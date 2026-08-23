@@ -61,8 +61,10 @@ describe("Sibling Strip: one batched fetch per page, never per card", () => {
     assert.match(effect, /if \(siblingsSeq\.current !== my\) return;/);
     assert.match(grid, /import \{ fetchSiblings \} from "\.\.\/api\.js";/);
   });
-  test("api.fetchSiblings posts {task_ids} to /api/siblings through postJSON, fail-soft", () => {
-    assert.match(api, /export async function fetchSiblings\(taskIds\) \{\s*const d = await postJSON\("\/api\/siblings", \{ task_ids: taskIds \}\);/);
+  test("api.fetchSiblings posts {task_ids} to /api/siblings through apiPost, fail-soft", () => {
+    // Re-anchored 2026-08-23: postJSON was one of four diverging copies and became api.js's
+    // apiPost. Same call, same fail-soft answer, one name.
+    assert.match(api, /export async function fetchSiblings\(taskIds\) \{\s*const d = await apiPost\("\/api\/siblings", \{ task_ids: taskIds \}\);/);
     assert.match(api, /\{ by_task: \{\} \}/);
   });
   test("the strip renders only for a task with >= 2 members; four shown + '+N'", () => {

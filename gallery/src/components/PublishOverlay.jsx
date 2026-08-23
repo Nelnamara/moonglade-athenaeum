@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import "../styles/overlays.css";
 import "../styles/publish.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -85,17 +86,16 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     if (!mid) return;
     let dead = false;
     setRow(null); setErr("");
-    fetch("/api/next/detail/" + encodeURIComponent(mid))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+    apiGet("/api/next/detail/" + encodeURIComponent(mid))
       .then((d) => {
         if (dead) return;
+        if (d.error) { setErr(d.error); return; }
         const r0 = d.row || {};
         setRow(r0);
         setTitle((r0.title || "").trim() || (r0.prompt_preview || "").trim().slice(0, 80));
         setTags((r0.art_tags || "").split(",").map((s) => s.trim()).filter(Boolean));
         setDesc("");
-      })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+      });
     return () => { dead = true; };
   }, [mid]);
 
@@ -109,13 +109,11 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   // feed; the strip is the real recent library (images only -- the DC's swatch pool,
   // with actual art in it).
   useEffect(() => {
-    fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
-    fetch("/api/contests").then((r) => r.json())
-      .then((d) => setContests((d.contests || []).filter((c) => c && c.title)))
-      .catch(() => {});
-    fetch("/api/next/library?page=1&page_size=24&media=image&sort=newest")
-      .then((r) => r.json()).then((d) => setStrip((d.items || []).slice(0, 24)))
-      .catch(() => {});
+    apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
+    apiGet("/api/contests")
+      .then((d) => setContests((d.contests || []).filter((c) => c && c.title)));
+    apiGet("/api/next/library?page=1&page_size=24&media=image&sort=newest")
+      .then((d) => setStrip((d.items || []).slice(0, 24)));
   }, []);
 
   // ✦ Suggest a title -- PixAI's image-to-prompt for THIS image. Free and read-only
@@ -124,10 +122,8 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     setSugOpen(!sugOpen);
     if (sugOpen || sugs || !mid) return;
     setSugs("loading");
-    fetch("/api/suggest-prompt?media_id=" + encodeURIComponent(mid))
-      .then((r) => r.json())
-      .then((d) => setSugs((d.suggestions || []).filter(Boolean)))
-      .catch(() => setSugs([]));
+    apiGet("/api/suggest-prompt?media_id=" + encodeURIComponent(mid))
+      .then((d) => setSugs((d.suggestions || []).filter(Boolean)));
   };
 
   // Live tag options as you type (free tag search), the DC's dropdown with real data.
@@ -136,10 +132,8 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     if (q.length < 2) { setTagOpts([]); return; }
     let dead = false;
     const t = setTimeout(() => {
-      fetch("/api/tag-suggest?q=" + encodeURIComponent(q))
-        .then((r) => r.json())
-        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 8)); })
-        .catch(() => {});
+      apiGet("/api/tag-suggest?q=" + encodeURIComponent(q))
+        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 8)); });
     }, 220);
     return () => { dead = true; clearTimeout(t); };
   }, [tagDraft]);
@@ -151,15 +145,12 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     setTagDraft("");
   };
 
-  const post = (extra) => fetch("/api/myart/publish", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "publish", media_id: mid, csrf,
-      title, description: desc, tags, private: priv, hide_prompts: hidePrompts,
-      ...(contest ? { challenge: contest } : {}),
-      ...extra,
-    }),
-  }).then((r) => r.json());
+  const post = (extra) => apiPost("/api/myart/publish", {
+    action: "publish", media_id: mid, csrf,
+    title, description: desc, tags, private: priv, hide_prompts: hidePrompts,
+    ...(contest ? { challenge: contest } : {}),
+    ...extra,
+  });
 
   const preview = async () => {
     setBusy(true); setErr("");

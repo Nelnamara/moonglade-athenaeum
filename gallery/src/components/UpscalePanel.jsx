@@ -1,6 +1,7 @@
 import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import { apiGet } from "../api.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import CostBadge from "./CostBadge.jsx";
@@ -251,9 +252,8 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
         else if (row.is_video) setMsg({ text: "Upscale works on images, not videos.", bad: true });
       };
       if (what && typeof what === "object") { done(what); return; }
-      fetch("/api/image-meta/" + encodeURIComponent(String(what)))
-        .then((r) => r.json())
-        .then((d) => done(d && !d.error ? d : null), () => done(null));
+      apiGet("/api/image-meta/" + encodeURIComponent(String(what)))
+        .then((d) => done(d && !d.error ? d : null));
     },
     close() {
       setPhase((p) => {

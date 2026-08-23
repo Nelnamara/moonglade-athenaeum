@@ -44,10 +44,15 @@ const rel = (f) => path.relative(SRC, f).split(path.sep).join("/");
 const read = (f) => readFileSync(f, "utf8").replace(/\r\n/g, "\n");
 
 describe("the price probe is the one /api/price caller under gallery/src", () => {
-  test("exactly one file fetches /api/price, and it is gen/usePriceProbe.js", () => {
-    const callers = files.filter((f) => read(f).includes('fetch("/api/price"')).map(rel).sort();
+  test("exactly one file asks /api/price, and it is gen/usePriceProbe.js", () => {
+    // Re-anchored 2026-08-23: the needle was the literal `fetch("/api/price"`, which stopped
+    // covering the whole tree the moment api.js became the one request module -- a stray probe
+    // would now be written apiPost("/api/price", ...) and sail straight past a fetch-only
+    // needle. Both spellings are the same offence, so both are the needle.
+    const ASKS = /(?:fetch|apiGet|apiPost|apiUpload)\(\s*["']\/api\/price["']/;
+    const callers = files.filter((f) => ASKS.test(read(f))).map(rel).sort();
     assert.deepEqual(callers, [PROBE],
-      "a second inline /api/price fetch is a second copy of the debounce, the seq guard, the abort "
+      "a second inline /api/price call is a second copy of the debounce, the seq guard, the abort "
       + "and -- the part that actually costs money -- the payload-identity gate. Call usePriceProbe "
       + "instead. Found: " + JSON.stringify(callers));
   });

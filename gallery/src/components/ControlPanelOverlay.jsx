@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/overlays.css";
 import "../styles/control-panel.css";
-import useControlPanel, { postJSON, DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
@@ -92,15 +93,13 @@ function MirrorTile() {
   const refresh = async () => {
     // Always drive the tile from the SERVER's real state, never a fabricated object -- a
     // fabricated {connected:true} with no `enabled` key drove the toggle from `undefined`.
-    try {
-      const r = await fetch("/api/mirror/status");
-      const j = await r.json();
-      setSt(j);
-      // The always-mounted destinations nav reveals "✦ AI Tools" only while armed, but it
-      // can't see this overlay's state. Announce every status read on a window event so
-      // NavSpine refetches and the entry appears/vanishes the instant the mirror flips.
-      window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
-    } catch { /* keep st */ }
+    const j = await apiGet("/api/mirror/status");
+    if (j.error) return;                    // keep st
+    setSt(j);
+    // The always-mounted destinations nav reveals "✦ AI Tools" only while armed, but it
+    // can't see this overlay's state. Announce every status read on a window event so
+    // NavSpine refetches and the entry appears/vanishes the instant the mirror flips.
+    window.dispatchEvent(new CustomEvent("mg-mirror-changed", { detail: j }));
   };
   useEffect(() => { refresh(); }, []);
   const toggle = async () => {
@@ -111,7 +110,7 @@ function MirrorTile() {
       return;
     }
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/mirror/enable", { enabled: want });
+    const d = await apiPost("/api/mirror/enable", { enabled: want });
     setBusy(false);
     if (d && d.error) { setMsg("⚠ " + d.error); return; }
     await refresh();                        // reflect the real persisted flag
@@ -119,7 +118,7 @@ function MirrorTile() {
   const connect = async () => {
     if (busy) return;
     setBusy(true); setMsg("Reading this machine's browser session…");
-    const d = await postJSON("/api/mirror/connect", {});
+    const d = await apiPost("/api/mirror/connect", {});
     setBusy(false);
     if (!d || !d.ok) { setMsg("⚠ " + ((d && d.error) || "couldn't connect")); return; }
     setMsg("Connected.");
@@ -214,14 +213,13 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   const openLibPicker = async () => {
     setLibOpen(true);
     setLibMsg(""); setLibNeedsCreate(null);
-    const r = await fetch("/api/library-path");
-    const d = await r.json().catch(() => null);
-    if (d) { setLibInfo(d); setLibInput(d.stored || d.path || ""); }
+    const d = await apiGet("/api/library-path");
+    if (!d.error) { setLibInfo(d); setLibInput(d.stored || d.path || ""); }
   };
   const saveLibPath = async (createIfMissing) => {
     if (!libInput.trim()) return;
     setLibBusy(true); setLibMsg("");
-    const d = await postJSON("/api/library-path", { path: libInput.trim(), create: !!createIfMissing });
+    const d = await apiPost("/api/library-path", { path: libInput.trim(), create: !!createIfMissing });
     setLibBusy(false);
     if (d.needs_create) { setLibNeedsCreate(d.path); return; }
     setLibNeedsCreate(null);
@@ -238,7 +236,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   // -- was simply never ported when this file was first built.
   const [watch, setWatch] = useState(null);
   useEffect(() => {
-    fetch("/api/watch/status").then((r) => r.json()).then(setWatch).catch(() => {});
+    apiGet("/api/watch/status").then((d) => { if (!d.error) setWatch(d); });
   }, []);
 
   const {
@@ -1099,8 +1097,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
 
   useEffect(() => { setT(null); setMsg(""); }, [slotIdx, data.active]);
   useEffect(() => {
-    fetch("/api/branding/banners/earned").then((r) => r.json())
-      .then((d) => setEarnedBanners(d.banners || [])).catch(() => {});
+    apiGet("/api/branding/banners/earned").then((d) => setEarnedBanners(d.banners || []));
   }, [achievements]);
 
   const refresh = async (d) => { if (d && d.error) { setMsg("⚠ " + d.error); } else { setMsg(""); onSaved(); } };
@@ -1108,30 +1105,30 @@ function BannerEditor({ summary, onSaved, achievements }) {
     if (!file) return;
     setBusy(true); setMsg("");
     const fd = new FormData(); fd.append("slot", cfg.slot); fd.append("file", file);
-    const r = await fetch("/api/branding/slot", { method: "POST", body: fd });
-    setBusy(false); refresh(await r.json());
+    const d = await apiUpload("/api/branding/slot", fd);
+    setBusy(false); refresh(d);
   };
   const fromGallery = async (mediaId) => {
     setBusy(true); setMsg("");
     const fd = new FormData(); fd.append("slot", cfg.slot); fd.append("media_id", mediaId);
-    const r = await fetch("/api/branding/slot", { method: "POST", body: fd });
-    setBusy(false); refresh(await r.json());
+    const d = await apiUpload("/api/branding/slot", fd);
+    setBusy(false); refresh(d);
   };
   const commit = async (next) => {
     if (!active) return;
     setBusy(true);
-    const d = await postJSON("/api/branding/slot/crop",
+    const d = await apiPost("/api/branding/slot/crop",
       { slot: cfg.slot, id: active.id, zoom: next.zoom, cropX: next.cropX, cropY: next.cropY });
     setBusy(false); refresh(d);
   };
   const resetCrop = () => { const n = { zoom: 100, cropX: 50, cropY: 50 }; setT(n); commit(n); };
   const pickActive = async (id) => {
     setBusy(true); setMsg("");
-    refresh(await postJSON("/api/branding/slot/active", { slot: cfg.slot, id }));
+    refresh(await apiPost("/api/branding/slot/active", { slot: cfg.slot, id }));
   };
   const pickEarned = async (id) => {
     setBusy(true); setMsg("");
-    refresh(await postJSON("/api/branding/banner/earned", { id }));
+    refresh(await apiPost("/api/branding/banner/earned", { id }));
   };
 
   const slider = (label, key, min, max) => (
@@ -1269,21 +1266,21 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
 
   const pickMark = async (id) => {
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding", { mark: id });
+    const d = await apiPost("/api/branding", { mark: id });
     setBusy(false);
     if (d.error) { setMsg("⚠ " + d.error); return; }
     onSaved();
   };
   const pickAnim = async (anim) => {
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding", { anim });
+    const d = await apiPost("/api/branding", { anim });
     setBusy(false);
     if (d.error) { setMsg("⚠ " + d.error); return; }
     onSaved();
   };
   const setShortcut = async () => {
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding/shortcut", {});
+    const d = await apiPost("/api/branding/shortcut", {});
     setBusy(false);
     setMsg(d.error ? "⚠ " + d.error : "✓ Desktop shortcut updated");
   };
@@ -1291,15 +1288,14 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     if (!file) return;
     setBusy(true); setMsg("");
     const fd = new FormData(); fd.append("file", file);
-    const r = await fetch("/api/branding/mark/custom", { method: "POST", body: fd });
-    const d = await r.json();
+    const d = await apiUpload("/api/branding/mark/custom", fd);
     setBusy(false);
     if (d.error) { setMsg("⚠ " + d.error); return; }
     onSaved();
   };
   const removeCustomMark = async (id) => {
     setBusy(true); setMsg("");
-    const d = await postJSON("/api/branding/mark/custom/remove", { id });
+    const d = await apiPost("/api/branding/mark/custom/remove", { id });
     setBusy(false);
     if (d.error) { setMsg("⚠ " + d.error); return; }
     onSaved();
@@ -1363,16 +1359,15 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
 
   const refresh = async () => {
     try {
-      const r = await fetch("/api/panel/summary");
-      const d = await r.json();
-      setUsers(d.web_users || []);
+      const d = await apiGet("/api/panel/summary");
+      if (!d.error) setUsers(d.web_users || []);   // else keep showing the last-known list
     } catch { /* keep showing the last-known list */ }
   };
 
   const addUser = async () => {
     if (addBusy) return;
     setAddBusy(true); setAddErr("");
-    const d = await postJSON("/api/users/add", {
+    const d = await apiPost("/api/users/add", {
       username: newUser, password: newPass, confirm: newConfirm, csrf: summary.csrf,
     });
     setAddBusy(false);
@@ -1384,7 +1379,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   const removeUser = async (username) => {
     if (removeBusy) return;
     setRemoveBusy(username); setRemoveErr("");
-    const d = await postJSON("/api/users/remove", { username, csrf: summary.csrf });
+    const d = await apiPost("/api/users/remove", { username, csrf: summary.csrf });
     setRemoveBusy(null);
     if (d.error) { setRemoveErr(d.error); return; }
     refresh(); onChanged();
@@ -1395,7 +1390,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
     setPwBusy(true); setPwMsg("");
     const body = { username, new_password: pwNew, csrf: summary.csrf };
     if (username === summary.current_username) body.current_password = pwCurrent;
-    const d = await postJSON("/api/users/password", body);
+    const d = await apiPost("/api/users/password", body);
     setPwBusy(false);
     setPwMsg(d.error ? "⚠ " + d.error : "✓ password changed");
     if (!d.error) { setPwNew(""); setPwCurrent(""); }
@@ -1404,7 +1399,7 @@ export function UsersSubOverlay({ summary, isLocal, onClose, onChanged }) {
   const resetOtherPassword = async (username) => {
     if (resetBusy || !resetNew) return;
     setResetBusy(true); setResetMsg("");
-    const d = await postJSON("/api/users/password", {
+    const d = await apiPost("/api/users/password", {
       username, new_password: resetNew, csrf: summary.csrf,
     });
     setResetBusy(false);
@@ -1498,9 +1493,9 @@ export function TrashSubOverlay({ isLocal, onClose }) {
   const load = async (p) => {
     setLoading(true);
     try {
-      const r = await fetch("/api/trash/list?page=" + p + "&limit=" + TRASH_LIMIT);
-      const d = await r.json();
-      setItems(d.items || []); setTotal(d.total || 0); setPage(d.page || p);
+      const d = await apiGet("/api/trash/list?page=" + p + "&limit=" + TRASH_LIMIT);
+      if (d.error) { setMsg("Network error loading the trash."); }
+      else { setItems(d.items || []); setTotal(d.total || 0); setPage(d.page || p); }
     } catch { setMsg("Network error loading the trash."); }
     setLoading(false);
   };
@@ -1527,7 +1522,7 @@ export function TrashSubOverlay({ isLocal, onClose }) {
   const restore = async () => {
     if (!sel.size) return;
     try {
-      const d = await postJSON("/api/trash/restore", { media_ids: [...sel] });
+      const d = await apiPost("/api/trash/restore", { media_ids: [...sel] });
       if (d.error) { setMsg("⚠ " + d.error); return; }
       setMsg((d.restored || []).length + " restored" + ((d.errors || []).length ? ", " + d.errors.length + " failed" : ""));
       setSel(new Set());
@@ -1539,7 +1534,7 @@ export function TrashSubOverlay({ isLocal, onClose }) {
     if (!all && !ids.length) return;
     const body = all ? { confirm: true } : { media_ids: ids, confirm: true };
     try {
-      const d = await postJSON(all ? "/api/trash/empty" : "/api/trash/delete-forever", body);
+      const d = await apiPost(all ? "/api/trash/empty" : "/api/trash/delete-forever", body);
       if (d.error) { setMsg("⚠ " + d.error); cancelConfirm(); return; }
       setMsg((d.deleted || 0) + " deleted forever");
       setSel(new Set()); cancelConfirm();

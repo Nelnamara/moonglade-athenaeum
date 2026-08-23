@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet } from "../api.js";
 import { buildPayload, clampLoras, GEN_DEFAULTS, goGate } from "./genCore.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
@@ -89,9 +90,8 @@ export default function useGenerate({ costRef }) {
       model: { model_id: row.model_id, title: row.title, thumb: row.preview_url || row.cover_url || "", version_id: "", resolving: true },
     }));
     try {
-      const r = await fetch("/api/model-version?model_id=" +
+      const d = await apiGet("/api/model-version?model_id=" +
         encodeURIComponent(row.model_id) + "&all=1");
-      const d = await r.json();
       if (seq !== verSeq.current) return null;
       const versions = d.versions || [];
       const latest = versions.find((v) => v.is_latest) || versions[0];
@@ -170,9 +170,8 @@ export default function useGenerate({ costRef }) {
     });
     if (present || row.version_id) return;   // the picker already resolved it
     try {
-      const r = await fetch("/api/model-version?model_id=" +
+      const d = await apiGet("/api/model-version?model_id=" +
         encodeURIComponent(row.model_id) + "&all=1");
-      const d = await r.json();
       const versions = d.versions || [];
       const latest = versions.find((v) => v.is_latest) || versions[0];
       if (!latest || !latest.version_id) throw new Error("unresolved");

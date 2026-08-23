@@ -26,7 +26,7 @@ import useClaimModal from "./hooks/useClaimModal.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
-  postJSON, downloadZipForm, resolveVideoIds,
+  apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
 
@@ -389,14 +389,12 @@ export default function App({ boot }) {
       // visuals wait for the beacon to land, or the very first trigger races
       // its own unlock and the art 404s. Fail-soft on a beacon error: the
       // stars/toast still play (the img/audio just may not resolve).
-      fetch("/api/ach-event", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event: "konami" }),
-        // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
-        // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
-        // public source, so a clone can't read the egg's payoff before finding it. Fail-soft
-        // to a generic line if the fetch fails or the feat hasn't resolved yet.
-      }).catch(() => {}).then(() => fetch("/api/achievements").then((r) => r.json()).catch(() => null))
+      // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
+      // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
+      // public source, so a clone can't read the egg's payoff before finding it -- a
+      // failed read answers {error}, and the sub-line falls back to its generic string.
+      apiPost("/api/ach-event", { event: "konami" })
+        .then(() => apiGet("/api/achievements"))
         .then((data) => {
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
         const stars = [];
@@ -459,7 +457,7 @@ export default function App({ boot }) {
       const name = window.prompt(
         "Add " + selIds.length + " image(s) to which collection? (a name; files are NOT moved)");
       if (name === null || !name.trim()) return;
-      const d = await postJSON("/api/collection",
+      const d = await apiPost("/api/collection",
         { action: "add", collection: name.trim(), media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -469,7 +467,7 @@ export default function App({ boot }) {
       if (!window.confirm(
         "Remove " + selIds.length + " item(s) from the collection “" + name + "”?\n\n" +
         "Only the collection label is removed — no files are deleted and nothing leaves your PixAI account.")) return;
-      const d = await postJSON("/api/collection",
+      const d = await apiPost("/api/collection",
         { action: "remove", collection: name, media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -500,14 +498,8 @@ export default function App({ boot }) {
     // parsePresetQuery) or "export" (from_year/from_month, what _filters_from_args reads).
     buildViewQuery: (draftAdv, style) =>
       filterQueryString({ applied, media, shelf, adv: draftAdv || adv, perPage }, style),
-    saveView: (name, query) => fetch("/api/view-presets", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, query }),
-    }).then((r) => r.json()),
-    deleteView: (name) => fetch("/api/view-presets", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ delete: name }),
-    }).then((r) => r.json()),
+    saveView: (name, query) => apiPost("/api/view-presets", { name, query }),
+    deleteView: (name) => apiPost("/api/view-presets", { delete: name }),
     downloadZip: () => downloadZipForm(selIds),
     replacePrompt: async () => {
       const find = window.prompt(
@@ -517,7 +509,7 @@ export default function App({ boot }) {
       if (repl === null) return;
       if (!window.confirm('Replace "' + find + '" with "' + repl + '" across ' +
         selIds.length + " prompt(s)? This edits catalog.db.")) return;
-      const d = await postJSON("/api/replace-prompts",
+      const d = await apiPost("/api/replace-prompts",
         { find, replace: repl, media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -526,7 +518,7 @@ export default function App({ boot }) {
       if (!window.confirm(
         "Remove " + selIds.length + " image" + (selIds.length !== 1 ? "s" : "") +
         " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
-      const d = await postJSON("/api/delete-local", { media_ids: selIds });
+      const d = await apiPost("/api/delete-local", { media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
@@ -535,7 +527,7 @@ export default function App({ boot }) {
       // it does not replace the guard.
       const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
       if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-      const d = await postJSON("/api/delete-tasks", { media_ids: ids });
+      const d = await apiPost("/api/delete-tasks", { media_ids: ids });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
@@ -557,7 +549,7 @@ export default function App({ boot }) {
     const suggested = "Contest: " + (contest.title || "(untitled)") + ends;
     const name = window.prompt("Add " + selIds.length + " image(s) to which collection?", suggested);
     if (name === null || !name.trim()) return;
-    const d = await postJSON("/api/collection",
+    const d = await apiPost("/api/collection",
       { action: "add", collection: name.trim(), media_ids: selIds });
     if (d.error) { window.alert(d.error); return; }
     afterMutation();
@@ -567,7 +559,6 @@ export default function App({ boot }) {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
     try {
-      const { rateImage } = await import("./api.js");
       await rateImage(mid, value);
     } catch {
       /* a failed rate leaves the optimistic value; the next load corrects it */

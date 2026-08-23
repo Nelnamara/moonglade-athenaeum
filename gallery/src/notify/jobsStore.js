@@ -14,6 +14,7 @@
    rows (running > 0) rather than read back off a DOM class like the vanilla did -- same value,
    no DOM dependency. */
 
+import { apiGet, apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
 
 const LSK = "mg_jobs_open";
@@ -94,8 +95,7 @@ function toastTransitions(rows) {
 }
 
 export function refresh() {
-  return fetch("/api/jobs")
-    .then((r) => r.json())
+  return apiGet("/api/jobs")
     .then((d) => {
       const rows = (d && d.jobs) || [];
       toastTransitions(rows);
@@ -115,21 +115,12 @@ function schedule() {
 }
 
 export function dismiss(id) {
-  fetch("/api/jobs/dismiss", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_id: id }),
-  })
-    .then(() => { delete last[id]; refresh(); })
-    .catch(() => {});
+  apiPost("/api/jobs/dismiss", { job_id: id })
+    .then(() => { delete last[id]; refresh(); });
 }
 
 export function clearFinished() {
-  fetch("/api/jobs/dismiss", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ finished: true }),
-  })
-    .then(refresh)
-    .catch(() => {});
+  apiPost("/api/jobs/dismiss", { finished: true }).then(refresh);
 }
 
 // Called once by installNotify() (the DOMContentLoaded equivalent). Idempotent.

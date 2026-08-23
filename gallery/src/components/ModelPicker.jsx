@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet } from "../api.js";
 import "../styles/model-picker.css";
 
 /* Faithful React port of static/mg-model-picker.js (2026-08-08, the vanilla static/ -> React
@@ -127,7 +128,7 @@ export default function ModelPicker({
     const mine = ++seqRef.current;
     cursorRef.current = ""; hasMoreRef.current = false;
     setDim(true);
-    fetch(searchUrl()).then((r) => r.json()).then((d) => {
+    apiGet(searchUrl()).then((d) => {
       if (mine !== seqRef.current) return;
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
@@ -144,7 +145,7 @@ export default function ModelPicker({
     if (!hasMoreRef.current || loadingMoreRef.current) return;
     const mine = seqRef.current;
     loadingMoreRef.current = true; setLoadingMore(true);
-    fetch(searchUrl(cursorRef.current)).then((r) => r.json()).then((d) => {
+    apiGet(searchUrl(cursorRef.current)).then((d) => {
       loadingMoreRef.current = false; setLoadingMore(false);
       if (mine !== seqRef.current) return;   // a fresh search superseded this continuation
       if (d && d.error) return;              // transient: leave hasMore/cursor, next scroll retries
@@ -188,8 +189,8 @@ export default function ModelPicker({
       version_id: "", weight: 0.7, lora_base_type: "", trigger_words: "", failed: false,
     };
     onToggle && onToggle(entry, true);
-    fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
-      .then((r) => r.json()).then((d) => {
+    apiGet("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1")
+      .then((d) => {
         // superseded-response guard: the entry's own identity is the token -- if the host
         // removed it while the resolve was in flight, don't put it back.
         if (!selectedRef.current.some((e) => e.model_id === m.model_id)) return;

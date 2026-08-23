@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useHealth.js/
@@ -15,10 +16,11 @@ export default function useContests() {
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/contests")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((data) => { if (!dead) setD(data); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+    apiGet("/api/contests")
+      .then((data) => {
+        if (dead) return;
+        if (data.error) setErr(data.error); else setD(data);
+      });
     return () => { dead = true; };
   }, []);
 

@@ -58,8 +58,11 @@ const fileNamed = (r) => {
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("web surfaces never add a second poll loop", () => {
-  test("exactly one file under gallery/src fetches /api/task-status, and it is notify/jobs.js", () => {
-    const callers = files.filter((f) => read(f).includes('fetch("/api/task-status')).map(rel).sort();
+  test("exactly one file under gallery/src asks /api/task-status, and it is notify/jobs.js", () => {
+    // Re-anchored 2026-08-23 (the one request module): a second loop would now most cheaply be
+    // written apiGet("/api/task-status..."), which a fetch-only needle would not see.
+    const ASKS = /(?:fetch|apiGet|apiPost|apiUpload)\(\s*["']\/api\/task-status/;
+    const callers = files.filter((f) => ASKS.test(read(f))).map(rel).sort();
     assert.deepEqual(callers, [POLLER],
       "/api/task-status is the route that writes the authoritative terminal job event. A second "
       + "loop against it duplicates traffic and creates a competing source of truth about whether "
@@ -91,9 +94,13 @@ describe("every spend rides submitTask", () => {
      single un-retried fetch) and looked fine, while silently missing the one guarantee that
      cannot be hand-rolled from outside -- Jobs.track's registration. */
   SPEND_ROUTES.forEach((route) => {
-    test('no file but the road fetches ' + route, () => {
-      const needle = 'fetch("' + route + '"';
-      const callers = files.filter((f) => read(f).includes(needle)).map(rel).sort();
+    test('no file but the road posts ' + route, () => {
+      // Re-anchored 2026-08-23: with api.js as the one request module, the cheap way to sneak a
+      // spend in is apiPost("<route>", ...), not fetch. Every spelling of "send this route" is
+      // the same offence, so the needle covers all of them.
+      const VERBS = ["fetch", "apiGet", "apiPost", "apiUpload"];
+      const asks = (src) => VERBS.some((v) => src.includes(v + '("' + route + '"'));
+      const callers = files.filter((f) => asks(read(f))).map(rel).sort();
       const strays = callers.filter((c) => c !== ROAD);
       assert.deepEqual(strays, [],
         route + " spends real credits, so it must go through gen/submitTask.js, which owns the "

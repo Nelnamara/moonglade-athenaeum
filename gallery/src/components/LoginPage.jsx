@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { apiPost } from "../api.js";
 import useFlavour from "../hooks/useFlavour.js";
 import "../styles/login.css";
 
@@ -139,17 +140,9 @@ export default function LoginPage({ boot }) {
   const csrfRef = useRef(boot.csrf || "");
   const submitLogin = async (payload) => {
     let d;
-    try {
-      const r = await fetch("/api/login", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, csrf: csrfRef.current, next: boot.next || "" }),
-      });
-      d = await r.json();
-    } catch {
-      setPhase("idle");
-      setError("Couldn't reach the server. Check your connection and try again.");
-      return;
-    }
+    // The rotated token rides the SAME body as the refusal, so it is adopted before the
+    // error branch -- a failed sign-in must leave the next attempt with a live token.
+    d = await apiPost("/api/login", { ...payload, csrf: csrfRef.current, next: boot.next || "" });
     if (d.csrf) csrfRef.current = d.csrf;
     if (d.error) {
       setPhase("idle");

@@ -3,6 +3,7 @@ import Stars from "./Stars.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import { apiGet } from "../api.js";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
 
@@ -95,8 +96,7 @@ export function useSimilar(mediaId) {
     if (!mediaId) { setState({ loading: false, images: [], error: "" }); return; }
     const mine = ++seq.current;
     setState({ loading: true, images: [], error: "" });
-    fetch("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
-      .then((r) => r.json())
+    apiGet("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
       .then((d) => {
         if (mine !== seq.current) return;
         const images = (d && d.images) || [];

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import PickerCore from "../picker/pickerCore.js";
+import { apiUpload } from "../api.js";
 import "../styles/gallery-picker.css";
 
 /* Faithful React port of static/mg-gallery-picker.js (2026-08-08, the vanilla static/ ->
@@ -132,14 +133,11 @@ export default function GalleryPicker({
     if (!f) return;
     setUploadMsg("Uploading " + f.name + "…");
     const fd = new FormData(); fd.append("file", f);
-    fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+    apiUpload("/api/upload", fd).then((d) => {
       if (fileRef.current) fileRef.current.value = "";
       if (d.error || !d.media_id) { setUploadMsg("⚠ Upload failed: " + (d.error || "no media id")); return; }
       setUploadMsg(null);
       pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
-    }).catch(() => {
-      if (fileRef.current) fileRef.current.value = "";
-      setUploadMsg("⚠ Upload failed (network).");
     });
   };
 

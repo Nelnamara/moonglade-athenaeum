@@ -6,6 +6,7 @@ import {
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
+import { apiGet, apiPost } from "../api.js";
 import { askPicker } from "./PickerHost.jsx";
 import CostBadge from "./CostBadge.jsx";
 
@@ -50,8 +51,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
   // presets load lazily, once, when the tab is first shown
   useEffect(() => {
     if (!visible || Object.keys(presets).length) return;
-    fetch("/api/presets").then((r) => r.json())
-      .then((d) => setPresets((d && d.presets) || {})).catch(() => {});
+    apiGet("/api/presets").then((d) => setPresets((d && d.presets) || {}));
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Its OWN price-probe instance -- sharing a debounce/seq with the image tab's is
@@ -92,16 +92,13 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
     const id = importTask.trim();
     if (!id) return;
     try {
-      const d = await fetch("/api/presets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_id: id }),
-      }).then((r) => r.json());
+      const d = await apiPost("/api/presets", { task_id: id });
       if (d.error) {
         if (window.Toast) window.Toast.show({ kind: "err", title: "Not banked", msg: d.error });
         return;
       }
       setImportTask("");
-      const fresh = await fetch("/api/presets").then((r) => r.json());
+      const fresh = await apiGet("/api/presets");
       setPresets((fresh && fresh.presets) || {});
       if (d.imported) set({ preset: d.imported });
       if (window.Toast) window.Toast.show({ kind: "ok", title: "Banked " + (d.label || d.imported) });

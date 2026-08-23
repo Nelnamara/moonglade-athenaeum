@@ -4,6 +4,7 @@ import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import { apiGet } from "../api.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
 import "../styles/control-mobile.css";
@@ -125,7 +126,7 @@ export default function ControlMobile({ account }) {
   // interval is added here.
   const [watch, setWatch] = useState(null);
   useEffect(() => {
-    fetch("/api/watch/status").then((r) => r.json()).then(setWatch).catch(() => {});
+    apiGet("/api/watch/status").then((d) => { if (!d.error) setWatch(d); });
   }, []);
 
   const [jobTab, setJobTab] = useState("pipelines"); // 'pipelines' | 'ledger' -- local UI only

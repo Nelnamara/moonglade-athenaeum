@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import "../styles/shell.css";
 import useFlavour from "../hooks/useFlavour.js";
+import { apiGet } from "../api.js";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -41,10 +42,8 @@ export default function Banner({
   useEffect(() => {
     let dead = false;
     const pull = () =>
-      fetch("/api/stats")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (!dead && d && !d.error) setStats((s) => ({ ...(s || {}), ...d })); })
-        .catch(() => {});
+      apiGet("/api/stats")
+        .then((d) => { if (!dead && d && !d.error) setStats((s) => ({ ...(s || {}), ...d })); });
     pull();
     const again = () => pull();
     document.addEventListener("mg-result", again);

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
+import { apiGet } from "../api.js";
 import "../styles/lightbox-mobile.css";
 
 /* Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
@@ -184,14 +185,9 @@ export default function LightboxMobile({
   useEffect(() => {
     if (!mid || !promptOpen || detailCache.current.has(mid)) return;
     let dead = false;
-    fetch("/api/next/detail/" + encodeURIComponent(mid))
-      .then((r) => (r.ok ? r.json() : null))
+    apiGet("/api/next/detail/" + encodeURIComponent(mid))
       .then((d) => {
         detailCache.current.set(mid, (d && d.row) || {});
-        if (!dead) bumpDetail((n) => n + 1);
-      })
-      .catch(() => {
-        detailCache.current.set(mid, {});
         if (!dead) bumpDetail((n) => n + 1);
       });
     return () => { dead = true; };

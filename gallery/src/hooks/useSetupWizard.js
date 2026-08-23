@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 
 /* All of SetupWizard.jsx's state/handlers/API-call logic, mechanically lifted out
    (2026-08-02, mobile pass surface 2) so SetupWizardMobile.jsx can reuse it verbatim
@@ -100,11 +101,8 @@ export default function useSetupWizard(boot) {
   };
 
   const assetTick = async () => {
-    let d;
-    try {
-      const r = await fetch("/api/assets/status");
-      d = await r.json();
-    } catch {
+    const d = await apiGet("/api/assets/status");
+    if (d.error) {
       assetMissesRef.current += 1;
       if (assetMissesRef.current >= ASSET_POLL_MISS_LIMIT) {
         clearInterval(assetPollRef.current); assetPollRef.current = null;
@@ -138,15 +136,7 @@ export default function useSetupWizard(boot) {
     setDlError("");
     setDl({ received: 0, total: 0, speed: 0, eta: null });
     assetMissesRef.current = 0;
-    let d;
-    try {
-      const r = await fetch("/api/assets/fetch", { method: "POST" });
-      d = await r.json();
-    } catch {
-      setDlError(dlErrorText("a network error reaching this machine's own server"));
-      setPhase("interrupted");
-      return;
-    }
+    const d = await apiPost("/api/assets/fetch");
     // "already running" means someone/something else's fetch is genuinely in
     // flight -- that's not a failure to report, just start polling its real
     // progress. Any OTHER error (no manifest, no urls yet, localhost-only) means
@@ -163,15 +153,9 @@ export default function useSetupWizard(boot) {
   const beginAssetCheck = async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
-    let d;
-    try {
-      const r = await fetch("/api/assets/status");
-      d = await r.json();
-    } catch {
-      d = null;
-    }
+    const d = await apiGet("/api/assets/status");
     checkingRef.current = false;
-    if (!d || !d.needs) { afterAssets(); return; }   // already dressed, or nothing to fetch
+    if (d.error || !d.needs) { afterAssets(); return; }   // unreachable, already dressed, or nothing to fetch
     beginDownload();
   };
 
@@ -207,18 +191,7 @@ export default function useSetupWizard(boot) {
     if (!key || authBusy) return;
     setAuthBusy(true);
     setAuthError("");
-    let d;
-    try {
-      const r = await fetch("/api/setup/save-key", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: key }),
-      });
-      d = await r.json();
-    } catch {
-      setAuthBusy(false);
-      setAuthError("Network error — try again.");
-      return;
-    }
+    const d = await apiPost("/api/setup/save-key", { api_key: key });
     if (d.error) {
       setAuthBusy(false);
       setAuthError(d.error);
@@ -247,11 +220,8 @@ export default function useSetupWizard(boot) {
   };
 
   const tick = async () => {
-    let d;
-    try {
-      const r = await fetch("/api/panel/status");
-      d = await r.json();
-    } catch {
+    const d = await apiGet("/api/panel/status");
+    if (d.error) {
       pollMissesRef.current += 1;
       if (pollMissesRef.current >= POLL_MISS_LIMIT) {
         clearInterval(pollRef.current); pollRef.current = null;
@@ -272,12 +242,8 @@ export default function useSetupWizard(boot) {
     // done / done_with_errors / anything else terminal-non-failed -- same "good enough,
     // move on" line classic's own tick() draws (it doesn't special-case done_with_errors
     // either): a handful of failed downloads doesn't strand a brand-new user on this screen.
-    try {
-      const r = await fetch("/api/stats");
-      setFinalStats(await r.json());
-    } catch {
-      setFinalStats(null);
-    }
+    const stats = await apiGet("/api/stats");
+    setFinalStats(stats.error ? null : stats);
     setPhase("ready");
   };
 
@@ -285,17 +251,7 @@ export default function useSetupWizard(boot) {
     setSyncError("");
     setProgress(null);
     pollMissesRef.current = 0;
-    let d;
-    try {
-      const r = await fetch("/api/panel/run", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sync" }),
-      });
-      d = await r.json();
-    } catch {
-      setSyncError("Network error — try again.");
-      return;
-    }
+    const d = await apiPost("/api/panel/run", { action: "sync" });
     if (d.error) {
       setSyncError(d.error);
       return;

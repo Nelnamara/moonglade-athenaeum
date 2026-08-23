@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* useMyArt -- MyArtOverlay.jsx's fetch/state/derivation, mechanically lifted
    out (2026-08-03) into its own hook so a new mobile screen can consume the
@@ -21,10 +22,11 @@ export default function useMyArt() {
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/your-art")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((data) => { if (!dead) setD(data); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+    apiGet("/api/your-art")
+      .then((data) => {
+        if (dead) return;
+        if (data.error) setErr(data.error); else setD(data);
+      });
     return () => { dead = true; };
   }, []);
 

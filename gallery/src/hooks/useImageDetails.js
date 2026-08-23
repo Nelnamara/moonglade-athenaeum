@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 
 /* useImageDetails -- DetailsView.jsx's fetch/state/derivation/action logic,
    mechanically lifted out (2026-08-03) into its own hook so a new mobile
@@ -57,15 +58,13 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     if (upEl.current) upEl.current.close();
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(advParams || {})) if (v) qs.set(k, v);
-    fetch("/api/next/detail/" + encodeURIComponent(mediaId) + "?" + qs.toString())
-      .then((r) => r.json())
+    apiGet("/api/next/detail/" + encodeURIComponent(mediaId) + "?" + qs.toString())
       .then((d) => {
         if (mine !== seq.current) return;
         if (d.error) { setState({ loading: false, data: null, error: d.error }); return; }
         setState({ loading: false, data: d, error: "" });
         setPromptText(d.row.prompt_full || d.row.prompt_preview || "");
-      })
-      .catch(() => { if (mine === seq.current) setState({ loading: false, data: null, error: "Network error." }); });
+      });
   }, [mediaId, advParams]);
 
   // closes the panel on unmount too (leaving Details entirely) -- Lightbox's
@@ -87,10 +86,8 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   // live view count, published rows only -- classic's DOMContentLoaded engagement fetch
   useEffect(() => {
     if (!row || row.is_published !== "1" || !row.artwork_id) return;
-    fetch("/api/artwork-views?id=" + encodeURIComponent(row.artwork_id))
-      .then((r) => r.json())
-      .then((d) => setViews(d && d.views != null ? d.views : null))
-      .catch(() => setViews(null));
+    apiGet("/api/artwork-views?id=" + encodeURIComponent(row.artwork_id))
+      .then((d) => setViews(d && d.views != null ? d.views : null));
   }, [row]);
 
   // The panel is now the React <UpscalePanel inline ref={upEl}> the two consumers (DetailsView,
@@ -113,7 +110,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   const runSuggest = async () => {
     setSuggestBusy(true); setSuggestErr("");
     try {
-      const d = await fetch("/api/suggest-prompt?media_id=" + encodeURIComponent(mediaId)).then((r) => r.json());
+      const d = await apiGet("/api/suggest-prompt?media_id=" + encodeURIComponent(mediaId));
       const s = d.suggestions || [];
       if (d.error || !s.length) { setSuggestErr(d.error || "No suggestion returned."); setSuggestions([]); }
       else setSuggestions(s);
@@ -126,10 +123,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   const savePrompt = async () => {
     setSaveStatus("Saving…");
     try {
-      const d = await fetch("/api/edit-prompt/" + encodeURIComponent(mediaId), {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: promptText }),
-      }).then((r) => r.json());
+      const d = await apiPost("/api/edit-prompt/" + encodeURIComponent(mediaId), { prompt: promptText });
       setSaveStatus(d && d.ok ? "Saved ✓" : "Error");
     } catch { setSaveStatus("Error"); }
   };
@@ -145,10 +139,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
       // this caller never even read, so a failed delete looked identical to a success.
       // Now a real error surfaces and onDeleted only fires when something was deleted.
       // (Migration off classic leftovers, 2026-08-08; /delete/<id> dies with the cut.)
-      const d = await fetch("/api/delete-local", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ media_ids: [mediaId] }),
-      }).then((r) => r.json()).catch((e) => ({ error: String((e && e.message) || e) }));
+      const d = await apiPost("/api/delete-local", { media_ids: [mediaId] });
       if (!d || d.error) { window.alert((d && d.error) || "Could not remove it."); return; }
       if (d.failed) { window.alert("The file could not be moved to the trash folder — nothing was deleted."); return; }
       onDeleted();
@@ -166,10 +157,7 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     if (typed !== "DELETE") { window.alert("Cancelled."); return; }
     setBusy(true);
     try {
-      const d = await fetch("/api/delete-image", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ media_id: mediaId, confirm: true }),
-      }).then((r) => r.json());
+      const d = await apiPost("/api/delete-image", { media_id: mediaId, confirm: true });
       if (!d || d.error) { window.alert((d && d.error) || "Could not delete it."); return; }
       onDeleted();
     } finally { setBusy(false); }

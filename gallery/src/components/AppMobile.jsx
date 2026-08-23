@@ -4,7 +4,7 @@ import useSheet from "../hooks/useSheet.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
-import { fetchAccount, fetchCollections, rateImage } from "../api.js";
+import { apiPost, fetchAccount, fetchCollections, rateImage } from "../api.js";
 import GalleryMobile from "./GalleryMobile.jsx";
 import ImageDetailsMobile from "./ImageDetailsMobile.jsx";
 import LightboxMobile from "./LightboxMobile.jsx";
@@ -479,11 +479,7 @@ export default function AppMobile({ boot }) {
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
   const logOut = () => {
-    fetch("/api/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csrf: boot.csrf || "" }),
-    }).catch(() => {}).then(() => {
+    apiPost("/api/logout", { csrf: boot.csrf || "" }).then(() => {
       const go = () => { window.location.href = "/login"; };
       if ("caches" in window) {
         caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);

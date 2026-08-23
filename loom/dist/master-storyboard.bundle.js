@@ -1257,6 +1257,48 @@ ${"=".repeat(48)}
   var Component = React2.Component;
   var PureComponent = React2.PureComponent;
 
+  // ../gallery/src/api.js
+  function withParams(path, params) {
+    if (!params) return path;
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== void 0 && v !== null && v !== "") qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    return s ? path + (path.includes("?") ? "&" : "?") + s : path;
+  }
+  async function request(path, init) {
+    let r;
+    try {
+      r = await fetch(path, init);
+    } catch (e) {
+      return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
+    }
+    let d = null;
+    try {
+      d = await r.json();
+    } catch {
+      d = null;
+    }
+    if (d && d.error) return r.ok ? d : { ...d, http_status: r.status };
+    if (!r.ok) return { error: r.status + " " + (r.statusText || "request failed"), http_status: r.status };
+    return d === null ? {} : d;
+  }
+  function apiGet(path, params, opts) {
+    return request(withParams(path, params), opts);
+  }
+  function apiPost(path, body, opts) {
+    return request(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+      ...opts || {}
+    });
+  }
+  function apiUpload(path, formData) {
+    return request(path, { method: "POST", body: formData });
+  }
+
   // ../gallery/src/picker/pickerCore.js
   var PickerCore = (function() {
     "use strict";
@@ -1288,12 +1330,13 @@ ${"=".repeat(48)}
         return endpoint + "?limit=" + pageSize + "&page=" + p + "&q=" + enc(filters.q || "") + "&collection=" + enc(filters.collection || "") + "&source=" + enc(filters.source || "") + "&type=" + enc(filters.type || "") + "&rating_min=" + enc(filters.rating_min || 0) + "&sort=" + enc(filters.sort || "newest");
       }
       function fetchCollections() {
-        fetch(collectionsEndpoint).then(function(r) {
-          return r.json();
-        }).then(function(d) {
-          if (!destroyed) onCollections(d.collections || []);
-        }).catch(function(e) {
-          onError(e);
+        apiGet(collectionsEndpoint).then(function(d) {
+          if (destroyed) return;
+          if (d.error) {
+            onError(new Error(d.error));
+            return;
+          }
+          onCollections(d.collections || []);
         });
       }
       function load2(append) {
@@ -1301,19 +1344,17 @@ ${"=".repeat(48)}
         loading = true;
         var atPage = page;
         var mine = ++loadSeq;
-        fetch(qs(atPage)).then(function(r) {
-          return r.json();
-        }).then(function(d) {
+        apiGet(qs(atPage)).then(function(d) {
           if (mine !== loadSeq) return;
           loading = false;
+          if (d.error) {
+            onError(new Error(d.error));
+            return;
+          }
           if (destroyed) return;
           var imgs = d.images || [];
           hasMore = (d.page || atPage) * (d.limit || pageSize) < (d.total || 0);
           onResults(imgs, { total: d.total || 0, append: !!append, hasMore, page: atPage });
-        }).catch(function(e) {
-          if (mine !== loadSeq) return;
-          loading = false;
-          onError(e);
         });
       }
       function reload() {
@@ -1519,7 +1560,7 @@ ${"=".repeat(48)}
       setUploadMsg("Uploading " + f.name + "\u2026");
       const fd = new FormData();
       fd.append("file", f);
-      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+      apiUpload("/api/upload", fd).then((d) => {
         if (fileRef.current) fileRef.current.value = "";
         if (d.error || !d.media_id) {
           setUploadMsg("\u26A0 Upload failed: " + (d.error || "no media id"));
@@ -1527,9 +1568,6 @@ ${"=".repeat(48)}
         }
         setUploadMsg(null);
         pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
-      }).catch(() => {
-        if (fileRef.current) fileRef.current.value = "";
-        setUploadMsg("\u26A0 Upload failed (network).");
       });
     };
     const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "");
@@ -1773,7 +1811,7 @@ ${"=".repeat(48)}
       cursorRef.current = "";
       hasMoreRef.current = false;
       setDim(true);
-      fetch(searchUrl()).then((r) => r.json()).then((d) => {
+      apiGet(searchUrl()).then((d) => {
         if (mine !== seqRef.current) return;
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
@@ -1792,7 +1830,7 @@ ${"=".repeat(48)}
       const mine = seqRef.current;
       loadingMoreRef.current = true;
       setLoadingMore(true);
-      fetch(searchUrl(cursorRef.current)).then((r) => r.json()).then((d) => {
+      apiGet(searchUrl(cursorRef.current)).then((d) => {
         loadingMoreRef.current = false;
         setLoadingMore(false);
         if (mine !== seqRef.current) return;
@@ -1839,7 +1877,7 @@ ${"=".repeat(48)}
         failed: false
       };
       onToggle && onToggle(entry, true);
-      fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+      apiGet("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((d) => {
         if (!selectedRef.current.some((e) => e.model_id === m.model_id)) return;
         const versions = d && d.versions || [], v = versions[0] || {};
         onToggle && onToggle({
@@ -2928,7 +2966,7 @@ ${"=".repeat(48)}
       rerender();
       const fd = new FormData();
       fd.append("file", file);
-      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+      apiUpload("/api/upload", fd).then((d) => {
         if (d.error || !d.media_id) {
           renderError(d.error || "audio upload failed");
           st.current.audSlot = null;
@@ -2938,10 +2976,6 @@ ${"=".repeat(48)}
         st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
         rerender();
         reprice();
-      }).catch(() => {
-        renderError("audio upload failed (network)");
-        st.current.audSlot = null;
-        rerender();
       });
     };
     const pickVideoModel = (v) => {
@@ -3518,7 +3552,7 @@ ${"=".repeat(48)}
     seeded = true;
   }
   function refresh() {
-    return fetch("/api/jobs").then((r) => r.json()).then((d) => {
+    return apiGet("/api/jobs").then((d) => {
       const rows = d && d.jobs || [];
       toastTransitions(rows);
       jobs = rows;
@@ -3538,23 +3572,13 @@ ${"=".repeat(48)}
     }, busy ? 2500 : 7e3);
   }
   function dismiss2(id) {
-    fetch("/api/jobs/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: id })
-    }).then(() => {
+    apiPost("/api/jobs/dismiss", { job_id: id }).then(() => {
       delete last[id];
       refresh();
-    }).catch(() => {
     });
   }
   function clearFinished() {
-    fetch("/api/jobs/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ finished: true })
-    }).then(refresh).catch(() => {
-    });
+    apiPost("/api/jobs/dismiss", { finished: true }).then(refresh);
   }
   function start() {
     if (started) return;
@@ -3569,12 +3593,7 @@ ${"=".repeat(48)}
   function register(id, label, count) {
     if (!id || seen[id]) return;
     seen[id] = true;
-    fetch("/api/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: id, type: "generate", label: label || "Generation", status: "running", count })
-    }).catch(() => {
-    });
+    apiPost("/api/jobs", { job_id: id, type: "generate", label: label || "Generation", status: "running", count });
     refresh();
   }
   function track(id, label, cb, count) {
@@ -3643,11 +3662,11 @@ ${"=".repeat(48)}
     if (srv !== cur) applySkin(srv);
   }
   function load(mark) {
-    fetch("/api/achievements" + (mark ? "?mark=1" : "")).then((r) => r.json()).then((d) => {
+    apiGet("/api/achievements" + (mark ? "?mark=1" : "")).then((d) => {
+      if (d.error) return;
       data = d;
       if (mark) toastNew(d);
       syncSkin(d);
-    }).catch(() => {
     });
   }
   function toastNew(d) {

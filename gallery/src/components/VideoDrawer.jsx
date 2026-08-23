@@ -1,6 +1,7 @@
 import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import { apiUpload } from "../api.js";
 import { createPortal } from "react-dom";
 import CostBadge from "./CostBadge.jsx";
 import {
@@ -330,14 +331,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     st.current.audSlot = { uploading: file.name };
     rerender();
     const fd = new FormData(); fd.append("file", file);
-    fetch("/api/upload", { method: "POST", body: fd })
-      .then((r) => r.json())
+    apiUpload("/api/upload", fd)
       .then((d) => {
         if (d.error || !d.media_id) { renderError(d.error || "audio upload failed"); st.current.audSlot = null; rerender(); return; }
         st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
         rerender(); reprice();
-      })
-      .catch(() => { renderError("audio upload failed (network)"); st.current.audSlot = null; rerender(); });
+      });
   };
 
   // ---- the ENGINE chip pick (§45 drift) ----------------------------------------------------

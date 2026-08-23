@@ -8,8 +8,14 @@
 
    SPEND-SAFETY CONTRACT (do not weaken):
    - This module NEVER submits or spends. It GETs /api/task-status and POSTs job METADATA to
-     /api/jobs (fire-and-forget). The only retries are idempotent READS (again(4000) on a fetch
-     reject) -- a transient network blip keeps watching, it never re-submits anything.
+     /api/jobs (fire-and-forget, through api.js's apiPost, which never throws). The only retries
+     are idempotent READS (again(4000) on a fetch reject) -- a transient network blip keeps
+     watching, it never re-submits anything.
+   - The task-status poll keeps its OWN fetch rather than riding apiGet: the REJECTION is the
+     retry trigger, and api.js's one error rule deliberately turns a dropped read into an
+     {error} body, which this loop would read as a non-terminal phase and re-poll at the normal
+     cadence instead of the 4s blip floor. Named as an exemption in
+     loom/test/request-module-structure.test.js.
    - `seen` de-dupes BOTH entry points: a stray double-call for one task_id can neither
      double-POST /api/jobs nor start two poll loops. It is a true module singleton.
    - register() is register-ONLY (no poll) for hosts that own a hardened poll loop already (the
@@ -26,6 +32,7 @@
      ride the same table and never reach the first step, which is the point: one table, no
      per-route copies. */
 
+import { apiPost } from "../api.js";
 import { refresh as trayRefresh } from "./jobsStore.js";
 import { cadenceFor } from "./pollCadence.js";
 
@@ -37,10 +44,7 @@ export function register(id, label, count) {
   // count: how many images this ONE task renders (1-4, image-gen only). Omitted by callers
   // that don't know it -- JSON.stringify drops an undefined key, so those registrations are
   // byte-identical to before the param existed.
-  fetch("/api/jobs", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_id: id, type: "generate", label: label || "Generation", status: "running", count }),
-  }).catch(() => {});
+  apiPost("/api/jobs", { job_id: id, type: "generate", label: label || "Generation", status: "running", count });
   trayRefresh();
 }
 

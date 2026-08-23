@@ -14,6 +14,8 @@
    infinite-scroll engine behind GalleryPicker; the IIFE body is kept VERBATIM,
    only the boundary changed: `global.PickerCore = {...}` is now a returned +
    default-exported const. */
+import { apiGet } from "../api.js";
+
 const PickerCore = (function () {
   'use strict';
 
@@ -53,9 +55,11 @@ const PickerCore = (function () {
     }
 
     function fetchCollections() {
-      fetch(collectionsEndpoint).then(function (r) { return r.json(); })
-        .then(function (d) { if (!destroyed) onCollections(d.collections || []); })
-        .catch(function (e) { onError(e); });
+      apiGet(collectionsEndpoint).then(function (d) {
+        if (destroyed) return;
+        if (d.error) { onError(new Error(d.error)); return; }
+        onCollections(d.collections || []);
+      });
     }
 
     function load(append) {
@@ -70,14 +74,15 @@ const PickerCore = (function () {
       loading = true;
       var atPage = page;
       var mine = ++loadSeq;
-      fetch(qs(atPage)).then(function (r) { return r.json(); }).then(function (d) {
+      apiGet(qs(atPage)).then(function (d) {
         if (mine !== loadSeq) return;
         loading = false;
+        if (d.error) { onError(new Error(d.error)); return; }
         if (destroyed) return;
         var imgs = d.images || [];
         hasMore = ((d.page || atPage) * (d.limit || pageSize)) < (d.total || 0);
         onResults(imgs, { total: d.total || 0, append: !!append, hasMore: hasMore, page: atPage });
-      }).catch(function (e) { if (mine !== loadSeq) return; loading = false; onError(e); });
+      });
     }
 
     function reload() { page = 1; load(false); }

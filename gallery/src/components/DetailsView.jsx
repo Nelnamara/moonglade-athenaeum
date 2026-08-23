@@ -4,7 +4,7 @@ import useImageDetails from "../hooks/useImageDetails.js";
 import SimilarModal from "./SimilarModal.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
-import { rebuildPoster } from "../api.js";
+import { apiGet, rebuildPoster } from "../api.js";
 import { localDay } from "../gen/dates.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
@@ -175,10 +175,8 @@ export default function DetailsView({
     if (!mediaId) { setLineage(null); return; }
     let dead = false;
     setLineage(null);
-    fetch("/api/lineage/" + encodeURIComponent(mediaId))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!dead) setLineage(d); })
-      .catch(() => { if (!dead) setLineage(null); });
+    apiGet("/api/lineage/" + encodeURIComponent(mediaId))
+      .then((d) => { if (!dead) setLineage(d.error ? null : d); });
     return () => { dead = true; };
   }, [mediaId]);
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import { fmt } from "../hooks/useMyArt.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
@@ -81,14 +82,16 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [err, setErr] = useState("");
 
 
-  const load = () => fetch("/api/myart/items")
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-    .then((j) => { setRows(j.items || []); setCsrf(j.csrf || ""); });
+  const load = () => apiGet("/api/myart/items")
+    .then((j) => {
+      if (j.error) throw new Error(j.error);
+      setRows(j.items || []); setCsrf(j.csrf || "");
+    });
 
   useEffect(() => {
     let dead = false;
     load().catch((e) => { if (!dead) setRowsErr(String(e.message || e)); });
-    fetch("/api/your-art").then((r) => r.json()).then((d) => {
+    apiGet("/api/your-art").then((d) => {
       if (dead) return;
       setStats([
         { value: fmt((d.totals || {}).count), label: "PUBLISHED", accent: false },
@@ -103,10 +106,11 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   useEffect(() => {
     if (tab !== "loras" || loras !== null) return;
     let dead = false;
-    fetch("/api/model-search?src=mine&kind=lora&size=48")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setLoras(d.results || []); })
-      .catch((e) => { if (!dead) setLorasErr(String(e.message || e)); });
+    apiGet("/api/model-search?src=mine&kind=lora&size=48")
+      .then((d) => {
+        if (dead) return;
+        if (d.error) setLorasErr(d.error); else setLoras(d.results || []);
+      });
     return () => { dead = true; };
   }, [tab, loras]);
 
@@ -115,10 +119,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     if (q.length < 2) { setTagOpts([]); return; }
     let dead = false;
     const t = setTimeout(() => {
-      fetch("/api/tag-suggest?q=" + encodeURIComponent(q))
-        .then((r) => r.json())
-        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 6)); })
-        .catch(() => {});
+      apiGet("/api/tag-suggest?q=" + encodeURIComponent(q))
+        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 6)); });
     }, 220);
     return () => { dead = true; clearTimeout(t); };
   }, [tagDraft]);
@@ -155,15 +157,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   // Never throws: a network error / non-JSON response resolves to {error} so every
   // caller's setBusy(false) is reached (a throw here used to latch busy=true forever).
   const mutate = async (action, mediaId, extra) => {
-    try {
-      const r = await fetch("/api/myart/publish", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, media_id: mediaId, csrf, confirm: true, ...extra }),
-      });
-      return await r.json();
-    } catch (e) {
-      return { error: String((e && e.message) || e) };
-    }
+    return apiPost("/api/myart/publish",
+      { action, media_id: mediaId, csrf, confirm: true, ...extra });
   };
 
   const cardTogglePublish = async () => {
