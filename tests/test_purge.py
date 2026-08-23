@@ -4,6 +4,8 @@ the gallery /api/delete-tasks route (cloud delete is mocked; we assert local sid
 effects + that the cloud call fires task-level). The classic /delete-tasks-bulk form
 route died in the 2026-08-08 classic cut; the JSON twin runs the same
 _start_bulk_delete engine, so the behavior pinned here is unchanged."""
+import contextlib
+
 import pytest
 
 import moonglade_gallery as g
@@ -293,7 +295,7 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
     client = login_client(tmp_path)
 
     seen = []
-    real_connect = g._connect
+    real_catalog = g.catalog
 
     class _Spy:
         def __init__(self, con):
@@ -306,12 +308,23 @@ def test_delete_preview_does_not_scan_the_catalog_once_per_selected_task(tmp_pat
         def __getattr__(self, name):
             return getattr(self._con, name)
 
-    monkeypatch.setattr(g, "_connect", lambda *a, **k: _Spy(real_connect(*a, **k)))
+    # Re-pinned 2026-08-23: the preview's SQL moved out of the route into the
+    # delete_preview_rows catalog verb, which opens the catalog through catalog(),
+    # so that is where the spy goes now. Spying on the old _connect would still
+    # PASS -- seeing zero statements and counting zero scans -- which is the one
+    # outcome this test must never be able to report as a success.
+    @contextlib.contextmanager
+    def _spy_catalog(*a, **k):
+        with real_catalog(*a, **k) as con:
+            yield _Spy(con)
+
+    monkeypatch.setattr(g, "catalog", _spy_catalog)
     del seen[:]                              # ignore anything the login/render did
     body = client.post("/api/delete-preview", json={
         "media_ids": ["q{}".format(i) for i in range(30)]}).get_json()
 
     assert body["totals"]["media"] == 60      # the work really was done
+    assert seen, "the spy saw no SQL at all -- it is watching the wrong seam"
     scans = [s for s in seen if "task_id=?" in s or "task_id IN" in s]
     assert len(scans) <= 3, (
         "the preview issued {} task_id lookups for 30 selected tasks -- task_id is "

@@ -54,7 +54,7 @@ from collections import defaultdict, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
+from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
@@ -84,6 +84,8 @@ def _ensure_db(out):
         else:
             raise PixAIError(
                 "No catalog found in {}. Run a download (or --collect-only) first.".format(out))
+    migrate(db_path)      # the CLI's entry point says the schema upgrade out loud; the
+                          # catalog road's per-process memo makes it free from here on
     return db_path
 
 try:

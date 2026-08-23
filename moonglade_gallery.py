@@ -26,6 +26,7 @@ import sqlite3
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import moonglade_assets
@@ -280,15 +281,110 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN video_model TEXT DEFAULT ''",
 ]
 
-def _connect(db_path):
+# ---------------------------------------------------------------------------
+# THE CATALOG ROAD -- connect and migrate are two things
+#
+# Opening the catalog and upgrading its schema used to be ONE act: _connect()
+# ran all of _MIGRATIONS on every single call, at ~39 call sites, so an ordinary
+# read paid 41 ALTER TABLE / CREATE INDEX statements (each raising and swallowing
+# an OperationalError once the column exists) before it could run its SELECT.
+# They are now two:
+#
+#   catalog(db_path)  -- a context manager: open, row_factory, close. NO DDL.
+#   migrate(db_path)  -- run _MIGRATIONS. Idempotent, and memoized per process
+#                        per resolved path, so calling it is free after the first.
+#
+# LAZY SAFETY IS THE CONTRACT. Every entry point that touches the catalog -- the
+# web app, the CLI through _ensure_db, moonglade_mcp.py, moonglade_similar.py,
+# save_catalog, and any test that calls a helper straight at a fresh tmp db --
+# used to be migrated implicitly by _connect, and still is: the FIRST catalog()
+# for a given path in this process runs migrate() for it. No entry point has to
+# remember to migrate; create_app and _ensure_db call migrate() explicitly only
+# to say so out loud, and the memo makes that call cost nothing.
+# ---------------------------------------------------------------------------
+
+# Resolved catalog paths already migrated in THIS process. Per-process by design:
+# a new process re-checks the schema once, which is what makes an install upgraded
+# by a new release pick the new columns up on its next run without a migration step.
+_MIGRATED = set()
+_MIGRATE_LOCK = threading.Lock()
+
+
+def _catalog_key(db_path):
+    """The memo key for one catalog file: absolute, symlink-resolved, and
+    case-normalized, so `pixai_backup/catalog.db` and `PIXAI_BACKUP\\CATALOG.DB`
+    are one entry rather than two on Windows."""
+    try:
+        resolved = str(Path(db_path).resolve())
+    except OSError:                       # a path the OS refuses to resolve
+        resolved = str(db_path)
+    return os.path.normcase(resolved)
+
+
+def migrate(db_path, force=False):
+    """Bring an existing catalog.db up to the current schema by running
+    _MIGRATIONS. Idempotent: every statement is an ALTER TABLE ADD COLUMN or a
+    CREATE INDEX IF NOT EXISTS, and the OperationalError a re-run raises ("duplicate
+    column name") is the success case, not a failure.
+
+    Memoized per process per resolved path -- the second and every later call for
+    the same catalog returns without opening anything. That is what lets create_app
+    and _ensure_db call it explicitly AND lets catalog() call it lazily without the
+    two ever colliding into real work twice.
+
+    `force=True` runs the statements again anyway, ignoring the memo. Nothing in the
+    app needs it (a new process starts with an empty memo, which is exactly the
+    upgrade path a new release takes); it exists so a test can prove the DDL really
+    is re-runnable rather than proving only that the memo skipped it."""
+    key = _catalog_key(db_path)
+    if key in _MIGRATED and not force:
+        return
+    with _MIGRATE_LOCK:
+        if key in _MIGRATED and not force:   # another thread got here first
+            return
+        con = sqlite3.connect(str(db_path))
+        try:
+            for sql in _MIGRATIONS:
+                try:
+                    con.execute(sql)
+                    con.commit()
+                except sqlite3.OperationalError:
+                    pass  # column/index already exists
+        finally:
+            con.close()
+        _MIGRATED.add(key)
+
+
+@contextmanager
+def catalog(db_path):
+    """The one way to open catalog.db: a migrated, sqlite3.Row-factory connection,
+    closed when the block ends. Runs NO DDL of its own -- the lazy migrate above
+    fires once per path per process and then never again.
+
+        with catalog(db_path) as con:
+            rows = con.execute("SELECT ...").fetchall()
+
+    Writers commit inside the block; this closes the connection, it does not
+    commit for you (an uncommitted write is rolled back on close, exactly as it
+    was under _connect)."""
+    migrate(db_path)
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
-    for sql in _MIGRATIONS:
-        try:
-            con.execute(sql)
-            con.commit()
-        except sqlite3.OperationalError:
-            pass  # column/index already exists
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+def _connect(db_path):
+    """Thin alias over the catalog road for the helpers below, which predate it and
+    hold the connection themselves (`con = _connect(...)` / `finally: con.close()`).
+    Same guarantees as catalog(): migrated once per process, Row factory, no
+    per-call DDL. New code -- and every catalog verb -- uses `catalog()`; nothing
+    outside this module's own helper set should call this."""
+    migrate(db_path)
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
     return con
 
 
@@ -916,6 +1012,319 @@ def catalog_counts(db_path):
         return {"images": 0, "videos": 0, "collections": 0}
     finally:
         con.close()
+
+
+
+# ---------------------------------------------------------------------------
+# CATALOG VERBS -- the questions the web routes ask of the catalog
+#
+# Every one of these was raw SQL inside a route handler in create_app until
+# 2026-08-23: eleven handlers and inner functions opened their own connection and
+# wrote their own SELECT/UPDATE against `catalog`, which is exactly what
+# architecture.md's "all I/O goes through helpers -- never raw SQL elsewhere" said
+# did not happen. A verb is named for what the DOMAIN calls the question, takes a
+# db_path, and returns PLAIN DATA (dicts, lists, ints) -- never a Row, never a live
+# connection, never a Response. Shaping that data into a payload, and the URLs in
+# it, stays at the handler; the SQL stays here.
+#
+# The SQL below is the SAME SQL those handlers held -- same columns, same WHERE,
+# same ORDER BY, same LIMITs. This move was a relocation, not a rewrite.
+# ---------------------------------------------------------------------------
+
+def task_media(db_path, task_id):
+    """Every catalog row belonging to one generation task: what the task produced,
+    locally. Three callers needed exactly this and each had its own copy of the
+    query -- the live-mirror's "a concurrent collect already finished, read the
+    result back" path, /api/import-task's already-catalogued precheck, and the bulk
+    delete's per-task local purge -- so they share one verb and one column list.
+    Empty list for a task this library never downloaded."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, is_video, filename FROM catalog WHERE task_id=?",
+            (str(task_id),)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def task_media_count(db_path, task_id):
+    """How many catalog rows share a task id -- is this picture one of a batch, or
+    the only thing its task made? A COUNT rather than task_media() because the
+    single delete-image dialog asks nothing else about them. Fails soft to 0: a
+    number on a confirm dialog must never be able to break the dialog."""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return 0
+    try:
+        with catalog(db_path) as con:
+            return int(con.execute(
+                "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+# sqlite's default host-parameter ceiling is 999, and this is well inside it while
+# still cutting a big selection to a handful of passes.
+_TASK_CHUNK = 400
+
+
+def _delete_targets(con, media_ids):
+    """The shared selection -> (task ids, local-only rows) resolution behind BOTH
+    /api/delete-preview and the bulk delete. Shared rather than copied so the preview
+    cannot drift from the action it previews: a dialog that lists a different blast
+    radius than the delete then takes is worse than showing nothing at all.
+
+    Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
+    cloud delete per task no matter how many of its images were selected) and
+    local_only holds the rows with no task id at all -- imports, which have nothing
+    on PixAI to delete and are purged locally only.
+
+    Takes a connection, not a db_path: delete_targets() and delete_preview_rows()
+    both need this answer plus more from the SAME open connection."""
+    sel_rows = [con.execute(
+        "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
+    ).fetchone() for m in media_ids]
+    sel_rows = [dict(r) for r in sel_rows if r]
+    task_ids = sorted({(r.get("task_id") or "").strip()
+                       for r in sel_rows if (r.get("task_id") or "").strip()})
+    local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+    return sel_rows, task_ids, local_only
+
+
+def _members_of_tasks(con, task_ids):
+    """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
+    instead of a query per task.
+
+    Rows come back grouped and sorted here rather than relying on the query's order,
+    because one statement now returns several tasks interleaved. (The chunked IN also
+    predates the idx_task_id index: measured on a 36,000-row catalog, 800 per-task
+    scans cost 8.6s inside the request /api/delete-preview's dialog was waiting on,
+    against 38ms chunked.)"""
+    out = {}
+    for i in range(0, len(task_ids), _TASK_CHUNK):
+        chunk = task_ids[i:i + _TASK_CHUNK]
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
+            "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+        for r in rows:
+            out.setdefault(r["task_id"], []).append(dict(r))
+    for members in out.values():
+        members.sort(key=lambda r: r["media_id"])
+    return out
+
+
+def delete_targets(db_path, media_ids):
+    """What a selection of media_ids actually resolves to for a delete:
+    (sel_rows, task_ids, local_only). See _delete_targets for the shape."""
+    with catalog(db_path) as con:
+        return _delete_targets(con, media_ids)
+
+
+def delete_preview_rows(db_path, media_ids, task_cap=None):
+    """Everything "Delete from PixAI" needs to describe its own blast radius before
+    anything fires, in ONE connection: the selection resolved to tasks, each task
+    expanded to its FULL catalog membership (deleting on PixAI is task-level, so
+    picking one image of a batch takes all four), and the display-capped rows for the
+    task-less imports the same button purges locally.
+
+    Returns {sel_rows, task_ids, local_only, members_by_task, local_rows}. The caps
+    are DISPLAY bounds on `local_rows` only -- task_ids and local_only always describe
+    the entire selection, because the totals are what the user reads to decide."""
+    cap = DELETE_PREVIEW_TASK_CAP if task_cap is None else task_cap
+    with catalog(db_path) as con:
+        sel_rows, task_ids, local_only = _delete_targets(con, media_ids)
+        members_by_task = _members_of_tasks(con, task_ids)
+        shown = [con.execute(
+            "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
+            (r["media_id"],)).fetchone() for r in local_only[:cap]]
+        local_rows = [dict(r) for r in shown if r]
+    return {"sel_rows": sel_rows, "task_ids": task_ids, "local_only": local_only,
+            "members_by_task": members_by_task, "local_rows": local_rows}
+
+
+def myart_items(db_path):
+    """Every catalog row that exists as a PixAI ARTWORK (artwork_id set by
+    --sync-artworks), public AND private -- the My Art gallery's whole population,
+    newest first. Pure catalog read: title/likes/comments/tags/nsfw all arrive via
+    --sync-artworks, so nothing here touches the network. `likes` and `comments` come
+    back as ints (the columns are TEXT and blank means zero)."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
+            " created_at, art_tags, is_published,"
+            " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
+            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+            " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
+            " ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def artwork_row(db_path, media_id):
+    """The publish-relevant catalog row behind one media_id (artwork_id / task_id /
+    title / art_tags / is_published), or None. What every My Art card action resolves
+    its target through before it will talk to PixAI at all."""
+    with catalog(db_path) as con:
+        r = con.execute(
+            "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
+            " FROM catalog WHERE media_id = ? LIMIT 1", (str(media_id),)).fetchone()
+    return dict(r) if r else None
+
+
+def publish_state(db_path, media_id, artwork_id=None, published=None,
+                  art_tags=None, title=None):
+    """Mirror a completed PixAI publish/unpublish/re-tag/delete back into the catalog
+    so the grid reflects it without a full --sync-artworks. Every field is optional and
+    None means LEAVE IT ALONE -- an artwork whose visibility changed must not have its
+    title or tags rewritten as a side effect.
+
+    `published` is a bool (stored as the catalog's '1'/'0' TEXT), `art_tags` an
+    already-formatted comma string. Unpublishing on PixAI is expressed here as
+    artwork_id='' plus published=False: the local row survives, it just no longer
+    claims an artwork. Returns the number of columns written."""
+    sets, params = [], []
+    if artwork_id is not None:
+        sets.append("artwork_id=?"); params.append(str(artwork_id))
+    if published is not None:
+        sets.append("is_published=?"); params.append("1" if published else "0")
+    if art_tags is not None:
+        sets.append("art_tags=?"); params.append(str(art_tags))
+    if title is not None:
+        sets.append("title=?"); params.append(str(title))
+    if not sets:
+        return 0
+    params.append(str(media_id))
+    with catalog(db_path) as con:
+        con.execute("UPDATE catalog SET {} WHERE media_id=?".format(", ".join(sets)),
+                    params)
+        con.commit()
+    return len(sets)
+
+
+def lineage(db_path, media_id):
+    """The family tree of one image, as rows:
+      * siblings -- the other outputs of the SAME generation task (share task_id).
+      * parent   -- the SOURCE image this one was derived from (source_media_id),
+                    carrying `kind`, the derivation (edit/upscale/video).
+      * children -- every image derived FROM this one, each with its own `kind`.
+    Returns {row, siblings, parent, children}, or None for a media_id the catalog does
+    not know -- "unknown image" is the caller's refusal to make, not this verb's. Any
+    dimension can be empty: an original txt2img with a batch of 1 and no derivatives
+    has an empty tree. Pure catalog read, no network."""
+    mid = str(media_id or "").strip()
+    cols = "media_id, is_video, title, prompt_preview"
+    with catalog(db_path) as con:
+        me = con.execute(
+            "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
+            " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
+        if not me:
+            return None
+        siblings = []
+        if me["task_id"]:
+            siblings = [dict(r) for r in con.execute(
+                "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
+                " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
+        parent = None
+        if me["source_media_id"]:
+            pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
+                             (me["source_media_id"],)).fetchone()
+            if pr:
+                parent = dict(pr, kind=me["derive_kind"] or "derived")
+        children = [dict(r, kind=(r["derive_kind"] or "derived"))
+                    for r in con.execute(
+                        "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
+                        " ORDER BY created_at" % cols, (mid,)).fetchall()]
+    return {"row": dict(me), "siblings": siblings, "parent": parent,
+            "children": children}
+
+
+def sibling_media(db_path, task_ids):
+    """Every output of each requested task, in ONE query, ordered by (task_id,
+    media_id) -- the page-batched form of lineage()'s siblings, for the card
+    placard's Sibling Strip. Includes each task's own members entire (the caller
+    lights "self" by media_id).
+
+    An EMPTY task_id is never queried: every import shares '', and one giant
+    pseudo-batch of unrelated images is not a sibling strip."""
+    ids = [str(t) for t in (task_ids or []) if str(t).strip()]
+    if not ids:
+        return []
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT task_id, media_id, is_video FROM catalog"
+            " WHERE task_id IN (%s) AND task_id != ''"
+            " ORDER BY task_id, media_id" % ",".join("?" * len(ids)), ids).fetchall()
+        return [dict(r) for r in rows]
+
+
+def recent_train_tasks(db_path, limit=18, pool=400):
+    """Recent generations grouped by TASK, newest task first, for the mobile Train
+    dataset picker -- each entry is one generation and its real image count, never a
+    fixed batch size (real batches are 1-4). Videos, task-less imports and rows with
+    no file are excluded: a training set is made of images that exist on disk.
+
+    `pool` is how many recent rows are read before grouping -- the tasks come out of
+    the newest `pool` media rows, which is what makes this one indexed query instead of
+    a GROUP BY over the whole catalog. Returns [{task_id, media_ids, count}]."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, created_at FROM catalog"
+            " WHERE task_id != '' AND is_video != '1' AND filename != ''"
+            " ORDER BY created_at DESC LIMIT ?", (int(pool),)).fetchall()
+    groups, order = {}, []
+    for r in rows:
+        tid = r["task_id"]
+        if tid not in groups:
+            if len(order) >= limit:
+                continue
+            groups[tid] = []
+            order.append(tid)
+        if tid in groups:
+            groups[tid].append(r["media_id"])
+    return [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid])}
+            for tid in order]
+
+
+def history_page(db_path, since_utc, until_utc, media="", source=""):
+    """One window of the history feed: every catalog row created in
+    [since_utc, until_utc), newest first, plus the cursor for the page below it.
+
+    ONE indexed range query (`created_at >= ? AND created_at < ?`, no functions on the
+    column) and one seek. The window is passed in already resolved to UTC strings
+    because the DAY boundaries are the caller's business -- they depend on the viewer's
+    timezone, and computing them at the route is what makes them deterministic and
+    testable. `media`/`source` are _build_where's own idiom.
+
+    Returns {rows, older_created_at}: `older_created_at` is the created_at of the
+    NEWEST row older than this window (None if there is nothing older), so the caller
+    can open the next page on a day that has runs instead of a run of empty days."""
+    where, params = _build_where("", "", "", "", media_type=media, source=source)
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, created_at, width, height, model_id, "
+            "COALESCE(NULLIF(model_name,''), NULLIF(video_model,''), model_id, '') AS model, "
+            "SUBSTR(COALESCE(NULLIF(prompt_full,''), prompt_preview, ''), 1, 300) AS prompt, "
+            "video_duration, paid_credit, source "
+            "FROM catalog WHERE {} AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at DESC, media_id DESC".format(where),
+            params + [since_utc, until_utc]).fetchall()
+        older = con.execute(
+            "SELECT created_at FROM catalog WHERE {} AND created_at < ? "
+            "ORDER BY created_at DESC LIMIT 1".format(where),
+            params + [since_utc]).fetchone()
+    return {"rows": [dict(r) for r in rows],
+            "older_created_at": older[0] if older else None}
+
+
+def history_created_ats(db_path, since_utc, until_utc, media="", source=""):
+    """Just the created_at values in a window, for counting how many LOCAL days of
+    the next page actually have runs ("Load N older days"). Values, not days: which
+    local day a UTC timestamp falls in depends on the viewer's timezone, so the
+    bucketing is the caller's to do."""
+    where, params = _build_where("", "", "", "", media_type=media, source=source)
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT created_at FROM catalog WHERE {} AND created_at >= ? "
+            "AND created_at < ?".format(where),
+            params + [since_utc, until_utc]).fetchall()
+    return [r[0] for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -5136,6 +5545,9 @@ def create_app(out_dir: Path):
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
     init_db(db_path)
+    migrate(db_path)          # say the schema upgrade out loud at the entry point --
+                              # catalog() would do it lazily anyway, and the per-process
+                              # memo makes this call free for every later open
     set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
@@ -5583,16 +5995,11 @@ def create_app(out_dir: Path):
     def _collected_from_catalog(tid):
         """A finished collect's outcome, re-read from the catalog, in
         collect_generation's return shape (saved=0: THIS caller downloaded nothing)."""
-        con = _connect(db_path)
-        try:
-            rows = con.execute("SELECT media_id, is_video FROM catalog WHERE task_id=?",
-                               (str(tid),)).fetchall()
-        finally:
-            con.close()
+        rows = task_media(db_path, tid)
         if not rows:
             return None
-        return {"media_ids": [r[0] for r in rows], "saved": 0,
-                "is_video": any(str(r[1] or "") == "1" for r in rows)}
+        return {"media_ids": [r["media_id"] for r in rows], "saved": 0,
+                "is_video": any(str(r["is_video"] or "") == "1" for r in rows)}
 
     def _collect_single_flight(core, session, tid):
         """core.collect_generation, but never twice concurrently for the same task id."""
@@ -6787,15 +7194,10 @@ def create_app(out_dir: Path):
             return jsonify({"error": "enter a numeric task id"}), 200
         # "Look behind the milk": if this task is already catalogued, don't re-fetch --
         # just report it's here + hand back its media so the UI can jump straight to it.
-        con = _connect(db_path)
-        try:
-            pre_rows = con.execute(
-                "SELECT media_id, is_video FROM catalog WHERE task_id=?", (tid,)).fetchall()
-        finally:
-            con.close()
+        pre_rows = task_media(db_path, tid)
         if pre_rows:
-            pre = [r[0] for r in pre_rows]
-            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0][1]))
+            pre = [r["media_id"] for r in pre_rows]
+            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0]["is_video"]))
             return jsonify({"ok": True, "already": True, "saved": 0, "media_ids": pre})
         job_id = "import-" + tid[-8:]
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
@@ -6935,15 +7337,7 @@ def create_app(out_dir: Path):
         whether the picture is one of a batch or the only one this task made -- because
         `deleteBatchMedia` on a task's last image is a different act from trimming one frame
         out of four, and the dialog should not make them look the same."""
-        tid = str(task_id or "").strip()
-        if not tid:
-            return 0
-        try:
-            with sqlite3.connect(str(db_path)) as con:
-                return int(con.execute(
-                    "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
-        except sqlite3.Error:
-            return 0
+        return task_media_count(db_path, task_id)
 
     @app.route("/api/delete-image", methods=["POST"])
     @tier(LOCALHOST)
@@ -7040,52 +7434,6 @@ def create_app(out_dir: Path):
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
 
-    def _resolve_delete_targets(con, media_ids):
-        """The shared selection -> (task ids, local-only rows) resolution behind BOTH
-        /api/delete-preview and delete_tasks_bulk. Shared rather than copied so the
-        preview cannot drift from the action it previews: a dialog that lists a different
-        blast radius than the delete then takes is worse than showing nothing at all.
-
-        Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
-        cloud delete per task no matter how many of its images were selected) and
-        local_only holds the rows with no task id at all -- imports, which have nothing
-        on PixAI to delete and are purged locally only."""
-        sel_rows = [con.execute(
-            "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
-        ).fetchone() for m in media_ids]
-        sel_rows = [dict(r) for r in sel_rows if r]
-        task_ids = sorted({(r.get("task_id") or "").strip()
-                           for r in sel_rows if (r.get("task_id") or "").strip()})
-        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
-        return sel_rows, task_ids, local_only
-
-    # sqlite's default host-parameter ceiling is 999, and this is well inside it while
-    # still cutting a big selection to a handful of passes.
-    _TASK_CHUNK = 400
-
-    def _members_of_tasks(con, task_ids):
-        """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
-        instead of a query per task.
-
-        `catalog` indexes media_id (its PRIMARY KEY), created_at, model_name, rating and
-        batch -- there is NO index on task_id, so each `WHERE task_id=?` is a full table
-        scan. Measured on a 36,000-row catalog: 24 such queries cost 216ms, 100 cost
-        1.04s and 800 cost 8.6s, all of it inside the request /api/delete-preview's
-        dialog is waiting on; the same 800 tasks fetched with chunked `IN` cost 38ms.
-        Rows come back grouped and sorted here rather than relying on the query's order,
-        because one statement now returns several tasks interleaved."""
-        out = {}
-        for i in range(0, len(task_ids), _TASK_CHUNK):
-            chunk = task_ids[i:i + _TASK_CHUNK]
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
-                "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
-            for r in rows:
-                out.setdefault(r["task_id"], []).append(r)
-        for members in out.values():
-            members.sort(key=lambda r: r["media_id"])
-        return out
-
     def _preview_entry(row, selected_ids):
         """One /api/delete-preview media entry: what it is, whether the user actually
         picked it, and the media_id whose thumbnail exists on disk -- or None for
@@ -7113,9 +7461,9 @@ def create_app(out_dir: Path):
         whole batch, cloud AND local. The confirm dialog said that in prose but never
         showed WHICH siblings, so the single irreversible action in this app was also
         the only one whose real scope the user could not see before committing to it.
-        This resolves the selection through _resolve_delete_targets (the same helper
-        delete_tasks_bulk uses, deliberately) and then expands each task to its full
-        catalog membership.
+        This resolves the selection through the delete_preview_rows catalog verb,
+        which shares its target resolution with /api/delete-tasks deliberately, and
+        then expands each task to its full catalog membership.
 
         LOCALHOST, mirroring the action it previews rather than the data it reads. The
         catalog rows themselves are ordinary LOGIN-tier browsing material (a LAN
@@ -7136,29 +7484,22 @@ def create_app(out_dir: Path):
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
 
-        con = _connect(db_path)
-        try:
-            sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
-            selected = {r["media_id"] for r in sel_rows}
-            members_by_task = _members_of_tasks(con, task_ids)
-            tasks, total_media = [], 0
-            for tid in task_ids:
-                members = members_by_task.get(tid, [])
-                total_media += len(members)
-                if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
-                    continue          # keep counting, stop describing
-                tasks.append({"task_id": tid,
-                              "media": [_preview_entry(m, selected) for m in members]})
-            # Imports have no task, so nothing about them is task-level -- but they ARE
-            # part of what the button removes, and the dialog has to show them or its
-            # file count won't add up. Capped on the same DISPLAY budget as the tasks.
-            shown_local = [con.execute(
-                "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
-                (r["media_id"],)).fetchone()
-                for r in local_only[:DELETE_PREVIEW_TASK_CAP]]
-            local_entries = [_preview_entry(m, selected) for m in shown_local if m]
-        finally:
-            con.close()
+        blast = delete_preview_rows(db_path, media_ids)
+        sel_rows, task_ids = blast["sel_rows"], blast["task_ids"]
+        local_only = blast["local_only"]
+        selected = {r["media_id"] for r in sel_rows}
+        tasks, total_media = [], 0
+        for tid in task_ids:
+            members = blast["members_by_task"].get(tid, [])
+            total_media += len(members)
+            if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
+                continue          # keep counting, stop describing
+            tasks.append({"task_id": tid,
+                          "media": [_preview_entry(m, selected) for m in members]})
+        # Imports have no task, so nothing about them is task-level -- but they ARE
+        # part of what the button removes, and the dialog has to show them or its
+        # file count won't add up. Capped on the same DISPLAY budget as the tasks.
+        local_entries = [_preview_entry(m, selected) for m in blast["local_rows"]]
 
         return jsonify({
             "tasks": tasks,
@@ -7225,16 +7566,9 @@ def create_app(out_dir: Path):
                         failed += 1
                         done += 1; _tick(); continue
                     if purge_local:
-                        con2 = _connect(db_path)
-                        try:
-                            media = con2.execute(
-                                "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
-                            ).fetchall()
-                        finally:
-                            con2.close()
-                        for m in media:
+                        for m in task_media(db_path, tid):
                             try:
-                                _purge_local(m[0], m[1]); removed += 1
+                                _purge_local(m["media_id"], m["filename"]); removed += 1
                             except OSError:
                                 # This task's cloud delete has ALREADY fired, so one file the
                                 # OS won't let go of must not take the whole loop down with it:
@@ -7274,7 +7608,7 @@ def create_app(out_dir: Path):
     def api_delete_tasks():
         """JSON twin of /delete-tasks-bulk: same LOCALHOST tier (and for the same
         reason -- this MUTATES THE OWNER'S REAL CLOUD ACCOUNT, irreversibly), same
-        _resolve_delete_targets selection so /api/delete-preview keeps describing
+        delete_targets selection so /api/delete-preview keeps describing
         exactly what this route then does, and the same off-thread worker via
         _start_bulk_delete -- which routes every cloud delete through
         core.delete_task_gql, the single-attempt _check_read_only'd choke point the
@@ -7300,11 +7634,7 @@ def create_app(out_dir: Path):
             media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
             if not media_ids:
                 return jsonify({"error": "no task_ids or media_ids given"}), 400
-            con = _connect(db_path)
-            try:
-                _sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
-            finally:
-                con.close()
+            _sel_rows, task_ids, local_only = delete_targets(db_path, media_ids)
         if not purge_local:
             local_only = []          # cloud-only mode: imports have no cloud side
         if not (task_ids or local_only):
@@ -9546,48 +9876,25 @@ def create_app(out_dir: Path):
         held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
         arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
         already serves. The Artworks/Animations tab split is the is_video flag."""
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
-                " created_at, art_tags, is_published,"
-                " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
-                " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
-                " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
-                " ORDER BY created_at DESC").fetchall()
-        finally:
-            con.close()
         items = []
-        for (mid, aid, title, preview, is_video, is_nsfw, created, tags, pub,
-             likes, comments) in rows:
+        for r in myart_items(db_path):
+            mid, title, preview = r["media_id"], r["title"], r["prompt_preview"]
+            created, tags = r["created_at"], r["art_tags"]
             items.append({
-                "media_id": mid, "artwork_id": aid,
+                "media_id": mid, "artwork_id": r["artwork_id"],
                 "title": (title or "").strip() or (preview or "").strip()[:60] or mid,
                 "thumb": "/thumbs/%s.jpg" % mid,
-                "is_video": is_video == "1", "is_nsfw": is_nsfw == "1",
+                "is_video": r["is_video"] == "1", "is_nsfw": r["is_nsfw"] == "1",
                 "date": (created or "")[:10],
                 "created_at": created or "",
                 "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
-                "public": pub == "1", "likes": likes, "comments": comments,
+                "public": r["is_published"] == "1",
+                "likes": r["likes"], "comments": r["comments"],
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
         # than making the overlay fetch the whole Control Panel summary for one field.
         return jsonify({"items": items, "csrf": session.get("csrf", "")})
-
-    def _artwork_row(mid):
-        """The catalog row behind one media_id (artwork_id/task_id/title), or None."""
-        con = _connect(db_path)
-        try:
-            r = con.execute(
-                "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
-                " FROM catalog WHERE media_id = ? LIMIT 1", (str(mid),)).fetchone()
-        finally:
-            con.close()
-        if not r:
-            return None
-        return {"media_id": r[0], "artwork_id": r[1], "task_id": r[2],
-                "title": r[3], "art_tags": r[4], "is_published": r[5]}
 
     @app.route("/api/myart/publish", methods=["POST"])
     @tier(LOGIN)
@@ -9617,7 +9924,7 @@ def create_app(out_dir: Path):
         mid = str(body.get("media_id") or "").strip()
         if action not in ("publish", "visibility", "tags", "delete"):
             return jsonify({"error": "unknown action"}), 400
-        row = _artwork_row(mid)
+        row = artwork_row(db_path, mid)
         if not row:
             return jsonify({"error": "unknown media id"}), 400
         confirm = bool(body.get("confirm"))
@@ -9694,25 +10001,21 @@ def create_app(out_dir: Path):
             return jsonify({"error": str(e)}), 502
 
         # Mirror the change into the catalog so the grid reflects it without a full sync.
-        con = _connect(db_path)
-        try:
-            if action == "delete":
-                con.execute("UPDATE catalog SET artwork_id='', is_published='0' WHERE media_id=?", (mid,))
-            else:
-                if action == "publish":
-                    con.execute("UPDATE catalog SET artwork_id=?, is_published=? WHERE media_id=?",
-                                (result.get("artwork_id") or "", "0" if private else "1", mid))
-                if private is not None:
-                    con.execute("UPDATE catalog SET is_published=? WHERE media_id=?",
-                                ("0" if private else "1", mid))
-                if tags is not None:
-                    con.execute("UPDATE catalog SET art_tags=? WHERE media_id=?",
-                                (", ".join(str(t).lstrip("#").strip() for t in tags), mid))
-                if title is not None:
-                    con.execute("UPDATE catalog SET title=? WHERE media_id=?", (title, mid))
-            con.commit()
-        finally:
-            con.close()
+        if action == "delete":
+            publish_state(db_path, mid, artwork_id="", published=False)
+        else:
+            changed = {}
+            if action == "publish":
+                changed["artwork_id"] = result.get("artwork_id") or ""
+                changed["published"] = not private
+            if private is not None:
+                changed["published"] = not private
+            if tags is not None:
+                changed["art_tags"] = ", ".join(
+                    str(t).lstrip("#").strip() for t in tags)
+            if title is not None:
+                changed["title"] = title
+            publish_state(db_path, mid, **changed)
         result["unmatched_tags"] = unmatched
         return jsonify(result)
 
@@ -9735,33 +10038,18 @@ def create_app(out_dir: Path):
         Pure catalog read, no network. Any dimension can be empty (an original txt2img with
         a batch size of 1 and no derivatives has an empty tree)."""
         mid = str(media_id or "").strip()
-        con = _connect(db_path)
-        try:
-            me = con.execute(
-                "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
-                " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
-            if not me:
-                return jsonify({"error": "unknown media id"}), 404
-            cols = ("media_id, is_video, title, prompt_preview")
-            siblings = []
-            if me["task_id"]:
-                siblings = [_lineage_card(r) for r in con.execute(
-                    "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
-                    " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
-            parent = None
-            if me["source_media_id"]:
-                pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
-                                 (me["source_media_id"],)).fetchone()
-                if pr:
-                    parent = dict(_lineage_card(pr), kind=me["derive_kind"] or "derived")
-            children = [dict(_lineage_card(r), kind=(r["derive_kind"] or "derived"))
-                        for r in con.execute(
-                            "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
-                            " ORDER BY created_at" % cols, (mid,)).fetchall()]
-        finally:
-            con.close()
-        return jsonify({"media_id": mid, "siblings": siblings,
-                        "parent": parent, "children": children})
+        tree = lineage(db_path, mid)
+        if tree is None:
+            return jsonify({"error": "unknown media id"}), 404
+        parent = tree["parent"]
+        return jsonify({
+            "media_id": mid,
+            "siblings": [_lineage_card(r) for r in tree["siblings"]],
+            "parent": (dict(_lineage_card(parent), kind=parent["kind"])
+                       if parent else None),
+            "children": [dict(_lineage_card(r), kind=r["kind"])
+                         for r in tree["children"]],
+        })
 
     @app.route("/api/siblings", methods=["POST"])
     @tier(LOGIN)
@@ -9797,16 +10085,7 @@ def create_app(out_dir: Path):
                 break
         by_task = {}
         if ids:
-            con = _connect(db_path)
-            try:
-                rows = con.execute(
-                    "SELECT task_id, media_id, is_video FROM catalog"
-                    " WHERE task_id IN (%s) AND task_id != ''"
-                    " ORDER BY task_id, media_id" % ",".join("?" * len(ids)),
-                    ids).fetchall()
-            finally:
-                con.close()
-            for r in rows:
+            for r in sibling_media(db_path, ids):
                 mid = str(r["media_id"] or "")
                 if not mid:
                     continue
@@ -9834,26 +10113,8 @@ def create_app(out_dir: Path):
             limit = max(1, min(int(request.args.get("limit") or 18), 60))
         except ValueError:
             limit = 18
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, created_at FROM catalog"
-                " WHERE task_id != '' AND is_video != '1' AND filename != ''"
-                " ORDER BY created_at DESC LIMIT 400").fetchall()
-        finally:
-            con.close()
-        groups, order = {}, []
-        for r in rows:
-            tid = r["task_id"]
-            if tid not in groups:
-                if len(order) >= limit:
-                    continue
-                groups[tid] = []
-                order.append(tid)
-            if tid in groups:
-                groups[tid].append(r["media_id"])
-        tasks = [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid]),
-                  "thumb": "/thumbs/%s.jpg" % groups[tid][0]} for tid in order]
+        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0])
+                 for t in recent_train_tasks(db_path, limit)]
         return jsonify({"tasks": tasks})
 
     @app.route("/api/train/quota")
@@ -11769,40 +12030,24 @@ __DESIGN_TOKENS__
             except ValueError:
                 return None
 
-        where, params = _build_where("", "", "", "", media_type=media, source=source)
         since_utc, until_utc = utc_iso(start_local), utc_iso(end_local)
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, created_at, width, height, model_id, "
-                "COALESCE(NULLIF(model_name,''), NULLIF(video_model,''), model_id, '') AS model, "
-                "SUBSTR(COALESCE(NULLIF(prompt_full,''), prompt_preview, ''), 1, 300) AS prompt, "
-                "video_duration, paid_credit, source "
-                "FROM catalog WHERE {} AND created_at >= ? AND created_at < ? "
-                "ORDER BY created_at DESC, media_id DESC".format(where),
-                params + [since_utc, until_utc]).fetchall()
-            # Paging cursor: the NEWEST row older than this window, so the next page
-            # opens on a day that has runs instead of a run of empty days.
-            older = con.execute(
-                "SELECT created_at FROM catalog WHERE {} AND created_at < ? "
-                "ORDER BY created_at DESC LIMIT 1".format(where),
-                params + [since_utc]).fetchone()
-            next_before, older_days = None, 0
-            older_ts = _history_ts(older[0]) if older else None
-            if older_ts is not None:
-                nb_date = local_date(older_ts) + timedelta(days=1)
-                nb_local = datetime(nb_date.year, nb_date.month, nb_date.day, tzinfo=tzinfo)
-                next_before = nb_date.isoformat()
-                older_days = len({
-                    local_date(t) for t in (
-                        _history_ts(r[0]) for r in con.execute(
-                            "SELECT created_at FROM catalog WHERE {} AND created_at >= ? "
-                            "AND created_at < ?".format(where),
-                            params + [utc_iso(nb_local - timedelta(days=days)),
-                                      utc_iso(nb_local)]).fetchall())
-                    if t is not None})
-        finally:
-            con.close()
+        page = history_page(db_path, since_utc, until_utc, media=media, source=source)
+        rows = page["rows"]
+        # Paging cursor: the NEWEST row older than this window, so the next page
+        # opens on a day that has runs instead of a run of empty days.
+        next_before, older_days = None, 0
+        older_ts = _history_ts(page["older_created_at"]) if page["older_created_at"] else None
+        if older_ts is not None:
+            nb_date = local_date(older_ts) + timedelta(days=1)
+            nb_local = datetime(nb_date.year, nb_date.month, nb_date.day, tzinfo=tzinfo)
+            next_before = nb_date.isoformat()
+            older_days = len({
+                local_date(t) for t in (
+                    _history_ts(c) for c in history_created_ats(
+                        db_path,
+                        utc_iso(nb_local - timedelta(days=days)), utc_iso(nb_local),
+                        media=media, source=source))
+                if t is not None})
 
         buckets = {}
         for i in range(days):

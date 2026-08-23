@@ -570,8 +570,9 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     this suite that pushes `{f: "" for f in CATALOG_FIELDS}` through save_catalog
     (INSERT fails immediately if _CREATE_TABLE is missing one). Nothing exercises the
     OTHER half: _MIGRATIONS is what actually reaches an EXISTING install's catalog.db
-    (run on every _connect()), so forgetting an ALTER TABLE entry for a newly added
-    field breaks upgraders silently while a fresh checkout's suite stays green.
+    (run by migrate(), which the first catalog() open of a path in a process reaches
+    lazily), so forgetting an ALTER TABLE entry for a newly added field breaks
+    upgraders silently while a fresh checkout's suite stays green.
 
     This simulates exactly that existing install: a catalog.db holding ONLY the columns
     present since the SQLite schema's very first commit (cc2aeb1, 2026-06-13, "replace
@@ -586,7 +587,7 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     was found. The test is not vacuous regardless -- see the report for the mutation
     check that proves it fails when a migration entry is missing.)"""
     import sqlite3
-    from moonglade_gallery import CATALOG_FIELDS, _connect
+    from moonglade_gallery import CATALOG_FIELDS, catalog
 
     original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
         "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
@@ -601,7 +602,8 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     con.commit()
     con.close()
 
-    _connect(db).close()   # the real upgrade path load_catalog/save_catalog always take
+    with catalog(db):      # the real upgrade path load_catalog/save_catalog always take
+        pass
 
     con = sqlite3.connect(str(db))
     cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)").fetchall()}
@@ -617,10 +619,10 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     """paid_credit (added 2026-07-23) followed the three-place contract; this locks the
     upgrade path for a real pre-paid_credit install: a catalog.db built from every
     column EXCEPT paid_credit, holding a populated row, must gain the column via
-    _MIGRATIONS on a plain _connect() with the existing row's data intact -- and the
-    migrated db must round-trip a real credit value."""
+    _MIGRATIONS on the first plain open of the catalog, with the existing row's data
+    intact -- and the migrated db must round-trip a real credit value."""
     import sqlite3
-    from moonglade_gallery import _connect
+    from moonglade_gallery import migrate
 
     assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
     pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
@@ -634,7 +636,7 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     con.commit()
     con.close()
 
-    rows = load_catalog(db)          # load_catalog -> _connect() runs _MIGRATIONS
+    rows = load_catalog(db)          # first open of this path -> migrate() runs _MIGRATIONS
     assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
     assert rows[0]["rating"] == "5"                 # no data loss
     assert rows[0]["paid_credit"] in ("", None)     # migrated in, blank default
@@ -644,7 +646,9 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     save_catalog(db, [row])
     got = load_catalog(db)[0]
     assert got["paid_credit"] == "2750" and got["filename"] == "keep.png"
-    _connect(db).close()             # re-connect after the fact stays harmless (idempotent)
+    migrate(db, force=True)          # re-running the DDL stays harmless (idempotent) --
+                                     # force, or the per-process memo would skip it and
+                                     # this line would prove nothing
 
 
 def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):
