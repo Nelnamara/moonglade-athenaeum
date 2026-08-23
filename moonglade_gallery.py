@@ -7064,7 +7064,8 @@ def create_app(out_dir: Path):
         # set is images only).
         src = out_dir / str(row.get("filename") or "")
         if not (row.get("filename") and src.is_file()):
-            files = find_files_for_media_id(out_dir, media_id, exts=_VIDEO_EXTS)
+            import moonglade_backup as core   # lazy, like every other gallery use of it
+            files = find_files_for_media_id(out_dir, media_id, exts=core._VIDEO_EXTS)
             if not files:
                 return json.dumps({"ok": False, "error": "video file not found"}), 404, {"Content-Type": "application/json"}
             src = Path(files[0])

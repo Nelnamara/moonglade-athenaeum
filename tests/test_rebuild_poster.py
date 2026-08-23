@@ -70,3 +70,26 @@ def test_rebuild_poster_reports_ffmpeg_failure_softly(tmp_path, monkeypatch):
     assert r.status_code == 200
     d = r.get_json()
     assert d["ok"] is False and "ffmpeg" in d["error"]
+
+
+def test_rebuild_poster_finds_a_moved_video_via_the_matcher(tmp_path, monkeypatch):
+    """The catalog row's filename is stale (the clip was moved by --organize); the route must
+    fall back to find_files_for_media_id told to look for VIDEO extensions. Pins the fallback
+    branch -- a NameError hid there once because the happy path never reached it."""
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+    (tmp_path / "2026-08").mkdir(parents=True, exist_ok=True)
+    # the real file sits where organize put it; the row still names the old path
+    (tmp_path / "2026-08" / "moved_clip_555.mp4").write_bytes(bytes(64))
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "555", "filename": "videos/gone_555.mp4", "is_video": "1",
+        "created_at": "2026-08-22T00:00:00Z"}])
+    calls = []
+    def fake_make(video_path, thumb_path):
+        calls.append(Path(video_path).name); return True
+    monkeypatch.setattr(G, "make_video_thumbnail", fake_make)
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/rebuild-poster/555")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["ok"] is True
+    assert calls == ["moved_clip_555.mp4"], calls
