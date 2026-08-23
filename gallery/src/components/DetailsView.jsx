@@ -4,6 +4,7 @@ import useImageDetails from "../hooks/useImageDetails.js";
 import SimilarModal from "./SimilarModal.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
+import { rebuildPoster } from "../api.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -136,6 +137,8 @@ export default function DetailsView({
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
+  const [posterBusy, setPosterBusy] = useState(false);
+  const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
   // Image Details.dc.html:127-139's SIMILAR section -- entirely absent on desktop before
   // this (mobile already has it working with real /api/similar data). Reusing the exact
   // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
@@ -164,6 +167,7 @@ export default function DetailsView({
   // mobile surface -- see useImageDetails.js for what is).
   useEffect(() => {
     setMediaOk(true);
+    setPosterSrc(null);   // a rebuilt poster belongs to ONE row; don't carry it to the next
   }, [mediaId]);
 
   useEffect(() => {
@@ -259,7 +263,7 @@ export default function DetailsView({
             <div className="gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
           ) : row.is_video === "1" ? (
             <video controls autoPlay loop playsInline preload="metadata"
-              poster={"/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg"}
+              poster={posterSrc || ("/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg")}
               onError={() => setMediaOk(false)}>
               <source src={"/video-file/" + encodeURIComponent(row.media_id)} />
             </video>
@@ -465,6 +469,22 @@ export default function DetailsView({
                     onClick={() => { onClose(); onVideo && onVideo(svid, "/thumbs/" + encodeURIComponent(svid) + ".jpg"); }}>▶ Send to Video</button>
                 ) : null;
               })()}
+              {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
+                  clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
+                  without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}
+              {row.is_video === "1" ? (
+                <button className="btn" disabled={posterBusy}
+                  title="Re-extract this video's thumbnail from the file"
+                  onClick={async () => {
+                    setPosterBusy(true);
+                    const d = await rebuildPoster(row.media_id);
+                    setPosterBusy(false);
+                    if (window.Toast) window.Toast.show(d && d.ok
+                      ? { kind: "ok", title: "Poster rebuilt" }
+                      : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
+                    if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
+                  }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
+              ) : null}
               <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
               {row.batch ? <button className="btn" onClick={() => onFilterByBatch(row.batch)}>View Batch</button> : null}
               <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>

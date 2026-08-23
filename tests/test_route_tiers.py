@@ -180,6 +180,7 @@ ROUTE_TIERS = {
     # library mutation (local only in effect, but LAN-authorized by design)
     ("rate", "POST"): LOGIN,
     ("edit_prompt", "POST"): LOGIN,
+    ("rebuild_poster", "POST"): LOGIN,          # rewrites one regenerable local thumb; no cloud/config
     # JSON twins of the redirect-page bulk actions above (the React gallery's
     # fetch() versions). Each takes the SAME tier as the page route it mirrors:
     # local quarantine, collection labels and prompt find/replace are reversible
