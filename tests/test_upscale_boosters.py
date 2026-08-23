@@ -548,7 +548,6 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     assert "Z_IMAGE_V1_MODEL" not in core.LORA_WEIGHT_RANGES
     assert core.lora_weight_range("SD3_MEDIUM_MODEL") == (-2.0, 2.0)
 
-
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
@@ -631,7 +630,7 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
             "{} maps to {}, which is not on the send whitelist".format(label, token)
 
 
-def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
+def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
     """An image whose model the catalog never recorded must still be upscalable.
 
     PixAI's own upscale dialog has NO model control -- their submit sets a fixed modelId
@@ -648,7 +647,6 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
                  [_row(media_id="u1", filename="u1.png", source="local",
                        created_at="2026-07-01T00:00:00", width="1959", height="1097")])
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
                         lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
@@ -703,13 +701,12 @@ def test_upscale_sends_the_images_model_as_a_version_id():
         "the image's own model id is a version id and must travel as version_id"
 
 
-def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path):
+def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path, pixai):
     """Pins the server behaviour the above exists to avoid, so the reason stays visible:
     a version id in the model_id field resolves to nothing and is refused."""
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="u2", filename="u2.png", created_at="2026-07-01T00:00:00",
                        width="900", height="600")])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "list_model_versions", lambda *a, **k: [])   # not a model id
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")

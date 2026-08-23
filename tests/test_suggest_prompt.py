@@ -28,8 +28,7 @@ def _args(**kw):
     return SimpleNamespace(**base)
 
 
-def test_run_suggest_prompt_media_id(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_suggest_prompt_media_id(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["tag1, tag2"])
     monkeypatch.setattr(core, "upload_media",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no upload for media_id")))
@@ -43,10 +42,9 @@ def test_run_suggest_prompt_requires_arg():
         core.run_suggest_prompt(_args(suggest_prompt=""))
 
 
-def test_run_suggest_prompt_local_file_uploads_first(monkeypatch, tmp_path):
+def test_run_suggest_prompt_local_file_uploads_first(monkeypatch, tmp_path, pixai):
     f = tmp_path / "pic.png"
     f.write_bytes(b"x")
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media", lambda s, p: "up-1")
     grabbed = {}
     def fake_suggest(s, mid):
@@ -85,11 +83,10 @@ def test_run_suggest_prompt_refuses_a_local_video_file(tmp_path, monkeypatch):
         core.run_suggest_prompt(_args(suggest_prompt=str(f), out=str(tmp_path)))
 
 
-def test_run_suggest_prompt_still_allows_an_image_media_id_not_in_the_catalog(monkeypatch, tmp_path):
+def test_run_suggest_prompt_still_allows_an_image_media_id_not_in_the_catalog(monkeypatch, tmp_path, pixai):
     """The gate must only fire when the LOCAL catalog affirmatively says is_video='1' --
     an id the catalog doesn't know about (someone else's, or not yet synced) must still
     reach the network exactly as before."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["tag1, tag2"])
     res = core.run_suggest_prompt(_args(suggest_prompt="424242", out=str(tmp_path)))
     assert res == {"suggestions": 1, "media_id": "424242"}

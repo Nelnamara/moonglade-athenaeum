@@ -113,7 +113,7 @@ def test_quarantined_file_is_invisible_to_resolution(tmp_path):
     assert g.find_files_for_media_id(tmp_path, "77") == []
 
 
-def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypatch):
+def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypatch, pixai):
     import moonglade_backup as core
     db = _seed(tmp_path, [
         _row(media_id="100", task_id="T1", filename="100.png"),
@@ -122,7 +122,6 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     ], {"100.png": b"a", "101.png": b"b", "200.png": b"c"})
 
     calls = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     client = login_client(tmp_path)
@@ -145,7 +144,7 @@ def test_delete_tasks_bulk_route_quarantines_and_calls_cloud(tmp_path, monkeypat
     assert {row["media_id"] for row in load_catalog(db)} == set()    # all three rows cleared
 
 
-def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch):
+def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatch, pixai):
     """One unmovable file must not abandon every task queued behind it. The cloud
     deletes have already fired and cannot be taken back by the time the local purge
     runs, so a loop that dies on the first OSError leaves the remaining tasks gone
@@ -159,7 +158,6 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
         _row(media_id="400", task_id="TB", filename="400.png"),
     ], {"300.png": b"a", "400.png": b"b"})
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
 
     real_replace = g.Path.replace
@@ -190,12 +188,11 @@ def test_bulk_delete_keeps_going_when_one_local_purge_fails(tmp_path, monkeypatc
         "the row for the file still on disk should survive, and only that one")
 
 
-def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch):
+def test_bulk_delete_async_logs_a_job_that_completes(tmp_path, monkeypatch, pixai):
     """The async delete registers a 'delete' job that shows in /api/jobs and reaches 'done'."""
     import time
     import moonglade_backup as core
     _seed(tmp_path, [_row(media_id="a1", task_id="TA", filename="a1.png")], {"a1.png": b"x"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
 
     client = login_client(tmp_path)
@@ -345,7 +342,7 @@ def test_delete_preview_refuses_an_authenticated_lan_session(tmp_path):
     assert r.status_code == 403
 
 
-def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
+def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch, pixai):
     """A LAN request must NOT be able to delete from the owner's PixAI account.
 
     An unauthenticated request never reaches the route body at all: the global
@@ -357,7 +354,6 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z1", task_id="TZ", filename="z1.png")], {"z1.png": b"x"})
     fired = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
 
     client = create_app(tmp_path).test_client()
@@ -369,7 +365,7 @@ def test_bulk_delete_cloud_is_localhost_only(tmp_path, monkeypatch):
     assert {x["media_id"] for x in load_catalog(db)} == {"z1"}   # row intact
 
 
-def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypatch):
+def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypatch, pixai):
     """A logged-in LAN account must NOT be able to trigger /api/delete-tasks --
     same trust tier as /api/branding/shortcut and destructive Panel actions: this
     destroys on the owner's real PixAI account, irreversibly. A LAN login unlocks
@@ -385,7 +381,6 @@ def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypat
     import moonglade_backup as core
     db = _seed(tmp_path, [_row(media_id="z2", task_id="TZ2", filename="z2.png")], {"z2.png": b"x"})
     fired = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.append(tid))
 
     client = login_client(tmp_path)

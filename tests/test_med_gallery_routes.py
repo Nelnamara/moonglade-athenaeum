@@ -144,7 +144,7 @@ def test_the_receipt_records_the_asked_for_value_not_the_defaulted_one(tmp_path,
 # M21 -- a failed Fix leaves a trail, like every other spend route
 # ---------------------------------------------------------------------------
 
-def test_a_failed_fix_is_logged_with_its_request_shape(tmp_path, monkeypatch, caplog):
+def test_a_failed_fix_is_logged_with_its_request_shape(tmp_path, monkeypatch, caplog, pixai):
     """Fix ALWAYS spends -- no free card covers a fixer task -- so an unlogged failure here
     is credits gone with nothing written down anywhere.
 
@@ -154,8 +154,6 @@ def test_a_failed_fix_is_logged_with_its_request_shape(tmp_path, monkeypatch, ca
     request shape is recorded too, per _log_gen_failure's own contract: which image, which
     boxes IS the diagnosis for a moderation decline vs a rejected box.
     """
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-
     def boom(session, media_id, boxes):
         raise core.PixAIError("content moderation declined this fix")
     monkeypatch.setattr(core, "submit_fixer", boom)

@@ -478,7 +478,7 @@ def test_stale_job_reconciliation_refreshes_ts_for_a_confirmed_still_running_age
     assert job["ts"] > old_ts + 3000, "ts was not refreshed -- the job will be re-asked every poll"
 
 
-def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypatch):
+def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypatch, pixai):
     """End-to-end: /api/jobs itself (not just the library function) runs the sweep --
     same 'runs opportunistically off an existing poll' shape as maybe_compact_jobs right
     beside it. A generate job old enough to cross JOBS_ORPHAN_SWEEP_AGE, whose PixAI
@@ -487,7 +487,6 @@ def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypat
     old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
     core.append_job_event(tmp_path, "2037215124834251576", status="running",
                           type="generate", label="Generated", ts=old_ts)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     def _boom(session, tid):
         raise RuntimeError("network blip")
@@ -498,7 +497,7 @@ def test_api_jobs_endpoint_reconciles_a_stale_orphan_on_poll(tmp_path, monkeypat
     assert by_id["2037215124834251576"]["status"] == "stale"
 
 
-def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypatch):
+def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypatch, pixai):
     """A task PixAI calls 'done' whose outputs carry no media is TERMINAL -- it produced
     nothing and never will. /api/task-status used to let that fall into the catch-all
     `except`, which deliberately withholds a terminal event so a transient 5xx can't
@@ -509,7 +508,6 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "555", "type": "generate", "label": "Enhanced"})
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
@@ -524,7 +522,7 @@ def test_empty_output_task_is_logged_failed_not_left_running(tmp_path, monkeypat
     assert job["status"] == "failed", "empty-output task left spinning at 'running'"
 
 
-def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeypatch):
+def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeypatch, pixai):
     """The other half of the same contract, and the reason a bare `except PixAIError`
     would have been the wrong fix: an ordinary error during collect (5xx/429/timeout,
     which surfaces as a plain PixAIError) must still leave the job at its last-known
@@ -533,7 +531,6 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "556", "type": "generate", "label": "Enhanced"})
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
@@ -547,7 +544,7 @@ def test_a_transient_blip_still_does_not_write_a_false_failure(tmp_path, monkeyp
     assert job["status"] == "running", "a transient blip wrote a sticky false failure"
 
 
-def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch):
+def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch, pixai):
     """The in-process half of the video-corruption fix (owner field-test 2026-07-23):
     the always-on live-mirror watcher and a /api/task-status done-poll both collect the
     same task seconds apart. They must coalesce into ONE collect_generation -- the
@@ -563,7 +560,6 @@ def test_collect_is_single_flight_across_watcher_and_poll(tmp_path, monkeypatch)
     app = create_app(tmp_path)
     cli = login_test_client(app)
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0})
@@ -799,7 +795,7 @@ def test_generation_status_keeps_its_existing_keys(monkeypatch):
     assert st["status"] == "completed" and st["phase"] == "done" and st["paid_credit"] == 42
 
 
-def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatch):
+def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatch, pixai):
     """When PixAI reaps a task it never dispatched, /api/task-status DOES mark it failed --
     but it logged the bare status, so the tracker card and the CLI both said only
     'cancelled'. The owner read that as "something cancelled my job" and had no way to
@@ -807,7 +803,6 @@ def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatc
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "2037594262049550370", "type": "generate",
                                 "label": "Enhanced"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "cancelled", "phase": "failed",
                                         "paid_credit": 1200, "started": False,
@@ -823,12 +818,11 @@ def test_reaped_task_logs_pixai_reason_not_a_bare_cancelled(tmp_path, monkeypatc
         "reason absent from the job log: {!r}".format(job)
 
 
-def test_running_response_says_whether_a_worker_ever_picked_it_up(tmp_path, monkeypatch):
+def test_running_response_says_whether_a_worker_ever_picked_it_up(tmp_path, monkeypatch, pixai):
     """A queued-but-undispatched task is non-terminal for ~60 minutes and looks identical
     to real work over the wire, so the tracker could only show an endless spinner. Pass
     `started` through so the card can say "queued" instead of implying progress."""
     cli = _authed_client(tmp_path)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "waiting", "phase": "running",
                                         "paid_credit": None, "started": False, "reason": ""})
@@ -879,7 +873,7 @@ def test_reaper_ignores_a_status_fn_that_never_reports_started(tmp_path):
     assert {j["job_id"]: j for j in core.read_jobs(tmp_path)}["889"]["status"] == "running"
 
 
-def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypatch):
+def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypatch, pixai):
     """END-TO-END, and the guard that catches the wiring this fix nearly shipped broken.
 
     resolve_orphan_jobs can only see `started` if its status_fn hands over the whole
@@ -894,7 +888,6 @@ def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypa
     old_ts = time.time() - core.JOBS_ORPHAN_SWEEP_AGE - 100
     core.append_job_event(tmp_path, "2037625229523385030", status="running",
                           type="generate", label="Enhanced", ts=old_ts)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "waiting", "phase": "running",
                                         "paid_credit": 1200, "started": False, "reason": ""})
@@ -906,7 +899,7 @@ def test_api_jobs_endpoint_marks_a_never_started_orphan_stale(tmp_path, monkeypa
     assert "not started" in str(job.get("error") or "").lower()
 
 
-def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypatch):
+def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypatch, pixai):
     """/api/task-status already receives PixAI's server-authoritative `paidCredit` and
     returns it to the browser, but dropped it from the job log -- so the Activity tray's
     detail popover could show a task id, a send time and an elapsed time, and never what
@@ -914,7 +907,6 @@ def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypa
     re-querying PixAI per task, and it is exactly what makes an unexpected spend visible."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "4242", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 3700, "started": True, "reason": ""})
@@ -927,13 +919,12 @@ def test_done_event_records_what_the_generation_actually_cost(tmp_path, monkeypa
         "the job log did not record the actual cost: {!r}".format(job)
 
 
-def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch):
+def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch, pixai):
     """A card-covered generation genuinely costs 0. That must round-trip as the number 0,
     not vanish -- otherwise "free" and "unknown" are indistinguishable in the log, and the
     tray would hide the cost row on exactly the generations worth confirming were free."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "4243", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "completed", "phase": "done",
                                         "paid_credit": 0, "started": True, "reason": ""})
@@ -947,7 +938,7 @@ def test_a_free_card_generation_records_zero_not_missing(tmp_path, monkeypatch):
 
 # ---- "it just says 'fails'": make a failure message say something usable ----
 
-def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path, monkeypatch):
+def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path, monkeypatch, pixai):
     """Owner report 2026-07-25, three hand-fix attempts: the tracker showed status `failed`
     and error `failed`, which is the whole message. PixAI's own status string for a failed
     generation genuinely IS just "failed" and `outputs` came back empty -- so forwarding
@@ -956,7 +947,6 @@ def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path
     credits come back."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9101", "type": "generate", "label": "Fixed"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "failed", "phase": "failed",
                                         "paid_credit": 8000, "started": True, "reason": ""})
@@ -969,13 +959,12 @@ def test_failed_with_no_reason_explains_itself_instead_of_saying_failed(tmp_path
     assert "refund" in str(body).lower()
 
 
-def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tmp_path, monkeypatch):
+def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tmp_path, monkeypatch, pixai):
     """The other failure mode, and it needs the opposite message: a task PixAI never
     dispatched did not 'fail to render' -- it was never picked up. Telling someone their
     render failed when no worker ever took it sends them debugging their prompt."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9102", "type": "generate", "label": "Enhanced"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "cancelled", "phase": "failed",
                                         "paid_credit": 1200, "started": False,
@@ -987,12 +976,11 @@ def test_failed_before_it_ever_started_says_so_rather_than_blaming_the_render(tm
     assert "never started" in msg.lower(), "must distinguish never-dispatched: {!r}".format(msg)
 
 
-def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monkeypatch):
+def test_a_reason_from_pixai_is_never_buried_under_our_own_words(tmp_path, monkeypatch, pixai):
     """When PixAI DOES explain itself, their explanation is the useful part and must not be
     replaced by our generic copy."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "9103", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status",
                         lambda s, tid: {"status": "failed", "phase": "failed",
                                         "paid_credit": 0, "started": True,
@@ -1024,14 +1012,13 @@ def _raw_lines(tmp_path):
     return core._reconstruct_jobs(tmp_path)[2]
 
 
-def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch):
+def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch, pixai):
     """The whole point: a task PixAI accepted but has not dispatched must reach the tray as
     QUEUED, not as an indefinite rendering spinner. `started` was already in this route's
     JSON response and nothing wrote it to the log, so the tray -- which reads the log --
     could not tell the two apart."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7001", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     _no_estimate(monkeypatch)
 
@@ -1042,14 +1029,13 @@ def test_a_queued_job_is_recorded_as_not_yet_started(tmp_path, monkeypatch):
     assert job["status"] == "running", "queued is a phase of running, not a new status"
 
 
-def test_the_phase_is_written_once_per_change_not_once_per_poll(tmp_path, monkeypatch):
+def test_the_phase_is_written_once_per_change_not_once_per_poll(tmp_path, monkeypatch, pixai):
     """Four different pollers hit this route every 3s per job. A write per poll would add
     1,200+ lines for one task PixAI sits on for its full ~60-minute reap window, and would
     refresh `ts` so often the ongoing orphan-reconciliation sweep could never see the job
     cross JOBS_ORPHAN_SWEEP_AGE."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7002", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     _no_estimate(monkeypatch)
 
@@ -1061,12 +1047,11 @@ def test_the_phase_is_written_once_per_change_not_once_per_poll(tmp_path, monkey
             _raw_lines(tmp_path) - before)
 
 
-def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypatch):
+def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypatch, pixai):
     """The other half of "once per change": when PixAI finally assigns a worker, the tray
     has to stop saying queued. One more line, and only one."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7003", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     _no_estimate(monkeypatch)
     cli.get("/api/task-status?task_id=7003")
@@ -1080,7 +1065,7 @@ def test_a_worker_picking_the_job_up_flips_the_recorded_phase(tmp_path, monkeypa
     assert job.get("started") is True, "still reads as queued while a worker renders it"
 
 
-def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, monkeypatch):
+def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, monkeypatch, pixai):
     """Two things at once. The done branch must not also emit a `running` phase line (the
     terminal-stickiness in _reconstruct_jobs would ignore it, but it is still noise), and
     the in-process de-dupe map must DROP the finished task -- otherwise it grows for the
@@ -1088,7 +1073,6 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
     the drop is that a later queued sighting of the same id writes again."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7004", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     _no_estimate(monkeypatch)
     cli.get("/api/task-status?task_id=7004")
@@ -1112,14 +1096,13 @@ def test_a_terminal_poll_writes_no_running_phase_and_forgets_the_task(tmp_path, 
         "a late running event must not revert a finished job (terminal stickiness)"
 
 
-def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_path, monkeypatch):
+def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_path, monkeypatch, pixai):
     """PixAI publishes no progress on a task at all, but it does publish the queue wait it
     shows beside its own Generate button. Recorded once, off the task's real submit
     parameters, so the tray can put "PixAI estimated ~27s" next to an elapsed time the
     owner can compare it against."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7005", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     asked = []
     monkeypatch.setattr(core, "_task_detail_query",
@@ -1137,14 +1120,13 @@ def test_pixais_own_queue_estimate_is_recorded_when_a_job_is_seen_queued(tmp_pat
         "{!r}".format(asked)
 
 
-def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, monkeypatch):
+def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, monkeypatch, pixai):
     """The common case. A generation a worker takes immediately was never queued from this
     route's point of view, so it must not trigger the two read-only calls the estimate
     needs -- politeness to their servers is the whole reason this is once-per-job and not
     per-poll."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7006", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued("processing", started=True))
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ask")))
@@ -1156,13 +1138,12 @@ def test_a_job_that_starts_before_its_first_poll_costs_no_extra_calls(tmp_path, 
     assert job.get("started") is True and "eta_seconds" not in job
 
 
-def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch):
+def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch, pixai):
     """The ETA is optional and the phase is not. If wait-time (or the parameter lookup it
     needs) fails, the queued signal must still be written -- degrading to "no number" is
     fine, degrading to "no phase" puts the spinner back."""
     cli = _authed_client(tmp_path)
     cli.post("/api/jobs", json={"job_id": "7007", "type": "generate", "label": "Generated"})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", _queued())
     monkeypatch.setattr(core, "_task_detail_query",
                         lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("boom")))
@@ -1174,7 +1155,7 @@ def test_an_unavailable_estimate_still_ships_the_phase(tmp_path, monkeypatch):
     assert "eta_seconds" not in job
 
 
-def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, monkeypatch):
+def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, monkeypatch, pixai):
     """RACE, found in code review 2026-07-25. _note_gen_phase claimed the phase under a lock
     but then released it before doing the SLOW part (two network calls for the queue ETA) and
     the write. So:
@@ -1195,7 +1176,6 @@ def test_a_slow_eta_fetch_cannot_overwrite_a_newer_rendering_phase(tmp_path, mon
     cli.post("/api/jobs", json={"job_id": "race1", "type": "generate", "label": "Generated"})
 
     phases = iter([False, True])          # first poll: queued. second: rendering.
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", lambda s, tid: {
         "status": "running", "phase": "running", "paid_credit": None,
         "started": next(phases, True), "reason": ""})
@@ -1317,7 +1297,7 @@ def _status_client(tmp_path):
     return login_test_client(create_app(tmp_path))
 
 
-def test_task_status_reports_our_OWN_defect_as_failed(tmp_path, monkeypatch):
+def test_task_status_reports_our_OWN_defect_as_failed(tmp_path, monkeypatch, pixai):
     """A bug in this poll cannot come good on a retry, so it must not be reported as a job
     that is merely still running.
 
@@ -1328,18 +1308,16 @@ def test_task_status_reports_our_OWN_defect_as_failed(tmp_path, monkeypatch):
     """
     def boom(*_a, **_k):
         raise TypeError("unsupported operand type(s)")
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", boom)
     d = _status_client(tmp_path).get("/api/task-status?task_id=T1").get_json()
     assert d["phase"] == "failed", d
     assert "internal error" in (d.get("error") or "").lower()
 
 
-def test_task_status_still_treats_a_pixai_blip_as_non_terminal(tmp_path, monkeypatch):
+def test_task_status_still_treats_a_pixai_blip_as_non_terminal(tmp_path, monkeypatch, pixai):
     """The other half, so the above can't be 'achieved' by making everything terminal."""
     def blip(*_a, **_k):
         raise core.PixAIError("502 Bad Gateway")
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", blip)
     d = _status_client(tmp_path).get("/api/task-status?task_id=T2").get_json()
     assert d["phase"] == "running", "a transient blip must stay non-terminal: %s" % d

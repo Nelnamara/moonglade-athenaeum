@@ -55,18 +55,19 @@ class TestDeleteTaskGqlReadOnly:
             core.delete_task_gql(mock_session, "123")
         mock_session.post.assert_not_called()
 
-    def test_overrides_apply_and_yes(self, mock_session, monkeypatch, tmp_path, capsys):
+    def test_overrides_apply_and_yes(self, pixai, monkeypatch, tmp_path, capsys):
         """The whole point: --apply --yes must NOT be enough to get past READ_ONLY. Drives
         the real CLI entry point, not just the raw function, for genuine end-to-end proof."""
         from types import SimpleNamespace
         monkeypatch.setattr(core, "READ_ONLY", True)
         monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
-        monkeypatch.setattr(core, "_make_session", lambda token: mock_session)
         args = SimpleNamespace(delete_task=["123"], apply=True, yes=True, delay=0)
         result = core.run_delete_tasks(args)
         assert result["deleted"] == 0
         assert result["failed"] == 1
-        mock_session.post.assert_not_called()
+        # Nothing reached PixAI at all -- the fake records every verb, and READ_ONLY
+        # refuses before the delete mutation is ever built.
+        assert pixai.calls == []
 
 
 class TestClaimReward:
@@ -93,7 +94,6 @@ class TestTrainingAndArtworkMutationsReadOnly:
     have passed the suite. The property asserted is the one the rest of this file makes: the
     network call NEVER FIRES under READ_ONLY. Their single-attempt behaviour is pinned
     separately in tests/test_spend_no_retry.py."""
-
     def test_submit_training_blocked(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
         # _check_read_only runs before validate_training, so even wholly-invalid args must
@@ -125,7 +125,6 @@ class TestReadOnlyDoesNotTouchLocalOperations:
     """READ_ONLY is scoped to PixAI-account mutations. --organize/--dedup are a different,
     already-covered trust concern (dry-run-by-default + --apply, never the network) --
     conflating the two would be a weaker promise than the one this flag actually makes."""
-
     def test_organize_and_dedup_unaffected(self, monkeypatch):
         # No function under test here -- this documents the boundary so a future change
         # that widens _check_read_only's call sites has to consciously cross it. Both

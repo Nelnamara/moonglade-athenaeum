@@ -492,7 +492,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     assert surviving_bytes == {b"content-A", b"totally-different-content-B"}   # neither lost
 
 
-def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
+def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
     from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     old = "2024-01-01T00:00:00"
@@ -502,7 +502,6 @@ def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "c", "task_id": "NEW", "filename": "c.png", "created_at": "2099-01-01T00:00:00"},
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "L", "task_id": "GONE2", "filename": "L.png", "source": "local", "created_at": old},
     ])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
     monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
     res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))

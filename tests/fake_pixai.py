@@ -16,10 +16,16 @@ readable "nobody registered `createGenerationTask`" instead of a live request.
 
 REGISTERING.
 
-    fake.on("me", {"me": {"id": "42"}})                  # a GraphQL operation
-    fake.on("me", lambda variables: {...})               # ...computed from the variables
-    fake.on("/kaisuuken/summary", {"kaisuukens": []})    # a REST path (leading slash)
+    fake.on("me", {"me": {"id": "42"}})                   # a GraphQL operation
+    fake.on("me", lambda call: {...})                     # ...computed from the call
+    fake.on("/kaisuuken/summary", {"kaisuukens": []})     # a REST path (leading slash)
     fake.fail("me", core.PixAIError("401 Unauthorized"))  # raise instead of answer
+
+A callable answer is handed the recorded call itself -- `.verb`, `.op`, `.document`,
+`.variables`, `.path`, `.params`, `.body` -- one rule for both roads. It is the whole call
+rather than just the variables because three of this app account queries are anonymous
+documents that all key to `me` (the account read, the free/paid credit split, the quota
+log), and telling them apart means reading the document.
 
 READING BACK.
 
@@ -80,7 +86,6 @@ class FakePixAI:
     `mutate` takes no `retries` argument here EITHER -- the rule has to hold on both
     adapters, or a test could pass against a fake that allows what the real client
     forbids."""
-
     _is_pixai_client = True
 
     def __init__(self, user_id="u-test", auth_kind="api-key"):
@@ -102,8 +107,9 @@ class FakePixAI:
     # -- registering ---------------------------------------------------------
     def on(self, key, response):
         """Answer `key` with `response`. `key` is a GraphQL operation name, or a REST path
-        (anything starting with "/"). `response` may be a value or a callable taking the
-        variables (GraphQL) / params or body (REST). Returns self, so registrations chain."""
+        (anything starting with "/"). `response` is a value, or a callable handed the
+        recorded call (`.document`, `.variables`, `.params`, `.body`, ...). Returns self, so
+        registrations chain."""
         self._answers[key] = response
         self._errors.pop(key, None)
         return self
@@ -115,7 +121,7 @@ class FakePixAI:
         self._answers.pop(key, None)
         return self
 
-    def _resolve(self, key, kind, payload):
+    def _resolve(self, key, kind, call):
         if key in self._errors:
             raise self._errors[key]
         if key not in self._answers:
@@ -125,7 +131,15 @@ class FakePixAI:
                 "Register it with fake.on({!r}, <response>) (or fake.fail(...) to make it "
                 "refuse). Currently registered: {}.".format(kind, key, key, known))
         answer = self._answers[key]
-        return answer(payload) if callable(answer) else answer
+        return answer(call) if callable(answer) else answer
+
+    def _record(self, **kw):
+        fields = dict(verb=None, op="", document=None, variables=None, retries=0,
+                      path=None, params=None, body=None)
+        fields.update(kw)
+        call = SimpleNamespace(**fields)
+        self.calls.append(call)
+        return call
 
     # -- the verbs -----------------------------------------------------------
     def query(self, document, variables=None, retries=None):
@@ -139,28 +153,22 @@ class FakePixAI:
 
     def _graphql(self, verb, document, variables, retries):
         op = operation_name(document)
-        self.calls.append(SimpleNamespace(verb=verb, op=op, document=document,
-                                          variables=variables, retries=retries,
-                                          path=None, params=None, body=None))
-        return self._resolve(op, "GraphQL operation", variables)
+        call = self._record(verb=verb, op=op, document=document, variables=variables,
+                            retries=retries)
+        return self._resolve(op, "GraphQL operation", call)
 
     def persisted(self, op_name, variables=None, sha256=None, retries=4):
-        self.calls.append(SimpleNamespace(verb="persisted", op=op_name, document=None,
-                                          variables=variables, retries=retries,
-                                          path=None, params=None, body=None))
-        return self._resolve(op_name, "persisted operation", variables)
+        call = self._record(verb="persisted", op=op_name, variables=variables,
+                            retries=retries)
+        return self._resolve(op_name, "persisted operation", call)
 
     def rest_get(self, path, params=None, timeout=30):
-        self.calls.append(SimpleNamespace(verb="rest_get", op=path, document=None,
-                                          variables=None, retries=0,
-                                          path=path, params=params, body=None))
-        return self._resolve(path, "REST GET path", params)
+        call = self._record(verb="rest_get", op=path, path=path, params=params)
+        return self._resolve(path, "REST GET path", call)
 
     def rest_post(self, path, body=None, timeout=60):
-        self.calls.append(SimpleNamespace(verb="rest_post", op=path, document=None,
-                                          variables=None, retries=0,
-                                          path=path, params=None, body=body))
-        return self._resolve(path, "REST POST path", body)
+        call = self._record(verb="rest_post", op=path, path=path, body=body)
+        return self._resolve(path, "REST POST path", call)
 
     def for_create(self):
         """The fake IS the create adapter. The mirror-vs-key choice is the real client's

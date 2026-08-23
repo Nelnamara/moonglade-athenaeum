@@ -31,7 +31,6 @@ from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 
 class FakeResponse:
     """The parts of a requests.Response the transport reads."""
-
     def __init__(self, payload=None, status_code=200, text="", content=b""):
         self._payload = payload
         self.status_code = status_code
@@ -58,7 +57,6 @@ class RecordingSession:
     `answers` is a list of FakeResponse (or exceptions to raise), consumed in order; the
     last one repeats, so one answer stands for "every attempt gets this". Every call lands
     in `.calls` as (verb, url, kwargs) -- which is how "exactly one POST" is asserted."""
-
     def __init__(self, *answers):
         self.answers = list(answers) or [FakeResponse({"data": {}})]
         self.calls = []
@@ -181,7 +179,6 @@ class TestThePrimitivesAreThinDelegates:
     """The five module-level primitives keep their names and their `session`-first
     signatures -- seventy-odd functions still call them that way -- but the road itself
     lives on the client rather than being re-implemented beside it."""
-
     @pytest.mark.parametrize("name", ["gql", "gql_adhoc", "gql_mutate",
                                       "_rest_get", "_rest_post"])
     def test_it_routes_through_the_client(self, name, real_rest):
@@ -242,7 +239,6 @@ class TestTheTransitionSurface:
     """resolve_media, download, delete_task_gql, refresh_jwt, run_watch and the six
     persisted GETs that have not moved onto `persisted()` still reach for the Session
     themselves. Those calls have to keep working when what they hold is a client."""
-
     def test_get_post_headers_cookies_delegate_to_the_session(self):
         s = RecordingSession(FakeResponse({"ok": 1}))
         s.headers["Authorization"] = "Bearer k"
@@ -446,7 +442,8 @@ class TestFakePixAISatisfiesTheSameInterface:
 
     def test_a_response_can_be_computed_from_the_variables(self):
         fake = FakePixAI()
-        fake.on("task", lambda v: {"task": {"id": v["id"], "status": "completed"}})
+        fake.on("task", lambda call: {"task": {"id": call.variables["id"],
+                                               "status": "completed"}})
         got = fake.query("query($id: ID!) { task(id: $id) { id } }", {"id": "T7"})
         assert got["task"]["id"] == "T7"
 

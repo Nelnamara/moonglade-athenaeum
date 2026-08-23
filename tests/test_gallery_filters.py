@@ -647,7 +647,7 @@ def test_video_row_flagged_and_serves(tmp_path):
     assert client.get("/video-file/POSTER").status_code == 404
 
 
-def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch):
+def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypatch, pixai):
     import moonglade_backup as core
     from moonglade_gallery import load_catalog
     from tests.conftest import login_client
@@ -664,7 +664,6 @@ def test_delete_tasks_bulk_purges_whole_task_cloud_and_local(tmp_path, monkeypat
     (tmp_path / "videos" / "c.mp4").write_bytes(b"v")
 
     calls = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: calls.append(tid))
     client = login_client(tmp_path)
 

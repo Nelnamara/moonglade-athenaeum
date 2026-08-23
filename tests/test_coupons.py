@@ -79,8 +79,7 @@ def test_list_extra_package_boosts_fails_soft(monkeypatch):
 
 # ---- run_coupons display (list_extra_package_boosts stubbed) ----
 
-def test_run_coupons_empty(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_coupons_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_extra_package_boosts", lambda s, **k: {
         "coupons": [], "has_next": False, "end_cursor": None})
     assert core.run_coupons(SimpleNamespace(token=None, coupons_history=False)) == {
@@ -88,22 +87,20 @@ def test_run_coupons_empty(monkeypatch, capsys):
     assert "No currently-held coupons found" in capsys.readouterr().out
 
 
-def test_run_coupons_history_flag_switches_statuses(monkeypatch, capsys):
+def test_run_coupons_history_flag_switches_statuses(monkeypatch, capsys, pixai):
     seen = {}
 
     def fake_list(s, statuses=None, **k):
         seen["statuses"] = statuses
         return {"coupons": [], "has_next": False, "end_cursor": None}
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "list_extra_package_boosts", fake_list)
     core.run_coupons(SimpleNamespace(token=None, coupons_history=True))
     assert seen["statuses"] == core.COUPON_STATUSES_HISTORY
     assert "No past coupons found" in capsys.readouterr().out
 
 
-def test_run_coupons_lists(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_coupons_lists(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_extra_package_boosts", lambda s, **k: {
         "coupons": [
             {"code": "SUMMER50", "boost_percent": 50, "status": "redeemed",

@@ -265,13 +265,12 @@ def test_price_route_never_claims_a_free_card_covers_a_fix(tmp_path, monkeypatch
     assert "card_checked" not in seen
 
 
-def test_price_route_reaches_task_price_with_the_chat_block_intact(tmp_path, monkeypatch):
+def test_price_route_reaches_task_price_with_the_chat_block_intact(tmp_path, monkeypatch, pixai):
     """The one test that stubs nothing but the HTTP call itself. price_task forwards only
     keys in its own scalar/nested sets, so if `chat` ever stopped surviving that filter the
     badge would quietly show the 1200 base floor instead of a Fix's real price -- a wrong
     number, which is worse than none."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_rest_get",
                         lambda s, path, params=None, **k: seen.update(path=path, params=params)
                         or {"originalPrice": 8000, "actualPrice": 8000})

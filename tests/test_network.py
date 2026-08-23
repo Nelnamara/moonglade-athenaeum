@@ -232,7 +232,6 @@ class TestResolveModelBaseId:
     """The reuse-prefill's version->base-model reverse lookup (2026-08-02), fixing a real
     bug found live: the catalog's model_id is a VERSION id, and feeding that straight into
     applyModelRow's base-model version listing returns nothing every time."""
-
     def test_returns_the_base_models_own_id(self, mock_session, mocker):
         import moonglade_backup as c
         mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
@@ -424,12 +423,11 @@ def test_resume_does_not_skip_a_zero_byte_file(tmp_path, mocker):
         "the zero-byte file was indexed as 'already done' and never re-downloaded")
 
 
-def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys):
+def test_run_download_returns_its_fail_count(tmp_path, mocker, capsys, pixai):
     """D-4: run_download's own tally (dl['fail'] etc.) never reached any caller -- no
     return statement meant a partial-failure run was indistinguishable from a clean one
     to everything downstream (the CLI job log, the Panel). Also locks in the louder
     console notice that replaces the old easy-to-miss one-liner."""
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "_quick_count", return_value=2)
     mocker.patch.object(core, "resolve_media",
                         return_value=("http://x/img", {"width": "1", "height": "1"}))
@@ -461,7 +459,6 @@ class TestDownloadNeverWritesAZeroByteFile:
     filename, or the very next run's resume index (now correctly fixed) would just
     find it and retry forever without the underlying cause (a bad response) ever
     being reported as a failure."""
-
     def test_empty_response_body_is_treated_as_a_failure(self, mock_session, mocker, tmp_path):
         resp = mocker.MagicMock()
         resp.status_code = 200
@@ -495,7 +492,6 @@ class TestDownloadVerifiesContentLength:
     retry/backoff path as any other network error. Only enforced when the body is not
     content-encoded: requests decompresses gzip/br inside iter_content, so the header
     counts different bytes than we write."""
-
     @staticmethod
     def _resp(mocker, headers, chunks):
         resp = mocker.MagicMock()
@@ -686,13 +682,12 @@ def test_extract_artwork_meta_no_extra():
     assert m["blurhash"] == "" and m["nsfw_scores"] == "" and m["is_published"] == "0"
 
 
-def test_sync_artworks_merges_by_media_id(tmp_path, mocker):
+def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
     from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
                       {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "My Art",
                                 "visibility": "PUBLIC", "isNsfw": False,
                                 "likedCount": 3, "commentCount": 1,
@@ -746,7 +741,7 @@ def test_artwork_detail_hash_config_key_is_gone():
     assert "ARTWORK_LIST_HASH" in example_cfg   # sibling override documentation stays
 
 
-def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker):
+def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker, pixai):
     """B16 (audit 2026-07-21): already_downloaded() gates --sync-artworks --with-videos'
     resume check on find_files_for_media_id's default _IMAGE_EXTS-only matcher -- no
     .mp4 ever matches, so it's a guaranteed-False no-op for videos. Every video fired a
@@ -757,7 +752,6 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker):
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "clip_V1.mp4").write_bytes(b"already here")
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     conn = {"edges": [{"node": {"id": "aw1", "mediaId": "", "title": "Anim",
                                 "visibility": "PUBLIC", "isNsfw": False,
                                 "likedCount": 0, "commentCount": 0, "aesScore": 0,
@@ -779,7 +773,7 @@ def test_sync_artworks_with_videos_skips_already_downloaded(tmp_path, mocker):
     assert res["videos"] == 1
 
 
-def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker):
+def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker, pixai):
     """B15: unlike gql() (retries 4x, then RAISES), artwork_list_gql swallows a
     RequestException/non-200/bad-JSON with NO retry and just returns None (see its
     own docstring: 'Returns the Relay connection dict ... or None on failure'). On
@@ -792,7 +786,6 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     page1 = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Page1 Art",
                                  "visibility": "PUBLIC", "isNsfw": False,
                                  "likedCount": 1, "commentCount": 0}}],
@@ -806,7 +799,7 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
     assert res["fail"] == 1                      # but the early stop is now visible, not silent
 
 
-def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mocker):
+def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mocker, pixai):
     """B15: a video that fails to download after retries (download() returns
     ('fail', None), the same status run_download's own dl['fail'] counts) must be
     just as visible here -- currently it's silently absorbed into a lower
@@ -817,7 +810,6 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     db = tmp_path / "catalog.db"
     save_catalog(db, [{f: "" for f in CATALOG_FIELDS} | {"media_id": "m1", "filename": "x_m1.png"}])
     mocker.patch.object(core, "USER_ID", "u1")
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     conn = {"edges": [{"node": {"id": "aw1", "mediaId": "m1", "title": "Animated",
                                 "visibility": "PUBLIC", "isNsfw": False,
                                 "likedCount": 0, "commentCount": 0,
@@ -860,7 +852,7 @@ def test_needs_model_fix():
     assert core._needs_model_fix({"model_id": "", "model_name": ""}) == ""
 
 
-def test_fix_models_resolves_numeric_names(tmp_path, mocker):
+def test_fix_models_resolves_numeric_names(tmp_path, mocker, pixai):
     from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     save_catalog(db, [
@@ -871,7 +863,6 @@ def test_fix_models_resolves_numeric_names(tmp_path, mocker):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "m3", "filename": "c.png",
                                            "model_id": "111", "model_name": "Already Named"},
     ])
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "model_name_gql", return_value="Tsubaki.2 v1")
 
     res = core.run_fix_models(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
@@ -947,22 +938,22 @@ def test_gql_adhoc_raises_on_graphql_error(mocker):
         core.gql_adhoc(sess, "query{ bad }")
 
 
-def test_account_info_parses_me(mocker):
-    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
+def test_account_info_parses_me(pixai):
+    pixai.on("me", {"me": {
         "id": "42", "quotaAmount": 21290, "tasks": {"totalCount": 19623},
         "followerCount": 30, "followingCount": 4,
         "membership": {"membershipId": "membership-plus", "tier": 2,
                        "privilege": {"dailyClaimAdded": 10000, "professionalMode": True}},
         "subscription": {"planId": "membership-plus", "status": "active",
                          "cancelAtPeriodEnd": True, "endAt": "2026-07-08T00:00:00Z"}}})
-    me = core.account_info(mocker.MagicMock())
+    me = core.account_info(pixai)
     assert me["quotaAmount"] == 21290
     assert me["membership"]["membershipId"] == "membership-plus"
     assert me["tasks"]["totalCount"] == 19623      # server's lifetime task count (backup coverage)
     assert me["followerCount"] == 30
 
 
-def test_account_query_does_not_ask_for_roles(mocker):
+def test_account_query_does_not_ask_for_roles(pixai):
     """This test used to assert the OPPOSITE, and that is why the account query shipped broken.
 
     It checked `"roles" in _ACCOUNT_QUERY` and then mocked a response containing roles -- so it
@@ -980,67 +971,66 @@ def test_account_query_does_not_ask_for_roles(mocker):
     assert "roles" not in core._ACCOUNT_QUERY, (
         "roles is back in the account query -- bare, it fails validation and takes credits, "
         "membership, the LoRA cap and the setup wizard with it")
-    mocker.patch.object(core, "gql_adhoc", return_value={"me": {
-        "id": "42", "quotaAmount": 1850640}})
-    assert core.account_info(mocker.MagicMock())["quotaAmount"] == 1850640
+    pixai.on("me", {"me": {"id": "42", "quotaAmount": 1850640}})
+    assert core.account_info(pixai)["quotaAmount"] == 1850640
 
-def test_account_info_empty_on_error(mocker):
-    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
-    assert core.account_info(mocker.MagicMock()) == {}          # soft-fail (web relies on this)
+def test_account_info_empty_on_error(pixai):
+    pixai.fail("me", core.PixAIError("boom"))
+    assert core.account_info(pixai) == {}                       # soft-fail (web relies on this)
     with __import__("pytest").raises(core.PixAIError):          # ...but can surface the reason
-        core.account_info(mocker.MagicMock(), raise_on_error=True)
+        core.account_info(pixai, raise_on_error=True)
 
 
-def test_run_account_info_reports_real_reason(mocker, capsys):
+def test_run_account_info_reports_real_reason(pixai, capsys):
     """The dashboard distinguishes an auth failure from a transient blip, instead of the old
     catch-all that blamed the API key for any hiccup."""
     from types import SimpleNamespace
-    mocker.patch.object(core, "_make_session", lambda *a, **k: object())
-    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("401 Unauthorized -- API key"))
+    pixai.fail("me", core.PixAIError("401 Unauthorized -- API key"))
     core.run_account_info(SimpleNamespace(token=None))
     assert "API key" in capsys.readouterr().out
-    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("connection reset"))
+    pixai.fail("me", core.PixAIError("connection reset"))
     core.run_account_info(SimpleNamespace(token=None))
     assert "temporary" in capsys.readouterr().out.lower()
 
 
 # ---- credit_balance: me { quotaAmount, quotaAmount(currency:"free"/"paid") } split ----
 
-def test_credit_balance_returns_the_free_paid_split(mocker):
+def test_credit_balance_returns_the_free_paid_split(pixai):
     # The real split: aliased quotaAmount fields on `me` with currency "free"/"paid"
     # (recovered from the site's own operation AST, verified live 2026-08-07).
-    mocker.patch.object(core, "gql_adhoc", return_value={
-        "me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}})
-    result = core.credit_balance(mocker.MagicMock())
+    pixai.on("me", {"me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}})
+    result = core.credit_balance(pixai)
     assert result == {"total": 3752991, "free": 219951, "paid": 3533040}
 
 
-def test_credit_balance_fails_soft(mocker):
-    mocker.patch.object(core, "gql_adhoc", side_effect=core.PixAIError("boom"))
-    assert core.credit_balance(mocker.MagicMock()) == {
+def test_credit_balance_fails_soft(pixai):
+    pixai.fail("me", core.PixAIError("boom"))
+    assert core.credit_balance(pixai) == {
         "total": None, "free": None, "paid": None}
 
 
-def test_run_account_info_shows_free_paid_breakdown(mocker, capsys):
+def test_run_account_info_shows_free_paid_breakdown(pixai, capsys):
     """The dashboard's "Credits (balance)" line breaks the balance into free vs paid, the
-    same split the site's own Membership & Credits page shows and quotaAmount alone can't."""
+    same split the site's own Membership & Credits page shows and quotaAmount alone can't.
+
+    Both reads are anonymous `query { me { ... } }` documents, so they share one key on the
+    fake and the answer dispatches on the document -- account_info's query has
+    tasks.totalCount, credit_balance's has the aliased split."""
     from types import SimpleNamespace
 
-    def fake_gql(session, query, variables=None):
-        # account_info's query has tasks.totalCount; credit_balance's has the aliased split.
-        if "total: quotaAmount" in query:
+    def answer(call):
+        if "total: quotaAmount" in call.document:
             return {"me": {"id": "42", "total": 3752991, "free": 219951, "paid": 3533040}}
         return {"me": {"id": "42", "quotaAmount": 3752991}}
 
-    mocker.patch.object(core, "_make_session", lambda *a, **k: object())
-    mocker.patch.object(core, "gql_adhoc", side_effect=fake_gql)
+    pixai.on("me", answer)
     res = core.run_account_info(SimpleNamespace(token=None))
     out = capsys.readouterr().out
     assert "of which free" in out and "219,951" in out
     assert "of which paid" in out and "3,533,040" in out
     assert res["free_credits"] == 219951 and res["paid_credits"] == 3533040
 
-def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
+def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker, pixai):
     """getTaskById returns the task's top-level paidCredit for HISTORICAL tasks (the
     same persisted response our full-meta path replays -- verified against a real
     captured task, 2026-07-04), so --backfill-full-meta can recover spend history:
@@ -1071,7 +1061,6 @@ def test_backfill_full_meta_recovers_historical_paid_credit(tmp_path, mocker):
         "t2": {"parameters": {"prompts": "ignored -- row already has meta"},
                "outputs": {}, "paidCredit": 0},
     }
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: tasks[str(tid)])
 
     # Pass 1: plain backfill -> t1 fetched (missing meta) and gains cost; t2 untouched.
@@ -1152,7 +1141,7 @@ def test_a_freshly_captured_generation_gets_its_model_NAME_not_just_its_id(monke
 
 
 def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_path, mocker,
-                                                                         capsys):
+                                                                         capsys, pixai):
     """One number covered two unrelated things: the fetch threw, or it returned fine and
     simply carried no prompt (a deleted task, or a kind that records none). Those have
     completely different answers, and a single "157 failed" had us guessing twice."""
@@ -1162,7 +1151,6 @@ def test_the_backfill_separates_errors_from_tasks_that_carried_no_prompt(tmp_pat
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(4)])
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "model_name_gql", side_effect=lambda s, m: "M")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
 
@@ -1235,7 +1223,7 @@ def test_parallel_map_paces_the_whole_pool_not_each_thread():
         "8 workers finished in {:.3f}s -- the pool ignored the pace".format(span))
 
 
-def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys):
+def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys, pixai):
     """The summary is by REASON, not just a total, and a majority-failure run says plainly
     that re-running it unchanged repeats it -- while making clear nothing already fetched is
     lost, because the backfill is resumable."""
@@ -1245,7 +1233,6 @@ def test_backfill_names_why_tasks_failed(tmp_path, mocker, capsys):
     save_catalog(tmp_path / "catalog.db",
                  [base | {"media_id": "m%d" % i, "task_id": "t%d" % i,
                           "filename": "%d.png" % i} for i in range(40)])
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "task_detail_gql",
                         side_effect=core.PixAIError("HTTP 429 rate limited"))
     core.run_backfill_full_meta(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
@@ -1321,7 +1308,7 @@ def test_catalog_stats_reports_metadata_coverage(tmp_path, capsys):
     assert "loras" not in out.lower(), "a blank loras column is ambiguous, not a gap"
 
 
-def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, mocker):
+def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, mocker, pixai):
     """A row can hold a prompt and a seed while holding no model, steps, sampler or CFG.
 
     prompt_full was the ONLY sentinel for "this row has its full metadata", so every such
@@ -1341,7 +1328,6 @@ def test_backfill_full_meta_refetches_rows_that_have_only_a_prompt(tmp_path, moc
     task = {"parameters": {"prompts": "night elf druid", "modelId": "4242"},
             "outputs": {"seed": 5, "detailParameters": {"samplingSteps": 25,
                                                         "samplingMethod": "Euler a"}}}
-    mocker.patch.object(core, "_make_session", return_value=mocker.MagicMock())
     mocker.patch.object(core, "task_detail_gql", side_effect=lambda s, tid: task)
     mocker.patch.object(core, "model_name_gql", side_effect=lambda s, mid: "WAI v17")
     mocker.patch.object(core, "resolve_loras", side_effect=lambda s, t: "")
