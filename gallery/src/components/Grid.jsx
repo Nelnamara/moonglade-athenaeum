@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { localDay } from "../gen/dates.js";
+import { localDay, localDayTime } from "../gen/dates.js";
+import { fetchSiblings } from "../api.js";
 import Stars from "./Stars.jsx";
 import "../styles/grid.css";
 
@@ -266,6 +267,30 @@ export default function Grid({
     return m;
   }, [items]);
 
+  /* ---- Sibling Strip data (#30, direction E): ONE batched POST per page ----
+     Collect the page's distinct non-empty task_ids and ask /api/siblings ONCE;
+     never per card. `siblingsSeq` is the epoch guard (the same discipline as
+     GenerateDrawer's prefillSeq): a fast page flip retires the older request
+     wholesale, so the previous page's strips can never paint over this one.
+     Failure -> no strips, no toast: the strip is decoration. */
+  const [siblings, setSiblings] = useState({});
+  const siblingsSeq = useRef(0);
+  useEffect(() => {
+    const my = ++siblingsSeq.current;
+    setSiblings({});
+    const taskIds = [];
+    const seen = new Set();
+    items.forEach((it) => {
+      const t = it.task_id ? String(it.task_id) : "";
+      if (t && !seen.has(t)) { seen.add(t); taskIds.push(t); }
+    });
+    if (!taskIds.length) return;
+    fetchSiblings(taskIds).then((d) => {
+      if (siblingsSeq.current !== my) return;   // superseded -- a newer page won
+      setSiblings((d && d.by_task) || {});
+    });
+  }, [items]);
+
   // The shift-range anchor is an INDEX into the current page's cells -- carrying
   // it across a page flip (or a layout re-lay, which reorders cells) would
   // range-add against a stale anchor.
@@ -395,9 +420,30 @@ export default function Grid({
     // While a marquee drags, the band IS the selection (live replace);
     // otherwise the App-owned Set paints.
     const isSel = marqueeHits ? marqueeHits.has(it.media_id) : selected.has(it.media_id);
-    const fname = it.filename || "";
-    const shortName = fname.length > 22 ? fname.slice(0, 10) + "…" + fname.slice(-9) : fname;
     const badge = it.is_video ? "VIDEO" : (it.source ? String(it.source).toUpperCase() : "");
+    // Sibling Strip (#30, direction E): the task's outputs, self lit, the rest dimmed.
+    // Only when the task has >= 2 members (the API already omits the rest). More than
+    // four -> four and a "+N"; self always sits among the four shown.
+    const sibs = it.task_id ? siblings[it.task_id] : null;
+    let strip = null;
+    if (Array.isArray(sibs) && sibs.length >= 2) {
+      const shown = sibs.slice(0, 4);
+      if (sibs.length > 4 && !shown.some((s) => s.media_id === it.media_id)) {
+        const self = sibs.find((s) => s.media_id === it.media_id);
+        if (self) shown[3] = self;
+      }
+      strip = (
+        <span className="mgg-strip">
+          {shown.map((s) => (
+            <img
+              key={s.media_id} src={s.thumb} alt="" loading="lazy" draggable={false}
+              className={s.media_id === it.media_id ? "self" : undefined}
+            />
+          ))}
+          {sibs.length > 4 ? <span className="more">+{sibs.length - 4}</span> : null}
+        </span>
+      );
+    }
     const pillClass = it.is_video
       ? " video"
       : String(it.source || "").toLowerCase() === "local" ? " local" : "";
@@ -460,9 +506,16 @@ export default function Grid({
         </span>
         {it.is_video ? <span className="mgg-vglyph">▶</span> : null}
         <figcaption className="mgg-cap">
-          <span className="mgg-model">{it.model || "—"}</span>
-          <span className="mgg-date">{localDay(it.created_at) || it.date || ""}</span>
-          {fname ? <span className="mgg-file" title={fname}>{shortName}</span> : null}
+          {/* Accession Stamp (#30, direction A; pixel source: the owner's locked
+              "Placard identity -- five directions" artifact). The title slot holds
+              ONLY a real title the piece was given -- never the filename, never
+              anything machine-derived (the review's hard condition). Line 1 is the
+              local day · time, line 2 the model (uppercased by CSS), flagged
+              "not grouped" when the row has no task to belong to. */}
+          {it.title ? <span className="mgg-title">{it.title}</span> : null}
+          <span className="mgg-stamp lead">{localDayTime(it.created_at) || it.date || ""}</span>
+          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped")}</span>
+          {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
             <button
