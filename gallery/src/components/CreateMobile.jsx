@@ -248,7 +248,7 @@ export default function CreateMobile({
      before this screen mounted, so this explicit prime is what shows the draft's
      price on entry (via costRef, never JSX). */
   useEffect(() => {
-    if (cmode === "image") refreshPrice();
+    if (cmode === "image") refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmode]);
 
@@ -258,7 +258,7 @@ export default function CreateMobile({
      reach edit/edit, by which commit the badge's ref is live -- never shared with
      Image's costRef (see useEditGenerate.js's header). */
   useEffect(() => {
-    if (cmode === "edit" && editSub === "edit") edit.refreshPrice();
+    if (cmode === "edit" && editSub === "edit") edit.refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmode, editSub]);
 

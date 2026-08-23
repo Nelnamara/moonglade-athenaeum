@@ -320,7 +320,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      remount, exactly as the old re-created element did. (Unchanged machinery; g
      intentionally out of the deps so this fires on entry, not every keystroke.) */
   useEffect(() => {
-    if (open && tab === "image") g.refreshPrice();
+    if (open && tab === "image") g.refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tab]);
 

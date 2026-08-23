@@ -90,6 +90,23 @@ describe("every cost line rides the probe", () => {
 /* ---- the probe's own wiring (no React harness in this runner) ----------------------------
    These pinned VideoDrawer's debCost/costNow before the loop was shared; they follow the
    mechanism. Each one is a review finding from 2026-08-16 that cost, or nearly cost, money. */
+describe("a badge that remounts is re-primed with force", () => {
+  // The image <CostBadge> mounts and unmounts with its tab (desktop dock and mobile Create
+  // alike), so it comes back idle while the probe's verdict may still be settled for the very
+  // same payload. An un-forced refresh() short-circuits on "nothing priced changed" and leaves
+  // Generate LIVE beside a blank badge -- a spend control with no quote on screen. The hook's
+  // own contract names the remount as one of the two cases `force` exists for; pin the callers.
+  test("GenerateDrawer's Image-tab entry prime passes force", () => {
+    const src = read(path.join(SRC, "components/GenerateDrawer.jsx"));
+    assert.match(src, /if \(open && tab === "image"\) g\.refreshPrice\(\{ force: true \}\);/);
+  });
+  test("CreateMobile's Image and Edit entry primes pass force", () => {
+    const src = read(path.join(SRC, "components/CreateMobile.jsx"));
+    assert.match(src, /if \(cmode === "image"\) refreshPrice\(\{ force: true \}\);/);
+    assert.match(src, /if \(cmode === "edit" && editSub === "edit"\) edit\.refreshPrice\(\{ force: true \}\);/);
+  });
+});
+
 describe("usePriceProbe's host half of the CostBadge contract", () => {
   const hook = read(files.find((x) => rel(x) === PROBE));
   // refresh() and the fire step both talk to the badge, so the ordering guards below are scoped
