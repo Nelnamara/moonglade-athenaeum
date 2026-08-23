@@ -72,7 +72,7 @@ def test_upload_media_three_step_flow(tmp_path, monkeypatch):
         put_calls.append((url, data, headers))
         return SimpleNamespace(status_code=200, text="")
 
-    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+    monkeypatch.setattr(core.PixAIClient, "_graphql_post", fake_gql)
     monkeypatch.setattr(core.requests, "put", fake_put)
 
     mid = core.upload_media(object(), str(f))

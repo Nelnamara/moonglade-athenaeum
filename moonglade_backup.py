@@ -1408,60 +1408,293 @@ def _quick_count(session, page_size=500):
         return 0
 
 
+# ===========================================================================
+# pixai_client -- the ONE PixAI transport seam
+# ===========================================================================
+# Every byte this app exchanges with PixAI leaves through a PixAIClient. Before
+# this section existed there was no transport MODULE at all: a bare
+# requests.Session was threaded through seventy-odd functions as a positional
+# argument, and the five primitives that actually spoke to PixAI --
+# gql/gql_adhoc/gql_mutate/_rest_get/_rest_post -- were module functions that
+# each re-derived the rules from that Session. The rules that matter are not
+# stylistic:
+#
+#   * the retry policy, and the ONE place the spend rule lives. `mutate()` has
+#     no `retries` parameter -- not defaulted to 0, ABSENT -- so a spending call
+#     site cannot ask for the unsafe value. `query()`'s `retries=None` is
+#     document-aware (3 for a query, 0 for a mutation) as the backstop for a
+#     call site that reaches past `mutate()`. A lost RESPONSE is
+#     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
+#     after PixAI already created and CHARGED for the task pays twice.
+#   * the two roads to PixAI -- the persisted-hash GET (`persisted()`), which is
+#     how the personal-history operations are reached, and the ad-hoc POST
+#     (`query()`/`mutate()`), which is everything the API key can ask for
+#     directly -- plus the oRPC `/v2` REST road (`rest_get()`/`rest_post()`).
+#   * WHICH credential a create rides (`for_create()`): the browser-JWT mirror
+#     session when the Mirror toggle is on, the API key otherwise, and a refusal
+#     rather than a silent fall-back to the key when the mirror is unavailable.
+#
+# There is a second adapter: `tests/fake_pixai.py`'s FakePixAI answers the same
+# interface from registered responses and refuses any operation nobody
+# registered, so "the suite never touches the network" is structural instead of
+# a habit maintained by 300-odd private monkeypatches.
+#
+# TRANSITION SURFACE. `get`/`post`/`headers`/`cookies` on the client delegate
+# straight to the inner requests.Session, because a handful of call sites still
+# reach for the Session themselves rather than through a verb: the persisted
+# GETs that have not moved onto `persisted()` (task_detail_gql,
+# _bookmarks_persisted, model_name_gql, resolve_model_base_id,
+# _resolve_model_preset, artwork_list_gql), delete_task_gql's lone hand-rolled
+# POST, refresh_jwt's mirror POST, resolve_media and download (which are not
+# GraphQL at all -- a media object and a file body), and run_watch reading the
+# Authorization header off to hand to the WebSocket. `.session` is the escape
+# hatch those will eventually stop needing; it exists for the transition, not
+# forever.
+#
+# NOT everything gets a client. A pasted API key is validated by hand-building a
+# Session with that key as the sole credential (moonglade_gallery's
+# /api/setup/save-key) precisely BECAUSE the normal path prefers the cached
+# config -- a garbage key once verified because the real cached key answered.
+# `_client_of()` therefore wraps whatever Session it is handed without reading
+# config, resolving a user id, or touching a credential, so that route keeps its
+# guarantee while still reaching account_info through the same verb.
+# ===========================================================================
+
+
+def _is_mutation_document(query):
+    """True when `query` is a GraphQL MUTATION document rather than a query.
+
+    Deliberately a dumb leading-keyword check: every document in this module is a plain
+    string literal that starts with its operation type. Anything it cannot classify falls
+    back to False (treated as a query), which is the behaviour that existed before it."""
+    return str(query or "").lstrip().lower().startswith("mutation")
+
+
+class PixAIClient:
+    """The transport seam: everything this app asks PixAI, asked here.
+
+    Five verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`), one credential
+    choice (`for_create`), and the underlying requests.Session on `.session` for the call
+    sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
+    resolved account id.
+
+    The class holds no PixAI knowledge that the module does not already own -- endpoints,
+    hashes and the Apollo headers stay module-level -- so a client can be built around ANY
+    session (a hand-built one, a test double) without that session inheriting the config
+    cache."""
+
+    def __init__(self, session, auth_kind="api-key", user_id=None):
+        self._session = session
+        self._auth_kind = auth_kind
+        self._user_id = user_id
+
+    # -- identity ----------------------------------------------------------
+    @property
+    def session(self):
+        """The underlying requests.Session. For the transition only -- prefer a verb."""
+        return self._session
+
+    @property
+    def auth_kind(self):
+        """`"api-key"` (the official credential) or `"web-jwt"` (the website mirror)."""
+        return self._auth_kind
+
+    @property
+    def user_id(self):
+        """The authenticated account's PixAI id."""
+        return self._user_id or USER_ID
+
+    def __repr__(self):
+        return "<PixAIClient {} user={}>".format(self._auth_kind, self.user_id or "?")
+
+    # -- the transition surface: the raw Session, delegated ------------------
+    def get(self, *args, **kwargs):
+        return self._session.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self._session.post(*args, **kwargs)
+
+    @property
+    def headers(self):
+        return self._session.headers
+
+    @property
+    def cookies(self):
+        return self._session.cookies
+
+    # -- ad-hoc GraphQL POST -------------------------------------------------
+    def query(self, document, variables=None, retries=None):
+        """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full document.
+
+        `retries=None` (the default) means "the safe default for THIS document": **3 for a
+        query, 0 for a mutation**. A retry re-POSTs on a RequestException or a 429/5xx, and
+        that is only free when the operation is idempotent. An explicit integer wins, so a
+        caller can still ask for anything on purpose. Returns the `data` dict; raises
+        PixAIError on GraphQL/HTTP error."""
+        if retries is None:
+            retries = 0 if _is_mutation_document(document) else 3
+        return self._graphql_post(document, variables, retries)
+
+    def mutate(self, document, variables=None):
+        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
+
+        It takes **no `retries` argument on purpose** -- there is no correct value above 0
+        for a spending path, so the knob is not offered rather than offered with a safe
+        default a call site can override by accident. Pinned by
+        tests/test_pixai_client.py and tests/test_spend_no_retry.py."""
+        return self._graphql_post(document, variables, 0)
+
+    def _graphql_post(self, document, variables, retries):
+        """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
+        verb that called in -- this function never chooses it, which is what keeps the
+        spend rule readable in exactly two places above."""
+        body = {"query": document, "variables": variables or {}}
+        delay = 2.0
+        for attempt in range(retries + 1):
+            try:
+                r = self._session.post(API_URL, json=body, timeout=120)
+            except requests.exceptions.SSLError:
+                raise PixAIError(_ssl_help())
+            except requests.RequestException:
+                if attempt == retries:
+                    raise
+                time.sleep(delay); delay *= 2; continue
+            if r.status_code == 401:
+                raise PixAIError("401 Unauthorized -- API key missing/expired.")
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == retries:
+                    r.raise_for_status()
+                time.sleep(delay); delay *= 2; continue
+            try:
+                data = r.json()
+            except ValueError:
+                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
+                    r.status_code, r.text[:400]))
+            if data.get("errors"):
+                raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+            return data.get("data") or {}
+        raise RuntimeError("unreachable")
+
+    # -- persisted-hash GET --------------------------------------------------
+    def persisted(self, op_name, variables=None, sha256=None, retries=4):
+        """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
+        params their frontend sends. `sha256=None` resolves the captured hash for
+        `op_name`; the history feed is the operation that rides this road today. Returns
+        the `data` dict; raises PixAIError with a recapture hint if the hash went stale."""
+        sha = sha256 or (PERSISTED_QUERY_HASH if op_name == OPERATION_NAME else "")
+        if not sha:
+            raise PixAIError(
+                "no persisted hash is known for operation {!r} -- pass sha256=... or add "
+                "it to config.json (see RECAPTURE at the bottom of moonglade_backup.py)."
+                .format(op_name))
+        params = {
+            "operation": op_name,
+            "u3t": U3T,
+            "operationName": op_name,
+            "variables": json.dumps(variables or {}, separators=(",", ":")),
+            "extensions": json.dumps(
+                {"clientLibrary": CLIENT_LIBRARY,
+                 "persistedQuery": {"version": 1, "sha256Hash": sha}},
+                separators=(",", ":")),
+        }
+        delay = 2.0
+        for attempt in range(retries + 1):
+            try:
+                _t = time.monotonic()
+                r = self._session.get(API_URL, params=params, timeout=60)
+            except requests.exceptions.SSLError:
+                raise PixAIError(_ssl_help())
+            except requests.RequestException as e:
+                if attempt == retries:
+                    raise
+                print("  network error ({}); retrying in {:.0f}s".format(e, delay))
+                time.sleep(delay); delay *= 2; continue
+
+            if r.status_code == 401:
+                raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == retries:
+                    r.raise_for_status()
+                print("  HTTP {}; backing off {:.0f}s".format(r.status_code, delay))
+                time.sleep(delay); delay *= 2; continue
+
+            try:
+                data = r.json()
+            except ValueError:
+                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
+                    r.status_code, r.text[:800]))
+            if data.get("errors"):
+                if "PersistedQueryNotFound" in json.dumps(data["errors"]):
+                    raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
+                                     "(see RECAPTURE at the bottom of this file).")
+                print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
+                print(json.dumps(data["errors"], indent=2)[:3000])
+                raise PixAIError("GraphQL error (see log above).")
+            if r.status_code >= 400:
+                print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
+                raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
+            vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
+                op_name, r.status_code, len(r.content), time.monotonic() - _t))
+            return data["data"]
+        raise RuntimeError("unreachable")
+
+    # -- the oRPC /v2 REST road ----------------------------------------------
+    def rest_get(self, path, params=None, timeout=30):
+        """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
+
+        Single-attempt by construction, like `rest_post` -- see its note."""
+        r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
+        if not r.ok:
+            raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+        return r.json()
+
+    def rest_post(self, path, body=None, timeout=60):
+        """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+        NO retry loop, deliberately: `submit_fixer` and `claim_reward` ride this, and the
+        session mounts no urllib3 Retry adapter (requests' default HTTPAdapter is
+        max_retries=0), so both are single-attempt. Pinned by
+        tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
+        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+        return r.json()
+
+    # -- which credential a create rides -------------------------------------
+    def for_create(self):
+        """The client a CREATE must POST through: the browser-JWT mirror when the 'Mirror
+        to PixAI' toggle is on (so the generation lands in the pixai.art web library),
+        this same client otherwise. Refuses (raises) rather than falling back to the API
+        key when the mirror is armed but unavailable. Callers must have already passed
+        `_check_read_only` -- building the mirror session may make a refreshToken call."""
+        chosen = _session_for_create(self)
+        if chosen is self:
+            return self
+        return PixAIClient(chosen, auth_kind="web-jwt")
+
+
+def _client_of(session):
+    """The PixAIClient for `session`: itself when it already is one, a thin wrapper
+    around it otherwise.
+
+    Wrapping reads NO config and resolves NO credential -- that is what lets the pasted-
+    API-key validation route hand its own hand-built Session to account_info and still
+    get the guarantee it was built for."""
+    if isinstance(session, PixAIClient):
+        return session
+    return PixAIClient(session)
+
+
+# --- end pixai_client ------------------------------------------------------
+
+
 # ---------------------------------------------------------------------------
 # Persisted GraphQL GET (with Apollo CSRF headers)
 # ---------------------------------------------------------------------------
 def gql(session, variables, retries=4):
-    params = {
-        "operation": OPERATION_NAME,
-        "u3t": U3T,
-        "operationName": OPERATION_NAME,
-        "variables": json.dumps(variables, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERY_HASH}},
-            separators=(",", ":")),
-    }
-    delay = 2.0
-    for attempt in range(retries + 1):
-        try:
-            _t = time.monotonic()
-            r = session.get(API_URL, params=params, timeout=60)
-        except requests.exceptions.SSLError:
-            raise PixAIError(_ssl_help())
-        except requests.RequestException as e:
-            if attempt == retries:
-                raise
-            print("  network error ({}); retrying in {:.0f}s".format(e, delay))
-            time.sleep(delay); delay *= 2; continue
-
-        if r.status_code == 401:
-            raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
-        if r.status_code == 429 or r.status_code >= 500:
-            if attempt == retries:
-                r.raise_for_status()
-            print("  HTTP {}; backing off {:.0f}s".format(r.status_code, delay))
-            time.sleep(delay); delay *= 2; continue
-
-        try:
-            data = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON response:\n{}".format(
-                r.status_code, r.text[:800]))
-        if data.get("errors"):
-            if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
-                                 "(see RECAPTURE at the bottom of this file).")
-            print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
-            print(json.dumps(data["errors"], indent=2)[:3000])
-            raise PixAIError("GraphQL error (see log above).")
-        if r.status_code >= 400:
-            print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
-            raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
-        vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
-            OPERATION_NAME, r.status_code, len(r.content), time.monotonic() - _t))
-        return data["data"]
-    raise RuntimeError("unreachable")
+    """Replay the history-feed persisted query. Thin delegate onto
+    `PixAIClient.persisted` -- the road itself lives in the pixai_client section."""
+    return _client_of(session).persisted(OPERATION_NAME, variables, retries=retries)
 
 
 # ---------------------------------------------------------------------------
@@ -2302,15 +2535,6 @@ def delete_task_gql(session, task_id):
     return result
 
 
-def _is_mutation_document(query):
-    """True when `query` is a GraphQL MUTATION document rather than a query.
-
-    Deliberately a dumb leading-keyword check: every document in this module is a plain
-    string literal that starts with its operation type. Anything it cannot classify falls
-    back to False (treated as a query), which is the behaviour that existed before it."""
-    return str(query or "").lstrip().lower().startswith("mutation")
-
-
 def gql_adhoc(session, query, variables=None, retries=None):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has
@@ -2330,34 +2554,14 @@ def gql_adhoc(session, query, variables=None, retries=None):
     a second one. Spending and account-mutating callers should still go through
     `gql_mutate()`, which cannot be handed a retry count at all; this default is the
     backstop for a future call site that reaches for `gql_adhoc` and forgets. An explicit
-    integer always wins, so a caller can still ask for anything on purpose."""
-    if retries is None:
-        retries = 0 if _is_mutation_document(query) else 3
-    body = {"query": query, "variables": variables or {}}
-    delay = 2.0
-    for attempt in range(retries + 1):
-        try:
-            r = session.post(API_URL, json=body, timeout=120)
-        except requests.exceptions.SSLError:
-            raise PixAIError(_ssl_help())
-        except requests.RequestException:
-            if attempt == retries:
-                raise
-            time.sleep(delay); delay *= 2; continue
-        if r.status_code == 401:
-            raise PixAIError("401 Unauthorized -- API key missing/expired.")
-        if r.status_code == 429 or r.status_code >= 500:
-            if attempt == retries:
-                r.raise_for_status()
-            time.sleep(delay); delay *= 2; continue
-        try:
-            data = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON response:\n{}".format(r.status_code, r.text[:400]))
-        if data.get("errors"):
-            raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
-        return data.get("data") or {}
-    raise RuntimeError("unreachable")
+    integer always wins, so a caller can still ask for anything on purpose.
+
+    THIN DELEGATE onto `PixAIClient.query` -- the POST, the retry loop and the
+    document-aware default all live in the pixai_client section, once. The function
+    survives under this name because seventy-odd callers still hand it a `session`
+    positionally (a raw requests.Session, a PixAIClient, or a test double are all fine)
+    and because the suite patches it here."""
+    return _client_of(session).query(query, variables, retries=retries)
 
 
 def gql_mutate(session, query, variables=None):
@@ -2372,7 +2576,7 @@ def gql_mutate(session, query, variables=None):
     this helper inherits the safe behaviour, and one written against `gql_adhoc` gets it
     anyway from that function's mutation-aware default.
 
-    Why a retry is not free here: `gql_adhoc`'s retry loop re-POSTs on a RequestException
+    Why a retry is not free here: the ad-hoc retry loop re-POSTs on a RequestException
     or a 429/5xx, and a lost RESPONSE looks exactly like a lost REQUEST. A read timeout, a
     dropped connection, or a proxy's 502 after the backend already succeeded all leave
     PixAI holding a created, CHARGED task while the client believes nothing happened -- so
@@ -2382,10 +2586,13 @@ def gql_mutate(session, query, variables=None):
     hand-rolling its own lone `session.post`.
 
     A 429 alone WOULD be safe to re-send (rate-limited means the request was refused, not
-    processed), but 429 and 5xx share one branch in `gql_adhoc` and a 5xx is genuinely
+    processed), but 429 and 5xx share one branch in the retry loop and a 5xx is genuinely
     ambiguous. The trade is deliberate: not retrying costs an error the caller can see and
-    act on; retrying wrongly costs credits they cannot get back."""
-    return gql_adhoc(session, query, variables, retries=0)
+    act on; retrying wrongly costs credits they cannot get back.
+
+    THIN DELEGATE onto `PixAIClient.mutate`, which likewise offers no `retries`
+    parameter -- the rule now has ONE home rather than being re-argued at each helper."""
+    return _client_of(session).mutate(query, variables)
 
 
 def resolve_user_id(session):
@@ -4490,9 +4697,18 @@ def cmd_undo_organize(args, out):
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
 def _make_session(token_val):
-    """Validate config, load token, return a configured requests.Session.
-    Re-reads config.json at call time so the GUI works even when the module
-    was imported before the working directory was set correctly."""
+    """Validate config, load token, return a configured PixAIClient.
+
+    The app's ONE entry to PixAI: it re-reads config.json at call time (so the GUI works
+    even when the module was imported before the working directory was set correctly),
+    refreshes the persisted-hash globals from it, builds the API-key requests.Session, and
+    resolves USER_ID over the network when it is not pinned.
+
+    It returns a `PixAIClient`, not the bare Session -- the client IS accepted everywhere a
+    `session` is passed today (it delegates `get`/`post`/`headers`/`cookies` to the Session
+    it holds, and every primitive resolves whatever it is handed through `_client_of`), so
+    the ~70 session-taking functions are unchanged. The name stays `_make_session` because
+    thirty-odd call sites and a hundred-odd tests say it."""
     global PERSISTED_QUERY_HASH, U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
     global DELETE_TASK_HASH
     fresh = _load_config()
@@ -4536,7 +4752,7 @@ def _make_session(token_val):
         else:
             raise PixAIError("config.json needs USER_ID (or set PIXAI_API_KEY to "
                              "auto-resolve it).")
-    return session
+    return PixAIClient(session, auth_kind="api-key")
 
 
 # ===========================================================================
@@ -10372,19 +10588,21 @@ def run_contests(args):
 
 
 def _rest_get(session, path, params=None, timeout=30):
-    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx."""
-    r = session.get(REST_API_BASE + path, params=params, timeout=timeout)
-    if not r.ok:
-        raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
-    return r.json()
+    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
+
+    THIN DELEGATE onto `PixAIClient.rest_get` -- the route road lives in the pixai_client
+    section. Kept under this name because a dozen call sites hand it a `session`
+    positionally and the suite patches it here (tests/conftest.py's `_no_live_card_network`
+    is what makes the /v2 API offline by default)."""
+    return _client_of(session).rest_get(path, params=params, timeout=timeout)
 
 
 def _rest_post(session, path, body, timeout=60):
-    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx."""
-    r = session.post(REST_API_BASE + path, json=body, timeout=timeout)
-    if not r.ok:
-        raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
-    return r.json()
+    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+    THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
+    keeps `submit_fixer` and `claim_reward` single-attempt."""
+    return _client_of(session).rest_post(path, body, timeout=timeout)
 
 
 def _normalize_kaisuuken(raw):

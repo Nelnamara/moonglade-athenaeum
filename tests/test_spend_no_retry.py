@@ -50,27 +50,53 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
 _CALLS_GQL_ADHOC = re.compile(r"\bgql_adhoc\s*\(")
 
 
+_STUB_PAYLOAD = {"createGenerationTask": {"id": "T1"},
+                 "updateGenerationTask": {"id": "T1"},
+                 "uploadMedia": {"uploadUrl": "https://s3.example/put",
+                                 "externalId": "E1", "mediaId": "M1"}}
+
+
 @pytest.fixture
 def gql_calls(monkeypatch):
-    """Record every `gql_adhoc` call the code under test makes and answer it with a
+    """Record every ad-hoc GraphQL POST the code under test makes -- the VERB it came
+    through and the retry count the loop was actually handed -- and answer it with a
     plausible payload so the caller keeps going.
 
-    The recorder's signature mirrors the real `gql_adhoc`'s, so a call that omits
-    `retries` records None ("took the default") while a call through `gql_mutate` records
-    0. Patching `gql_adhoc` -- not `gql_mutate` -- is deliberate: `gql_mutate` delegates
-    through the module global, so this sees what the retry loop would ACTUALLY have been
-    handed.
+    Recorded at `PixAIClient._graphql_post`, the single function that owns the retry loop,
+    with `query`/`mutate` wrapped only to tag which verb reached it. That is deliberately
+    lower than the old recorder (which stood in for `gql_adhoc` and read `retries=None` as
+    "took the default"): `retries` here is the resolved integer the loop will count with,
+    so `mutate()`'s hard-coded 0 is OBSERVED rather than inferred, and `verb` makes
+    "reached the loop through the road that offers no retries knob" checkable on its own.
+    Both real methods still run, so the document-aware default is exercised, not bypassed.
     """
     calls = []
+    real_query = core.PixAIClient.query
+    real_mutate = core.PixAIClient.mutate
+    box = {"verb": None}
 
-    def _recorder(session, query, variables=None, retries=None):
-        calls.append(SimpleNamespace(query=query, variables=variables, retries=retries))
-        return {"createGenerationTask": {"id": "T1"},
-                "updateGenerationTask": {"id": "T1"},
-                "uploadMedia": {"uploadUrl": "https://s3.example/put",
-                                "externalId": "E1", "mediaId": "M1"}}
+    def _query(self, document, variables=None, retries=None):
+        box["verb"] = "query"
+        try:
+            return real_query(self, document, variables, retries)
+        finally:
+            box["verb"] = None
 
-    monkeypatch.setattr(core, "gql_adhoc", _recorder)
+    def _mutate(self, document, variables=None):
+        box["verb"] = "mutate"
+        try:
+            return real_mutate(self, document, variables)
+        finally:
+            box["verb"] = None
+
+    def _recorder(self, document, variables, retries):
+        calls.append(SimpleNamespace(query=document, variables=variables,
+                                     retries=retries, verb=box["verb"]))
+        return _STUB_PAYLOAD
+
+    monkeypatch.setattr(core.PixAIClient, "query", _query)
+    monkeypatch.setattr(core.PixAIClient, "mutate", _mutate)
+    monkeypatch.setattr(core.PixAIClient, "_graphql_post", _recorder)
     return calls
 
 
@@ -122,6 +148,11 @@ def _assert_single_attempt(calls, document=None):
             "a spending/account-mutating call was made with retries={!r} -- it must go "
             "through gql_mutate(), which hard-codes 0. A retry re-POSTs the mutation "
             "after a lost response and charges twice.".format(c.retries))
+        assert c.verb == "mutate", (
+            "a spending/account-mutating call reached the retry loop through "
+            "PixAIClient.{}() -- it must ride gql_mutate()/client.mutate(), the road that "
+            "offers no retries argument at all. The count was 0 here only because the "
+            "document-aware default caught it.".format(c.verb))
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +170,15 @@ class TestGqlMutate:
         assert "retries" not in inspect.signature(core.gql_mutate).parameters
         with pytest.raises(TypeError):
             core.gql_mutate(None, "mutation { x }", None, retries=3)
+
+    def test_the_client_verb_underneath_offers_no_retries_either(self):
+        """`gql_mutate` is a thin delegate onto `PixAIClient.mutate`, so the absence of the
+        knob has to hold at the verb too -- otherwise the rule would live in the delegate
+        and a caller reaching the client directly (the gallery, the fake, a future call
+        site) could ask for the unsafe value after all."""
+        assert "retries" not in inspect.signature(core.PixAIClient.mutate).parameters
+        with pytest.raises(TypeError):
+            core.PixAIClient(None).mutate("mutation { x }", None, retries=3)
 
 
 class TestGqlAdhocDefault:
@@ -288,6 +328,13 @@ class TestRestSpendPathsAreSingleAttempt:
         assert posts == ["/task/fixer"]
 
     def test_rest_post_has_no_retry_loop(self):
-        src = inspect.getsource(core._rest_post)
-        assert "for " not in src and "while " not in src, \
-            "_rest_post grew a retry loop -- submit_fixer and claim_reward would double-fire"
+        """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line
+        that forwards to `PixAIClient.rest_post`, so scanning it alone would pass even if
+        the real road grew a loop. Both are checked: the delegate must stay a delegate and
+        the verb must stay single-attempt."""
+        for fn, name in ((core._rest_post, "_rest_post"),
+                         (core.PixAIClient.rest_post, "PixAIClient.rest_post")):
+            src = inspect.getsource(fn)
+            assert "for " not in src and "while " not in src, (
+                "{} grew a retry loop -- submit_fixer and claim_reward would "
+                "double-fire".format(name))

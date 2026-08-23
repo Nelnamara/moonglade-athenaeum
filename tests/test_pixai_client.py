@@ -1,0 +1,369 @@
+"""The PixAI transport seam: `PixAIClient`, the one way this app talks to PixAI.
+
+These tests drive the client against a recording stand-in for `requests.Session` --
+nothing here opens a socket, and no test in this file can spend anything: the only
+"mutation" documents used are invented ones, answered by a local object.
+
+What is pinned:
+
+  * each verb makes the HTTP call it claims to (`query`/`mutate` -> POST /graphql,
+    `persisted` -> GET /graphql with the Apollo persisted-query params, `rest_get` /
+    `rest_post` -> the oRPC `/v2` base);
+  * `mutate` retries EXACTLY 0 times and has no `retries` parameter to ask with -- the
+    spend rule at the one place it now lives (tests/test_spend_no_retry.py pins the same
+    property from the spending paths' side);
+  * `query` still retries 3 times on a retryable failure, so the no-retry rule did not
+    leak into reads;
+  * `for_create()` picks the mirror (web-JWT) client vs the API-key one by the existing
+    rule, and refuses rather than falling back;
+  * the five module-level primitives are thin delegates, and a raw Session and a client
+    are interchangeable at every one of them.
+"""
+import inspect
+import json
+
+import pytest
+import requests
+
+import moonglade_backup as core
+
+
+class FakeResponse:
+    """The parts of a requests.Response the transport reads."""
+
+    def __init__(self, payload=None, status_code=200, text="", content=b""):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = text
+        self.content = content or (json.dumps(payload).encode() if payload else b"")
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError("HTTP {}".format(self.status_code))
+
+
+class RecordingSession:
+    """A requests.Session that records instead of sending.
+
+    `answers` is a list of FakeResponse (or exceptions to raise), consumed in order; the
+    last one repeats, so one answer stands for "every attempt gets this". Every call lands
+    in `.calls` as (verb, url, kwargs) -- which is how "exactly one POST" is asserted."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers) or [FakeResponse({"data": {}})]
+        self.calls = []
+        self.headers = {}
+        self.cookies = {}
+
+    def _answer(self, verb, url, kwargs):
+        self.calls.append((verb, url, kwargs))
+        a = self.answers[min(len(self.calls) - 1, len(self.answers) - 1)]
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    def get(self, url, **kwargs):
+        return self._answer("GET", url, kwargs)
+
+    def post(self, url, **kwargs):
+        return self._answer("POST", url, kwargs)
+
+
+# Captured at import, BEFORE conftest's autouse `_no_live_card_network` swaps them for a
+# raising stub. That fixture is what makes the whole suite offline by default; this file is
+# the one place that must exercise the real REST helpers, and it does so against a
+# RecordingSession, so nothing leaves the machine either way.
+_REAL_REST_GET = core._rest_get
+_REAL_REST_POST = core._rest_post
+
+
+@pytest.fixture(autouse=True)
+def _no_backoff_sleep(monkeypatch):
+    """Retries are counted, never waited for."""
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+
+
+@pytest.fixture
+def real_rest(monkeypatch):
+    """Put the real `_rest_get`/`_rest_post` back for a test that is ABOUT them."""
+    monkeypatch.setattr(core, "_rest_get", _REAL_REST_GET)
+    monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
+
+
+# ---------------------------------------------------------------------------
+# Each verb delegates with the right HTTP shape
+# ---------------------------------------------------------------------------
+
+class TestVerbsMakeTheRightCall:
+    def test_query_posts_the_document_to_graphql(self):
+        s = RecordingSession(FakeResponse({"data": {"me": {"id": "7"}}}))
+        c = core.PixAIClient(s)
+        assert c.query("query{ me{ id } }") == {"me": {"id": "7"}}
+        (verb, url, kwargs), = s.calls
+        assert verb == "POST" and url == core.API_URL
+        assert kwargs["json"] == {"query": "query{ me{ id } }", "variables": {}}
+
+    def test_mutate_posts_the_document_to_graphql(self):
+        s = RecordingSession(FakeResponse({"data": {"doThing": {"id": "1"}}}))
+        c = core.PixAIClient(s)
+        assert c.mutate("mutation{ doThing{ id } }", {"a": 1}) == {"doThing": {"id": "1"}}
+        (verb, url, kwargs), = s.calls
+        assert verb == "POST" and url == core.API_URL
+        assert kwargs["json"]["variables"] == {"a": 1}
+
+    def test_graphql_errors_become_pixaierror(self):
+        s = RecordingSession(FakeResponse({"errors": [{"message": "nope"}]}))
+        with pytest.raises(core.PixAIError, match="GraphQL error"):
+            core.PixAIClient(s).query("query{ bad }")
+
+    def test_a_401_says_so_plainly(self):
+        s = RecordingSession(FakeResponse(status_code=401, text=""))
+        with pytest.raises(core.PixAIError, match="401 Unauthorized"):
+            core.PixAIClient(s).query("query{ me{ id } }")
+
+    def test_persisted_gets_graphql_with_the_apollo_persisted_params(self):
+        s = RecordingSession(FakeResponse({"data": {"page": 1}}))
+        c = core.PixAIClient(s)
+        assert c.persisted(core.OPERATION_NAME, {"last": 5}) == {"page": 1}
+        (verb, url, kwargs), = s.calls
+        assert verb == "GET" and url == core.API_URL
+        p = kwargs["params"]
+        assert p["operation"] == core.OPERATION_NAME
+        assert p["operationName"] == core.OPERATION_NAME
+        assert json.loads(p["variables"]) == {"last": 5}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"] == {"version": 1,
+                                         "sha256Hash": core.PERSISTED_QUERY_HASH}
+
+    def test_persisted_refuses_an_operation_with_no_known_hash(self):
+        c = core.PixAIClient(RecordingSession())
+        with pytest.raises(core.PixAIError, match="no persisted hash"):
+            c.persisted("someOperationNobodyCaptured", {})
+
+    def test_persisted_names_the_recapture_step_on_a_stale_hash(self):
+        s = RecordingSession(FakeResponse({"errors": [{"message": "PersistedQueryNotFound"}]}))
+        with pytest.raises(core.PixAIError, match="Recapture"):
+            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
+
+    def test_rest_get_hits_the_v2_base(self):
+        s = RecordingSession(FakeResponse({"kaisuukens": []}))
+        c = core.PixAIClient(s)
+        assert c.rest_get("/kaisuuken/summary", params={"a": 1}) == {"kaisuukens": []}
+        (verb, url, kwargs), = s.calls
+        assert verb == "GET" and url == core.REST_API_BASE + "/kaisuuken/summary"
+        assert kwargs["params"] == {"a": 1}
+
+    def test_rest_post_hits_the_v2_base(self):
+        s = RecordingSession(FakeResponse({"id": "T1"}))
+        c = core.PixAIClient(s)
+        assert c.rest_post("/task/fixer", {"mediaId": "M1"}) == {"id": "T1"}
+        (verb, url, kwargs), = s.calls
+        assert verb == "POST" and url == core.REST_API_BASE + "/task/fixer"
+        assert kwargs["json"] == {"mediaId": "M1"}
+
+    def test_rest_raises_pixaierror_on_non_2xx(self):
+        c = core.PixAIClient(RecordingSession(FakeResponse(status_code=500, text="nope")))
+        with pytest.raises(core.PixAIError, match="REST GET"):
+            c.rest_get("/claim")
+
+
+class TestThePrimitivesAreThinDelegates:
+    """The five module-level primitives keep their names and their `session`-first
+    signatures -- seventy-odd functions still call them that way -- but the road itself
+    lives on the client rather than being re-implemented beside it."""
+
+    @pytest.mark.parametrize("name", ["gql", "gql_adhoc", "gql_mutate",
+                                      "_rest_get", "_rest_post"])
+    def test_it_routes_through_the_client(self, name, real_rest):
+        src = inspect.getsource(getattr(core, name))
+        assert "_client_of(" in src, "{} no longer routes through the client".format(name)
+        assert "session.post(" not in src and "session.get(" not in src, \
+            "{} speaks HTTP itself again -- it must delegate".format(name)
+
+    def test_gql_delegates_to_persisted(self):
+        s = RecordingSession(FakeResponse({"data": {"page": 1}}))
+        assert core.gql(s, {"last": 3}) == {"page": 1}
+        assert s.calls[0][0] == "GET"
+
+    def test_gql_adhoc_takes_a_raw_session(self):
+        s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
+        assert core.gql_adhoc(s, "query{ me{ id } }") == {"me": {"id": "1"}}
+
+    def test_gql_adhoc_takes_a_client(self):
+        s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
+        assert core.gql_adhoc(core.PixAIClient(s), "query{ me{ id } }") == {"me": {"id": "1"}}
+
+    def test_rest_helpers_take_either_shape(self, real_rest):
+        s = RecordingSession(FakeResponse({"ok": 1}))
+        assert core._rest_get(s, "/claim") == {"ok": 1}
+        assert core._rest_post(core.PixAIClient(s), "/claim/1", {}) == {"ok": 1}
+
+    def test_client_of_is_identity_for_a_client(self):
+        c = core.PixAIClient(RecordingSession())
+        assert core._client_of(c) is c
+
+    def test_wrapping_reads_no_config_and_resolves_no_credential(self, monkeypatch):
+        """The pasted-API-key route hand-builds a Session with the submitted key as its
+        sole credential and reaches account_info with it, precisely BECAUSE the normal
+        path prefers the module-cached config (a garbage key once verified because the
+        real cached key answered). Wrapping must therefore be inert."""
+        monkeypatch.setattr(core, "_load_config",
+                            lambda *a, **k: pytest.fail("wrapping read config.json"))
+        monkeypatch.setattr(core, "resolve_user_id",
+                            lambda *a, **k: pytest.fail("wrapping resolved a user id"))
+        s = RecordingSession(FakeResponse({"data": {"me": {"id": "1"}}}))
+        assert core._client_of(s).session is s
+        assert core.account_info(s) == {"id": "1"}
+
+    def test_make_session_hands_back_a_client(self, monkeypatch, tmp_path):
+        """`_make_session` is the app's one entry to PixAI and now returns the seam
+        itself, so every `session` threaded through the module is a client in production
+        while still accepting a bare Session anywhere."""
+        monkeypatch.setattr(core, "_load_config", lambda *a, **k: {"PIXAI_API_KEY": "k"})
+        monkeypatch.setattr(core, "load_token", lambda v: "k")
+        monkeypatch.setattr(core, "USER_ID", "u-1")
+        c = core._make_session(None)
+        assert isinstance(c, core.PixAIClient)
+        assert c.auth_kind == "api-key" and c.user_id == "u-1"
+        assert c.headers["Authorization"] == "Bearer k"
+
+
+class TestTheTransitionSurface:
+    """resolve_media, download, delete_task_gql, refresh_jwt, run_watch and the six
+    persisted GETs that have not moved onto `persisted()` still reach for the Session
+    themselves. Those calls have to keep working when what they hold is a client."""
+
+    def test_get_post_headers_cookies_delegate_to_the_session(self):
+        s = RecordingSession(FakeResponse({"ok": 1}))
+        s.headers["Authorization"] = "Bearer k"
+        c = core.PixAIClient(s)
+        assert c.headers["Authorization"] == "Bearer k"     # run_watch reads this
+        assert c.cookies is s.cookies
+        assert c.session is s
+        c.get("https://example/x", timeout=1)               # resolve_media / download
+        c.post("https://example/y", json={"a": 1})          # delete_task_gql / refresh_jwt
+        assert [v for v, _u, _k in s.calls] == ["GET", "POST"]
+
+    def test_a_persisted_get_that_has_not_moved_still_works_through_a_client(self,
+                                                                            monkeypatch):
+        """task_detail_gql builds its own params and calls `session.get` directly. It is
+        handed a client in production now, so this is the shape that must not break."""
+        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "deadbeef")
+        s = RecordingSession(FakeResponse({"data": {"task": {"id": "T7"}}}))
+        assert core.task_detail_gql(core.PixAIClient(s), "T7") == {"id": "T7"}
+        assert s.calls[0][0] == "GET"
+
+
+# ---------------------------------------------------------------------------
+# The spend rule, at the seam
+# ---------------------------------------------------------------------------
+
+class TestRetryPolicy:
+    def test_mutate_has_no_retries_parameter_at_all(self):
+        assert "retries" not in inspect.signature(core.PixAIClient.mutate).parameters
+        with pytest.raises(TypeError):
+            core.PixAIClient(RecordingSession()).mutate("mutation{ x }", None, retries=1)
+
+    def test_mutate_posts_exactly_once_on_a_retryable_failure(self):
+        """A lost RESPONSE is indistinguishable from a lost REQUEST: re-POSTing
+        createGenerationTask after PixAI already created and CHARGED for the task pays
+        twice. One attempt, always."""
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.PixAIClient(s).mutate("mutation{ doThing{ id } }")
+        assert len(s.calls) == 1
+
+    def test_mutate_posts_exactly_once_on_a_5xx(self):
+        """The ambiguous one: a proxy's 502 can arrive after the backend already ran."""
+        s = RecordingSession(FakeResponse(status_code=502, text="bad gateway"))
+        with pytest.raises(requests.HTTPError):
+            core.PixAIClient(s).mutate("mutation{ doThing{ id } }")
+        assert len(s.calls) == 1
+
+    def test_query_retries_three_times_on_a_retryable_failure(self):
+        """The other half: this is not a blanket no-retry policy. Reads are idempotent and
+        a flaky network must not fail them on the first blip."""
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.PixAIClient(s).query("query{ me{ id } }")
+        assert len(s.calls) == 4                      # the original + 3 retries
+
+    def test_query_retries_three_times_on_a_429(self):
+        s = RecordingSession(FakeResponse(status_code=429, text="slow down"))
+        with pytest.raises(requests.HTTPError):
+            core.PixAIClient(s).query("query{ me{ id } }")
+        assert len(s.calls) == 4
+
+    def test_query_of_a_mutation_document_still_does_not_retry(self):
+        """The backstop for a call site that reaches past `mutate()`."""
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.PixAIClient(s).query("mutation{ doThing{ id } }")
+        assert len(s.calls) == 1
+
+    def test_an_explicit_count_still_wins_on_query(self):
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.PixAIClient(s).query("query{ me{ id } }", retries=0)
+        assert len(s.calls) == 1
+
+    def test_persisted_retries_four_times_by_default(self):
+        s = RecordingSession(requests.ConnectionError("connection dropped"))
+        with pytest.raises(requests.RequestException):
+            core.PixAIClient(s).persisted(core.OPERATION_NAME, {})
+        assert len(s.calls) == 5                      # the original + 4 retries
+
+    def test_rest_post_makes_exactly_one_attempt(self):
+        """submit_fixer and claim_reward ride this. No loop, by construction."""
+        s = RecordingSession(FakeResponse(status_code=502, text="bad gateway"))
+        with pytest.raises(core.PixAIError):
+            core.PixAIClient(s).rest_post("/task/fixer", {})
+        assert len(s.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# for_create(): which credential a create rides
+# ---------------------------------------------------------------------------
+
+class TestForCreate:
+    def test_mirror_off_is_the_same_client(self, monkeypatch):
+        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+        c = core.PixAIClient(RecordingSession())
+        assert c.for_create() is c
+        assert c.for_create().auth_kind == "api-key"
+
+    def test_mirror_on_returns_a_web_jwt_client_over_the_mirror_session(self, monkeypatch):
+        mirror = RecordingSession()
+        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(core, "make_mirror_session", lambda: mirror)
+        c = core.PixAIClient(RecordingSession())
+        made = c.for_create()
+        assert made is not c
+        assert made.session is mirror
+        assert made.auth_kind == "web-jwt"
+
+    def test_mirror_on_but_unavailable_refuses_and_never_falls_back(self, monkeypatch):
+        """F5: if the mirror session is unavailable, refuse and spend nothing -- never
+        quietly file the generation under the API key instead."""
+        monkeypatch.setattr(core, "mirror_enabled", lambda: True)
+        monkeypatch.setattr(core, "make_mirror_session", lambda: None)
+        c = core.PixAIClient(RecordingSession())
+        with pytest.raises(core.PixAIError, match="Mirror to PixAI is ON"):
+            c.for_create()
+
+    def test_it_is_the_same_rule_the_module_choke_uses(self, monkeypatch):
+        """`_session_for_create` stays the one place the rule is written; `for_create()`
+        is its face on the client, not a second copy of the decision."""
+        monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+        c = core.PixAIClient(RecordingSession())
+        assert core._session_for_create(c) is c
+        assert c.for_create() is core._session_for_create(c)
