@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Fixed: a video **Remix** whose references were uploads (not in your library) no longer silently inherits the *previous* remix’s reference tiles into the new, paid render. Every remix now writes its reference banks authoritatively — image, video, and audio — so an unrecoverable ref clears the slot (and says so) instead of leaving a stale one from the last clip to be priced and generated.
+
 ## [3.5.0] - 2026-08-22 — Across the Bridge: the Mirror opens PixAI's AI Tools and Enhance, a History dock, Remix, four gallery layouts, and the art goes incognito
 
 Moonglade now crosses into the half of PixAI that only a logged-in browser could reach — the **Mirror** files your work into your pixai.art library, and with it on, PixAI's own **AI Tools** and **Enhance** workflows open up inside the app. Creating gains a memory: **Remix** any picture or clip back into the composer, and a **History** timeline of everything you've made, with what it really cost. The library learns four **layouts** and a density slider, Details shows the whole generation record, and the default art now ships as a pack that keeps its secrets.
