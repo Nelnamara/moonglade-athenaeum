@@ -4961,6 +4961,134 @@ def _redact_host_paths_cli(out_dir, msg):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Auth tiers -- DECLARED AT THE ROUTE, enforced in one place
+# ---------------------------------------------------------------------------
+# A route's auth tier is a property OF THE ROUTE, so it is written on the route.
+# It used to live in tests/test_route_tiers.py's ROUTE_TIERS table instead, which
+# meant every route addition edited two files in two repositories' worth of
+# context -- and the table had already drifted past every credit-spending route
+# once (see that file's own header). The decorator below hangs the declaration on
+# the view function; _enforce_front_door() reads it back off app.view_functions at
+# request time; create_app() refuses to return an app in which any registered rule
+# has no declaration. The test still enumerates the url_map and still proves each
+# tier against a live request -- it just no longer DECLARES anything.
+PUBLIC = "PUBLIC"        # reachable with no session at all (the login surface itself)
+LOGIN = "LOGIN"          # any logged-in session, local or LAN
+LOCALHOST = "LOCALHOST"  # a logged-in session AND a loopback remote_addr
+TIERS = (PUBLIC, LOGIN, LOCALHOST)
+
+# The 403 body a LOCALHOST route refuses with. Three routes say something more
+# specific instead (see their `message=`); the wording of all four is a contract
+# the front end reads, so it is carried here verbatim rather than regenerated.
+LOCALHOST_REFUSAL = "localhost-only"
+
+_TIER_ATTR = "_mg_route_tier"
+
+
+def tier(default, message=LOCALHOST_REFUSAL, **by_method):
+    """Declare this view's auth tier. `@tier(LOGIN)`, `@tier(LOCALHOST)`, `@tier(PUBLIC)`.
+
+    A per-method override keeps a split route declarative instead of pushing half
+    of it back into the handler body: `/api/library-path` and `/api/panel/schedule`
+    are `@tier(LOGIN, POST=LOCALHOST)` -- readable at the route, and enforced by
+    the same gate as everything else.
+
+    `message` overrides the `error` string in the 403 a LOCALHOST route refuses
+    with, for the three routes whose hand-written guard said something more
+    specific than "localhost-only" (deleting from PixAI; importing onto the
+    server's machine). It is the message only -- the status and JSON shape are
+    the same for every tier refusal.
+
+    Pick the tier by what the handler can DO, not by what feels convenient:
+      LOGIN     -- browse the library, spend the owner's credits, manage your OWN
+                   account. A signed-in LAN device is NOT read-only; that is the
+                   whole point of the tier (see docs/DECISIONS.md).
+      LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
+                   PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
+                   maintenance, or shelling out on the SERVER machine.
+      PUBLIC    -- the login surface and the static art it renders. Nothing else.
+
+    A route whose LOCALHOST requirement depends on its ARGUMENTS rather than on
+    its URL is not expressible as a tier and must not be forced into one:
+    /api/panel/run demands loopback only for a destructive action, and
+    /api/users/remove only for someone else's account. Those declare the floor
+    the gate can actually enforce (LOGIN) and keep their own conditional check,
+    which their own test files cover."""
+    if default not in TIERS:
+        raise ValueError("unknown auth tier {!r}; expected one of {}".format(default, TIERS))
+    bad = {m: t for m, t in by_method.items() if t not in TIERS}
+    if bad:
+        raise ValueError("unknown auth tier(s) in per-method override: {!r}".format(bad))
+
+    declaration = (default, {m.upper(): t for m, t in by_method.items()}, message)
+
+    def _declare(view):
+        setattr(view, _TIER_ATTR, declaration)
+        return view
+    return _declare
+
+
+def route_tier(view, method):
+    """The tier that governs `view` for `method`, or None if it declares none."""
+    declaration = getattr(view, _TIER_ATTR, None)
+    if declaration is None:
+        return None
+    default, by_method, _message = declaration
+    return by_method.get(method, default)
+
+
+def route_tier_message(view):
+    """The `error` string this view's LOCALHOST refusal carries."""
+    declaration = getattr(view, _TIER_ATTR, None)
+    return LOCALHOST_REFUSAL if declaration is None else declaration[2]
+
+
+def declare_endpoint_tier(app, endpoint, default, message=LOCALHOST_REFUSAL, **by_method):
+    """Declare a tier for an endpoint whose view function this module does not define.
+
+    Exactly one exists: Flask's built-in `static`. It is NOT special-cased away --
+    `if rule.endpoint == "static": continue` is the single most common way a
+    catch-all route rule grows a hole, and /static/ is gated like everything else."""
+    view = app.view_functions[endpoint]
+    try:
+        tier(default, message=message, **by_method)(view)
+    except (AttributeError, TypeError):
+        # A bound method or C function can't carry an attribute; wrap it once.
+        import functools
+
+        @functools.wraps(view)
+        def _shim(*a, **k):
+            return view(*a, **k)
+        app.view_functions[endpoint] = tier(default, message=message, **by_method)(_shim)
+
+
+def assert_every_route_declares_a_tier(app):
+    """Refuse to hand back an app in which any registered rule has no tier.
+
+    This is the half of the old test table that could never be a test: a
+    declaration that lives at the route can only be MISSING at the route, and the
+    cheapest possible moment to say so is app creation, not CI. Adding a route
+    without a tier now fails the very first request anyone makes -- including the
+    developer's own."""
+    missing = sorted(
+        {(rule.endpoint, str(rule)) for rule in app.url_map.iter_rules()
+         if route_tier(app.view_functions.get(rule.endpoint), "GET") is None})
+    if missing:
+        raise AssertionError(
+            "{} registered route(s) declare NO auth tier:\n{}\n\n"
+            "FIX: put @tier(...) on the view, under its @app.route(...):\n"
+            "    @app.route(\"/api/thing\", methods=[\"POST\"])\n"
+            "    @tier(LOGIN)\n"
+            "    def api_thing():\n"
+            "Choose by what the handler can DO -- see tier()'s own docstring. The\n"
+            "tier is not paperwork: every credit-spending route was missing from\n"
+            "the hand-maintained lists that preceded this mechanism, and nothing\n"
+            "noticed until a route-gating audit found it."
+            .format(len(missing),
+                    "\n".join("    {} ({})".format(r, e) for e, r in missing)))
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -5889,6 +6017,7 @@ def create_app(out_dir: Path):
         session.permanent = True
 
     @app.route("/login")
+    @tier(PUBLIC)
     def login():
         """The sign-in page: serves the React shell (LoginPage.jsx) for EVERY request,
         including from the server's own machine -- there is no localhost bypass (see
@@ -5927,11 +6056,12 @@ def create_app(out_dir: Path):
             boot=boot)
 
     @app.route("/api/login", methods=["POST"])
+    @tier(PUBLIC)
     def api_login():
         """JSON sign-in AND first-run account creation for the React Login page
         (2026-08-02) -- docs/DECISIONS.md's 2026-07-31 feasibility map called
         this out explicitly: 'A SPA needs real POST /api/login -> JSON... before
-        auth can be driven from React at all.' Public (see _PUBLIC_PATHS) -- an
+        auth can be driven from React at all.' Public (@tier(PUBLIC)) -- an
         unauthenticated caller is exactly who needs to reach this.
 
         mode="create" (added once design_handoff/request-bootstrap-account-creation.md
@@ -6031,12 +6161,13 @@ def create_app(out_dir: Path):
     # Jinja/user input involved, so a plain string is safer than round-tripping it
     # through render_template_string for nothing.
     @app.route("/api/logout", methods=["POST"])
+    @tier(PUBLIC)
     def api_logout():
         """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
         logout()'s own POST branch; see that route's docstring for the full
         CSRF/revoke-scope reasoning, identical here (same shared
         bump_web_user_session_epoch, same scope="this-device" opt-out of the
-        global revoke). Public (see _PUBLIC_PATHS): an already-dead cookie
+        global revoke). Public (@tier(PUBLIC)): an already-dead cookie
         must still be able to shed itself locally with no valid session to
         check a CSRF token against -- same "fail toward MORE cleanup, never
         less" shape as the classic route, so this skips the CSRF check
@@ -6064,90 +6195,100 @@ def create_app(out_dir: Path):
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
     # ------------------------------------------------------------------
-    # Allowlist is intentionally tiny: /login (GET-only since the classic cut,
-    # 2026-08-08 -- it renders the React sign-in shell), the React JSON
-    # sign-in/sign-out, and the public /branding/ art prefix below.
-    # /branding/ IS public (see _PUBLIC_PREFIXES below): it was briefly left
-    # gated on the theory that a missing logo is a harmless degrade, but the
-    # actual effect was the real chosen mark/banner/favicon never rendering on
-    # the one page every visitor -- including a not-yet-authenticated LAN
-    # device -- is guaranteed to see. That route only serves static drop-in
-    # art (banner/logo/marks/mascots) with path traversal already rejected
-    # (see branding()); there's no user data, credential, or spend behind it,
-    # so it carries the same public trust tier as /login itself.
-    _PUBLIC_PATHS = frozenset({
-        "/login",
-        # The React app's JSON sign-in/sign-out (2026-08-02) -- an
-        # unauthenticated caller is exactly who needs to reach /api/login,
-        # and /api/logout must stay reachable by an already-dead cookie (an
-        # expired session still deserves a clean local sign-out).
-        "/api/login", "/api/logout",
-    })
-    _PUBLIC_PREFIXES = (
-        "/branding/",
-        # The React bundle (2026-08-02): LoginPage.jsx's own shell needs its
-        # compiled CSS/JS to render at all, and it renders for a visitor who
-        # by definition is not authenticated yet -- same public tier as
-        # /branding/ and /manifest.webmanifest above (plain compiled code, no
-        # user data, no catalog, no credential). LOGIN_PAGE below deliberately
-        # does NOT reference the 4 /static/mg-*.js custom-element scripts
-        # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
-        # badge, upscale panel) exists on the login page, so those stay
-        # exactly as gated as they always were.
-        "/next/assets/",
-    )
     # Routes whose contract is JSON, not an HTML page -- these get a JSON 401
     # instead of a login redirect, so a fetch(...).then(r => r.json()) caller
     # still gets parseable JSON instead of choking on the login page's HTML.
     # ONE prefix since the classic cut (2026-08-08): the two legacy non-/api/
     # JSON routes (/rate/<id>, /edit-prompt/<id>) were renamed under /api/.
+    # This selects the SHAPE of a refusal, never whether to refuse -- that is
+    # the route's own @tier declaration, and this list must never grow into a
+    # second, parallel one.
     _JSON_GATE_PREFIXES = ("/api/",)
 
     @app.before_request
     def _enforce_front_door():
-        """THE gate: every request must satisfy _is_authorized_request() (a
-        logged-in session ONLY -- no localhost bypass, see that function's
-        docstring further down) to reach anything beyond the tiny allowlist
-        above. This replaced 43
-        individual, easy-to-forget `if not _is_authorized_request(): ...` blocks
-        that used to sit one-per-route (see CHANGELOG.md for the full list) with
-        one place that can't be skipped when a new route is added later --
-        exactly the gap a prior adversarial review flagged: `/`, `/image/<id>`,
-        `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
-        `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`,
-        `/panel`, `/duplicates`, `/health`, the raw asset routes (`/thumbs/`,
-        `/img/`, `/video-file/`, `/full/`, `/badge-thumb/`,
-        `/contact-sheet`), `/export-zip`, `/manifest.webmanifest`, `/sw.js`, and
-        `/api/gallery-images`, `/api/similar`, `/api/collections`,
-        `/api/contests`, `/api/achievements`, `/api/skin`, `/api/ach-event`,
-        `/api/your-art`, `/api/loom/export-status`, `/api/loom/export-file`,
-        `/api/ping` had NO auth check of any kind before this hook existed.
-        `/branding/` is in that same "previously wide open" list, and
-        deliberately went back to public (see `_PUBLIC_PREFIXES`) rather than
-        joining the rest: it's static cosmetic art (logo/marks/mascots), not
-        gallery content, and the login page itself needs to render it for a
-        visitor who by definition isn't authenticated yet.
+        """THE gate: every request is refused unless its route's own @tier
+        declaration lets it through.
 
-        `/api/branding/shortcut` is deliberately NOT loosened by this hook
-        passing a logged-in remote session through as "authorized": its own
-        handler re-checks the stricter `_is_local_request()` underneath,
-        because it shells out to a host-local admin API on the machine the
-        SERVER process runs on -- a categorically different trust tier than
-        "browse the library" or "spend the owner's credits". See that route's
-        docstring."""
-        if request.path in _PUBLIC_PATHS or request.path.startswith(_PUBLIC_PREFIXES):
+        The tier is read off the view function (see tier() / route_tier()), so
+        this hook holds NO list of paths. It used to hold two -- _PUBLIC_PATHS
+        and _PUBLIC_PREFIXES -- which were the public tier written a second
+        time, in a second place, keyed on a string prefix rather than on the
+        route. Those are now `@tier(PUBLIC)` on login / api_login / api_logout /
+        branding / next_assets, and mean exactly what they meant before:
+        /branding/ is public because it is static drop-in art (logo, marks,
+        mascots, banners) with traversal already rejected in branding(), and the
+        login page every unauthenticated visitor sees has to render it; the
+        /next/assets/ bundle is public for the same reason -- LoginPage.jsx's
+        own compiled CSS/JS, no user data, no catalog, no credential. The 4
+        /static/mg-*.js custom-element scripts are NOT in that set: the login
+        page never loads them, and `static` stays LOGIN.
+
+        Three tiers, one place:
+          PUBLIC    -> through, no session needed.
+          LOGIN     -> _is_authorized_request() (a logged-in session ONLY -- no
+                       localhost bypass, see that function's docstring further
+                       down).
+          LOCALHOST -> that same session check AND _is_local_request().
+
+        The LOCALHOST arm is what changed on 2026-08-23. It used to be absent:
+        this hook only ever asked "is the session valid?", so it passed a
+        logged-in LAN device straight through, and each localhost-only handler
+        opened with its own hand-written `if not _is_local_request(): return
+        jsonify({"error": "localhost-only"}), 403`. Nothing structural kept
+        those there -- the check was silently deleted from api_panel_cancel and
+        api_panel_schedule (commit 0fd8cee) and never written at all in
+        api_setup_save_key, while all three docstrings went on claiming
+        "localhost-only". The refusal body is unchanged (same status, same JSON,
+        same wording, including the three routes that say something more
+        specific via `message=`); it is only issued from one place now.
+
+        A route whose localhost requirement depends on its ARGUMENTS keeps its
+        own conditional check, because that is not a tier: /api/panel/run
+        demands loopback only for a destructive action (14 of the 20
+        PANEL_ACTIONS are not, and a LAN account may run every one of them),
+        and /api/users/remove and /api/users/password only for an account that
+        is not the caller's own. Those declare the floor the gate can enforce.
+
+        This hook replaced 43 individual, easy-to-forget
+        `if not _is_authorized_request(): ...` blocks that used to sit
+        one-per-route (see CHANGELOG.md for the full list) with one place that
+        can't be skipped when a new route is added later -- exactly the gap a
+        prior adversarial review flagged: `/`, `/image/<id>`, `/delete/<id>`,
+        `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`, `/collection-add`,
+        `/collection-remove`, `/bulk-replace-prompt`, `/panel`, `/duplicates`,
+        `/health`, the raw asset routes (`/thumbs/`, `/img/`, `/video-file/`,
+        `/full/`, `/badge-thumb/`, `/contact-sheet`), `/export-zip`,
+        `/manifest.webmanifest`, `/sw.js`, and `/api/gallery-images`,
+        `/api/similar`, `/api/collections`, `/api/contests`,
+        `/api/achievements`, `/api/skin`, `/api/ach-event`, `/api/your-art`,
+        `/api/loom/export-status`, `/api/loom/export-file`, `/api/ping` had NO
+        auth check of any kind before this hook existed."""
+        view = app.view_functions.get(request.endpoint or "")
+        # No rule matched (a 404 in waiting), so there is no declaration to
+        # read. Gate it as LOGIN, exactly as the old path-prefix version did:
+        # an anonymous caller gets the login redirect, not a 404 that maps the
+        # app for them. A REGISTERED route can never land here -- create_app
+        # refuses to return an app with an undeclared rule.
+        level = route_tier(view, request.method) if view is not None else LOGIN
+        if level is None:
+            level = LOGIN
+        if level == PUBLIC:
             return None
-        if _is_authorized_request():
-            return None
-        if request.path.startswith(_JSON_GATE_PREFIXES):
-            return jsonify({"error": "authentication required"}), 401
-        return redirect(url_for("login", next=_safe_next(request.path) or ""))
+        if not _is_authorized_request():
+            if request.path.startswith(_JSON_GATE_PREFIXES):
+                return jsonify({"error": "authentication required"}), 401
+            return redirect(url_for("login", next=_safe_next(request.path) or ""))
+        if level == LOCALHOST and not _is_local_request():
+            return jsonify({"error": route_tier_message(view)}), 403
+        return None
 
     _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
     # (Used to live beside the classic /health page; the page died in the 2026-08-08 cut,
     # the cache moved here to its one surviving consumer.)
 
     @app.route("/api/health")
+    @tier(LOGIN)
     def api_health():
         """The health dashboard's data as JSON -- gap-audit route #10, consumed by the
         React app's HealthOverlay (the in-app modal that replaces bouncing to the
@@ -6174,6 +6315,7 @@ def create_app(out_dir: Path):
         return jsonify(payload)
 
     @app.route("/api/panel/summary")
+    @tier(LOGIN)
     def api_panel_summary():
         """JSON twin of /panel's own aggregation, for the React Control Panel overlay --
         same data, same local/destructive action-visibility rule (see /panel's own long
@@ -6233,6 +6375,7 @@ def create_app(out_dir: Path):
         return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
 
     @app.route("/api/users/add", methods=["POST"])
+    @tier(LOCALHOST)
     def api_users_add():
         """Add a new gallery web-login account from the Panel's Users tab.
 
@@ -6263,8 +6406,6 @@ def create_app(out_dir: Path):
         write would silently reset the first request's just-created password.
         (Same root-cause family as /api/users/remove's last-account race -- see
         that route's docstring.)"""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -6288,6 +6429,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/remove", methods=["POST"])
+    @tier(LOGIN)
     def api_users_remove():
         """Remove a gallery web-login account from the Panel's Users tab.
 
@@ -6336,6 +6478,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/password", methods=["POST"])
+    @tier(LOGIN)
     def api_users_password():
         """Change an account's password from the Panel's Users tab.
 
@@ -6407,12 +6550,14 @@ def create_app(out_dir: Path):
                         "still_signed_in_here": target == me})
 
     @app.route("/api/ping")
+    @tier(LOGIN)
     def api_ping():
         """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Login required
         (any session, local or LAN)."""
         return jsonify({"ok": True})
 
     @app.route("/api/server/stop", methods=["POST"])
+    @tier(LOGIN)
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
         Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app.
@@ -6432,6 +6577,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "stop"})
 
     @app.route("/api/library-path", methods=["GET", "POST"])
+    @tier(LOGIN, POST=LOCALHOST)
     def api_library_path():
         """Read or set the library folder (config.json's LIBRARY_DIR).
 
@@ -6463,8 +6609,6 @@ def create_app(out_dir: Path):
                 "local": local,
                 "supervised": _supervised(),
             })
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         want = str(body.get("path") or "").strip().strip('"')
         if not want:
@@ -6508,6 +6652,7 @@ def create_app(out_dir: Path):
                         "supervised": _supervised(), "restart_needed": str(target) != str(out_dir)})
 
     @app.route("/api/server/restart", methods=["POST"])
+    @tier(LOGIN)
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
         which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
@@ -6522,6 +6667,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "restart"})
 
     @app.route("/export-csv")
+    @tier(LOGIN)
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
         not a copy silently written into the backup folder. Built in memory. Authorized only.
@@ -6562,6 +6708,7 @@ def create_app(out_dir: Path):
                              datetime.date.today().isoformat()))
 
     @app.route("/api/panel/run", methods=["POST"])
+    @tier(LOGIN)
     def api_panel_run():
         """Start a whitelisted maintenance job as a background subprocess. Safe/read-only
         actions are open to any authorized session (local or logged-in LAN); destructive
@@ -6622,6 +6769,7 @@ def create_app(out_dir: Path):
             pass
 
     @app.route("/api/import-task", methods=["POST"])
+    @tier(LOGIN)
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
         edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
@@ -6666,6 +6814,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/panel/status")
+    @tier(LOGIN)
     def api_panel_status():
         """Live state of the running maintenance job, for the Panel's progress UI.
 
@@ -6704,6 +6853,7 @@ def create_app(out_dir: Path):
                             "lines": lines})
 
     @app.route("/api/watch/status")
+    @tier(LOGIN)
     def api_watch_status():
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
@@ -6711,6 +6861,7 @@ def create_app(out_dir: Path):
             return jsonify(dict(_watch_status))
 
     @app.route("/api/panel/cancel", methods=["POST"])
+    @tier(LOCALHOST)
     def api_panel_cancel():
         """Stop the running maintenance job from the browser (no Task Manager). Terminates the
         subprocess; the reader marks it 'cancelled'.
@@ -6724,8 +6875,6 @@ def create_app(out_dir: Path):
         row but only writes catalog_updates via save_catalog() AFTER the loop, so a
         mid-run terminate leaves files physically moved on disk while catalog.db still
         points at their old paths. Undo survives; catalog/disk coherence does not."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _panel_lock:
             proc = _panel_job.get("proc")
             running = _panel_job["status"] == "running"
@@ -6740,6 +6889,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "cancel"})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
+    @tier(LOGIN, POST=LOCALHOST)
     def api_panel_schedule():
         """Panel settings: the automated-task schedule + the download-workers count. GET
         returns the current settings; POST MERGES only the fields present (so the schedule
@@ -6756,8 +6906,6 @@ def create_app(out_dir: Path):
         owner would never see it configured. And `workers` is not schedule-scoped:
         _panel_run reads it for EVERY run including the owner's own local button
         clicks, so this endpoint also sets the concurrency of local maintenance jobs."""
-        if request.method == "POST" and not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
@@ -6798,6 +6946,7 @@ def create_app(out_dir: Path):
             return 0
 
     @app.route("/api/delete-image", methods=["POST"])
+    @tier(LOCALHOST)
     def api_delete_image():
         """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
 
@@ -6815,8 +6964,6 @@ def create_app(out_dir: Path):
         gate, and a route that acted without it would make that prompt decorative.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "not confirmed"}), 400
@@ -6854,6 +7001,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "media_id": mid, "task_id": tid})
 
     @app.route("/api/delete-local", methods=["POST"])
+    @tier(LOGIN)
     def api_delete_local():
         """JSON twin of /delete-bulk (and /delete/<id>) for fetch()-driven clients:
         quarantine the selected media to out_dir/_deleted/ through the SAME
@@ -6956,6 +7104,7 @@ def create_app(out_dir: Path):
                 "selected": mid in selected_ids, "thumb": thumb}
 
     @app.route("/api/delete-preview", methods=["POST"])
+    @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
         anything fires. Read-only: a few catalog reads, no network, no PixAI call.
@@ -6978,8 +7127,6 @@ def create_app(out_dir: Path):
 
         Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
         the entire selection, because the totals are what the user reads to decide."""
-        if not _is_local_request():
-            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -7123,6 +7270,7 @@ def create_app(out_dir: Path):
         return job_id, total, None
 
     @app.route("/api/delete-tasks", methods=["POST"])
+    @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_tasks():
         """JSON twin of /delete-tasks-bulk: same LOCALHOST tier (and for the same
         reason -- this MUTATES THE OWNER'S REAL CLOUD ACCOUNT, irreversibly), same
@@ -7143,8 +7291,6 @@ def create_app(out_dir: Path):
         inside delete_task_gql: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
         import moonglade_backup as core   # lazy: avoid import cycle
-        if not _is_local_request():
-            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         purge_local = bool(body.get("purge_local", True))
         task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
@@ -7187,6 +7333,7 @@ def create_app(out_dir: Path):
     # -------------------------------------------------------------------
 
     @app.route("/api/trash/list")
+    @tier(LOGIN)
     def api_trash_list():
         """List out_dir/_deleted/ for the Control Panel's Trash panel -- a directory
         scan, not a catalog query (purge_media_local's whole point is that the
@@ -7211,6 +7358,7 @@ def create_app(out_dir: Path):
                         "page": page, "limit": limit})
 
     @app.route("/api/trash/restore", methods=["POST"])
+    @tier(LOGIN)
     def api_trash_restore():
         """Restore one or more quarantined files back into the library. LOGIN tier --
         recovering something you (or anyone signed in) deleted is not the same trust
@@ -7232,6 +7380,7 @@ def create_app(out_dir: Path):
         return jsonify({"restored": restored, "errors": errors})
 
     @app.route("/api/trash/delete-forever", methods=["POST"])
+    @tier(LOCALHOST)
     def api_trash_delete_forever():
         """Permanently destroy one or more SELECTED quarantined files -- no more
         recovery after this. LOCALHOST-only (the owner physically at the machine),
@@ -7243,8 +7392,6 @@ def create_app(out_dir: Path):
         what actually stands between a misclick and data loss; confirm=true here just
         proves the client meant to send the request at all, it is not itself the
         security boundary -- the LOCALHOST check is."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
@@ -7257,13 +7404,12 @@ def create_app(out_dir: Path):
         return jsonify({"deleted": n})
 
     @app.route("/api/trash/empty", methods=["POST"])
+    @tier(LOCALHOST)
     def api_trash_empty():
         """Empty the ENTIRE trash -- every file under out_dir/_deleted/, not just a
         selection. Same LOCALHOST + confirm=true contract as
         api_trash_delete_forever() (see its docstring); the client demands the same
         typed "DELETE" word first (Trash.emptyAll())."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
@@ -7272,6 +7418,7 @@ def create_app(out_dir: Path):
         return jsonify({"deleted": n})
 
     @app.route("/api/rate/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def rate(media_id):
         data = request.get_json(silent=True) or {}
         try:
@@ -7282,6 +7429,7 @@ def create_app(out_dir: Path):
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/rebuild-poster/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def rebuild_poster(media_id):
         """Regenerate ONE video's poster thumbnail from its file, replacing the cached
         one. For a clip whose cached poster is wrong -- e.g. a fade-in that was
@@ -7314,12 +7462,14 @@ def create_app(out_dir: Path):
         return json.dumps({"ok": True, "thumb": "/thumbs/" + media_id + ".jpg?v=" + str(int(time.time()))}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/edit-prompt/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def edit_prompt(media_id):
         data = request.get_json(silent=True) or {}
         update_prompt_full(db_path, media_id, data.get("prompt", ""))
         return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/collection", methods=["POST"])
+    @tier(LOGIN)
     def api_collection():
         """JSON twin of /collection-add + /collection-remove for fetch()-driven
         clients: one route, `action` picks the direction, same add_to_collection /
@@ -7342,6 +7492,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
 
     @app.route("/api/replace-prompts", methods=["POST"])
+    @tier(LOGIN)
     def api_replace_prompts():
         """JSON twin of /bulk-replace-prompt: same bulk_replace_prompt helper (plain
         substring find/replace over prompt_full, counting only rows that actually
@@ -7430,6 +7581,7 @@ def create_app(out_dir: Path):
             return None
 
     @app.route("/thumbs/<media_id>.jpg")
+    @tier(LOGIN)
     def thumb(media_id):
         # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
         if (request.args.get("s") or "") == "32" and "/" not in media_id \
@@ -7445,6 +7597,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/video-file/<media_id>")
+    @tier(LOGIN)
     def video_file(media_id):
         row = get_row(db_path, media_id)
         if not row or row.get("is_video") != "1":
@@ -7475,6 +7628,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/full/<media_id>")
+    @tier(LOGIN)
     def full_image(media_id):
         # Resolve a media_id to its full-res file on the fly (used by the
         # lightbox so the index page doesn't precompute 250 image paths).
@@ -7491,6 +7645,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/export-zip", methods=["POST"])
+    @tier(LOGIN)
     def export_zip():
         # Stream a ZIP of the selected files. Default is STORED (no recompression) --
         # they're already compressed. Optional export-time transforms: convert to
@@ -7599,9 +7754,14 @@ def create_app(out_dir: Path):
     # must never let an UNAUTHENTICATED device use the key or spend credits, but
     # a logged-in LAN session is deliberately trusted the same as the owner at
     # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
-    # _is_local_request() itself now backs only the one deliberately-narrower
-    # exception (/api/branding/shortcut, which shells out to the SERVER machine's
-    # own PowerShell/COM) -- see that route's docstring.
+    # _is_local_request() itself backs the deliberately-narrower LOCALHOST tier
+    # on top of that: since 2026-08-23 it is read in ONE place for every route
+    # that declares @tier(LOCALHOST) -- _enforce_front_door() -- rather than by
+    # a hand-written guard per handler. The only direct callers left are the
+    # three routes whose localhost requirement depends on their ARGUMENTS and so
+    # is not a tier (/api/panel/run's destructive actions, /api/users/remove and
+    # /api/users/password for an account that is not the caller's own) and a
+    # handful of purely-informational reads (a boot flag, a withheld host path).
     #
     # FAILS CLOSED on a missing/empty remote_addr: a prior version treated
     # "" as local, which is safe under
@@ -7631,10 +7791,13 @@ def create_app(out_dir: Path):
         so the web app remains unreachable, from any address including
         127.0.0.1, to anything but /login until an account exists and signs in.
         `_is_local_request()` still exists and is still used, but ONLY as an
-        independent, stricter, ADDITIONAL requirement on the couple of routes
-        that must never run for a remote session even when logged in
-        (/api/branding/shortcut, destructive Panel actions) -- it is no longer
-        consulted here.
+        independent, stricter, ADDITIONAL requirement on the routes that must
+        never run for a remote session even when logged in -- the LOCALHOST tier
+        (every route carrying `@tier(LOCALHOST)`, enforced by
+        _enforce_front_door() right after this function returns true), plus the
+        few argument-dependent cases that are not a tier (destructive Panel
+        actions, changing or removing an account that is not the caller's own).
+        It is no longer consulted here.
 
         Every genuine access-control gate that used to read `_is_local_request()`
         was converted to this during the LAN-auth pass; a few purely-informational
@@ -7836,6 +7999,7 @@ def create_app(out_dir: Path):
         return s
 
     @app.route("/api/model-search")
+    @tier(LOGIN)
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
@@ -7954,6 +8118,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
     @app.route("/api/model-version")
+    @tier(LOGIN)
     def api_model_version():
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
@@ -7991,6 +8156,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
     @app.route("/api/task-params/<task_id>")
+    @tier(LOGIN)
     def api_task_params(task_id):
         """A task's submit parameters, reduced to what Remix (issue #4) needs:
         the task's LoRAs -- exact {version_id, weight} pairs straight off
@@ -8065,6 +8231,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/video-task-params/<task_id>")
+    @tier(LOGIN)
     def api_video_task_params(task_id):
         """A VIDEO task's submit parameters, reduced to what "↺ Remix for videos"
         (SCOPE_2026-08-17 §2) needs: the shot kind (i2v / flf / r2v) and every
@@ -8177,6 +8344,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/image-meta/<media_id>")
+    @tier(LOGIN)
     def api_image_meta(media_id):
         """The one catalog row the Upscale panel needs, by media_id. Read-only, no network.
 
@@ -8217,6 +8385,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/gallery-images")
+    @tier(LOGIN)
     def api_gallery_images():
         """Pick-from-your-gallery source for the create surfaces + The Loom: recent (or
         keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
@@ -8265,6 +8434,7 @@ def create_app(out_dir: Path):
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
+    @tier(LOGIN)
     def api_similar(media_id):
         """'More like this': the k catalog images most visually similar to media_id, via the
         moonglade_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
@@ -8323,11 +8493,13 @@ def create_app(out_dir: Path):
         return jsonify({"images": out, "total": len(out), "query": str(media_id)})
 
     @app.route("/api/collections")
+    @tier(LOGIN)
     def api_collections():
         """Collection names for the picker/filter dropdowns. Read-only, local catalog."""
         return jsonify({"collections": unique_collections(db_path)})
 
     @app.route("/branding/<path:fname>")
+    @tier(PUBLIC)
     def branding(fname):
         """Serve branding art. The URL vocabulary is PUBLIC role names
         (/branding/marks/..., /branding/bridge/emotion/...); the on-disk tree
@@ -8380,6 +8552,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/badge-thumb/<aid>.png")
+    @tier(LOGIN)
     def badge_thumb(aid):
         """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
         truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
@@ -8427,6 +8600,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/contact-sheet")
+    @tier(LOGIN)
     def contact_sheet():
         """Print-ready views for physical output. ?format=letter (grid, default) |
         photo (single 4x6) | strip (photo-booth: 2x2in strips on a 4x6, for the
@@ -8542,6 +8716,7 @@ def create_app(out_dir: Path):
         return html
 
     @app.route("/api/contact-sheet")
+    @tier(LOGIN)
     def api_contact_sheet():
         """JSON twin of /contact-sheet -- feeds the React ContactSheetOverlay's on-screen
         preview and its own native (window.print()) output. Same source selection as the
@@ -8592,6 +8767,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/duplicates")
+    @tier(LOGIN)
     def api_duplicates():
         """Real, working duplicate-groups listing for the React Duplicate Review overlay
         (the parked affordance in HealthOverlay.jsx's Duplicates/Reclaimable stat tiles).
@@ -8753,6 +8929,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/duplicates/resolve", methods=["POST"])
+    @tier(LOGIN)
     def api_duplicates_resolve():
         """The destructive half of Duplicate Review: quarantines the LOSING
         copies of one or more duplicate groups into out_dir/_duplicates/, via
@@ -8881,6 +9058,7 @@ def create_app(out_dir: Path):
                         "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
 
     @app.route("/api/duplicates/undo", methods=["POST"])
+    @tier(LOGIN)
     def api_duplicates_undo():
         """Reverses ONE quarantine_duplicate_file() call (see its own docstring
         and restore_quarantined_duplicate()): moves a single quarantined
@@ -8911,6 +9089,7 @@ def create_app(out_dir: Path):
         return jsonify(result)
 
     @app.route("/api/account")
+    @tier(LOGIN)
     def api_account():
         """Credits + free-card balance for the header chip. Read-only; login required.
         Fails soft to nulls so the header never breaks."""
@@ -9014,6 +9193,7 @@ def create_app(out_dir: Path):
             return default
 
     @app.route("/api/account/card-history")
+    @tier(LOGIN)
     def api_account_card_history():
         """Benefit-card (kaisuuken) usage. ?all=1 -> the lifetime type roster
         (kaisuuken_type_catalog); otherwise the recent usage events (list_kaisuuken_logs,
@@ -9028,6 +9208,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/account/coupons")
+    @tier(LOGIN)
     def api_account_coupons():
         """Coupons / Credit Boost. On-hand (available|locked) by default; ?history=1 swaps
         to redeemed|expired. Informational only -- no redeem/apply here by design. Read-only,
@@ -9043,6 +9224,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/account/credit-log")
+    @tier(LOGIN)
     def api_account_credit_log():
         """Full credit movement history (purchase/gift/spend/refund). Newest-first;
         BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
@@ -9056,6 +9238,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/stats")
+    @tier(LOGIN)
     def api_stats():
         """Catalog totals for fetch()-driven headers: the SAME numbers the classic
         template bakes into its banner (catalog_counts -- images, videos, distinct
@@ -9085,6 +9268,7 @@ def create_app(out_dir: Path):
                         "coverage_pct": coverage})
 
     @app.route("/api/setup/save-key", methods=["POST"])
+    @tier(LOCALHOST)
     def api_setup_save_key():
         """First-run wizard: validate the submitted key with a real, read-only account_info
         call, and only write config.json AFTER that succeeds -- never write first and hope.
@@ -9106,8 +9290,6 @@ def create_app(out_dir: Path):
         could point the owner's generations at a foreign API key -- on a server started
         without a key (the exact first-run state this endpoint exists for) load_token's
         fresh-disk fallback picks it up on the very next spend."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         key = (body.get("api_key") or "").strip()
         if not key:
@@ -9172,6 +9354,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "credits": credits})
 
     @app.route("/api/assets/status")
+    @tier(LOGIN)
     def api_assets_status():
         """The asset container's current state: whether a (re)fetch is needed and,
         if a fetch is running/just finished/just failed, its live progress. LOGIN
@@ -9192,13 +9375,12 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/assets/fetch", methods=["POST"])
+    @tier(LOCALHOST)
     def api_assets_fetch():
         """Start the asset container fetch. LOCALHOST-ONLY, same trust class as
         /api/setup/save-key just above -- it writes a real file into the app
         root. Single-flight: a second call while one is already running is a
         409, matching /api/panel/run's own busy shape, not a second job."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         started = _asset_job.start()
         if not started:
             st = _asset_job.status()
@@ -9208,6 +9390,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True})
 
     @app.route("/api/claim", methods=["POST"])
+    @tier(LOGIN)
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
         money moves). Login required; the header click IS the confirmation. One bad claim
@@ -9267,6 +9450,7 @@ def create_app(out_dir: Path):
         return _read_snips_file(_legacy_snips_path())
 
     @app.route("/api/snippets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_snippets():
         """Prompt snippets/favorites, stored PER-ACCOUNT (out_dir/prompt_snippets/<user>.json)
         so one signed-in account can't see or wholesale-clobber another's -- same split saved
@@ -9293,6 +9477,7 @@ def create_app(out_dir: Path):
     _ach_lock = threading.Lock()
 
     @app.route("/api/contests")
+    @tier(LOGIN)
     def api_contests():
         """The live PixAI contest board (community + official). Read-only PUBLIC data (not
         owner-private, no spend), so NOT localhost-gated -- the owner browsing over LAN still
@@ -9308,6 +9493,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
 
     @app.route("/api/artwork-views")
+    @tier(LOGIN)
     def api_artwork_views():
         """Live view count for one published artwork -> the detail page's Views metric.
         Login required; uses the owner's key. ?id=<artwork_id>."""
@@ -9321,6 +9507,7 @@ def create_app(out_dir: Path):
             return jsonify({"views": None, "error": _redact_host_paths(str(e))[:120]}), 200
 
     @app.route("/api/your-art")
+    @tier(LOGIN)
     def api_your_art():
         """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
         so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
@@ -9350,6 +9537,7 @@ def create_app(out_dir: Path):
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
     @app.route("/api/myart/items")
+    @tier(LOGIN)
     def api_myart_items():
         """Card-ready rows for the My Art tabbed gallery (Frontend Gallery.dc.html's
         ovMyArt, rebuilt 2026-08-06): every catalog row that exists as a PixAI ARTWORK
@@ -9402,6 +9590,7 @@ def create_app(out_dir: Path):
                 "title": r[3], "art_tags": r[4], "is_published": r[5]}
 
     @app.route("/api/myart/publish", methods=["POST"])
+    @tier(LOGIN)
     def api_myart_publish():
         """Publish / unpublish / re-tag / delete one of the owner's artworks -- the My Art
         card actions and the Lightbox/Details Publish button.
@@ -9535,6 +9724,7 @@ def create_app(out_dir: Path):
                 "title": (row["title"] or "").strip() or (row["prompt_preview"] or "").strip()[:48]}
 
     @app.route("/api/lineage/<media_id>")
+    @tier(LOGIN)
     def api_lineage(media_id):
         """The family tree of one image, for Image Details' LINEAGE panel:
           * siblings -- the other outputs of the SAME generation task (share task_id; up to
@@ -9574,6 +9764,7 @@ def create_app(out_dir: Path):
                         "parent": parent, "children": children})
 
     @app.route("/api/siblings", methods=["POST"])
+    @tier(LOGIN)
     def api_siblings():
         """Page-batched Sibling Strip data for the card placard (issue #30): every
         output of each requested task, in ONE query. The per-card /api/lineage fetch
@@ -9628,6 +9819,7 @@ def create_app(out_dir: Path):
         return jsonify({"by_task": by_task})
 
     @app.route("/api/train/recent-tasks")
+    @tier(LOGIN)
     def api_train_recent_tasks():
         """Recent generations grouped by task, for the mobile Train dataset picker
         (Moonglade Mobile.dc.html's 'tap a task, it adds its images' tile grid). Desktop's
@@ -9665,6 +9857,7 @@ def create_app(out_dir: Path):
         return jsonify({"tasks": tasks})
 
     @app.route("/api/train/quota")
+    @tier(LOGIN)
     def api_train_quota():
         """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
         NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
@@ -9676,6 +9869,7 @@ def create_app(out_dir: Path):
                             "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/train/models")
+    @tier(LOGIN)
     def api_train_models():
         """Trainable base models grouped by architecture (the train panel's Model Type ->
         Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
@@ -9692,6 +9886,7 @@ def create_app(out_dir: Path):
 
     @app.route("/api/train/cover")
     @app.route("/api/pixai-cdn/thumb")   # the general name -- covers My Art's LoRA cards too
+    @tier(LOGIN)
     def api_train_cover():
         """Proxy a PixAI CDN thumbnail (images-ng.pixai.art), which the browser can't load
         cross-origin from localhost but the server fetches fine. Started as the Train
@@ -9726,6 +9921,7 @@ def create_app(out_dir: Path):
             return ("fetch failed", 502)
 
     @app.route("/api/train/submit", methods=["POST"])
+    @tier(LOGIN)
     def api_train_submit():
         """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
 
@@ -9794,6 +9990,7 @@ def create_app(out_dir: Path):
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
     @app.route("/api/achievements")
+    @tier(LOGIN)
     def api_achievements():
         """Milestone progress + skin unlocks, computed from local catalog stats +
         the persisted telemetry counters. Read-only catalog data (no spend, no
@@ -9905,6 +10102,7 @@ def create_app(out_dir: Path):
         return jsonify(result)
 
     @app.route("/api/skin", methods=["POST"])
+    @tier(LOGIN)
     def api_skin():
         """Set the active cosmetic skin. Only an *earned* skin may be applied (server checks
         against current unlocks), so a client can't force a locked palette. Persists to
@@ -9934,6 +10132,7 @@ def create_app(out_dir: Path):
         return jsonify({"skin": skin})
 
     @app.route("/api/ach-event", methods=["POST"])
+    @tier(LOGIN)
     def api_ach_event():
         """Feat-event beacon from the front-end: the Starfall konami egg, the
         in-app manual, and narrator pokes. Whitelisted event names only; each is
@@ -9953,6 +10152,7 @@ def create_app(out_dir: Path):
         return jsonify({"error": "unknown event"}), 400
 
     @app.route("/api/mirror/status")
+    @tier(LOGIN)
     def api_mirror_status():
         """Read-only status of 'Mirror to PixAI website': the toggle flag + the stored
         JWT's days-left, decoded OFFLINE (no network). NEVER returns the token (review
@@ -9963,6 +10163,7 @@ def create_app(out_dir: Path):
                         "days_left": core.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/mirror/enable", methods=["POST"])
+    @tier(LOCALHOST)
     def api_mirror_enable():
         """Set the MIRROR_TO_PIXAI toggle in config.json. LOCALHOST-ONLY: it rewrites
         config.json (the file that also holds PIXAI_API_KEY, AUTH_USERS, AUTH_SECRET_KEY),
@@ -9973,8 +10174,6 @@ def create_app(out_dir: Path):
         wipe _save_config's docstring exists to prevent -- _load_config()'s ValueError->{}
         cannot tell a corrupt file from an empty one). Serialized on _accounts_lock with the
         other config writers."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         import moonglade_backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
         cfg_path = Path(core.__file__).resolve().parent / "config.json"
@@ -10002,6 +10201,7 @@ def create_app(out_dir: Path):
         return jsonify({"enabled": want})
 
     @app.route("/api/mirror/connect", methods=["POST"])
+    @tier(LOGIN)
     def api_mirror_connect():
         """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
         machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
@@ -10022,6 +10222,7 @@ def create_app(out_dir: Path):
                         "days_left": core.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/branding", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_branding():
         """The banner mark (the icon beside the title) + its animation. GET and POST both
         require login (any session, local or LAN) -- cosmetic, so any authorized device may
@@ -10061,6 +10262,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
 
     @app.route("/api/branding/slot", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_upload():
         """Upload a new asset into one Branding slot (the three banner slots --
         Control Panel.dc.html's 'From disk' chip; mascots/rewards are NOT slots,
@@ -10102,6 +10304,7 @@ def create_app(out_dir: Path):
         return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/crop", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_crop():
         """Update one uploaded asset's zoom/cropX/cropY transform (Control
         Panel.dc.html's three banner sliders). LOGIN tier, same as the upload
@@ -10122,6 +10325,7 @@ def create_app(out_dir: Path):
         return jsonify({"assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/active", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_active():
         """Pick which already-uploaded asset is active for a slot. LOGIN tier,
         same as the upload route. There is no "clear to none" -- see
@@ -10133,6 +10337,7 @@ def create_app(out_dir: Path):
         return jsonify({"slots": branding_slots_payload(out_dir)})
 
     @app.route("/api/branding/mark/custom", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_mark_custom():
         """Upload The Great Library's custom mark (Control Panel.dc.html's 6th
         marks tile). LOGIN tier + a real server-side achievement check -- unlike
@@ -10157,6 +10362,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/mark/custom/remove", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_mark_custom_remove():
         """Remove an uploaded custom mark (Control Panel.dc.html's Remove chip).
         LOGIN tier, same as the upload route above."""
@@ -10168,6 +10374,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/banners/earned")
+    @tier(LOGIN)
     def api_branding_banners_earned():
         """The earned-banner picks BannerEditor's locked/earned tile row renders.
         One entry today (great_library, gated on the-great-library); void_banner
@@ -10184,6 +10391,7 @@ def create_app(out_dir: Path):
         }]})
 
     @app.route("/api/branding/banner/earned", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_banner_earned():
         """Apply an earned banner as the banner_main flat. Server gate is
         authoritative (the UI's locked tile is cosmetic): 403 until the
@@ -10205,6 +10413,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
+    @tier(LOCALHOST)
     def api_branding_shortcut():
         """Write/refresh the Desktop launcher shortcut with the chosen mark's
         .ico. A .pyw can't carry an icon; the .lnk can -- this IS the app icon.
@@ -10221,8 +10430,6 @@ def create_app(out_dir: Path):
         the rest of the branding-writes group during the LAN-auth conversion
         pass (unlike GET/POST /api/branding just above, which only writes
         out_dir/branding.json -- ordinary app data, correctly broadened)."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         mark = str(body.get("mark") or load_branding(out_dir)["mark"])
         # Whitelist before anything touches the shell: only a known cut mark id
@@ -10236,6 +10443,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "lnk": lnk})
 
     @app.route("/api/suggest-prompt")
+    @tier(LOGIN)
     def api_suggest_prompt():
         """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
         NL description for a media_id. Read-only and free; login required. ?media_id="""
@@ -10249,6 +10457,7 @@ def create_app(out_dir: Path):
             return jsonify({"suggestions": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/tag-suggest")
+    @tier(LOGIN)
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
         dropdown). Read-only and free; login required. ?q=<prefix>."""
@@ -10262,6 +10471,7 @@ def create_app(out_dir: Path):
             return jsonify({"tags": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/upload", methods=["POST"])
+    @tier(LOGIN)
     def api_upload():
         """Upload a local file from the picker -> PixAI media_id (the same free
         3-step S3 handshake as the CLI's --upload). Login required,
@@ -10308,6 +10518,7 @@ def create_app(out_dir: Path):
                     _sh.copyfileobj(src, dst)
 
     @app.route("/api/import-local", methods=["POST"])
+    @tier(LOCALHOST, message="this imports files onto the server's machine; localhost-only")
     def api_import_local():
         """Import local files into the catalog as source='local' -- the web equivalent of the
         CLI's --import-local. Accepts multipart `files` (images/videos); a `.zip` is expanded.
@@ -10321,8 +10532,6 @@ def create_app(out_dir: Path):
         Saves the uploads to a temp dir (expanding any zip), then reuses
         core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
         dedup), tags an optional collection, and returns counts. Synchronous for now."""
-        if not _is_local_request():
-            return jsonify({"error": "this imports files onto the server's machine; localhost-only"}), 403
         import os as _os
         import tempfile
         import shutil
@@ -10430,6 +10639,7 @@ def create_app(out_dir: Path):
         return _read_presets_data(_legacy_presets_path())
 
     @app.route("/api/presets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_presets():
         """Toolbox presets, stored per-account under out_dir/toolbox_presets/ (preset
         prompts are PixAI-authored content, so they live as the owner's own captured
@@ -10545,6 +10755,7 @@ def create_app(out_dir: Path):
         return isinstance(q, str) and q.startswith("?") and len(q) <= 4096
 
     @app.route("/api/view-presets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_view_presets():
         """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
         string}, stored server-side under out_dir/view_presets/ so a view saved at the
@@ -10647,6 +10858,7 @@ def create_app(out_dir: Path):
         return msg
 
     @app.route("/api/price", methods=["POST"])
+    @tier(LOGIN)
     def api_price():
         """Live cost + free-card check for the drawer's current settings (generate, edit,
         fix, video or an AI preset). Read-only (no spend). Login required (any session,
@@ -10680,6 +10892,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
 
     @app.route("/api/generate", methods=["POST"])
+    @tier(LOGIN)
     def api_generate():
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
         backup. Login required -- any session, local or LAN, deliberately: spending from a
@@ -10756,6 +10969,7 @@ def create_app(out_dir: Path):
                 "/api/generate", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
+    @tier(LOGIN)
     def api_edit():
         """Instruct-edit an existing gallery image ('make it night'). Login required;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
@@ -10794,6 +11008,7 @@ def create_app(out_dir: Path):
     _ENH_PRICE_TTL = 3600.0
 
     @app.route("/api/enhance/presets")
+    @tier(LOGIN)
     def api_enhance_presets():
         """The six Bridge Enhance presets + LIVE per-preset cost (price + free-card), so the
         drawer's cost chips are honest rather than baked (the same 'fetch, don't bake' rule Fix
@@ -10845,6 +11060,7 @@ def create_app(out_dir: Path):
         return jsonify({"presets": out})
 
     @app.route("/api/enhance", methods=["POST"])
+    @tier(LOGIN)
     def api_enhance():
         """One-click AI preset (PixAI panelplugin workflow) on the Edit tab's source image --
         the mirror-gated Bridge tier (drift §44 / SCOPE §3). Accepts `workflow_id` OR
@@ -10897,6 +11113,7 @@ def create_app(out_dir: Path):
                 "/api/enhance", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/enhance/emotions")
+    @tier(LOGIN)
     def api_enhance_emotions():
         """The staged Change-Emotion options: each emotion-role <key>.<img>
         (loose OR packed in the container), keyed by filename stem. The picker self-populates
@@ -10960,6 +11177,7 @@ def create_app(out_dir: Path):
                 "custom": bool(sc.get("custom"))}
 
     @app.route("/api/scenes")
+    @tier(LOGIN)
     def api_scenes():
         """The AI-Tools scene catalog + each scene's control schema, so the nav modal browses
         and the gen drawer renders the right form. 'Fetch, don't bake': the list is pulled LIVE
@@ -10985,6 +11203,7 @@ def create_app(out_dir: Path):
         return jsonify({"scenes": out})
 
     @app.route("/api/scene", methods=["POST"])
+    @tier(LOGIN)
     def api_scene():
         """Generate one AI-Tools scene (createChatEditingSceneTask) on the picked source
         image(s). Mirror-gated FIRST, before any upload/build/submit: a scene task submitted on
@@ -11023,6 +11242,7 @@ def create_app(out_dir: Path):
                                   "media_ct": len(locals().get("media") or [])})[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
+    @tier(LOGIN)
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
         pixel coords. Login required; returns {task_id} for the async poller.
@@ -11240,9 +11460,9 @@ __UPSCALE_CONST__
     #      surfaces that don't exist on the login page at all -- dead weight
     #      to parse before a visitor has even signed in.
     #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
-    #      allowlist, and never needed to be until now -- only
-    #      /next/assets/ (this page's own bundle/stylesheet) was added to
-    #      _PUBLIC_PREFIXES. Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      public tier, and never needed to be until now -- only
+    #      /next/assets/ (this page's own bundle/stylesheet) is
+    #      @tier(PUBLIC). Reusing NEXT_PAGE unmodified would have 404/401'd
     #      an unauthenticated visitor's <script> requests for all 8 -- caught
     #      live: those requests 302'd back to /login (the front door redoing
     #      its own job on itself), the module script's own fetch got HTML
@@ -11281,6 +11501,7 @@ __DESIGN_TOKENS__
     # keep working. One endpoint, two paths -- no redirect hop, same tier.
     @app.route("/")
     @app.route("/next")
+    @tier(LOGIN)
     def next_gallery():
         session.setdefault("csrf", secrets.token_hex(16))
         brand = brand_context(out_dir)
@@ -11336,6 +11557,7 @@ __DESIGN_TOKENS__
             boot=boot)
 
     @app.route("/next/assets/<path:fname>")
+    @tier(PUBLIC)
     def next_assets(fname):
         resp = send_from_directory(str(_NEXT_DIST), fname)
         # The bundle changes on every `npm run build` with NO url change, and this
@@ -11350,6 +11572,7 @@ __DESIGN_TOKENS__
         return resp
 
     @app.route("/api/next/library")
+    @tier(LOGIN)
     def api_next_library():
         """The new gallery's own listing surface -- full filter set, clean field
         names, one purpose. Reads the same catalog engine (query_catalog) as
@@ -11411,6 +11634,7 @@ __DESIGN_TOKENS__
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
 
     @app.route("/api/next/detail/<media_id>")
+    @tier(LOGIN)
     def api_next_detail(media_id):
         """The pilot's Details view backing data -- classic's detail() route (~12254),
         JSON instead of a server-rendered page. Full row, plus prev_id/next_id computed
@@ -11479,6 +11703,7 @@ __DESIGN_TOKENS__
         return base.timestamp() + ms
 
     @app.route("/api/next/history")
+    @tier(LOGIN)
     def api_next_history():
         """Read-only feed for the Generate dock's History mode: the last `days` LOCAL
         calendar days of finished runs (catalog rows by created_at, newest first, empty
@@ -11684,6 +11909,7 @@ __DESIGN_TOKENS__
         })
 
     @app.route("/loom/vendor/<path:fname>")
+    @tier(LOGIN)
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
@@ -11701,6 +11927,7 @@ __DESIGN_TOKENS__
         return send_from_directory(str(vdir), fname, max_age=31536000)
 
     @app.route("/loom/dist/<path:fname>")
+    @tier(LOGIN)
     def loom_dist(fname):
         """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
         loom/) -- the Loom's SOLE delivery path since the Babel-standalone retirement
@@ -11719,6 +11946,7 @@ __DESIGN_TOKENS__
         return send_from_directory(str(ddir), fname, max_age=0)
 
     @app.route("/loom")
+    @tier(LOGIN)
     def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
         backend (window.storage swapped for /api/loom/*). Authorized only.
@@ -11738,6 +11966,7 @@ __DESIGN_TOKENS__
         return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
     @app.route("/api/loom/get")
+    @tier(LOGIN)
     def loom_get():
         user = str(session.get("user") or "")
         if not user:
@@ -11747,6 +11976,7 @@ __DESIGN_TOKENS__
             return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
+    @tier(LOGIN)
     def loom_set():
         user = str(session.get("user") or "")
         if not user:
@@ -11764,6 +11994,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
+    @tier(LOGIN)
     def loom_list():
         from urllib.parse import unquote
         user = str(session.get("user") or "")
@@ -11785,6 +12016,7 @@ __DESIGN_TOKENS__
         return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
+    @tier(LOGIN)
     def loom_delete():
         user = str(session.get("user") or "")
         if not user:
@@ -11873,6 +12105,7 @@ __DESIGN_TOKENS__
         return fallback[0] if fallback else None
 
     @app.route("/api/loom/handoff", methods=["POST"])
+    @tier(LOGIN)
     def loom_handoff():
         """Frame handoff: given a generated shot's video media_id, extract its LAST frame,
         upload it, and return the new frame media_id -- which the storyboard sets as the
@@ -11911,6 +12144,7 @@ __DESIGN_TOKENS__
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/import-frames", methods=["POST"])
+    @tier(LOGIN)
     def loom_import_frames():
         """Give an IMPORTED clip the two stills it never had.
 
@@ -11958,6 +12192,7 @@ __DESIGN_TOKENS__
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/video-duration")
+    @tier(LOGIN)
     def loom_video_duration():
         """Real duration (seconds) of an already-catalogued video, via ffprobe on the local
         file -- fallback for the Footage tab's import-as-footage picker (loom/master-
@@ -11985,6 +12220,7 @@ __DESIGN_TOKENS__
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
+    @tier(LOGIN)
     def loom_generate():
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
@@ -12171,6 +12407,7 @@ __DESIGN_TOKENS__
                 _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
 
     @app.route("/api/loom/export", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export():
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
@@ -12384,12 +12621,14 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True, "shots": len(segs), "audio": audio_track})
 
     @app.route("/api/loom/export-status")
+    @tier(LOGIN)
     def api_loom_export_status():
         with _export_lock:
             return jsonify({k: _export_job[k] for k in
                             ("status", "progress", "elapsed", "out", "error", "warning")})
 
     @app.route("/api/loom/export-file")
+    @tier(LOGIN)
     def api_loom_export_file():
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
@@ -12398,6 +12637,7 @@ __DESIGN_TOKENS__
                                    download_name="moonglade-loom-cut.mp4")
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export_cancel():
         with _export_lock:
             proc = _export_job.get("proc")
@@ -12511,6 +12751,7 @@ __DESIGN_TOKENS__
         return ",".join(out)
 
     @app.route("/api/loom/export-bundle", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export_bundle():
         """Full-bundle export: a zip of project.json (the lightweight Backup .json's
         {project, thumbs}, plus a `missing_media` manifest this tier alone can produce
@@ -12567,6 +12808,7 @@ __DESIGN_TOKENS__
         return resp
 
     @app.route("/api/loom/import-bundle", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_import_bundle():
         """Accepts a full-bundle zip (see export-bundle), catalogs any media this machine
         doesn't already have (source='api' -- it's real PixAI media, just synced via the
@@ -12722,6 +12964,7 @@ __DESIGN_TOKENS__
             _enhance_pending.pop(str(tid), None)
 
     @app.route("/api/task-status")
+    @tier(LOGIN)
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
@@ -12828,6 +13071,7 @@ __DESIGN_TOKENS__
                             "status": "checking… ({})".format(_redact_host_paths(str(e))[:160])}), 200
 
     @app.route("/api/jobs")
+    @tier(LOGIN)
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
         survives a reload. The card polls this. Login required, like the creation suite.
@@ -12850,6 +13094,7 @@ __DESIGN_TOKENS__
         return jsonify({"jobs": jobs})
 
     @app.route("/api/jobs", methods=["POST"])
+    @tier(LOGIN)
     def api_jobs_register():
         """Register/update a job in the log. The Jobs card calls this the moment a gen is
         submitted (status=running) so it shows immediately; the authoritative done/failed
@@ -12878,6 +13123,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/jobs/dismiss", methods=["POST"])
+    @tier(LOGIN)
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
@@ -12898,6 +13144,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/workflows")
+    @tier(LOGIN)
     def api_workflows():
         """Live enhance-workflow catalog (id + name + type) for the Bridge picker. Read-only;
         login required (uses the owner's key). Restored 2026-08-18 for parity -- NOTE: this
@@ -12954,6 +13201,17 @@ __DESIGN_TOKENS__
         # header lands on the 401 too -- pinned by test_web_auth.
         resp.headers["X-Moonglade"] = "1"
         return resp
+
+    # Flask's own `static` endpoint is the one route this module does not define,
+    # so it is the one that cannot carry a @tier at its `def`. It is declared
+    # here rather than skipped: /static/ is gated by the front door exactly like
+    # everything else, and `if rule.endpoint == "static": continue` is the single
+    # most common way a catch-all route rule grows a hole.
+    declare_endpoint_tier(app, "static", LOGIN)
+
+    # Every registered rule must now carry a tier -- checked here, at app
+    # creation, not in CI. See assert_every_route_declares_a_tier().
+    assert_every_route_declares_a_tier(app)
 
     return app
 

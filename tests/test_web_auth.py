@@ -809,8 +809,9 @@ def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, pa
 @pytest.mark.parametrize("remote_addr", [LAN, "127.0.0.1"])
 def test_branding_stays_public_unauthenticated(tmp_path, remote_addr):
     """Unlike every other previously-ungated route above, /branding/ was
-    deliberately put back on the public allowlist (see _PUBLIC_PREFIXES in
-    _enforce_front_door()): it's static cosmetic art, not gallery content, and
+    deliberately put back on the public tier (it declares @tier(PUBLIC), which
+    _enforce_front_door() reads off the route): it's static cosmetic art, not
+    gallery content, and
     the login page itself needs it to render for a not-yet-authenticated
     visitor. A missing file still 404s (never redirects to /login) from LAN
     or localhost, with or without a session."""
