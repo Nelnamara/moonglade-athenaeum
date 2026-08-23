@@ -253,6 +253,9 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN source_media_id TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN derive_kind TEXT DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS idx_source_media_id ON catalog(source_media_id)",
+    # task_id is the sibling key (/api/siblings IN-query, the View Batch filter) and had
+    # no index: both were full scans of the table (adversarial review, 2026-08-22).
+    "CREATE INDEX IF NOT EXISTS idx_task_id ON catalog(task_id)",
     # A real txt2img original legitimately has an EMPTY source_media_id forever, which
     # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
     # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
@@ -7142,10 +7145,11 @@ def create_app(out_dir: Path):
     # (never the master), cached beside the badge cache under gallery/cache/_strip/
     # (badge_cache_dir()'s rule: regenerable caches live as siblings there, never in
     # the goods tree). Self-heals when the 768 thumb is newer (mtime) -- a rebuilt
-    # poster re-cuts its strip thumb on the next request. A day of browser cache is
-    # safe: the bytes only change when the 768 thumb does, and that path already
-    # cache-busts with ?v=.
-    _STRIP_CACHE = "public, max-age=86400"
+    # poster re-cuts its strip thumb on the next request. Browser cache matches the
+    # 768 thumb's own 300s policy (the block above): the strip URL carries NO ?v=, and
+    # a rebuilt poster must not show its old tile for a day (adversarial review, 2026-08-22).
+    _STRIP_CACHE = _THUMB_CACHE   # same 300s as the 768: media_id is an identity, not a hash
+    _STRIP_ID_OK = re.compile(r"[0-9A-Za-z_-]+")
 
     def strip_cache_dir():
         return out_dir / "gallery" / "cache" / "_strip"
@@ -7154,6 +7158,14 @@ def create_app(out_dir: Path):
         """Path of the cached 32px strip thumb for media_id, (re)cut from the 768
         thumb when missing or stale. None when there is no 768 thumb to derive from
         or the cut fails -- the caller then falls through to the normal thumb."""
+        # ALLOWLIST the id here, inside the helper, so every caller is covered. A
+        # denylist of / \ .. missed the Windows drive letter: pathlib's `/` RESETS to
+        # a drive-relative path when the right operand carries one, so
+        # thumb_dir / "C:x.jpg" == Path("C:x.jpg") == the drive ROOT -- and
+        # send_from_directory would then serve C:\x.jpg (adversarial review,
+        # 2026-08-22). Catalog ids are numeric (or local_<hex>); nothing else is valid.
+        if not _STRIP_ID_OK.fullmatch(media_id or ""):
+            return None
         src = thumb_dir / (media_id + ".jpg")
         if not src.is_file():
             return None
@@ -7164,10 +7176,24 @@ def create_app(out_dir: Path):
                 return dst
             from PIL import Image
             dst.parent.mkdir(parents=True, exist_ok=True)
-            with Image.open(src) as im:
-                im = im.convert("RGB")
-                im.thumbnail((32, 32))
-                im.save(dst, "JPEG", quality=80)
+            # Atomic: cut to a temp file and os.replace it in. An in-place save that died
+            # mid-write (disk full, kill) left a truncated file carrying a FRESH mtime,
+            # which then passed the staleness check and was served for the whole
+            # cache window; a concurrent reader (4 siblings render the same URL at once
+            # on a threaded server) could also read a half-written file.
+            tmp = dst.with_suffix(".tmp")
+            try:
+                with Image.open(src) as im:
+                    im = im.convert("RGB")
+                    im.thumbnail((32, 32))
+                    im.save(tmp, "JPEG", quality=80)
+                os.replace(tmp, dst)
+            finally:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
             return dst
         except Exception:
             return None
@@ -9327,7 +9353,11 @@ def create_app(out_dir: Path):
         fewer than 2 members is omitted -- a single output has no strip.
         An empty task_id is NEVER queried: every import shares '' and would
         otherwise become one giant pseudo-batch. Pure catalog read, no network."""
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            return jsonify({"error": "body must be a JSON object"}), 400
         raw_ids = body.get("task_ids") or []
         if not isinstance(raw_ids, list):
             return jsonify({"error": "task_ids must be a list"}), 400

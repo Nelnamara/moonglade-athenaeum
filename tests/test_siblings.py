@@ -125,7 +125,9 @@ def test_strip_thumb_is_32px_cached_under_gallery_cache_strip(tmp_path):
     assert r.status_code == 200
     w, h = _size(r.data)
     assert max(w, h) <= 32 and w == 32, (w, h)   # aspect kept, longest side 32
-    assert r.headers["Cache-Control"] == "public, max-age=86400"
+    # same 300s policy as the 768 thumb: media_id is an identity, not a content hash,
+    # and a rebuilt poster must not show its old strip tile for a day (review 2026-08-22)
+    assert r.headers["Cache-Control"] == "public, max-age=300"
     cached = tmp_path / "gallery" / "cache" / "_strip" / "555.jpg"
     assert cached.is_file()
     assert _size(cached.read_bytes())[0] == 32
@@ -190,3 +192,77 @@ def test_query_catalog_batch_finds_an_organized_row_by_task_id(tmp_path):
     cli = _client(tmp_path)
     d = cli.get("/api/next/library?batch=T1").get_json()
     assert d["total"] == 2 and {i["media_id"] for i in d["items"]} == {"601", "602"}
+
+# ---- adversarial-review fixes (2026-08-22) ----
+
+def test_strip_rejects_a_drive_letter_id(tmp_path):
+    """pathlib's `/` RESETS to a drive-relative path when the right operand carries a
+    drive: thumb_dir / "C:x.jpg" == Path("C:x.jpg") == the drive ROOT. A denylist of
+    slashes and '..' missed it; the id is allowlisted now (numeric or local_<hex>)."""
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    cli = login_test_client(create_app(tmp_path))
+    for bad in ("C:x", "D:anything", "a:b", "x;y", "id%20with%20space"):
+        r = cli.get("/thumbs/" + bad + ".jpg?s=32")
+        assert r.status_code == 404, (bad, r.status_code)
+    assert not (tmp_path / "gallery" / "cache" / "_strip").exists(), "no cache dir for a bad id"
+
+
+def test_siblings_non_object_body_is_400_not_500(tmp_path):
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    cli = login_test_client(create_app(tmp_path))
+    for body in ('["T1"]', '"T1"', '42'):
+        r = cli.post("/api/siblings", data=body, content_type="application/json")
+        assert r.status_code == 400, (body, r.status_code)
+    assert cli.post("/api/siblings", json={}).get_json() == {"by_task": {}}
+
+
+def test_strip_recuts_a_stale_corrupt_cache_and_leaves_no_tmp(tmp_path):
+    """The cut goes through a temp file + os.replace (an in-place save that died
+    half-written left a truncated file with a FRESH mtime that the staleness rule then
+    trusted). Pin: no .tmp left behind, and a strip OLDER than the 768 is re-cut."""
+    import os, time
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = "555"
+    _seed_768(tmp_path, mid)
+    cli = login_test_client(create_app(tmp_path))
+    assert cli.get("/thumbs/%s.jpg?s=32" % mid).status_code == 200
+    strip_dir = tmp_path / "gallery" / "cache" / "_strip"
+    dst = strip_dir / (mid + ".jpg")
+    assert dst.is_file() and not (strip_dir / (mid + ".tmp")).exists()
+    dst.write_bytes(b"garbage")
+    old = time.time() - 1000
+    os.utime(dst, (old, old))                      # corrupt AND older than the 768
+    r = cli.get("/thumbs/%s.jpg?s=32" % mid)
+    assert r.status_code == 200
+    assert dst.read_bytes() != b"garbage", "stale corrupt strip was served instead of re-cut"
+    assert len(r.data) > 100 and not (strip_dir / (mid + ".tmp")).exists()
+
+
+def test_strip_up_to_date_cache_is_reused_not_recut(tmp_path):
+    """The second request must NOT re-cut: same file, same mtime."""
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = "777"
+    _seed_768(tmp_path, mid)
+    cli = login_test_client(create_app(tmp_path))
+    assert cli.get("/thumbs/%s.jpg?s=32" % mid).status_code == 200
+    dst = tmp_path / "gallery" / "cache" / "_strip" / (mid + ".jpg")
+    m1 = dst.stat().st_mtime_ns
+    assert cli.get("/thumbs/%s.jpg?s=32" % mid).status_code == 200
+    assert dst.stat().st_mtime_ns == m1, "an up-to-date strip thumb was re-cut"
+
+
+def test_task_id_is_indexed(tmp_path):
+    """task_id is the sibling key; /api/siblings and the View Batch filter query it.
+    It had no index (full table scan). Pin the migration."""
+    import sqlite3
+    from moonglade_gallery import CATALOG_FIELDS, save_catalog
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "1", "filename": "a_1.png", "task_id": "T1",
+        "created_at": "2026-08-22T00:00:00Z"}])
+    con = sqlite3.connect(tmp_path / "catalog.db")
+    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_task_id" in names, sorted(names)
