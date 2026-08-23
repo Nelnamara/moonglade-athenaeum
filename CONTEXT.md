@@ -70,3 +70,18 @@ that makes one; `core.price()` and `core.submit()` are the only things that read
 request once, then either quote it or spend it, both reading the same `parameters` object.
 There is one road for every mode (image, edit, fix, video, enhance), and the mode dispatch
 lives in exactly one place.
+
+**Library scan** — the one walk of the library folder: `moonglade_gallery.py`'s LIBRARY SCAN
+section, `scan_library()` for the whole tree and `files_for()` for a single media id. It owns
+what a walk skips (the `.part` temp files, the thumbnail and quarantine folders), which file
+extensions count (`kinds`), and how a path becomes a bucket and a media id. A caller asks for
+its own `kinds`/`exclude` instead of keeping a private copy of the rules; the caller-specific
+rules that are about *files* rather than the shape of the tree — the zero-byte rule above all
+— stay at the caller, which is why the scan reports each file's `size` and decides nothing
+with it.
+
+**Bucket** — which top-level folder of the library a file sits in, as one word: `images` (the
+flat folder), `batches` (legacy batch folders), `month` (a `YYYY-MM/` folder or
+`unknown-date/`), or `other` (anything else). `bucket_of()` is the only thing that decides it.
+Buckets are how a duplicate is spotted (the same media id in more than one bucket) and how the
+keeper is chosen when one is — most-organized wins.

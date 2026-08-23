@@ -51,13 +51,17 @@ There's no linter gate today — match the surrounding code's style rather than 
 whole files. A few conventions that matter more than usual here:
 
 - **A file is located by its `media_id`** (the last `_`-chunk of the filename stem), not by
-  a stored absolute path. This is **not actually centralized through one matcher today** —
-  `find_files_for_media_id()` is the gallery's own resolver, but resume, the audit,
-  `--organize`, `--import-local` and a few other call sites each walk the tree
-  independently with their own exclusion set (a known gap, not a pattern to copy). If you
-  add a new file-by-media_id lookup, prefer calling `find_files_for_media_id()` over
-  writing another ad-hoc glob, even though the existing code doesn't consistently do that
-  yet.
+  a stored absolute path — and since 2026-08-23 that really is centralized. The **LIBRARY
+  SCAN** section of `moonglade_gallery.py` owns the one walk of the library folder
+  (`scan_library()`) and the one media-id lookup (`files_for()`, behind the historical name
+  `find_files_for_media_id()`), along with the exclusion vocabulary, the `.part` skip, the
+  extension taxonomy, `bucket_of()` and `media_id_of()`. Resume, the audit, `--organize`,
+  `--import-local`, the Health walk and the Similar index each used to walk the tree with
+  their own copy of those rules; they now pass their own `kinds`/`exclude` to the shared
+  scan instead. If you add a file-by-media_id lookup or a new walk of the library, call into
+  that section. If your caller genuinely needs a different rule, give it a `kinds`/`exclude`
+  argument and write the disagreement down in the section header, alongside the six
+  deliberate ones already recorded there — a private copy is how this drifted twice before.
 - **Catalog schema changes** touch three places together: `CATALOG_FIELDS`, the `_CREATE_TABLE`
   DDL, and the `_MIGRATIONS` list (so existing databases pick up the column automatically).
   All three live in `moonglade_gallery.py`.
