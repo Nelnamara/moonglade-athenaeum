@@ -16,6 +16,7 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Improved: the achievement-unlock celebration — a larger, crisper badge medallion (kept phone-safe on small screens), the mascot rests higher above the card, a gentler tier glow, and the badge now loads from a cached thumbnail so the toast appears instantly instead of pulling the full-resolution art.
 - Fixed: a video **Remix** whose references were uploads (not in your library) no longer silently inherits the *previous* remix’s reference tiles into the new, paid render. Every remix now writes its reference banks authoritatively — image, video, and audio — so an unrecoverable ref clears the slot (and says so) instead of leaving a stale one from the last clip to be priced and generated.
 
 ## [3.5.0] - 2026-08-22 — Across the Bridge: the Mirror opens PixAI's AI Tools and Enhance, a History dock, Remix, four gallery layouts, and the art goes incognito
