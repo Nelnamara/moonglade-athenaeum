@@ -7452,11 +7452,13 @@ def create_app(out_dir: Path):
     def _input_media_id(core, session, val):
         """Turn whatever the client sent into a media_id PixAI will accept as an INPUT.
 
-        A media_id in our catalog identifies a generation OUTPUT, and PixAI refuses one
-        as an input -- invalid_media_id / invalid_reference_image_media_id, with a full
-        refund. Readable is NOT usable-as-input: verified 2026-07-20 that both a
-        month-old and a same-day catalog id still resolve fine through GET /v1/media, so
-        this is media KIND, not expiry.
+        A media_id in our catalog identifies a generation OUTPUT. On 2026-07-20 PixAI
+        refused one as an input (invalid_media_id / invalid_reference_image_media_id) and
+        this helper was built to upload instead. PROBED since: i2vPro (2026-07-26) and
+        referenceVideo (2026-08-22, 10 completed tasks) both accept catalog ids, so
+        /api/loom/generate passes ids through and calls this only as the retry FALLBACK
+        after a real invalid_*_media_id rejection. /api/edit and /api/fix still resolve
+        through it on the main path.
 
         We hold the file on disk (that is what the backup IS), so upload it and hand
         PixAI an upload-kind id. Same free S3 handshake as --upload and /api/upload;
@@ -11844,19 +11846,25 @@ __DESIGN_TOKENS__
             # and already vetted into a BRAND-NEW upload, which its content scanner then checks
             # -- and that is what refused this owner's video with 403 NSFW_DETECTED while the
             # same frames sailed through on the website. The upload was manufacturing the
-            # rejection. R2V still uploads; nothing measured about that path has changed.
-            i2v_direct = (p.get("mode") or "R2V").upper() in ("I2V", "FLF")
+            # rejection. R2V uploaded too until the 2026-08-22 probe showed its field accepts
+            # catalog ids as well -- see resolve_img.
 
             def resolve_img(val):
                 s = str(val or "").strip()
                 if not s:
                     return ""
                 if s.isdigit():
-                    if i2v_direct:
-                        return s                  # i2vPro takes the catalog id as-is
-                    # R2V's referenceImageMediaIds genuinely refuse a generation output --
-                    # upload the local copy we hold. See _input_media_id.
-                    return _input_media_id(core, session, s)
+                    # A catalog id passes through for EVERY mode. R2V was the last holdout,
+                    # uploading on the belief that referenceImageMediaIds refuses a
+                    # generation output. PROBED 2026-08-22 (getTaskById, 10 of the owner's own
+                    # completed R2V tasks, read-only): two completed with ONLY in-library ids
+                    # (one with six), four completed with library AND upload ids in the same
+                    # submit. The field accepts catalog ids; the all-upload tasks were this
+                    # very code re-uploading. (moonglade-internal/probes/
+                    # PROBE_2026-08-22_r2v-refs-and-video-fields.md) If PixAI ever refuses
+                    # an id synchronously, the upload-and-retry below catches it; see the
+                    # note there on why the July refusal may have been asynchronous.
+                    return s
                 if s.startswith("data:"):             # a Loom thumbnail -> upload it
                     try:
                         head, b64 = s.split(",", 1)
@@ -11870,7 +11878,8 @@ __DESIGN_TOKENS__
                     return core.upload_media(session, str(fp))
                 return ""                             # a bare filename/URL we can't fetch
 
-            image_ids = [m for m in (resolve_img(x) for x in (p.get("images") or [])) if m]
+            resolved = [(str(x or "").strip(), resolve_img(x)) for x in (p.get("images") or [])]
+            image_ids = [rid for _raw, rid in resolved if rid]
             video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
             audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
 
@@ -11921,13 +11930,30 @@ __DESIGN_TOKENS__
                 # Safe by submit_generation's own argument for its inferenceProfile retry: a
                 # PixAIError means PixAI answered with a GraphQL error and REJECTED the task, so
                 # there is nothing created and nothing charged to duplicate.
-                if not (i2v_direct and "invalid_media_id" in str(e)):
+                # Both error names: `invalid_media_id` (i2vPro) and
+                # `invalid_reference_image_media_id` (R2V's own field). The passthrough now
+                # applies to every mode (probe 2026-08-22), so the fallback does too.
+                #
+                # HONEST SCOPE (adversarial review 2026-08-22): this only catches a
+                # SYNCHRONOUS GraphQL rejection. The 2026-07-20 failures came "with a full
+                # refund", which means those tasks were created and charged, then failed
+                # ASYNCHRONOUSLY -- a path that surfaces through the poll's failure_reason
+                # (_task_failure_reason), never through this except. So this is a free
+                # belt-and-braces for a sync refusal, not a guarantee; the user-facing
+                # safety net for an async refusal is the poll reporting the reason.
+                err = str(e)
+                if "invalid_media_id" not in err and "invalid_reference_image_media_id" not in err:
                     raise
                 _logging_ = __import__("logging")
                 _logging_.getLogger(__name__).info(
-                    "i2v passthrough refused (invalid_media_id); uploading frames and retrying")
-                image_ids = [m for m in (_input_media_id(core, session, x)
-                                         for x in (p.get("images") or [])) if m]
+                    "passthrough refused (%s); uploading frames and retrying", err[:80])
+                # Re-resolve ONLY the catalog (digit) ids through the upload path. Anything
+                # else -- a Loom data: thumbnail already uploaded on the first pass, a bare
+                # filename that resolved to "" -- keeps its first-pass result. Re-running
+                # the raw payload here threw the thumbnail's upload away and sent the
+                # base64 blob as a media id (adversarial review, 2026-08-22).
+                image_ids = [m for m in ((_input_media_id(core, session, raw) if raw.isdigit() else rid)
+                                         for raw, rid in resolved) if m]
                 params = _params_for(image_ids)
                 _card(params)
                 task_id = core.submit_generation(session, params)
