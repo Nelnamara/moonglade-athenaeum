@@ -3536,7 +3536,16 @@ def make_video_thumbnail(video_path, thumb_path):
     """Poster fallback for videos PixAI gave no poster frame: extract an early
     frame via ffmpeg (already a dependency for Loom export), then run it through
     the SAME Pillow thumbnail path as images so size/quality stay uniform.
-    Returns False (never raises) when ffmpeg is missing or the extract fails."""
+    Returns False (never raises) when ffmpeg is missing or the extract fails.
+
+    Picks a REPRESENTATIVE early frame, not a fixed timestamp. A clip that fades
+    in from black used to get a black poster, because the old `-ss 0.5` landed
+    inside the fade (owner, 2026-08-22). ffmpeg's `thumbnail` filter scans a batch
+    of frames and keeps the one closest to the batch average -- near-solid frames
+    (a fade, a flash) lose that contest by construction. The window is the first
+    ~3s (72 frames at 24fps) so the poster still reads as the clip's opening,
+    not a random mid-clip moment. The literal-first-frame fallback stays for
+    clips too short for the filter to get a batch."""
     import shutil as _sh
     import subprocess
     import tempfile
@@ -3547,8 +3556,8 @@ def make_video_thumbnail(video_path, thumb_path):
         fd, tmp = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
         r = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5",
-             "-i", str(video_path), "-frames:v", "1", tmp],
+            ["ffmpeg", "-y", "-loglevel", "error",
+             "-i", str(video_path), "-vf", "thumbnail=72", "-frames:v", "1", tmp],
             capture_output=True, timeout=90, creationflags=_NO_WINDOW)
         if r.returncode != 0 or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
