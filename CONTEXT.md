@@ -7,10 +7,19 @@ plans, no arguments. **Why** a thing was decided the way it was lives in
 
 ---
 
+**Price transport** — `gallery/src/gen/priceRequest.js`, the one place any part of the app
+asks `POST /api/price`. `requestPrice(payload, {timeoutMs, signal})` resolves `{response}` for
+any parsed body — an HTTP-200 `{error}` is an *answer*, not a failure — and `{failed}` for a
+transport failure, an abort or the timeout. That distinction is the whole reason it is not the
+request module: `api.js`'s one error rule flattens both into `{error}`, and the spend gate reads
+the difference. One POST per call, never a retry. The gallery's probe and the Loom's `priceBody`
+both ride it.
+
 **Price probe** — the one module every cost line rides to find out what a generation would
 cost: `gallery/src/gen/priceProbeCore.js` (pure) plus `gallery/src/gen/usePriceProbe.js`
-(the React hook that owns the debounce, the `POST /api/price`, the sequence guard and the
-abort). A host supplies a payload builder and a `CostBadge` ref; it supplies everything else.
+(the React hook that owns the debounce, the sequence guard, the verdict and the teardown
+abort; the request itself belongs to the price transport). A host supplies a payload builder
+and a `CostBadge` ref; it supplies everything else.
 
 **Price identity (`priceKey`)** — the fingerprint of a payload, computed over every field
 except the ones that never price (prompt, negative, seed; Edit skips `instruction` instead).
