@@ -170,9 +170,50 @@ def _no_live_card_network(monkeypatch):
     monkeypatch.setattr(core, "USER_ID", "0", raising=False)
 
 
+# Captured at import, before `_no_live_card_network` (below) swaps them for a raising
+# stub. The `pixai` fixture puts the real delegates back so a /v2 call reaches the FAKE
+# and is refused BY PATH there, rather than dying on a generic "blocked" message.
+_REAL_REST_GET = core._rest_get
+_REAL_REST_POST = core._rest_post
+
+
+@pytest.fixture()
+def pixai(monkeypatch):
+    """The PixAI transport, faked at the seam -- what `_make_session()` (and therefore the
+    gallery's `_gen_session()`) hands out for this test.
+
+    This is the road that replaces "patch four private names and hand-roll a stub". The
+    fake answers only operations the test registered and refuses everything else by name,
+    so a route under test cannot reach the network even by accident, and a call nobody
+    anticipated fails with the operation's name instead of a socket error.
+
+        def test_something(pixai, ...):
+            pixai.on("me", {"me": {"id": "1", "quotaAmount": 500}})
+            ...
+            assert pixai.mutations("createGenerationTask") == 1
+
+    `_rest_get`/`_rest_post` are restored to the real delegates here on purpose: they route
+    through `_client_of`, which hands the fake straight back, so the /v2 road lands on the
+    same registry as the GraphQL one. Offline-ness is not weakened -- it moves from a
+    blanket raise to the fake's own refusal."""
+    from tests.fake_pixai import FakePixAI
+    fake = FakePixAI()
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: fake)
+    monkeypatch.setattr(core, "_rest_get", _REAL_REST_GET)
+    monkeypatch.setattr(core, "_rest_post", _REAL_REST_POST)
+    return fake
+
+
 @pytest.fixture()
 def mock_session(mocker):
-    """Return a MagicMock that quacks like a requests.Session."""
+    """Return a MagicMock that quacks like a requests.Session.
+
+    The older road, kept working deliberately: a MagicMock is what a test wants when the
+    assertion is about the HTTP call itself (`mock_session.post.call_count`), which is
+    exactly what tests/test_spend_no_retry.py's network-level checks assert. For a test
+    whose stubs are purely "answer this operation with that payload", prefer the `pixai`
+    fixture above -- it refuses what it was not told about, where a MagicMock invents a
+    truthy answer for anything."""
     session = mocker.MagicMock()
     return session
 

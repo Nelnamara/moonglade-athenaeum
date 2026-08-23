@@ -1483,6 +1483,14 @@ class PixAIClient:
     session (a hand-built one, a test double) without that session inheriting the config
     cache."""
 
+    #: Marks an object as a PixAI transport adapter, so `_client_of` hands it straight
+    #: back instead of wrapping it. Checked with `is True` on purpose: a MagicMock answers
+    #: every attribute with a truthy mock, and a mock standing in for a *Session* must
+    #: still be wrapped or its `.post` would never be reached. This is what lets
+    #: tests/fake_pixai.py's FakePixAI be a real second adapter rather than a subclass --
+    #: it satisfies the interface, it does not inherit the implementation.
+    _is_pixai_client = True
+
     def __init__(self, session, auth_kind="api-key", user_id=None):
         self._session = session
         self._auth_kind = auth_kind
@@ -1674,13 +1682,17 @@ class PixAIClient:
 
 
 def _client_of(session):
-    """The PixAIClient for `session`: itself when it already is one, a thin wrapper
-    around it otherwise.
+    """The transport adapter for `session`: itself when it already is one, a thin
+    PixAIClient wrapper around it otherwise.
+
+    "Already is one" is the `_is_pixai_client is True` marker rather than an isinstance
+    check, so a second adapter (tests/fake_pixai.py's FakePixAI) passes through without
+    inheriting this class's implementation.
 
     Wrapping reads NO config and resolves NO credential -- that is what lets the pasted-
     API-key validation route hand its own hand-built Session to account_info and still
     get the guarantee it was built for."""
-    if isinstance(session, PixAIClient):
+    if getattr(session, "_is_pixai_client", False) is True:
         return session
     return PixAIClient(session)
 

@@ -26,6 +26,7 @@ import pytest
 import requests
 
 import moonglade_backup as core
+from tests.fake_pixai import FakePixAI, UnregisteredOperation, operation_name
 
 
 class FakeResponse:
@@ -367,3 +368,175 @@ class TestForCreate:
         c = core.PixAIClient(RecordingSession())
         assert core._session_for_create(c) is c
         assert c.for_create() is core._session_for_create(c)
+
+
+# ---------------------------------------------------------------------------
+# The second adapter
+# ---------------------------------------------------------------------------
+
+class TestFakePixAISatisfiesTheSameInterface:
+    VERBS = ("query", "mutate", "persisted", "rest_get", "rest_post", "for_create")
+
+    @pytest.mark.parametrize("verb", VERBS)
+    def test_the_fake_offers_the_same_verb_with_the_same_signature(self, verb):
+        """Same interface, verb for verb -- otherwise a test could pass against the fake
+        and fail against the real client, or the reverse."""
+        real = inspect.signature(getattr(core.PixAIClient, verb)).parameters
+        fake = inspect.signature(getattr(FakePixAI, verb)).parameters
+        assert list(fake) == list(real), \
+            "FakePixAI.{} has a different shape from PixAIClient.{}".format(verb, verb)
+
+    def test_mutate_on_the_fake_offers_no_retries_either(self):
+        """The spend rule has to hold on BOTH adapters, or a test could pass against a
+        fake that allows what the real client forbids."""
+        assert "retries" not in inspect.signature(FakePixAI.mutate).parameters
+
+    def test_the_fake_is_recognised_as_a_client_and_never_wrapped(self):
+        fake = FakePixAI()
+        assert core._client_of(fake) is fake
+
+    def test_a_magicmock_is_still_wrapped_not_mistaken_for_a_client(self, mock_session):
+        """The marker is checked with `is True` precisely because a MagicMock answers every
+        attribute truthily. A mock standing in for a Session must keep receiving `.post`."""
+        assert core._client_of(mock_session) is not mock_session
+        assert core._client_of(mock_session).session is mock_session
+
+    @pytest.mark.parametrize("document, expected", [
+        ("mutation createGenerationTask($parameters: JSONObject!) { x }",
+         "createGenerationTask"),
+        ("query listChatEditingScenes { scenes { id } }", "listChatEditingScenes"),
+        ("query{ me{ id } }", "me"),
+        ("query($id: ID!) { task(id: $id) { id } }", "task"),
+        ("\n  mutation($id: ID!, $input: UpdateGenerationTaskInput!) {\n"
+         "    updateGenerationTask(id: $id, input: $input) { id }\n  }\n",
+         "updateGenerationTask"),
+        ("", ""),
+        (None, ""),
+    ])
+    def test_operation_names_come_off_the_document(self, document, expected):
+        """Named operations give their name; this codebase's anonymous ones are keyed by
+        their first root field, which is what a reader calls them anyway."""
+        assert operation_name(document) == expected
+
+    def test_an_unregistered_operation_is_refused_by_name(self):
+        fake = FakePixAI()
+        with pytest.raises(UnregisteredOperation, match="createGenerationTask"):
+            fake.mutate("mutation createGenerationTask($p: JSONObject!) { id }", {"p": {}})
+
+    def test_an_unregistered_rest_path_is_refused_by_path(self):
+        fake = FakePixAI()
+        with pytest.raises(UnregisteredOperation, match="/kaisuuken/summary"):
+            fake.rest_get("/kaisuuken/summary")
+
+    def test_the_refusal_is_not_a_pixaierror(self):
+        """A lot of this app fails SOFT on PixAIError. If a missing registration raised
+        one, it would be swallowed into an empty result and the test would pass on a
+        pretend answer instead of telling the author what to register."""
+        fake = FakePixAI()
+        with pytest.raises(UnregisteredOperation) as e:
+            fake.query("query me { id }")
+        assert not isinstance(e.value, core.PixAIError)
+
+    def test_a_registered_response_is_returned_and_the_call_recorded(self):
+        fake = FakePixAI()
+        fake.on("me", {"me": {"id": "42"}})
+        assert fake.query("query me { id }") == {"me": {"id": "42"}}
+        assert [c.op for c in fake.calls] == ["me"]
+        assert fake.calls[0].verb == "query"
+
+    def test_a_response_can_be_computed_from_the_variables(self):
+        fake = FakePixAI()
+        fake.on("task", lambda v: {"task": {"id": v["id"], "status": "completed"}})
+        got = fake.query("query($id: ID!) { task(id: $id) { id } }", {"id": "T7"})
+        assert got["task"]["id"] == "T7"
+
+    def test_a_registered_error_is_raised(self):
+        fake = FakePixAI()
+        fake.fail("me", core.PixAIError("401 Unauthorized -- API key missing/expired."))
+        with pytest.raises(core.PixAIError, match="401"):
+            fake.query("query me { id }")
+
+    def test_registering_a_response_clears_a_previous_failure(self):
+        fake = FakePixAI()
+        fake.fail("me", core.PixAIError("boom"))
+        fake.on("me", {"me": {"id": "1"}})
+        assert fake.query("query me { id }") == {"me": {"id": "1"}}
+
+    def test_mutate_counts_its_calls_so_a_double_spend_is_visible(self):
+        """The fake's half of the spend rule: a test asserts the mutation was submitted
+        exactly once, by COUNT at the seam, with no retry argument in the assertion."""
+        fake = FakePixAI()
+        fake.on("createGenerationTask", {"createGenerationTask": {"id": "T1"}})
+        doc = "mutation createGenerationTask($p: JSONObject!) { id }"
+        fake.mutate(doc, {"p": {}})
+        assert fake.mutations("createGenerationTask") == 1
+        fake.mutate(doc, {"p": {}})
+        assert fake.mutations("createGenerationTask") == 2
+        assert fake.mutations() == 2
+
+    def test_a_query_is_not_counted_as_a_mutation(self):
+        fake = FakePixAI()
+        fake.on("me", {"me": {}})
+        fake.query("query me { id }")
+        assert fake.mutations() == 0
+
+    def test_for_create_answers_a_client_shaped_thing(self):
+        fake = FakePixAI()
+        assert fake.for_create() is fake
+
+    def test_the_fake_exposes_the_identity_attributes(self):
+        fake = FakePixAI(user_id="u-1")
+        assert fake.user_id == "u-1"
+        assert fake.auth_kind == "api-key"
+
+    def test_reaching_for_the_raw_session_says_why_it_is_not_there(self):
+        """Offline-by-default is structural here: there is no Session to fall through to,
+        and the message names the call sites that still speak HTTP themselves."""
+        fake = FakePixAI()
+        with pytest.raises(UnregisteredOperation, match="no requests.Session"):
+            fake.session
+        with pytest.raises(UnregisteredOperation, match="answers verbs, not URLs"):
+            fake.get("https://api.pixai.art/v1/media/M1")
+
+
+class TestTheFixtureIsWhatTheAppIsHanded:
+    def test_make_session_returns_the_fake(self, pixai):
+        """`_gen_session()` is `(core, core._make_session(None))` and is how all 36 gallery
+        call sites reach PixAI, so pinning `_make_session` pins both."""
+        assert core._make_session(None) is pixai
+        assert core._make_session("some-token") is pixai
+
+    def test_gen_session_hands_the_gallery_the_fake(self, pixai, tmp_path):
+        """Through the real route, not the closure: /api/account is a `_gen_session()`
+        caller, and with the fixture installed its account read lands on the fake."""
+        from tests.conftest import login_client
+        pixai.on("me", {"me": {"id": "u-test", "quotaAmount": 500}})
+        pixai.on("/kaisuuken/summary", {"kaisuukens": []})
+        pixai.on("/claim", {"claims": []})
+        d = login_client(tmp_path).get("/api/account").get_json()
+        assert d["credits"] == 500
+        # All three roads through the fake in one route: the ad-hoc GraphQL read, and two
+        # /v2 REST reads. Nothing was registered for the credit-split call, which the route
+        # guards separately -- so the split comes back unknown rather than breaking it.
+        assert "me" in [c.op for c in pixai.calls]
+        assert "/kaisuuken/summary" in [c.op for c in pixai.calls]
+        assert "/claim" in [c.op for c in pixai.calls]
+        assert d["credits_free"] is None and d["credits_paid"] is None
+
+    def test_every_primitive_routes_to_the_fake(self, pixai):
+        pixai.on("me", {"me": {"id": "9"}})
+        pixai.on("listUserTaskSummaries", {"edges": []})
+        pixai.on("/claim", {"claims": []})
+        pixai.on("/claim/1", {"ok": True})
+        assert core.gql_adhoc(pixai, "query me { id }") == {"me": {"id": "9"}}
+        assert core.gql(pixai, {"last": 1}) == {"edges": []}
+        assert core._rest_get(pixai, "/claim") == {"claims": []}
+        assert core._rest_post(pixai, "/claim/1", {}) == {"ok": True}
+        assert [c.verb for c in pixai.calls] == ["query", "persisted", "rest_get",
+                                                 "rest_post"]
+
+    def test_an_unstubbed_call_fails_loudly_instead_of_going_to_the_network(self, pixai):
+        """The whole point: nothing registered, nothing answered, and the message names
+        what to register."""
+        with pytest.raises(UnregisteredOperation, match="me"):
+            core.account_info(pixai, raise_on_error=True)
