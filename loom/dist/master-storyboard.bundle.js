@@ -2500,6 +2500,35 @@ ${"=".repeat(48)}
     return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
   }
 
+  // ../gallery/src/gen/priceRequest.js
+  async function requestPrice(payload, { timeoutMs = PRICE_FETCH_TIMEOUT_MS, signal } = {}) {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer2 = ctrl && timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+    let unlink = null;
+    if (ctrl && signal) {
+      if (signal.aborted) ctrl.abort();
+      else {
+        const onAbort = () => ctrl.abort();
+        signal.addEventListener("abort", onAbort);
+        unlink = () => signal.removeEventListener("abort", onAbort);
+      }
+    }
+    try {
+      const r = await fetch("/api/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: ctrl ? ctrl.signal : void 0
+      });
+      return { response: await r.json() };
+    } catch {
+      return { failed: true };
+    } finally {
+      if (timer2) clearTimeout(timer2);
+      if (unlink) unlink();
+    }
+  }
+
   // ../gallery/src/gen/usePriceProbe.js
   function usePriceProbe({ build: build2, costRef, enabled = true, skipKeys = PRICE_KEY_SKIP }) {
     const [verdict, setVerdict] = useState(initialVerdict);
@@ -2549,25 +2578,18 @@ ${"=".repeat(48)}
       const mine = ++seq2.current;
       const c = typeof AbortController !== "undefined" ? new AbortController() : null;
       ctrl.current = c;
-      const abortTimer = c ? setTimeout(() => c.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
-      fetch("/api/price", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(p),
-        signal: c ? c.signal : void 0
-      }).then((r) => r.json()).then((d) => {
-        clearTimeout(abortTimer);
+      requestPrice(p, { signal: c ? c.signal : void 0 }).then(({ response: response2, failed }) => {
         if (mine !== seq2.current || !costRef.current) return;
         ctrl.current = null;
+        if (failed) {
+          costRef.current.setPrice(null);
+          setResponse(null);
+          put(settledFor(key));
+          return;
+        }
+        const d = response2;
         costRef.current.setPrice(d);
         setResponse(d);
-        put(settledFor(key));
-      }).catch(() => {
-        clearTimeout(abortTimer);
-        if (mine !== seq2.current || !costRef.current) return;
-        ctrl.current = null;
-        costRef.current.setPrice(null);
-        setResponse(null);
         put(settledFor(key));
       });
     }, [costRef, put]);
@@ -4323,6 +4345,10 @@ ${"=".repeat(48)}
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   installNotify();
+  var priceBody = async (body) => {
+    const { response, failed } = await requestPrice(body);
+    return failed ? null : response;
+  };
   var LV_TINTS = [
     "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
     "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
@@ -5624,10 +5650,8 @@ ${"=".repeat(48)}
       const badge = ref.current;
       if (!badge) return;
       badge.setChecking();
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).then((d) => {
+      priceBody(body).then((d) => {
         if (ref.current === badge) badge.setPrice(d);
-      }).catch(() => {
-        if (ref.current === badge) badge.setPrice(null);
       });
     };
     const activeRef = useRef2(null);
@@ -5873,14 +5897,8 @@ ${"=".repeat(48)}
       setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -8023,14 +8041,8 @@ ${"=".repeat(48)}
       setImgPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt))
-        }).then((r) => r.json()).then((pr) => {
+        priceBody(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)).then((pr) => {
           if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -8049,14 +8061,8 @@ ${"=".repeat(48)}
       setEditPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }).then((pr) => {
           if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -8075,14 +8081,8 @@ ${"=".repeat(48)}
       setRefPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }).then((pr) => {
           if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -8199,14 +8199,8 @@ ${"=".repeat(48)}
       setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -9734,30 +9728,9 @@ Your currently-open board is left untouched.`)) return;
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
-    const priceShot = async (entry) => {
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(shotPayload2(entry))
-        });
-        return await r.json();
-      } catch {
-        return null;
-      }
-    };
-    const confirmSpend = async (priceBody, label) => {
-      let pr = null;
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(priceBody)
-        });
-        pr = await r.json();
-      } catch {
-        pr = null;
-      }
+    const priceShot = (entry) => priceBody(shotPayload2(entry));
+    const confirmSpend = async (quoteBody, label) => {
+      const pr = await priceBody(quoteBody);
       if (pr && pr.free) return true;
       if (pr && !pr.free && pr.cost != null) {
         const line = priceIsShort(pr) ? shortSpendLine(pr, "this") : `No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
@@ -9976,8 +9949,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
-      if (priceBody && !await confirmSpend(priceBody, label)) return;
+    const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
+      if (quoteBody && !await confirmSpend(quoteBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
@@ -10064,17 +10037,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } }));
         return;
       }
-      let pr = null;
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes })
-        });
-        pr = await r.json();
-      } catch {
-        pr = null;
-      }
+      const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
       const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
       const quote = priced == null ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)." : "This will spend " + Number(priced).toLocaleString() + " credits \u2014 a Fix is never covered by a free card.";
       if (!window.confirm(

@@ -426,8 +426,13 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
     # route it hands over -- the fetch literals live in those modules. (The component's own doc
     # names /api/upscale in prose while explaining why it does not exist, hence the quoted forms.)
     probe = (root / "gallery" / "src" / "gen" / "usePriceProbe.js").read_text(encoding="utf-8")
+    # Re-anchored 2026-08-23: the POST came out of the hook too. usePriceProbe still owns the
+    # debounce, the sequence guard and the verdict; gen/priceRequest.js owns the request and is
+    # the one /api/price caller under gallery/src (the Loom rides it as well).
+    transport = (root / "gallery" / "src" / "gen" / "priceRequest.js").read_text(encoding="utf-8")
     road = (root / "gallery" / "src" / "gen" / "submitTask.js").read_text(encoding="utf-8")
-    assert "usePriceProbe" in src and '"/api/price"' in probe
+    assert "usePriceProbe" in src
+    assert "requestPrice" in probe and '"/api/price"' in transport
     assert 'from "../gen/submitTask.js"' in src, "the submit must ride the one road"
     assert 'submitTask("/api/generate"' in src, "and it must hand the road the generate route"
     assert "await fetch(route" in road, "which is where the actual POST lives"

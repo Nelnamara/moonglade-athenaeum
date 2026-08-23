@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  PRICE_DEBOUNCE_MS, PRICE_FETCH_TIMEOUT_MS, PRICE_KEY_SKIP,
+  PRICE_DEBOUNCE_MS, PRICE_KEY_SKIP,
   canSubmit as verdictAllows, fired, initialVerdict, priceKey, scheduled,
   settledFor, shouldShortCircuit,
 } from "./priceProbeCore.js";
+import { requestPrice } from "./priceRequest.js";
 
 /* usePriceProbe -- the ONE price probe behind every cost line. The React half of
-   gen/priceProbeCore.js: it owns the 250ms debounce, the POST /api/price, the sequence guard,
-   the abort timeout, and the whole host half of <CostBadge>'s contract (the badge never
-   fetches; a host pushes the parsed answer in through setPrice/setChecking/clear, and that
-   imperative handle is untouched public API).
+   gen/priceProbeCore.js: it owns the 250ms debounce, the sequence guard, the teardown abort,
+   and the whole host half of <CostBadge>'s contract (the badge never fetches; a host pushes
+   the parsed answer in through setPrice/setChecking/clear, and that imperative handle is
+   untouched public API). The request itself belongs to gen/priceRequest.js, the one price
+   transport -- the same one the Loom's priceBody/priceShot ride -- which is what draws the
+   line between a real answer ({response}, HTTP-200 {error} bodies included) and the
+   could-not-verify road ({failed}) this hook's red badge is about.
 
-   THIS IS THE ONLY FILE UNDER gallery/src THAT MAY FETCH /api/price -- pinned by
+   THE PROBE IS THE ONLY PRICE-PROBE LOOP under gallery/src, and gen/priceRequest.js is the
+   only file there that names /api/price -- both pinned by
    loom/test/price-probe-structure.test.js. Six hosts used to hand-roll this loop
    (gen/useGenerate.js, gen/useEditGenerate.js, components/EditTab.jsx, components/FixTab.jsx,
    components/UpscalePanel.jsx, components/VideoDrawer.jsx) and only ONE of them -- the video
@@ -101,41 +106,38 @@ export default function usePriceProbe({ build, costRef, enabled = true, skipKeys
     }
     badge.setChecking();
     const mine = ++seq.current;
-    // BOUNDED: Go is hard-gated on this fetch settling, and a HUNG request (a transport stall --
-    // a LAN tablet dropping Wi-Fi mid-request) fires neither .then nor .catch, so the verdict
-    // never settled, the gate stayed shut and the badge sat on a muted "Checking cost…" with no
-    // error and no way out short of changing a priced field (review 2026-08-16). Before the
-    // identity gate a hung price left Go LIVE (fail-open); the gate made it fail-silent-closed.
-    // An abort rejects into the .catch below, which paints the red "couldn't verify — may spend"
-    // and settles, so the machine reaches its documented error verdict and Go returns to its
-    // pre-gate, fail-closed-but-live behaviour.
+    // BOUNDED: Go is hard-gated on this check settling, and a HUNG request (a transport stall --
+    // a LAN tablet dropping Wi-Fi mid-request) used to fire neither road, so the verdict never
+    // settled, the gate stayed shut and the badge sat on a muted "Checking cost…" with no error
+    // and no way out short of changing a priced field (review 2026-08-16). Before the identity
+    // gate a hung price left Go LIVE (fail-open); the gate made it fail-silent-closed. The
+    // timeout lives in gen/priceRequest.js now and is unconditional there; it arrives here as
+    // {failed}, which paints the red "couldn't verify — may spend" and settles, so the machine
+    // reaches its documented error verdict and Go returns to its pre-gate, fail-closed-but-live
+    // behaviour. The controller is still OURS -- stop() aborts it on teardown, and
+    // requestPrice links it to the request it issues.
     const c = (typeof AbortController !== "undefined") ? new AbortController() : null;
     ctrl.current = c;
-    const abortTimer = c ? setTimeout(() => c.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
     // The identity is recorded ONLY under the seq guard, off the SAME payload that was priced.
     // A failed check settles too: the badge's red could-not-verify IS this payload's verdict,
-    // whereas a verdict for a DIFFERENT payload is exactly what canSubmit refuses.
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p), signal: c ? c.signal : undefined,
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        clearTimeout(abortTimer);
-        if (mine !== seq.current || !costRef.current) return;
-        ctrl.current = null;
-        costRef.current.setPrice(d);
-        setResponse(d);
-        put(settledFor(key));
-      })
-      .catch(() => {
-        clearTimeout(abortTimer);
-        if (mine !== seq.current || !costRef.current) return;
-        ctrl.current = null;
+    // whereas a verdict for a DIFFERENT payload is exactly what canSubmit refuses. Both roads
+    // join at one guard because requestPrice never rejects -- it RESOLVES onto one of them.
+    requestPrice(p, { signal: c ? c.signal : undefined }).then(({ response, failed }) => {
+      if (mine !== seq.current || !costRef.current) return;
+      ctrl.current = null;
+      if (failed) {
+        // the could-not-verify road: nothing was learned about the price.
         costRef.current.setPrice(null);
         setResponse(null);
         put(settledFor(key));
-      });
+        return;
+      }
+      // any parsed body, HTTP-200 {error} included -- the badge decides what it means.
+      const d = response;
+      costRef.current.setPrice(d);
+      setResponse(d);
+      put(settledFor(key));
+    });
   }, [costRef, put]);
 
   /* Schedule a re-price. Verbatim in behaviour from the video drawer's debCost(). */

@@ -329,6 +329,14 @@ def _probe_src():
     return _src("gen/usePriceProbe.js")
 
 
+def _transport_src():
+    """The one price transport (2026-08-23). The POST came out of the hook: usePriceProbe
+    still owns the debounce, the sequence guard, the verdict and the teardown abort, but the
+    request -- and the {response}-vs-{failed} split the spend gate reads -- lives in
+    gen/priceRequest.js, which the Loom's own price sites ride too."""
+    return _src("gen/priceRequest.js")
+
+
 def test_fix_surface_mounts_the_shared_cost_badge():
     src = _src("components/FixTab.jsx")
     # Ported 2026-08-08 (no-vanilla campaign step 4): the vanilla <mg-cost-badge> custom
@@ -346,8 +354,12 @@ def test_fix_cost_asks_the_server_and_hardcodes_nothing():
     src = _src("components/FixTab.jsx")
     body = _price_build(src)
     assert 'mode: "fix"' in body
-    # The request itself is the shared probe's -- the one /api/price caller under gallery/src.
-    assert "usePriceProbe" in src and '"/api/price"' in _probe_src()
+    # The request itself is not this surface's: the host rides the shared probe, and the
+    # probe rides the one price transport -- the only /api/price caller under gallery/src.
+    assert "usePriceProbe" in src
+    assert '"/api/price"' in _transport_src()
+    assert "requestPrice" in _probe_src(), (
+        "the probe must get its request from gen/priceRequest.js, not hand-roll one again")
     assert "8000" not in body and "8,000" not in body, (
         "the badge hardcodes the measured price instead of calling /api/price -- it would "
         "go silently wrong the moment PixAI reprices a Fix")
@@ -445,7 +457,14 @@ def test_cost_helpers_still_drop_a_superseded_response():
     probe = _probe_src()
     fire = probe[probe.index("const fire = useCallback("):probe.index("const refresh = useCallback(")]
     flat = fire.replace(" ", "")
-    assert flat.count("mine!==seq.current") == 2, (
+    # Re-anchored 2026-08-23: there used to be TWO guards, one in .then and one in .catch.
+    # requestPrice never rejects -- it RESOLVES onto {response} or {failed} -- so both paths
+    # now join at a single guard, which must therefore stand before EITHER of them paints.
+    # Same property, one copy of it; the bite below is what actually protects it.
+    assert flat.count("mine!==seq.current") == 1, (
+        "the answer path and the failure path must join at exactly one sequence guard")
+    guard = flat.index("mine!==seq.current")
+    assert guard < flat.index("setPrice(null)") and guard < flat.index("setPrice(d)"), (
         "both the answer path and the failure path must consult the sequence before painting, "
         "or a superseded response would repaint over a newer one")
     # Each cost surface owns its OWN sequence (the classic's editCost once shared `costSeq`

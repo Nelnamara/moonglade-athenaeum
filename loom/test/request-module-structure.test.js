@@ -33,9 +33,11 @@ const MODULE = "api.js";
    rule -- the body's {error} is authoritative -- deliberately collapses a distinction that
    file's own contract depends on. Adding a fourth name is a deliberate edit to this list. */
 const EXEMPT = {
-  "gen/usePriceProbe.js":
-    "owns the AbortController + timeout, and must tell an ABORTED price check (setPrice(null)) "
-    + "apart from an HTTP-200 {error} body (setPrice(d)) -- the spend gate reads that difference",
+  "gen/priceRequest.js":
+    "the one price transport: it owns the AbortController + timeout, and must tell an ABORTED "
+    + "or timed-out price check ({failed}) apart from an HTTP-200 {error} body ({response}) -- "
+    + "the spend gate reads that difference. gen/usePriceProbe.js held this exemption until "
+    + "2026-08-23, when the request moved out of the hook and the Loom joined it as a caller",
   "gen/submitTask.js":
     "the spend road: a transport failure says 'the task MAY still have been submitted', which is "
     + "a different sentence from a body error, and that difference is a spend-safety guarantee",

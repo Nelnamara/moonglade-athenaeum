@@ -39,10 +39,12 @@
    the body it is given.
 
    EXEMPTIONS -- three files keep their own fetch, each for a reason the one rule cannot serve:
-     gen/usePriceProbe.js  owns an AbortController + timeout, and must tell an ABORTED price
-                           check (setPrice(null), the red "couldn't verify — may spend") apart
-                           from an HTTP-200 {error} body (setPrice(d)) -- the distinction rule 1
-                           deliberately collapses. It is the only /api/price caller.
+     gen/priceRequest.js   the one price transport (the gallery's probe and the Loom both ride
+                           it). It must tell an ABORTED or timed-out price check ({failed} --
+                           the red "couldn't verify — may spend") apart from an HTTP-200
+                           {error} body ({response}) -- the distinction rule 1 deliberately
+                           collapses, and the spend gate reads it. It is the only
+                           /api/price caller under gallery/src.
      gen/submitTask.js     the spend road. Its transport-failure line ("the task MAY still have
                            been submitted") is a different sentence from a body error, and that
                            difference is a spend-safety guarantee, not a message.

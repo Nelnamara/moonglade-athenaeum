@@ -481,9 +481,16 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
     assert.match(src, /runGen\(setGenFixState, c\.id, "\/api\/fix", \{ source: src, boxes: scaledBoxes \}, null, "",/);
   });
 
-  test("genFix runs its own fresh mode:\"fix\" /api/price check right before its confirm -- the real, read-only cost check, not skipped", () => {
+  test("genFix runs its own fresh mode:\"fix\" price check right before its confirm -- the real, read-only cost check, not skipped", () => {
+    // Re-anchored 2026-08-23: the check used to be a hand-rolled fetch here and is now the
+    // Loom's one price call site (priceBody -> gen/priceRequest.js). What matters and is
+    // unchanged: genFix asks for THIS Fix's real price, freshly, before its own confirm --
+    // never a cached or skipped one, and never a different body than the one it submits.
     const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
-    assert.match(genFixBlock, /body: JSON\.stringify\(\{ mode: "fix", source: src, boxes: scaledBoxes \}\)/);
+    assert.match(genFixBlock, /const pr = await priceBody\(\{ mode: "fix", source: src, boxes: scaledBoxes \}\);/);
+    const priceAt = genFixBlock.indexOf("const pr = await priceBody(");
+    const confirmAt = genFixBlock.indexOf("if (!window.confirm(");
+    assert.ok(priceAt >= 0 && confirmAt > priceAt, "the price check must run BEFORE the confirm");
   });
 
   test("the confirm wording is ported VERBATIM from FixTab.jsx's own run() -- 'ALWAYS spends' / 'never covered by a free card', never confirmSpend's generic phrasing", () => {
@@ -493,10 +500,12 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
     assert.match(genFixBlock, /if \(!window\.confirm\(/, "the real window.confirm gate must fire before any submit");
   });
 
-  test("genFix passes priceBody:null to runGen -- it must never trigger runGen's OWN confirmSpend gate on top of its own real, Fix-correct confirm above", () => {
+  test("genFix passes quoteBody:null to runGen -- it must never trigger runGen's OWN confirmSpend gate on top of its own real, Fix-correct confirm above", () => {
+    // The parameter is positional and unchanged; only its NAME moved (priceBody -> quoteBody,
+    // 2026-08-23), because priceBody is now the Loom's one price call site.
     const genFixBlock = src.slice(src.indexOf("const genFix = async (entry, scaledBoxes) => {"), src.indexOf("// Batch-generate the whole board"));
     assert.match(genFixBlock, /runGen\(setGenFixState, c\.id, "\/api\/fix", \{ source: src, boxes: scaledBoxes \}, null,/,
-      "priceBody must be null so runGen's own confirmSpend (generic, free-card-implying wording) never runs a second confirm");
+      "quoteBody must be null so runGen's own confirmSpend (generic, free-card-implying wording) never runs a second confirm");
   });
 
   test("a missing open-frame source or an empty box list is refused BEFORE any price check or confirm, same defensive-gate shape as genEdit", () => {
@@ -507,11 +516,15 @@ describe("Fixer: the real, mandatory spend warning and confirm-gated submit thro
 });
 
 describe("Fixer: real cost PREVIEW and real result routing, mirroring the Edit/Reference tabs' own conventions", () => {
-  test("the price preview debounces a real mode:\"fix\" /api/price fetch, gated on genOpen/genTab/editSub, same convention as imgPrice/editPrice/refPrice", () => {
+  test("the price preview debounces a real mode:\"fix\" price check, gated on genOpen/genTab/editSub, same convention as imgPrice/editPrice/refPrice", () => {
     assert.match(loomMobileSrc, /const \[genFixPrice, setGenFixPrice\] = useState\(\{\}\);/);
     assert.match(loomMobileSrc, /if \(!genOpen \|\| genTab !== "Edit" \|\| editSub !== "fixer" \|\| !dfLive\) return;/);
+    // Re-anchored 2026-08-23: was a hand-rolled fetch of /api/price, now the Loom's one price
+    // call site. The BODY is the assertion -- this preview must price the same mode:"fix" shape
+    // genFix submits -- and it is unchanged; only the transport under it moved.
     assert.match(loomMobileSrc,
-      /body: JSON\.stringify\(\{ mode: "fix", source: src, boxes: scaleFixBoxes\(fixBoxes, fixImgRef\.current\) \}\)/);
+      /priceBody\(\{ mode: "fix", source: src, boxes: scaleFixBoxes\(fixBoxes, fixImgRef\.current\) \}\)[\s\S]{0,200}\}, 250\);/,
+      "the preview must price the same mode:\"fix\" body genFix submits, and stay debounced");
   });
 
   test("the preview line reuses the SAME priceLine/priceTitle helpers the Image/Edit/Reference tabs already share -- no new formatter", () => {
@@ -697,12 +710,13 @@ describe("Generate: real submit, real cost preview, real generation-state tracki
   });
 
   test("the Video tab's price preview is still driven by the real priceShot(dfLive), untouched by the fourth increment", () => {
-    // A direct fetch("/api/price", ...) now legitimately exists elsewhere in LoomMobile (the
-    // Image/Edit/Reference tabs added in the fourth increment -- see that increment's own
-    // describe block below, which asserts those calls mirror LoomV2's own priceInto bodies
-    // verbatim, not a new pricing shape). This test narrows to what it actually protects: the
-    // VIDEO tab's cost line specifically must still go through priceShot(dfLive), never a
-    // parallel fetch of its own.
+    // Other price checks legitimately exist elsewhere in LoomMobile (the Image/Edit/Reference
+    // tabs added in the fourth increment -- see that increment's own describe block below,
+    // which asserts those calls mirror LoomV2's own priceInto bodies verbatim, not a new
+    // pricing shape). Since 2026-08-23 they all go through priceBody, the Loom's one price
+    // call site. This test narrows to what it actually protects: the VIDEO tab's cost line
+    // specifically must still go through priceShot(dfLive) -- the SHOT-shaped price, built by
+    // shotPayload -- never a hand-built body of its own.
     assert.match(loomMobileSrc, /priceShot\(dfLive\)\.then\(\(pr\) => /);
   });
 
