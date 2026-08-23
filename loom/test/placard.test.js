@@ -66,7 +66,10 @@ describe("Sibling Strip: one batched fetch per page, never per card", () => {
     assert.match(api, /\{ by_task: \{\} \}/);
   });
   test("the strip renders only for a task with >= 2 members; four shown + '+N'", () => {
-    assert.match(grid, /if \(Array\.isArray\(sibs\) && sibs\.length >= 2\) \{/);
+    // >= 2 members AND the size gate (owner call (a), 2026-08-22): below STRIP_MIN_THUMB the
+    // fixed-height grid cell can't hold the slab + strip, so the strip steps aside.
+    assert.match(grid, /if \(Array\.isArray\(sibs\) && sibs\.length >= 2 && \(thumb \|\| 210\) >= STRIP_MIN_THUMB\) \{/);
+    assert.match(grid, /const STRIP_MIN_THUMB = 190;/);
     assert.match(grid, /const shown = sibs\.slice\(0, 4\);/);
     assert.match(grid, /\{sibs\.length > 4 \? <span className="more">\+\{sibs\.length - 4\}<\/span> : null\}/);
     assert.match(grid, /className=\{s\.media_id === it\.media_id \? "self" : undefined\}/);

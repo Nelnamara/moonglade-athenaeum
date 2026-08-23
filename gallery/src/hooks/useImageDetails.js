@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { detailsHeadline } from "../gen/headline.js";
 
 /* useImageDetails -- DetailsView.jsx's fetch/state/derivation/action logic,
    mechanically lifted out (2026-08-03) into its own hook so a new mobile
@@ -177,7 +178,11 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
 
   // ---- derived (guarded: only meaningful once `row` exists; consumers keep
   // their own loading/error early-return before rendering these) ----
-  const headline = row ? (row.title || row.filename || "Untitled") : "";
+  // Image Details.dc.html: a typed title, else a quoted PROMPT EXCERPT -- never the
+  // filename (it has its own ledger row). The `title || filename` that lived here shipped
+  // the clipped filename as the headline on 99.95% of the library ("Where the Refit
+  // Broke", 19 Aug 2026). See gen/headline.js for the excerpt rule and its DC oracle test.
+  const headline = detailsHeadline(row);
   const hasPromptBlock = !!(row && (row.prompt_full || row.natural_prompt || row.negative_prompt));
   const tagList = row && row.art_tags ? row.art_tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
   const collectionList = row && row.collections ? row.collections.split(",").map((c) => c.trim()).filter(Boolean) : [];

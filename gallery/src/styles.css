@@ -682,6 +682,18 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
    size that works -- so it stops trying to and gives the image the full
    width instead. */
 .placard-wide { grid-template-columns: 1fr; }
+/* The stacked layout inherited the two-column image budget (max-height: 100vh-160) --
+   correct when the image owns a column, wrong when it shares a column with the record:
+   the image claimed ~94% of the takeover's height in a track the grid had sized at ~47%,
+   and align-self:center hung the excess off BOTH ends, the bottom half across the record
+   ("Where the Refit Broke", 19 Aug 2026 -- measured: 143px overlap as shipped;
+   align-self:start 317px = worse, proving it is height not alignment; 40vh = a real gap).
+   Both doors into the stacked layout get the budget: the wide-ratio class AND the <860px
+   media query, which collapses every ratio into one column. */
+.placard-wide .placard-frame img, .placard-wide .placard-frame video { max-height: 40vh; }
+@media (max-width: 860px) {
+  .placard-frame img, .placard-frame video { max-height: 40vh; }
+}
 
 /* A grid item's default min-width is auto, which lets it refuse to shrink
    below its CONTENT's intrinsic size -- for an <img> that's the real pixel
@@ -717,8 +729,12 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
    is bounded server-side, but nothing stops a future data source (or a title
    the owner types by hand) from being long, and this is what stops that from
    ever blowing out the layout again regardless of where the text came from. */
-.p-title { margin: 0 0 8px; font: italic 600 25px/1.32 var(--serif); color: var(--text);
-  text-wrap: balance; opacity: 0;
+/* Image Details.dc.html titleStyle: 30px italic Georgia, line-height 1.2, -.01em. The
+   field is a quoted PROMPT EXCERPT (~40 chars) -- the line clamp that used to live here was
+   a bandage over the wrong field (a 1669px filename), not something an excerpt needs. Kept
+   as a 3-line ceiling only so a hand-typed title can never blow the layout out. */
+.p-title { margin: 0 0 8px; font: italic 400 30px/1.2 var(--serif); letter-spacing: -.01em;
+  color: var(--text); text-wrap: balance; opacity: 0; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .p-rule-track { position: relative; height: 2px; overflow: hidden; border-radius: 2px;
   background: var(--surface1); }
@@ -741,7 +757,10 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .p-facts li { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; }
 .p-facts span { flex: 0 0 78px; color: var(--overlay0); font-size: 10.5px;
   letter-spacing: .05em; text-transform: uppercase; }
-.p-facts b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.p-facts b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums;
+  /* Image Details.dc.html valueStyle, verbatim -- a 19-digit id or a path has no break
+     opportunity and was silently clipped ("Where the Refit Broke": FILENAME +67px). */
+  min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .p-facts .mono { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
 .p-facts .dim { color: var(--overlay0); }
 
