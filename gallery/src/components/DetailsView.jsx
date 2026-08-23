@@ -487,7 +487,10 @@ export default function DetailsView({
                   }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
               ) : null}
               <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
-              {row.batch ? <button className="btn" onClick={() => onFilterByBatch(row.batch)}>View Batch</button> : null}
+              {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
+                  button (and its filter matched nothing) on every organized library. The server's
+                  batch filter now matches either column (issue #30). */}
+              {row.task_id ? <button className="btn" onClick={() => onFilterByBatch(row.task_id)}>View Batch</button> : null}
               <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>
               <button className="btn btn-danger" disabled={busy} onClick={deleteLocal}>Delete locally</button>
               {state.data.can_delete_cloud && row.task_id ? (
