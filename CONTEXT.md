@@ -85,3 +85,22 @@ flat folder), `batches` (legacy batch folders), `month` (a `YYYY-MM/` folder or
 `unknown-date/`), or `other` (anything else). `bucket_of()` is the only thing that decides it.
 Buckets are how a duplicate is spotted (the same media id in more than one bucket) and how the
 keeper is chosen when one is — most-organized wins.
+**Media tools** — the one seam every ffmpeg and ffprobe invocation passes through: the
+delimited `media_tools` section of `moonglade_backup.py`. It answers "is the binary
+installed" (once, cached, per binary), supplies the no-window flag and the timeout, and
+returns a **tool result** instead of raising. Video thumbnails, the faststart remux, the
+frame handoff, clip duration, audio detection and the Loom export are all callers of it,
+not re-implementations.
+
+**Tool result** — what one media-tool invocation did: `ok`, the exit code, the captured
+`stdout`/`stderr`, and `missing`. A non-zero exit is an *answer* (ffmpeg's ordinary way of
+refusing a file), not an error — what it means is the caller's to say.
+
+**Missing (a media tool)** — the binary is not installed. A distinct road from "it ran and
+failed", so a caller can degrade deliberately rather than by accident; it is what lets a
+missing ffprobe cost the Loom export its audio track without costing it the file.
+
+**Frame primitive** — `extract_last_frame()`: the one piece of code in the app that pulls a
+still out of a clip. General, not last-frame-only — an explicit timestamp of `0.0` yields
+the *first* frame, and a trim's out-point yields the frame the cut actually ends on. Nothing
+else extracts frames.
