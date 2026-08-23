@@ -49,3 +49,14 @@ no card at all and charges the full price ("short").
 pushes state in through its imperative handle — `setPrice(response)`, `setChecking()`,
 `clear(hint)` — and the badge owns every state's wording and colour, so a displayed "free"
 or "0 credits" can only ever mean a settled zero-cost result.
+
+**Submit road** — `gallery/src/gen/submitTask.js`, the one function every gallery surface POSTs
+a spend route through (`/api/generate`, `/api/edit`, `/api/fix`, `/api/enhance`, `/api/scene`,
+`/api/loom/generate`). It owns the no-retry rule, the HTTP-200 `{error}` read, the `adjusted`
+disclosure, and registration: its `Jobs.track` call is what puts a generation in the Activity
+tray, so no host has to remember to.
+
+**Poll cadence** — the tier table in `gallery/src/notify/pollCadence.js`: a task is asked about
+every 3s, then every 20s past 20 minutes (`slow`), every 3 minutes past 90 minutes (`stale`),
+and at 6 hours this tab stops asking (`stalled` — a statement about the tab, never a verdict on
+the task). `cadenceFor(elapsedMs)` returns `{ms, tier}`; the tier is announced once, on entry.
