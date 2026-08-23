@@ -23,17 +23,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Card placard: Accession Stamp + Sibling Strip** ([#30](https://github.com/Nelnamara/moonglade-athenaeum/issues/30)) *(owner: blend of A+E, 2026-08-19 review)*
-  The card's "title" is the word-salad filename, and two outputs of one batch are indistinguishable.
-  Replace it with direction A's small monospace stamp (local date+time · model; a typed title above it
-  only when one exists, never a machine name) and E's **sibling strip** — tiny thumbs of the task's
-  other outputs with self lit — in place of an `OUTPUT n OF N` number. The strip dissolves the
-  review's blocker (no stored batch order exists; a number would be wrong for an unknown fraction
-  of the library, undetectably). Data is mostly there: `/api/lineage` already returns a thumb per
-  sibling; it needs a page-batched form, four new card-payload fields, a 32px thumb tier, and the
-  `find more` filter re-pointed at `task_id`. Carries a real bug to fix regardless: the card date is a
-  UTC slice, so ~half the library shows the wrong day. Design source: the "Placard identity" artifact.
-
 - **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
@@ -206,7 +195,9 @@ it's actionable. Listed so they aren't lost, not because they're ready.
 - **Curator:** smart collections (saved queries as live collections) · search operators
   (`seed:` `aes:>` `ar:`) · collections manager (rename/merge/delete) · archive-integrity job.
 - **Power user:** prompt-matrix queue runs · metadata recovery for hand-made folders.
-- **Mobile:** Remix and Send to Video on the mobile details sheet — both need their own
+- **Mobile:** the card placard (accession stamp + sibling strip) — the phone grid is a separate
+  component and has none of it yet; and the mobile details sheet's View-batch chip still gates on the
+  legacy `batch` column (re-point at `task_id` like desktop did in #30) · Remix and Send to Video on the mobile details sheet — both need their own
   wiring into CreateMobile's composer (the sheet has no dock hand-off; Send to Video is
   already a disclosed stub there, Remix now ships desktop-only the same way).
 
