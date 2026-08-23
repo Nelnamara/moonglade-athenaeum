@@ -12,20 +12,25 @@ import path from "node:path";
 // designed labels in the designed order, the faces are right, and the app's own extra
 // actions -- the ones the DC never drew -- kept every one of their handlers in a
 // quieter third row, with the irreversible one last.
+//
+// The two PLACES, per the 2026-08-23 rebuild to the DC (details-layout.test.js has the
+// layout itself): fileActions sit UNDER THE HERO in the picture column (DC:56-60), and
+// recordActions sit in the record directly under the ledger, BEFORE lineage (DC:102-108).
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8");
 const details = src("gallery/src/components/DetailsView.jsx");
 
 // the text of one <div className="p-actions p-actions-X"> ... </div> group: from its
-// opening tag to the first </div> back at the container's own 12-space indent (every
-// chip inside sits deeper), so the slice is exactly that group and nothing after it.
+// opening tag to the first </div> back at the container's OWN indent (every chip inside
+// sits deeper), so the slice is exactly that group and nothing after it.
 function group(name) {
   const open = '<div className="p-actions p-actions-' + name + '">';
   const i = details.indexOf(open);
   assert.ok(i >= 0, "the " + name + " group exists: " + open);
+  const indent = i - (details.lastIndexOf("\n", i) + 1);
   const rest = details.slice(i + open.length);
-  const close = rest.search(/\r?\n {12}<\/div>/);
+  const close = rest.search(new RegExp("\\r?\\n {" + indent + "}</div>"));
   assert.ok(close >= 0, "the " + name + " group closes");
   return rest.slice(0, close);
 }
@@ -41,7 +46,7 @@ function labels(txt) {
   return out;
 }
 
-describe("the primary group: the DC's fileActions, after the facts, before lineage", () => {
+describe("the primary group: the DC's fileActions, under the hero in the picture column", () => {
   const g = group("primary");
 
   test("(a) exactly the five designed labels, in the designed order", () => {
@@ -49,12 +54,16 @@ describe("the primary group: the DC's fileActions, after the facts, before linea
       "⬇ Download", "☁ Publish", "⧉ Copy prompt", "⇱ Upscale", "Delete locally",
     ]);
   });
-  test("it sits directly after the ledger facts + tags and BEFORE lineage", () => {
-    const facts = details.indexOf('<ul className="p-facts">');
+  test("it sits in the PICTURE column, under the frame and before the stars row -- never in the record", () => {
+    const picture = details.indexOf('<div className="placard-picture">');
+    const frame = details.indexOf('className={"placard-frame"');
     const primary = details.indexOf('className="p-actions p-actions-primary"');
-    const lineage = details.indexOf('className="p-lineage"');
-    assert.ok(facts >= 0 && primary > facts, "primary comes after the facts list");
-    assert.ok(lineage > primary, "primary comes before the lineage strip");
+    const stars = details.indexOf('className="p-stars-row"');
+    const record = details.indexOf('<aside className="placard-record"');
+    assert.ok(picture >= 0 && frame > picture, "the picture column opens, then the frame");
+    assert.ok(primary > frame, "primary comes after the frame");
+    assert.ok(stars > primary, "primary comes before the stars row");
+    assert.ok(record > stars, "all of it before the record column opens");
   });
   test("(c) Download carries the shared metal face; Delete locally is the danger chip", () => {
     assert.match(g, /<a className="btn mgx-metal"[\s\S]*?>⬇ Download<\/a>/);
@@ -68,7 +77,7 @@ describe("the primary group: the DC's fileActions, after the facts, before linea
   });
 });
 
-describe("the record group: the DC's recordActions, at the end of the record", () => {
+describe("the record group: the DC's recordActions, under the ledger, before lineage", () => {
   const g = group("record");
 
   test("(b) exactly the five designed labels, in the designed order", () => {
@@ -77,10 +86,12 @@ describe("the record group: the DC's recordActions, at the end of the record", (
       "✎ Edit prompt", "▶ Send to Video", "Find similar (model)", "View batch", "Suggest prompt",
     ]);
   });
-  test("it comes after lineage", () => {
+  test("it comes after the ledger and BEFORE lineage (DC:102-108)", () => {
+    const ledger = details.indexOf('<div className="p-ledger">');
     const lineage = details.indexOf('className="p-lineage"');
     const record = details.indexOf('className="p-actions p-actions-record"');
-    assert.ok(lineage >= 0 && record > lineage);
+    assert.ok(ledger >= 0 && record > ledger, "record actions come after the ledger");
+    assert.ok(lineage > record, "record actions come before the lineage card");
   });
   test("Find similar (model) is the DC's 'every image from this model' -- the model filter", () => {
     assert.match(g, /onClick=\{\(\) => onFilterByModel\(row\.model_name\)\}>Find similar \(model\)<\/button>/);
@@ -113,8 +124,13 @@ describe("the More row: the app's actions the DC never drew, every handler kept"
   test("(e) Delete from PixAI is the last chip of all, still danger-styled", () => {
     const all = labels(g);
     assert.equal(all[all.length - 1], "Delete from PixAI");
-    // and nothing renders after the More row inside the record
-    assert.ok(details.indexOf('className="p-actions p-actions-more"') > details.indexOf('className="p-actions p-actions-record"'));
+    // and the More row is the LAST thing in the record: after the record actions,
+    // lineage and the Similar strip, closed by the record's own </aside>
+    const more = details.indexOf('className="p-actions p-actions-more"');
+    assert.ok(more > details.indexOf('className="p-actions p-actions-record"'));
+    assert.ok(more > details.indexOf('className="p-lineage"'));
+    assert.ok(more > details.indexOf('className="p-similar"'));
+    assert.match(details.slice(more), /<\/div>\r?\n\s*<\/aside>/);
   });
   test("Rebuild poster stays video-only", () => {
     assert.match(g, /\{row\.is_video === "1" \? \(\s*<button className="btn" disabled=\{posterBusy\}/);
@@ -129,6 +145,10 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
   test("the three containers, the DC's chip metrics, the danger outline, the quieter More row", () => {
     const css = src("gallery/src/styles.css");
     assert.match(css, /\.p-actions \{ display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px;/);
+    // only the RECORD's groups start hidden for the reveal; the file actions under the
+    // hero are drawn unanimated (DC:56-60) and must never sit at opacity 0
+    assert.match(css, /\.placard-record \.p-actions \{ opacity: 0; \}/);
+    assert.doesNotMatch(css, /\n\.p-actions \{[^}]*opacity: 0/);
     assert.match(css, /\.p-actions \.btn \{ font-size: 11px; font-weight: 700; white-space: nowrap; padding: 8px 14px;\r?\n\s*border-radius: 9px;/);
     assert.match(css, /\.p-actions \.btn-danger[^{]*\{ border: 1px solid rgba\(243,139,168,\.35\);\r?\n\s*background: rgba\(243,139,168,\.1\); color: var\(--red\);/);
     assert.match(css, /\.p-actions-more \.btn \{ font-size: 10px;/);
@@ -140,7 +160,8 @@ describe("the strip is gone: three groups, styled as groups, and the reveal stil
     assert.match(details, /qa\("\.p-actions"\)\.forEach\(\(g, i\) => play\(g, \[/);
     assert.match(details, /qa\("\.p-kicker, \.p-title, \.p-fact, \.p-tag, \.p-actions"\)/);
     const css = src("gallery/src/styles.css");
-    assert.match(css, /header, \.detail-nav, \.p-actions, \.p-vitals \{ display: none !important; \}/);
+    assert.match(css, /header, \.detail-nav, \.p-actions, \.p-stars-row \{ display: none !important; \}/);
     assert.match(css, /\.p-kicker, \.p-title, \.p-fact, \.p-tag, \.p-actions \{ opacity: 1; \}/);
+    assert.match(css, /\.placard-record \.p-actions \{ opacity: 1; \}/);
   });
 });

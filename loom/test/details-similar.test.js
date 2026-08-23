@@ -38,12 +38,15 @@ test("A: DetailsView renders the DC's ✧ SIMILAR header + an 8-tile strip, inli
   assert.match(details, /similar\.images\.slice\(0, 8\)\.map/);           // eight tiles, DC:135
   assert.match(details, /className="p-sim-tile"/);
   assert.match(details, /see all \{similar\.images\.length\}/);           // DC:132's "see all 48", a real count
-  // the strip sits INSIDE the record (between the lineage block and the record actions)
+  // the strip sits INSIDE the record, after LINEAGE (DC:108 then :127), with only the
+  // app's quiet More row after it (the 2026-08-23 rebuild put the record actions where
+  // the DC has them, BEFORE lineage -- details-actions.test.js)
   const lineageEnd = details.indexOf('className="p-lineage"');
   const strip = details.indexOf('className="p-similar"');
-  const recordActions = details.indexOf("p-actions-record");
+  const moreRow = details.indexOf("p-actions-more");
+  const asideEnd = details.indexOf("</aside>");
   assert.ok(lineageEnd > 0 && strip > lineageEnd, "strip comes after LINEAGE");
-  assert.ok(recordActions < 0 || strip < recordActions, "strip comes before the record-actions group");
+  assert.ok(moreRow > strip && asideEnd > moreRow, "only the More row follows it inside the record");
 });
 
 test("A: the strip's CSS exists and matches the DC's geometry (flex row, gap 8, overflow-x, 78px tiles)", () => {
@@ -76,7 +79,7 @@ test("B: the strip is gated on the route's availability signal -- empty images =
   const m = details.match(/\{similar\.images\.length \? \(\s*<div className="p-similar">/);
   assert.ok(m, "the p-similar block is conditional on similar.images.length");
   // nothing renders a "loading" or error note for the strip -- unavailable means absent
-  const block = details.slice(details.indexOf('className="p-similar"'), details.indexOf("p-actions-record"));
+  const block = details.slice(details.indexOf('className="p-similar"'), details.indexOf("p-actions-more"));
   assert.doesNotMatch(block, /similar\.error|similar\.loading/);
   // and the hook really does collapse every unavailable case to images: []
   assert.match(hook, /const images = \(d && d\.images\) \|\| \[\]/);
