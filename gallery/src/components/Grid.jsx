@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { localDay } from "../gen/dates.js";
 import Stars from "./Stars.jsx";
 import "../styles/grid.css";
 
@@ -71,8 +72,9 @@ const spanFor = (width, r) => Math.max(4, Math.round((width * r + GAP) / ROW_STE
 const spanForH = (hpx) => Math.max(1, Math.round((hpx + GAP) / ROW_STEP));
 
 /* Timeline banding (drift §47): Today · Yesterday · then YYYY-MM, newest first.
-   The catalog row's `date` is already created_at[:10] ("YYYY-MM-DD") — zero new
-   data. A missing date (very old imports) falls into an "Undated" band, last. */
+   The day is the viewer's LOCAL day from the row's full created_at (gen/dates.js);
+   the server's `date` (a UTC slice) is only the fallback for rows with no timestamp.
+   A missing date (very old imports) falls into an "Undated" band, last. */
 function todayYesterday() {
   const pad = (n) => String(n).padStart(2, "0");
   const fmt = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
@@ -224,7 +226,7 @@ export default function Grid({
     const groups = new Map();
     const order = [];
     items.forEach((it) => {
-      const b = bandFor(it.date, today, yesterday);
+      const b = bandFor(localDay(it.created_at) || it.date, today, yesterday);
       let g = groups.get(b.key);
       if (!g) {
         g = { key: b.key, label: b.label, tier: b.tier, monthKey: b.monthKey, list: [] };
@@ -459,7 +461,7 @@ export default function Grid({
         {it.is_video ? <span className="mgg-vglyph">▶</span> : null}
         <figcaption className="mgg-cap">
           <span className="mgg-model">{it.model || "—"}</span>
-          <span className="mgg-date">{it.date || ""}</span>
+          <span className="mgg-date">{localDay(it.created_at) || it.date || ""}</span>
           {fname ? <span className="mgg-file" title={fname}>{shortName}</span> : null}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
