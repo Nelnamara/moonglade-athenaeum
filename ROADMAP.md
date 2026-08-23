@@ -23,17 +23,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **Image Details: stamp headline + the wide-image layout** ([#31](https://github.com/Nelnamara/moonglade-athenaeum/issues/31)) *(owner-reported live, 2026-08-22)*
-  The other half of the placard design: the "Placard identity" artifact designs the **Details view's
-  placard** ("placard" is this view's own class name) as one identity with the grid card; #30 built
-  the card half and this half was missed. The Details headline still leads with the word-salad
-  **filename** for every untitled image — apply direction A (a typed title only, else the accession
-  stamp; never a machine name) and E's sibling strip in the record. And a **wide** image (ratio > 1.6)
-  clips off the top of the viewport while the record paints over its lower half: `.placard-wide`
-  stacks the columns but never sizes the rows, so the art and the record auto-split into two equal
-  rows the image can't fit. Measured live; a two-line CSS fix (`grid-template-rows: auto minmax(0,1fr)`,
-  frame `align-self: start`). Small, real, no design gate.
-
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
