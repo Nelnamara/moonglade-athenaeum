@@ -48,8 +48,8 @@ def test_build_thumbnails_video_fallback(tmp_path, monkeypatch):
 
 
 def test_make_video_thumbnail_fail_soft(tmp_path, monkeypatch):
-    import shutil
-    monkeypatch.setattr(shutil, "which", lambda _x: None)   # no ffmpeg anywhere
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")    # no ffmpeg anywhere
     assert g.make_video_thumbnail(tmp_path / "nope.mp4",
                                   tmp_path / "t.jpg") is False
     assert not (tmp_path / "t.jpg").exists()

@@ -229,7 +229,10 @@ def _ffmpeg_refuses(monkeypatch, stderr=b"[mp4 @ 0x55] could not find sample tab
     def fake_run(cmd, **kw):
         seen.update(kw)
         seen.setdefault("calls", []).append(cmd)
-        return SimpleNamespace(returncode=1, stderr=stderr)
+        # A faithful CompletedProcess shape: media_tools' runner reads BOTH streams
+        # (stderr is where ffmpeg says why it refused; stdout is piped too, and with
+        # -v error it is empty on every road).
+        return SimpleNamespace(returncode=1, stdout=b"", stderr=stderr)
     monkeypatch.setattr(subprocess, "run", fake_run)
     return seen
 
@@ -239,7 +242,7 @@ def _ffmpeg_succeeds(monkeypatch):
     def fake_run(cmd, **kw):
         from pathlib import Path
         Path(cmd[-1]).write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
-        return SimpleNamespace(returncode=0, stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
 
@@ -252,7 +255,7 @@ class TestM04Faststart:
         clip = tmp_path / "nf.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
         before = clip.read_bytes()
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         seen = _ffmpeg_refuses(
             monkeypatch, b"[mp4 @ 0x55] track 1: could not find sample table\n")
 
@@ -269,7 +272,7 @@ class TestM04Faststart:
         both "ffmpeg refused" and "there was nothing to do", which is fine for the collect-time
         callers that only want the file made streamable -- but a sweep that has to name the
         clips still broken cannot tell them apart, and so named the wrong ones."""
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         already = tmp_path / "already.mp4"
         already.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
         gone = tmp_path / "gone.mp4"
@@ -290,7 +293,7 @@ class TestM04Faststart:
         vdir.mkdir()
         (vdir / "ok.mp4").write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))    # already faststart
         (vdir / "broken.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch)                                      # ffmpeg refuses it
 
         res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -316,7 +319,7 @@ class TestM04Faststart:
         vdir = tmp_path / "videos"
         vdir.mkdir()
         (vdir / "raced.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_succeeds(monkeypatch)
         asked = {"n": 0}
 
@@ -346,7 +349,7 @@ class TestM04Faststart:
         vdir.mkdir()
         clip = vdir / "purged.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch, b"purged.mp4: No such file or directory\n")
 
         def purge_then_answer(p):

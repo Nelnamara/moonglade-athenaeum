@@ -764,7 +764,7 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
         return out
     monkeypatch.setattr(core, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+    monkeypatch.setattr(core, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -793,7 +793,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
         return out
     monkeypatch.setattr(core, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+    monkeypatch.setattr(core, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -857,7 +857,7 @@ def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
     the real local file via ffprobe instead of leaving an imported clip's length wrong."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 7.25)
+    monkeypatch.setattr(core, "duration", lambda p: 7.25)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -893,7 +893,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
     calls = []
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: calls.append(p) or 9.0)
+    monkeypatch.setattr(core, "duration", lambda p: calls.append(p) or 9.0)
 
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/loom/video-duration?media_id=V9").get_json()

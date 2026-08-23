@@ -188,7 +188,7 @@ def test_import_local_external_copies_in(tmp_path):
 
 def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
     # ffmpeg absent -> returns False gracefully, no thumbnail written
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     vid = tmp_path / "clip.mp4"; vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
     thumb = tmp_path / "out.jpg"
     assert core.video_poster_thumb(vid, thumb) is False
@@ -196,7 +196,7 @@ def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
 
 
 def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
@@ -222,7 +222,7 @@ def test_mp4_faststart_detection(tmp_path):
 
 
 def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     before = nf.read_bytes()
     assert core.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
@@ -231,7 +231,7 @@ def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
 
 def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     # ffmpeg 'present' but the file is already faststart -> short-circuits, no remux attempt
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
     assert core.video_faststart(fs) is False
     assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
@@ -254,7 +254,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
     import subprocess
     import threading
 
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
 
@@ -287,7 +287,9 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
             fh.close()
             if role == 2:
                 two_finished.set()
-        return SimpleNamespace(returncode=0)
+        # stdout/stderr are part of a real CompletedProcess and media_tools' runner
+        # reads both; the concurrency this test is about is untouched by them.
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
 
@@ -306,7 +308,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
 
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -325,7 +327,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     import moonglade_gallery as g
     from moonglade_gallery import load_catalog
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     g._role_dir("marks").mkdir(parents=True)
     (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
