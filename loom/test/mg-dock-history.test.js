@@ -227,9 +227,17 @@ describe("the dock wires History (source guards -- the parts that are not pure)"
   const reel = src("gallery/src/components/RunsReel.jsx");
   const css = src("gallery/src/styles/dock.css");
 
-  test("HistoryStrip renders in the reel's place under reelVisible && historyOpen", () => {
+  test("HistoryStrip renders in the reel's place; reachable even when the reel is hidden (#27)", () => {
     assert.match(dock, /import HistoryStrip, \{ RunTip \} from "\.\/HistoryStrip\.jsx"/);
-    assert.match(dock, /\{reelVisible && \(historyOpen\s*\? <HistoryStrip[\s\S]*?: <RunsReel/);
+    // History is no longer gated on reelVisible: the History button is the only control
+    // that opens it, so on short viewports (reel hidden) it was unreachable. The strip
+    // renders whenever historyOpen; only the RunsReel itself stays behind reelVisible.
+    assert.match(dock, /\{historyOpen\s*\? <HistoryStrip[\s\S]*?: \(reelVisible && <RunsReel/);
+    assert.doesNotMatch(dock, /\{reelVisible && \(historyOpen/);
+    // and the History BUTTON is not display:none'd with the reel any more
+    const btn = dock.indexOf('className={"mgdock-hist"');
+    assert.ok(btn > 0);
+    assert.doesNotMatch(dock.slice(btn, btn + 300), /style=\{reelVisible \? null : \{ display: "none" \}\}/);
   });
   test("header copy: label 'History', note '7 days · newest first · …', the live note wins; no stale title", () => {
     assert.match(dock, /const reelLabel = historyOpen \? "History" : \(runningCount \? "Making" : "Runs"\);/);

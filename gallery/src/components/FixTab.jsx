@@ -122,6 +122,9 @@ export default function FixTab({ visible, dock, source }) {
     if (!visible) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(fireCost, 250);
+    // cleanup (#27): leaving the tab used to leave the armed timer, so one stray /api/price
+    // fired ~250ms after the tab was gone
+    return () => clearTimeout(timer.current);
   }, [fireCost, visible]);
 
   /* ---- the canvas: draw, paint, resize ---- */
