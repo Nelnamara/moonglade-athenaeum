@@ -420,7 +420,12 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
     # The QUOTED form (double quotes in the React source), i.e. an actual fetch target -- the
     # component's own doc names /api/upscale in prose while explaining why it does not exist.
-    assert '"/api/price"' in src and '"/api/generate"' in src
+    # Since 2026-08-22 the price half rides the shared probe (gen/usePriceProbe.js, the one
+    # /api/price caller under gallery/src), so the panel's own import is what pins it; the
+    # submit stays this component's.
+    probe = (root / "gallery" / "src" / "gen" / "usePriceProbe.js").read_text(encoding="utf-8")
+    assert "usePriceProbe" in src and '"/api/price"' in probe
+    assert '"/api/generate"' in src
     assert "'/api/upscale'" not in src and '"/api/upscale"' not in src
     assert "ref_media_id" in src and "ref_strength" in src, "an image-view upscale is i2i"
     # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),
@@ -432,13 +437,16 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
         assert name not in src, name + " is retyped in the component instead of served"
     # CostBadge's real handle is setChecking()/setPrice(). An invented one (.loading()/.show())
     # is silently a no-op -- the panel renders, the price line never updates, nothing reports it.
+    # The panel supplies the badge ref and the probe drives it, so the call sites live there.
     badge = (root / "gallery" / "src" / "components" / "CostBadge.jsx").read_text(encoding="utf-8")
+    assert "<CostBadge" in src and "ref={costRef}" in src, "the panel must own the badge instance"
     for meth in ("setChecking", "setPrice"):
-        assert meth + "(" in src, "the panel must call the badge's " + meth
+        assert meth + "(" in probe, "the probe must call the badge's " + meth
         assert meth + "(" in badge, meth + " is not actually on the badge"
     # Scoped to the badge handle -- Toast.show() is a real, different API on this page.
-    assert "costRef.current.show(" not in src and "costRef.current.loading(" not in src, (
-        "those are not badge methods; calling them fails silently")
+    for f in (src, probe):
+        assert "costRef.current.show(" not in f and "costRef.current.loading(" not in f, (
+            "those are not badge methods; calling them fails silently")
 
 
 def test_lora_weight_spans_pixais_real_range_on_every_surface():
@@ -649,11 +657,17 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     must be SERVED rather than retyped into the component."""
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    # Go's disabled derives from canSubmit, which accepts the served fallback version -- so a
-    # no-model image stays submittable, never dead-disabled.
+    # Go's disabled derives from goReady, which accepts the served fallback version -- so a
+    # no-model image stays submittable, never dead-disabled. (2026-08-22: goReady is also what
+    # the cost badge prices on -- ONE predicate, so a fallback-only picture is quoted rather
+    # than offered a live button with no price beside it.)
     assert "(src && src.model_id) || fallbackVersion()" in src, \
         "the no-model case must still submit via the fallback, not dead-disable Go"
-    assert "disabled={!canSubmit || busy}" in src
+    assert "const canGo = goReady && probe.canSubmit;" in src, \
+        "Go is the panel's own readiness AND a price settled for THIS payload"
+    assert "idle: goReady ? null : true" in src, \
+        "the badge must price whenever Go is possible -- one predicate, not two"
+    assert "disabled={!canGo || busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src
@@ -669,7 +683,7 @@ def test_upscale_sends_the_images_model_as_a_version_id():
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    body = src[src.index("const payload = ()"):src.index("const doPrice = ()")]
+    body = src[src.index("const payload = ()"):src.index("const build = useCallback(")]
     assert 'model_id: s.model_picked ? (s.model_id || "") : ""' in body, \
         "only a PICKED model may travel as model_id"
     assert 'version_id: s.model_picked ? "" : (s.model_id || fallbackVersion())' in body, \

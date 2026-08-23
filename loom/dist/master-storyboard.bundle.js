@@ -2223,6 +2223,36 @@ ${"=".repeat(48)}
   var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
   var findDOMNode = ReactDOM.findDOMNode;
 
+  // ../gallery/src/gen/priceProbeCore.js
+  var PRICE_KEY_SKIP = ["prompt", "negative", "seed"];
+  function priceKey(payload, skipKeys = PRICE_KEY_SKIP) {
+    if (!payload || typeof payload !== "object") return "";
+    const skip = skipKeys || [];
+    const keys = Object.keys(payload).filter((k) => skip.indexOf(k) === -1).sort();
+    return JSON.stringify(keys.map((k) => [k, payload[k]]));
+  }
+  function initialVerdict() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function scheduled() {
+    return { settled: false, pricedKey: null, pendingTimer: true };
+  }
+  function fired() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function settledFor(key) {
+    return { settled: true, pricedKey: key, pendingTimer: false };
+  }
+  function canSubmit(verdict, payload, skipKeys = PRICE_KEY_SKIP) {
+    return !!(verdict && verdict.settled && !verdict.pendingTimer && verdict.pricedKey != null && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  function shouldShortCircuit(verdict, payload, force, skipKeys = PRICE_KEY_SKIP) {
+    if (force) return false;
+    return !!(verdict && verdict.settled && verdict.pricedKey != null && !verdict.pendingTimer && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  var PRICE_DEBOUNCE_MS = 250;
+  var PRICE_FETCH_TIMEOUT_MS = 25e3;
+
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
     { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
@@ -2411,16 +2441,6 @@ ${"=".repeat(48)}
   function hasAnyRef(p) {
     return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
   }
-  var PRICE_KEY_SKIP = ["prompt", "negative"];
-  function priceKey(payload) {
-    if (!payload || typeof payload !== "object") return "";
-    const keys = Object.keys(payload).filter((k) => PRICE_KEY_SKIP.indexOf(k) === -1).sort();
-    return JSON.stringify(keys.map((k) => [k, payload[k]]));
-  }
-  function canSubmit(price, payload) {
-    return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null && price.pricedKey === priceKey(payload));
-  }
-  var PRICE_FETCH_TIMEOUT_MS = 25e3;
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
@@ -2440,6 +2460,106 @@ ${"=".repeat(48)}
       hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
     }
     return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
+  }
+
+  // ../gallery/src/gen/usePriceProbe.js
+  function usePriceProbe({ build: build2, costRef, enabled = true, skipKeys = PRICE_KEY_SKIP }) {
+    const [verdict, setVerdict] = useState(initialVerdict);
+    const [response, setResponse] = useState(null);
+    const live = useRef(verdict);
+    const buildRef = useRef(build2);
+    const skipRef = useRef(skipKeys);
+    const enabledRef = useRef(enabled);
+    buildRef.current = build2;
+    skipRef.current = skipKeys;
+    enabledRef.current = enabled;
+    const seq2 = useRef(0);
+    const timer2 = useRef(0);
+    const ctrl = useRef(null);
+    const put = useCallback((v) => {
+      live.current = v;
+      setVerdict(v);
+    }, []);
+    const stop = useCallback(() => {
+      clearTimeout(timer2.current);
+      timer2.current = 0;
+      seq2.current++;
+      if (ctrl.current) {
+        try {
+          ctrl.current.abort();
+        } catch {
+        }
+        ctrl.current = null;
+      }
+    }, []);
+    const fire = useCallback(() => {
+      put(fired());
+      const badge = costRef.current;
+      if (!badge) return;
+      const built2 = buildRef.current() || {};
+      const p = built2.payload;
+      const skip = skipRef.current;
+      const key = priceKey(p, skip);
+      if (built2.idle) {
+        if (built2.idle === true) badge.clear();
+        else badge.clear(String(built2.idle));
+        setResponse(null);
+        put(settledFor(key));
+        return;
+      }
+      badge.setChecking();
+      const mine = ++seq2.current;
+      const c = typeof AbortController !== "undefined" ? new AbortController() : null;
+      ctrl.current = c;
+      const abortTimer = c ? setTimeout(() => c.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
+      fetch("/api/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(p),
+        signal: c ? c.signal : void 0
+      }).then((r) => r.json()).then((d) => {
+        clearTimeout(abortTimer);
+        if (mine !== seq2.current || !costRef.current) return;
+        ctrl.current = null;
+        costRef.current.setPrice(d);
+        setResponse(d);
+        put(settledFor(key));
+      }).catch(() => {
+        clearTimeout(abortTimer);
+        if (mine !== seq2.current || !costRef.current) return;
+        ctrl.current = null;
+        costRef.current.setPrice(null);
+        setResponse(null);
+        put(settledFor(key));
+      });
+    }, [costRef, put]);
+    const refresh2 = useCallback((opts) => {
+      if (!enabledRef.current) return;
+      const force = !!(opts && opts.force);
+      const built2 = buildRef.current() || {};
+      if (shouldShortCircuit(live.current, built2.payload, force, skipRef.current)) return;
+      const badge = costRef.current;
+      if (badge && badge.setChecking) badge.setChecking();
+      put(scheduled());
+      seq2.current++;
+      clearTimeout(timer2.current);
+      timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
+    }, [costRef, fire, put]);
+    useEffect(() => {
+      if (!enabled) {
+        stop();
+        return;
+      }
+      refresh2({ force: true });
+    }, [enabled, refresh2, stop]);
+    useEffect(() => stop, [stop]);
+    const built = build2 ? build2() || {} : {};
+    return {
+      refresh: refresh2,
+      verdict,
+      canSubmit: canSubmit(verdict, built.payload, skipKeys),
+      response
+    };
   }
 
   // ../gallery/src/components/VideoDrawer.jsx
@@ -2469,21 +2589,15 @@ ${"=".repeat(48)}
       negative: "",
       modeNote: "",
       rendering: false,
-      hostBusy: false,
-      // The price verdict's IDENTITY (videoDrawerCore.canSubmit reads exactly this shape): settled
-      // = the badge shows the verdict for pricedKey; pricedKey = priceKey() of the payload that was
-      // priced; pendingTimer = a debCost re-price is scheduled and not yet fired. Go is disabled
-      // unless the payload it would submit has this same key -- state alone can't say that.
-      // Seeded once below: the badge's initial idle hint IS the verdict for the initial empty form.
-      price: null
+      hostBusy: false
+      // The price VERDICT no longer lives here: it is the shared probe's React state
+      // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
+      // rerender() that used to sit beside each verdict write by hand.
     });
-    if (!st.current.price) st.current.price = { settled: true, pricedKey: priceKey(buildPayload(st.current, "")), pendingTimer: false };
     const [, force] = useState(0);
     const rerender = useCallback(() => force((n) => n + 1), []);
     const [results, setResults] = useState([]);
-    const [warn, setWarnState] = useState("");
     const [reuse, setReuseChip] = useState(null);
-    const setWarn = useCallback((w) => setWarnState(w), []);
     const ceRef = useRef(null);
     const previewRef = useRef(null);
     const audFileRef = useRef(null);
@@ -2494,8 +2608,6 @@ ${"=".repeat(48)}
       rootRef.current = n;
       if (n) liveNode.current = n;
     }, []);
-    const costSeq = useRef(0);
-    const costTimer = useRef(0);
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
@@ -2507,7 +2619,6 @@ ${"=".repeat(48)}
     }, []);
     useEffect(() => () => {
       connected.current = false;
-      clearTimeout(costTimer.current);
       clearTimeout(chipTimer.current);
       clearTimeout(previewTimer.current);
       pollTimers.current.forEach((t) => clearTimeout(t));
@@ -2522,7 +2633,7 @@ ${"=".repeat(48)}
       applyMode(st.current, m, userDriven);
       syncPlaceholder();
       rerender();
-      debCost();
+      reprice();
     };
     const userSetMode = (m) => {
       setMode(m, true);
@@ -2625,7 +2736,7 @@ ${"=".repeat(48)}
         ceRef.current.textContent = v || "";
         chipify(true);
       }
-      debCost();
+      reprice();
       dirty.current = false;
     };
     const emitCommitIfDirty = () => {
@@ -2639,7 +2750,7 @@ ${"=".repeat(48)}
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify(false);
-        debCost();
+        reprice();
         emitCommitIfDirty();
       }, 300);
     }, []);
@@ -2701,7 +2812,7 @@ ${"=".repeat(48)}
             setPrimary(arr);
           }
           rerender();
-          debCost();
+          reprice();
         }
       });
     };
@@ -2723,7 +2834,7 @@ ${"=".repeat(48)}
         }
         st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
         rerender();
-        debCost();
+        reprice();
       }).catch(() => {
         renderError("audio upload failed (network)");
         st.current.audSlot = null;
@@ -2733,64 +2844,22 @@ ${"=".repeat(48)}
     const pickVideoModel = (v) => {
       st.current.model = v;
       applyModelGating2(true);
-      debCost();
+      reprice();
     };
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
-    const debCost = (force2) => {
-      const pr = st.current.price;
-      if (!force2 && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
-        return;
-      }
-      const cost = costRef.current;
-      if (cost && cost.setChecking) cost.setChecking();
-      st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
-      costSeq.current++;
-      clearTimeout(costTimer.current);
-      costTimer.current = setTimeout(costNow, 250);
-      rerender();
-    };
-    const costNow = () => {
-      st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
-      const cost = costRef.current;
-      if (!cost) return;
-      const s2 = st.current, p = payload();
-      const settle = (key) => {
-        st.current.price = { settled: true, pricedKey: key, pendingTimer: false };
-        rerender();
-      };
-      const idleHint = s2.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
+    const build2 = useCallback(() => {
+      const p = payload();
       if (!hasAnyRef(p)) {
-        setWarn("");
-        cost.clear(idleHint);
-        settle(priceKey(p));
-        return;
+        return { payload: p, idle: st.current.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost." };
       }
       if (flfMissingStart2()) {
-        setWarn("");
-        cost.clear("Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last.");
-        settle(priceKey(p));
-        return;
+        return { payload: p, idle: "Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last." };
       }
-      setWarn(p.video_model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "");
-      cost.setChecking();
-      const mine = ++costSeq.current;
-      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : void 0 }).then((r) => r.json()).then((d) => {
-        clearTimeout(abortTimer);
-        if (mine === costSeq.current && costRef.current) {
-          costRef.current.setPrice(d);
-          settle(priceKey(p));
-        }
-      }).catch(() => {
-        clearTimeout(abortTimer);
-        if (mine === costSeq.current && costRef.current) {
-          costRef.current.setPrice(null);
-          settle(priceKey(p));
-        }
-      });
-    };
+      return { payload: p };
+    }, []);
+    const probe = usePriceProbe({ build: build2, costRef });
+    const reprice = probe.refresh;
     const pushLine = (line) => {
       const id = ++lineSeq;
       setResults((rs) => rs.concat([{ id, ...line }]));
@@ -2807,11 +2876,11 @@ ${"=".repeat(48)}
         pushLine({ kind: "error", text: "Pick a Start Frame first \u2014 the End Frame alone can\u2019t drive First & Last." });
         return;
       }
-      if (!canSubmit(s2.price, p)) {
+      if (!probe.canSubmit) {
         pushLine({ kind: "error", text: "Re-checking the cost\u2026 try again when the badge settles." });
-        const pr = s2.price || {};
+        const pr = probe.verdict || {};
         const checkInFlight = !!pr.pendingTimer || !pr.settled && pr.pricedKey == null;
-        if (!checkInFlight) debCost();
+        if (!checkInFlight) reprice();
         return;
       }
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
@@ -2832,7 +2901,7 @@ ${"=".repeat(48)}
         }
         emit3("mg-submit", { task_id: d.task_id, payload: p });
         updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
-        debCost(true);
+        reprice({ force: true });
         poll2(d.task_id, id);
       }).catch(() => {
         unlock();
@@ -2906,14 +2975,14 @@ ${"=".repeat(48)}
       applySetRefs(st.current, refs);
       syncPlaceholder();
       rerender();
-      debCost();
+      reprice();
     };
     const prefill = (o) => {
       const r = applyPrefill(st.current, o);
       syncPlaceholder();
       if (r.setPrompt != null) promptSet(r.setPrompt);
       rerender();
-      debCost();
+      reprice();
     };
     const flushPromptEdit = () => {
       clearTimeout(chipTimer.current);
@@ -2953,7 +3022,8 @@ ${"=".repeat(48)}
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     const chosenModel = MODELS.find((m) => m.value === s.model);
     const isR2v = s.mode === "r2v";
-    const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
+    const canGo = !s.hostBusy && !s.rendering && probe.canSubmit;
+    const warn = s.model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "";
     const shotModes = ["i2v", "flf", "r2v"].map((v) => {
       const ok = allowedModes.indexOf(v) >= 0;
       return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
@@ -2970,7 +3040,7 @@ ${"=".repeat(48)}
         cur.imgSlots = arr;
       } else cur.slots[i] = null;
       rerender();
-      debCost();
+      reprice();
     };
     const slotBox = ({ key, item, bank, index, caption, badge, title }) => /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
@@ -3048,7 +3118,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.negative = e.target.value;
           rerender();
-          debCost();
+          reprice();
         }
       }
     );
@@ -3112,7 +3182,7 @@ ${"=".repeat(48)}
         onClick: () => {
           st.current.audSlot = null;
           rerender();
-          debCost();
+          reprice();
         }
       },
       /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "\u266A"),
@@ -3134,7 +3204,7 @@ ${"=".repeat(48)}
     ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
-      debCost();
+      reprice();
     } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ENGINE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, MODELS.map((m) => {
       const sel = m.value === s.model;
       const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
@@ -3155,12 +3225,12 @@ ${"=".repeat(48)}
       if (st.current.quality === v) return;
       st.current.quality = v;
       rerender();
-      debCost();
+      reprice();
     } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
       if (st.current.channel === v) return;
       st.current.channel = v;
       rerender();
-      debCost();
+      reprice();
     } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, CHANNEL_CAP[s.channel]), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
@@ -3170,7 +3240,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.audioGen = e.target.checked;
           rerender();
-          debCost();
+          reprice();
           emit3("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
@@ -3183,7 +3253,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.videoHelper = e.target.checked;
           rerender();
-          debCost();
+          reprice();
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Video prompt helper")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement(
@@ -3195,7 +3265,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.audioLanguage = e.target.value;
           rerender();
-          debCost();
+          reprice();
           emit3("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
@@ -3216,7 +3286,7 @@ ${"=".repeat(48)}
             if (!ok || d === st.current.duration) return;
             st.current.duration = d;
             rerender();
-            debCost();
+            reprice();
             emit3("mg-duration-commit", { duration: d });
           }
         },
@@ -9956,7 +10026,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       setBatching(false);
     };
-    const PRICE_DEBOUNCE_MS = 600;
+    const PRICE_DEBOUNCE_MS2 = 600;
     const [priceCache, setPriceCache] = useState2({});
     const priceInFlightRef = useRef2({});
     const ensurePriced = useCallback2((entry, force) => {
@@ -9987,7 +10057,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const priceDebounceRef = useRef2(null);
     useEffect2(() => {
       clearTimeout(priceDebounceRef.current);
-      priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS);
+      priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS2);
       return () => clearTimeout(priceDebounceRef.current);
     }, [notDoneFp]);
     const refreshEstimate = useCallback2(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);

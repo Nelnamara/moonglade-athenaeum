@@ -1,6 +1,7 @@
 import React, {
-  forwardRef, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import usePriceProbe from "../gen/usePriceProbe.js";
 import CostBadge from "./CostBadge.jsx";
 import ModelPicker from "./ModelPicker.jsx";
 import "../styles/upscale-panel.css";
@@ -85,7 +86,6 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
 
   const costRef = useRef(null);
   const openSeq = useRef(0);
-  const costSeq = useRef(0);
   const closeTimer = useRef(0);
   const busyRef = useRef(false);
   const rootRef = useRef(null);
@@ -104,7 +104,14 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const effRatio = mx ? Math.min(ratio, mx) : ratio;
   const [ow, oh] = outDims(w, hh, effRatio);
   const isVideo = !!(src && src.is_video);
-  const canSubmit = phase !== "closed" && !!((src && src.model_id) || fallbackVersion())
+  // ONE predicate for Go AND the cost badge. It used to be two: the badge priced only when the
+  // source carried a real model_id, while Go also allowed the fallback version -- so a
+  // fallback-only picture (an imported file, or a catalog row with no model recorded) offered a
+  // live Upscale button with NO quote beside it. Pricing what Go would refuse, or refusing to
+  // price what Go would submit, is the same split that let a disabled control charge; the
+  // payload already carries fallbackVersion() as its version_id, so the quote is for exactly
+  // what submits.
+  const goReady = phase !== "closed" && !!((src && src.model_id) || fallbackVersion())
     && !isVideo && !ratioDisabled;
 
   // A shrinking cap (mode/image change) clamps the stored ratio so the thumb never exceeds max.
@@ -173,26 +180,23 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     return body;
   };
 
-  // Price ONLY when the source has a real model_id (not the fallback) and the ratio is live --
-  // narrower than Go's gate on purpose (verbatim from the vanilla): a fallback-only image shows no
-  // price, and passing null on a failed fetch is the badge's could-not-verify state, not clear().
-  const doPrice = () => {
-    if (!src || !src.model_id || ratioDisabled) return;
-    const mine = ++costSeq.current;
-    const badge = costRef.current;
-    if (badge && badge.setChecking) badge.setChecking();
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload()),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(null); });
-  };
-  // Re-price on any change to a pricing input (the vanilla fired _price from each handler).
-  useEffect(() => { doPrice(); },
+  /* The shared price probe (gen/usePriceProbe.js) owns the debounce, the seq guard, the abort
+     timeout and the payload-identity spend gate; this panel supplies the payload and the ONE
+     predicate above. Idle only when Go itself is impossible -- a plain clear() back to the
+     badge's own hint. (A failed fetch still passes null, which is the badge's red
+     could-not-verify state, NOT clear(); the probe keeps that distinction.) */
+  const build = useCallback(() => ({ payload: payload(), idle: goReady ? null : true }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [src, mode, ratio, scaler, denoise, denoiseSteps, ratioDisabled]);
+    [src, mode, ratio, effRatio, scaler, denoise, denoiseSteps, ratioDisabled, goReady]);
+  // Closed, the panel holds no armed timer and no request out (its consumers keep it mounted
+  // between opens); re-opening forces a re-price, because the badge is idle again on screen.
+  const probe = usePriceProbe({ build, costRef, enabled: phase !== "closed" });
+  // Re-price on any change to a pricing input (the vanilla fired _price from each handler).
+  useEffect(() => { probe.refresh(); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [src, mode, ratio, scaler, denoise, denoiseSteps, ratioDisabled, probe.refresh]);
+  // The Go gate: the panel's own readiness AND a settled quote for THIS payload.
+  const canGo = goReady && probe.canSubmit;
 
   // Global listeners for the custom scaler dropdown, added ONLY while open -- the cleanup is the
   // React answer to the vanilla's leak risk (globals removed only by _closeScaler).
@@ -289,7 +293,10 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
 
   // ---- the spend (verbatim _submit): the ONLY POST /api/generate ------------------------------
   const doSubmit = () => {
-    if (!canSubmit || busyRef.current) return;
+    if (!goReady || busyRef.current) return;
+    // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the click that
+    // slips through a stale render (a keyboard Enter needs no repaint to fire).
+    if (!probe.canSubmit) { probe.refresh(); return; }
     busyRef.current = true;                         // latch, independent of render timing
     setBusy(true);
     const mid = src.media_id;                        // captured before the await
@@ -305,6 +312,11 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
           return;
         }
         setMsg(null);
+        // The submit DEBITED credits or a card; the payload is byte-identical, so only a
+        // FORCED re-price gets past the short-circuit. (This panel closes on success, so the
+        // re-open's own forced prime usually gets there first -- kept so the rule reads the
+        // same on every cost line: a spend always invalidates the verdict that allowed it.)
+        probe.refresh({ force: true });
         handleClose();
         if (typeof onDone === "function") onDone({ media_id: mid, task_id: d.task_id });
         if (window.Toast) {
@@ -437,7 +449,7 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
             cardLabel="a card"
           />
 
-          <button type="button" className="mgu-go" disabled={!canSubmit || busy} onClick={doSubmit}>
+          <button type="button" className="mgu-go" disabled={!canGo || busy} onClick={doSubmit}>
             {busy ? "Submitting…" : "Upscale"}
           </button>
           {msg && <div className={"mgu-note" + (msg.bad ? " bad" : "")}>{msg.text}</div>}

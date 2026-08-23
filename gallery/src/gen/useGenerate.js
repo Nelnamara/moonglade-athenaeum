@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildPayload, clampLoras, GEN_DEFAULTS, goGate } from "./genCore.js";
 import { submitTask, useResultLines } from "./submitTask.js";
+import usePriceProbe from "./usePriceProbe.js";
 
 /* The image-generation hook. Mirrors the classic Gen IIFE's timing contracts:
-   - price: 250ms debounce + a seq counter so a stale response never paints over
-     a newer one (the classic's costSeq), and the badge goes to "checking" the
-     moment a refresh is scheduled so a stale number is never on screen while a
-     newer request is pending;
+   - price: the shared price probe (gen/usePriceProbe.js) owns the 250ms debounce,
+     the seq counter so a stale response never paints over a newer one (the
+     classic's costSeq), the badge going to "checking" the moment a refresh is
+     scheduled, and the payload-identity spend gate that used to live only in the
+     video drawer (issue #15). `refreshPrice` keeps its name -- GenerateDrawer's
+     Image-tab entry effect and CreateMobile's both prime the badge with it -- and
+     now simply delegates to the probe;
    - version/LoRA resolve: seq-guarded the same way;
    - submit: a busyRef latch makes double-submit impossible independent of React
      scheduling, the button re-enables when the server ANSWERS, concurrent
@@ -16,44 +20,28 @@ export default function useGenerate({ costRef }) {
   const [s, setS] = useState(GEN_DEFAULTS);
   const [busy, setBusy] = useState(false);
   const [results, openLine] = useResultLines();
-  const priceSeq = useRef(0);
-  const priceTimer = useRef(0);
   const verSeq = useRef(0);
   const busyRef = useRef(false);
 
   const set = useCallback((patch) => setS((old) => ({ ...old, ...patch })), []);
 
-  /* ---- price preview: same payload builder as submit, debounced ---- */
-  const firePrice = useCallback(() => {
-    const seq = ++priceSeq.current;
-    const badge = costRef.current;
+  /* ---- price preview: the SAME payload builder the submit uses ---- */
+  const build = useCallback(() => {
     const p = buildPayload(s);
-    if (!p.version_id) { if (badge && badge.clear) badge.clear(); return; }
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (seq === priceSeq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => {
-        // fail-CLOSED: a failed check paints the badge's red "couldn't verify"
-        // state, never silence and never "free".
-        if (seq === priceSeq.current && costRef.current) costRef.current.setPrice(null);
-      });
-  }, [s, costRef]);
-
-  const refreshPrice = useCallback(() => {
-    // Blank the number FIRST: an old quote next to new settings is the one thing
-    // worse than no quote (review: a click inside the debounce window spent
-    // against a figure that had already stopped being true).
-    const badge = costRef.current;
-    if (badge && badge.setChecking) badge.setChecking();
-    clearTimeout(priceTimer.current);
-    priceTimer.current = setTimeout(firePrice, 250);
-  }, [firePrice, costRef]);
+    // No model version = nothing to price: a plain clear() back to the badge's own
+    // "Pick a model to see the cost." hint, exactly as this hook always did. That is
+    // a verdict, not a gap -- goGate() is what refuses a submit in that state, and it
+    // must stay reachable, so the gate below is never what silences it.
+    return { payload: p, idle: p.version_id ? null : true };
+  }, [s]);
+  const probe = usePriceProbe({ build, costRef });
+  const refreshPrice = probe.refresh;
+  const priceOk = probe.canSubmit;   // the identity gate, ANDed into goGate at the buttons
 
   // Structural cost inputs only -- prompt/negative/seed text never refires,
   // matching the classic. steps IS structural (it changes the upscale pass too).
+  // (All three text fields are in the probe's identity skip, so even a stray call
+  // short-circuits -- this list is now an optimisation, not a correctness rule.)
   useEffect(() => { refreshPrice(); }, [
     s.model, s.loras, s.ref, s.refStrength, s.boosters,
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
@@ -220,6 +208,11 @@ export default function useGenerate({ costRef }) {
   const generate = useCallback(async (loraCap) => {
     if (busyRef.current) return;              // latch, independent of render timing
     if (goGate(s, loraCap)) return;
+    // PAYLOAD IDENTITY gate. The Generate buttons are already disabled on
+    // g.canSubmit; this is the click that slips through a stale render (a keyboard
+    // Enter needs no repaint to fire). The quote on the badge must have been priced
+    // off THIS payload -- never a silent drop: re-price and let the button come back.
+    if (!priceOk) { refreshPrice(); return; }
     busyRef.current = true;
     setBusy(true);
     const emit = openLine("Submitting…");
@@ -229,10 +222,16 @@ export default function useGenerate({ costRef }) {
     await submitTask("/api/generate", buildPayload(s), { label: "Generated", emit });
     busyRef.current = false;                   // the classic unlocks on ANSWER
     setBusy(false);
-  }, [s, openLine]);
+    // The submit just DEBITED credits or a card, so the settled verdict is stale even
+    // though the payload is byte-identical -- identity-by-payload cannot see a balance
+    // change caused by our own submit. FORCED, or the short-circuit would swallow it
+    // as "nothing changed" -- but the balance did.
+    refreshPrice({ force: true });
+  }, [s, openLine, priceOk, refreshPrice]);
 
   return { s, set, busy, results, applyModelRow, pickVersion,
-           addLora, removeLora, setLora, generate, refreshPrice };
+           addLora, removeLora, setLora, generate, refreshPrice,
+           canSubmit: priceOk };
 }
 
 

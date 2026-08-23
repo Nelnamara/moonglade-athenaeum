@@ -7,13 +7,13 @@ import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
   DEFAULT_MODEL, MODEL_CARD, SHOT_LABEL, modelCaps, modelMeta, bankView,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
-  priceKey, canSubmit, PRICE_FETCH_TIMEOUT_MS,
   applyMode as applyModeState,
   applyModelGating as gateModelState,
   applySetRefs as applySetRefsState,
   applyPrefill as applyPrefillState,
   flfMissingStart as flfMissingStartOf,
 } from "../gen/videoDrawerCore.js";
+import usePriceProbe from "../gen/usePriceProbe.js";
 import "../styles/gen-drawer.css";
 
 /* VideoDrawer -- the React port of static/mg-generate-drawer.js's <mg-generate-drawer> (no-vanilla
@@ -63,7 +63,7 @@ import "../styles/gen-drawer.css";
    three settings slabs hide (CSS only) while it is false, as the DC's settings grid does
    (DC 1209). The Generate button in the footer is the
    SAME button: same `canGo` (price-identity gate), same doGenerate, same "Rendering…" latch;
-   the CostBadge in the footer is the SAME instance costRef drives (debCost/costNow untouched).
+   the CostBadge in the footer is the SAME instance costRef drives (the price probe untouched).
    Without `dock` (the Loom, mobile Video mode) everything renders inline exactly as before. */
 
 let lineSeq = 0;
@@ -93,19 +93,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     modeNote: "",
     rendering: false,
     hostBusy: false,
-    // The price verdict's IDENTITY (videoDrawerCore.canSubmit reads exactly this shape): settled
-    // = the badge shows the verdict for pricedKey; pricedKey = priceKey() of the payload that was
-    // priced; pendingTimer = a debCost re-price is scheduled and not yet fired. Go is disabled
-    // unless the payload it would submit has this same key -- state alone can't say that.
-    // Seeded once below: the badge's initial idle hint IS the verdict for the initial empty form.
-    price: null,
+    // The price VERDICT no longer lives here: it is the shared probe's React state
+    // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
+    // rerender() that used to sit beside each verdict write by hand.
   });
-  if (!st.current.price) st.current.price = { settled: true, pricedKey: priceKey(buildPayload(st.current, "")), pendingTimer: false };
   const [, force] = useState(0);
   const rerender = useCallback(() => force((n) => n + 1), []);
 
   const [results, setResults] = useState([]);   // concurrent result lines
-  const [warn, setWarnState] = useState("");     // CostBadge caution clause (paid-state only)
   // The ↺-from chip (SCOPE_2026-08-17 §2): "prefilled from run #NNNN", the video mirror of the
   // dock's image chip (GenerateDrawer.reuseFrom). {tag, partial} | null -- `partial` is the amber
   // "recipe from the catalog only / camera unknown / …" disclosure (§2.4). Set imperatively by the
@@ -113,7 +108,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // (a new render's recipe is no longer "from" the old run). Plain React state -- it is not a
   // spend-critical form field, so the st.current/rerender discipline the payload needs is overkill.
   const [reuse, setReuseChip] = useState(null);
-  const setWarn = useCallback((w) => setWarnState(w), []);
   const ceRef = useRef(null);                    // the contenteditable prompt
   const previewRef = useRef(null);
   const audFileRef = useRef(null);
@@ -129,8 +123,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const liveNode = useRef(null);
   const setRoot = useCallback((n) => { rootRef.current = n; if (n) liveNode.current = n; }, []);
 
-  const costSeq = useRef(0);
-  const costTimer = useRef(0);
   const chipTimer = useRef(0);
   const previewTimer = useRef(0);
   const dirty = useRef(false);
@@ -147,14 +139,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   }, []);
   useEffect(() => () => {
     connected.current = false;
-    clearTimeout(costTimer.current); clearTimeout(chipTimer.current); clearTimeout(previewTimer.current);
+    clearTimeout(chipTimer.current); clearTimeout(previewTimer.current);
     pollTimers.current.forEach((t) => clearTimeout(t));
     pollTimers.current = [];
   }, []);
 
   // ---- the primary (image) slot bank ---------------------------------------------------------
   // Thin wrappers over the PURE state layer in videoDrawerCore.js (which the loom node-tests hit
-  // directly). The React side owns only the paint (ce placeholder, rerender) + pricing (debCost).
+  // directly). The React side owns only the paint (ce placeholder, rerender) + pricing (the price probe).
   const primary = () => primaryBank(st.current);
   const setPrimary = (arr) => setPrimaryBank(st.current, arr);
   const syncPlaceholder = () => { if (ceRef.current) ceRef.current.setAttribute("data-placeholder", MODE_PH[st.current.mode]); };
@@ -163,7 +155,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     applyModeState(st.current, m, userDriven);
     syncPlaceholder();
     rerender();
-    debCost();
+    reprice();
   };
   const userSetMode = (m) => { setMode(m, true); emit("mg-mode-commit", { vmode: m }); };
 
@@ -252,7 +244,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   };
   const promptSet = (v) => {
     if (ceRef.current) { ceRef.current.textContent = v || ""; chipify(true); }
-    debCost();
+    reprice();
     dirty.current = false;
   };
   const emitCommitIfDirty = () => {
@@ -264,7 +256,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     dirty.current = true;
     emit("mg-dirty", {});
     clearTimeout(chipTimer.current);
-    chipTimer.current = setTimeout(() => { chipify(false); debCost(); emitCommitIfDirty(); }, 300);
+    chipTimer.current = setTimeout(() => { chipify(false); reprice(); emitCommitIfDirty(); }, 300);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const onCeBlur = useCallback(() => { chipify(true); emitCommitIfDirty(); },
@@ -310,7 +302,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         const item = refItem({ media_id, thumb, is_nsfw });
         if (bank === "vid") { st.current.vidSlots[i] = item; }
         else { const arr = primary(); arr[i] = item; setPrimary(arr); }
-        rerender(); debCost();
+        rerender(); reprice();
       },
     });
   };
@@ -324,7 +316,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       .then((d) => {
         if (d.error || !d.media_id) { renderError(d.error || "audio upload failed"); st.current.audSlot = null; rerender(); return; }
         st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
-        rerender(); debCost();
+        rerender(); reprice();
       })
       .catch(() => { renderError("audio upload failed (network)"); st.current.audSlot = null; rerender(); });
   };
@@ -334,7 +326,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // unchanged from what the flyout's onClick ran: set the model, gate it (applyModelGating
   // adjusts the shot mode to a supported one and clamps duration to the engine's cap), then
   // re-price. userDriven=true so a dropped shot mode explains itself (DC pickVideoModel note).
-  const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); debCost(); };
+  const pickVideoModel = (v) => { st.current.model = v; applyModelGating(true); reprice(); };
 
   // ---- payload + live cost -------------------------------------------------------------------
   // payload/hasAnyRef/flfMissingStart are the PURE spend-gate predicates (videoDrawerCore.js); the
@@ -342,84 +334,35 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const payload = () => buildPayload(st.current, promptText());
   const flfMissingStart = () => flfMissingStartOf(st.current);
 
-  const debCost = (force) => {
-    // SHORT-CIRCUIT when nothing that prices has changed: if the payload's price identity
-    // equals the SETTLED key, the quote on the badge is still exactly right, so leave it (and
-    // Go) alone. This is what makes a prompt/negative keystroke harmless -- those fields are
-    // outside priceKey ("never prices"), yet their handlers call debCost, and before this every
-    // typing pause blanked the badge, disabled Generate for 250ms+RTT, discarded any in-flight
-    // quote, and re-POSTed /api/price (three PixAI calls) for a byte-identical payload (review
-    // 2026-08-16). Fixing it HERE, at the mechanism, covers every non-pricing caller, present
-    // and future, instead of auditing handlers one by one. Un-settled/pending states still
-    // fall through so a genuine re-price is never suppressed.
-    //
-    // `force` bypasses the short-circuit for the ONE case where the payload is identical but the
-    // verdict is stale anyway: right after a submit debited the tickets. Identity-by-payload
-    // cannot see a balance change, so the post-submit re-price must not be swallowed here.
-    const pr = st.current.price;
-    if (!force && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer
-        && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
-      return;
-    }
-    // Blank the number FIRST, synchronously (mirrors useGenerate's refreshPrice): an old quote
-    // next to new settings is the one thing worse than no quote. Before this, setChecking only
-    // ran 250ms later inside costNow, so a settled FREE for 5s stayed on the badge -- and Go
-    // stayed live -- for the debounce plus one RTT after the user picked 15s. Dropping the
-    // verdict identity here (settled=false, pendingTimer=true) is what disables Go; bumping
-    // costSeq drops any answer already in flight, since it was priced off the payload that just
-    // stopped being true. Every debCost caller repaints, so canGo re-reads this on the next render.
-    const cost = costRef.current;
-    if (cost && cost.setChecking) cost.setChecking();
-    st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
-    costSeq.current++;
-    clearTimeout(costTimer.current);
-    costTimer.current = setTimeout(costNow, 250);
-    rerender();
-  };
-  // The HOST half of CostBadge's contract: owns the /api/price call, the 250ms debounce, and the
-  // _costSeq stale-response guard; the badge owns every state's wording/colour. It is ALSO the
-  // only writer of a settled price identity: every exit records priceKey(p) for the payload it
-  // just judged (the idle hints are verdicts too -- "nothing to price" keeps Go live so its own
-  // "Pick a source image first" error stays reachable; doGenerate refuses those before any spend).
-  const costNow = () => {
-    // The timer has FIRED: clear pendingTimer before anything can bail, or an early return
-    // (no badge ref) leaves {pendingTimer:true} forever and canSubmit never passes (review).
-    st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
-    const cost = costRef.current;
-    if (!cost) return;
-    const s = st.current, p = payload();
-    const settle = (key) => { st.current.price = { settled: true, pricedKey: key, pendingTimer: false }; rerender(); };
+  /* THE PRICE PROBE. Everything this drawer used to own by hand -- the 250ms debounce, the
+     synchronous badge blank, the stale-answer sequence guard, the 25s abort, the settled-verdict
+     identity and its short-circuit -- now lives in the shared module (gen/priceProbeCore.js +
+     gen/usePriceProbe.js), where the other five cost lines ride the same gate. The long WHY
+     comments this block carried moved with the mechanism; what stays here is what is genuinely
+     this drawer's: which payload to price, and what "nothing to price" means for a video.
+
+     build() is the whole host half now. The two idle cases are VERDICTS, not gaps -- "nothing to
+     price" keeps Go live so doGenerate's own "Pick a source image first" error stays reachable,
+     and doGenerate refuses both before any spend. */
+  const build = useCallback(() => {
+    const p = payload();
     // Mode-dependent idle label is delivered through clear()'s one-shot hint override (the badge
     // has no setHint -- the idle state shows note||hint, and clear(h) sets that h).
-    const idleHint = (s.mode === "r2v") ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
-    if (!hasAnyRef(p)) { setWarn(""); cost.clear(idleHint); settle(priceKey(p)); return; }
-    if (flfMissingStart()) { setWarn(""); cost.clear("Pick a Start Frame — the End Frame alone can’t drive First & Last."); settle(priceKey(p)); return; }
-    // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). The badge shows `warn` only in the
-    // `paid` state; the red (not amber) colour is re-asserted by gen-drawer.css's own override.
-    setWarn(p.video_model === "v4.0" ? "V4.0 full — ~2.5× Lite" : "");
-    cost.setChecking();
-    const mine = ++costSeq.current;
-    // The identity is recorded ONLY under the costSeq guard, off the SAME p that was priced. A
-    // failed check settles too: the badge's red "couldn't verify — may spend" IS this payload's
-    // verdict (same call the image drawer makes), whereas a verdict for a different payload is
-    // exactly what canSubmit refuses.
-    // BOUNDED: Go is hard-gated on this fetch settling, and a HUNG request (transport stall --
-    // a LAN tablet dropping Wi-Fi mid-request) fires neither .then nor .catch, so settle()
-    // never ran, canSubmit stayed false forever, and the badge sat on a muted "Checking cost…"
-    // with no error and no way out short of changing a priced field (review 2026-08-16).
-    // Before the identity gate a hung price left Go LIVE (fail-open); the gate made it
-    // fail-silent-closed. An abort after PRICE_FETCH_TIMEOUT_MS rejects into the existing
-    // .catch, which already paints the red "couldn't verify — may spend" and settles, so the
-    // state machine reaches its documented error verdict and Go returns to its pre-gate,
-    // fail-closed-but-live behaviour. The server's own PixAI calls carry timeouts (30s/60s),
-    // so this only ever fires on a browser<->server stall.
-    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
-    const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
-    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : undefined })
-      .then((r) => r.json())
-      .then((d) => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(d); settle(priceKey(p)); } })
-      .catch(() => { clearTimeout(abortTimer); if (mine === costSeq.current && costRef.current) { costRef.current.setPrice(null); settle(priceKey(p)); } });
-  };
+    if (!hasAnyRef(p)) {
+      return { payload: p, idle: (st.current.mode === "r2v")
+        ? "Pick at least one reference to see the cost."
+        : "Pick a source image to see the cost." };
+    }
+    if (flfMissingStart()) {
+      return { payload: p, idle: "Pick a Start Frame — the End Frame alone can’t drive First & Last." };
+    }
+    return { payload: p };
+    // Every input it reads is a ref (st.current, the contenteditable), so the first closure
+    // stays correct for the life of the drawer -- no dep list can track a ref mutation anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const probe = usePriceProbe({ build, costRef });
+  const reprice = probe.refresh;
 
   // ---- submit -> poll -> result (concurrent; each submission its own line + poll loop) --------
   const pushLine = (line) => {
@@ -443,20 +386,20 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // that slips through a stale render). The quote on the badge must have been priced off THIS
     // payload -- a settled FREE for 5s must never carry a 15s submit, and a quality/camera change
     // must not ride a price it never saw. Never a silent drop: say so and re-price.
-    if (!canSubmit(s.price, p)) {
+    if (!probe.canSubmit) {
       // kind:"error", not "status": this is a REFUSAL (submit blocked), and the dock renders
       // only error lines -- as "status" it was silently dropped there (#27).
       pushLine({ kind: "error", text: "Re-checking the cost… try again when the badge settles." });
       // Only kick a NEW re-price when nothing is already in flight for this payload. Calling
-      // debCost() unconditionally here bumped costSeq (discarding a quote about to settle) and
-      // restarted the debounce, so fast repeated clicks could keep the badge from ever settling
-      // (review: refusal-path starvation). If a check is pending, just refuse and let it land.
-      // A check is "in flight" when the debounce timer is pending or a fetch is out
+      // reprice() unconditionally here bumped the sequence (discarding a quote about to settle)
+      // and restarted the debounce, so fast repeated clicks could keep the badge from ever
+      // settling (review: refusal-path starvation). If a check is pending, just refuse and let
+      // it land. A check is "in flight" when the debounce timer is pending or a fetch is out
       // (unsettled with no key). In both cases the answer for THIS payload is already
       // coming -- don't discard it. Otherwise (settled-but-stale key) re-price.
-      const pr = s.price || {};
+      const pr = probe.verdict || {};
       const checkInFlight = !!pr.pendingTimer || (!pr.settled && pr.pricedKey == null);
-      if (!checkInFlight) debCost();
+      if (!checkInFlight) reprice();
       return;
     }
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
@@ -485,9 +428,9 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         // by the drawer's own submit. Without this, a second click on the unchanged form passed
         // canSubmit on the same key and submitted under a FREE badge for a clip the server now
         // found SHORT and charged in full (review: post-submit stale FREE, the exact #15 shape).
-        // FORCED: the payload is byte-identical to the settled key, so an unforced debCost would
-        // short-circuit as "nothing changed" -- but the balance did.
-        debCost(true);
+        // FORCED: the payload is byte-identical to the settled key, so an unforced re-price
+        // would short-circuit as "nothing changed" -- but the balance did.
+        reprice({ force: true });
         poll(d.task_id, id);
       })
       .catch(() => { unlock(); updateLine(id, { kind: "error", text: "network error", moon: false }); emit("mg-error", { error: "network error" }); });
@@ -567,13 +510,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const setRefs = (refs) => {
     applySetRefsState(st.current, refs);
     syncPlaceholder();
-    rerender(); debCost();
+    rerender(); reprice();
   };
   const prefill = (o) => {
     const r = applyPrefillState(st.current, o);
     syncPlaceholder();
     if (r.setPrompt != null) promptSet(r.setPrompt);
-    rerender(); debCost();
+    rerender(); reprice();
   };
   const flushPromptEdit = () => {
     clearTimeout(chipTimer.current);
@@ -626,11 +569,15 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const maxDur = MODEL_MAXDUR[s.model] || 10;
   const chosenModel = MODELS.find((m) => m.value === s.model);
   const isR2v = s.mode === "r2v";
-  // Go is DISABLED (not awaited) until the badge's settled verdict is for the payload this form
+  // Go is DISABLED (not awaited) until the probe's settled verdict is for the payload this form
   // would submit right now -- an await here would add PixAI RTTs after the click and land after
-  // the rendering latch, a double-submit window. Prompt text is outside priceKey, so the payload
-  // is keyed off the form state alone here (no DOM read in render).
-  const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
+  // the rendering latch, a double-submit window.
+  const canGo = !s.hostBusy && !s.rendering && probe.canSubmit;
+  // v4.0 full is ~2.5x Lite (14k/s -> 210k for a 15s clip). The badge shows `warn` only in the
+  // `paid` state -- which is only ever reached by a price settled for THIS model -- so deriving
+  // it from the form is exactly as truthful as writing it at fire time was, with no second state
+  // to keep in step. The red (not amber) colour is re-asserted by gen-drawer.css's own override.
+  const warn = s.model === "v4.0" ? "V4.0 full — ~2.5× Lite" : "";
 
   // ---- SHOT MODE + the ref/frame banks (DC 1346-1376, getters 2842-2895) ----------------
   // ALL three segments always render; one the engine lacks is dimmed (opacity .35, not-allowed,
@@ -648,7 +595,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     if (bank === "vid") { cur.vidSlots.splice(i, 1); if (!cur.vidSlots.length) cur.vidSlots = [null]; }
     else if (cur.mode === "r2v") { let arr = cur.imgSlots; arr.splice(i, 1); if (!arr.length) arr = [null]; cur.imgSlots = arr; }
     else cur.slots[i] = null;
-    rerender(); debCost();
+    rerender(); reprice();
   };
   // One reference / frame slot: DC slotBox (54px, radius 9, dashed while empty, solid once
   // filled), the empty caption, and the '@imageN' / '@videoN' badge Multi-Reference alone carries.
@@ -697,7 +644,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   const negativeField = (
     <textarea className={inDock ? "mgdock-neg" : "mgd-neg"} rows={inDock ? 1 : undefined}
       placeholder="blurry, extra fingers, watermark" value={s.negative}
-      onChange={(e) => { st.current.negative = e.target.value; rerender(); debCost(); }} />
+      onChange={(e) => { st.current.negative = e.target.value; rerender(); reprice(); }} />
   );
   const costLine = (
     <CostBadge ref={costRef} className="mgd-cost" warn={warn} cardLabel="a video card"
@@ -784,7 +731,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
                   <div className="mgd-slot" title={"Uploading " + s.audSlot.uploading}><div className="mgd-slotcap">uploading…</div></div>
                 ) : s.audSlot ? (
                   <div className="mgd-slot filled audio" title={"Audio reference — " + s.audSlot.filename}
-                    onClick={() => { st.current.audSlot = null; rerender(); debCost(); }}>
+                    onClick={() => { st.current.audSlot = null; rerender(); reprice(); }}>
                     <div className="mgd-slotcap">♪</div>
                     <div className="mgd-slot-tag">@audio1</div>
                   </div>
@@ -805,7 +752,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               so each change re-prices like every other priced field. */}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
             <div className="mgd-sec">CAMERA</div>
-            <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} onChange={(e) => { st.current.camera = e.target.value; rerender(); debCost(); }}>
+            <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
               {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
@@ -851,30 +798,30 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           <div className="mgd-sec">MODE &amp; CHANNEL</div>
           <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
             {[["basic", "Basic"], ["professional", "Professional"]].map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); debCost(); }}>{l}</button>
+              <button key={v} type="button" role="radio" aria-checked={s.quality === v} className={"mgd-quality" + (s.quality === v ? " on" : "")} onClick={() => { if (st.current.quality === v) return; st.current.quality = v; rerender(); reprice(); }}>{l}</button>
             ))}
           </div>
           <div className="mgd-seg" role="radiogroup" aria-label="Channel">
             {[["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); debCost(); }}>{l}</button>
+              <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); }}>{l}</button>
             ))}
           </div>
           <div className="mgd-chancap">{CHANNEL_CAP[s.channel]}</div>
           <label className="mgd-sw" title="Spoken lines in the prompt become voiceover">
             <input type="checkbox" className="mgd-audio" checked={s.audioGen}
-              onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); debCost(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
+              onChange={(e) => { st.current.audioGen = e.target.checked; rerender(); reprice(); emit("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage }); }} />
             <span className="mgd-swtrack"><i /></span>
             <span className="mgd-swlab">Generate audio</span>
           </label>
           <label className="mgd-sw" title="Off by default — the opposite of image gen">
             <input type="checkbox" className="mgd-helper" checked={s.videoHelper}
-              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); debCost(); }} />
+              onChange={(e) => { st.current.videoHelper = e.target.checked; rerender(); reprice(); }} />
             <span className="mgd-swtrack"><i /></span>
             <span className="mgd-swlab">Video prompt helper</span>
           </label>
           {s.audioGen ? (
             <select className="mgd-sel mgd-lang" value={s.audioLanguage} aria-label="Audio language"
-              onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); debCost(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
+              onChange={(e) => { st.current.audioLanguage = e.target.value; rerender(); reprice(); emit("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value }); }}>
               {AUDIO_LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           ) : null}
@@ -894,7 +841,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
                 <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
                   className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
                   title={d + " seconds" + (ok ? "" : " — not on this engine")}
-                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); debCost(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
+                  onClick={() => { if (!ok || d === st.current.duration) return; st.current.duration = d; rerender(); reprice(); emit("mg-duration-commit", { duration: d }); }}>{d}</button>
               );
             })}
           </div>

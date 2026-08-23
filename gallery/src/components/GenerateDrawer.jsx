@@ -1231,8 +1231,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                     idle hint -- via the badge's own hint API, never hand-written text */}
                 <CostBadge ref={costRef} stack count={s.count} balance={balance}
                   hint="Pick a model to see the cost." />
-                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy ? " off" : "")}
-                  disabled={!!gate || g.busy || prefillBusy}
+                {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the
+                    quote on the badge must have been priced off the payload this click submits
+                    (gen/priceProbeCore.js). generate() refuses the same way, for the keyboard
+                    Enter that fires against a stale render. */}
+                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || !g.canSubmit ? " off" : "")}
+                  disabled={!!gate || g.busy || prefillBusy || !g.canSubmit}
                   title={prefillBusy ? "Restoring the recipe…"
                     : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
                   onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
