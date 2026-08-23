@@ -2562,6 +2562,114 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/gen/genCore.js
+  var ASPECTS = [
+    ["1:1", 1],
+    ["3:4", 3 / 4],
+    ["4:3", 4 / 3],
+    ["2:3", 2 / 3],
+    ["3:2", 3 / 2],
+    ["9:16", 9 / 16],
+    ["16:9", 16 / 9],
+    ["3:1", 3]
+  ];
+  function friendlyGenErr3(raw) {
+    const e = String(raw || "");
+    const add = (hint) => e + " \u2014 " + hint;
+    if (/insufficient|40300010|balance/i.test(e))
+      return add("your credit balance can't cover this one. Claim your daily credits or lower the size/count.");
+    if (/maxLength|too long/i.test(e))
+      return add("the prompt is over PixAI's length limit \u2014 trim it and try again.");
+    if (/NSFW_DETECTED|40300032/i.test(e))
+      return add("PixAI's moderation flagged the source image, not your prompt.");
+    if (/moderation|blocked|violat/i.test(e))
+      return add("PixAI's moderation rejected this one.");
+    if (/inferenceProfile|quality mode|profile/i.test(e))
+      return add("that quality mode isn't available for this model \u2014 try Auto.");
+    if (/LORA_NUM_EXCEEDED|40300027/i.test(e))
+      return add("too many LoRAs for your membership tier.");
+    return e;
+  }
+
+  // ../gallery/src/gen/submitTask.js
+  async function submitTask(route, payload, { label, emit: emit3, count, onPhase }) {
+    let d;
+    try {
+      const r = await fetch(route, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      d = await r.json();
+    } catch {
+      emit3({
+        kind: "err",
+        text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
+      });
+      return null;
+    }
+    if (d.error || !d.task_id) {
+      emit3({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
+      return null;
+    }
+    const adj = (d.adjusted || []).map((a) => a.field + " " + a.asked + "\u2192" + a.used).join(", ");
+    if (adj && window.Toast) {
+      window.Toast.show({
+        kind: "err",
+        title: "Settings were adjusted before submitting",
+        msg: adj
+      });
+    }
+    emit3({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    if (!window.Jobs) {
+      emit3({
+        kind: "ok",
+        text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
+      });
+      return d.task_id;
+    }
+    window.Jobs.track(d.task_id, label, (phase, st) => {
+      const data2 = st || {};
+      if (phase === "done") {
+        const paid = data2.paid_credit;
+        emit3({
+          kind: "ok",
+          text: paid === 0 ? "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
+          media: data2.media_ids || []
+        });
+        window.dispatchEvent(new CustomEvent("mg-gen-done"));
+        if (window.Ach) window.Ach.check();
+      } else if (phase === "failed") {
+        emit3({
+          kind: "err",
+          text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
+        });
+      } else if (phase === "stalled") {
+        emit3({
+          kind: "err",
+          text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
+        });
+      }
+      if (onPhase) onPhase(phase, data2);
+    }, count == null ? payload.count : count);
+    return d.task_id;
+  }
+
+  // ../gallery/src/notify/pollCadence.js
+  var POLL_MS = 3e3;
+  var SLOW_AT_MS = 20 * 60 * 1e3;
+  var SLOW_MS = 20 * 1e3;
+  var STALE_AT_MS = 90 * 60 * 1e3;
+  var STALE_MS = 3 * 60 * 1e3;
+  var CEILING_MS = 6 * 60 * 60 * 1e3;
+  function cadenceFor(elapsedMs) {
+    const e = Number(elapsedMs) || 0;
+    if (e >= CEILING_MS) return { ms: 0, tier: "stalled" };
+    if (e >= STALE_AT_MS) return { ms: STALE_MS, tier: "stale" };
+    if (e >= SLOW_AT_MS) return { ms: SLOW_MS, tier: "slow" };
+    return { ms: POLL_MS, tier: "normal" };
+  }
+
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
@@ -2611,18 +2719,13 @@ ${"=".repeat(48)}
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const pollTimers = useRef([]);
-    const connected = useRef(true);
     const emit3 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
     useEffect(() => () => {
-      connected.current = false;
       clearTimeout(chipTimer.current);
       clearTimeout(previewTimer.current);
-      pollTimers.current.forEach((t) => clearTimeout(t));
-      pollTimers.current = [];
     }, []);
     const primary = () => primaryBank(st.current);
     const setPrimary = (arr) => setPrimaryBank(st.current, arr);
@@ -2866,7 +2969,8 @@ ${"=".repeat(48)}
       return id;
     };
     const updateLine = (id, patch2) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch2 } : l));
-    const doGenerate = () => {
+    const elapsedLabel2 = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
+    const doGenerate = async () => {
       const s2 = st.current, p = payload();
       if (!hasAnyRef(p)) {
         pushLine({ kind: "error", text: s2.mode === "r2v" ? "Pick at least one reference first." : "Pick a source image first." });
@@ -2891,81 +2995,56 @@ ${"=".repeat(48)}
         st.current.rendering = false;
         rerender();
       };
-      fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
-        unlock();
-        if (d.error || !d.task_id) {
-          const msg = friendlyGenErr2(d.error || "submit failed");
-          updateLine(id, { kind: "error", text: msg, moon: false });
-          emit3("mg-error", { error: msg });
+      const startedAt = Date.now();
+      let taskId = null;
+      let tier = "normal";
+      let lastErr = "";
+      const short = () => String(taskId || "").slice(-6);
+      const emitLine = (patch2) => {
+        if (patch2.kind === "err") {
+          lastErr = patch2.text;
+          updateLine(id, { kind: "error", text: patch2.text, moon: false });
           return;
         }
-        emit3("mg-submit", { task_id: d.task_id, payload: p });
-        updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
-        reprice({ force: true });
-        poll2(d.task_id, id);
-      }).catch(() => {
-        unlock();
-        updateLine(id, { kind: "error", text: "network error", moon: false });
-        emit3("mg-error", { error: "network error" });
-      });
-    };
-    const poll2 = (taskId, lineId) => {
-      const startedAt = Date.now();
-      const SLOW_AT = 20 * 60 * 1e3, SLOW_MS = 20 * 1e3;
-      const STALE_AT = 90 * 60 * 1e3, STALE_MS = 3 * 60 * 1e3;
-      const CEILING = 6 * 60 * 60 * 1e3;
-      let timer2 = null;
-      const schedule2 = (fn, ms) => {
-        const i = pollTimers.current.indexOf(timer2);
-        if (i >= 0) pollTimers.current.splice(i, 1);
-        timer2 = setTimeout(fn, ms);
-        pollTimers.current.push(timer2);
+        if (patch2.kind === "ok") {
+          updateLine(id, { kind: "plain", text: patch2.text, moon: false });
+          return;
+        }
+        updateLine(id, { kind: "status", moon: true, text: patch2.text });
       };
-      const label = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
-      const short = String(taskId).slice(-6);
-      const pause = () => {
-        updateLine(lineId, {
-          kind: "plain",
-          text: "Paused auto-checking after " + label(CEILING) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short + ")"
-        });
-        emit3("mg-paused", { task_id: taskId });
+      const tierLine = (t, elapsed) => t === "stale" ? { kind: "status", moon: true, amber: true, text: "Still going after " + elapsedLabel2(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short() + ")" } : { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + elapsedLabel2(elapsed) + ", task " + short() + ")" };
+      const onPhase = (phase, d) => {
+        const elapsed = Date.now() - startedAt;
+        if (phase === "done") {
+          updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
+          emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+        } else if (phase === "failed") {
+          const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
+          updateLine(id, { kind: "error", text: msg, moon: false });
+          emit3("mg-error", { error: msg });
+        } else if (phase === "stalled") {
+          updateLine(id, {
+            kind: "plain",
+            text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
+          });
+          emit3("mg-paused", { task_id: taskId });
+        } else if (phase === "slow" || phase === "stale") {
+          tier = phase;
+          updateLine(id, tierLine(phase, elapsed));
+          emit3("mg-slow", { tier: phase, elapsed, task_id: taskId });
+        } else {
+          updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
+        }
       };
-      const tick = () => {
-        fetch("/api/task-status?task_id=" + encodeURIComponent(taskId)).then((r) => r.json()).then((d) => {
-          if (!connected.current) return;
-          const elapsed = Date.now() - startedAt;
-          if (d.phase === "done") {
-            updateLine(lineId, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-            emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
-          } else if (d.phase === "failed") {
-            const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
-            updateLine(lineId, { kind: "error", text: msg, moon: false });
-            emit3("mg-error", { error: msg });
-          } else if (elapsed > CEILING) {
-            pause();
-          } else if (elapsed > STALE_AT) {
-            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Still going after " + label(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short + ")" });
-            emit3("mg-slow", { tier: "stale", elapsed, task_id: taskId });
-            schedule2(tick, STALE_MS);
-          } else if (elapsed > SLOW_AT) {
-            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + label(elapsed) + ", task " + short + ")" });
-            emit3("mg-slow", { tier: "slow", elapsed, task_id: taskId });
-            schedule2(tick, SLOW_MS);
-          } else {
-            updateLine(lineId, { kind: "status", moon: true, text: "Rendering under the eclipse\u2026 (task " + short + ")" });
-            schedule2(tick, 2e3);
-          }
-        }).catch(() => {
-          if (!connected.current) return;
-          const elapsed = Date.now() - startedAt;
-          if (elapsed > CEILING) {
-            pause();
-            return;
-          }
-          schedule2(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2e3);
-        });
-      };
-      schedule2(tick, 2e3);
+      const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
+      unlock();
+      if (!tid) {
+        emit3("mg-error", { error: lastErr || "submit failed" });
+        return;
+      }
+      taskId = tid;
+      emit3("mg-submit", { task_id: tid, payload: p });
+      reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
@@ -3503,11 +3582,12 @@ ${"=".repeat(48)}
     register(id, label, count);
     poll(id, cb);
   }
-  var POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
-  function poll(id, cb, startedAt) {
+  function poll(id, cb, startedAt, tier) {
     const t0 = startedAt || Date.now();
-    function again(ms) {
-      if (Date.now() - t0 > POLL_CEILING_MS) {
+    const from = tier || "normal";
+    function again(d, floorMs) {
+      const c = cadenceFor(Date.now() - t0);
+      if (c.tier === "stalled") {
         if (cb) cb("stalled", {
           phase: "stalled",
           error: "Stopped checking after 6h \u2014 the task may still be running. Reload to resume watching, or check it on pixai.art."
@@ -3515,7 +3595,8 @@ ${"=".repeat(48)}
         refresh();
         return;
       }
-      setTimeout(() => poll(id, cb, t0), ms);
+      if (cb && c.tier !== from && (c.tier === "slow" || c.tier === "stale")) cb(c.tier, d || {});
+      setTimeout(() => poll(id, cb, t0, c.tier), floorMs ? Math.max(c.ms, floorMs) : c.ms);
     }
     fetch("/api/task-status?task_id=" + encodeURIComponent(id)).then((r) => r.json()).then((d) => {
       if (d.phase === "done") {
@@ -3526,9 +3607,9 @@ ${"=".repeat(48)}
         refresh();
       } else {
         if (cb) cb("running", d);
-        again(3e3);
+        again(d, 0);
       }
-    }).catch(() => again(4e3));
+    }).catch(() => again(null, 4e3));
   }
 
   // ../gallery/src/notify/ach.js
@@ -9731,14 +9812,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const POLL_SLOW_MS = 20 * 1e3;
     const POLL_STALE_AT_MS = 90 * 60 * 1e3;
     const POLL_STALE_MS = 3 * 60 * 1e3;
-    const POLL_CEILING_MS2 = 6 * 60 * 60 * 1e3;
+    const POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
     const pollShot = (cardId, tid, existingStartedAt) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
       const startedAt = existingStartedAt || Date.now();
       const pause = () => {
         setGenState((s) => ({ ...s, [cardId]: {
           phase: "paused",
-          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS2) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
+          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
         } }));
         setBatchOutcome(cardId, "stale");
       };
@@ -9755,7 +9836,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
           setBatchOutcome(cardId, "failed");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
-        } else if (elapsed > POLL_CEILING_MS2) {
+        } else if (elapsed > POLL_CEILING_MS) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
           setGenState((s) => ({ ...s, [cardId]: {
@@ -9772,7 +9853,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else setTimeout(tick, 4e3);
       }).catch(() => {
         const elapsed = Date.now() - startedAt;
-        if (elapsed > POLL_CEILING_MS2) {
+        if (elapsed > POLL_CEILING_MS) {
           pause();
           return;
         }
@@ -9817,10 +9898,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else again(4e3);
       }).catch(() => again(5e3));
       const again = (ms) => {
-        if (Date.now() - startedAt > POLL_CEILING_MS2) {
+        if (Date.now() - startedAt > POLL_CEILING_MS) {
           setState((s) => ({ ...s, [cardId]: {
             phase: "error",
-            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS2) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
+            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
           } }));
           return;
         }

@@ -317,11 +317,15 @@ export default function App({ boot }) {
   /* Generation completions refresh the library + credits chip.
      THREE channels, because there are three producers:
      - mg-gen-done: our own image submit path (useGenerate);
-     - mg-submit:   the SHARED video drawer accepting a task -- it owns its own
-                    poll, so it gets Jobs.register (never Jobs.track, which
-                    would double-poll: the Loom's pinned contract);
+     - mg-submit:   the SHARED video drawer accepting a task;
      - mg-result:   that drawer finishing, which is when credits actually moved.
-     The same submit/result pair also ticks the shell's live-run counter. */
+     The same submit/result pair also ticks the shell's live-run counter.
+     NO Jobs.register here (2026-08-23). This listener used to be what registered a
+     video with the Job Tracker, which quietly made tracking a property of WHICH SHELL
+     the drawer happened to be mounted in -- and AppMobile.jsx has no such listener, so
+     a video started from the phone never reached /api/jobs, the Activity tray or the
+     orphan sweep. The drawer now submits through gen/submitTask.js, whose Jobs.track
+     registers on the way past; registration belongs to the submit road, not the shell. */
   useEffect(() => {
     const refresh = () => { load(1, true); fetchAccount().then(setAccount); };
     // mg-gen-done also nudges the Folio of Honors to check-and-celebrate any newly
@@ -329,9 +333,7 @@ export default function App({ boot }) {
     // has outside a hard page load, so it belongs here alongside the grid/account
     // refresh. Guarded like window.Toast/window.Jobs elsewhere in this file.
     const onGenDone = () => { refresh(); if (window.Ach) window.Ach.check(); };
-    const onSubmit = (e) => {
-      const id = e.detail && (e.detail.task_id || e.detail.taskId);
-      if (id && window.Jobs) window.Jobs.register(id, "Rendered");
+    const onSubmit = () => {
       setRunning((r) => ({ ...r, count: r.count + 1 }));
     };
     const onResult = () => {

@@ -25,7 +25,7 @@ const src = readFileSync(path.join(__dirname, "../../gallery/src/components/Vide
 function fnBody(name, close) {
   // Accept any parameter list -- a signature change must not silently turn these guards into a
   // false pass/fail.
-  const m = new RegExp("const " + name + " = (?:useCallback\\()?\\([^)]*\\) => \\{").exec(src);
+  const m = new RegExp("const " + name + " = (?:useCallback\\()?(?:async )?\\([^)]*\\) => \\{").exec(src);
   assert.ok(m, "expected to find " + name + "(...) in VideoDrawer.jsx");
   const i = m.index;
   const end = src.indexOf(close || "\n  };", i);   // component-level 2-space indent closes it
@@ -72,9 +72,11 @@ describe("<VideoDrawer> rides the shared price probe", () => {
   test("doGenerate() gates the submit on the probe and never silently drops the click", () => {
     const body = fnBody("doGenerate");
     const gate = body.indexOf("probe.canSubmit");
-    const submit = body.indexOf('fetch("/api/loom/generate"');
+    // The spend is the call onto the shared submit road (2026-08-23; it was this drawer's own
+    // fetch until then). The gate's position relative to it is the assertion either way.
+    const submit = body.indexOf('submitTask("/api/loom/generate"');
     assert.ok(gate >= 0, "doGenerate must consult probe.canSubmit");
-    assert.ok(submit >= 0);
+    assert.ok(submit >= 0, "doGenerate must submit through gen/submitTask.js");
     assert.ok(gate < submit, "the identity gate must sit before the spend");
     const gateBlock = body.slice(gate, submit);
     assert.match(gateBlock, /pushLine\(/, "a refused click must say so (an error line), not vanish");

@@ -19,9 +19,15 @@
    - The 6h wall-clock ceiling ('stalled', t0 threaded through the recursion) stops a stuck task
      from pinning the tab against the server forever. 'stalled' is deliberately NOT 'failed':
      elapsed time is not evidence the task died, only that this tab stopped watching -- a reload
-     resumes. */
+     resumes.
+   - The cadence STEPS DOWN as a task ages (notify/pollCadence.js): 3s, then 20s past 20min,
+     then 3min past 90min, then the ceiling. Video renders are the reason -- a clip can run for
+     an hour, and asking every 3s for an hour is an hour of pointless traffic. Image/edit/fix
+     ride the same table and never reach the first step, which is the point: one table, no
+     per-route copies. */
 
 import { refresh as trayRefresh } from "./jobsStore.js";
+import { cadenceFor } from "./pollCadence.js";
 
 const seen = {};
 
@@ -44,12 +50,25 @@ export function track(id, label, cb, count) {
   poll(id, cb);
 }
 
-const POLL_CEILING_MS = 6 * 60 * 60 * 1000;
-
-function poll(id, cb, startedAt) {
+/* The callback contract, as hosts see it:
+   - "running"  -- every non-terminal poll, with the /api/task-status body.
+   - "slow" / "stale" -- ONCE, on ENTERING that tier, in addition to that poll's "running".
+     Once, not every poll, because these are a host's cue to change its wording, and a host
+     that wants a live elapsed readout already has one on every "running" tick. The tier is
+     threaded through the recursion beside t0, so re-entering is impossible and a tab that was
+     backgrounded across two thresholds simply reports the tier it woke up in.
+   - "done" / "failed" -- terminal, from the server.
+   - "stalled" -- the 6h ceiling: this tab stopped asking. Not a verdict on the task. */
+function poll(id, cb, startedAt, tier) {
   const t0 = startedAt || Date.now();
-  function again(ms) {
-    if (Date.now() - t0 > POLL_CEILING_MS) {
+  const from = tier || "normal";
+  /* One scheduling decision, taken off the shared tier table. `floorMs` is the network-blip
+     retry floor: a rejected fetch has always backed off further than the normal cadence
+     (again(4000)), and that stays true at every tier -- an idempotent READ retry, never a
+     resubmit. */
+  function again(d, floorMs) {
+    const c = cadenceFor(Date.now() - t0);
+    if (c.tier === "stalled") {
       if (cb) cb("stalled", {
         phase: "stalled",
         error: "Stopped checking after 6h — the task may still be running. "
@@ -58,14 +77,15 @@ function poll(id, cb, startedAt) {
       trayRefresh();
       return;
     }
-    setTimeout(() => poll(id, cb, t0), ms);
+    if (cb && c.tier !== from && (c.tier === "slow" || c.tier === "stale")) cb(c.tier, d || {});
+    setTimeout(() => poll(id, cb, t0, c.tier), floorMs ? Math.max(c.ms, floorMs) : c.ms);
   }
   fetch("/api/task-status?task_id=" + encodeURIComponent(id))
     .then((r) => r.json())
     .then((d) => {
       if (d.phase === "done") { if (cb) cb("done", d); trayRefresh(); }
       else if (d.phase === "failed") { if (cb) cb("failed", d); trayRefresh(); }
-      else { if (cb) cb("running", d); again(3000); }
+      else { if (cb) cb("running", d); again(d, 0); }
     })
-    .catch(() => again(4000));
+    .catch(() => again(null, 4000));
 }

@@ -7029,6 +7029,13 @@ export default function App() {
     // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
     // "Rendered" matches the gallery's own existing label for this same /api/loom/generate
     // endpoint (Gen.videoGenerate()'s runTask call).
+    // 2026-08-23: the drawer now submits through the gallery's shared submit road, which
+    // registers on the way past, so by the time this runs the id is usually already in the
+    // log and register() no-ops on its `seen` map. KEPT anyway, and not as an oversight:
+    // register is idempotent by design, this stays the Loom's own guarantee (every Loom
+    // submit path registers, pinned by loom-image-job-register.test.js) rather than a
+    // dependency on what another bundle's road happens to do, and it is still the only
+    // registration if a future host mounts this drawer without the gallery's Jobs engine.
     if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
   }, [setGenState, setCardStatus]);
   const onVideoResult = useCallback((cardId, detail) => {
