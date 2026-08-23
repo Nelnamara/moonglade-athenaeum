@@ -111,3 +111,10 @@ signed-in session, local or LAN; *localhost* is a signed-in session whose reques
 from the serving machine's own loopback address. One `before_request` gate reads the
 declaration off the endpoint and enforces all three, and an app whose routes do not all
 declare one refuses to start.
+**Request module** — `gallery/src/api.js`, the one place under `gallery/src` where a `fetch`,
+a body parse and an error decision live. `apiGet` / `apiPost` / `apiUpload` all answer
+`data | {error}` and never throw, on ONE rule: the body's `{error}` is authoritative whatever
+the HTTP status was (this app's spend routes refuse with HTTP 200 `{error}`), a non-2xx with
+no body error becomes `{error: "<status> <statusText>"}`, and a transport failure becomes
+`{error: "network error: …"}`. Three files keep their own `fetch` by name, each because its
+contract needs a distinction that rule deliberately collapses.
