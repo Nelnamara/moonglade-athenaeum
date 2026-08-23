@@ -120,6 +120,23 @@ signed-in session, local or LAN; *localhost* is a signed-in session whose reques
 from the serving machine's own loopback address. One `before_request` gate reads the
 declaration off the endpoint and enforces all three, and an app whose routes do not all
 declare one refuses to start.
+**Catalog verb** — one named question the app asks of `catalog.db`, living beside the other
+catalog helpers in `moonglade_gallery.py`'s CATALOG VERBS section: `task_media`, `lineage`,
+`publish_state`, `history_page`, `delete_preview_rows` and the rest. A verb takes a `db_path`,
+holds the SQL, and returns **plain data** — dicts, lists, ints, never a `sqlite3.Row` and never a
+live connection. What the data becomes — a JSON payload, a `/thumbs/<id>.jpg` URL, a truncated
+caption — is the caller's; a web route asks a verb and jsonifies the answer, and holds no SQL of
+its own. `tests/test_catalog_verbs.py` walks `create_app`'s handlers and fails the suite over a
+SELECT that reappears in one.
+
+**The catalog road** — the two things opening `catalog.db` used to be at once, now separated.
+`catalog(db_path)` is a context manager that opens a `sqlite3.Row` connection and closes it,
+running no schema statements at all; `migrate(db_path)` runs the `_MIGRATIONS` list, idempotently,
+and is memoized per process per resolved path. **Lazy safety** is the rule that survived the split:
+the FIRST `catalog()` for a path in a process migrates it, so no entry point — the web app, the CLI,
+the MCP server, the similarity index, a test on a fresh tmp database — has to remember to migrate,
+and the ones that call `migrate()` explicitly do it to say so out loud rather than to make it work.
+
 **Request module** — `gallery/src/api.js`, the one place under `gallery/src` where a `fetch`,
 a body parse and an error decision live. `apiGet` / `apiPost` / `apiUpload` all answer
 `data | {error}` and never throw, on ONE rule: the body's `{error}` is authoritative whatever
