@@ -415,17 +415,25 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
 
     There is deliberately no /api/upscale: a second submit path is a second place for the
     read-only guard, the free-card check and the job-tracker registration to be forgotten.
+    That last one is not hypothetical -- this panel proved it. Until 2026-08-23 it POSTed
+    /api/generate with its own fetch, which meant it never called Jobs.track and an upscale
+    was registered nowhere: not the job log, not the Activity tray its own success toast
+    points at, not the server's orphan sweep. Both halves now ride their shared module.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    # The QUOTED form (double quotes in the React source), i.e. an actual fetch target -- the
-    # component's own doc names /api/upscale in prose while explaining why it does not exist.
-    # Since 2026-08-22 the price half rides the shared probe (gen/usePriceProbe.js, the one
-    # /api/price caller under gallery/src), so the panel's own import is what pins it; the
-    # submit stays this component's.
+    # Both halves are the SHARED module's now, so what pins each is the panel's import plus the
+    # route it hands over -- the fetch literals live in those modules. (The component's own doc
+    # names /api/upscale in prose while explaining why it does not exist, hence the quoted forms.)
     probe = (root / "gallery" / "src" / "gen" / "usePriceProbe.js").read_text(encoding="utf-8")
+    road = (root / "gallery" / "src" / "gen" / "submitTask.js").read_text(encoding="utf-8")
     assert "usePriceProbe" in src and '"/api/price"' in probe
-    assert '"/api/generate"' in src
+    assert 'from "../gen/submitTask.js"' in src, "the submit must ride the one road"
+    assert 'submitTask("/api/generate"' in src, "and it must hand the road the generate route"
+    assert "await fetch(route" in road, "which is where the actual POST lives"
+    assert "window.Jobs.track(" in road, (
+        "the road's registration is the whole reason this panel stopped POSTing for itself")
+    assert 'fetch("/api/generate"' not in src, "no bespoke spend fetch may come back"
     assert "'/api/upscale'" not in src and '"/api/upscale"' not in src
     assert "ref_media_id" in src and "ref_strength" in src, "an image-view upscale is i2i"
     # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),

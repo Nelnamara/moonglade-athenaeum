@@ -2,6 +2,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import usePriceProbe from "../gen/usePriceProbe.js";
+import { submitTask } from "../gen/submitTask.js";
 import CostBadge from "./CostBadge.jsx";
 import ModelPicker from "./ModelPicker.jsx";
 import "../styles/upscale-panel.css";
@@ -13,10 +14,11 @@ import "../styles/upscale-panel.css";
    at the larger size, ~3700). The ratio cap is DYNAMIC -- derived from the source's real dimensions
    against a per-mode output-pixel ceiling that the server ships in window.MG_UPSCALE (never a second
    hand-ported copy). What it submits is nothing new: an image-view upscale is an ordinary i2i
-   generation (mediaId + strength), so it POSTs the SAME /api/price and /api/generate the drawer
-   uses -- there is deliberately no /api/upscale (a second submit path is a second place for the
-   read-only guard / free-card check / job-tracker registration to be forgotten; those all live
-   SERVER-SIDE on /api/generate).
+   generation (mediaId + strength), so it takes the SAME /api/price and /api/generate the drawer
+   does -- there is deliberately no /api/upscale (a second submit path is a second place for the
+   read-only guard / free-card check / job-tracker registration to be forgotten; the first two
+   live SERVER-SIDE on /api/generate, and since 2026-08-23 the third is guaranteed by submitting
+   through gen/submitTask.js rather than by this panel's own fetch -- see doSubmit).
 
    Ported 2026-08-08 (no-vanilla campaign step 5). Kept a forwardRef + useImperativeHandle component
    so the consumers' imperative contract survives verbatim: upEl.current.open(mediaIdOrRow) /
@@ -291,8 +293,20 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     setPickerOpen(false);
   };
 
-  // ---- the spend (verbatim _submit): the ONLY POST /api/generate ------------------------------
-  const doSubmit = () => {
+  // ---- the spend: through the ONE submit road, like every other cost line ---------------------
+  /* This panel POSTed /api/generate itself until 2026-08-23, with hand-rolled equivalents of the
+     road's guarantees (a busyRef double-submit latch, the canSubmit gate, a single no-retry
+     fetch). The equivalents were real; what could not be hand-rolled was the part that only the
+     road does -- Jobs.track, which REGISTERS the task. So an upscale ran, billed, and appeared
+     in no job log, no Activity tray and no orphan sweep, underneath a toast that said "Watch it
+     in Activity". This component's own header already argued that a second submit path is a
+     second place for the job-tracker registration to be forgotten; it was the one forgetting.
+
+     The panel's result UI is now the road's `emit` adapter: an "err" patch becomes the inline
+     note it always showed, and the modal keeps its own shape -- close on success, toast, onDone.
+     No onPhase: this is a one-shot modal that is gone before the task finishes, and the tray it
+     now really does register with is where a finished upscale belongs. */
+  const doSubmit = async () => {
     if (!goReady || busyRef.current) return;
     // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the click that
     // slips through a stale render (a keyboard Enter needs no repaint to fire).
@@ -300,36 +314,41 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     busyRef.current = true;                         // latch, independent of render timing
     setBusy(true);
     const mid = src.media_id;                        // captured before the await
-    fetch("/api/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload()),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        busyRef.current = false; setBusy(false);
-        if (!d || d.error || !d.task_id) {
-          setMsg({ text: (d && d.error) || "Could not start the upscale.", bad: true });
-          return;
-        }
-        setMsg(null);
-        // The submit DEBITED credits or a card; the payload is byte-identical, so only a
-        // FORCED re-price gets past the short-circuit. (This panel closes on success, so the
-        // re-open's own forced prime usually gets there first -- kept so the rule reads the
-        // same on every cost line: a spend always invalidates the verdict that allowed it.)
-        probe.refresh({ force: true });
-        handleClose();
-        if (typeof onDone === "function") onDone({ media_id: mid, task_id: d.task_id });
-        if (window.Toast) {
-          window.Toast.show({
-            kind: "ok", title: "Upscale started",
-            msg: "Watch it in Activity · the result lands in your gallery",
-          });
-        }
-      })
-      .catch((e) => {
-        busyRef.current = false; setBusy(false);
-        setMsg({ text: "Could not start the upscale: " + ((e && e.message) || e), bad: true });
+    // This submit belongs to THIS open. A terminal patch landing after the panel was closed and
+    // re-opened on a different picture must not paint its note over the new one (the same
+    // stale-bind guard open() already applies to /api/image-meta).
+    const mine = openSeq.current;
+    let handedOff = false;   // set once the modal closes on success -- the tray owns it from there
+
+    const emit = (patch) => {
+      if (handedOff || mine !== openSeq.current) return;
+      if (patch.kind === "err") { setMsg({ text: patch.text, bad: true }); return; }
+      setMsg(null);
+    };
+
+    let tid = null;
+    try {
+      tid = await submitTask("/api/generate", payload(), { label: "Upscaled", emit });
+    } finally {
+      // The latch releases the moment the road answers, accepted or rejected -- never on a
+      // later phase, and never left stuck by a throw on the way back.
+      busyRef.current = false; setBusy(false);
+    }
+    if (!tid) return;   // the adapter already painted the reason inline
+    // The submit DEBITED credits or a card; the payload is byte-identical, so only a
+    // FORCED re-price gets past the short-circuit. (This panel closes on success, so the
+    // re-open's own forced prime usually gets there first -- kept so the rule reads the
+    // same on every cost line: a spend always invalidates the verdict that allowed it.)
+    probe.refresh({ force: true });
+    handedOff = true;
+    handleClose();
+    if (typeof onDone === "function") onDone({ media_id: mid, task_id: tid });
+    if (window.Toast) {
+      window.Toast.show({
+        kind: "ok", title: "Upscale started",
+        msg: "Watch it in Activity · the result lands in your gallery",
       });
+    }
   };
 
   const cls = "upscale-panel" + (inline ? " inline" : "")

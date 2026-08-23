@@ -100,21 +100,29 @@ def test_generate_edit_fix_all_still_route_through_the_shared_submit_task():
     assert 'submitTask("/api/edit"' in _src("gallery/src/components/EditTab.jsx")
     assert 'submitTask("/api/edit"' in _src("gallery/src/gen/useEditGenerate.js")
     assert 'submitTask("/api/fix"' in _src("gallery/src/components/FixTab.jsx")
+    assert 'submitTask("/api/generate"' in _src("gallery/src/components/UpscalePanel.jsx")
+    assert 'submitTask("/api/loom/generate"' in _src("gallery/src/components/VideoDrawer.jsx")
     # No surface owns a bespoke fetch to a spend route -- the ONLY fetch of these
-    # routes is submitTask's own fetch(route).
+    # routes is submitTask's own fetch(route). NO exceptions (2026-08-23).
     #
-    # ONE deliberate exception: UpscalePanel.jsx (2026-08-08 port of static/mg-upscale-panel.js).
-    # The image-view upscale is a one-shot MODAL that closes on success and shows its own inline
-    # error, so it does not fit submitTask's openLine/result-line contract. It posts the SAME
-    # /api/generate (server-side READ_ONLY / free-card / job-tracker guards all apply) and carries
-    # its OWN equivalents of the client guarantees this test protects: a busyRef double-submit
-    # latch, a canSubmit spend-gate, and a single no-retry fetch. The vanilla did exactly this;
-    # it was invisible here only because it lived in static/ (this test globs gallery/src). If a
-    # future pass wants the shared path anyway, route it through submitTask and drop this skip.
-    bespoke = re.compile(r'fetch\(\s*["\']/api/(?:generate|edit|fix)["\']')
-    exempt = {(_ROOT / "gallery" / "src" / "components" / "UpscalePanel.jsx").resolve()}
+    # There used to be one, for UpscalePanel.jsx, on the grounds that a one-shot modal closing
+    # on success does not fit submitTask's result-line contract, and that it carried its own
+    # equivalents of the guarantees this test protects: a busyRef double-submit latch, a
+    # canSubmit spend-gate, a single no-retry fetch. The equivalents were real. What the note
+    # missed is the one guarantee that cannot be hand-rolled from outside the road: Jobs.track,
+    # which REGISTERS the task. So an upscale ran, billed, and existed in no job log, no
+    # Activity tray and no orphan sweep -- underneath a toast that said "Watch it in Activity".
+    # The same shape had just been found in the video drawer, which trusted its HOST to register
+    # and so tracked nothing at all under the mobile shell. Both ride the road now, and the
+    # sweep is closed: "this surface's UI is different" is exactly how the gap comes back, and
+    # a surface's result UI is the emit adapter's problem, not a reason to leave the road.
+    bespoke = re.compile(r'fetch\(\s*["\']/api/(?:generate|edit|fix|enhance|scene|loom/generate)["\']')
+    road = (_ROOT / "gallery" / "src" / "gen" / "submitTask.js").resolve()
+    seen_road = False
     for f in (_ROOT / "gallery" / "src").rglob("*.js*"):
-        if f.resolve() in exempt:
+        if f.resolve() == road:
+            seen_road = True
             continue
         assert not bespoke.search(f.read_text(encoding="utf-8")), (
             "bespoke spend-route fetch outside submitTask: " + str(f))
+    assert seen_road, "the walk never reached submitTask.js -- this sweep would pass vacuously"

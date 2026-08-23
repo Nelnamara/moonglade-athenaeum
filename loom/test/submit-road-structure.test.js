@@ -83,12 +83,37 @@ describe("web surfaces never add a second poll loop", () => {
 });
 
 describe("every spend rides submitTask", () => {
-  test("no file under gallery/src POSTs /api/loom/generate any more", () => {
-    const callers = files.filter((f) => read(f).includes('fetch("/api/loom/generate"')).map(rel);
-    assert.deepEqual(callers, [],
-      "the video route is a spend route: it must go through gen/submitTask.js, which owns the "
-      + "no-retry rule, the HTTP-200-body-keyed error read, the `adjusted` disclosure and the "
-      + "Jobs.track registration. Found: " + JSON.stringify(callers));
+  /* The rule, in one sentence: under gallery/src, gen/submitTask.js is the only file that may
+     fetch a spend route. Derived from the tree rather than from a list of known hosts -- a
+     bespoke fetch in a file nobody thought of fails this exactly like a regression in one of the
+     six. Both surfaces that ever broke this rule broke it the same quiet way: they carried
+     hand-rolled equivalents of the road's client-side guarantees (a busy latch, a spend gate, a
+     single un-retried fetch) and looked fine, while silently missing the one guarantee that
+     cannot be hand-rolled from outside -- Jobs.track's registration. */
+  SPEND_ROUTES.forEach((route) => {
+    test('no file but the road fetches ' + route, () => {
+      const needle = 'fetch("' + route + '"';
+      const callers = files.filter((f) => read(f).includes(needle)).map(rel).sort();
+      const strays = callers.filter((c) => c !== ROAD);
+      assert.deepEqual(strays, [],
+        route + " spends real credits, so it must go through gen/submitTask.js, which owns the "
+        + "no-retry rule, the HTTP-200-body-keyed error read, the `adjusted` disclosure and the "
+        + "Jobs.track registration that puts the task in the Activity tray. Found: "
+        + JSON.stringify(strays));
+    });
+  });
+
+  test("the road's own fetch is the one that survives -- this guard must not pass vacuously", () => {
+    // If submitTask stopped fetching by that literal (a variable, a helper), every assertion
+    // above would still pass while describing nothing.
+    assert.match(fileNamed(ROAD), /const r = await fetch\(route, \{/,
+      "submitTask must still be the thing that actually POSTs the route it was handed");
+  });
+
+  test("UpscalePanel.jsx imports submitTask", () => {
+    assert.match(fileNamed("components/UpscalePanel.jsx"),
+      /import \{ submitTask \} from "\.\.\/gen\/submitTask\.js";/,
+      "the image-view upscale is an ordinary paid i2i generation and rides the same road");
   });
 
   test("VideoDrawer.jsx imports submitTask", () => {
