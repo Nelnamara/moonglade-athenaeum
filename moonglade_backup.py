@@ -57,7 +57,15 @@ from pathlib import Path
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli)
+                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
+                            # The one library scan (see moonglade_gallery.py's
+                            # "LIBRARY SCAN" section) -- imported the same way the
+                            # SQLite catalog helpers above are, because the gallery
+                            # is the shared base module and this file imports it.
+                            scan_library, bucket_of, _VIDEO_EXTS,
+                            GALLERY_DIRNAME, DUPLICATES_DIRNAME,
+                            QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
+                            IMPORT_EXCLUDE)
 
 
 def _ensure_db(out):
@@ -3844,50 +3852,27 @@ def cmd_convert_existing(args, out):
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 
-def _bucket_of(rel_path):
-    """Classify a path (relative to out_dir) into a top-level bucket name."""
-    top = str(rel_path).replace("\\", "/").split("/")[0]
-    if top == "images":
-        return "images"
-    if top == "batches":
-        return "batches"
-    if top == "unknown-date":
-        return "month"
-    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
-        return "month"
-    return "other"
+# The bucket classifier is `moonglade_gallery.bucket_of` -- the LIBRARY SCAN
+# section's one copy. This alias keeps the private name every caller (and
+# tests/test_dedup.py's `core._bucket_of` assertions) already uses.
+_bucket_of = bucket_of
 
 
 def _scan_media_files(out_dir):
     """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
-    file outside gallery/, _duplicates/, and _deleted/. Single source of truth for
-    the audit (and, via verify_quarantine, the dedup-verify pass).
+    file outside gallery/, _duplicates/, and _deleted/. The audit's view (and, via
+    verify_quarantine, the dedup-verify pass) onto the shared scan.
 
     _deleted/ exclusion is B11 (audit 2026-07-21): without it, a locally-purged
     image is a valid audit hit -- reported back as a live Class A duplicate of its
     own quarantined self, and (via verify_quarantine's survivor index) potentially
-    treated as the "surviving keeper" a _duplicates/ copy is compared against."""
-    gallery_dir = out_dir / "gallery"
-    quarantine_dir = out_dir / "_duplicates"
-    deleted_dir = out_dir / DELETED_DIRNAME
-    for p in out_dir.rglob("*"):
-        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
-            continue
-        if p.name.endswith(".part"):
-            continue
-        if (_is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir)
-                or _is_under_dir(p, deleted_dir)):
-            continue
-        rel = p.relative_to(out_dir)
-        yield p, rel, _bucket_of(rel), media_id_of(p)
+    treated as the "surviving keeper" a _duplicates/ copy is compared against.
 
-
-def _is_under_dir(path, parent):
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
+    Deliberately does NOT drop zero-byte files (named disagreement 3): the audit
+    has to SEE one in order to never choose it as a keeper -- tests/test_dedup.py
+    pins that, and it is why the scan reports `size` rather than deciding."""
+    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
+        yield e.path, e.rel, e.bucket, e.media_id
 
 
 def audit_collection(out_dir, content=True, progress=None):
@@ -4292,8 +4277,10 @@ def cmd_organize(args, out, img_dir, db_path):
         if mid:
             meta_by_mid[mid] = row
 
-    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported",
-                 out / DELETED_DIRNAME)
+    # This walker's own exclusion (named disagreement 6): the shared quarantine set
+    # plus videos/ and imported/, which organize must leave alone because they are
+    # not PixAI images to normalize.
+    skip_dirs = QUARANTINE_EXCLUDE + ("videos", "imported")
 
     def _target(mid, row, ext):
         month = (row.get("created_at") or "")[:7] or "unknown-date"
@@ -4303,21 +4290,18 @@ def cmd_organize(args, out, img_dir, db_path):
 
     # Sources: every PixAI image on disk (catalog media), wherever it currently is.
     plan, in_place = [], 0
-    for p in out.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
-            continue
-        if p.name.endswith(".part") or p.name.startswith("_"):
-            continue
-        if any(_under(p, d) for d in skip_dirs):
-            continue
-        row = meta_by_mid.get(media_id_of(p))
+    for e in scan_library(out, kinds=("image",), exclude=skip_dirs):
+        p = e.path
+        if p.name.startswith("_"):
+            continue                       # organize's own rule, about files not folders
+        row = meta_by_mid.get(e.media_id)
         if not row or (row.get("source") or "") == "local":
             continue                       # unknown file or user import: leave it
-        dst = _target(media_id_of(p), row, p.suffix.lower())
+        dst = _target(e.media_id, row, p.suffix.lower())
         if p.resolve() == dst.resolve():
             in_place += 1
             continue
-        plan.append((p, dst, media_id_of(p), row))
+        plan.append((p, dst, e.media_id, row))
 
     print("Organize plan: {} file(s) -> YYYY-MM/ with descriptive names; "
           "{} already in place.".format(len(plan), in_place))
@@ -5895,7 +5879,10 @@ def run_sync_videos(args):
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
 
 
-_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+# _VIDEO_EXTS is the LIBRARY SCAN section's `"video"` kind, imported at the top of
+# this file with the rest of the shared base -- one spelling of the video extension
+# set instead of the three this file, the gallery's health walk and the loom bundle
+# each used to keep.
 
 
 def _under(path, parent):
@@ -6132,16 +6119,18 @@ def run_import_local(args):
     db_path = out / "catalog.db"
     init_db(db_path)                  # import can seed a fresh, download-free backup
     thumb_dir = out / "gallery" / "thumbs"
-    media_exts = _IMAGE_EXTS | _VIDEO_EXTS
 
     raw = getattr(args, "import_local", None)
     src = Path(raw) if raw else out
     if not src.exists():
         raise PixAIError("import path not found: {}".format(src))
     try:
-        external = not _under(src.resolve(), out.resolve()) and src.resolve() != out.resolve()
+        _s, _o = src.resolve(), out.resolve()
+        external = not _under(_s, _o) and _s != _o
+        scan_root_is_out = (_s == _o)
     except OSError:
         external = False
+        scan_root_is_out = (src == out)
 
     _prog = getattr(args, "progress", None)
     catalog_rows = load_catalog(db_path)
@@ -6152,40 +6141,36 @@ def run_import_local(args):
     # though its on-disk path no longer equals the stored `filename` string. This
     # is what stops --import-local from re-cataloging the whole backup as 'local'.
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
-    gallery_dir = out / "gallery"
-    quarantine = out / "_duplicates"
-    # Branding moved to the APP root on 2026-07-26, so this no longer names a live
-    # directory -- kept because an install that predates the move still has files here,
-    # and --import-local would otherwise catalogue someone's banner and mascots as
-    # gallery images. Excluding an absent path costs nothing; dropping the exclusion
-    # would silently sweep a legacy folder into the library.
-    branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
-    # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
-    # row when it moves the file to _deleted/, so without this exclusion the scan
-    # below sees an orphaned file with no existing row/media_id match and
-    # resurrects it as a brand-new source='local' row.
-    deleted_dir = out / DELETED_DIRNAME
+
+    # IMPORT_EXCLUDE = the shared quarantine set plus legacy branding/ (named
+    # disagreement 5) -- app chrome that must never be catalogued as gallery
+    # content, and, for _deleted/, B11 (audit 2026-07-21): purge_media_local()
+    # clears a purged image's catalog row when it moves the file there, so without
+    # the exclusion the scan finds an orphaned file with no existing row/media_id
+    # match and resurrects it as a brand-new source='local' row.
+    #
+    # Those names only mean anything relative to the backup root, so they apply
+    # exactly when the scan root IS the backup root. An external source folder --
+    # or a subfolder of the backup handed in explicitly -- excludes nothing, which
+    # is what the old `if not external and _under(p, out / "gallery")` chain
+    # amounted to: it tested paths rooted at `out`, which could not match anything
+    # under a different root.
+    excl = IMPORT_EXCLUDE if scan_root_is_out else ()
 
     print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
           flush=True)
-    candidates, scanned = [], 0
-    for p in src.rglob("*"):
-        scanned += 1
-        if scanned % 5000 == 0:
-            vlog("scanned {} files, {} media so far...".format(scanned, len(candidates)))
-        if p.is_file() and p.suffix.lower() in media_exts and not p.name.endswith(".part"):
-            candidates.append(p)
+    candidates = []
+    for e in scan_library(src, kinds=("image", "video"), exclude=excl):
+        candidates.append(e.path)
+        if len(candidates) % 5000 == 0:
+            vlog("scanned {} media files so far...".format(len(candidates)))
     total = len(candidates)
-    print("Found {} media file(s) among {} scanned; cataloging new ones...".format(
-        total, scanned), flush=True)
+    print("Found {} media file(s); cataloging new ones...".format(total), flush=True)
 
     rows, made, skipped = [], 0, 0
     for idx, p in enumerate(candidates):
         if _prog:
             _prog(idx + 1, total, 0)
-        if not external and (_under(p, gallery_dir) or _under(p, quarantine)
-                             or _under(p, branding_dir) or _under(p, deleted_dir)):
-            continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
         if external:
             dest_dir = out / ("videos" if is_vid else "imported")
@@ -11280,28 +11265,27 @@ def _count_backup_images(out):
     reported SEPARATELY rather than dropped, so the total still accounts for the whole
     folder."""
     out = Path(out)
-    gallery_dir = out / "gallery"
-    deleted_dir = out / DELETED_DIRNAME
-    skip = (gallery_dir, out / "_duplicates", deleted_dir)
+    # The one walker that does NOT want the quarantine trees pruned -- it counts
+    # them into separate columns instead of dropping them, so it asks for
+    # `exclude=()` and splits on the entry's own top-level folder against the
+    # shared dirnames. Case-normalized because the old `dir in p.parents` test was
+    # (Path comparison is case-insensitive on Windows).
+    _norm = os.path.normcase
+    _gallery, _deleted, _dupes = (_norm(GALLERY_DIRNAME), _norm(DELETED_DIRNAME),
+                                  _norm(DUPLICATES_DIRNAME))
     n = b = thumbs = trashed = trashed_bytes = 0
-    for p in out.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS or p.name.endswith(".part"):
-            continue
-        if any(s in p.parents for s in skip):
-            if gallery_dir in p.parents:
-                thumbs += 1
-            elif deleted_dir in p.parents:
-                trashed += 1
-                try:
-                    trashed_bytes += p.stat().st_size
-                except OSError:
-                    pass
-            continue
-        n += 1
-        try:
-            b += p.stat().st_size
-        except OSError:
-            pass
+    for e in scan_library(out, kinds=("image",), exclude=()):
+        top = _norm(e.rel.parts[0]) if len(e.rel.parts) > 1 else ""
+        if top == _gallery:
+            thumbs += 1
+        elif top == _deleted:
+            trashed += 1
+            trashed_bytes += e.size or 0
+        elif top == _dupes:
+            pass                       # quarantined duplicates: neither live nor trash
+        else:
+            n += 1
+            b += e.size or 0
     return DiskCounts(n, b, thumbs, trashed, trashed_bytes)
 
 
@@ -12123,42 +12107,27 @@ def run_download(args, progress=None):
 
     img_dir.mkdir(parents=True, exist_ok=True)
 
-    # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
-    # the progress count AND build the on-disk media_id index. Resume is then an
+    # ONE fast tree walk at startup (the shared scan_library: os.scandir, ~free
+    # stat() on Windows, excluded subtrees pruned before descending): seed the
+    # progress count AND build the on-disk media_id index. Resume is then an
     # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
-    # latter made follow-up runs scale quadratically with collection size.
-    # Prunes gallery/ thumbnails, _duplicates/ quarantine, and _deleted/ quarantine
-    # (B11, audit 2026-07-21: without this a locally-purged media_id is still
-    # indexed as "already done", so resume/--update never re-downloads it).
+    # latter made follow-up runs scale quadratically with collection size. This
+    # walk happens BEFORE any network call and is the whole of INVARIANT 2's base
+    # case, so it stays one walk and one dict.
+    # QUARANTINE_EXCLUDE_ANYWHERE prunes gallery/ thumbnails, _duplicates/ and
+    # _deleted/ by NAME at any depth -- this walker's own reading of the exclusion
+    # set (named disagreement 2), not the top-level-subtree one the rglob walkers
+    # use. B11 (audit 2026-07-21): without the _deleted/ prune a locally-purged
+    # media_id is still indexed as "already done", so resume/--update never
+    # re-downloads it.
     already_done = 0
     disk_bytes = 0
     on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
 
-    def _iter_image_entries(root):
-        skip_dirs = {"gallery", "_duplicates", DELETED_DIRNAME}
-        stack = [str(root)]
-        while stack:
-            try:
-                with os.scandir(stack.pop()) as it:
-                    for e in it:
-                        if e.is_dir(follow_symlinks=False):
-                            if e.name not in skip_dirs:
-                                stack.append(e.path)
-                        elif e.is_file(follow_symlinks=False):
-                            yield e
-            except OSError:
-                continue
-
     if out.exists():
         _t_scan = time.monotonic()
-        for e in _iter_image_entries(out):
-            name = e.name
-            if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
-                continue
-            try:
-                size = e.stat().st_size
-            except OSError:
-                size = None
+        for e in scan_library(out, kinds=("image",),
+                              exclude=QUARANTINE_EXCLUDE_ANYWHERE):
             # A zero-byte file (an interrupted download that got far enough to create
             # the file but not to write it) must NOT count as "already done" here --
             # indexing it means it is skipped FOREVER: no --update/--sync ever
@@ -12168,12 +12137,14 @@ def run_download(args, progress=None):
             # file with no signal to the user. A stat() race (size is None) is treated
             # as fine, matching prior behaviour -- we can't tell either way, and this
             # index has always erred toward "already done" on an unreadable stat.
-            if size == 0:
+            # This is INVARIANT 3 living at the caller, which is why scan_library
+            # reports `size` instead of applying a zero-byte rule of its own.
+            if e.size == 0:
                 continue
             already_done += 1
-            if size is not None:
-                disk_bytes += size
-            on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
+            if e.size is not None:
+                disk_bytes += e.size
+            on_disk_by_mid.setdefault(e.media_id, e.path)
         vlog("startup disk scan: {} image files ({}) indexed in {:.2f}s".format(
             already_done, _format_size(disk_bytes), time.monotonic() - _t_scan))
     # Progress counts items as the walk visits them (skips included), starting at
