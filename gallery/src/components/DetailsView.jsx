@@ -5,6 +5,7 @@ import SimilarModal from "./SimilarModal.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { rebuildPoster } from "../api.js";
+import { localDay } from "../gen/dates.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -298,7 +299,7 @@ export default function DetailsView({
               <span className="p-vsep">·</span>
               <span>{row.width}×{row.height}</span>
               <span className="p-vsep">·</span>
-              <span>{(row.created_at || "").slice(0, 10)}</span>
+              <span>{localDay(row.created_at)}</span>
             </div>
 
             {hasPromptBlock ? (

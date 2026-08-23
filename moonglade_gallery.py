@@ -9075,6 +9075,7 @@ def create_app(out_dir: Path):
                 "thumb": "/thumbs/%s.jpg" % mid,
                 "is_video": is_video == "1", "is_nsfw": is_nsfw == "1",
                 "date": (created or "")[:10],
+                "created_at": created or "",
                 "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
                 "public": pub == "1", "likes": likes, "comments": comments,
             })
@@ -11270,7 +11271,8 @@ __DESIGN_TOKENS__
                 "is_video": str(r.get("is_video") or "") == "1",
                 "is_nsfw": str(r.get("is_nsfw") or "") == "1",
                 "model": str(r.get("model_name") or ""),
-                "date": str(r.get("created_at") or "")[:10],
+                "date": str(r.get("created_at") or "")[:10],   # UTC day -- fallback only; the
+                "created_at": str(r.get("created_at") or ""),  # client derives the LOCAL day from this
                 "rating": int(str(r.get("rating") or "0") or 0)
                           if str(r.get("rating") or "").isdigit() else 0,
                 "w": str(r.get("width") or ""),
