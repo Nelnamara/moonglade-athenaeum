@@ -387,7 +387,11 @@ def test_upscale_lives_on_the_image_view_on_both_surfaces():
         assert "import UpscalePanel" in v and "<UpscalePanel ref={upEl}" in v, \
             fname + " no longer renders the shared panel"
     det = (root / "gallery" / "src" / "components" / "DetailsView.jsx").read_text(encoding="utf-8")
-    assert "toggleUpscale" in det and "Upscale" in det, "the details view lost its Upscale control"
+    # Desktop Details mounts the panel as the design's FIXED float (Image Details.dc.html:143-189,
+    # rebuilt 2026-08-23) and its Upscale chip opens it for THIS picture directly -- the same
+    # contract the lightbox line above pins. (Mobile still drives it through toggleUpscale.)
+    assert "upEl.current.open(row.media_id)" in det and "Upscale" in det, (
+        "the details view lost its Upscale control")
 
 
 def test_the_upscale_flyout_never_outlives_the_picture_it_was_opened_for():
