@@ -116,6 +116,8 @@ button.glm-hero-claim { position: absolute; right: 11px; bottom: 40px; z-index: 
   border: 1px solid var(--emerald); background: rgba(79,201,154,.16); color: var(--emerald);
   animation: glmClaimPulse 2.6s ease-in-out infinite; white-space: nowrap; }
 button.glm-hero-claim:disabled { opacity: .7; animation: none; }
+button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; height: 13px;
+  vertical-align: -2px; background: url(/branding/rewards/claim.png) center/contain no-repeat; }
 
 /* ---- body / tab content ---- */
 .glm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
