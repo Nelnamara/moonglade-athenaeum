@@ -285,7 +285,11 @@ export default function Lightbox({
             transition: dragging ? "none" : "transform .32s cubic-bezier(.2,.9,.24,1)",
           }}>
             <div className={"lbx-hero" + (hasAR ? "" : " noar")}
-              style={hasAR ? { aspectRatio: W + " / " + H } : undefined}>
+              style={hasAR ? {
+                aspectRatio: W + " / " + H,
+                // the pixel-size cap: never upscale past the file's actual size (lightbox.css)
+                "--lbx-w": W + "px", "--lbx-h": H + "px", "--lbx-ar": (W / H).toFixed(5),
+              } : undefined}>
               {it.is_video ? (
                 <video key={it.media_id} src={"/video-file/" + it.media_id} controls autoPlay loop
                   style={{ viewTransitionName: "vt-reveal" }} />
