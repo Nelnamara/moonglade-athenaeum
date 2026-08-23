@@ -138,18 +138,45 @@
 .mgg-card.sel .mgg-cap,
 .mgg-selecting .mgg-cap { opacity: 1; transform: none; }
 
-.mgg-model {
-  font-size: 10.5px; font-weight: 600; color: var(--lavender, var(--accent));
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* ---- Accession Stamp + Sibling Strip (#30) ----------------------------------
+   Pixel source: the owner's locked "Placard identity -- five directions"
+   artifact, directions A (stamp) + E (strip). Values are the artifact's,
+   mapped onto the app's tokens the way this file already does (DC-literal
+   whites): its overlay0 #6a6088 over the slab is white at .4, its subtext
+   #9a93ab is white at .6; surface1 -> var(--surface1); lavender -> the
+   existing var(--lavender, var(--accent)). The ONE adaptation: the serif
+   title is 13px, not the artifact's 20px -- inside a card's hover slab 20px
+   is a headline, not a placard line. The filename line is GONE (the
+   word-salad "title" the review struck); .mgg-model/.mgg-date went with it. */
+.mgg-title {
+  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;
+  font-size: 13px; line-height: 1.2; margin: 0 0 7px; color: #d6d2e2;
+  overflow-wrap: anywhere; text-wrap: balance;
 }
-/* DC literals restored (owner 2026-08-01): the DC brightens the date over the
-   filename (.5 vs .35 white) -- the single-token version flattened that. */
-.mgg-date { font-size: 9.5px; color: rgba(255, 255, 255, .5); font-variant-numeric: tabular-nums; }
-.mgg-file {
-  font-size: 9.5px; color: rgba(255, 255, 255, .35);
-  font-family: ui-monospace, Menlo, monospace;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.mgg-stamp {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px;
+  letter-spacing: .13em; text-transform: uppercase; color: rgba(255, 255, 255, .4);
+  margin: 0 0 4px; overflow-wrap: anywhere;
 }
+.mgg-stamp.lead { color: rgba(255, 255, 255, .6); }
+
+.mgg-strip { display: flex; gap: 4px; margin-top: 9px; flex-wrap: wrap; }
+.mgg-strip img {
+  width: 30px; height: 30px; object-fit: cover; border-radius: 3px;
+  border: 1px solid var(--surface1, #3a3460); opacity: .5; display: block;
+}
+.mgg-strip img.self {
+  opacity: 1; border-color: var(--lavender, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lavender, var(--accent)) 70%, transparent);
+}
+.mgg-strip .more {
+  font-family: monospace; font-size: 9.5px; color: rgba(255, 255, 255, .4);
+  align-self: center; padding-left: 3px; letter-spacing: .06em;
+}
+/* the privacy eye blurs EVERY thumb (App.jsx's classic contract) -- the strip's
+   sibling thumbs included; hover reveals, the same as the art. */
+.mgg-blur .mgg-strip img { filter: blur(4px); }
+.mgg-blur .mgg-card:hover .mgg-strip img { filter: none; }
 
 .mgg-caprow { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
 .mgg-caprow .stars { flex: 1 1 auto; display: flex; gap: 2px; letter-spacing: 0; }

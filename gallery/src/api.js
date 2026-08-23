@@ -27,6 +27,16 @@ export async function postJSON(url, body) {
   }
 }
 
+// Sibling Strip data for the card placard (#30): ONE page-batched POST, never per
+// card (the per-card lineage fetch cost ~4.3s per 100-card page). Returns
+// {by_task: {task_id: [{media_id, is_video, thumb}, ...]}} -- self INCLUDED, tasks
+// with <2 members omitted by the server. Fail-soft: the strip is decoration, so a
+// failure means no strips, never an error surface.
+export async function fetchSiblings(taskIds) {
+  const d = await postJSON("/api/siblings", { task_ids: taskIds });
+  return d && d.by_task && typeof d.by_task === "object" ? d : { by_task: {} };
+}
+
 // ZIP download goes through a real form submit so the browser owns the download.
 export function downloadZipForm(idList) {
   const f = document.createElement("form");

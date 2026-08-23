@@ -253,6 +253,9 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN source_media_id TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN derive_kind TEXT DEFAULT ''",
     "CREATE INDEX IF NOT EXISTS idx_source_media_id ON catalog(source_media_id)",
+    # task_id is the sibling key (/api/siblings IN-query, the View Batch filter) and had
+    # no index: both were full scans of the table (adversarial review, 2026-08-22).
+    "CREATE INDEX IF NOT EXISTS idx_task_id ON catalog(task_id)",
     # A real txt2img original legitimately has an EMPTY source_media_id forever, which
     # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
     # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
@@ -697,8 +700,12 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         clauses.append("model_name = ?")
         params.append(model)
     if batch:
-        clauses.append("batch = ?")
-        params.append(batch)
+        # EITHER column: --organize blanks `batch` (r["batch"] = ""), so a library
+        # that has been organized would resolve a batch filter to nothing. The Details
+        # "View Batch" button passes the task_id (issue #30); the legacy batches/
+        # folder-name filter keeps working through the same param.
+        clauses.append("(batch = ? OR task_id = ?)")
+        params.extend([batch, batch])
     if date_from:
         clauses.append("SUBSTR(created_at,1,7) >= ?")
         params.append(date_from)
@@ -7134,8 +7141,73 @@ def create_app(out_dir: Path):
     # max-age + the ETag send_from_directory already sets = a 304 on the common path.
     _THUMB_CACHE = "public, max-age=300"
 
+    # The Sibling Strip's 32px tier (issue #30): derived from the EXISTING 768 thumb
+    # (never the master), cached beside the badge cache under gallery/cache/_strip/
+    # (badge_cache_dir()'s rule: regenerable caches live as siblings there, never in
+    # the goods tree). Self-heals when the 768 thumb is newer (mtime) -- a rebuilt
+    # poster re-cuts its strip thumb on the next request. Browser cache matches the
+    # 768 thumb's own 300s policy (the block above): the strip URL carries NO ?v=, and
+    # a rebuilt poster must not show its old tile for a day (adversarial review, 2026-08-22).
+    _STRIP_CACHE = _THUMB_CACHE   # same 300s as the 768: media_id is an identity, not a hash
+    _STRIP_ID_OK = re.compile(r"[0-9A-Za-z_-]+")
+
+    def strip_cache_dir():
+        return out_dir / "gallery" / "cache" / "_strip"
+
+    def _strip_thumb(media_id):
+        """Path of the cached 32px strip thumb for media_id, (re)cut from the 768
+        thumb when missing or stale. None when there is no 768 thumb to derive from
+        or the cut fails -- the caller then falls through to the normal thumb."""
+        # ALLOWLIST the id here, inside the helper, so every caller is covered. A
+        # denylist of / \ .. missed the Windows drive letter: pathlib's `/` RESETS to
+        # a drive-relative path when the right operand carries one, so
+        # thumb_dir / "C:x.jpg" == Path("C:x.jpg") == the drive ROOT -- and
+        # send_from_directory would then serve C:\x.jpg (adversarial review,
+        # 2026-08-22). Catalog ids are numeric (or local_<hex>); nothing else is valid.
+        if not _STRIP_ID_OK.fullmatch(media_id or ""):
+            return None
+        src = thumb_dir / (media_id + ".jpg")
+        if not src.is_file():
+            return None
+        dst = strip_cache_dir() / (media_id + ".jpg")
+        try:
+            src_mtime = src.stat().st_mtime
+            if dst.is_file() and dst.stat().st_mtime >= src_mtime:
+                return dst
+            from PIL import Image
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # Atomic: cut to a temp file and os.replace it in. An in-place save that died
+            # mid-write (disk full, kill) left a truncated file carrying a FRESH mtime,
+            # which then passed the staleness check and was served for the whole
+            # cache window; a concurrent reader (4 siblings render the same URL at once
+            # on a threaded server) could also read a half-written file.
+            tmp = dst.with_suffix(".tmp")
+            try:
+                with Image.open(src) as im:
+                    im = im.convert("RGB")
+                    im.thumbnail((32, 32))
+                    im.save(tmp, "JPEG", quality=80)
+                os.replace(tmp, dst)
+            finally:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+            return dst
+        except Exception:
+            return None
+
     @app.route("/thumbs/<media_id>.jpg")
     def thumb(media_id):
+        # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
+        if (request.args.get("s") or "") == "32" and "/" not in media_id \
+                and "\\" not in media_id and ".." not in media_id:
+            p = _strip_thumb(media_id)
+            if p is not None:
+                resp = send_from_directory(str(p.parent), p.name, max_age=86400)
+                resp.headers["Cache-Control"] = _STRIP_CACHE
+                return resp
         resp = send_from_directory(str(thumb_dir), "{}.jpg".format(media_id),
                                    max_age=300)
         resp.headers["Cache-Control"] = _THUMB_CACHE
@@ -9270,6 +9342,60 @@ def create_app(out_dir: Path):
         return jsonify({"media_id": mid, "siblings": siblings,
                         "parent": parent, "children": children})
 
+    @app.route("/api/siblings", methods=["POST"])
+    def api_siblings():
+        """Page-batched Sibling Strip data for the card placard (issue #30): every
+        output of each requested task, in ONE query. The per-card /api/lineage fetch
+        cost ~4.3s per 100-card page; this costs ~85ms (probe 2026-08-22).
+        Body {"task_ids": [...]} (cap 200; blanks and non-strings dropped). Returns
+        {"by_task": {task_id: [{media_id, is_video, thumb}, ...]}} ordered by
+        media_id, INCLUDING self (the client lights self by media_id); a task with
+        fewer than 2 members is omitted -- a single output has no strip.
+        An empty task_id is NEVER queried: every import shares '' and would
+        otherwise become one giant pseudo-batch. Pure catalog read, no network."""
+        body = request.get_json(silent=True)
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            return jsonify({"error": "body must be a JSON object"}), 400
+        raw_ids = body.get("task_ids") or []
+        if not isinstance(raw_ids, list):
+            return jsonify({"error": "task_ids must be a list"}), 400
+        ids = []
+        seen = set()
+        for t in raw_ids:
+            if not isinstance(t, str):
+                continue
+            t = t.strip()
+            if not t or t in seen:
+                continue
+            seen.add(t)
+            ids.append(t)
+            if len(ids) >= 200:
+                break
+        by_task = {}
+        if ids:
+            con = _connect(db_path)
+            try:
+                rows = con.execute(
+                    "SELECT task_id, media_id, is_video FROM catalog"
+                    " WHERE task_id IN (%s) AND task_id != ''"
+                    " ORDER BY task_id, media_id" % ",".join("?" * len(ids)),
+                    ids).fetchall()
+            finally:
+                con.close()
+            for r in rows:
+                mid = str(r["media_id"] or "")
+                if not mid:
+                    continue
+                by_task.setdefault(str(r["task_id"]), []).append({
+                    "media_id": mid,
+                    "is_video": str(r["is_video"] or "") == "1",
+                    "thumb": "/thumbs/{}.jpg?s=32".format(mid),
+                })
+            by_task = {t: m for t, m in by_task.items() if len(m) >= 2}
+        return jsonify({"by_task": by_task})
+
     @app.route("/api/train/recent-tasks")
     def api_train_recent_tasks():
         """Recent generations grouped by task, for the mobile Train dataset picker
@@ -11282,6 +11408,10 @@ __DESIGN_TOKENS__
                 # (owner QA, 2026-07-30): where it came from, and the actual file.
                 "source": str(r.get("source") or ""),
                 "filename": str(r.get("filename") or ""),
+                # The placard's Accession Stamp + Sibling Strip (issue #30): the
+                # client batches task_ids into one POST /api/siblings per page.
+                "task_id": str(r.get("task_id") or ""),
+                "title": str(r.get("title") or "").strip(),
             })
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
