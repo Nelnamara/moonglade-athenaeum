@@ -16,6 +16,7 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Added: a video that fades in from black no longer gets a black thumbnail — the poster is now the clip's first *representative* frame, not a fixed half-second mark. And a **Rebuild poster** button in a video's Details re-extracts one clip's thumbnail on demand, so a bad poster is a one-click fix instead of a full thumbnail rebuild.
 - Fixed: a **reference video** made from library images no longer re-uploads them to PixAI first. The upload was running PixAI's content scan a second time on art it already hosts, which is what refused some frames the website accepted (403). References now go through as-is; the upload survives only as a one-shot fallback if PixAI rejects an id outright.
 - Fixed: six Generate-dock niggles — **History** is reachable on short windows (its button used to hide with the run strip); a rapid second tile click can't land the older recipe; the cost re-check refusal now shows in the dock instead of being swallowed; a stray price lookup no longer fires after leaving Edit/Fix; a hovered run tooltip can't linger after the strip unmounts; a scene with no selector options no longer errors.
 - Improved: the achievement-unlock celebration — a larger, crisper badge medallion (kept phone-safe on small screens), the mascot rests higher above the card, a gentler tier glow, and the badge now loads from a cached thumbnail so the toast appears instantly instead of pulling the full-resolution art.
