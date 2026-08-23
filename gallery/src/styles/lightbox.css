@@ -89,7 +89,16 @@
     0 6px 16px rgba(0,0,0,.45); }
 
 /* ---- stage ---- */
+/* The stage's ROW must be explicit, for the same reason .lbx-shell's column is (above): an
+   implicit row is auto-sized by its content, so every percentage height inside it --
+   herowrap 100% -> hero min(100%, 86vh) -> media 100% -- resolved against the media's
+   INTRINSIC height, not the viewport track. A landscape clip is short and nothing binds
+   wrong; a portrait VIDEO with no recorded w/h (the noar path, no pixel cap) grew the
+   whole stack to its intrinsic height and ran off the bottom of the screen (owner,
+   2026-08-23; measured: a 768-tall image made a 775px hero in a 765px stage). With an
+   explicit minmax(0,1fr) row the percentages resolve against the real stage height. */
 .lbx-stage { position: relative; min-height: 0; display: grid; place-items: center;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
   padding: 0 18px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .lbx-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 64px;
   display: grid; place-items: center; border-radius: 12px; font-size: 20px; cursor: pointer;
@@ -99,7 +108,8 @@
 .lbx-nav:hover { color: #f4eeff; border-color: rgba(182,146,230,.5); }
 .lbx-prev { left: 18px; }
 .lbx-next { right: 18px; }
-.lbx-herowrap { position: relative; height: 100%; display: grid; place-items: center; min-width: 0; }
+.lbx-herowrap { position: relative; height: 100%; display: grid; place-items: center; min-width: 0;
+  min-height: 0; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 /* THE LIGHTBOX IS THE FAST BROWSER: the picture is as large as the screen allows, or its
    actual size, whichever is smaller (owner, 2026-08-23). Classic's real rule was
    `#lb-img { max-width: 94vw; max-height: 86vh }` on a FREE element -- a budget on BOTH
@@ -127,7 +137,7 @@
    would square it) and keeps Classic's plain height budget. */
 .lbx-hero.noar { width: auto; height: min(100%, 86vh); }
 .lbx-hero.noar img, .lbx-hero.noar video { position: static; width: auto; height: 100%;
-  max-width: 94vw; }
+  max-width: 94vw; max-height: 100%; object-fit: contain; }
 /* slideshow progress: 2px accent fill pinned to the hero's bottom edge */
 .lbx-slidetrack { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   background: rgba(5,4,13,.5); overflow: hidden; z-index: 2; }
