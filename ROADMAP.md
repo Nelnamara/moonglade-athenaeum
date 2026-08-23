@@ -15,19 +15,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- **Seal ALL achievement code + definitions into `moonglade.dat`** *(owner's #1, 2026-08-19)*
-  A `git clone` of this PUBLIC repo exposes every feat's name, metric, threshold, and both roasts —
-  hard-coded in source; the `/api/achievements` masking is defeated by just reading the `.py`. Move
-  all achievement / feat / ladder **definitions**, spoiler strings, and spoiler art into the sealed
-  container, leaving only opaque ids + metric keys public. Per the red-team sequencing this runs
-  **with** the ladder-rung redefinition + 57→60 roster growth, and it **absorbs the earned-rewards
-  item** below. Owner prereqs in progress: `branding/` folder cleared, the hidden branding surface nearly ready,
-  and the enhance-picker preset/scene thumbnails still to be added to the bundle. Scope underway
-  (full codebase sweep of every achievement/feat/spoiler surface + the container mechanism).
-
-- **Recently shipped is not listed here** — this session's Bridge AI-Tools tier + Enhance-preset fix,
-  the gallery layout switcher, and the video-drawer cleanup all landed on master and moved to
-  `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
+- **Recently shipped is not listed here** — the achievement sealing (definitions + art in the
+  sealed pack, public source holds only opaque ids) landed in 3.5.0; this session's toast polish and
+  video-Remix fix are in `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
 
 ---
 
