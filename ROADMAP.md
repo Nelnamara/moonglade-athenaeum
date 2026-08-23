@@ -34,6 +34,35 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   rows the image can't fit. Measured live; a two-line CSS fix (`grid-template-rows: auto minmax(0,1fr)`,
   frame `align-self: start`). Small, real, no design gate.
 
+- **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
+  Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
+  routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
+  breakpoint so tablets get the mobile build (one number, least work, most side effects on a
+  desktop-shaped surface); add a real third tier; or keep the split and port touch affordances
+  (always-visible card controls on coarse pointers, 44px targets) into the desktop components.
+  The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
+  built from the refit review's findings; which sections bite decides which answer.
+
+- **Per-image naming — NOT DECIDED; constraints captured, brainstorm open** *(owner, 2026-08-23)*
+  The problem: four siblings share one prompt, so any prompt-derived title is identical ×4 (card stamp,
+  Details headline). **Constraints the owner has set:** filenames are NOT touched (separate workshop below);
+  the goal is to *tell siblings apart* more than to describe each (explore as a POC, not a commitment);
+  LOCAL only — no third-party cost, ever, for any user. **Facts established:** the prompt is batch-level
+  (84% collide; cleaning makes it worse); only the picture or the batch position can distinguish siblings;
+  the batch index IS recoverable ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33) —
+  `outputs.batch[]` is the site's own order). **Options on the table, none chosen:** a batch-index suffix
+  (`· 3 of 4`, free); a local-VLM 3-word *discriminator*; structured *flags* (subject · orientation ·
+  palette · has-text); AI-suggest-then-human-promote as the UI contract; the strip alone. Claude's
+  recommendation was the discriminator + flags in one call with the index as the free floor — the owner
+  has not picked. Next step is the brainstorm/workshop, not a build; a local bake-off (the "Naming 35,815
+  Images" artifact's Next) is the cheapest test of whichever direction he picks.
+
+- **The filename convention — workshop** *(owner, 2026-08-23)*
+  `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
+  PixAI's own download names are `from-PixAI-<task>-<index>`; the API sends no filename (a media object +
+  CDN URL), the site synthesizes one client-side. Workshop what ours should be — the batch index is now a
+  known fact — before anything touches 43k files (`--organize` makes any rename reversible).
+
 - **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own

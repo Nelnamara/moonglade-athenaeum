@@ -63,7 +63,7 @@
 .lbx-fig { font-size: 10.5px; color: rgba(214,210,226,.45);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* action chips: only Slideshow wears the metal */
+/* action chips: Slideshow and Publish wear the metal (the DC's two btn(..., true)) */
 .lbx-acts { display: flex; align-items: center; gap: 6px; flex: none; }
 .lbx-chip { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 7px 13px;
   border-radius: 9px; cursor: pointer; transition: border-color .2s, color .2s, background .2s;
@@ -89,7 +89,16 @@
     0 6px 16px rgba(0,0,0,.45); }
 
 /* ---- stage ---- */
+/* The stage's ROW must be explicit, for the same reason .lbx-shell's column is (above): an
+   implicit row is auto-sized by its content, so every percentage height inside it --
+   herowrap 100% -> hero min(100%, 86vh) -> media 100% -- resolved against the media's
+   INTRINSIC height, not the viewport track. A landscape clip is short and nothing binds
+   wrong; a portrait VIDEO with no recorded w/h (the noar path, no pixel cap) grew the
+   whole stack to its intrinsic height and ran off the bottom of the screen (owner,
+   2026-08-23; measured: a 768-tall image made a 775px hero in a 765px stage). With an
+   explicit minmax(0,1fr) row the percentages resolve against the real stage height. */
 .lbx-stage { position: relative; min-height: 0; display: grid; place-items: center;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
   padding: 0 18px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .lbx-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 46px; height: 64px;
   display: grid; place-items: center; border-radius: 12px; font-size: 20px; cursor: pointer;
@@ -99,14 +108,20 @@
 .lbx-nav:hover { color: #f4eeff; border-color: rgba(182,146,230,.5); }
 .lbx-prev { left: 18px; }
 .lbx-next { right: 18px; }
-.lbx-herowrap { position: relative; height: 100%; display: grid; place-items: center; min-width: 0; }
-/* Classic's rule, restored (owner, 2026-08-19 "whatever makes it feel like Classic again"):
-   the picture is measured against the SCREEN -- 94vw x 86vh, both axes in viewport units --
-   not against whatever the chrome leaves over. The pre-refit source read
-   `#lb-img { max-width: 94vw; max-height: 86vh; object-fit: contain; }`. The `min(100%, ...)`
-   term stays only so the hero can never overflow its grid row; with the prompt slab gone the
-   stage row is large enough that 86vh is what actually binds. */
-.lbx-hero { position: relative; height: min(100%, 86vh);
+.lbx-herowrap { position: relative; height: 100%; display: grid; place-items: center; min-width: 0;
+  min-height: 0; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+/* THE LIGHTBOX IS THE FAST BROWSER: the picture is as large as the screen allows, or its
+   actual size, whichever is smaller (owner, 2026-08-23). Classic's real rule was
+   `#lb-img { max-width: 94vw; max-height: 86vh }` on a FREE element -- a budget on BOTH
+   axes, whichever binds. The refit kept only the height (height: 86vh, width derived from
+   aspect-ratio), so a square rendered at 44% of a 1920 screen and a 3:5 portrait at 26%
+   ("Where the Refit Broke" #9). Both budgets now, via the --lbx-w/--lbx-h pixel vars the
+   component sets from the row's true size so the image never upscales past 1:1: the hero's
+   box is min(natural, 94vw, 86vh-by-aspect) on width and the mirror on height, and
+   aspect-ratio keeps it true. `min(100%, ...)` still guards the grid row. */
+.lbx-hero { position: relative;
+  width: min(var(--lbx-w, 100vw), 94vw, calc(86vh * var(--lbx-ar, 1)));
+  height: min(100%, var(--lbx-h, 100vh), 86vh, calc(94vw / var(--lbx-ar, 1)));
   max-width: 94vw; border-radius: 14px; overflow: hidden;
   border: 1px solid rgba(255,255,255,.12);
   box-shadow: 0 40px 110px rgba(0,0,0,.75), 0 0 90px rgba(100,58,172,.22);
@@ -117,9 +132,12 @@
 /* classic's double-tap 2x (579d008^: `im.style.transform = 'scale(2)'`) */
 .lbx-hero img.zoomed { transform: scale(2); }
 @media (prefers-reduced-motion: reduce) { .lbx-hero img, .lbx-hero video { transition: none; } }
-/* an item with no recorded size cannot carry aspect-ratio: the media sizes the frame */
+/* an item with no recorded size cannot carry aspect-ratio: the media sizes the frame. It
+   also has no --lbx-* vars, so it opts OUT of the computed box above (the ar=1 default
+   would square it) and keeps Classic's plain height budget. */
+.lbx-hero.noar { width: auto; height: min(100%, 86vh); }
 .lbx-hero.noar img, .lbx-hero.noar video { position: static; width: auto; height: 100%;
-  max-width: 94vw; }
+  max-width: 94vw; max-height: 100%; object-fit: contain; }
 /* slideshow progress: 2px accent fill pinned to the hero's bottom edge */
 .lbx-slidetrack { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   background: rgba(5,4,13,.5); overflow: hidden; z-index: 2; }

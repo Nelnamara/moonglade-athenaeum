@@ -41,13 +41,14 @@
   --mm-mid2: color-mix(in oklab, var(--accent) 74%, #06030d);
   --mm-hi: var(--mauve);
   --mm-ink: color-mix(in oklab, var(--accent) 26%, #08040f);
+  --mm-grad: linear-gradient(100deg, var(--mm-dark) 0%, var(--mm-mid) 18%,
+    var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
+    var(--mm-dark) 100%);
   font-weight: 800; letter-spacing: .03em; white-space: nowrap; cursor: pointer;
   border: 1px solid rgba(255, 255, 255, .3);
   color: var(--mm-ink);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .35);
-  background: linear-gradient(100deg, var(--mm-dark) 0%, var(--mm-mid) 18%,
-    var(--mm-light) 34%, var(--mm-mid) 50%, var(--mm-mid2) 68%, var(--mm-hi) 84%,
-    var(--mm-dark) 100%);
+  background: var(--mm-grad);
   background-size: 220% 100%;
   animation: mgMetal 7s ease-in-out infinite;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .65), inset 0 -3px 5px rgba(0, 0, 0, .4),

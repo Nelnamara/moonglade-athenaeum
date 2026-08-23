@@ -29,6 +29,7 @@ import {
   postJSON, downloadZipForm, resolveVideoIds,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
+import { buildUrl, readPage, readImage } from "./gen/urlState.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -56,6 +57,9 @@ import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
      <main>; shell.css maps it onto the existing .grid columns until then. */
 
 export default function App({ boot }) {
+  // ?page=N on first load (#31, "Where the Refit Broke" #7): the classic addressed
+  // pages in the URL; the refit hardcoded page 1. Read once, handed to the hook.
+  const [initialPage] = useState(() => readPage(window.location.search));
   const {
     // filters
     media, setMedia, shelf, setShelf, perPage, setPerPage,
@@ -66,7 +70,7 @@ export default function App({ boot }) {
     load, applyAdvanced, advCount, submitQuery, resetAll,
     // selection
     selectMode, setSelectMode, selected, setSelected, toggleSelected,
-  } = useLibrary();
+  } = useLibrary({ initialPage });
   const [account, setAccount] = useState(null);
   const refreshAccount = () => fetchAccount().then(setAccount);
   const claimModal = useClaimModal(account, refreshAccount);
@@ -274,9 +278,22 @@ export default function App({ boot }) {
      swap, matching classic's genuinely separate /image/<mid> page. Reads
      ?image= on first load so a shared/bookmarked link opens straight there;
      back/forward (popstate) stays in sync since pushState never fires it. */
-  const [detailsFor, setDetailsFor] = useState(
-    () => new URLSearchParams(window.location.search).get("image") || null
-  );
+  const [detailsFor, setDetailsFor] = useState(() => readImage(window.location.search));
+  /* The ONE history writer (gen/urlState.js; #31 "Where the Refit Broke" #7).
+     Every pushState/replaceState in the shell goes through here, so ?page= and
+     ?image= can never overwrite each other: the builder patches only the keys it
+     is handed and keeps the rest of the current query. closeDetails() used to
+     push a bare "/" -- which threw the page the grid was on away the moment the
+     owner closed a picture. A write that would not change the address is skipped
+     (no duplicate history entries). */
+  const setUrl = useCallback((patch, replace) => {
+    const url = buildUrl(patch, window.location.search, window.location.pathname);
+    if (url === window.location.pathname + window.location.search) return;
+    try {
+      if (replace) window.history.replaceState({}, "", url);
+      else window.history.pushState({}, "", url);
+    } catch { /* no History API (sandboxed frame): state still updates, only the address lags */ }
+  }, []);
   /* The locked Direction C morph (docs/DECISIONS.md, artifact 477b4655): the
      image the owner was already looking at slides/resizes into the Details
      hero frame in place, via the native View Transitions API rather than a
@@ -290,21 +307,47 @@ export default function App({ boot }) {
   const openDetails = (mid) => {
     const commit = () => {
       setLbIndex(null);
-      window.history.pushState({}, "", "/?image=" + encodeURIComponent(mid));
+      setUrl({ image: mid });
       setDetailsFor(mid);
     };
     if (document.startViewTransition) document.startViewTransition(() => flushSync(commit));
     else commit();
   };
   const closeDetails = () => {
-    window.history.pushState({}, "", "/");
+    setUrl({ image: null });   // keeps ?page=N -- the grid underneath is still on it
     setDetailsFor(null);
   };
+  /* Back/forward re-read BOTH params: the image (as before) and the page -- a
+     ?page= that differs from the grid's current page loads it. Refs, because the
+     listener mounts once and load's identity follows the filters. */
+  const pageRef = useRef(page);
+  const loadRef = useRef(load);
+  useEffect(() => { pageRef.current = page; loadRef.current = load; });
   useEffect(() => {
-    const onPop = () => setDetailsFor(new URLSearchParams(window.location.search).get("image") || null);
+    const onPop = () => {
+      setDetailsFor(readImage(window.location.search));
+      const p = readPage(window.location.search);
+      if (p !== pageRef.current) loadRef.current(p, true);
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  /* And the address follows the grid the other way round: whenever the loaded
+     page settles somewhere the URL doesn't say -- a filter/search/sort change or
+     a finished generation resetting to 1, the Lightbox stepping across a page
+     boundary -- mirror it with replaceState (no history entry; nobody navigated).
+     The URL never claims a page the grid isn't showing. Waits for the first load
+     to land (total != null) so a fresh ?page=3 visit isn't clobbered by the
+     page-1 default while its request is still in flight. */
+  useEffect(() => {
+    if (loading || total == null) return;
+    setUrl({ page }, true);
+  }, [page, loading, total, setUrl]);
+  /* A user page change is a real navigation: pushState, then load. */
+  const goToPage = (p) => {
+    setUrl({ page: p });
+    load(p, true);
+  };
   const filterByModel = (name) => {
     closeDetails();
     setAdv((old) => ({ ...old, model: name }));
@@ -618,8 +661,25 @@ export default function App({ boot }) {
     onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
     onDetails: openDetails,
   };
+  /* ✧ Similar from the Lightbox's chip or Details' "see all N" NAVIGATES here: the viewer
+     (and the record) close and the gallery's own lookalike set -- the same SimilarModal the
+     grid's right-click "Find similar" opens, over the grid -- takes over. Lightbox.dc.html:354
+     sends Similar to Frontend Gallery.dc.html and Image Details.dc.html:127-140 keeps only
+     the inline 8-strip in the record; the refit had both stacking the modal on the open
+     surface instead ("Where the Refit Broke" #6). */
+  const showSimilar = (mid) => {
+    setLbIndex(null);
+    if (detailsFor) closeDetails();
+    setSimilarFor(mid);
+  };
 
   const dockActive = dockOpen && !dockClosing;
+
+  /* Grid arrow-key navigation (#31, Refit #7) only while the grid is the top
+     layer: no lightbox, no Details, no nav overlay, no dock, no context menu or
+     Similar modal -- each of those owns (or must not lose) the arrow keys. */
+  const gridKeys = lbIndex == null && !detailsFor && !overlay && !ctxMenu
+    && !similarFor && !dockActive && !claimModal.open;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
      DetailsView's own JSX call site. A fresh object every render meant a
@@ -709,12 +769,16 @@ export default function App({ boot }) {
                 const i = items.findIndex((it) => it.media_id === mid);
                 if (i >= 0) setLbIndex(i);
               }}
+              onSimilar={showSimilar}
+              morph={lbIndex == null}
             />, document.body)
         ) : (
           <Grid
             items={items} total={total} loading={loading}
             page={page} pages={pages}
-            goToPage={(p) => load(p, true)}
+            goToPage={goToPage}
+            keysEnabled={gridKeys}
+            onOpenDetails={openDetails}
             blur={blur}
             thumb={thumb}
             layout={layout}
@@ -746,6 +810,7 @@ export default function App({ boot }) {
           onEdit={requestEdit} onToVideo={requestVideo}
           onOpenDetails={openDetails}
           onPublish={openPublish}
+          onSimilar={showSimilar}
         />
       )}
 

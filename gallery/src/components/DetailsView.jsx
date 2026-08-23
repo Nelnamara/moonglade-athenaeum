@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
-import SimilarModal from "./SimilarModal.jsx";
+import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { rebuildPoster } from "../api.js";
-import { localDay } from "../gen/dates.js";
+import { localDay, localDayTime } from "../gen/dates.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -32,7 +32,7 @@ function playReveal(root) {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   if (reduced) {
-    qa(".p-kicker, .p-title, .p-fact, .p-tag, .p-footer")
+    qa(".p-kicker, .p-title, .p-fact, .p-tag, .p-actions")
       .forEach((n) => { n.style.opacity = 1; n.style.transform = "none"; });
     const rule = q(".p-rule");
     if (rule) rule.style.clipPath = "inset(0 0% 0 0)";
@@ -76,7 +76,8 @@ function playReveal(root) {
     ], { duration: P(260), easing: "ease-out" });
   }
 
-  // the record, stamped in one piece at a time (prompt block rides along as item 0)
+  // the ledger, stamped in one row at a time (the More-details disclosure rides along
+  // as the last "row"; the rows folded inside it are not part of the cascade)
   const facts = qa(".p-fact");
   facts.forEach((li, i) => play(li, [
     { opacity: 0, transform: "translateY(8px)" },
@@ -91,14 +92,42 @@ function playReveal(root) {
   ], { duration: P(200), delay: lastFactDelay + i * P(28) }));
   const tagsDoneDelay = lastFactDelay + Math.max(0, tags.length - 1) * P(28) + P(200);
 
-  // the closing beat: pops up from below and bounces into place
-  play(q(".p-footer"), [
+  // the closing beat: the record's action groups pop up from below and bounce into
+  // place, one after another (record, more) -- the same bounce, staggered. The file
+  // actions under the hero are NOT part of this: the DC (Image Details.dc.html:56-60)
+  // draws them unanimated in the picture column, and they live outside `root`.
+  qa(".p-actions").forEach((g, i) => play(g, [
     { opacity: 0, transform: "translateY(30px) scale(.97)" },
     { opacity: 1, transform: "translateY(-7px) scale(1.01)", offset: 0.55 },
     { opacity: 1, transform: "translateY(2px) scale(.997)", offset: 0.8 },
     { opacity: 1, transform: "translateY(0) scale(1)" },
-  ], { duration: P(440), delay: tagsDoneDelay + P(140), easing: "ease-out" });
+  ], { duration: P(440), delay: tagsDoneDelay + P(140) + i * P(90), easing: "ease-out" }));
 }
+
+/* One ledger row (Image Details.dc.html:91-98 + :326-339 row()): a right-aligned
+   118px label, the value (mono / dim / warm faces as the DC's opts), and the ⧉ copy
+   icon on the copyable ids. An empty value renders "—" -- the DC shows every one of
+   its rows even when there is nothing in it (LoRAs). `quiet` rows are the ones folded
+   under "More details": they skip the .p-fact reveal class, since the cascade only
+   stamps what is on screen. */
+function LedgerRow({ label, value, mono, dim, warm, copyKey, quiet, copied, copy }) {
+  const text = value == null ? "" : String(value);
+  const has = text.trim() !== "";
+  const cls = "p-row" + (quiet ? "" : " p-fact") + (copyKey && copied === copyKey ? " copied" : "");
+  const vcls = "p-row-v" + (mono ? " mono" : "") + (dim ? " dim" : "") + (warm ? " warm" : "");
+  return (
+    <div className={cls}>
+      <span className="p-row-k">{label}</span>
+      <span className={vcls}>{has ? text : "—"}</span>
+      {copyKey && has ? (
+        <button type="button" className="p-copy" title="Copy" aria-label={"Copy " + label}
+          onClick={() => copy(text, copyKey)}>⧉</button>
+      ) : null}
+    </div>
+  );
+}
+
+const MORE_KEY = "mg_details_more";
 
 /* The Details view -- "the layer deeper" (owner, 2026-07-30). Classic's
    /image/<media_id> page, ported: the full metadata, the whole action bar,
@@ -106,22 +135,31 @@ function playReveal(root) {
    bookmarkable /next?image=<mid> URL via the History API), not a modal bolted
    onto the lightbox -- matching classic's genuinely separate page.
 
-   Design pass (locked, docs/DECISIONS.md "Direction C"): a museum-placard
-   composition -- the art framed beside a record, one confident headline, actions
-   demoted to a footer strip. Direction C's own entry (restored in full in
-   docs/DECISIONS.md after going missing from the live file for a while -- it was
-   never actually lost, a prior session just mis-cited which prune removed it) is
-   a motion/composition decision, not a field-hiding one: it never called for a
-   "Full record" disclosure hiding specific fields, and neither classic
-   (moonglade_gallery.py's DETAIL_HTML) nor the current Image Details.dc.html hide
-   anything -- both show every field flat. The disclosure toggle that used to live
-   here was a later implementer's own invention, corrected 2026-08-04 (owner: "We
-   are not displaying metrics in details?"). All fields are flat and always
-   visible again, per-row copy icons matching Image Details.dc.html:95-97's own
-   row.copyable pattern instead of the footer-only copy buttons that stood in for
-   them. Nothing here drops capability: every field and every action from the
-   original port is still reachable, just organized by how often it's actually
-   wanted.
+   Rebuilt 2026-08-23 to the PIXEL source, design_handoff/design_handoff_moonglade_suite/
+   Image Details.dc.html, after the owner's verdict on the previous build ("does not
+   follow the design's layout. There should be NO page scrolling. The image stays static
+   and the details pane scrolls if needed."). The structure is the DC's, line for line:
+
+     shell (DC:36)       fixed inset-0, 100vh, overflow hidden, flex column -- the document
+                         NEVER scrolls
+     top bar (DC:38-46)  Back · divider · ⛶ Lightbox · spacer · N of M · Prev · Next (+ the
+                         app's Focus toggle last, a shipped owner feature)
+     body (DC:345)       grid, two EQUAL columns always (minmax(0,1fr) x2); F collapses the
+                         second to 0px and fades the record
+     picture (DC:50-71)  the frame sized by the DC's formula (width = min(100%, 72vh x AR),
+                         aspect-ratio W/H, centred), then the FILE ACTIONS row, then the
+                         stars row with dims · date
+     record (DC:73-140)  the only scroller: head (kicker / headline / rule), tags, the
+                         11-row ledger, the record actions, LINEAGE, ✧ SIMILAR
+
+   Gone with this rebuild: the branch that stacked landscape images over the record
+   (an earlier implementer's invention, not in the design), the record-column
+   placement of the file actions, the vitals row at the top of the record, and the
+   ever-growing flat fact list. What the app carries beyond the DC's eleven rows (the
+   issue #18 generation surface, engagement, content scores) is NOT dropped: it folds
+   under a collapsed "More details" disclosure directly below the ledger, remembered in
+   localStorage (mg_details_more). Nothing lost its handler; the app's own extra actions
+   keep their quiet More row at the end of the record.
 
    Data comes from /api/next/detail/<mid>, which mirrors classic's detail()
    route: the full catalog row, plus prev_id/next_id computed under the CURRENT
@@ -131,20 +169,19 @@ function playReveal(root) {
 export default function DetailsView({
   mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
-  items, onOpenLightbox, onPublish,
+  items, onOpenLightbox, onPublish, onSimilar,
+  morph = true,
 }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const [focusMode, setFocusMode] = useState(
     () => (typeof localStorage !== "undefined" && localStorage.getItem("gallery_focus") === "1")
   );
+  const [moreOpen, setMoreOpen] = useState(
+    () => (typeof localStorage !== "undefined" && localStorage.getItem(MORE_KEY) === "1")
+  );
   const [mediaOk, setMediaOk] = useState(true);
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
-  // Image Details.dc.html:127-139's SIMILAR section -- entirely absent on desktop before
-  // this (mobile already has it working with real /api/similar data). Reusing the exact
-  // real SimilarModal.jsx already proven by Lightbox.jsx's own "✧ Similar" button, not a
-  // rebuilt strip -- fits Direction C's own "actions demoted to a footer strip" idiom.
-  const [similarOpen, setSimilarOpen] = useState(false);
   // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
   // what came from it -- GET /api/lineage/<mid>, a pure catalog read (batch siblings via
   // task_id, derivation chain via source_media_id). Real data, fetched per image.
@@ -153,16 +190,21 @@ export default function DetailsView({
 
   const {
     state, row,
-    headline, hasPromptBlock, tagList, collectionList, wide, nsfw,
+    headline, tagList, collectionList, nsfw,
     promptText, setPromptText,
     copied, copy,
     editingPrompt, setEditingPrompt, saveStatus, savePrompt,
     suggestions, suggestBusy, suggestErr, runSuggest,
     views,
     busy, deleteLocal, deleteCloud,
-    upscaleOpen, upEl, toggleUpscale,
+    upEl,
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
+
+  // ✧ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
+  // record's strip already uses (hooks/useSimilar.js). The first 8 render inline below;
+  // "see all N" hands the full set to the gallery via onSimilar.
+  const similar = useSimilar(row ? row.media_id : null);
 
   // this component's OWN local reset on navigate (mediaOk isn't shared with the
   // mobile surface -- see useImageDetails.js for what is).
@@ -188,7 +230,20 @@ export default function DetailsView({
   }, [focusMode]);
 
   useEffect(() => {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(MORE_KEY, moreOpen ? "1" : "");
+  }, [moreOpen]);
+
+  // the Upscale float (Image Details.dc.html:143-189 -- a fixed panel over the page, the
+  // Lightbox's own flyout language) is open: Esc closes IT and nothing else fires.
+  const upscaleUp = () => !!(upEl.current && upEl.current.isOpen() && !upEl.current.isClosing());
+
+  useEffect(() => {
     const onKey = (e) => {
+      if (upscaleUp()) {
+        if (e.key === "Escape") upEl.current.close();
+        return;
+      }
       if (document.activeElement && /^(input|textarea)$/i.test(document.activeElement.tagName)) return;
       if (e.key === "Escape" || e.key === "ArrowUp") onClose();
       else if (e.key === "ArrowRight" && row && state.data.next_id) onNavigate(state.data.next_id);
@@ -197,19 +252,20 @@ export default function DetailsView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [row, state.data, onClose, onNavigate]);
+  }, [row, state.data, onClose, onNavigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the reveal: fires once per newly-loaded image, never on an in-place
-  // update (rating, focus toggle) -- keyed on the media id itself, not on
+  // update (rating, More toggle) -- keyed on the media id itself, not on
   // `row`/`state`, whose object identity changes on every optimistic setState.
+  // Replays when Focus lets the record back in (it was faded out, not unmounted).
   useEffect(() => {
     if (!row || focusMode) return;
     playReveal(recordRef.current);
   }, [row && row.media_id, focusMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Image Details.dc.html:39-43 -- the header's ⛶ Lightbox link + "N of M" index label,
-  // both missing before this. Same real computation ImageDetailsMobile.jsx's own
-  // indexLabel already uses -- position within the currently-loaded grid `items`.
+  // Image Details.dc.html:39-43 -- the header's ⛶ Lightbox link + "N of M" index label.
+  // Same real computation ImageDetailsMobile.jsx's own indexLabel already uses --
+  // position within the currently-loaded grid `items`.
   const detailIdx = row && items ? items.findIndex((it) => it.media_id === row.media_id) : -1;
   const indexLabel = detailIdx >= 0 && items ? (detailIdx + 1) + " of " + items.length : "";
 
@@ -234,311 +290,398 @@ export default function DetailsView({
     );
   }
 
-  // headline/hasPromptBlock/tagList/collectionList/wide/nsfw now come from
-  // useImageDetails() above -- see that hook for the exact same derivation
-  // (byte-for-byte lifted, including the headline-is-never-a-prompt rule and
-  // the wide-aspect-ratio placard-stacks-instead rule).
+  // The frame's size is the DC's formula (frameStyle, Image Details.dc.html:357-358):
+  // the inline size is the definite one -- min(100%, 72vh x AR) -- and aspect-ratio
+  // derives the height, so it always stays inside the viewport budget with no
+  // percentage height to resolve against. One custom property carries W / H for both
+  // the calc() and the aspect-ratio (styles.css .placard-frame). A row with no
+  // recorded size (some videos) gets no ratio: the media sizes the frame instead.
+  const W = Number(row.width) || 0, H = Number(row.height) || 0;
+  const hasDims = W > 0 && H > 0;
+  const frameStyle = { viewTransitionName: morph ? "vt-reveal" : "none" };
+  if (hasDims) frameStyle["--ar"] = W + " / " + H;
+  const dims = hasDims ? W + "×" + H : "";
+  const day = localDay(row.created_at);
+
+  const stepsCfg = (row.steps || row.cfg_scale)
+    ? (row.steps || "—") + " · " + (row.cfg_scale || "—")
+    : "";
+  const c = { copied, copy };
+
+  // The full generation surface (issue #18) and the app's other extras, folded under
+  // "More details": only the fields this row actually carries (older rows predate the
+  // capture), and no disclosure at all when there is nothing to fold.
+  const extra = [];
+  const push = (label, value, opts) => { if (value != null && String(value).trim() !== "") extra.push({ label, value, ...(opts || {}) }); };
+  push("Clip Skip", row.clip_skip);
+  push("Mode", row.inference_profile);
+  push("Quality Tag", row.quality_tag);
+  push("Prompt Helper", row.prompt_helper);
+  push("Control Nets", row.control_nets, { mono: true, dim: true });
+  push("Priority", row.priority ? (row.priority === "1500" ? "turbo (1500)" : row.priority) : "");
+  push("Render Time", row.render_seconds ? Math.round(parseFloat(row.render_seconds)) + "s" : "");
+  push("Backend", row.backend, { mono: true, dim: true });
+  push("Started", localDayTime(row.started_at), { mono: true, dim: true });
+  push("Ended", localDayTime(row.ended_at), { mono: true, dim: true });
+  push("Updated", localDayTime(row.updated_at), { mono: true, dim: true });
+  push("Retries", row.retry_count && row.retry_count !== "0" ? row.retry_count : "");
+  push("Moderation", row.moderation);
+  push("Video Mode", row.video_mode);
+  push("Video Model", row.video_model);
+  if (row.is_published === "1") {
+    push("Engagement",
+      (views != null ? "👁 " + Number(views).toLocaleString() + " · " : "") +
+      "♥ " + (row.liked_count || 0) + " · 💬 " + (row.comment_count || 0) +
+      (row.aes_score ? " · aesthetic " + row.aes_score : ""));
+  }
+  push("Content", nsfw);
 
   return (
     <div className={"detail-wrap" + (focusMode ? " focus-mode" : "")}>
+      {/* TOP BAR (Image Details.dc.html:38-46): Back · divider · ⛶ Lightbox · spacer ·
+          N of M · ‹ Prev · Next › -- and the app's Focus toggle last (a shipped owner
+          feature; the DC has the F key, not the button). */}
       <div className="detail-nav">
         <a className="back-link" href="/" onClick={navClick(null)}>&larr; Back to gallery</a>
         {onOpenLightbox ? (
-          <button type="button" className="nav-arrow" title="Full-screen viewer"
-            onClick={() => onOpenLightbox(row.media_id)}>&#9974;</button>
+          <>
+            <span className="detail-div" aria-hidden="true" />
+            <button type="button" className="detail-lb" title="Full-screen viewer"
+              onClick={() => onOpenLightbox(row.media_id)}>&#9974; Lightbox</button>
+          </>
         ) : null}
-        {indexLabel ? <span className="detail-index">{indexLabel}</span> : null}
         <span className="sp" />
+        {indexLabel ? <span className="detail-index">{indexLabel}</span> : null}
         {state.data.prev_id
-          ? <a className="nav-arrow" href={navHref(state.data.prev_id)} onClick={navClick(state.data.prev_id)}>&lsaquo; Prev</a>
+          ? <a className="nav-arrow" title="Previous — ←" href={navHref(state.data.prev_id)} onClick={navClick(state.data.prev_id)}>&lsaquo; Prev</a>
           : <span className="nav-disabled">&lsaquo; Prev</span>}
         {state.data.next_id
-          ? <a className="nav-arrow" href={navHref(state.data.next_id)} onClick={navClick(state.data.next_id)}>Next &rsaquo;</a>
+          ? <a className="nav-arrow" title="Next — →" href={navHref(state.data.next_id)} onClick={navClick(state.data.next_id)}>Next &rsaquo;</a>
           : <span className="nav-disabled">Next &rsaquo;</span>}
-        <button className="focus-btn" onClick={() => setFocusMode((v) => !v)}>{focusMode ? "Details" : "Focus"}</button>
+        <button className="focus-btn" title="Focus mode — F" onClick={() => setFocusMode((v) => !v)}>{focusMode ? "Details" : "Focus"}</button>
       </div>
 
-      <div className={"placard" + (wide ? " placard-wide" : "")}>
-        <div className="placard-frame" style={{ viewTransitionName: "vt-reveal" }}>
-          {!mediaOk ? (
-            <div className="gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
-          ) : row.is_video === "1" ? (
-            <video controls autoPlay loop playsInline preload="metadata"
-              poster={posterSrc || ("/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg")}
-              onError={() => setMediaOk(false)}>
-              <source src={"/video-file/" + encodeURIComponent(row.media_id)} />
-            </video>
-          ) : (
-            <a href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">
-              <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" decoding="async" onError={() => setMediaOk(false)} />
-            </a>
-          )}
+      {/* BODY GRID (Image Details.dc.html:345): two equal columns, always. */}
+      <div className="placard">
+
+        {/* PICTURE COLUMN (Image Details.dc.html:50-71): the frame, the file actions
+            under it, the stars row under that -- centred vertically as a unit. */}
+        <div className="placard-picture">
+          {/* `morph` (App.jsx: the Lightbox is NOT mounted) gates the name: while the viewer
+              sits on top of this record -- opened from the ⛶ link -- its stage image carries
+              vt-reveal too, and the View Transitions spec SKIPS a transition whose old state
+              has two elements under one name. Dropping the name here while the destination is
+              mounted keeps exactly one per view, so the viewer's Details link still morphs
+              back into this frame ("Where the Refit Broke" #6). */}
+          <div className={"placard-frame" + (hasDims ? "" : " no-dims")} style={frameStyle}>
+            {!mediaOk ? (
+              <div className="placard-missing gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
+            ) : row.is_video === "1" ? (
+              <video controls autoPlay loop playsInline preload="metadata"
+                poster={posterSrc || ("/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg")}
+                onError={() => setMediaOk(false)}>
+                <source src={"/video-file/" + encodeURIComponent(row.media_id)} />
+              </video>
+            ) : (
+              <a className="placard-media" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">
+                <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" decoding="async" onError={() => setMediaOk(false)} />
+              </a>
+            )}
+          </div>
+
+          {/* FILE ACTIONS -- Image Details.dc.html:56-60 + :389-396 fileActions, drawn UNDER
+              THE HERO in the picture column (the previous build had them in the record).
+              Download is THE metal button (the DC's `metal` const = shell.css's shared
+              .mgx-metal face); Delete locally is the red-outline danger chip. */}
+          <div className="p-actions p-actions-primary">
+            <a className="btn mgx-metal" title="Full-resolution file"
+              href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
+            {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
+                2026-08-06. Already-published rows say so instead of offering it twice;
+                this row is the full catalog row, so artwork_id is right here. */}
+            {(row.artwork_id || "").trim()
+              ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
+              : <button className="btn" title="Publish this image to PixAI"
+                  onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
+            <button className="btn" title="Copy the full prompt"
+              onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}</button>
+            {/* ⇱ Upscale opens the float (Image Details.dc.html:393-394 / :143-189): the
+                same fixed UpscalePanel the Lightbox uses, over the page -- never in flow,
+                where it would have to squeeze the frame or scroll the document. The hook's
+                close-on-navigate still governs it (useImageDetails.js, correction 2). */}
+            <button className="btn" title="Upscale or Hires"
+              onClick={() => upEl.current && upEl.current.open(row.media_id)}>⇱ Upscale</button>
+            <button className="btn btn-danger" disabled={busy} title="Remove from your library only"
+              onClick={deleteLocal}>Delete locally</button>
+          </div>
+
+          {/* STARS ROW -- Image Details.dc.html:61-70: the stars, the "N / 5" label, a
+              spacer, then dims · date (the LOCAL day, gen/dates.js). */}
+          <div className="p-stars-row">
+            <Stars mediaId={row.media_id} rating={row.rating} onRate={handleRate} />
+            <span className="rating-label">{row.rating ? row.rating + " / 5" : "unrated"}</span>
+            <span className="sp" />
+            <span className="p-stamp">{[dims, day].filter(Boolean).join(" · ")}</span>
+          </div>
         </div>
 
-        {!focusMode && (
-          <aside className="placard-record" ref={recordRef}>
+        {/* RECORD COLUMN (Image Details.dc.html:73-140, recordColStyle): the ONLY thing
+            that scrolls. Stays mounted under Focus (the DC fades it and collapses its
+            column to 0px -- styles.css .focus-mode). */}
+        <aside className="placard-record" ref={recordRef}>
+          <div className="p-head">
             <p className="p-kicker">
               {(row.model_name || row.model_id || "—").toUpperCase()}
               {row.model_name ? <button className="gd-mini" onClick={() => onFilterByModel(row.model_name)}>find more</button> : null}
             </p>
+            <h2 className="p-title">{headline}</h2>
+            <div className="p-rule-track">
+              <span className="p-rule" />
+              <span className="p-glint" />
+            </div>
+          </div>
 
-            <div className="p-title-wrap">
-              <h2 className="p-title">{headline}</h2>
-              <div className="p-rule-track">
-                <span className="p-rule" />
-                <span className="p-glint" />
+          {(tagList.length || collectionList.length) ? (
+            <div className="p-tags">
+              {tagList.map((t) => <span key={"t" + t} className="p-tag">{t}</span>)}
+              {collectionList.map((c) => <span key={"c" + c} className="p-tag p-tag-shelf">{c}</span>)}
+            </div>
+          ) : null}
+
+          {/* THE LEDGER -- Image Details.dc.html:90-100 + :375-387: exactly the DC's eleven
+              rows, in the DC's order, with the DC's faces (mono / dim / warm) and its
+              copyable ids. Every row renders, "—" when empty, as the DC shows its LoRAs. */}
+          <div className="p-ledger">
+            <LedgerRow label="Full prompt" value={row.prompt_full || row.prompt_preview} {...c} />
+            <LedgerRow label="Natural" value={row.natural_prompt} dim {...c} />
+            <LedgerRow label="Negative" value={row.negative_prompt} dim {...c} />
+            <LedgerRow label="Model" value={row.model_name || row.model_id} warm {...c} />
+            <LedgerRow label="LoRAs" value={row.loras} {...c} />
+            <LedgerRow label="Seed" value={row.seed} mono copyKey="seed" {...c} />
+            <LedgerRow label="Steps · CFG" value={stepsCfg} {...c} />
+            <LedgerRow label="Sampler" value={row.sampler} {...c} />
+            <LedgerRow label="Task ID" value={row.task_id} mono dim copyKey="task" {...c} />
+            <LedgerRow label="Media ID" value={row.media_id} mono dim copyKey="mid" {...c} />
+            <LedgerRow label="Filename" value={row.filename} mono dim copyKey="fname" {...c} />
+          </div>
+
+          {/* MORE DETAILS -- the full generation surface (issue #18) and the app's other
+              extras the DC predates. Same row styling, folded closed by default so the
+              record keeps the DC's shape; the open state is remembered (mg_details_more). */}
+          {extra.length ? (
+            <details className="p-more p-fact" open={moreOpen}
+              onToggle={(e) => setMoreOpen(e.currentTarget.open)}>
+              <summary className="p-more-sum">
+                <span className="p-more-caret" aria-hidden="true">▸</span> More details
+                <span className="p-more-n">{extra.length}</span>
+              </summary>
+              <div className="p-ledger">
+                {extra.map((x) => (
+                  <LedgerRow key={x.label} label={x.label} value={x.value} mono={x.mono} dim={x.dim} quiet {...c} />
+                ))}
+              </div>
+            </details>
+          ) : null}
+
+          {/* RECORD ACTIONS -- Image Details.dc.html:102-106 + :397-403 recordActions, the
+              second of the design's two groups, directly under the ledger. "Find similar
+              (model)" is the DC's "every image from this model" (onFilterByModel), the same
+              filter the kicker's "find more" link applies -- NOT visual similarity, which is
+              the ✧ SIMILAR strip below. */}
+          <div className="p-actions p-actions-record">
+            <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>✎ Edit prompt</button>
+            {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
+                own SOURCE frame (source_media_id), never the clip -- a clip is not a valid
+                i2v input. Hidden when a video has no recorded source frame (r2v shots). */}
+            {(() => {
+              const svid = row.is_video === "1" ? (row.source_media_id || "") : row.media_id;
+              return svid ? (
+                <button className="btn" title={row.is_video === "1"
+                  ? "Send this video's source frame to the Video composer"
+                  : "Send this picture to the Video composer as the first frame"}
+                  onClick={() => { onClose(); onVideo && onVideo(svid, "/thumbs/" + encodeURIComponent(svid) + ".jpg"); }}>▶ Send to Video</button>
+              ) : null;
+            })()}
+            {row.model_name ? <button className="btn" title="Every image from this model"
+              onClick={() => onFilterByModel(row.model_name)}>Find similar (model)</button> : null}
+            {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
+                button (and its filter matched nothing) on every organized library. The server's
+                batch filter now matches either column (issue #30). */}
+            {row.task_id ? <button className="btn" title="The rest of this batch"
+              onClick={() => onFilterByBatch(row.task_id)}>View batch</button> : null}
+            <button className="btn" disabled={suggestBusy} title="Reverse a prompt out of this image"
+              onClick={runSuggest}>{suggestBusy ? "Reading…" : "Suggest prompt"}</button>
+          </div>
+
+          {/* The prompt editor and the suggestions land right under the buttons that open
+              them, INSIDE the scroller -- nothing outside the record may grow the page. */}
+          {editingPrompt && (
+            <div id="prompt-editor">
+              <textarea rows={5} value={promptText} onChange={(e) => setPromptText(e.target.value)} />
+              <div className="gd-row" style={{ marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={savePrompt}>Save</button>
+                <button className="btn" onClick={() => setEditingPrompt(false)}>Cancel</button>
+                <span id="save-status">{saveStatus}</span>
               </div>
             </div>
+          )}
 
-            {/* the vitals: same summary the Lightbox already shows compactly
-                (rating, dimensions, date) -- kept up top here too, ahead of
-                the prompt block, instead of buried below a wall of text. */}
-            <div className="p-vitals p-fact">
-              <Stars mediaId={row.media_id} rating={row.rating} onRate={handleRate} />
-              <span className="rating-label">{row.rating ? row.rating + " / 5" : "unrated"}</span>
-              <span className="p-vsep">·</span>
-              <span>{row.width}×{row.height}</span>
-              <span className="p-vsep">·</span>
-              <span>{localDay(row.created_at)}</span>
-            </div>
-
-            {hasPromptBlock ? (
-              <div className="p-fact p-prompts">
-                {row.prompt_full ? <p><b>Prompt</b> {row.prompt_full}</p> : null}
-                {row.natural_prompt ? <p><b>Natural</b> {row.natural_prompt}</p> : null}
-                {row.negative_prompt ? <p><b>Negative</b> {row.negative_prompt}</p> : null}
-              </div>
-            ) : (
-              <div className="p-fact p-prompts"><p>{row.prompt_preview || "—"}</p></div>
-            )}
-
-            <ul className="p-facts">
-              {row.loras ? <li className="p-fact"><span>LoRA</span><b>{row.loras}</b></li> : null}
-              <li className={"p-fact" + (copied === "seed" ? " copied" : "")}>
-                <span>Seed</span><b className="mono">{row.seed || "—"}</b>
-                {row.seed ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Seed"
-                  onClick={() => copy(row.seed, "seed")}>⧉</button> : null}
-              </li>
-              {row.is_published === "1" ? (
-                <li className="p-fact">
-                  <span>Engagement</span>
-                  <b>{views != null ? "👁 " + Number(views).toLocaleString() + " · " : ""}
-                    ♥ {row.liked_count || 0} · 💬 {row.comment_count || 0}
-                    {row.aes_score ? " · aesthetic " + row.aes_score : ""}</b>
-                </li>
-              ) : null}
-              {nsfw ? <li className="p-fact"><span>Content</span><b>{nsfw}</b></li> : null}
-              {/* Steps/Sampler/CFG Scale/Clip Skip/Task ID/Media ID/Filename below used to
-                  sit behind a "Full record" toggle -- restored flat and always-visible,
-                  matching classic and Image Details.dc.html:376-386 exactly (2026-08-04
-                  correction, see this file's own header comment). */}
-              <li className="p-fact"><span>Steps</span><b>{row.steps || "—"}</b></li>
-              <li className="p-fact"><span>Sampler</span><b>{row.sampler || "—"}</b></li>
-              <li className="p-fact"><span>CFG Scale</span><b>{row.cfg_scale || "—"}</b></li>
-              {row.clip_skip ? <li className="p-fact"><span>Clip Skip</span><b>{row.clip_skip}</b></li> : null}
-              {/* Full generation surface (issue #18) -- conditional so older rows that predate
-                  capture stay clean; a new gen shows the full record. */}
-              {row.inference_profile ? <li className="p-fact"><span>Mode</span><b>{row.inference_profile}</b></li> : null}
-              {row.quality_tag ? <li className="p-fact"><span>Quality Tag</span><b>{row.quality_tag}</b></li> : null}
-              {row.priority ? <li className="p-fact"><span>Priority</span><b>{row.priority === "1500" ? "turbo (1500)" : row.priority}</b></li> : null}
-              {row.prompt_helper ? <li className="p-fact"><span>Prompt Helper</span><b>{row.prompt_helper}</b></li> : null}
-              {row.moderation ? <li className="p-fact"><span>Moderation</span><b>{row.moderation}</b></li> : null}
-              {row.render_seconds ? <li className="p-fact"><span>Render Time</span><b>{Math.round(parseFloat(row.render_seconds)) + "s"}</b></li> : null}
-              {row.retry_count && row.retry_count !== "0" ? <li className="p-fact"><span>Retries</span><b>{row.retry_count}</b></li> : null}
-              {row.video_mode ? <li className="p-fact"><span>Video Mode</span><b>{row.video_mode}</b></li> : null}
-              {row.video_model ? <li className="p-fact"><span>Video Model</span><b>{row.video_model}</b></li> : null}
-              {row.backend ? <li className="p-fact"><span>Backend</span><b className="mono dim">{row.backend}</b></li> : null}
-              <li className={"p-fact" + (copied === "task" ? " copied" : "")}>
-                <span>Task ID</span><b className="mono dim">{row.task_id}</b>
-                {row.task_id ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Task ID"
-                  onClick={() => copy(row.task_id, "task")}>⧉</button> : null}
-              </li>
-              <li className={"p-fact" + (copied === "mid" ? " copied" : "")}>
-                <span>Media ID</span><b className="mono dim">{row.media_id}</b>
-                <button type="button" className="p-copy" title="Copy" aria-label="Copy Media ID"
-                  onClick={() => copy(row.media_id, "mid")}>⧉</button>
-              </li>
-              <li className={"p-fact" + (copied === "fname" ? " copied" : "")}>
-                <span>Filename</span><b className="mono dim">{row.filename}</b>
-                {row.filename ? <button type="button" className="p-copy" title="Copy" aria-label="Copy Filename"
-                  onClick={() => copy(row.filename, "fname")}>⧉</button> : null}
-              </li>
-            </ul>
-
-            {(tagList.length || collectionList.length) ? (
-              <div className="p-tags">
-                {tagList.map((t) => <span key={"t" + t} className="p-tag">{t}</span>)}
-                {collectionList.map((c) => <span key={"c" + c} className="p-tag p-tag-shelf">{c}</span>)}
-              </div>
-            ) : null}
-
-            {/* LINEAGE (Image Details.dc.html:108-123) -- where this image came from and
-                what came from it, REAL: batch siblings (same task_id) before "this",
-                derivatives (edit/upscale/video, source_media_id) after. A linear strip
-                like the DC draws it; siblings sit alongside "this" since they're from the
-                same generation moment, not a chain. Hidden entirely when there's nothing
-                to show (a lone original) -- no empty rail. */}
-            {lineage && (lineage.parent || lineage.siblings.length || lineage.children.length) ? (
-              <div className="p-lineage">
-                <div className="p-lineage-head">
-                  <span className="k">LINEAGE</span>
-                  <span className="s">where this came from, and what came from it</span>
-                </div>
-                <div className="p-lineage-strip">
-                  {lineage.parent && (
-                    <>
-                      <button type="button" className="p-lin-chip" title={lineage.parent.title}
-                        onClick={() => onNavigate(lineage.parent.media_id)}>
-                        <img src={lineage.parent.thumb} alt="" />
-                        <span className="cap">{lineage.parent.kind}</span>
-                      </button>
-                      <span className="p-lin-arrow">→</span>
-                    </>
-                  )}
-                  {lineage.siblings.map((s) => (
-                    <React.Fragment key={s.media_id}>
-                      <button type="button" className="p-lin-chip" title={s.title}
-                        onClick={() => onNavigate(s.media_id)}>
-                        <img src={s.thumb} alt="" />
-                        <span className="cap">batch</span>
-                      </button>
-                      <span className="p-lin-arrow">→</span>
-                    </React.Fragment>
-                  ))}
-                  <div className="p-lin-chip this" title="This record">
-                    <img src={"/thumbs/" + encodeURIComponent(row.media_id) + ".jpg"} alt="" />
-                    <span className="cap">this</span>
-                  </div>
-                  {lineage.children.map((c) => (
-                    <React.Fragment key={c.media_id}>
-                      <span className="p-lin-arrow">→</span>
-                      <button type="button" className="p-lin-chip" title={c.title}
-                        onClick={() => onNavigate(c.media_id)}>
-                        <img src={c.thumb} alt="" />
-                        <span className="cap">{c.kind}</span>
-                      </button>
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="p-footer">
-              <a className="btn" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
-              {/* ☁ Publish -- cross-page hand-off (Image Details.dc.html:391), REAL since
-                  2026-08-06. Already-published rows say so instead of offering it twice;
-                  this row is the full catalog row, so artwork_id is right here. */}
-              {(row.artwork_id || "").trim()
-                ? <span className="btn is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
-                : <button className="btn" title="Publish this image to PixAI"
-                    onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
-              <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
-              {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
-              <button className="btn" onClick={() => copy(promptText, "prompt")}>{copied === "prompt" ? "Copied!" : "Copy Prompt"}</button>
-              {/* Seed/Task ID/Media ID/Filename each have their own per-row ⧉ copy icon
-                  now (Image Details.dc.html:95-97's row.copyable pattern) -- removed from
-                  here 2026-08-04 to avoid duplicating the same action in two places. */}
-              <button className="btn" onClick={() => window.print()}>🖨 Print</button>
-              <button className="btn" onClick={() => setSimilarOpen(true)}>✧ Similar</button>
-              {row.is_video !== "1" && (
+          {suggestions && (
+            <div id="suggest-box">
+              {suggestErr ? <span style={{ color: "var(--overlay0)" }}>{suggestErr}</span> : (
                 <>
-                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
-                  <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=strip"} target="_blank" rel="noreferrer">Photo strip</a>
+                  <div className="suggest-hd">Suggested prompt(s) · click to copy</div>
+                  {suggestions.map((t, i) => (
+                    <div key={i} className={"suggest-line" + (copied === "s" + i ? " done" : "")}
+                      onClick={() => copy(t, "s" + i)}>
+                      {t}
+                    </div>
+                  ))}
                 </>
               )}
-              <button className="btn" disabled={suggestBusy} onClick={runSuggest}>{suggestBusy ? "Reading…" : "✎ Suggest prompt"}</button>
-              <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
-              {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
-                  recipe into the Generate drawer -- an image's prompt/negative/size/
-                  steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/
-                  duration/mode/camera/audio/prompt into the Video tab. Prefill only;
-                  the drawer routes by kind (GenerateDrawer.prefillRun). Ordered
-                  Remix · Send to Video per the respec's action row (§2.6 default). */}
-              <button className="btn" title={row.is_video === "1"
-                ? "Load this video's full recipe into the Video composer"
-                : "Load this picture's full recipe into Generate"}
-                onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
-              {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
-                  own SOURCE frame (source_media_id), never the clip -- a clip is not a valid
-                  i2v input. Hidden when a video has no recorded source frame (r2v shots). */}
-              {(() => {
-                const svid = row.is_video === "1" ? (row.source_media_id || "") : row.media_id;
-                return svid ? (
-                  <button className="btn" title={row.is_video === "1"
-                    ? "Send this video's source frame to the Video composer"
-                    : "Send this picture to the Video composer as the first frame"}
-                    onClick={() => { onClose(); onVideo && onVideo(svid, "/thumbs/" + encodeURIComponent(svid) + ".jpg"); }}>▶ Send to Video</button>
-                ) : null;
-              })()}
-              {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
-                  clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
-                  without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}
-              {row.is_video === "1" ? (
-                <button className="btn" disabled={posterBusy}
-                  title="Re-extract this video's thumbnail from the file"
-                  onClick={async () => {
-                    setPosterBusy(true);
-                    const d = await rebuildPoster(row.media_id);
-                    setPosterBusy(false);
-                    if (window.Toast) window.Toast.show(d && d.ok
-                      ? { kind: "ok", title: "Poster rebuilt" }
-                      : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
-                    if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
-                  }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
-              ) : null}
-              <button className={"btn" + (upscaleOpen ? " btn-primary" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
-              {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
-                  button (and its filter matched nothing) on every organized library. The server's
-                  batch filter now matches either column (issue #30). */}
-              {row.task_id ? <button className="btn" onClick={() => onFilterByBatch(row.task_id)}>View Batch</button> : null}
-              <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>Edit Prompt</button>
-              <button className="btn btn-danger" disabled={busy} onClick={deleteLocal}>Delete locally</button>
-              {state.data.can_delete_cloud && row.task_id ? (
-                <button className="btn btn-danger" disabled={busy} onClick={deleteCloud}>Delete from PixAI</button>
-              ) : null}
             </div>
-          </aside>
-        )}
+          )}
+
+          {/* LINEAGE (Image Details.dc.html:108-126) -- where this image came from and
+              what came from it, REAL: batch siblings (same task_id) before "this",
+              derivatives (edit/upscale/video, source_media_id) after. A linear strip
+              like the DC draws it; siblings sit alongside "this" since they're from the
+              same generation moment, not a chain. Hidden entirely when there's nothing
+              to show (a lone original) -- no empty rail. */}
+          {lineage && (lineage.parent || lineage.siblings.length || lineage.children.length) ? (
+            <div className="p-lineage">
+              <div className="p-lineage-head">
+                <span className="k">LINEAGE</span>
+                <span className="s">where this came from, and what came from it</span>
+              </div>
+              <div className="p-lineage-strip">
+                {lineage.parent && (
+                  <>
+                    <button type="button" className="p-lin-chip" title={lineage.parent.title}
+                      onClick={() => onNavigate(lineage.parent.media_id)}>
+                      <img src={lineage.parent.thumb} alt="" />
+                      <span className="cap">{lineage.parent.kind}</span>
+                    </button>
+                    <span className="p-lin-arrow">→</span>
+                  </>
+                )}
+                {lineage.siblings.map((s) => (
+                  <React.Fragment key={s.media_id}>
+                    <button type="button" className="p-lin-chip" title={s.title}
+                      onClick={() => onNavigate(s.media_id)}>
+                      <img src={s.thumb} alt="" />
+                      <span className="cap">batch</span>
+                    </button>
+                    <span className="p-lin-arrow">→</span>
+                  </React.Fragment>
+                ))}
+                <div className="p-lin-chip this" title="This record">
+                  <img src={"/thumbs/" + encodeURIComponent(row.media_id) + ".jpg"} alt="" />
+                  <span className="cap">this</span>
+                </div>
+                {lineage.children.map((ch) => (
+                  <React.Fragment key={ch.media_id}>
+                    <span className="p-lin-arrow">→</span>
+                    <button type="button" className="p-lin-chip" title={ch.title}
+                      onClick={() => onNavigate(ch.media_id)}>
+                      <img src={ch.thumb} alt="" />
+                      <span className="cap">{ch.kind}</span>
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ✧ SIMILAR (Image Details.dc.html:127-140) -- the eight closest by eye, INLINE
+              in the record: the LINEAGE header idiom, a lavender "see all N" pushed right,
+              then a horizontal strip of 78px tiles fading down the row as the DC draws
+              them. "see all" / the Lightbox's chip both NAVIGATE to the gallery's own
+              lookalike set ("Where the Refit Broke" #6). Gated on the route's own
+              availability signal (no CLIP index, empty index, no hits -> images: []): the
+              whole section goes, header included -- never an empty rail, same as .p-lineage. */}
+          {similar.images.length ? (
+            <div className="p-similar">
+              <div className="p-similar-head">
+                <span className="k">✧ SIMILAR</span>
+                <span className="s">the closest by eye, not by model</span>
+                <span className="sp" />
+                {onSimilar && similar.images.length > 8 ? (
+                  <button type="button" className="p-seeall" title="The 48 closest, over the gallery"
+                    onClick={() => onSimilar(row.media_id)}>
+                    see all {similar.images.length}
+                  </button>
+                ) : null}
+              </div>
+              <div className="p-similar-strip">
+                {similar.images.slice(0, 8).map((it, k) => (
+                  <button key={it.media_id} type="button" className="p-sim-tile"
+                    style={{ "--sim-o": 0.9 - k * 0.06 }}
+                    title={it.score != null ? "✧ " + it.score : "Open"}
+                    onClick={() => onNavigate(it.media_id)}>
+                    <img src={it.thumb} alt="" loading="lazy" decoding="async" />
+                    {it.is_video === "1" ? <span className="vbadge">▶</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* MORE -- the app's actions the DC never drew (it designs ten; the app
+              carries more, each with real function). A quieter row, LAST, so the
+              designed groups keep their shape; nothing here lost its handler.
+              Delete from PixAI stays danger-styled and LAST (the irreversible one). */}
+          <div className="p-actions p-actions-more">
+            <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
+            {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
+            <button className="btn" onClick={() => window.print()}>🖨 Print</button>
+            {row.is_video !== "1" && (
+              <>
+                <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
+                <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=strip"} target="_blank" rel="noreferrer">Photo strip</a>
+              </>
+            )}
+            <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
+            {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
+                recipe into the Generate drawer -- an image's prompt/negative/size/
+                steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/
+                duration/mode/camera/audio/prompt into the Video tab. Prefill only;
+                the drawer routes by kind (GenerateDrawer.prefillRun). */}
+            <button className="btn" title={row.is_video === "1"
+              ? "Load this video's full recipe into the Video composer"
+              : "Load this picture's full recipe into Generate"}
+              onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+            {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
+                clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
+                without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}
+            {row.is_video === "1" ? (
+              <button className="btn" disabled={posterBusy}
+                title="Re-extract this video's thumbnail from the file"
+                onClick={async () => {
+                  setPosterBusy(true);
+                  const d = await rebuildPoster(row.media_id);
+                  setPosterBusy(false);
+                  if (window.Toast) window.Toast.show(d && d.ok
+                    ? { kind: "ok", title: "Poster rebuilt" }
+                    : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
+                  if (d && d.ok && d.thumb) setPosterSrc(d.thumb);
+                }}>{posterBusy ? "Rebuilding…" : "🖼 Rebuild poster"}</button>
+            ) : null}
+            {state.data.can_delete_cloud && row.task_id ? (
+              <button className="btn btn-danger" disabled={busy} onClick={deleteCloud}>Delete from PixAI</button>
+            ) : null}
+          </div>
+        </aside>
       </div>
 
       {/* Unconditional render -- see useImageDetails.js's header comment
-          (correction 1): <UpscalePanel>'s own .open/.inline CSS shows/hides it,
-          not conditional React mounting. The hook drives upEl.current.open()/
-          .close(); rendering it only when upscaleOpen is true would leave the
-          handle null when toggleUpscale first fires. */}
-      <UpscalePanel ref={upEl} inline />
-
-      {!focusMode && suggestions && (
-        <div id="suggest-box">
-          {suggestErr ? <span style={{ color: "var(--overlay0)" }}>{suggestErr}</span> : (
-            <>
-              <div className="suggest-hd">Suggested prompt(s) · click to copy</div>
-              {suggestions.map((t, i) => (
-                <div key={i} className={"suggest-line" + (copied === "s" + i ? " done" : "")}
-                  onClick={() => copy(t, "s" + i)}>
-                  {t}
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-
-      {!focusMode && editingPrompt && (
-        <div id="prompt-editor">
-          <textarea rows={5} value={promptText} onChange={(e) => setPromptText(e.target.value)} />
-          <div className="gd-row" style={{ marginTop: 8 }}>
-            <button className="btn btn-primary" onClick={savePrompt}>Save</button>
-            <button className="btn" onClick={() => setEditingPrompt(false)}>Cancel</button>
-            <span id="save-status">{saveStatus}</span>
-          </div>
-        </div>
-      )}
-
-      {similarOpen && (
-        <SimilarModal mediaId={row.media_id} onClose={() => setSimilarOpen(false)}
-          onOpenDetails={(mid) => { setSimilarOpen(false); onNavigate(mid); }} />
-      )}
+          (correction 1): <UpscalePanel>'s own .open CSS shows/hides it, not
+          conditional React mounting. The hook drives upEl.current.close() on
+          navigate/unmount; the ⇱ Upscale chip above calls .open(). NOT `inline`:
+          the DC's Upscale is a fixed float over the page (Image Details.dc.html:
+          143-146), the Lightbox's own flyout -- the in-flow mount had nowhere to
+          go on a page that never scrolls. */}
+      <UpscalePanel ref={upEl} />
     </div>
   );
 }

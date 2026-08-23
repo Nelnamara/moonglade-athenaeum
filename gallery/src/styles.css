@@ -622,39 +622,45 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   font-size: 11px; color: var(--text); background: linear-gradient(transparent, rgba(0,0,0,.72)); }
 
 /* ---- Details view -- "the layer deeper", classic's /image/<mid> page ----
-   Design pass locked 2026-07-30 (docs/DECISIONS.md "Direction C" -- The Reveal):
-   a museum-placard composition, the art framed beside a record rather than a
-   raw field grid underneath it. The record's own arrival is choreographed in
-   DetailsView.jsx's playReveal(); this stylesheet just holds the rest state
-   each animated piece starts from (opacity:0) and the quiet/curated look. */
-/* Image Details is a full-window TAKEOVER (Image Details.dc.html:36, gallery-era pass
-   2026-08-06) -- fixed inset like the Lightbox, not a page below the banner. The page
-   never scrolls; the record column scrolls internally (below). z 40: above the page
-   chrome, below the app's real overlay band (300+) so the Lightbox/dock still paint
-   over it. dvFrame is the DC's own entrance. Background is the DC's literal radial --
-   the page behind is covered, so the takeover carries its own. */
+   Rebuilt 2026-08-23 to the PIXEL source, design_handoff/design_handoff_moonglade_suite/
+   Image Details.dc.html, after the owner's verdict on the previous build: "Does not
+   follow the design's layout. There should be NO page scrolling. The image stays static
+   and the details pane scrolls if needed." Every metric below is the DC's own style
+   const, cited by line. The record's arrival is still choreographed in DetailsView.jsx's
+   playReveal() (the reveal locked 2026-07-30, docs/DECISIONS.md "Direction C"); this
+   sheet holds the rest state each animated piece starts from (opacity:0) and the look. */
 @keyframes dvFrame { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
+/* THE SHELL (DC:36): a fixed full-window takeover, 100vh, overflow hidden, a flex column
+   -- the DOCUMENT NEVER SCROLLS. z 40: above the page chrome, below the app's overlay
+   band (300+) so the Lightbox and the Upscale float still paint over it. Background is
+   the DC's literal radial -- the page behind is covered, so the takeover carries its own. */
 .detail-wrap { position: fixed; inset: 0; z-index: 40; height: 100vh; overflow: hidden;
   display: flex; flex-direction: column; padding: 0;
   background: radial-gradient(120% 80% at 22% -10%, #17123a 0%, #0a0818 52%, #05040d 100%);
   animation: dvFrame .34s cubic-bezier(.2, .9, .24, 1) both; }
-/* Floating translucent top bar (DC:38). */
-.detail-nav { flex: none; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+
+/* TOP BAR (DC:38-46): a translucent blurred strip; Back and ⛶ Lightbox are 11px/700/.12em
+   uppercase text (DC:39, :41), a 1px x 12px divider between them (DC:40), "N of M" in
+   tabular figures (DC:43), then the nav chips. */
+.detail-nav { flex: none; display: flex; align-items: center; gap: 14px;
   padding: 14px 26px; background: rgba(9, 7, 22, .5);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   border-bottom: 1px solid rgba(255, 255, 255, .06); }
-.back-link { color: var(--accent); text-decoration: none; font-size: 13px; }
-.back-link:hover { text-decoration: underline; }
-.nav-arrow { color: var(--accent); text-decoration: none; font-size: 13px; padding: 4px 10px;
-  border: 1px solid var(--surface1); border-radius: 6px; background: none; font-family: inherit; cursor: pointer; }
-.nav-arrow:hover { background: var(--surface0); }
-/* Image Details.dc.html:39-43 -- the header's "N of M" index label, next to the
-   ⛶ Lightbox link (which reuses .nav-arrow's own look, now button-safe above). */
-.detail-index { color: var(--subtext); font-size: 12px; font-variant-numeric: tabular-nums; }
-.nav-disabled { color: var(--overlay0); font-size: 13px; padding: 4px 10px;
-  border: 1px solid var(--surface0); border-radius: 6px; cursor: default; }
-.focus-btn { font-size: 12px; padding: 4px 12px; cursor: pointer; border-radius: 6px;
-  border: 1px solid var(--surface1); background: none; color: var(--text); }
+.back-link, .detail-lb { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(226, 222, 238, .7); cursor: pointer; text-decoration: none; white-space: nowrap;
+  background: none; border: 0; padding: 0; font-family: inherit; }
+.detail-lb { color: rgba(226, 222, 238, .5); }
+.back-link:hover, .detail-lb:hover { color: var(--text); }
+.detail-div { flex: none; width: 1px; height: 12px; background: rgba(255, 255, 255, .14); }
+.detail-index { font-size: 11px; color: rgba(214, 210, 226, .45); font-variant-numeric: tabular-nums; }
+/* navBtnStyle (DC:351): 11px/600, 6px 12px, radius 8, on the `plain` face (DC:233). The
+   app's Focus toggle (last in the bar, a shipped owner feature) wears the same chip. */
+.nav-arrow, .nav-disabled, .focus-btn { font-size: 11px; font-weight: 600; padding: 6px 12px;
+  border-radius: 8px; cursor: pointer; font-family: inherit; text-decoration: none; line-height: normal;
+  white-space: nowrap; border: 1px solid rgba(255, 255, 255, .12); background: rgba(12, 10, 28, .72);
+  color: rgba(226, 222, 238, .82); transition: border-color .2s, color .2s; }
+.nav-arrow:hover, .focus-btn:hover { border-color: rgba(255, 255, 255, .28); color: var(--text); }
+.nav-disabled { opacity: .4; cursor: default; }
 
 /* The one bold move: the image the owner was already looking at (the lightbox's
    stage picture -- see Lightbox.jsx) morphs into this frame, natively, via the
@@ -667,58 +673,58 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   animation-timing-function: cubic-bezier(.2, .8, .3, 1);
 }
 
-/* The body grid fills the takeover's remaining height (DC:345 -- min-height:0 +
-   align-items:stretch); the image column centers vertically, the record column
-   scrolls internally. */
-.placard { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1.55fr 1fr;
-  gap: 34px; padding: 26px 26px 34px; align-items: stretch; }
-@media (max-width: 860px) { .placard { grid-template-columns: 1fr; } }
+/* BODY GRID (DC:345-346 bodyGridStyle): fills the takeover's remaining height, two
+   EQUAL columns always -- no wide-image stacking branch, no ratio threshold (the
+   wide-image stacking class the previous build carried was an implementer's invention,
+   not the design). Focus (F) collapses the record's column to 0px and fades the record
+   (DC:346-348); the picture takes the row. */
+.placard { flex: 1 1 auto; min-height: 0; display: grid; gap: 34px; padding: 26px 26px 34px;
+  align-items: stretch; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  transition: grid-template-columns .45s cubic-bezier(.2, .9, .24, 1); }
+.focus-mode .placard { grid-template-columns: minmax(0, 1fr) 0px; }
 
-/* A landscape/banner piece (DetailsView.jsx's `wide`, ratio > 1.6) stacks
-   instead of sitting beside the record: the earlier attempt forced every
-   ratio into the same side-by-side column, which either shrank a wide image
-   to a thin sliver, or (a min-height floor) opened a dead void around it at
-   the extreme end. Past a real landscape threshold there's no side-by-side
-   size that works -- so it stops trying to and gives the image the full
-   width instead. */
-.placard-wide { grid-template-columns: 1fr; }
+/* PICTURE COLUMN (DC:50): the frame, the file actions, the stars row -- one centred unit. */
+.placard-picture { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+  justify-content: center; }
+/* THE FRAME (DC:357-358 frameStyle): the inline size is the definite one -- min(100%,
+   72vh x AR) -- and aspect-ratio derives the height, so the picture never exceeds 72vh
+   nor its column's width, with no percentage height to resolve against. --ar is "W / H",
+   set per row by DetailsView.jsx (one property feeds both the calc() and the ratio). The
+   inset highlight (DC:54) rides as ::after. A row with no recorded size (.no-dims, some
+   videos) has no ratio: the media sizes the frame under the same 72vh cap instead. */
+.placard-frame { position: relative; width: min(100%, calc(72vh * var(--ar))); height: auto;
+  align-self: center; aspect-ratio: var(--ar); border-radius: 16px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .12); background: var(--surface0);
+  box-shadow: 0 40px 110px rgba(0, 0, 0, .72), 0 0 90px rgba(100, 58, 172, .2); }
+.placard-frame::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 0 60px rgba(100, 58, 172, .18); }
+.placard-media { position: absolute; inset: 0; display: block; }
+.placard-frame img, .placard-frame video { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; display: block; }
+.placard-missing { position: absolute; inset: 0; display: grid; place-items: center; }
+.placard-frame.no-dims { width: auto; max-width: 100%; max-height: 72vh; aspect-ratio: auto; }
+.placard-frame.no-dims .placard-media { position: static; }
+.placard-frame.no-dims img, .placard-frame.no-dims video { position: static; width: auto; height: auto;
+  max-width: 100%; max-height: 72vh; }
+.placard-frame.no-dims .placard-missing { position: static; padding: 40px; }
 
-/* A grid item's default min-width is auto, which lets it refuse to shrink
-   below its CONTENT's intrinsic size -- for an <img> that's the real pixel
-   width, not the rendered one. A 1920px-wide banner was overflowing
-   .placard-frame past its 1fr track and out of .detail-wrap's 1100px cap
-   (confirmed live: body 2154px vs viewport 1935px, .placard-frame measured
-   1726px against a 1100px container) -- the exact same class of bug the
-   art-filters compare grid's columns (dock.css .mgfc-grid > *) carry this fix for. */
-.placard-frame, .placard-record { min-width: 0; }
+/* RECORD COLUMN (DC:347 recordColStyle): the ONLY scroller on the page. Under Focus it
+   stays mounted (so the reveal can replay when it returns) but fades, and is taken out
+   of the tab order once faded. */
+.placard-record { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; transition: opacity .3s ease, visibility 0s linear 0s; }
+.focus-mode .placard-record { opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .3s ease, visibility 0s linear .3s; }
 
-.placard-frame { position: relative; border-radius: 12px; overflow: hidden;
-  background: var(--surface0); border: 1px solid var(--surface1);
-  display: flex; align-items: center; justify-content: center;
-  align-self: center; max-width: 100%;
-  box-shadow: 0 22px 60px -18px rgba(0, 0, 0, .8); }
-.placard-frame img, .placard-frame video { display: block; max-width: 100%;
-  max-height: calc(100vh - 160px); width: auto; height: auto; object-fit: contain; }
-.focus-mode .placard { grid-template-columns: 1fr; }
-.focus-mode .placard-frame { min-height: 0; }
-.focus-mode .placard-frame img, .focus-mode .placard-frame video { max-height: calc(100vh - 110px); }
-
-/* Internal scroll (DC:347) -- the record reads like a column of its own, the page
-   itself never moves. */
-.placard-record { display: flex; flex-direction: column; gap: 13px; padding-top: 2px;
-  min-height: 0; overflow-y: auto; overflow-x: hidden; }
-
-.p-kicker { margin: 0; font: 10.5px/1 ui-monospace, Menlo, monospace; letter-spacing: .14em;
-  text-transform: uppercase; color: var(--overlay0); opacity: 0; display: flex;
-  align-items: center; gap: 8px; }
-
-.p-title-wrap { margin: 0; }
-/* line-clamp is a hard visual floor, not just a style choice -- prompt_preview
-   is bounded server-side, but nothing stops a future data source (or a title
-   the owner types by hand) from being long, and this is what stops that from
-   ever blowing out the layout again regardless of where the text came from. */
-.p-title { margin: 0 0 8px; font: italic 600 25px/1.32 var(--serif); color: var(--text);
-  text-wrap: balance; opacity: 0;
+/* HEAD (DC:75-82): kicker (DC:361, 10px/700/.16em uppercase lavender), the headline
+   (DC:365, 30px italic Georgia, 1.2, -.01em), the 2px rule with the glint. */
+.p-head { display: flex; flex-direction: column; gap: 8px; }
+.p-kicker { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--lavender, var(--accent)); opacity: 0; display: flex; align-items: center; gap: 8px; }
+/* The field is a quoted PROMPT EXCERPT (~40 chars, gen/headline.js); the 3-line clamp is a
+   ceiling only, so a hand-typed title can never blow the layout out. */
+.p-title { margin: 0; font: italic 400 30px/1.2 var(--serif); letter-spacing: -.01em;
+  color: var(--text); text-wrap: balance; opacity: 0; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .p-rule-track { position: relative; height: 2px; overflow: hidden; border-radius: 2px;
   background: var(--surface1); }
@@ -727,56 +733,82 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .95), transparent);
   filter: blur(1.5px); }
 
-/* .p-fact is the shared "arrives with the cascade" unit -- the prompt block and
-   every curated fact row share it, so playReveal() can stamp them in as one
-   sequence without the component listing each one by hand. */
-.p-fact { opacity: 0; }
-.p-prompts { font-size: 12.5px; line-height: 1.65; color: var(--subtext); }
-.p-prompts p { margin: 0 0 6px; }
-.p-prompts p:last-child { margin-bottom: 0; }
-.p-prompts b { color: var(--overlay0); font-size: 10.5px; letter-spacing: .08em;
-  text-transform: uppercase; font-weight: 600; margin-right: 6px; }
-
-.p-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.p-facts li { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; }
-.p-facts span { flex: 0 0 78px; color: var(--overlay0); font-size: 10.5px;
-  letter-spacing: .05em; text-transform: uppercase; }
-.p-facts b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
-.p-facts .mono { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
-.p-facts .dim { color: var(--overlay0); }
-
-/* per-row copy icon, mirroring ImageDetailsMobile.jsx's .idm-row-copy so both
-   platforms share one visual pattern for the same affordance. */
-.p-copy { flex: none; border: none; background: none; font-family: inherit; font-size: 11px;
-  cursor: pointer; padding: 2px 5px; border-radius: 6px; color: var(--overlay0); }
-.p-copy:hover { color: var(--text); background: var(--surface1); }
-.p-fact.copied .p-copy { color: var(--emerald); }
-
-.p-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.p-tag { opacity: 0; font-size: 10.5px; color: var(--subtext); padding: 3px 10px;
-  border-radius: 12px; border: 1px solid var(--surface1); background: var(--surface0); }
+/* TAGS (DC:84, :372-373): 10px/600 pills, lavender-tinted. Collections wear the accent. */
+.p-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.p-tag { opacity: 0; font-size: 10px; font-weight: 600; padding: 4px 11px; border-radius: 999px;
+  border: 1px solid rgba(182, 146, 230, .28); background: rgba(182, 146, 230, .1);
+  color: rgba(226, 222, 238, .8); }
 .p-tag-shelf { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
-/* the vitals: rating + dimensions + date, the same summary the Lightbox
-   already shows compactly up top -- rides the plain .p-fact cascade rather
-   than its own animation step, since it's just another row in the arrival. */
-.p-vitals { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--subtext); }
-.p-vitals .rating-label { font-size: 12px; }
-.p-vsep { color: var(--overlay0); }
+/* THE LEDGER (DC:90-100, :326-339 row()): flex column gap 3; a row is flex gap 12,
+   5px 9px, radius 8 (the copied flash is the emerald wash); the label is a right-aligned
+   118px column of 10px/700/.1em uppercase overlay0; the value wraps anywhere at 11.5px/1.65
+   and wears the DC's faces -- mono for ids, dim for the secondary prompts/ids, warm
+   (lavender) for the model. .p-fact is the shared "arrives with the cascade" unit
+   DetailsView.playReveal() stamps in row by row. */
+.p-ledger { display: flex; flex-direction: column; gap: 3px; }
+.p-fact { opacity: 0; }
+.p-row { display: flex; gap: 12px; align-items: flex-start; padding: 5px 9px; border-radius: 8px;
+  background: transparent; transition: background .18s; }
+.p-row.copied { background: rgba(79, 201, 154, .1); }
+.p-row-k { flex: none; width: 118px; text-align: right; font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); padding-top: 2px; }
+.p-row-v { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word;
+  font-size: 11.5px; line-height: 1.65; color: rgba(226, 222, 238, .86); }
+.p-row-v.mono { font-family: ui-monospace, Menlo, monospace; }
+.p-row-v.dim { color: rgba(214, 210, 226, .45); }
+.p-row-v.warm { color: var(--lavender, var(--accent)); }
+/* the per-row ⧉ (DC:96, :336-338): overlay0 at rest, emerald on its wash once copied */
+.p-copy { flex: none; border: none; background: none; font-family: inherit; font-size: 11px;
+  cursor: pointer; padding: 2px 6px; border-radius: 6px; color: var(--overlay0);
+  transition: color .18s, background .18s; }
+.p-copy:hover { color: var(--text); background: var(--surface1); }
+.p-row.copied .p-copy { color: var(--emerald); background: rgba(79, 201, 154, .14); }
 
-/* LINEAGE (Image Details.dc.html:108-123) -- a strip of 74x74 chips, "this" accent-
-   highlighted, matching the DC's own geometry exactly. Deliberately NOT wired into
-   playReveal's staggered opacity:0 choreography (that animation is hand-tuned and fires
-   once on mount; lineage data arrives async off a fetch, so joining it risks the section
-   staying invisible if the fetch resolves after the reveal already ran, or under
-   reduced-motion where only the fixed selector list gets un-hidden) -- it just renders. */
-.p-lineage { display: flex; flex-direction: column; gap: 10px; margin-top: 4px;
-  padding-top: 14px; border-top: 1px solid var(--surface0); }
-.p-lineage-head { display: flex; flex-direction: column; gap: 2px; }
+/* MORE DETAILS: the issue #18 generation surface and the app's other extras, folded under
+   a disclosure styled as one more ledger label so it reads as part of the list. Closed by
+   default (DetailsView.jsx remembers it in mg_details_more). */
+.p-more { margin: 0; }
+.p-more-sum { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center;
+  gap: 7px; padding: 5px 9px; border-radius: 8px; font-size: 10px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+.p-more-sum::-webkit-details-marker { display: none; }
+.p-more-sum:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+.p-more-caret { display: inline-block; font-size: 9px; transition: transform .18s; }
+.p-more[open] .p-more-caret { transform: rotate(90deg); }
+.p-more-n { font-weight: 600; letter-spacing: 0; color: rgba(214, 210, 226, .45);
+  font-variant-numeric: tabular-nums; }
+.p-more .p-ledger { padding-top: 3px; }
+
+/* STARS ROW (DC:61-70): 15px stars at gap 3, gold lit / faint unlit, the hovered star
+   lifted 1.18 (DC:411-412) with the fill previewed up to the cursor; the "N / 5" label
+   (DC:67); dims · date pushed right (DC:69). */
+.p-stars-row { display: flex; align-items: center; gap: 9px; padding-top: 2px; }
+.p-stars-row .stars { display: inline-flex; align-items: center; gap: 3px; letter-spacing: 0; }
+.p-stars-row .stars .st { font-size: 15px; line-height: 1; padding: 0;
+  color: rgba(214, 210, 226, .24); transition: color .15s, transform .15s; }
+.p-stars-row .stars .st.lit { color: var(--gold); }
+.p-stars-row .stars:has(.st:hover) .st:not(:hover):not(:has(~ .st:hover)) { color: rgba(214, 210, 226, .24); }
+.p-stars-row .stars .st:hover,
+.p-stars-row .stars .st:has(~ .st:hover) { color: var(--gold); }
+.p-stars-row .stars .st:hover { transform: scale(1.18); }
+.p-stars-row .rating-label { font-size: 10.5px; color: rgba(214, 210, 226, .45); }
+.p-stamp { font-size: 10px; color: rgba(214, 210, 226, .3); white-space: nowrap; }
+
+/* LINEAGE (DC:108-126) -- a card (13px 15px, radius 13, the faint border on the deep
+   wash), the header a baseline row, then a strip of 74x74 chips with "this" accent-ringed.
+   Deliberately NOT wired into playReveal's staggered opacity:0 choreography (that animation
+   is hand-tuned and fires once on mount; lineage data arrives async off a fetch, so
+   joining it risks the section staying invisible if the fetch resolves after the reveal
+   already ran, or under reduced-motion where only the fixed selector list gets
+   un-hidden) -- it just renders. */
+.p-lineage { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, .08); background: rgba(9, 7, 22, .6); }
+.p-lineage-head { display: flex; align-items: baseline; gap: 9px; }
 .p-lineage-head .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
   color: var(--overlay0); }
-.p-lineage-head .s { font-size: 11px; color: var(--subtext); }
-.p-lineage-strip { display: flex; align-items: center; gap: 6px; overflow-x: auto;
+.p-lineage-head .s { font-size: 10.5px; color: rgba(214, 210, 226, .5); }
+.p-lineage-strip { display: flex; align-items: center; gap: 10px; overflow-x: auto;
   padding: 2px; }
 .p-lin-chip { position: relative; flex: none; width: 74px; height: 74px; border-radius: 10px;
   overflow: hidden; cursor: pointer; padding: 0; background: var(--surface0);
@@ -788,17 +820,44 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   text-align: center; color: rgba(226,222,238,.72); background: rgba(5,4,13,.78); }
 .p-lin-chip.this .cap { color: var(--text); }
-.p-lin-arrow { flex: none; color: var(--overlay0); font-size: 13px; }
+.p-lin-arrow { flex: none; color: var(--overlay0); font-size: 12px; }
 
-/* actions demoted: the same capability as before, quieter and smaller -- a
-   glass-chip strip like .card/.gd-chip elsewhere, not a wall of solid buttons. */
-.p-footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; padding-top: 12px;
-  border-top: 1px solid var(--surface0); opacity: 0; }
-.p-footer .btn { padding: 6px 12px; font-size: 11px; border-radius: 14px;
-  background: rgba(33, 31, 58, .38); border-color: rgba(255, 255, 255, .14); }
-.p-footer .btn-primary { background: color-mix(in srgb, var(--accent) 30%, transparent);
-  border-color: var(--accent); color: var(--text); }
-.p-footer .btn-danger { background: color-mix(in srgb, var(--red) 12%, transparent); }
+/* ACTIONS -- Image Details.dc.html:318-324 btn() (plain / metal / danger faces) in
+   the DC's two groups: fileActions (:56-60, under the hero: flex, centred, gap 7) and
+   recordActions (:102-106, in the record: flex-wrap, gap 7, padding-top 4), plus the
+   app's own quieter More row at the end of the record. The RECORD's groups start hidden
+   -- the reveal's closing beat (DetailsView.playReveal) pops each one in; the file
+   actions in the picture column are drawn unanimated, as the DC draws them. */
+.p-actions { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 4px; }
+.placard-record .p-actions { opacity: 0; }
+.p-actions-primary { align-items: center; padding-top: 0; }
+.p-actions .btn { font-size: 11px; font-weight: 700; white-space: nowrap; padding: 8px 14px;
+  border-radius: 9px; transition: border-color .2s, color .2s, background .2s; }
+/* the plain face (the DC's `plain` const) */
+.p-actions .btn:not(.mgx-metal):not(.btn-danger) { border: 1px solid rgba(255,255,255,.12);
+  background: rgba(12,10,28,.72); color: rgba(226,222,238,.82); }
+.p-actions .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover {
+  border-color: rgba(255,255,255,.28); color: var(--text); }
+/* the metal face: Download is the one promoted action. .mgx-metal (shell.css) owns
+   the recipe; re-assert what .btn's later-loaded base (border/color/background and
+   .btn:hover's flat surface) would otherwise paint over. */
+.p-actions .btn.mgx-metal, .p-actions .btn.mgx-metal:hover {
+  border-color: rgba(255,255,255,.3); color: var(--mm-ink);
+  background: var(--mm-grad); background-size: 220% 100%; }
+.p-actions .btn.mgx-metal:hover { filter: brightness(1.08); }
+/* the danger face (the DC's red outline) */
+.p-actions .btn-danger, .p-actions .btn-danger:hover { border: 1px solid rgba(243,139,168,.35);
+  background: rgba(243,139,168,.1); color: var(--red); }
+.p-actions .btn-danger:hover { border-color: rgba(243,139,168,.6); }
+/* More: everything the design doesn't draw, visibly second-tier -- smaller, dimmer,
+   tighter; Delete from PixAI keeps its red but at the row's quieter weight */
+.p-actions-more { gap: 5px; padding-top: 2px; }
+.p-actions-more .btn { font-size: 10px; font-weight: 600; padding: 5px 10px; border-radius: 7px; }
+.p-actions-more .btn:not(.mgx-metal):not(.btn-danger) { color: var(--overlay0);
+  background: rgba(12,10,28,.45); border-color: rgba(255,255,255,.08); }
+.p-actions-more .btn:not(.mgx-metal):not(.btn-danger):not(.is-off):hover { color: var(--text); }
+.p-actions-more .btn-danger { opacity: .8; }
+.p-actions-more .btn-danger:hover { opacity: 1; }
 
 .btn { border-radius: 8px; border: 1px solid var(--surface1); color: var(--text);
   background: var(--surface0); padding: 7px 13px; font-size: 12.5px; cursor: pointer;
@@ -814,39 +873,74 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .btn-danger { background: color-mix(in srgb, var(--red) 15%, var(--mantle)); color: var(--red);
   border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 .btn-danger:hover { background: color-mix(in srgb, var(--red) 25%, var(--mantle)); }
-#suggest-box { margin-top: 4px; margin-bottom: 14px; padding: 12px 14px; background: var(--surface0);
+/* the prompt editor and the suggestions live INSIDE the record (the scroller), right
+   under the actions that open them -- nothing outside it may grow the page */
+#suggest-box { padding: 12px 14px; background: var(--surface0);
   border: 1px solid var(--surface1); border-radius: 8px; font-size: 13px; line-height: 1.5; }
 .suggest-hd { color: var(--overlay0); font-size: 11px; text-transform: uppercase;
   letter-spacing: .05em; margin-bottom: 6px; }
 .suggest-line { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .suggest-line:hover { background: var(--surface1); }
 .suggest-line.done { color: var(--emerald); }
-#prompt-editor textarea { width: 100%; background: var(--base); color: var(--text);
+#prompt-editor textarea { width: 100%; box-sizing: border-box; background: var(--base); color: var(--text);
   border: 1px solid var(--surface1); border-radius: 8px; padding: 10px 12px; font: inherit;
   font-size: 13px; resize: vertical; }
 #save-status { font-size: 12px; color: var(--subtext); }
-/* Focus mode: a pure CSS-class toggle, no layout math -- hide everything but the
-   nav+image, let the image breathe at near-full viewport. */
-.focus-mode .placard-record,
-.focus-mode #suggest-box, .focus-mode #prompt-editor { display: none; }
-/* Focus mode under the takeover: the old page-era max-width/padding overrides are
-   meaningless on a fixed root; the collapse itself (record hidden, 1fr grid, taller
-   image cap) is handled above. */
+
+/* Narrow windows only (the tablet tier is a tabled owner call, ROADMAP): one column, the
+   grid itself scrolls, and the frame is capped well under half the viewport so it can
+   never overlap the record stacked under it. */
+@media (max-width: 860px) {
+  .detail-nav { flex-wrap: wrap; }
+  .placard { grid-template-columns: 1fr; overflow-y: auto; transition: none; }
+  .focus-mode .placard { grid-template-columns: 1fr; }
+  /* two auto rows now: min-height:0 (right for the one-row layout, where the row fills
+     the grid) would give the picture row a ZERO base size and collapse it -- content-size it */
+  .placard-picture { min-height: auto; }
+  .placard-frame { width: min(100%, calc(40vh * var(--ar))); }
+  .placard-frame.no-dims, .placard-frame.no-dims img, .placard-frame.no-dims video { max-height: 40vh; }
+  .placard-record { overflow: visible; min-height: auto; }
+}
 @media print {
-  header, .detail-nav, .p-footer, .p-vitals { display: none !important; }
+  header, .detail-nav, .p-actions, .p-stars-row { display: none !important; }
   /* Print escapes the fixed takeover -- position:static restores normal document
      flow so the browser paginates the record instead of clipping one viewport. */
   .detail-wrap { position: static; height: auto; overflow: visible; max-width: 100%; animation: none; }
-  .placard-record { overflow: visible; }
   .placard { grid-template-columns: 1fr; }
+  .placard-record { overflow: visible; }
+  .placard-frame { width: auto; max-width: 100%; aspect-ratio: auto; box-shadow: none; }
+  .placard-frame img, .placard-frame video, .placard-media { position: static; width: auto; height: auto; max-width: 100%; }
   .placard-record { background: #fff !important; border: none !important; color: #000 !important; }
-  .p-kicker, .p-facts span { color: #555 !important; }
-  .p-title, .p-facts b, .p-prompts { color: #000 !important; }
+  .p-kicker, .p-row-k { color: #555 !important; }
+  .p-title, .p-row-v { color: #000 !important; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .p-kicker, .p-title, .p-fact, .p-tag, .p-footer { opacity: 1; }
+  .p-kicker, .p-title, .p-fact, .p-tag, .p-actions { opacity: 1; }
+  .placard-record .p-actions { opacity: 1; }
   .p-rule { clip-path: inset(0 0% 0 0); }
+  .placard, .placard-record { transition: none; }
 }
 
-/* below the fold threshold everything simply wraps -- the chunky .nb groups keep
-   wrapping honest, and phone/tablet-portrait get their own designed pass later */
+/* ✧ SIMILAR (Image Details.dc.html:127-140) -- the eight closest by eye, inline in the
+   record: the LINEAGE header idiom (9.5px/700/.14em overlay0 + a 10.5px muted caption), a
+   lavender "see all N" pushed to the right, then a horizontal row of 78px tiles (flex,
+   gap 8, overflow-x auto, padding 2) fading in opacity down the row exactly as the DC
+   draws them (.9 - k*.06, set per tile as --sim-o). Like .p-lineage, NOT wired into
+   playReveal: the data arrives async, so it just renders -- and renders nothing at all
+   when the similarity index can't answer. */
+.p-similar { display: flex; flex-direction: column; gap: 8px; }
+.p-similar-head { display: flex; align-items: baseline; gap: 9px; }
+.p-similar-head .k { font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  color: var(--overlay0); }
+.p-similar-head .s { font-size: 10.5px; color: rgba(214,210,226,.5); }
+.p-seeall { font: inherit; font-size: 10.5px; color: var(--lavender, var(--accent));
+  cursor: pointer; background: none; border: 0; padding: 0; }
+.p-seeall:hover { text-decoration: underline; }
+.p-similar-strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px; }
+.p-sim-tile { position: relative; flex: none; width: 78px; height: 78px; border-radius: 9px;
+  overflow: hidden; cursor: pointer; padding: 0; border: 0; background: var(--surface0);
+  opacity: var(--sim-o, .9);
+  transition: transform .2s cubic-bezier(.2,.9,.24,1), opacity .2s; }
+.p-sim-tile:hover { opacity: 1; transform: translateY(-2px); }
+.p-sim-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.p-sim-tile .vbadge { top: 4px; right: 4px; font-size: 8px; padding: 1px 4px; }

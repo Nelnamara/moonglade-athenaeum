@@ -68,7 +68,10 @@ export function filterQueryString({ applied, media, shelf, adv, perPage }, dateS
   return p.toString();
 }
 
-export default function useLibrary() {
+/* initialPage: the page the FIRST load lands on (App reads it from ?page=, via
+   gen/urlState.js -- #31 "Where the Refit Broke" #7). Every later filter change
+   still restarts from page 1, exactly as before. */
+export default function useLibrary({ initialPage = 1 } = {}) {
   // filters
   const [media, setMedia] = useState("");
   const [shelf, setShelf] = useState("");
@@ -132,8 +135,16 @@ export default function useLibrary() {
     (k) => JSON.stringify(adv[k]) !== JSON.stringify(ADV_DEFAULTS[k])
   ).length;
 
-  // any filter change restarts from page 1
-  useEffect(() => { load(1, true); }, [load]);
+  // any filter change restarts from page 1 -- except the mount's own load, which
+  // honors the page the URL asked for. "Mount" is judged by load's identity, not a
+  // consumed flag: StrictMode's dev double-invoke re-runs this effect with the SAME
+  // load, and a flag would have sent the second run to page 1.
+  const mountLoad = useRef(null);
+  useEffect(() => {
+    const first = mountLoad.current === null || mountLoad.current === load;
+    mountLoad.current = load;
+    load(first ? Math.max(1, initialPage | 0) : 1, true);
+  }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitQuery = (forced) => {
     setApplied(forced !== undefined ? forced : query);

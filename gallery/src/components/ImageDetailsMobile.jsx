@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
+import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
@@ -87,32 +88,8 @@ import "../styles/image-details-mobile.css";
        flyout already differs from any per-screen mock,
        because it is a REUSED shared component, not rebuilt per screen. */
 
-export function useSimilar(mediaId) {
-  const [state, setState] = useState({ loading: true, images: [], error: "" });
-  const seq = useRef(0);
-
-  useEffect(() => {
-    if (!mediaId) { setState({ loading: false, images: [], error: "" }); return; }
-    const mine = ++seq.current;
-    setState({ loading: true, images: [], error: "" });
-    fetch("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
-      .then((r) => r.json())
-      .then((d) => {
-        if (mine !== seq.current) return;
-        const images = (d && d.images) || [];
-        setState({
-          loading: false, images,
-          error: images.length ? "" : ((d && d.error) || "No similar images found for this one."),
-        });
-      })
-      .catch(() => {
-        if (mine === seq.current) setState({ loading: false, images: [], error: "Could not load similar images." });
-      });
-  }, [mediaId]);
-
-  return state;
-}
-
+/* useSimilar (the /api/similar data path) now lives in hooks/useSimilar.js, shared with
+   the desktop DetailsView's inline strip -- same fetch, same seq guard, byte-for-byte. */
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
