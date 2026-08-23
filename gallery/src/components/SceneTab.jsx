@@ -42,7 +42,7 @@ export default function SceneTab({ scene, source, armed }) {
       const onlyCustom = keys.length === 1 && keys[0] === "custom";
       setPreset(onlyCustom ? "custom" : (keys.find((k) => k !== "custom") || "random"));
       const sv = {};
-      (m.selectors || []).forEach((x) => { sv[x.id] = x.default || (x.options[0] && x.options[0].key); });
+      (m.selectors || []).forEach((x) => { const o = x.options || []; sv[x.id] = x.default || (o[0] && o[0].key); });
       setSel(sv);
     }).catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
@@ -87,7 +87,7 @@ export default function SceneTab({ scene, source, armed }) {
           onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
         <div className="mgdock-sctt">
           <div className="mgdock-scname">{scene.name}
-            {scene.tier ? <span className="mgdock-sctier">Tier {scene.tier}</span> : null}</div>
+            {scene.tier ? <span className="mgdock-sctier">{typeof scene.tier === "boolean" ? "Tier" : "Tier " + scene.tier}</span> : null}</div>
           <div className="mgdock-scsub">&#10022; AI Tools <span className="dot">·</span>
             <span className="mir">● runs on the mirror</span></div>
         </div>

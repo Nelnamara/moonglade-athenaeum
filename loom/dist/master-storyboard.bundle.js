@@ -2808,7 +2808,7 @@ ${"=".repeat(48)}
         return;
       }
       if (!canSubmit(s2.price, p)) {
-        pushLine({ kind: "status", text: "Re-checking the cost\u2026 try again when the badge settles." });
+        pushLine({ kind: "error", text: "Re-checking the cost\u2026 try again when the badge settles." });
         const pr = s2.price || {};
         const checkInFlight = !!pr.pendingTimer || !pr.settled && pr.pricedKey == null;
         if (!checkInFlight) debCost();

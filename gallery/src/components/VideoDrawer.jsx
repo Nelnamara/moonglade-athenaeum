@@ -444,7 +444,9 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     // payload -- a settled FREE for 5s must never carry a 15s submit, and a quality/camera change
     // must not ride a price it never saw. Never a silent drop: say so and re-price.
     if (!canSubmit(s.price, p)) {
-      pushLine({ kind: "status", text: "Re-checking the cost… try again when the badge settles." });
+      // kind:"error", not "status": this is a REFUSAL (submit blocked), and the dock renders
+      // only error lines -- as "status" it was silently dropped there (#27).
+      pushLine({ kind: "error", text: "Re-checking the cost… try again when the badge settles." });
       // Only kick a NEW re-price when nothing is already in flight for this payload. Calling
       // debCost() unconditionally here bumped costSeq (discarding a quote about to settle) and
       // restarted the debounce, so fast repeated clicks could keep the badge from ever settling

@@ -642,9 +642,14 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      path, which re-fetches and surfaces its own error. */
   const prefillRun = useCallback(async (idHint, mediaId) => {
     if (!mediaId) return;
+    // Join the prefill epoch (#27): this routing fetch used to sit OUTSIDE prefillSeq, so
+    // two fast tile clicks could resolve out of order and land the OLDER recipe. Bump here
+    // and bail if a newer prefill started while we were waiting; the callees bump again.
+    const my = ++prefillSeq.current;
     try {
       const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
       const d = await r.json();
+      if (prefillSeq.current !== my) return;   // superseded -- a newer click won
       if (d && d.row && String(d.row.is_video) === "1") {
         return prefillVideoFromRun(idHint || (d.row && d.row.task_id) || "", mediaId);
       }
@@ -794,10 +799,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                 onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
-          {/* DC 3518 historyBtnStyle: History belongs to the reel -- hidden with it.
-              No title (DC 1115 has none; the header note carries the copy). */}
+          {/* DC 3518 historyBtnStyle: History belongs to the reel. It used to HIDE with the
+              reel too, but this button is the only control that opens History, so below
+              the reel's height floor (~554px viewport) History was unreachable (#27).
+              Stays visible; the body below renders the strip in the reel's slot. No title
+              (DC 1115 has none; the header note carries the copy). */}
           <button type="button" className={"mgdock-hist" + (historyOpen ? " on" : "")}
-            style={reelVisible ? null : { display: "none" }}
             onClick={() => setHistoryOpen((v) => !v)}>
             {historyOpen ? "Hide history" : "History"}
           </button>
@@ -809,9 +816,9 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
              slot, ABOVE the ▲ slabs, DC 1119-1207) · per-tab surface. Safety-valve
              scroll for short windows only — the composer footer never scrolls. ---- */}
         <div className="mgdock-body">
-          {reelVisible && (historyOpen
+          {historyOpen
             ? <HistoryStrip onPrefill={prefillRun} onTip={setRunTip} />
-            : <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillRun} onTip={setRunTip} />)}
+            : (reelVisible && <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillRun} onTip={setRunTip} />)}
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">

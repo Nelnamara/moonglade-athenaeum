@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { costColor, costText } from "../gen/historyCore.js";
 import { RunningFace, ClusterFace, tipEnter } from "./HistoryStrip.jsx";
 
@@ -102,6 +102,9 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
   const tw = Math.max(44, Math.round(th * (832 / 1216)));
 
   const leave = () => { setHover(null); if (onTip) onTip(null); };
+  // Unmount cleanup (#27), same as HistoryStrip: the tooltip is hoisted to the dock, so if
+  // the reel unmounts mid-hover (a resize flipping reelVisible) it lingered at stale coords.
+  useEffect(() => () => { if (onTip) onTip(null); }, [onTip]);
 
   return (
     <div className="mgdock-reel">
