@@ -60,3 +60,13 @@ tray, so no host has to remember to.
 every 3s, then every 20s past 20 minutes (`slow`), every 3 minutes past 90 minutes (`stale`),
 and at 6 hours this tab stops asking (`stalled` — a statement about the tab, never a verdict on
 the task). `cadenceFor(elapsedMs)` returns `{ms, tier}`; the tier is announced once, on entry.
+
+**Generation request** — the one object a web create carries: the exact `parameters` dict
+PixAI will receive, plus the few facts a submit needs that the dict itself does not hold
+(the free-card flag, a Fix's `mediaId` and boxes). `core.build_request()` is the only thing
+that makes one; `core.price()` and `core.submit()` are the only things that read one.
+
+**Payload road** — the single path a drawer payload travels from JSON to PixAI: build the
+request once, then either quote it or spend it, both reading the same `parameters` object.
+There is one road for every mode (image, edit, fix, video, enhance), and the mode dispatch
+lives in exactly one place.
