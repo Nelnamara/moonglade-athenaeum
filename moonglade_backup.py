@@ -6684,8 +6684,13 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     is a top-level `modelId` + the `i2vPro` block + privacy/preview flags. Their site
     sends a top-level `channel` (observed value "private", task dump 2026-07-26); we send
     the equivalent as `isPrivate`. Also unsent by us: width/height and a lora object,
-    both present in their submit. No evidence any of the three matters — every real task
-    renders without them. `media_id` = source/first frame; `tail_media_id` (optional) =
+    both present in their submit. PROBED 2026-08-22 (17 i2v tasks, 6 models, read-only):
+    all three are inert. `width`/`height` is PixAI echoing the SOURCE FRAME's dimensions
+    onto the task (3/3 exact match; present on our own tasks though we never send it),
+    and cost keys on model + duration, never resolution. `channel` is the same switch as
+    `isPrivate`, relabelled. `lora` is always {} for video. Nothing to add.
+    (moonglade-internal/probes/PROBE_2026-08-22_r2v-refs-and-video-fields.md)
+    `media_id` = source/first frame; `tail_media_id` (optional) =
     last frame for FLF interpolation.
 
     `modelId` is NOT what selects the engine -- `i2vPro.model` is. Corrected 2026-07-21

@@ -447,9 +447,9 @@ def test_download_video_task_with_poster_skips_ffmpeg(monkeypatch, tmp_path):
     assert (tmp_path / "gallery" / "thumbs" / "V2.jpg").exists()
 
 
-# ---- gallery references must be uploaded, not passed through (regression) ----
+# ---- gallery references: catalog id first, upload only as the invalid_media_id fallback ----
 
-def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatch):
+def test_gallery_catalog_ref_passes_through_then_uploads_on_invalid_media_id(tmp_path, monkeypatch):
     """PRODUCTION BUG, 2026-07-20: every generation started from the gallery failed with
     PixAI's invalid_media_id / invalid_reference_image_media_id and a full refund, while
     the same thing from the Loom worked.
@@ -510,8 +510,11 @@ def test_gallery_catalog_ref_is_uploaded_not_passed_through(tmp_path, monkeypatc
     assert len(calls) == 2, "expected exactly one retry, not a loop"
 
 
-def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
-    """Referencing the same image twice in one R2V must upload it once, not per slot."""
+def test_gallery_r2v_catalog_ids_pass_through_without_upload(tmp_path, monkeypatch):
+    """R2V passes catalog ids through untouched -- no upload, even when the same image is
+    referenced twice. Was "upload once per media_id"; PROBED 2026-08-22 (10 of the owner's own
+    completed R2V tasks): referenceImageMediaIds accepts in-library ids, so uploading only
+    re-ran PixAI's content scan on art it already hosts (the 403 NSFW refusals)."""
     from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
     from tests.conftest import login_test_client
 
@@ -533,8 +536,8 @@ def test_gallery_ref_upload_is_cached_per_media_id(tmp_path, monkeypatch):
     r = cli.post("/api/loom/generate", json={
         "mode": "R2V", "prompt": "x", "images": ["555", "555"], "duration": 5})
     assert r.status_code == 200, r.get_data(as_text=True)
-    assert len(calls) == 1, "same media_id uploaded {} times".format(len(calls))
-    assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["777", "777"]
+    assert calls == [], "a catalog id must NOT be uploaded for R2V (uploaded {}x)".format(len(calls))
+    assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["555", "555"]
 
 
 def _seed_one(tmp_path, mid="733917871331404290"):
@@ -554,7 +557,8 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
 
     NOT every path any more: i2v was measured on 2026-07-26 to accept a catalog id directly
     (PixAI's own site does exactly that), and uploading there actively caused an NSFW rejection
-    on content their site accepts. R2V, edit and fix are unchanged.
+    on content their site accepts. R2V followed on 2026-08-22 (probed the same way). Edit and
+    fix are unchanged.
 
     Parametrised deliberately: a new input endpoint that forgets to resolve is the exact
     way this returns, and this fails by name when it does."""
@@ -580,11 +584,13 @@ def test_every_input_path_uploads_the_catalog_reference(tmp_path, monkeypatch):
                     "images": [mid], "duration": 5}).status_code == 200
     assert seen["params"]["i2vPro"]["mediaId"] == mid, "i2v should pass the catalog id through"
 
-    # R2V still uploads -- that path's requirement was measured separately and is unchanged.
+    # R2V passes through too (probe 2026-08-22: its field accepts catalog ids). The upload
+    # survives only as the invalid_*_media_id fallback, covered by its own test below.
     seen.pop("params", None)
     assert cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x",
                     "images": [mid], "duration": 5}).status_code == 200
-    assert seen["params"]["referenceVideo"]["referenceImageMediaIds"] == ["999000111222"]
+    assert seen["params"]["referenceVideo"]["referenceImageMediaIds"] == [mid], (
+        "R2V should pass the catalog id through")
 
     # 2. fix
     cli.post("/api/fix", json={"source": mid, "boxes": [{"x": 1, "y": 1, "w": 2, "h": 2}]})
@@ -917,3 +923,116 @@ def test_mode_can_never_ride_absent_on_the_video_spend_path():
     for good in ("basic", "professional"):
         p = core.build_video_parameters("p", media_id="1", model="v4.0.1", mode=good)
         assert p["i2vPro"]["mode"] == good
+
+def test_r2v_invalid_reference_image_media_id_falls_back_to_upload(tmp_path, monkeypatch):
+    """R2V tries the catalog id FIRST (probe 2026-08-22); if PixAI answers with R2V's OWN error
+    name, invalid_reference_image_media_id, the route uploads and retries exactly once -- the
+    same insurance i2v has for invalid_media_id. Pins the R2V-specific error string, because the
+    fallback used to be gated to i2v only and would have re-raised this."""
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    calls, uploaded, submitted = [], [], {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media",
+                        lambda session, path, **k: uploaded.append(str(path)) or "999000111222")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    def _submit(session, params):
+        calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
+        if len(calls) == 1:
+            raise core.PixAIError("GraphQL error: invalid_reference_image_media_id")
+        submitted.update(params)
+        return "task-r2v"
+    monkeypatch.setattr(core, "submit_generation", _submit)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert calls[0] == [mid], "the catalog id must be TRIED first"
+    assert uploaded, "invalid_reference_image_media_id did not trigger the upload fallback"
+    assert submitted["referenceVideo"]["referenceImageMediaIds"] == ["999000111222"]
+    assert len(calls) == 2, "expected exactly one retry, not a loop"
+
+def test_r2v_fallback_keeps_first_pass_uploads_for_mixed_shots(tmp_path, monkeypatch):
+    """A Loom R2V shot routinely mixes a catalog id with a data: thumbnail. On the fallback,
+    ONLY the catalog id is re-resolved through the upload path; the thumbnail keeps the id
+    its first-pass upload produced. The fallback used to re-run the RAW payload, throwing
+    the thumbnail upload away and sending the base64 blob as a media id (adversarial
+    review 2026-08-22)."""
+    import base64
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    thumb = "data:image/png;base64," + base64.b64encode(bytes([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]) + b"" * 32).decode()
+    calls, submitted, n = [], {}, [0]
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    def _upload(session, path, **k):
+        n[0] += 1
+        return "UP%d" % n[0]
+    monkeypatch.setattr(core, "upload_media", _upload)
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+
+    def _submit(session, params):
+        calls.append(list(params.get("referenceVideo", {}).get("referenceImageMediaIds") or []))
+        if len(calls) == 1:
+            raise core.PixAIError("GraphQL error: invalid_reference_image_media_id")
+        submitted.update(params)
+        return "task-mixed"
+    monkeypatch.setattr(core, "submit_generation", _submit)
+
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={
+        "mode": "R2V", "prompt": "x", "images": [mid, thumb], "duration": 5})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert calls[0] == [mid, "UP1"], "first pass: catalog id through, thumbnail uploaded"
+    second = calls[1]
+    assert second[0] == "UP2", "fallback must re-resolve the catalog id via upload"
+    assert second[1] == "UP1", "fallback must REUSE the thumbnail's first-pass upload"
+    assert not any(s.startswith("data:") for s in second), "raw base64 must never be sent as a media id"
+    assert len(calls) == 2
+
+
+def test_loom_generate_both_submits_rejected_is_exactly_two_posts_then_error(tmp_path, monkeypatch):
+    """The fallback is exactly-once: if the retry is ALSO rejected, the route stops at two
+    submits and reports the error -- never a loop. Spend guard."""
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    calls = []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", lambda session, path, **k: "999000111222")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    def _submit(session, params):
+        calls.append(1)
+        raise core.PixAIError("GraphQL error: invalid_reference_image_media_id")
+    monkeypatch.setattr(core, "submit_generation", _submit)
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
+    assert len(calls) == 2, "expected exactly two submits (try + one retry), got %d" % len(calls)
+    assert r.get_json().get("error"), "a double rejection must surface as an error"
+
+
+def test_loom_generate_lost_response_never_retries(tmp_path, monkeypatch):
+    """THE double-spend guard. A lost response (read timeout / dropped connection / 502) is
+    NOT a PixAIError: the task may already have been created and CHARGED, so the route must
+    submit exactly ONCE and must not upload-and-retry. Only a GraphQL rejection PixAI
+    actually answered (a PixAIError carrying invalid_*_media_id) may retry."""
+    import requests
+    from moonglade_gallery import create_app
+    from tests.conftest import login_test_client
+    mid = _seed_one(tmp_path)
+    calls, uploaded = [], []
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "upload_media", lambda session, path, **k: uploaded.append(1) or "x")
+    monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
+    def _submit(session, params):
+        calls.append(1)
+        raise requests.ReadTimeout("read timed out")
+    monkeypatch.setattr(core, "submit_generation", _submit)
+    cli = login_test_client(create_app(tmp_path))
+    r = cli.post("/api/loom/generate", json={"mode": "R2V", "prompt": "x", "images": [mid], "duration": 5})
+    assert len(calls) == 1, "a lost response must NEVER be retried (double-spend), got %d submits" % len(calls)
+    assert uploaded == [], "a lost response must not trigger the upload fallback"
+    assert r.get_json().get("error")
