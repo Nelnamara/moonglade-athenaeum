@@ -104,3 +104,10 @@ missing ffprobe cost the Loom export its audio track without costing it the file
 still out of a clip. General, not last-frame-only — an explicit timestamp of `0.0` yields
 the *first* frame, and a trim's out-point yields the frame the cut actually ends on. Nothing
 else extracts frames.
+**Route tier** — the permission level a web route requires, declared on the route itself as
+`@tier(PUBLIC)`, `@tier(LOGIN)` or `@tier(LOCALHOST)` (a split route writes
+`@tier(LOGIN, POST=LOCALHOST)`). *Public* is reachable with no session at all; *login* is any
+signed-in session, local or LAN; *localhost* is a signed-in session whose request also came
+from the serving machine's own loopback address. One `before_request` gate reads the
+declaration off the endpoint and enforces all three, and an app whose routes do not all
+declare one refuses to start.
