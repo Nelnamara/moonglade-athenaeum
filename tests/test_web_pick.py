@@ -1910,9 +1910,9 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     """The Loom's Image / Edit / Reference tabs now price their REAL submit body through
     /api/price before spending (confirmSpend, the same fail-closed gate the video shots use).
     Each client shape must route to a priceable params object. If a key were wrong,
-    _params_and_nocard returns a `note` (params None), price_task is never called, and the
-    client guardrail degrades to a permanent "couldn't verify the cost" that can never show
-    the true credits/free-card state -- exactly the silent-spend seam this closes.
+    core.build_request returns a `note` (parameters None), price_task is never called, and
+    the client guardrail degrades to a permanent "couldn't verify the cost" that can never
+    show the true credits/free-card state -- exactly the silent-spend seam this closes.
 
     Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
     cost assertion drops from 1200 to None."""
@@ -1921,9 +1921,12 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
     # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
-    # version the same way /api/generate does. Stub that resolve so the test needs no network.
-    monkeypatch.setattr(core, "resolve_version_meta",
-                        lambda s, mid: {"version_id": "ver_" + str(mid)})
+    # version the same way /api/generate does -- literally the same way now, through
+    # core.model_version_resolver, so this pins list_model_versions (the validating resolve
+    # /api/generate always used) rather than the weaker rows[0] resolve_version_meta the
+    # price route used to run on its own. Stubbed so the test needs no network.
+    monkeypatch.setattr(core, "list_model_versions",
+                        lambda s, mid: [{"version_id": "ver_" + str(mid)}])
     cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
                                          created_at="2025-01-01T00:00:00")])
 

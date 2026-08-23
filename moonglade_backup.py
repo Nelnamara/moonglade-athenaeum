@@ -51,6 +51,7 @@ import sys
 import threading
 import time
 from collections import defaultdict, Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
@@ -8217,6 +8218,513 @@ def submit_fixer(session, media_id, boxes):
     if not tid:
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
     return str(tid)
+
+# =============================================================================
+# ONE PAYLOAD ROAD -- price and submit build the same dict
+# =============================================================================
+# Every create surface used to reach a PixAI `parameters` dict by a road of its
+# own: /api/price through the gallery's `_params_and_nocard`, and each create
+# route through its own builder call, its own `_apply_kaisuuken`, its own
+# mutation. Two roads to one number is how a cost badge comes to quote a job
+# that is not the one about to be paid for -- the hazard already written down at
+# /api/generate ("the badge must quote the shape that will actually submit").
+#
+# The interface is three names, and they sit here, right behind the builders,
+# because that is the only place both a quote and a spend can see the same dict:
+#
+#   build_request(payload, ...) -> GenerationRequest    the ONLY producer
+#   price(session, req)  -> dict                        READ-ONLY, spends nothing
+#   submit(session, req) -> dict                        the ONE spend choke
+#
+# `price` and `submit` both read `req.parameters` and neither ever rebuilds it,
+# so a quote and a spend inside one request describe the same job by
+# construction, not by two pieces of code agreeing. A caller cannot submit a
+# shape that was never quotable, because `build_request` is the only place a
+# shape comes from and the mode dispatch lives there exactly once.
+#
+# It is also the one place READ_ONLY and the free card are decided. Before this,
+# each web route called `_apply_kaisuuken` (a real network call) and only THEN
+# reached `submit_generation`'s READ_ONLY guard -- the same fail-open ordering
+# the four CLI runners were fixed for on 2026-07-21, still live on the web side.
+# `submit` checks first and matches nothing else.
+#
+# The CLI runners (`run_generate`, `run_generate_video`, `run_edit_image`, ...)
+# deliberately keep their own flow for now: they carry preview/--confirm/--dump-
+# params behaviour that is not a web payload's, and folding them in is its own
+# increment.
+
+
+@dataclass
+class GenerationRequest:
+    """One create request: the exact dict PixAI will receive, plus the few
+    route-level facts the payload carries that a submit needs.
+
+    `parameters` is THE object -- price() reads it, submit() sends it, nothing
+    rebuilds it in between. `None` means the payload was not enough to build a
+    shape, and `note` says what is missing in the cost badge's own voice.
+
+    mode              "image" | "edit" | "fix" | "video" | "enhance"
+    parameters        createGenerationTask `parameters`, or None (see `note`)
+    no_card           skip the free-card match (forced True for a Fix)
+    note              why `parameters` is None -- rendered by the badge
+    price_note        set when the shape is REAL but must not be priced: an
+                      enhance/panelplugin task is priced by its workflow id,
+                      which is deliberately not in _PRICE_SCALARS, so pricing
+                      the workflow-less shape that survives the allowlist
+                      returns a confident WRONG number. No number is the honest
+                      answer until that is measured live.
+    media_id / boxes  the Fix's own submit body: POST /v2/task/fixer takes
+                      {mediaId, boxes} and never sees `parameters` (those are
+                      the synthesized chat.fixer shape, built for pricing only).
+    model_version_id  the RESOLVED model version an image gen will submit --
+                      the one fact a route needs to tell "no model picked" from
+                      "the builder refused something".
+    lora_version_ids  the LoRAs actually going out, for the per-account cap and
+                      the LoRA telemetry.
+    adjusted          the clamp receipt: [{field, asked, used}] for every clamp
+                      that FIRED. Clamping is substitution on a paid path, so
+                      the route hands it back in the response rather than
+                      charging for a different generation in silence.
+    """
+    mode: str = "image"
+    parameters: dict = None
+    no_card: bool = False
+    note: str = None
+    price_note: str = None
+    media_id: str = ""
+    boxes: list = field(default_factory=list)
+    model_version_id: str = ""
+    lora_version_ids: list = field(default_factory=list)
+    adjusted: list = field(default_factory=list)
+
+
+@dataclass
+class RequestResolver:
+    """The lookups `build_request` cannot do on its own, supplied by the caller.
+
+    model_version(model_id, client_version_id) -> version id   -- needs a session
+    preset(user, name) -> banked Toolbox preset dict or None   -- per-account store
+    media_id(value)    -> an id PixAI accepts as an INPUT      -- uploads; SUBMIT only
+
+    `media_id` is deliberately absent when pricing. /api/price fires on every
+    keystroke in the drawer, and resolving there would upload the same file once
+    per character; a quote needs the SHAPE, not an upload-kind id.
+    """
+    model_version: object = None
+    preset: object = None
+    media_id: object = None
+
+
+def model_version_resolver(session):
+    """The ONE model_id -> version_id rule, so a quote and a spend can never
+    resolve a picked model differently.
+
+    A client version_id is honored IF it names one of model_id's own real
+    versions (PixAI's model cards offer a version picker and so does ours);
+    otherwise -- absent, stale from a fast model switch, or belonging to a
+    DIFFERENT model entirely -- it falls back to the newest. A raw client
+    version_id is never trusted blind: that is what once landed generations on
+    PixAI as 'Unknown model'. With no model_id at all the client's version_id
+    stands unchanged (back-compat), and a model that resolves to nothing leaves
+    it untouched rather than inventing one.
+
+    /api/price used to run a DIFFERENT, weaker resolve of its own (rows[0] via
+    resolve_version_meta, and only when the payload carried no version_id and no
+    mode at all), which is precisely a badge quoting one model while the submit
+    sent another.
+    """
+    def _resolve(model_id, client_version_id=""):
+        mid = str(model_id or "").strip()
+        vid = str(client_version_id or "").strip()
+        if not mid:
+            return vid
+        versions = list_model_versions(session, mid)
+        chosen = next((v for v in versions if v.get("version_id") == vid),
+                      None) if vid else None
+        if chosen:
+            return chosen["version_id"]
+        if versions:
+            return versions[0]["version_id"]
+        return vid
+    return _resolve
+def _gen_args_from_web_payload(p):
+    """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
+    feeds to _gen_parameters -- so web + CLI build identical params (one source
+    of truth). Clamped to safe ranges, and every clamp that actually fired is listed on
+    the returned namespace as `.clamped` = [{field, asked, used}] so the route can tell
+    the caller its request was rewritten instead of charging for the difference."""
+    from types import SimpleNamespace
+    p = p or {}
+    def num(k, d, cast=int):
+        try:
+            return cast(p.get(k, d))
+        except (TypeError, ValueError):
+            return d
+    # "Clamped to safe ranges" was, until this existed, true of `count` alone: width,
+    # height, steps and cfg went through num() with no ceiling and straight into a real
+    # paid submit, because _gen_parameters only FLOORS width/height to 64 (via
+    # _dim) and caps nothing at all. /api/generate is LOGIN-tier on purpose -- any
+    # signed-in LAN device may spend -- so the drawer's own HTML min/max attributes are
+    # the only bound a well-behaved client honours and a hand-rolled POST honours none:
+    # {"width": 999999999, "steps": 999999} reached PixAI, priced at whatever that
+    # produces. Clamp here, where the docstring promises it.
+    #
+    # The ceilings are read off the drawer's OWN controls, not invented:
+    #   width/height  64..4096  -- #gen-cw / #gen-ch (min=64 max=4096 step=8), and the
+    #                              drawer's d8() already clamps to exactly that before
+    #                              it POSTs, so this is the same number twice
+    #   steps         1..150    -- #gen-steps, and gateField()'s defMin/defMax
+    #   cfg           1..30     -- #gen-cfg, and gateField()'s defMin/defMax
+    # Same idiom _gen_parameters uses for the Hires knobs ("bounds read off the
+    # live dialog's own controls: strength 0.01-0.99, steps 1-50").
+    #
+    # These are NOT provably the widest the UI can emit, and an earlier draft of this
+    # comment claimed they were ("a model publishing tighter `restrictions` narrows the
+    # browser field further"). gateField() REPLACES the field's min/max with whatever
+    # `restrictions` carries rather than clipping them, and `restrictions` is live PixAI
+    # data -- so a model publishing samplingSteps.max = 200 would widen the drawer's own
+    # control and the drawer would legitimately POST 200.
+    #
+    # Which is exactly why a clamp that FIRES is recorded instead of applied in silence.
+    # Clamping is substitution on a paid path: the caller asked for one generation and
+    # is charged for a different one, and doing that without a word is a worse failure
+    # than the absurd value the clamp exists to refuse -- the money is gone either way,
+    # and only the version that says so tells you what it bought. `adjusted` is that
+    # receipt; /api/generate hands it back in the response (see api_generate). No
+    # price/charge split comes of it either way: /api/price builds its params through
+    # this same function, so the badge already quotes the clamped request.
+    adjusted = []
+
+    def clamp(field, v, lo, hi):
+        c = max(lo, min(hi, v))
+        if c != v:
+            adjusted.append({"field": field, "asked": v, "used": c})
+        return c
+    loras = []
+    for lo in (p.get("loras") or []):
+        vid = str((lo or {}).get("version_id") or "").strip()
+        if vid:
+            loras.append((vid, (lo or {}).get("weight", 0.7)))
+    seed_raw = str(p.get("seed") or "").strip()
+    hp = p.get("high_priority") in (True, "1", "true", "on")
+    return SimpleNamespace(
+        params_json="", prompt=(p.get("prompt") or "").strip(),
+        negative=(p.get("negative") or "").strip(),
+        model=(p.get("version_id") or "").strip(),
+        width=clamp("width", num("width", 512), 64, 4096),
+        height=clamp("height", num("height", 512), 64, 4096),
+        steps=clamp("steps", num("steps", 25), 1, 150),
+        cfg=clamp("cfg", num("cfg", 7, float), 1.0, 30.0),
+        count=clamp("count", num("count", 1), 1, 4),
+        # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
+        # members-only); core's submit downgrades that to Low on its own if PixAI
+        # says this account isn't entitled, so an expired membership no longer
+        # breaks every generate/edit/upscale at once.
+        priority=(PRIORITY_HIGH if hp else PRIORITY_TURBO),
+        mode=(p.get("mode") or "auto"),
+        seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
+        lora=loras,
+        # .lower() matters: a JSON `false` arrives as Python False, and
+        # str(False) is "False" -- which did NOT match the lowercase tuple, so
+        # every explicitly-disabled prompt helper was submitted as ENABLED.
+        # Found 2026-07-29 reviewing the pilot's port; it bit the classic
+        # drawer's unchecked box identically.
+        prompt_helper=(str(p.get("prompt_helper", "1")).lower()
+                       not in ("0", "false", "off", "none")),
+        ref_media_id=str(p.get("ref_media_id") or "").strip(),
+        ref_strength=num("ref_strength", 0.55, float),
+        # Upscale + boosters. num() returns its default for a missing/blank value, so
+        # None here means "the drawer's Upscale control is Off" and the builder omits
+        # every one of these keys -- an absent control must not change the submit.
+        enlarge=num("enlarge", None, float),
+        enlarge_model=str(p.get("enlarge_model") or "").strip(),
+        upscale=num("upscale", None, float),
+        upscale_denoising_strength=num("upscale_denoise", None, float),
+        upscale_denoising_steps=num("upscale_denoise_steps", None, int),
+        face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
+        quality_tag=str(p.get("quality_tag") or "").strip(),
+        kaisuuken_id="", no_card=bool(p.get("no_card")),
+        # _gen_parameters reads named attributes only, so carrying the receipt on
+        # the namespace costs the submit shape nothing and keeps it beside the values it
+        # describes -- a caller cannot pick up the args and lose the record of what was
+        # changed to make them.
+        clamped=adjusted)
+
+
+def _edit_parameters_from_payload(p, user, resolve):
+    """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
+    catalog media_id (the image being edited). A `preset` name swaps in a locally
+    banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
+    `user`'s own per-account presets through the caller's `resolve.preset`.
+    Returns None if no source (or a preset name that isn't banked).
+
+    `resolve.media_id` is present on a real submit and deliberately absent when
+    pricing. With it, every source id is run through the caller's resolver -- a
+    catalog id is a generation OUTPUT and PixAI refuses it as an input. Without
+    it, ids are left alone: /api/price only needs the SHAPE to compute a cost,
+    and uploading on every cost check would upload the same file repeatedly
+    while the user types."""
+    p = p or {}
+    src = str(p.get("source") or "").strip()
+    if not src:
+        return None
+    instruction = (p.get("instruction") or "").strip()
+    scene_id, model_id = "", ""
+    preset_name = str(p.get("preset") or "").strip()
+    if preset_name:
+        pre = resolve.preset(user, preset_name) if resolve.preset else None
+        if not pre:
+            return None
+        instruction = pre.get("prompt") or instruction
+        scene_id = pre.get("scene_id") or ""
+        model_id = pre.get("model_id") or ""
+    # A preset pins its own model; otherwise resolve from the Edit-card model picker.
+    if not model_id:
+        model_id = edit_model_id(p.get("edit_model") or "") or EDIT_PRO_MODEL_ID
+    # quality: omitted (passed "") for models with no quality option (Reference Pro);
+    # default medium only when the client sent no quality key at all.
+    q = p.get("quality")
+    if q is None:
+        q = "medium"
+    res, q, asp = clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
+                                    (p.get("aspect") or "3:4"))   # never send an invalid knob
+    kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
+                  model_id=model_id)
+    # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
+    # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
+    media = p.get("sources")
+    media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
+    if not media:
+        media = [src]
+    spec = edit_model_by_id(model_id)
+    if spec:
+        media = media[:spec["max_refs"]] or [src]
+    if resolve.media_id is not None:       # real submit -- see the docstring
+        media = [resolve.media_id(m) for m in media]
+    return build_chat_edit_parameters(instruction, media, **kwargs)
+
+
+# An enhance/panelplugin task is priced by its workflow id, which is deliberately NOT in
+# _PRICE_SCALARS: pricing the workflow-less shape that survives the allowlist returns a
+# confident WRONG number, so no number is the honest answer until it is measured live.
+_ENHANCE_PRICE_NOTE = "couldn't verify the cost of an AI preset yet"
+
+# The READ_ONLY refusal wording per road -- the same sentences submit_generation and
+# submit_fixer raise, so moving the guard earlier did not change what a user reads.
+_SUBMIT_ACTIONS = {"fix": "submit a hand/face fix (spends credits)"}
+_SUBMIT_ACTION_DEFAULT = "submit a generation (spends credits)"
+
+
+def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None):
+    """Turn a web payload into the ONE GenerationRequest that both /api/price and the
+    create routes ride. The mode dispatch lives here and nowhere else.
+
+    `mode` pins the road when the CALLER knows it -- a create route is single-purpose,
+    and /api/generate must build an image gen whatever the payload says. It matters on a
+    spend path: `mode` is overloaded in the payload itself (the image road reads it as
+    the inferenceProfile quality setting, "auto"/"lite"/"pro"/...), so an unpinned
+    {"mode": "I2V"} POSTed at /api/generate would otherwise build and pay for a VIDEO.
+    Omit it and the road is read off the payload -- that is /api/price, the one caller
+    that legitimately serves every road.
+
+    `is_member` is the same entitlement the submit applies, so a badge cannot quote a
+    price for a members-only option that will be stripped before it is sent. `resolve`
+    carries the lookups this cannot do itself (see RequestResolver).
+
+    Raises PixAIError when a BUILDER refuses (asking for both upscale methods at once, an
+    unknown video mode): that is a real refusal with a real message, and each caller
+    already renders one -- the badge as its note, a create route as its logged failure.
+    A payload that is merely INCOMPLETE is not an error: it comes back with `note` set and
+    `parameters` None."""
+    p = payload or {}
+    rs = resolve if resolve is not None else RequestResolver()
+    road = str(mode or p.get("mode") or "").strip()
+    no_card = bool(p.get("no_card"))
+
+    if road == "edit":
+        params = _edit_parameters_from_payload(p, user, rs)
+        return GenerationRequest(mode="edit", parameters=params, no_card=no_card,
+                                 note=None if params else "pick an image to edit")
+
+    if road == "fix":
+        # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
+        # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
+        # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
+        # shape (see its docstring for the measurement). `parameters` is therefore the
+        # PRICE shape only; `media_id` + `boxes` are what actually go out, which is why
+        # submit() reads those, and a shape this could not synthesize never blocks a
+        # submit -- submit_fixer runs the same clean_fix_boxes and is the real guard.
+        src = str(p.get("source") or "").strip()
+        if src and rs.media_id is not None:
+            src = str(rs.media_id(src) or src)
+        boxes = list(p.get("boxes") or [])
+        # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
+        # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
+        # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
+        # synthesized params. Letting the card check run would paint the badge emerald
+        # "FREE -- a card covers this" over an action about to charge full credits.
+        if not src:
+            return GenerationRequest(mode="fix", no_card=True, boxes=boxes,
+                                     note="pick an image to fix")
+        try:
+            params = build_fixer_price_parameters(src, boxes)
+        except PixAIError:
+            return GenerationRequest(mode="fix", no_card=True, media_id=src, boxes=boxes,
+                                     note="drag a box over a hand or face")
+        return GenerationRequest(mode="fix", parameters=params, no_card=True,
+                                 media_id=src, boxes=boxes)
+
+    if road == "video" or road in ("I2V", "FLF", "R2V"):
+        shot = str(p.get("mode") or "").strip().upper()
+        if shot not in ("I2V", "FLF", "R2V"):
+            shot = "R2V"                   # the Loom's own default for an unnamed shot
+        imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
+        # .isdigit() on the video/audio refs is the SUBMIT's filter, and pricing uses it
+        # too now: a non-numeric ref was priced and then dropped before the mutation,
+        # which is a quote for a different job than the spend.
+        vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
+        auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
+        # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
+        # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
+        # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
+        # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
+        has_ref = imgs or (shot == "R2V" and (vids or auds))
+        if not has_ref:
+            return GenerationRequest(mode="video", no_card=no_card,
+                                     note="pick a source image")
+        params = build_shot_video_params(
+            shot, (p.get("prompt") or "").strip(), image_ids=imgs,
+            video_ids=vids, audio_ids=auds,
+            duration=p.get("duration") or 5,
+            generate_audio=bool(p.get("generate_audio") or p.get("audio")),
+            model=(p.get("video_model") or ""),
+            camera_movement=(p.get("camera_movement") or ""),
+            quality=(p.get("quality") or "professional"),
+            audio_language=(p.get("audio_language") or "english"),
+            negative=(p.get("negative") or "").strip(),
+            is_private=bool(p.get("is_private")),
+            use_prompt_helper=bool(p.get("prompt_helper")))
+        return GenerationRequest(mode="video", parameters=params, no_card=no_card)
+
+    if road == "enhance":
+        src = str(p.get("source") or "").strip()
+        if src and rs.media_id is not None:
+            src = str(rs.media_id(src) or src)
+        wid = str(p.get("workflow_id") or "").strip()
+        wname = str(p.get("workflow_name") or "").strip()
+        if not src:
+            return GenerationRequest(mode="enhance", no_card=no_card,
+                                     note="pick an image first",
+                                     price_note=_ENHANCE_PRICE_NOTE)
+        if not (wid or wname):
+            return GenerationRequest(mode="enhance", no_card=no_card, media_id=src,
+                                     note="pick an AI preset",
+                                     price_note=_ENHANCE_PRICE_NOTE)
+        # workflow_name wins inside the builder when both are set; a preset is pinned to
+        # exactly one of the two (numeric id OR author/workflow name) in the caller.
+        # Change Emotion carries a control: pass the picked expression, and ONLY for that
+        # preset (an unknown input on the others would be a stray arg on a spend submit).
+        # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants
+        # the danbooru TAG STRING, so translate key->tag here (unknown key falls back to
+        # itself).
+        emotion_key = str(p.get("emotion") or "").strip()
+        emotion_tag = ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
+        extra = ({ENHANCE_EMOTION_ARG: emotion_tag}
+                 if emotion_tag and wname == ENHANCE_EMOTION_WORKFLOW else None)
+        params = build_panelplugin_parameters(src, wid, workflow_name=wname,
+                                              extra_inputs=extra)
+        return GenerationRequest(mode="enhance", parameters=params, no_card=no_card,
+                                 media_id=src, price_note=_ENHANCE_PRICE_NOTE)
+
+    # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
+    args = _gen_args_from_web_payload(p)
+    if rs.model_version is not None:
+        args.model = rs.model_version(p.get("model_id") or "", args.model)
+    lora_ids = [vid for vid, _w in (args.lora or [])]
+    if not args.model:
+        return GenerationRequest(mode="image", no_card=args.no_card, note="pick a model",
+                                 lora_version_ids=lora_ids, adjusted=args.clamped)
+    # Same entitlement the submit applies, so the badge cannot quote a price for a
+    # members-only option that will be stripped before it is sent.
+    args.is_member = is_member
+    return GenerationRequest(mode="image", parameters=_gen_parameters(args),
+                             no_card=args.no_card, model_version_id=args.model,
+                             lora_version_ids=lora_ids, adjusted=args.clamped)
+
+
+def price(session, req):
+    """The live cost + free-card verdict for a request. READ-ONLY -- it creates nothing
+    and spends nothing, and the object it prices is the very `req.parameters` a submit
+    would send, which is the whole point of this road.
+
+    Fails CLOSED in both directions: an unbuildable payload is `cost: None` with the note,
+    never a `free` a caller could act on; and `free` is card_covers(best), NOT bool(best)
+    -- a multi-ticket video can MATCH a card the account holds too few tickets of (issue
+    #15), and that case is paid at the full price because the site attaches nothing. One
+    predicate shared with the CLI preview and _apply_kaisuuken, so this can never say FREE
+    while the submit charges.
+
+    `cards` is the HELD count (kept under its old name for the badge's "(N left)"); the
+    job's ticket cost is `cards_needed`, and `card_short` is the honest flag the badge
+    renders as "not enough -- costs the full price"."""
+    if req.parameters is None:
+        return {"cost": None, "free": False, "note": req.note}
+    if req.price_note:
+        return {"cost": None, "free": False, "note": req.price_note}
+    cost = price_task(session, req.parameters)
+    best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
+    covered = card_covers(best)
+    return {"cost": cost, "free": covered,
+            "cards": (best or {}).get("total"),
+            "cards_held": (best or {}).get("total"),
+            "cards_needed": (best or {}).get("consumeAmount"),
+            "card_short": bool(best) and not covered,
+            "card_name": (best or {}).get("name"),
+            # The Loom's batch tally keys its per-template ticket pool on this (falls
+            # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
+            "card_template": (best or {}).get("templateId"),
+            "card_expires": (best or {}).get("expiresAt")}
+
+
+def submit(session, req, *, no_card=None):
+    """Spend: READ_ONLY guard -> free card -> the one mutation this road's mode uses.
+    Returns {"task_id": ...}.
+
+    The READ_ONLY check is FIRST, ahead of the card match, and that ordering is the point
+    of putting it here. `_apply_kaisuuken` calls /v2/kaisuuken/check -- a real network
+    call on the account -- and every web create route used to make it before reaching
+    submit_generation's own guard, so a READ_ONLY install still talked to PixAI before
+    refusing. That is the identical fail-open the four CLI runners were fixed for on
+    2026-07-21; the web side kept it until this became one choke.
+
+    `no_card` overrides the request's own flag for a caller with a reason to (the
+    request's flag is what the payload asked for). A Fix ignores both: POST /v2/task/fixer
+    has no kaisuukenId field at all, so no card can ever cover one, and this never runs
+    the check that would tell a user otherwise."""
+    _check_read_only(_SUBMIT_ACTIONS.get(req.mode, _SUBMIT_ACTION_DEFAULT))
+    if req.mode == "fix":
+        # A Fix's `parameters` are the PRICE shape and may legitimately be None while the
+        # submit is still good (a box clean_fix_boxes would drop is not this function's
+        # call to make -- submit_fixer runs the same cleaner and is the real guard). What
+        # it cannot do without is the two fields /v2/task/fixer actually takes.
+        if not req.media_id or not req.boxes:
+            raise PixAIError(req.note or "nothing to submit")
+        return {"task_id": submit_fixer(session, req.media_id, req.boxes)}
+    if req.parameters is None:
+        raise PixAIError(req.note or "nothing to submit")
+    from types import SimpleNamespace
+    skip = req.no_card if no_card is None else bool(no_card)
+    # Passing the flag through rather than branching around the call keeps
+    # _apply_kaisuuken's own precedence (explicit id > no_card > auto-match) and its
+    # spend log ("--no-card: this WILL spend credits") the single source of both.
+    _apply_kaisuuken(session, req.parameters,
+                     SimpleNamespace(kaisuuken_id="", no_card=skip))
+    return {"task_id": submit_generation(session, req.parameters)}
+
+
+# =============================================================================
+# end of the one payload road
+# =============================================================================
 
 
 _GEN_DONE = ("completed", "success", "succeeded", "done", "finished")

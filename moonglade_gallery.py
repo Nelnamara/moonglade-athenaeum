@@ -10135,109 +10135,29 @@ def create_app(out_dir: Path):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def _gen_args_from_payload(p):
-        """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
-        feeds to core._gen_parameters -- so web + CLI build identical params (one source
-        of truth). Clamped to safe ranges, and every clamp that actually fired is listed on
-        the returned namespace as `.clamped` = [{field, asked, used}] so the route can tell
-        the caller its request was rewritten instead of charging for the difference."""
-        from types import SimpleNamespace
-        import moonglade_backup as core          # module-local, like every other use here
-        p = p or {}
-        def num(k, d, cast=int):
-            try:
-                return cast(p.get(k, d))
-            except (TypeError, ValueError):
-                return d
-        # "Clamped to safe ranges" was, until this existed, true of `count` alone: width,
-        # height, steps and cfg went through num() with no ceiling and straight into a real
-        # paid submit, because core._gen_parameters only FLOORS width/height to 64 (via
-        # _dim) and caps nothing at all. /api/generate is LOGIN-tier on purpose -- any
-        # signed-in LAN device may spend -- so the drawer's own HTML min/max attributes are
-        # the only bound a well-behaved client honours and a hand-rolled POST honours none:
-        # {"width": 999999999, "steps": 999999} reached PixAI, priced at whatever that
-        # produces. Clamp here, where the docstring promises it.
-        #
-        # The ceilings are read off the drawer's OWN controls, not invented:
-        #   width/height  64..4096  -- #gen-cw / #gen-ch (min=64 max=4096 step=8), and the
-        #                              drawer's d8() already clamps to exactly that before
-        #                              it POSTs, so this is the same number twice
-        #   steps         1..150    -- #gen-steps, and gateField()'s defMin/defMax
-        #   cfg           1..30     -- #gen-cfg, and gateField()'s defMin/defMax
-        # Same idiom core._gen_parameters uses for the Hires knobs ("bounds read off the
-        # live dialog's own controls: strength 0.01-0.99, steps 1-50").
-        #
-        # These are NOT provably the widest the UI can emit, and an earlier draft of this
-        # comment claimed they were ("a model publishing tighter `restrictions` narrows the
-        # browser field further"). gateField() REPLACES the field's min/max with whatever
-        # `restrictions` carries rather than clipping them, and `restrictions` is live PixAI
-        # data -- so a model publishing samplingSteps.max = 200 would widen the drawer's own
-        # control and the drawer would legitimately POST 200.
-        #
-        # Which is exactly why a clamp that FIRES is recorded instead of applied in silence.
-        # Clamping is substitution on a paid path: the caller asked for one generation and
-        # is charged for a different one, and doing that without a word is a worse failure
-        # than the absurd value the clamp exists to refuse -- the money is gone either way,
-        # and only the version that says so tells you what it bought. `adjusted` is that
-        # receipt; /api/generate hands it back in the response (see api_generate). No
-        # price/charge split comes of it either way: /api/price builds its params through
-        # this same function, so the badge already quotes the clamped request.
-        adjusted = []
+    # --- the gallery's end of the one payload road ---------------------------------
+    # core.build_request is the only place a PixAI `parameters` dict is built for the web
+    # (see its section in moonglade_backup.py). These two supply the lookups it cannot do
+    # on its own, and they differ in EXACTLY one field, deliberately: a quote never
+    # resolves a source image.
 
-        def clamp(field, v, lo, hi):
-            c = max(lo, min(hi, v))
-            if c != v:
-                adjusted.append({"field": field, "asked": v, "used": c})
-            return c
-        loras = []
-        for lo in (p.get("loras") or []):
-            vid = str((lo or {}).get("version_id") or "").strip()
-            if vid:
-                loras.append((vid, (lo or {}).get("weight", 0.7)))
-        seed_raw = str(p.get("seed") or "").strip()
-        hp = p.get("high_priority") in (True, "1", "true", "on")
-        return SimpleNamespace(
-            params_json="", prompt=(p.get("prompt") or "").strip(),
-            negative=(p.get("negative") or "").strip(),
-            model=(p.get("version_id") or "").strip(),
-            width=clamp("width", num("width", 512), 64, 4096),
-            height=clamp("height", num("height", 512), 64, 4096),
-            steps=clamp("steps", num("steps", 25), 1, 150),
-            cfg=clamp("cfg", num("cfg", 7, float), 1.0, 30.0),
-            count=clamp("count", num("count", 1), 1, 4),
-            # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
-            # members-only); core's submit downgrades that to Low on its own if PixAI
-            # says this account isn't entitled, so an expired membership no longer
-            # breaks every generate/edit/upscale at once.
-            priority=(core.PRIORITY_HIGH if hp else core.PRIORITY_TURBO),
-            mode=(p.get("mode") or "auto"),
-            seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
-            lora=loras,
-            # .lower() matters: a JSON `false` arrives as Python False, and
-            # str(False) is "False" -- which did NOT match the lowercase tuple, so
-            # every explicitly-disabled prompt helper was submitted as ENABLED.
-            # Found 2026-07-29 reviewing the pilot's port; it bit the classic
-            # drawer's unchecked box identically.
-            prompt_helper=(str(p.get("prompt_helper", "1")).lower()
-                           not in ("0", "false", "off", "none")),
-            ref_media_id=str(p.get("ref_media_id") or "").strip(),
-            ref_strength=num("ref_strength", 0.55, float),
-            # Upscale + boosters. num() returns its default for a missing/blank value, so
-            # None here means "the drawer's Upscale control is Off" and the builder omits
-            # every one of these keys -- an absent control must not change the submit.
-            enlarge=num("enlarge", None, float),
-            enlarge_model=str(p.get("enlarge_model") or "").strip(),
-            upscale=num("upscale", None, float),
-            upscale_denoising_strength=num("upscale_denoise", None, float),
-            upscale_denoising_steps=num("upscale_denoise_steps", None, int),
-            face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
-            quality_tag=str(p.get("quality_tag") or "").strip(),
-            kaisuuken_id="", no_card=bool(p.get("no_card")),
-            # core._gen_parameters reads named attributes only, so carrying the receipt on
-            # the namespace costs the submit shape nothing and keeps it beside the values it
-            # describes -- a caller cannot pick up the args and lose the record of what was
-            # changed to make them.
-            clamped=adjusted)
+    def _price_resolver(core, gsession):
+        """For a QUOTE. Same model resolution and same per-account preset lookup as the
+        submit, and NO media resolver: _input_media_id uploads, and /api/price fires on
+        every keystroke in the drawer -- resolving here would upload the same file once
+        per character. A quote needs the SHAPE, not an upload-kind id."""
+        return core.RequestResolver(
+            model_version=core.model_version_resolver(gsession),
+            preset=lambda u, name: _load_presets(u).get(name))
+
+    def _submit_resolver(core, gsession):
+        """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
+        a generation OUTPUT, and PixAI refuses one as an input on the Edit and Fix paths
+        (the Loom's video routes resolve their own frames -- see loom_generate)."""
+        return core.RequestResolver(
+            model_version=core.model_version_resolver(gsession),
+            preset=lambda u, name: _load_presets(u).get(name),
+            media_id=lambda v: _input_media_id(core, gsession, v))
 
     _presets_lock = threading.Lock()
 
@@ -10277,55 +10197,6 @@ def create_app(out_dir: Path):
         if own.exists():
             return _read_presets_data(own)
         return _read_presets_data(_legacy_presets_path())
-
-    def _edit_params_from_payload(core, p, user, session=None):
-        """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
-        catalog media_id (the image being edited). A `preset` name swaps in a locally
-        banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
-        `user`'s own per-account presets. Returns None if no source.
-
-        `session` is REQUIRED for a real submit and deliberately omitted for pricing.
-        With it, every source id is run through _input_media_id -- a catalog id is a
-        generation OUTPUT and PixAI refuses it as an input. Without it, ids are left
-        alone: /api/price only needs the SHAPE to compute a cost, and uploading on every
-        cost check would upload the same file repeatedly while the user types."""
-        p = p or {}
-        src = str(p.get("source") or "").strip()
-        if not src:
-            return None
-        instruction = (p.get("instruction") or "").strip()
-        scene_id, model_id = "", ""
-        preset_name = str(p.get("preset") or "").strip()
-        if preset_name:
-            pre = _load_presets(user).get(preset_name)
-            if not pre:
-                return None
-            instruction = pre.get("prompt") or instruction
-            scene_id = pre.get("scene_id") or ""
-            model_id = pre.get("model_id") or ""
-        # A preset pins its own model; otherwise resolve from the Edit-card model picker.
-        if not model_id:
-            model_id = core.edit_model_id(p.get("edit_model") or "") or core.EDIT_PRO_MODEL_ID
-        # quality: omitted (passed "") for models with no quality option (Reference Pro);
-        # default medium only when the client sent no quality key at all.
-        q = p.get("quality")
-        if q is None:
-            q = "medium"
-        res, q, asp = core.clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
-                                             (p.get("aspect") or "3:4"))   # never send an invalid knob
-        kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id, model_id=model_id)
-        # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
-        # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
-        media = p.get("sources")
-        media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
-        if not media:
-            media = [src]
-        spec = core.edit_model_by_id(model_id)
-        if spec:
-            media = media[:spec["max_refs"]] or [src]
-        if session is not None:            # real submit -- see the docstring
-            media = [_input_media_id(core, session, m) for m in media]
-        return core.build_chat_edit_parameters(instruction, media, **kwargs)
 
     @app.route("/api/presets", methods=["GET", "POST"])
     def api_presets():
@@ -10487,83 +10358,6 @@ def create_app(out_dir: Path):
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
 
-    def _params_and_nocard(core, p, user, is_member=None):
-        """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
-        no_card, note). note is set (params None) when something's missing. `user` is
-        only consulted on the edit path (a preset lookup is per-account)."""
-        p = p or {}
-        if p.get("mode") == "edit":
-            params = _edit_params_from_payload(core, p, user)
-            return (params, bool(p.get("no_card")),
-                    None if params else "pick an image to edit")
-        if p.get("mode") == "fix":
-            # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
-            # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
-            # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
-            # shape (see its docstring for the measurement).
-            src = str(p.get("source") or "").strip()
-            if not src:
-                return None, True, "pick an image to fix"
-            try:
-                params = core.build_fixer_price_parameters(src, p.get("boxes") or [])
-            except core.PixAIError:
-                return None, True, "drag a box over a hand or face"
-            # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
-            # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
-            # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
-            # synthesized params. Letting the card check run would paint the badge emerald
-            # "FREE -- a card covers this" over an action about to charge full credits.
-            return params, True, None
-        if p.get("mode") in ("I2V", "FLF", "R2V"):
-            imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
-            vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
-            auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip()]
-            # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
-            # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
-            # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
-            # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
-            has_ref = imgs or (p["mode"] == "R2V" and (vids or auds))
-            if not has_ref:
-                return None, bool(p.get("no_card")), "pick a source image"
-            try:
-                params = core.build_shot_video_params(
-                    p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
-                    video_ids=vids, audio_ids=auds,
-                    duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
-                    model=(p.get("video_model") or ""),
-                    camera_movement=(p.get("camera_movement") or ""),
-                    quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"),
-                    negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")),
-                    use_prompt_helper=bool(p.get("prompt_helper")))
-            except core.PixAIError as e:
-                return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
-            return params, bool(p.get("no_card")), None
-        if p.get("mode") == "enhance":
-            # [MAJOR] An enhance/panelplugin task is priced by its workflow id, which is
-            # deliberately NOT in core._PRICE_SCALARS: pricing the workflow-less shape that would
-            # survive the allowlist returns a confident WRONG number. So we do NOT call price_task
-            # for enhance -- we return (None, ...) here, which api_price renders as cost:None
-            # ("couldn't verify the cost"). Adding the workflow-id scalar to the allowlist needs a
-            # live measurement first (a separately authorized step); until then, no number is the
-            # honest answer. Returning here also keeps an enhance payload from ever reaching the
-            # pricing endpoint (test_web_pick.py's enhance-price guard).
-            return None, bool(p.get("no_card")), "couldn't verify the cost of an AI preset yet"
-        args = _gen_args_from_payload(p)
-        if not args.model:
-            return None, args.no_card, "pick a model"
-        # Same entitlement the submit applies, so the badge cannot quote a price for a
-        # members-only option that will be stripped before it is sent.
-        args.is_member = is_member
-        try:
-            return core._gen_parameters(args), args.no_card, None
-        except core.PixAIError as e:
-            # Same shape as the I2V branch above: a builder refusal (asking for both
-            # upscale methods at once) becomes the badge's own note, not a 500.
-            return None, args.no_card, _redact_host_paths(str(e))[:140]
-
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
         caller can both log and return it in one line.
@@ -10623,8 +10417,15 @@ def create_app(out_dir: Path):
 
     @app.route("/api/price", methods=["POST"])
     def api_price():
-        """Live cost + free-card check for the drawer's current settings (generate OR
-        edit). Read-only (no spend). Login required (any session, local or LAN)."""
+        """Live cost + free-card check for the drawer's current settings (generate, edit,
+        fix, video or an AI preset). Read-only (no spend). Login required (any session,
+        local or LAN).
+
+        This route and every create route build their shape through the SAME
+        core.build_request, so the badge quotes the request that will actually submit --
+        it is not a second, price-flavoured road that happens to agree. /api/price is the
+        one caller that does NOT pin a mode: it serves every road, so the payload's own
+        `mode` picks one."""
         try:
             user = str(session.get("user") or "")
             # NOT `core, session = _gen_session()` -- session is assigned that way further
@@ -10634,44 +10435,16 @@ def create_app(out_dir: Path):
             # the PixAI API session distinctly, the same fix already applied in api_presets.
             core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
-            # Resolve a bare base model_id -> its current version, exactly as /api/generate
-            # does, so a caller that knows only the base model still gets a real cost +
-            # free-card check instead of a "pick a model" note. The Loom's Image tab is
-            # precisely that caller: its model picker emits {model_id, title} with no
-            # version_id, and its price check (confirmSpend) would otherwise always fall to
-            # "couldn't verify the cost". The web drawer already sends version_id, so this
-            # only fires for the model_id-only path.
-            if (not str(body.get("version_id") or "").strip()
-                    and str(body.get("model_id") or "").strip()
-                    and not body.get("mode")):
-                _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
-                if _vid:
-                    body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(
-                core, body, user, _account_is_member(core, gsession))
-            if params is None:
-                return jsonify({"cost": None, "free": False, "note": note})
-            cost = core.price_task(gsession, params)
-            best = None if no_card else core.match_kaisuuken(gsession, params, enrich=True)
-            # `free` is core.card_covers(best), NOT bool(best): a multi-ticket video can MATCH
-            # a card the account holds too few tickets of (issue #15), and that case is paid
-            # at the full price -- the site attaches nothing. One predicate shared with the
-            # CLI preview and _apply_kaisuuken so this badge can never say FREE while the
-            # submit charges. `cards` is the HELD count (kept under its old name for the
-            # badge's "(N left)"); the job's ticket cost is `cards_needed`, and `card_short`
-            # is the honest flag the badge renders as "not enough -- costs the full price".
-            covered = core.card_covers(best)
-            return jsonify({"cost": cost, "free": covered,
-                            "cards": (best or {}).get("total"),
-                            "cards_held": (best or {}).get("total"),
-                            "cards_needed": (best or {}).get("consumeAmount"),
-                            "card_short": bool(best) and not covered,
-                            "card_name": (best or {}).get("name"),
-                            # The Loom's batch tally keys its per-template ticket pool on
-                            # this (falls back to card_name when absent) -- see
-                            # loom-core.js tallyPricesDetailed.
-                            "card_template": (best or {}).get("templateId"),
-                            "card_expires": (best or {}).get("expiresAt")})
+            try:
+                req = core.build_request(body, user=user,
+                                         is_member=_account_is_member(core, gsession),
+                                         resolve=_price_resolver(core, gsession))
+            except core.PixAIError as e:
+                # A builder refusal (both upscale methods at once, an unknown video mode)
+                # becomes the badge's own note, not a 500 and not a number.
+                return jsonify({"cost": None, "free": False,
+                                "note": _redact_host_paths(str(e))[:140]})
+            return jsonify(core.price(gsession, req))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
 
@@ -10680,41 +10453,37 @@ def create_app(out_dir: Path):
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
         backup. Login required -- any session, local or LAN, deliberately: spending from a
         signed-in tablet is the point of the login. A matching free card is
-        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
+        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}.
+
+        The shape comes from core.build_request -- the same call /api/price makes -- and
+        goes out through core.submit, which is where READ_ONLY and the free card are
+        decided for every create route at once. What is left here is what only a route
+        knows: the entitlement read, the LoRA cap, telemetry, and the clamp receipt."""
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
-            args = _gen_args_from_payload(body)
-            # Authoritative model resolution: if the drawer sent the base model_id, resolve
-            # its REAL version list server-side and never trust the client's version_id blind.
-            # picker-parity-round2 (2026-07-24): the client's version_id is now honored IF it
-            # names one of model_id's own real versions (the version picker lets the owner
-            # choose a specific release, not just the latest) -- otherwise (absent, stale from
-            # a fast model switch, or belonging to a DIFFERENT model_id entirely) this falls
-            # back to the newest version, exactly like before this existed. Either way the
-            # client's raw version_id is NEVER submitted un-validated, which is what originally
-            # stopped gens landing as "Unknown model" + missing the feed. Falls back to the
-            # client version_id as-is only when no model_id was sent at all (back-compat).
-            _mid = str(body.get("model_id") or "").strip()
-            if _mid:
-                _client_vid = str(body.get("version_id") or "").strip()
-                _versions = core.list_model_versions(session, _mid)
-                _chosen = next((v for v in _versions if v.get("version_id") == _client_vid),
-                               None) if _client_vid else None
-                if _chosen:
-                    args.model = _chosen["version_id"]
-                elif _versions:
-                    args.model = _versions[0]["version_id"]
-            if not args.model:
-                return jsonify({"error": "pick a model first"}), 400
-            if not args.prompt:
-                return jsonify({"error": "enter a prompt"}), 400
             # Members-only options are dropped for an account PixAI reports as non-member.
-            # Set on the args (not inside the builder) so the CLI keeps its own path and the
-            # price call below can set the identical flag -- the badge must quote the shape
+            # Handed to the builder (not decided inside it) so the CLI keeps its own path
+            # and /api/price passes the identical flag -- the badge must quote the shape
             # that will actually submit.
             _ent = _entitlements(core, session)
-            args.is_member = _ent["is_member"]
+            # mode="image" pins the road: `mode` in THIS payload is the inferenceProfile
+            # quality setting ("auto"/"lite"/"pro"/...), not a road name, so an
+            # unpinned {"mode": "I2V"} POST here would otherwise build and pay for a video.
+            # `params` is bound for the failure log below, which reads it through
+            # locals().get() -- see _log_gen_failure.
+            req = core.build_request(body, mode="image", is_member=_ent["is_member"],
+                                     resolve=_submit_resolver(core, session))
+            params = req.parameters
+            # Authoritative model resolution happened inside build_request (see
+            # core.model_version_resolver): the client's version_id is honored only when
+            # it names one of model_id's own real versions, else the newest, and it is
+            # never submitted un-validated -- which is what originally stopped gens
+            # landing as "Unknown model" + missing the feed.
+            if not req.model_version_id:
+                return jsonify({"error": "pick a model first"}), 400
+            if not (body.get("prompt") or "").strip():
+                return jsonify({"error": "enter a prompt"}), 400
             # The per-generation LoRA cap was CLIENT-ONLY until 2026-07-28: both the gallery
             # drawer and the Loom disable their own submit button over the cap, and nothing
             # checked it here -- so any path that is not one of those two buttons (a stale
@@ -10724,18 +10493,14 @@ def create_app(out_dir: Path):
             # changes the picture he asked for, and a refusal costs nothing because no task
             # is created either way. Fails OPEN on an unknown cap.
             _cap = _ent["lora_cap"]
-            if _cap is not None and len(getattr(args, "lora", None) or []) > _cap:
+            if _cap is not None and len(req.lora_version_ids) > _cap:
                 return jsonify({"error": "Your account allows {} LoRA{} per generation — "
                                          "remove {} to continue.".format(
                                              _cap, "" if _cap == 1 else "s",
-                                             len(args.lora) - _cap)}), 400
-            params = core._gen_parameters(args)
-            core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
-            task_id = core.submit_generation(session, params)
+                                             len(req.lora_version_ids) - _cap)}), 400
+            task_id = core.submit(session, req)["task_id"]
             try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
-                lvids = [str((lo or {}).get("version_id") or "").strip()
-                         for lo in (body.get("loras") or [])]
-                lvids = [v for v in lvids if v]
+                lvids = req.lora_version_ids
                 if lvids:
                     telem_bump("lora_used", out_dir=out_dir)
                     telem_max("lora_stacked", len(lvids), out_dir=out_dir)
@@ -10744,7 +10509,7 @@ def create_app(out_dir: Path):
             except Exception:
                 pass
             out = {"task_id": task_id}
-            if getattr(args, "clamped", None):
+            if req.adjusted:
                 # A clamp fired: this submit is NOT the one that was asked for, and the
                 # caller has just been charged for it. Say so in the response rather than
                 # letting the substitution pass unremarked -- the whole hazard M20's clamp
@@ -10753,7 +10518,7 @@ def create_app(out_dir: Path):
                 # (the finding's own threat model) and the drawer itself, whose steps/cfg
                 # controls adopt a model's published `restrictions` verbatim and so can
                 # legitimately offer a number this clamp then rewrites.
-                out["adjusted"] = args.clamped
+                out["adjusted"] = req.adjusted
             return jsonify(out)
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -10763,9 +10528,11 @@ def create_app(out_dir: Path):
     def api_edit():
         """Instruct-edit an existing gallery image ('make it night'). Login required;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
-        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
+        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}.
+
+        Same road as the badge: core.build_request builds the `chat` shape /api/price
+        quoted, core.submit is the one READ_ONLY + free-card choke."""
         try:
-            from types import SimpleNamespace
             user = str(session.get("user") or "")
             # gsession, not `core, session = _gen_session()` -- see api_price's identical
             # comment: session is Flask's, reassigning it here would make every reference
@@ -10773,14 +10540,14 @@ def create_app(out_dir: Path):
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p, user, gsession)
+            req = core.build_request(p, mode="edit", user=user,
+                                     resolve=_submit_resolver(core, gsession))
+            params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            core._apply_kaisuuken(gsession, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(gsession, params)
+            task_id = core.submit(gsession, req)["task_id"]
             telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
@@ -10870,31 +10637,20 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
-            from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            wid = str(p.get("workflow_id") or "").strip()
-            wname = str(p.get("workflow_name") or "").strip()
-            if not src:
-                return jsonify({"error": "pick an image first"}), 400
-            if not (wid or wname):
-                return jsonify({"error": "pick an AI preset"}), 400
-            # workflow_name wins inside the builder when both are set; a preset is pinned to
-            # exactly one of the two (numeric id OR author/workflow name) in the caller.
-            # Change Emotion carries a control: pass the picked expression, and ONLY for that
-            # preset (an unknown input on the others would be a stray arg on a spend submit).
-            # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants the
-            # danbooru TAG STRING, so translate key->tag here (unknown key falls back to itself).
-            emotion_key = str(p.get("emotion") or "").strip()
-            emotion_tag = core.ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
-            extra = ({core.ENHANCE_EMOTION_ARG: emotion_tag}
-                     if emotion_tag and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
-            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname,
-                                                       extra_inputs=extra)
-            core._apply_kaisuuken(session, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
+            # Same road as every other create: build_request resolves the source image,
+            # translates the Change-Emotion control and calls build_panelplugin_parameters;
+            # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
+            # be covered by a card (measured 2026-08-18) -- the check simply returns no
+            # match -- but it costs nothing to ride the same choke and it is one fewer
+            # spend path with a guard of its own to get wrong.
+            req = core.build_request(p, mode="enhance",
+                                     resolve=_submit_resolver(core, session))
+            params = req.parameters          # bound for _log_gen_failure's locals().get()
+            if params is None:
+                return jsonify({"error": req.note}), 400
+            task_id = core.submit(session, req)["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
@@ -10902,7 +10658,8 @@ def create_app(out_dir: Path):
             # counts a workflowName preset too. The three producers fire from /api/task-status's
             # terminal-success branch via _fire_enhance_telemetry.
             with _enhance_pending_lock:
-                _enhance_pending[str(task_id)] = wname or wid
+                _enhance_pending[str(task_id)] = (str(p.get("workflow_name") or "").strip()
+                                                  or str(p.get("workflow_id") or "").strip())
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -11037,24 +10794,30 @@ def create_app(out_dir: Path):
     @app.route("/api/fix", methods=["POST"])
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
-        pixel coords. Login required; returns {task_id} for the async poller."""
+        pixel coords. Login required; returns {task_id} for the async poller.
+
+        The Fix is the one road whose submit body is NOT `parameters`: /v2/task/fixer takes
+        {mediaId, boxes}, so the request carries those and core.submit sends them. Its
+        `parameters` are the synthesized chat.fixer shape /api/price quotes off the same
+        request -- built here too, so the badge and the spend cannot describe different
+        boxes."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            boxes = p.get("boxes") or []
-            if not src:
+            req = core.build_request(p, mode="fix",
+                                     resolve=_submit_resolver(core, session))
+            if not req.media_id:
                 return jsonify({"error": "pick an image first"}), 400
-            if not boxes:
+            if not req.boxes:
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             # The exact body submit_fixer POSTs to /v2/task/fixer, named here so the failure
             # log below has the REQUEST SHAPE to report, the same way /api/generate and
-            # /api/edit hand it their `params`. Built from the route's own inputs rather
+            # /api/edit hand it their `params`. Built from the request's own inputs rather
             # than re-running clean_fix_boxes(), so nothing on the error path can itself
             # raise; a box the cleaner would have dropped is still worth seeing, because
             # "which boxes did we actually ask about" is half the diagnosis.
-            fix_params = {"mediaId": src, "boxes": boxes}
-            task_id = core.submit_fixer(session, src, boxes)
+            fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
+            task_id = core.submit(session, req)["task_id"]
             telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
@@ -11995,7 +11758,6 @@ __DESIGN_TOKENS__
         try:
             import base64
             import hashlib
-            from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             updir = out_dir / "loom" / "_uploads"
@@ -12056,29 +11818,20 @@ __DESIGN_TOKENS__
             video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
             audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
 
-            def _params_for(imgs):
-                return core.build_shot_video_params(
-                    p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
-                    image_ids=imgs, video_ids=video_ids, audio_ids=audio_ids,
-                    duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
-                    model=(p.get("video_model") or ""),
-                    camera_movement=(p.get("camera_movement") or ""),
-                    quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"),
-                    negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")),
-                    use_prompt_helper=bool(p.get("prompt_helper")))
+            def _request_for(imgs):
+                # The ONE video road: build_request(mode="video") builds the shot the
+                # Loom's own cost badge priced through /api/price, and core.submit is
+                # the READ_ONLY + free-card choke. Frames are resolved HERE (data-URL
+                # upload / catalog passthrough -- see resolve_img) and handed in already
+                # resolved, so the request carries exactly the ids that go out.
+                return core.build_request({**p, "images": imgs,
+                                           "video_refs": video_ids,
+                                           "audio_refs": audio_ids}, mode="video")
 
-            def _card(prm):
-                core._apply_kaisuuken(
-                    session, prm,
-                    SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-
-            params = _params_for(image_ids)
-            _card(params)
+            req = _request_for(image_ids)
+            params = req.parameters      # bound for _log_gen_failure's locals().get()
             try:
-                task_id = core.submit_generation(session, params)
+                task_id = core.submit(session, req)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -12127,9 +11880,9 @@ __DESIGN_TOKENS__
                 # base64 blob as a media id (adversarial review, 2026-08-22).
                 image_ids = [m for m in ((_input_media_id(core, session, raw) if raw.isdigit() else rid)
                                          for raw, rid in resolved) if m]
-                params = _params_for(image_ids)
-                _card(params)
-                task_id = core.submit_generation(session, params)
+                req = _request_for(image_ids)
+                params = req.parameters   # rebound for the failure log below
+                task_id = core.submit(session, req)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
