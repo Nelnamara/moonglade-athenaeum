@@ -117,7 +117,7 @@ def test_task_row_fields_carry_lineage():
         assert f in CATALOG_FIELDS, f + " missing from CATALOG_FIELDS"
 
 
-def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path):
+def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path, pixai):
     """--with-surface is the ONLY way a pre-#18 row -- one that already reached detail (it has
     prompt_full + a model_id, so every core _needs() gate passes) but carries none of the 15
     surface columns -- gets re-fetched to gain them. Without the flag such a row is skipped
@@ -138,7 +138,6 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path):
                 "moderationAction": {"promptsModerationAction": "PASS"}}
 
     monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")            # gate guard: must be truthy
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "My Model")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")
@@ -168,7 +167,7 @@ def test_with_surface_gate_readmits_pre18_rows(monkeypatch, tmp_path):
     assert fetched == []
 
 
-def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp_path):
+def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp_path, pixai):
     """A big backfill (a 36k-image catalog is tens of thousands of getTaskById calls) must
     persist AS IT GOES, so a Ctrl-C or dropped connection partway keeps its progress instead of
     writing nothing. With the checkpoint interval forced to 1, each fetched task flushes its own
@@ -187,7 +186,6 @@ def test_backfill_checkpoints_incrementally_not_only_at_the_end(monkeypatch, tmp
                 "outputs": {}, "updatedAt": "2026-08-1" + tid[-1]}
 
     monkeypatch.setattr(core, "TASK_DETAIL_HASH", "hash")
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", detail)
     monkeypatch.setattr(core, "model_name_gql", lambda s, mid: "M")
     monkeypatch.setattr(core, "resolve_loras", lambda s, t: "")

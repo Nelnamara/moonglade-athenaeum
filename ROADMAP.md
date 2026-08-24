@@ -87,7 +87,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   download — it has to be done from the server. Owner: it's a vital package function; allow LAN clients to
   trigger it. Low-risk (the route pulls one fixed, sha-verified, pinned Release asset to one known path,
   single-flight), but it's a **security-tier change** (`api_assets_fetch` LOCALHOST → LOGIN) so it gets its
-  own tiny branch + sanity check: `tests/test_route_tiers.py:113`, the route's `_is_local_request` guard, the
+  own tiny branch + sanity check: the route's own `@tier(LOCALHOST)` declaration (there is no separate
+  table to edit and no hand-written guard in the handler any more — change the decorator to `@tier(LOGIN)`
+  and regenerate `TIER_SNAPSHOT` in `tests/test_route_tiers.py`), the
   wizard calling it on a non-local device, and a confirm that repeat 685 MB fetches can't be weaponised
   (single-flight already blocks concurrency). Not bolted onto the bundle-v2 merge.
 

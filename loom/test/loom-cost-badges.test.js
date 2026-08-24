@@ -40,10 +40,20 @@ test("a <CostBadge> is actually mounted in the Image, Edit, and Reference tab JS
     "the Reference tab's badge must actually be in the rendered tabBody, not just declared as a ref");
 });
 
-test("badge refreshes are debounced read-only /api/price checks, not the spend endpoints", () => {
+test("badge refreshes are debounced read-only price checks, not the spend endpoints", () => {
   assert.match(src, /const priceInto = \(ref, body\) => \{/);
   assert.match(src, /badge\.setChecking\(\);/);
-  assert.match(src, /fetch\("\/api\/price", \{ method: "POST"/);
+  // Re-anchored 2026-08-23: the needle was this tab's own hand-rolled
+  // fetch("/api/price", {method:"POST"...}). The nine hand-rolled blocks in this file
+  // collapsed onto priceBody, the Loom's ONE price call site over gen/priceRequest.js -- so
+  // the read-only route is asserted through the function that owns it now. What the test
+  // protects is unchanged: a READ-ONLY price check, never a spend endpoint, and never a
+  // second inline request. (price-probe-structure.test.js walks the file to prove there is
+  // exactly one.)
+  assert.match(src, /priceBody\(body\)\.then\(\(d\) => \{ if \(ref\.current === badge\) badge\.setPrice\(d\); \}\);/,
+    "priceInto must ask through priceBody, and push whatever comes back (null included) at the badge");
+  assert.doesNotMatch(src, /priceInto[\s\S]{0,400}fetch\(/,
+    "priceInto must not grow its own request back");
   // three separate setTimeout-debounced effects driving priceInto -- not a synchronous
   // call on every keystroke
   const debounceCount = (src.match(/setTimeout\(\(\) => priceInto\(/g) || []).length;
@@ -68,7 +78,11 @@ test("confirmSpend's window.confirm gate is UNCHANGED and still runs at submit t
   // loom-image-job-register.test.js) is additive and sits AFTER `label`; the gate below is
   // what this assertion is about, so the signature is matched up to `label` rather than
   // pinned to an exact arity that any future additive param would break again.
-  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, priceBody, label[^)]*\) => \{\s*\n\s*if \(priceBody && !\(await confirmSpend\(priceBody, label\)\)\) return;/,
+  // The parameter was renamed priceBody -> quoteBody on 2026-08-23: `priceBody` became this
+  // file's one price call site, and a parameter of that name shadows the function runGen and
+  // confirmSpend now have to reach. The GATE is untouched -- same position, same short-circuit,
+  // same confirmSpend.
+  assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, quoteBody, label[^)]*\) => \{\s*\n\s*if \(quoteBody && !\(await confirmSpend\(quoteBody, label\)\)\) return;/,
     "runGen (genEdit/genRef's shared submit path) must still gate on confirmSpend");
   assert.match(src, /return window\.confirm\(`\$\{label\}/,
     "confirmSpend itself must still fall through to a real window.confirm");

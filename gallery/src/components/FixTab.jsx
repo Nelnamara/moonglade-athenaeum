@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FIX_COLORS, FIX_MAX_BOXES, FIX_MIN_PX, scaleBoxes } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
+import usePriceProbe from "../gen/usePriceProbe.js";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 
@@ -48,9 +49,6 @@ export default function FixTab({ visible, dock, source }) {
   const costRef = useRef(null);
   const drag = useRef(null);
   const busyRef = useRef(false);
-  const seq = useRef(0);
-  const timer = useRef(0);
-  const costVal = useRef(null);   // the settled figure, for the confirm dialog
 
   // Boxes are display-pixel rectangles over ONE picture: a new source (picked in slab 1
   // on any sub-tab, or handed in from the lightbox) invalidates every one of them.
@@ -75,57 +73,27 @@ export default function FixTab({ visible, dock, source }) {
     return measured.current;
   };
 
-  /* ---- price: own debounce + seq, like every other cost surface ----
-     `pending` holds the in-flight quote's promise. A Fix's ONLY safety net is
-     the confirm dialog's wording -- classic and pilot both let costVal sit null
-     until the round trip settles, so clicking Fix right after the last box (a
-     completely normal thing to do) could open a confirm reading "price could
-     not be verified" even though the real number was one moment away (owner QA
-     2026-07-30: "works but never sends" -- it always sent, but a plausible read
-     of an uncertain confirm is to cancel). run() now flushes and awaits this
-     before it ever shows the dialog. */
-  const pending = useRef(null);
-  const fireCost = useCallback(() => {
-    const mine = ++seq.current;
-    const badge = costRef.current;
-    if (!source || !boxes.length) {
-      costVal.current = null;
-      pending.current = null;
-      if (badge && badge.clear) badge.clear();
-      return null;
-    }
-    if (badge && badge.setChecking) badge.setChecking();
-    const p = fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "fix", source, boxes: scaleBoxes(boxes, scaleEl()) }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (mine !== seq.current) return;
-        costVal.current = d && typeof d.cost === "number" ? d.cost : null;
-        if (costRef.current) costRef.current.setPrice(d);
-      })
-      .catch(() => {
-        if (mine !== seq.current) return;
-        costVal.current = null;
-        if (costRef.current) costRef.current.setPrice(null);
-      })
-      .finally(() => { if (pending.current === p) pending.current = null; });
-    pending.current = p;
-    return p;
-  }, [source, boxes]);
+  /* ---- price: the shared probe (gen/usePriceProbe.js), like every other cost surface ----
+     A Fix's ONLY safety net is the confirm dialog's wording, and classic and pilot both let
+     the settled figure sit null until the round trip landed, so clicking Fix right after the
+     last box (a completely normal thing to do) could open a confirm reading "price could not
+     be verified" even though the real number was one moment away (owner QA 2026-07-30:
+     "works but never sends" -- it always sent, but a plausible read of an uncertain confirm
+     is to cancel). run() used to flush the debounce and await the in-flight promise to close
+     that window; it no longer has to. The probe's identity gate keeps ✦ Fix unpressable until
+     a verdict for THESE boxes has settled, so by the time the dialog can open, probe.response
+     already holds that payload's answer -- the guarantee replaces the flush. */
+  const build = useCallback(() => ({
+    payload: { mode: "fix", source, boxes: scaleBoxes(boxes, scaleEl()) },
+    idle: (source && boxes.length) ? null : true,
+  }), [source, boxes]);
+  // `enabled: visible` is the #27 cleanup and the DC's re-price-on-sub-tab-entry (2927) in one
+  // seam: hidden, no timer is armed and no request is out (the badge is portaled into the
+  // footer and unmounts with the tab); becoming visible again forces a re-price, because the
+  // badge comes back idle whatever the settled verdict says.
+  const probe = usePriceProbe({ build, costRef, enabled: visible });
 
-  // Re-prices on source/box changes AND on each return to this sub-tab (DC 2927: picking
-  // a sub-tab re-prices): the badge is portaled into the footer and unmounts with the tab,
-  // so it comes back idle and must be primed again. Hidden, it does not price.
-  useEffect(() => {
-    if (!visible) return;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(fireCost, 250);
-    // cleanup (#27): leaving the tab used to leave the armed timer, so one stray /api/price
-    // fired ~250ms after the tab was gone
-    return () => clearTimeout(timer.current);
-  }, [fireCost, visible]);
+  useEffect(() => { probe.refresh(); }, [source, boxes, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- the canvas: draw, paint, resize ---- */
   const paint = useCallback(() => {
@@ -203,11 +171,12 @@ export default function FixTab({ visible, dock, source }) {
 
   const run = async () => {
     if (busyRef.current || !source || !boxes.length) return;
-    // Flush a pending debounce so a click right after the last box doesn't
-    // read a stale null, then await whatever quote is already in flight.
-    if (timer.current) { clearTimeout(timer.current); timer.current = 0; fireCost(); }
-    if (pending.current) await pending.current;
-    const priced = costVal.current;
+    // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the click
+    // that slips through a stale render (a keyboard Enter needs no repaint to fire). It
+    // is ALSO what guarantees the number quoted below is this payload's.
+    if (!probe.canSubmit) { probe.refresh(); return; }
+    const d = probe.response;
+    const priced = d && typeof d.cost === "number" ? d.cost : null;
     const quote = priced == null
       ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can cover it)."
       : "This will spend " + Number(priced).toLocaleString() +
@@ -221,6 +190,9 @@ export default function FixTab({ visible, dock, source }) {
       { source, boxes: scaleBoxes(boxes, scaleEl()) },
       { label: "Fixed", emit });
     busyRef.current = false; setBusy(false);
+    // The submit DEBITED credits (a Fix always spends); the payload is byte-identical,
+    // so only a FORCED re-price gets past the short-circuit.
+    probe.refresh({ force: true });
   };
 
   if (!visible) return null;
@@ -237,7 +209,9 @@ export default function FixTab({ visible, dock, source }) {
   const goTitle = !source ? "Pick a source image first"
     : !boxes.length ? "Drag at least one box first"
     : "Submit — this spends credits (a Fix is never card-covered)";
-  const goOff = !source || !boxes.length || busy;
+  // The price probe's verdict gates the button IN ADDITION to source/boxes/busy: the number
+  // the confirm quotes must have been priced off the payload this click submits.
+  const goOff = !source || !boxes.length || busy || !probe.canSubmit;
   const costLine = (
     /* no cardLabel: a Fix can never be card-covered */
     <CostBadge ref={costRef} hint="Drag a box over a hand or face to see the cost."

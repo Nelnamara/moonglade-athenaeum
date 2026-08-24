@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* "More like this" -- classic's Similar object (moonglade_gallery.py's shared
    INDEX_HTML script), ported to a component. GET /api/similar/<mid>?k=48 runs
@@ -18,8 +19,7 @@ export default function SimilarModal({ mediaId, onClose, onOpenDetails }) {
     if (!mediaId) return;
     const mine = ++seq.current;
     setState({ loading: true, images: [], error: "" });
-    fetch("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
-      .then((r) => r.json())
+    apiGet("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
       .then((d) => {
         if (mine !== seq.current) return;
         const images = (d && d.images) || [];

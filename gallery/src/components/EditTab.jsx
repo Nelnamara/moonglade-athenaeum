@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  buildEditPayload, editCaps, editGate, EDIT_CAPS,
+  buildEditPayload, editCaps, editGate, EDIT_CAPS, EDIT_PRICE_KEY_SKIP,
   refTag, switchEditModel,
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
+import usePriceProbe from "../gen/usePriceProbe.js";
+import { apiGet, apiPost } from "../api.js";
 import { askPicker } from "./PickerHost.jsx";
 import CostBadge from "./CostBadge.jsx";
 
@@ -40,8 +42,6 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
   const [lines, openLine] = useResultLines();
   const costRef = useRef(null);
   const busyRef = useRef(false);
-  const seq = useRef(0);
-  const timer = useRef(0);
   const caps = editCaps(s.model);
   const gate = editGate(s);
   const used = ((s.source || "").trim() ? 1 : 0) + s.refs.length;
@@ -51,38 +51,30 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
   // presets load lazily, once, when the tab is first shown
   useEffect(() => {
     if (!visible || Object.keys(presets).length) return;
-    fetch("/api/presets").then((r) => r.json())
-      .then((d) => setPresets((d && d.presets) || {})).catch(() => {});
+    apiGet("/api/presets").then((d) => setPresets((d && d.presets) || {}));
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Its OWN debounce + seq pair -- sharing them with the image tab's is exactly
-     what caused the classic's historical no-price-on-?edit= bug. */
-  const fireCost = useCallback(() => {
-    const mine = ++seq.current;
-    const badge = costRef.current;
-    if (!(s.source || "").trim()) { if (badge && badge.clear) badge.clear(); return; }
-    if (badge && badge.setChecking) badge.setChecking();
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildEditPayload(s)),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (mine === seq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => { if (mine === seq.current && costRef.current) costRef.current.setPrice(null); });
+  /* Its OWN price-probe instance -- sharing a debounce/seq with the image tab's is
+     exactly what caused the classic's historical no-price-on-?edit= bug. The probe
+     (gen/usePriceProbe.js) owns the debounce, the seq guard, the abort timeout and
+     the payload-identity spend gate; this tab supplies only the payload builder.
+     It POSTs buildEditPayload(s), the SAME object /api/edit receives on submit, so a
+     quote can never describe a different edit than what goes out. */
+  const build = useCallback(() => {
+    const p = buildEditPayload(s);
+    return { payload: p, idle: (s.source || "").trim() ? null : true };
   }, [s]);
+  // `enabled: visible` is the #27 cleanup and the entry re-prime in one seam: hidden,
+  // the probe holds no armed timer and no request (the badge is portaled into the
+  // footer and unmounts with the tab, and the shared source can change from the
+  // Fixer meanwhile); becoming visible again forces a re-price, because the badge
+  // comes back idle whatever the settled verdict says.
+  const probe = usePriceProbe({ build, costRef, enabled: visible, skipKeys: EDIT_PRICE_KEY_SKIP });
 
-  // Re-prices on any field change AND on each return to this sub-tab: the badge is
-  // portaled into the footer and unmounts with the tab (returns null below), so it
-  // comes back idle and must be primed again -- the image tab's own entry rule.
-  // Hidden, it does not price at all (the shared source can change from the Fixer).
-  useEffect(() => {
-    if (!visible) return;
-    clearTimeout(timer.current);
-    timer.current = setTimeout(fireCost, 250);
-    // cleanup (#27): leaving the tab used to leave the armed timer, so one stray /api/price
-    // fired ~250ms after the tab was gone
-    return () => clearTimeout(timer.current);
-  }, [fireCost, visible]);
+  // Re-prices on any field change. BEHAVIOUR CHANGE 2026-08-22: the instruction is in
+  // the probe's identity skip, so a keystroke short-circuits instead of blanking the
+  // badge and disabling ✦ Edit for 250ms + one RTT.
+  useEffect(() => { probe.refresh(); }, [s, probe.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // clampEditNote (DC 1517-1519 / 2255-2258): set by a model switch that had to correct
   // the resolution (or, real caps, the aspect); replaced by the next switch, like the DC's.
@@ -100,16 +92,13 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
     const id = importTask.trim();
     if (!id) return;
     try {
-      const d = await fetch("/api/presets", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task_id: id }),
-      }).then((r) => r.json());
+      const d = await apiPost("/api/presets", { task_id: id });
       if (d.error) {
         if (window.Toast) window.Toast.show({ kind: "err", title: "Not banked", msg: d.error });
         return;
       }
       setImportTask("");
-      const fresh = await fetch("/api/presets").then((r) => r.json());
+      const fresh = await apiGet("/api/presets");
       setPresets((fresh && fresh.presets) || {});
       if (d.imported) set({ preset: d.imported });
       if (window.Toast) window.Toast.show({ kind: "ok", title: "Banked " + (d.label || d.imported) });
@@ -120,10 +109,16 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
 
   const run = async () => {
     if (busyRef.current || gate) return;
+    // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the click
+    // that slips through a stale render (a keyboard Enter needs no repaint to fire).
+    if (!probe.canSubmit) { probe.refresh(); return; }
     busyRef.current = true; setBusy(true);
     const emit = openLine("Submitting…");
     await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit });
     busyRef.current = false; setBusy(false);
+    // The submit DEBITED credits or a card; the payload is byte-identical, so only a
+    // FORCED re-price gets past the short-circuit.
+    probe.refresh({ force: true });
   };
 
   // Dock ★ Snippets <-> the instruction: insert (functional update, no stale closure) and
@@ -170,12 +165,15 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
     <CostBadge ref={costRef} hint="Pick an image to edit to see the cost."
       stack={inDock || undefined} balance={inDock ? dock.balance : undefined} />
   );
+  // The submit control is gated on the price probe's verdict IN ADDITION to editGate:
+  // the quote on the badge must have been priced off the payload this click submits.
+  const goOff = !!gate || busy || !probe.canSubmit;
   const goButton = inDock ? (
-    <button type="button" className={"mgdock-gen" + (gate || busy ? " off" : "")}
-      disabled={!!gate || busy} title={gate || "Submit — this spends credits or a card"}
+    <button type="button" className={"mgdock-gen" + (goOff ? " off" : "")}
+      disabled={goOff} title={gate || "Submit — this spends credits or a card"}
       onClick={run}><span>&#10022; Edit</span></button>
   ) : (
-    <button className="gen" disabled={!!gate || busy} title={gate || "Submit the edit"}
+    <button className="gen" disabled={goOff} title={gate || "Submit the edit"}
       onClick={run}>&#10022; Edit</button>
   );
   // Composer top row (DC 1557-1562: pip · summary): the edit model as the pip -- with the

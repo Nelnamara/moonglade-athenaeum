@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { ResultLines } from "./EditTab.jsx";
 import { askPicker } from "./PickerHost.jsx";
+import { apiGet } from "../api.js";
 
 /* The Bridge §5 scene generator -- where a scene picked in the "✦ AI Tools" nav modal lands
    (DECISIONS: the AI-Tools tier splits by function -- browse in the nav modal, generate in the
@@ -33,7 +34,7 @@ export default function SceneTab({ scene, source, armed }) {
     if (!armed || !slug) { setCfg(null); return undefined; }
     let live = true;
     setCfg(null); setFailed(false); setRef2(null); setCustom("");
-    fetch("/api/scenes").then((r) => r.json()).then((d) => {
+    apiGet("/api/scenes").then((d) => {
       if (!live) return;
       const m = ((d && d.scenes) || []).find((s) => s.sceneId === slug) || null;
       if (!m) { setFailed(true); return; }
@@ -44,7 +45,7 @@ export default function SceneTab({ scene, source, armed }) {
       const sv = {};
       (m.selectors || []).forEach((x) => { const o = x.options || []; sv[x.id] = x.default || (o[0] && o[0].key); });
       setSel(sv);
-    }).catch(() => { if (live) setFailed(true); });
+    });
     return () => { live = false; };
   }, [armed, slug]);
 

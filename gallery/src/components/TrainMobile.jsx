@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/train.css";
@@ -56,19 +57,16 @@ export default function TrainMobile({ onClose }) {
 
 
   useEffect(() => {
-    fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
-    fetch("/api/train/quota").then((r) => r.json())
-      .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0))
-      .catch(() => setQuota(0));
-    fetch("/api/train/recent-tasks?limit=18").then((r) => r.json())
-      .then((d) => setTasks(d.tasks || [])).catch(() => {});
-    fetch("/api/train/models").then((r) => r.json())
+    apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
+    apiGet("/api/train/quota")
+      .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0));
+    apiGet("/api/train/recent-tasks?limit=18").then((d) => setTasks(d.tasks || []));
+    apiGet("/api/train/models")
       .then((d) => {
         const gs = d.groups || [];
         setGroups(gs);
         if (gs.length && gs[0].models.length) setBaseModel(gs[0].models[0].version_id);
-      })
-      .catch(() => {});
+      });
   }, []);
 
   const pickArch = (i) => {
@@ -95,9 +93,7 @@ export default function TrainMobile({ onClose }) {
   const preview = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/train/submit", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
-      const p = await r.json();
+      const p = await apiPost("/api/train/submit", body());
       if (p.error) { setErr(p.error); return; }
       setAsk(p); setAcceptCost(false); openSheet("confirm");
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
@@ -105,11 +101,9 @@ export default function TrainMobile({ onClose }) {
   const confirm = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/train/submit", { method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body(), confirm: true,
-                               ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) }) });
-      const res = await r.json();
+      const res = await apiPost("/api/train/submit",
+        { ...body(), confirm: true,
+          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
       // Same as PublishMobile: the error note lives under the sheet -- close it
       // so the failure is actually visible instead of a silent button revert.
       if (res.error) { setErr(res.error); closeSheet(); return; }

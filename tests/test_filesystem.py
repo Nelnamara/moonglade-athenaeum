@@ -188,7 +188,7 @@ def test_import_local_external_copies_in(tmp_path):
 
 def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
     # ffmpeg absent -> returns False gracefully, no thumbnail written
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     vid = tmp_path / "clip.mp4"; vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
     thumb = tmp_path / "out.jpg"
     assert core.video_poster_thumb(vid, thumb) is False
@@ -196,7 +196,7 @@ def test_video_poster_thumb_noop_without_ffmpeg(tmp_path, monkeypatch):
 
 
 def test_import_local_video_no_crash_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "v.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     res = core.run_import_local(SimpleNamespace(out=str(tmp_path), import_local=""))
@@ -222,7 +222,7 @@ def test_mp4_faststart_detection(tmp_path):
 
 
 def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     nf = tmp_path / "nf.mp4"; nf.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     before = nf.read_bytes()
     assert core.video_faststart(nf) is False       # no ffmpeg -> graceful no-op
@@ -231,7 +231,7 @@ def test_video_faststart_noop_without_ffmpeg(tmp_path, monkeypatch):
 
 def test_video_faststart_skips_already_faststart(tmp_path, monkeypatch):
     # ffmpeg 'present' but the file is already faststart -> short-circuits, no remux attempt
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     fs = tmp_path / "fs.mp4"; fs.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
     assert core.video_faststart(fs) is False
     assert core.video_faststart(tmp_path / "x.webm") is False   # non-mp4 ignored
@@ -254,7 +254,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
     import subprocess
     import threading
 
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))       # NOT faststart -> both remux
 
@@ -287,7 +287,9 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
             fh.close()
             if role == 2:
                 two_finished.set()
-        return SimpleNamespace(returncode=0)
+        # stdout/stderr are part of a real CompletedProcess and media_tools' runner
+        # reads both; the concurrency this test is about is untouched by them.
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_ffmpeg)
 
@@ -306,7 +308,7 @@ def test_concurrent_faststart_never_mixes_two_remuxes(tmp_path, monkeypatch):
 
 
 def test_run_faststart_videos_no_ffmpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "a.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
     res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -325,7 +327,7 @@ def test_import_local_skips_branding_folder(tmp_path, monkeypatch):
     _isolated_branding redirects branding_root() to tmp_path/"branding"."""
     import moonglade_gallery as g
     from moonglade_gallery import load_catalog
-    monkeypatch.setattr(core, "_ffmpeg_path", lambda: "")
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "")
     g._role_dir("marks").mkdir(parents=True)
     (g.branding_root() / "banner.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
     (g._role_dir("marks") / "m1.png").write_bytes(b"\x89PNG\r\n\x1a\ny")
@@ -490,7 +492,7 @@ def test_organize_keeps_differing_content_side_by_side(tmp_path):
     assert surviving_bytes == {b"content-A", b"totally-different-content-B"}   # neither lost
 
 
-def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
+def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch, pixai):
     from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
     old = "2024-01-01T00:00:00"
@@ -500,7 +502,6 @@ def test_reconcile_flags_deleted_server_side(tmp_path, monkeypatch):
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "c", "task_id": "NEW", "filename": "c.png", "created_at": "2099-01-01T00:00:00"},
         {f: "" for f in CATALOG_FIELDS} | {"media_id": "L", "task_id": "GONE2", "filename": "L.png", "source": "local", "created_at": old},
     ])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     conn = {"edges": [{"node": {"id": "LIVE1"}}], "pageInfo": {"hasPreviousPage": False}}
     monkeypatch.setattr(core, "gql", lambda *a, **k: conn)
     res = core.run_reconcile_deleted(SimpleNamespace(out=str(tmp_path), token=None, page_size=250))
@@ -568,8 +569,9 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     this suite that pushes `{f: "" for f in CATALOG_FIELDS}` through save_catalog
     (INSERT fails immediately if _CREATE_TABLE is missing one). Nothing exercises the
     OTHER half: _MIGRATIONS is what actually reaches an EXISTING install's catalog.db
-    (run on every _connect()), so forgetting an ALTER TABLE entry for a newly added
-    field breaks upgraders silently while a fresh checkout's suite stays green.
+    (run by migrate(), which the first catalog() open of a path in a process reaches
+    lazily), so forgetting an ALTER TABLE entry for a newly added field breaks
+    upgraders silently while a fresh checkout's suite stays green.
 
     This simulates exactly that existing install: a catalog.db holding ONLY the columns
     present since the SQLite schema's very first commit (cc2aeb1, 2026-06-13, "replace
@@ -584,7 +586,7 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     was found. The test is not vacuous regardless -- see the report for the mutation
     check that proves it fails when a migration entry is missing.)"""
     import sqlite3
-    from moonglade_gallery import CATALOG_FIELDS, _connect
+    from moonglade_gallery import CATALOG_FIELDS, catalog
 
     original_fields = [   # cc2aeb1's _CREATE_TABLE, verbatim -- none of these have ever
         "task_id", "media_id", "filename", "url", "width", "height",   # needed a migration
@@ -599,7 +601,8 @@ def test_migrations_backfill_every_field_added_after_the_original_schema(tmp_pat
     con.commit()
     con.close()
 
-    _connect(db).close()   # the real upgrade path load_catalog/save_catalog always take
+    with catalog(db):      # the real upgrade path load_catalog/save_catalog always take
+        pass
 
     con = sqlite3.connect(str(db))
     cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)").fetchall()}
@@ -615,10 +618,10 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     """paid_credit (added 2026-07-23) followed the three-place contract; this locks the
     upgrade path for a real pre-paid_credit install: a catalog.db built from every
     column EXCEPT paid_credit, holding a populated row, must gain the column via
-    _MIGRATIONS on a plain _connect() with the existing row's data intact -- and the
-    migrated db must round-trip a real credit value."""
+    _MIGRATIONS on the first plain open of the catalog, with the existing row's data
+    intact -- and the migrated db must round-trip a real credit value."""
     import sqlite3
-    from moonglade_gallery import _connect
+    from moonglade_gallery import migrate
 
     assert "paid_credit" in CATALOG_FIELDS   # the contract half: the field exists at all
     pre_fields = [f for f in CATALOG_FIELDS if f != "paid_credit"]
@@ -632,7 +635,7 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     con.commit()
     con.close()
 
-    rows = load_catalog(db)          # load_catalog -> _connect() runs _MIGRATIONS
+    rows = load_catalog(db)          # first open of this path -> migrate() runs _MIGRATIONS
     assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
     assert rows[0]["rating"] == "5"                 # no data loss
     assert rows[0]["paid_credit"] in ("", None)     # migrated in, blank default
@@ -642,7 +645,9 @@ def test_migration_adds_paid_credit_to_existing_db_without_data_loss(tmp_path):
     save_catalog(db, [row])
     got = load_catalog(db)[0]
     assert got["paid_credit"] == "2750" and got["filename"] == "keep.png"
-    _connect(db).close()             # re-connect after the fact stays harmless (idempotent)
+    migrate(db, force=True)          # re-running the DDL stays harmless (idempotent) --
+                                     # force, or the per-process memo would skip it and
+                                     # this line would prove nothing
 
 
 def test_catalog_stats_totals_paid_credit_once_per_task(tmp_path, capsys):

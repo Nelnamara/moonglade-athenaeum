@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* "More like this" -- the one data path behind every Similar surface (the Details
    record's inline strip on desktop AND mobile, and the gallery's 48-grid modal):
@@ -19,7 +20,7 @@ export default function useSimilar(mediaId) {
     if (!mediaId) { setState({ loading: false, images: [], error: "" }); return; }
     const mine = ++seq.current;
     setState({ loading: true, images: [], error: "" });
-    fetch("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
+    apiGet("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
       .then((r) => r.json())
       .then((d) => {
         if (mine !== seq.current) return;

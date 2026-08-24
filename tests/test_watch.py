@@ -263,9 +263,12 @@ def test_catchup_sweep_is_bounded_rate_limited_and_off_thread():
     i = text.index("def _watch_catchup(reason):")
     body = text[i:i + 3200]
 
-    # Bounded: one page, never a history walk.
+    # Bounded: one page, never a history walk. WATCH_CATCHUP_TASKS is the page size passed to
+    # page_variables; the account id now rides the client (USER_ID retired from page_variables),
+    # so the catchup threads it explicitly rather than leaning on a module global.
     assert "WATCH_CATCHUP_TASKS = 30" in text
-    assert "core.page_variables(WATCH_CATCHUP_TASKS)" in body
+    assert "core.page_variables(" in body
+    assert "WATCH_CATCHUP_TASKS, core._client_of(session).user_id" in body
 
     # Rate-limited: a reconnect storm must not become a request storm.
     assert "WATCH_CATCHUP_MIN_GAP" in body and "_catchup_at" in body

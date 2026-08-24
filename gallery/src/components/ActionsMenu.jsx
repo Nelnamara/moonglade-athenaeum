@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
+import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
 import "../styles/librarybar.css";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
@@ -40,28 +40,13 @@ import "../styles/librarybar.css";
                                           disabled (the GenerateDock retab owns
                                           the bulk→video prefill contract).
      onMutated, clearSelection          — optional post-mutation hooks.
-     onAddCollection / onRemoveCollection / onReplacePrompt / onDeleteLocal /
-     onDeleteCloud                      — legacy delegation props (Strip's old
-                                          contract): accepted so existing
-                                          mounts compile, but NO LONGER CALLED —
-                                          the JSON flows above replaced them. */
+   Nine props, and every one of them is read. Five more (onAddCollection /
+   onRemoveCollection / onReplacePrompt / onDeleteLocal / onDeleteCloud) were Strip's old
+   delegation contract, kept "so existing mounts compile" after the JSON flows above replaced
+   them; no mount has passed one since, so they are gone (2026-08-23). Both mounts --
+   FiltersPanel's LibraryBar and GalleryMobile's actions sheet -- speak this one contract. */
 
 function plural(v, one, many) { return v + " " + (v === 1 ? one : many); }
-
-async function postJSON(url, body) {
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || (d && d.error)) return { error: (d && d.error) || url + " failed: " + r.status };
-    return d || {};
-  } catch (e) {
-    return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
-  }
-}
 
 function toastOk(title, msg) {
   if (window.Toast) window.Toast.show({ kind: "ok", title, msg });
@@ -152,8 +137,6 @@ export default function ActionsMenu({
   ids, shelf, isTrueLocal,
   onSendCast, onPrintSheet, onDownloadZip, onSendVideo,
   onMutated, clearSelection,
-  /* legacy delegation props — accepted, not called (see header comment) */
-  onAddCollection, onRemoveCollection, onReplacePrompt, onDeleteLocal, onDeleteCloud, // eslint-disable-line no-unused-vars
 }) {
   const count = ids.length;
   const [open, setOpen] = useState(false);
@@ -218,7 +201,7 @@ export default function ActionsMenu({
     const name = window.prompt(
       "Add " + count + " image(s) to which collection? (a name; files are NOT moved)");
     if (name === null || !name.trim()) return;
-    const d = await postJSON("/api/collection",
+    const d = await apiPost("/api/collection",
       { action: "add", collection: name.trim(), media_ids: ids });
     if (d.error) { toastErr("Not added", d.error); return; }
     toastOk("Added to “" + name.trim() + "”", plural(d.count || 0, "item", "items") + " newly labeled");
@@ -230,7 +213,7 @@ export default function ActionsMenu({
     if (!window.confirm(
       "Remove " + count + " item(s) from the collection “" + shelf + "”?\n\n" +
       "Only the collection label is removed — no files are deleted and nothing leaves your PixAI account.")) return;
-    const d = await postJSON("/api/collection",
+    const d = await apiPost("/api/collection",
       { action: "remove", collection: shelf, media_ids: ids });
     if (d.error) { toastErr("Not removed", d.error); return; }
     toastOk("Removed from “" + shelf + "”", plural(d.count || 0, "item", "items") + " unlabeled");
@@ -245,7 +228,7 @@ export default function ActionsMenu({
     if (repl === null) return;
     if (!window.confirm('Replace "' + find + '" with "' + repl + '" across ' +
       count + " prompt(s)? This edits catalog.db.")) return;
-    const d = await postJSON("/api/replace-prompts",
+    const d = await apiPost("/api/replace-prompts",
       { find, replace: repl, media_ids: ids });
     if (d.error) { toastErr("Nothing replaced", d.error); return; }
     toastOk("Prompts updated", plural(d.changed || 0, "prompt", "prompts") + " actually changed");
@@ -256,7 +239,7 @@ export default function ActionsMenu({
     if (!window.confirm(
       "Remove " + count + " image" + (count !== 1 ? "s" : "") +
       " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
-    const d = await postJSON("/api/delete-local", { media_ids: ids });
+    const d = await apiPost("/api/delete-local", { media_ids: ids });
     if (d.error) { toastErr("Not removed", d.error); return; }
     if (d.failed) {
       // the page route's wording, minus the redirect banner
@@ -274,7 +257,7 @@ export default function ActionsMenu({
     // it does not replace the guard.
     const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
     if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-    const d = await postJSON("/api/delete-tasks", { media_ids: idsArg });
+    const d = await apiPost("/api/delete-tasks", { media_ids: idsArg });
     if (d.error) { toastErr("Not deleted", d.error); return; }
     toastOk("Deleting from PixAI",
       plural(d.count || 0, "file", "files") + " across " + plural(d.tasks || 0, "task", "tasks") +

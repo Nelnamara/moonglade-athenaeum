@@ -57,12 +57,40 @@ import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
 import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
 import useActivity from "../gallery/src/notify/useActivity.js";
+// The one price transport, shared with the gallery's own cost lines (gen/usePriceProbe.js
+// rides the same function). Imported the same way as VideoDrawer/CostBadge above.
+import { requestPrice } from "../gallery/src/gen/priceRequest.js";
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
 // working for every guarded call site in this file. Installed at module scope (the old
 // mg-notify.js <script> ran at parse time; the bundle evaluating is the equivalent moment).
 installNotify();
+
+/* THE LOOM'S ONE PRICE CALL SITE (2026-08-23). Nine hand-rolled
+   `fetch("/api/price", {method:"POST", ...}).then(r => r.json()).catch(...)` blocks used to
+   live in this file -- LoomV2's priceInto and its Fixer preview, LoomMobile's Image / Edit /
+   Reference / Fixer previews, and useGenerationPipeline's priceShot, confirmSpend and genFix.
+   They all rode the same transport by hand and each re-decided, in its own five lines, what a
+   dropped socket meant. They are one call now: this function, over gen/priceRequest.js.
+
+   ONLY THE TRANSPORT IS SHARED. Every caller keeps its own timing and its own answer to
+   staleness, because those are separate contracts and they are banked:
+     · the cost-to-finish pill      a warm per-shot cache, 600ms board debounce, click-to-force
+     · batchGenerate                a fresh, uncached Promise.all right before the confirm
+     · confirmSpend / generateShot  one shot, at the moment of spending
+     · the tab previews             their own 250ms debounces, one per tab
+   A browsing estimate may be stale; the number shown at the moment of spending may not.
+
+   `null` IS THE COULD-NOT-VERIFY ROAD. requestPrice resolves {response} for any parsed body
+   (an HTTP-200 {error} is an answer, not a failure) and {failed} for a transport failure,
+   abort or timeout; this flattens {failed} to null, which is exactly the value every caller
+   here already treated as "unverified" -- and every one of them fails CLOSED on it (the
+   confirms still ASK, the batch tally buckets it as unknown, the previews show no number). */
+const priceBody = async (body) => {
+  const { response, failed } = await requestPrice(body);
+  return failed ? null : response;
+};
 
 // The Loom.dc.html's own TINTS + tint formula (line ~681, ~760): 6 rotating per-shot
 // gradients so same-status shots stay visually distinguishable from each other, not just
@@ -1271,10 +1299,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const badge = ref.current;
     if (!badge) return;
     badge.setChecking();
-    fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then((r) => r.json())
-      .then((d) => { if (ref.current === badge) badge.setPrice(d); })
-      .catch(() => { if (ref.current === badge) badge.setPrice(null); });
+    // One transport, one road in: priceBody flattens the could-not-verify answer to null,
+    // which is exactly what this call site's old .catch(setPrice(null)) already meant -- the
+    // badge's own red "may spend" state.
+    priceBody(body).then((d) => { if (ref.current === badge) badge.setPrice(d); });
   };
   // Bridge <mg-generate-drawer> the same way. activeRef always holds the CURRENT active
   // shot (updated every render below) so these long-lived, bind-once listeners never read
@@ -1628,10 +1656,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     let live = true;
     const t = setTimeout(() => {
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
-        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
-        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+      priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
+        .then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4322,10 +4348,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     setImgPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     let live = true;
     const t = setTimeout(() => {
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)) })
-        .then((r) => r.json()).then((pr) => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
-        .catch(() => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+      priceBody(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt))
+        .then((pr) => { if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4338,10 +4362,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     setEditPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     let live = true;
     const t = setTimeout(() => {
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }) })
-        .then((r) => r.json()).then((pr) => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
-        .catch(() => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+      priceBody({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" })
+        .then((pr) => { if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
   }, [genOpen, genTab, dfLive && dfLive.c.id, dfLive && dfLive.c.editPrompt, editSrcMid]);
@@ -4353,10 +4375,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     setRefPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     let live = true;
     const t = setTimeout(() => {
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }) })
-        .then((r) => r.json()).then((pr) => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
-        .catch(() => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+      priceBody({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" })
+        .then((pr) => { if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4503,10 +4523,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     setGenFixPrice((s) => ({ ...s, [id]: { ...(s[id] || {}), loading: true } }));
     let live = true;
     const t = setTimeout(() => {
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }) })
-        .then((r) => r.json()).then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); })
-        .catch(() => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } })); });
+      priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
+        .then((pr) => { if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } })); });
     }, 250);
     return () => { live = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6229,28 +6247,23 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
      + `imgSrc` (closes over `thumbs`), preserving the original single-argument
      call shape used below and in priceShot/generateShot. */
   const shotPayload = (entry) => buildShotPayload(entry, project, imgSrc);
-  /* READ-ONLY cost + free-card check for a shot (reuses the drawer's /api/price; spends nothing). */
-  const priceShot = async (entry) => {
-    try {
-      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(shotPayload(entry)) });
-      return await r.json();   // {cost, free, cards, note}
-    } catch { return null; }
-  };
+  /* READ-ONLY cost + free-card check for a shot (spends nothing). The shot-shaped face of
+     priceBody, the file's one price call site: -> {cost, free, cards, note}, or null when the
+     check could not be verified at all. Every caller below fails CLOSED on that null. */
+  const priceShot = (entry) => priceBody(shotPayload(entry));
   // Fail-closed cost gate for the Image / Edit / Reference tabs -- the SAME guardrail
   // generateShot (video) already runs, factored out so those three stop lying. They used
   // to show a flat "a free card auto-applies; otherwise it spends credits" confirm that
   // never actually checked: a shot with no covering card spent silently past an OK click.
-  // `priceBody` is the exact shape the matching submit endpoint receives, so /api/price
+  // `quoteBody` is the exact shape the matching submit endpoint receives, so /api/price
   // prices precisely what will run. Fails CLOSED -- a null/failed price check still ASKS
-  // before spending, never waves it through. Returns true to proceed.
-  const confirmSpend = async (priceBody, label) => {
-    let pr = null;
-    try {
-      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(priceBody) });
-      pr = await r.json();
-    } catch { pr = null; }
+  // before spending, never waves it through. Returns true to proceed. (The parameter was
+  // named priceBody until 2026-08-23, when priceBody became this file's one price call site
+  // -- a param of that name would shadow the function this line has to call.)
+  const confirmSpend = async (quoteBody, label) => {
+    // ONE shot, right here, right before the confirm -- deliberately NOT the cost-to-finish
+    // pill's warm cache: this is the number at the moment of spending.
+    const pr = await priceBody(quoteBody);
     if (pr && pr.free) return true;                                    // a free card covers it: no spend, no prompt
     if (pr && !pr.free && pr.cost != null) {
       // `free` is the server's card_covers(): false for BOTH "no card matched" and "a card
@@ -6618,8 +6631,8 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // `label` is the confirmSpend() QUESTION ("Edit the open frame of X?"); `jobLabel` is the
   // separate, much shorter Job Tracker row text each caller supplies -- two different strings
   // for two different surfaces, so neither has to be bent to fit the other.
-  const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
-    if (priceBody && !(await confirmSpend(priceBody, label))) return;
+  const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
+    if (quoteBody && !(await confirmSpend(quoteBody, label))) return;
     setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
     // Same unbounded-loop fix as pollImg -- see pollTaskWithCeiling's comment.
     const poll = (tid) => pollTaskWithCeiling(tid, setState, cardId);
@@ -6695,12 +6708,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // fresh read the moment the owner taps Fix. mode:"fix" always comes back free:false
     // (server-forced -- see _params_and_nocard), so `cost` is the only field this confirm
     // ever needs.
-    let pr = null;
-    try {
-      const r = await fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes }) });
-      pr = await r.json();
-    } catch { pr = null; }
+    const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
     const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
     // Wording ported VERBATIM from FixTab.jsx's own run() -- "ALWAYS spends" / "never
     // covered by a free card" -- not confirmSpend's generic phrasing, which this Fix gate
@@ -6711,7 +6719,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     if (!window.confirm(
       "Repair " + scaledBoxes.length + " area" + (scaledBoxes.length === 1 ? "" : "s") + "?\n\n" + quote
     )) return;
-    // priceBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
+    // quoteBody is null: runGen's own confirmSpend gate exists for the OTHER two drawer tabs
     // (which CAN be free-card-covered) -- this submit already ran its own, Fix-correct
     // confirm above, so passing null here skips a SECOND, wrongly-worded confirm rather than
     // stacking one on top of it.
@@ -7029,6 +7037,13 @@ export default function App() {
     // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
     // "Rendered" matches the gallery's own existing label for this same /api/loom/generate
     // endpoint (Gen.videoGenerate()'s runTask call).
+    // 2026-08-23: the drawer now submits through the gallery's shared submit road, which
+    // registers on the way past, so by the time this runs the id is usually already in the
+    // log and register() no-ops on its `seen` map. KEPT anyway, and not as an oversight:
+    // register is idempotent by design, this stays the Loom's own guarantee (every Loom
+    // submit path registers, pinned by loom-image-job-register.test.js) rather than a
+    // dependency on what another bundle's road happens to do, and it is still the only
+    // registration if a future host mounts this drawer without the gallery's Jobs engine.
     if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
   }, [setGenState, setCardStatus]);
   const onVideoResult = useCallback((cardId, detail) => {

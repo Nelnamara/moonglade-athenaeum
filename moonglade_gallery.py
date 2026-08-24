@@ -26,6 +26,7 @@ import sqlite3
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import moonglade_assets
@@ -296,15 +297,110 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN batch_size TEXT DEFAULT ''",
 ]
 
-def _connect(db_path):
+# ---------------------------------------------------------------------------
+# THE CATALOG ROAD -- connect and migrate are two things
+#
+# Opening the catalog and upgrading its schema used to be ONE act: _connect()
+# ran all of _MIGRATIONS on every single call, at ~39 call sites, so an ordinary
+# read paid 41 ALTER TABLE / CREATE INDEX statements (each raising and swallowing
+# an OperationalError once the column exists) before it could run its SELECT.
+# They are now two:
+#
+#   catalog(db_path)  -- a context manager: open, row_factory, close. NO DDL.
+#   migrate(db_path)  -- run _MIGRATIONS. Idempotent, and memoized per process
+#                        per resolved path, so calling it is free after the first.
+#
+# LAZY SAFETY IS THE CONTRACT. Every entry point that touches the catalog -- the
+# web app, the CLI through _ensure_db, moonglade_mcp.py, moonglade_similar.py,
+# save_catalog, and any test that calls a helper straight at a fresh tmp db --
+# used to be migrated implicitly by _connect, and still is: the FIRST catalog()
+# for a given path in this process runs migrate() for it. No entry point has to
+# remember to migrate; create_app and _ensure_db call migrate() explicitly only
+# to say so out loud, and the memo makes that call cost nothing.
+# ---------------------------------------------------------------------------
+
+# Resolved catalog paths already migrated in THIS process. Per-process by design:
+# a new process re-checks the schema once, which is what makes an install upgraded
+# by a new release pick the new columns up on its next run without a migration step.
+_MIGRATED = set()
+_MIGRATE_LOCK = threading.Lock()
+
+
+def _catalog_key(db_path):
+    """The memo key for one catalog file: absolute, symlink-resolved, and
+    case-normalized, so `pixai_backup/catalog.db` and `PIXAI_BACKUP\\CATALOG.DB`
+    are one entry rather than two on Windows."""
+    try:
+        resolved = str(Path(db_path).resolve())
+    except OSError:                       # a path the OS refuses to resolve
+        resolved = str(db_path)
+    return os.path.normcase(resolved)
+
+
+def migrate(db_path, force=False):
+    """Bring an existing catalog.db up to the current schema by running
+    _MIGRATIONS. Idempotent: every statement is an ALTER TABLE ADD COLUMN or a
+    CREATE INDEX IF NOT EXISTS, and the OperationalError a re-run raises ("duplicate
+    column name") is the success case, not a failure.
+
+    Memoized per process per resolved path -- the second and every later call for
+    the same catalog returns without opening anything. That is what lets create_app
+    and _ensure_db call it explicitly AND lets catalog() call it lazily without the
+    two ever colliding into real work twice.
+
+    `force=True` runs the statements again anyway, ignoring the memo. Nothing in the
+    app needs it (a new process starts with an empty memo, which is exactly the
+    upgrade path a new release takes); it exists so a test can prove the DDL really
+    is re-runnable rather than proving only that the memo skipped it."""
+    key = _catalog_key(db_path)
+    if key in _MIGRATED and not force:
+        return
+    with _MIGRATE_LOCK:
+        if key in _MIGRATED and not force:   # another thread got here first
+            return
+        con = sqlite3.connect(str(db_path))
+        try:
+            for sql in _MIGRATIONS:
+                try:
+                    con.execute(sql)
+                    con.commit()
+                except sqlite3.OperationalError:
+                    pass  # column/index already exists
+        finally:
+            con.close()
+        _MIGRATED.add(key)
+
+
+@contextmanager
+def catalog(db_path):
+    """The one way to open catalog.db: a migrated, sqlite3.Row-factory connection,
+    closed when the block ends. Runs NO DDL of its own -- the lazy migrate above
+    fires once per path per process and then never again.
+
+        with catalog(db_path) as con:
+            rows = con.execute("SELECT ...").fetchall()
+
+    Writers commit inside the block; this closes the connection, it does not
+    commit for you (an uncommitted write is rolled back on close, exactly as it
+    was under _connect)."""
+    migrate(db_path)
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
-    for sql in _MIGRATIONS:
-        try:
-            con.execute(sql)
-            con.commit()
-        except sqlite3.OperationalError:
-            pass  # column/index already exists
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+def _connect(db_path):
+    """Thin alias over the catalog road for the helpers below, which predate it and
+    hold the connection themselves (`con = _connect(...)` / `finally: con.close()`).
+    Same guarantees as catalog(): migrated once per process, Row factory, no
+    per-call DDL. New code -- and every catalog verb -- uses `catalog()`; nothing
+    outside this module's own helper set should call this."""
+    migrate(db_path)
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
     return con
 
 
@@ -932,6 +1028,319 @@ def catalog_counts(db_path):
         return {"images": 0, "videos": 0, "collections": 0}
     finally:
         con.close()
+
+
+
+# ---------------------------------------------------------------------------
+# CATALOG VERBS -- the questions the web routes ask of the catalog
+#
+# Every one of these was raw SQL inside a route handler in create_app until
+# 2026-08-23: eleven handlers and inner functions opened their own connection and
+# wrote their own SELECT/UPDATE against `catalog`, which is exactly what
+# architecture.md's "all I/O goes through helpers -- never raw SQL elsewhere" said
+# did not happen. A verb is named for what the DOMAIN calls the question, takes a
+# db_path, and returns PLAIN DATA (dicts, lists, ints) -- never a Row, never a live
+# connection, never a Response. Shaping that data into a payload, and the URLs in
+# it, stays at the handler; the SQL stays here.
+#
+# The SQL below is the SAME SQL those handlers held -- same columns, same WHERE,
+# same ORDER BY, same LIMITs. This move was a relocation, not a rewrite.
+# ---------------------------------------------------------------------------
+
+def task_media(db_path, task_id):
+    """Every catalog row belonging to one generation task: what the task produced,
+    locally. Three callers needed exactly this and each had its own copy of the
+    query -- the live-mirror's "a concurrent collect already finished, read the
+    result back" path, /api/import-task's already-catalogued precheck, and the bulk
+    delete's per-task local purge -- so they share one verb and one column list.
+    Empty list for a task this library never downloaded."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, is_video, filename FROM catalog WHERE task_id=?",
+            (str(task_id),)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def task_media_count(db_path, task_id):
+    """How many catalog rows share a task id -- is this picture one of a batch, or
+    the only thing its task made? A COUNT rather than task_media() because the
+    single delete-image dialog asks nothing else about them. Fails soft to 0: a
+    number on a confirm dialog must never be able to break the dialog."""
+    tid = str(task_id or "").strip()
+    if not tid:
+        return 0
+    try:
+        with catalog(db_path) as con:
+            return int(con.execute(
+                "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+# sqlite's default host-parameter ceiling is 999, and this is well inside it while
+# still cutting a big selection to a handful of passes.
+_TASK_CHUNK = 400
+
+
+def _delete_targets(con, media_ids):
+    """The shared selection -> (task ids, local-only rows) resolution behind BOTH
+    /api/delete-preview and the bulk delete. Shared rather than copied so the preview
+    cannot drift from the action it previews: a dialog that lists a different blast
+    radius than the delete then takes is worse than showing nothing at all.
+
+    Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
+    cloud delete per task no matter how many of its images were selected) and
+    local_only holds the rows with no task id at all -- imports, which have nothing
+    on PixAI to delete and are purged locally only.
+
+    Takes a connection, not a db_path: delete_targets() and delete_preview_rows()
+    both need this answer plus more from the SAME open connection."""
+    sel_rows = [con.execute(
+        "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
+    ).fetchone() for m in media_ids]
+    sel_rows = [dict(r) for r in sel_rows if r]
+    task_ids = sorted({(r.get("task_id") or "").strip()
+                       for r in sel_rows if (r.get("task_id") or "").strip()})
+    local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
+    return sel_rows, task_ids, local_only
+
+
+def _members_of_tasks(con, task_ids):
+    """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
+    instead of a query per task.
+
+    Rows come back grouped and sorted here rather than relying on the query's order,
+    because one statement now returns several tasks interleaved. (The chunked IN also
+    predates the idx_task_id index: measured on a 36,000-row catalog, 800 per-task
+    scans cost 8.6s inside the request /api/delete-preview's dialog was waiting on,
+    against 38ms chunked.)"""
+    out = {}
+    for i in range(0, len(task_ids), _TASK_CHUNK):
+        chunk = task_ids[i:i + _TASK_CHUNK]
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
+            "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+        for r in rows:
+            out.setdefault(r["task_id"], []).append(dict(r))
+    for members in out.values():
+        members.sort(key=lambda r: r["media_id"])
+    return out
+
+
+def delete_targets(db_path, media_ids):
+    """What a selection of media_ids actually resolves to for a delete:
+    (sel_rows, task_ids, local_only). See _delete_targets for the shape."""
+    with catalog(db_path) as con:
+        return _delete_targets(con, media_ids)
+
+
+def delete_preview_rows(db_path, media_ids, task_cap=None):
+    """Everything "Delete from PixAI" needs to describe its own blast radius before
+    anything fires, in ONE connection: the selection resolved to tasks, each task
+    expanded to its FULL catalog membership (deleting on PixAI is task-level, so
+    picking one image of a batch takes all four), and the display-capped rows for the
+    task-less imports the same button purges locally.
+
+    Returns {sel_rows, task_ids, local_only, members_by_task, local_rows}. The caps
+    are DISPLAY bounds on `local_rows` only -- task_ids and local_only always describe
+    the entire selection, because the totals are what the user reads to decide."""
+    cap = DELETE_PREVIEW_TASK_CAP if task_cap is None else task_cap
+    with catalog(db_path) as con:
+        sel_rows, task_ids, local_only = _delete_targets(con, media_ids)
+        members_by_task = _members_of_tasks(con, task_ids)
+        shown = [con.execute(
+            "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
+            (r["media_id"],)).fetchone() for r in local_only[:cap]]
+        local_rows = [dict(r) for r in shown if r]
+    return {"sel_rows": sel_rows, "task_ids": task_ids, "local_only": local_only,
+            "members_by_task": members_by_task, "local_rows": local_rows}
+
+
+def myart_items(db_path):
+    """Every catalog row that exists as a PixAI ARTWORK (artwork_id set by
+    --sync-artworks), public AND private -- the My Art gallery's whole population,
+    newest first. Pure catalog read: title/likes/comments/tags/nsfw all arrive via
+    --sync-artworks, so nothing here touches the network. `likes` and `comments` come
+    back as ints (the columns are TEXT and blank means zero)."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
+            " created_at, art_tags, is_published,"
+            " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
+            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+            " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
+            " ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def artwork_row(db_path, media_id):
+    """The publish-relevant catalog row behind one media_id (artwork_id / task_id /
+    title / art_tags / is_published), or None. What every My Art card action resolves
+    its target through before it will talk to PixAI at all."""
+    with catalog(db_path) as con:
+        r = con.execute(
+            "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
+            " FROM catalog WHERE media_id = ? LIMIT 1", (str(media_id),)).fetchone()
+    return dict(r) if r else None
+
+
+def publish_state(db_path, media_id, artwork_id=None, published=None,
+                  art_tags=None, title=None):
+    """Mirror a completed PixAI publish/unpublish/re-tag/delete back into the catalog
+    so the grid reflects it without a full --sync-artworks. Every field is optional and
+    None means LEAVE IT ALONE -- an artwork whose visibility changed must not have its
+    title or tags rewritten as a side effect.
+
+    `published` is a bool (stored as the catalog's '1'/'0' TEXT), `art_tags` an
+    already-formatted comma string. Unpublishing on PixAI is expressed here as
+    artwork_id='' plus published=False: the local row survives, it just no longer
+    claims an artwork. Returns the number of columns written."""
+    sets, params = [], []
+    if artwork_id is not None:
+        sets.append("artwork_id=?"); params.append(str(artwork_id))
+    if published is not None:
+        sets.append("is_published=?"); params.append("1" if published else "0")
+    if art_tags is not None:
+        sets.append("art_tags=?"); params.append(str(art_tags))
+    if title is not None:
+        sets.append("title=?"); params.append(str(title))
+    if not sets:
+        return 0
+    params.append(str(media_id))
+    with catalog(db_path) as con:
+        con.execute("UPDATE catalog SET {} WHERE media_id=?".format(", ".join(sets)),
+                    params)
+        con.commit()
+    return len(sets)
+
+
+def lineage(db_path, media_id):
+    """The family tree of one image, as rows:
+      * siblings -- the other outputs of the SAME generation task (share task_id).
+      * parent   -- the SOURCE image this one was derived from (source_media_id),
+                    carrying `kind`, the derivation (edit/upscale/video).
+      * children -- every image derived FROM this one, each with its own `kind`.
+    Returns {row, siblings, parent, children}, or None for a media_id the catalog does
+    not know -- "unknown image" is the caller's refusal to make, not this verb's. Any
+    dimension can be empty: an original txt2img with a batch of 1 and no derivatives
+    has an empty tree. Pure catalog read, no network."""
+    mid = str(media_id or "").strip()
+    cols = "media_id, is_video, title, prompt_preview"
+    with catalog(db_path) as con:
+        me = con.execute(
+            "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
+            " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
+        if not me:
+            return None
+        siblings = []
+        if me["task_id"]:
+            siblings = [dict(r) for r in con.execute(
+                "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
+                " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
+        parent = None
+        if me["source_media_id"]:
+            pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
+                             (me["source_media_id"],)).fetchone()
+            if pr:
+                parent = dict(pr, kind=me["derive_kind"] or "derived")
+        children = [dict(r, kind=(r["derive_kind"] or "derived"))
+                    for r in con.execute(
+                        "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
+                        " ORDER BY created_at" % cols, (mid,)).fetchall()]
+    return {"row": dict(me), "siblings": siblings, "parent": parent,
+            "children": children}
+
+
+def sibling_media(db_path, task_ids):
+    """Every output of each requested task, in ONE query, ordered by (task_id,
+    media_id) -- the page-batched form of lineage()'s siblings, for the card
+    placard's Sibling Strip. Includes each task's own members entire (the caller
+    lights "self" by media_id).
+
+    An EMPTY task_id is never queried: every import shares '', and one giant
+    pseudo-batch of unrelated images is not a sibling strip."""
+    ids = [str(t) for t in (task_ids or []) if str(t).strip()]
+    if not ids:
+        return []
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT task_id, media_id, is_video, batch_index FROM catalog"
+            " WHERE task_id IN (%s) AND task_id != ''"
+            " ORDER BY task_id, media_id" % ",".join("?" * len(ids)), ids).fetchall()
+        return [dict(r) for r in rows]
+
+
+def recent_train_tasks(db_path, limit=18, pool=400):
+    """Recent generations grouped by TASK, newest task first, for the mobile Train
+    dataset picker -- each entry is one generation and its real image count, never a
+    fixed batch size (real batches are 1-4). Videos, task-less imports and rows with
+    no file are excluded: a training set is made of images that exist on disk.
+
+    `pool` is how many recent rows are read before grouping -- the tasks come out of
+    the newest `pool` media rows, which is what makes this one indexed query instead of
+    a GROUP BY over the whole catalog. Returns [{task_id, media_ids, count}]."""
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, created_at FROM catalog"
+            " WHERE task_id != '' AND is_video != '1' AND filename != ''"
+            " ORDER BY created_at DESC LIMIT ?", (int(pool),)).fetchall()
+    groups, order = {}, []
+    for r in rows:
+        tid = r["task_id"]
+        if tid not in groups:
+            if len(order) >= limit:
+                continue
+            groups[tid] = []
+            order.append(tid)
+        if tid in groups:
+            groups[tid].append(r["media_id"])
+    return [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid])}
+            for tid in order]
+
+
+def history_page(db_path, since_utc, until_utc, media="", source=""):
+    """One window of the history feed: every catalog row created in
+    [since_utc, until_utc), newest first, plus the cursor for the page below it.
+
+    ONE indexed range query (`created_at >= ? AND created_at < ?`, no functions on the
+    column) and one seek. The window is passed in already resolved to UTC strings
+    because the DAY boundaries are the caller's business -- they depend on the viewer's
+    timezone, and computing them at the route is what makes them deterministic and
+    testable. `media`/`source` are _build_where's own idiom.
+
+    Returns {rows, older_created_at}: `older_created_at` is the created_at of the
+    NEWEST row older than this window (None if there is nothing older), so the caller
+    can open the next page on a day that has runs instead of a run of empty days."""
+    where, params = _build_where("", "", "", "", media_type=media, source=source)
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT media_id, task_id, is_video, created_at, width, height, model_id, "
+            "COALESCE(NULLIF(model_name,''), NULLIF(video_model,''), model_id, '') AS model, "
+            "SUBSTR(COALESCE(NULLIF(prompt_full,''), prompt_preview, ''), 1, 300) AS prompt, "
+            "video_duration, paid_credit, source "
+            "FROM catalog WHERE {} AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at DESC, media_id DESC".format(where),
+            params + [since_utc, until_utc]).fetchall()
+        older = con.execute(
+            "SELECT created_at FROM catalog WHERE {} AND created_at < ? "
+            "ORDER BY created_at DESC LIMIT 1".format(where),
+            params + [since_utc]).fetchone()
+    return {"rows": [dict(r) for r in rows],
+            "older_created_at": older[0] if older else None}
+
+
+def history_created_ats(db_path, since_utc, until_utc, media="", source=""):
+    """Just the created_at values in a window, for counting how many LOCAL days of
+    the next page actually have runs ("Load N older days"). Values, not days: which
+    local day a UTC timestamp falls in depends on the viewer's timezone, so the
+    bucketing is the caller's to do."""
+    where, params = _build_where("", "", "", "", media_type=media, source=source)
+    with catalog(db_path) as con:
+        rows = con.execute(
+            "SELECT created_at FROM catalog WHERE {} AND created_at >= ? "
+            "AND created_at < ?".format(where),
+            params + [since_utc, until_utc]).fetchall()
+    return [r[0] for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -3186,20 +3595,17 @@ def backfill_batches(out_dir, db_path):
 
     Safe to re-run — only updates rows where batch is currently empty.
     Returns number of rows updated.
+
+    Rides the shared scan (`include=("batches",)` = walk only that subtree, no
+    exclusions inside it) rather than its own iterdir+rglob pair, and takes the
+    media_id from the scan instead of re-typing `stem.split("_")[-1]` inline --
+    that inline copy was one of the two INVARIANT-1 re-implementations.
     """
-    batches_root = Path(out_dir) / "batches"
-    if not batches_root.exists():
-        return 0
     updates = {}  # media_id -> batch_name
-    for batch_dir in batches_root.iterdir():
-        if not batch_dir.is_dir():
-            continue
-        batch_name = batch_dir.name
-        for p in batch_dir.rglob("*"):
-            if p.suffix.lower() not in _IMAGE_EXTS:
-                continue
-            mid = p.stem.split("_")[-1]
-            updates[mid] = batch_name
+    for e in scan_library(out_dir, kinds=("image",), include=("batches",), exclude=()):
+        if len(e.rel.parts) < 3:
+            continue          # a loose file sitting directly in batches/ has no batch dir
+        updates[e.media_id] = e.rel.parts[1]
     if not updates:
         return 0
     con = _connect(db_path)
@@ -3246,13 +3652,6 @@ def collection_health(out_dir, db_path):
     it's safe to render on every page load.
     """
     from collections import defaultdict, Counter
-    gallery_dir = out_dir / "gallery"
-    quarantine_dir = out_dir / "_duplicates"
-    deleted_dir = out_dir / DELETED_DIRNAME
-    # Kept as an exclusion even though branding no longer lives under out_dir: an old
-    # install still has files there, and excluding a path that is now absent is a harmless
-    # no-op, whereas dropping the exclusion would sweep a legacy folder into a scan.
-    branding_dir = out_dir / "branding"
 
     per_bucket = Counter()
     total_files = 0
@@ -3263,65 +3662,28 @@ def collection_health(out_dir, db_path):
     dup_redundant = 0
     dup_bytes = 0
     mid_sizes = defaultdict(list)  # media_id -> [sizes] to estimate reclaimable
-    _video_exts = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
 
     # The walk is the panel's cost at scale (owner report 2026-08-06: "VERY slow" at
-    # 35k images). The old rglob walked EVERY file -- including the entire gallery/
-    # thumbnail tree, only to exclude each one by path-prefix afterward -- and then
-    # paid a separate stat() per kept file. This scandir recursion (a) PRUNES the
-    # excluded subtrees (gallery/, _duplicates/, the deleted dir, legacy branding/)
-    # so their thousands of entries are never enumerated at all, and (b) reads
-    # is_file/size straight off the DirEntry, which on Windows comes from the
-    # directory read itself -- no per-file syscall. Same results, same exclusions,
-    # guarded by tests/test_gallery_filters.py's existing health tests.
-    import os as _os
-    _pruned = {str(gallery_dir), str(quarantine_dir), str(deleted_dir), str(branding_dir)}
-
-    def _walk(dirpath):
-        try:
-            with _os.scandir(dirpath) as entries:
-                for e in entries:
-                    try:
-                        if e.is_dir(follow_symlinks=False):
-                            if e.path not in _pruned:
-                                yield from _walk(e.path)
-                        elif e.is_file(follow_symlinks=False):
-                            yield e
-                    except OSError:
-                        continue
-        except OSError:
-            return
-
-    for e in _walk(str(out_dir)):
-        p = Path(e.path)
-        ext = p.suffix.lower()
-        is_img = ext in _IMAGE_EXTS
-        if (not is_img and ext not in _video_exts) or p.name.endswith(".part"):
-            continue
-        rel = p.relative_to(out_dir)
-        on_disk_rels.add(str(rel).replace("\\", "/"))
-        if not is_img:
+    # 35k images), which is why the shared scan_library PRUNES the excluded subtrees
+    # (gallery/, _duplicates/, _deleted/, legacy branding/) instead of enumerating
+    # their thousands of entries only to drop each one by path-prefix afterward, and
+    # reads is_file/size straight off the DirEntry. branding/ is this walker's own
+    # extra exclusion (named disagreement 5) and videos are its own extra kind
+    # (named disagreement 4) -- both asked for here, neither imposed on the others.
+    # Guarded by tests/test_gallery_filters.py's existing health tests.
+    for e in scan_library(out_dir, kinds=("image", "video"),
+                          exclude=QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)):
+        on_disk_rels.add(str(e.rel).replace("\\", "/"))
+        if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
-        top = str(rel).replace("\\", "/").split("/")[0]
-        if top == "images":
-            bucket = "images"
-        elif top == "batches":
-            bucket = "batches"
-        elif top == "unknown-date" or (len(top) == 7 and top[4] == "-" and top[:4].isdigit()):
-            bucket = "month"
-        else:
-            bucket = "other"
-        try:
-            sz = e.stat(follow_symlinks=False).st_size   # from the DirEntry -- no extra syscall on Windows
-        except OSError:
-            continue
+        if e.size is None:
+            continue          # stat() failed -- same skip the per-file stat() had
         total_files += 1
-        total_bytes += sz
-        per_bucket[bucket] += 1
-        mid = media_id_of(p)
-        on_disk_ids.add(mid)
-        locs[mid].add(bucket)
-        mid_sizes[mid].append(sz)
+        total_bytes += e.size
+        per_bucket[e.bucket] += 1
+        on_disk_ids.add(e.media_id)
+        locs[e.media_id].add(e.bucket)
+        mid_sizes[e.media_id].append(e.size)
 
     for mid, buckets in locs.items():
         if len(buckets) > 1:
@@ -3458,32 +3820,11 @@ def duplicate_groups(out_dir, limit=300):
     locally-purged image must not be reported back as a live duplicate of its own
     quarantined self."""
     from collections import defaultdict
-    gallery_dir = out_dir / "gallery"
-    quarantine_dir = out_dir / "_duplicates"
-    deleted_dir = out_dir / DELETED_DIRNAME
     prio = {"batches": 0, "month": 1, "images": 2, "other": 3}
     locs = defaultdict(list)
-    for p in out_dir.rglob("*"):
-        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
-            continue
-        if (p.name.endswith(".part") or _is_under(p, gallery_dir)
-                or _is_under(p, quarantine_dir) or _is_under(p, deleted_dir)):
-            continue
-        rel = p.relative_to(out_dir)
-        top = str(rel).replace("\\", "/").split("/")[0]
-        if top == "images":
-            bucket = "images"
-        elif top == "batches":
-            bucket = "batches"
-        elif top == "unknown-date" or (len(top) == 7 and top[4] == "-" and top[:4].isdigit()):
-            bucket = "month"
-        else:
-            bucket = "other"
-        try:
-            sz = p.stat().st_size
-        except OSError:
-            sz = 0
-        locs[media_id_of(p)].append({"rel": str(rel), "bucket": bucket, "size": sz})
+    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
+        locs[e.media_id].append({"rel": str(e.rel), "bucket": e.bucket,
+                                 "size": e.size or 0})
 
     groups = []
     for mid, items in locs.items():
@@ -3641,11 +3982,200 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
     return out
 
 
+# ---------------------------------------------------------------------------
+# LIBRARY SCAN -- the one tree-walk (2026-08-23)
+# ---------------------------------------------------------------------------
+# Ten places used to walk the library tree, each carrying a private copy of the
+# exclusion set, the `.part` skip, the extension set and the bucket classifier.
+# They drifted twice: B11 (audit 2026-07-21) had to teach `_deleted/` to five
+# walkers one at a time, and `_count_backup_images` only caught up at M06
+# (2026-07-27) -- its own docstring says so. This section is the one module they
+# all ride now. It lives HERE, in the gallery, beside the SQLite catalog helpers,
+# because the import direction runs one way: `moonglade_backup` imports the
+# gallery at module top (see its `from moonglade_gallery import ...`), the gallery
+# only imports the backup lazily inside functions, and `moonglade_similar` imports
+# the gallery lazily inside `scan_dir`. Putting the scan anywhere else would need
+# a new top-level module or a cycle.
+#
+# WHAT IS SHARED: the exclusion vocabulary, the `.part` skip, the extension /
+# `kinds` taxonomy, `bucket_of`, `media_id_of`, and the traversal itself.
+# WHAT IS NOT: the zero-byte rule and every caller-specific filter stay at the
+# caller (INVARIANT 3) -- `scan_library` reports `size` (None on a stat failure)
+# and lets each caller decide, exactly as each one decided before.
+#
+# THE TEN WALKERS (walker -> what it skipped -> what it asks for now):
+#
+#   moonglade_gallery.py
+#     find_files_for_media_id   gallery/ _duplicates/ _deleted/, .part, zero-byte,
+#                               _IMAGE_EXTS (or caller `exts`), exact-id
+#                            -> files_for(kinds=("image",) or exts,
+#                                         exclude=QUARANTINE_EXCLUDE)
+#     duplicate_groups          gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",),
+#                                            exclude=QUARANTINE_EXCLUDE)
+#     collection_health._walk   gallery/ _duplicates/ _deleted/ branding/, .part,
+#                               _IMAGE_EXTS + its own video set
+#                            -> scan_library(kinds=("image","video"),
+#                                            exclude=QUARANTINE_EXCLUDE+(BRANDING_DIRNAME,))
+#     backfill_batches          nothing (rooted at batches/), _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",), include=("batches",),
+#                                            exclude=())
+#
+#   moonglade_backup.py
+#     _scan_media_files         gallery/ _duplicates/ _deleted/, .part, _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",),
+#                                            exclude=QUARANTINE_EXCLUDE)
+#     cmd_organize              gallery/ _duplicates/ _deleted/ videos/ imported/,
+#                               .part, leading-underscore names, _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",),
+#                                            exclude=QUARANTINE_EXCLUDE+("videos","imported"))
+#                               plus its own name.startswith("_") skip, kept at the caller
+#     run_import_local          gallery/ _duplicates/ _deleted/ branding/ (internal
+#                               scan only -- an EXTERNAL source dir excludes nothing),
+#                               .part, _IMAGE_EXTS | _VIDEO_EXTS
+#                            -> scan_library(kinds=("image","video"),
+#                                            exclude=IMPORT_EXCLUDE or ())
+#     _count_backup_images      counts gallery/ as thumbs and _deleted/ as trashed
+#                               rather than dropping them; skips _duplicates/;
+#                               .part, _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",), exclude=())
+#                               plus a split on rel.parts[0] against the shared dirnames
+#     run_download._iter_...    gallery/ _duplicates/ _deleted/ by dir NAME at any
+#                               depth, .part, zero-byte, _IMAGE_EXTS
+#                            -> scan_library(kinds=("image",),
+#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
+#                               plus its own zero-byte skip, kept at the caller
+#
+#   moonglade_similar.py
+#     scan_dir                  gallery/ _duplicates/ _deleted/ by dir NAME at any
+#                               depth, case-insensitively; a NARROWER ext set
+#                            -> scan_library(kinds=("embeddable",),
+#                                            exclude=QUARANTINE_EXCLUDE_ANYWHERE)
+#
+# NAMED DISAGREEMENTS -- kept as caller choices, NOT silently unified:
+#
+#   1. Extension set. `moonglade_similar.scan_dir` indexes only
+#      {.png,.jpg,.jpeg,.webp} -- it does NOT embed `.gif` or `.avif`, which the
+#      other nine walkers do read. That is the `"embeddable"` kind, deliberately a
+#      subset of `"image"`, not a bug to be widened here.
+#   2. Exclusion DEPTH. Eight walkers exclude the top-level subtrees
+#      `out/gallery`, `out/_duplicates`, `out/_deleted` only; `run_download` and
+#      `scan_dir` prune any DIRECTORY OF THAT NAME at any depth. Both survive: a
+#      plain name in `exclude` is the top-level subtree, a `"**/name"` entry is the
+#      any-depth prune. `QUARANTINE_EXCLUDE` and `QUARANTINE_EXCLUDE_ANYWHERE` are
+#      the two spellings. (The any-depth match is case-insensitive, which is what
+#      scan_dir already did; run_download's own name compare was case-sensitive,
+#      a difference that cannot show up on Windows, where the two names are the
+#      same directory.)
+#   3. Zero-byte. Only `files_for` (so `find_files_for_media_id`, resume, and
+#      `find_image_file`) and `run_download` treat a zero-byte file as not-there
+#      (INVARIANT 3). The audit deliberately does not -- it wants to SEE the
+#      zero-byte file so it can never pick it as a keeper (tests/test_dedup.py pins
+#      both halves). So the rule stays at the caller and `scan_library` reports
+#      `size` instead of deciding.
+#   4. Video. Only `collection_health` and `run_import_local` look at videos at
+#      all; the audit, organize, dedup and resume paths are image-only, and stay so.
+#   5. Legacy `branding/`. Only `collection_health` and `run_import_local` exclude
+#      it. Branding moved to the app root on 2026-07-26, so on a current install
+#      this excludes nothing; it is kept because an older install still has files
+#      there. Adding it to the other eight would be a behaviour change, so it is
+#      not added.
+#   6. `cmd_organize` alone also skips `videos/`, `imported/`, and any file whose
+#      name starts with `_`. The two directories are `exclude` entries; the
+#      leading-underscore rule is one line at the caller, because it is a rule
+#      about FILES, not about the shape of the tree.
+#
+# ONE MODULE, TWO TRAVERSALS. `scan_library` walks the whole tree with
+# `os.scandir` and prunes excluded subtrees before descending (so the gallery's
+# thousands of thumbnails are never enumerated). `files_for` answers the one-id
+# question with a targeted `rglob("*<mid>.*")` instead, because it is called once
+# per media id inside loops -- a full walk per id is what made resume scale
+# quadratically before run_download built its index. Same rules, same helpers,
+# two access paths: the SET each yields is identical, only the cost differs.
+# ---------------------------------------------------------------------------
+from collections import namedtuple
+
+# The quarantine / derived-output directory names. One spelling each, shared by
+# every walker and by the code that WRITES them, so a rename can never again be
+# taught to some walkers and not others.
+GALLERY_DIRNAME = "gallery"           # derived thumbnails + regenerable caches
+DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
+# Accidental bulk deletes should be recoverable: purges MOVE files here instead of
+# destroying them (the catalog row is still removed, so the gallery stays clean).
+DELETED_DIRNAME = "_deleted"
+# App chrome (banner/logo/marks). Branding moved to the APP root on 2026-07-26, so
+# under a current out_dir this names nothing -- kept because an install that predates
+# the move still has files here, and a scan that swept them in would catalogue
+# someone's banner and mascots as gallery images.
+BRANDING_DIRNAME = "branding"
+
+# The two spellings of "skip the derived + quarantined trees" (named disagreement 2).
+QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME)
+QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
+# --import-local's internal scan: the three above plus legacy branding/.
+IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
+
+_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+# What moonglade_similar's CLIP index will actually embed -- deliberately narrower
+# than _IMAGE_EXTS (named disagreement 1).
+_EMBED_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+
+# The kind taxonomy. `_IMAGE_EXTS` is defined at the top of this module beside the
+# other catalog constants; the other two live here because nothing outside the scan
+# needs them.
+SCAN_KINDS = {
+    "image": _IMAGE_EXTS,
+    "video": _VIDEO_EXTS,
+    "embeddable": _EMBED_EXTS,
+}
+# ext -> the widest kind that owns it ("image" wins over the "embeddable" subset).
+_KIND_BY_EXT = {}
+for _k in ("image", "video", "embeddable"):
+    for _e in SCAN_KINDS[_k]:
+        _KIND_BY_EXT.setdefault(_e, _k)
+del _k, _e
+
+MediaEntry = namedtuple("MediaEntry", "path rel bucket media_id size kind")
+MediaEntry.__doc__ = """One media file the scan found.
+
+    path      absolute Path
+    rel       Path relative to the scan root (native separators, like the
+              `p.relative_to(out_dir)` every caller used to compute itself)
+    bucket    bucket_of(rel) -- "images" | "batches" | "month" | "other"
+    media_id  media_id_of(path) -- INVARIANT 1
+    size      st_size, or None if the stat() failed. None is NOT zero: resume
+              treats an unreadable stat as "probably fine, already done", and a
+              genuine zero means an interrupted download (INVARIANT 3).
+    kind      which entry of SCAN_KINDS matched ("image" | "video" | ...)
+    """
+
+
+def bucket_of(path_or_rel):
+    """THE bucket classifier (was moonglade_backup._bucket_of, which is now an
+    alias onto this, and which this module used to re-type inline twice more).
+    Classifies a path RELATIVE to out_dir into its top-level bucket name:
+    "images", "batches", "month" (YYYY-MM/ or unknown-date/), or "other". Feeds
+    _BUCKET_PRIORITY, which decides which copy of a duplicated media_id is the
+    keeper."""
+    top = str(path_or_rel).replace("\\", "/").split("/")[0]
+    if top == "images":
+        return "images"
+    if top == "batches":
+        return "batches"
+    if top == "unknown-date":
+        return "month"
+    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
+        return "month"
+    return "other"
+
+
 def media_id_of(path):
     """Canonical media_id extraction (INVARIANT 1): the last underscore-delimited
     chunk of the filename stem. Works for every naming layout the tool produces:
-    flat (`prompt_task_<mid>`), batch (`NN_<mid>`), and bare (`<mid>`)."""
-    from pathlib import Path
+    flat (`prompt_task_<mid>`), batch (`NN_<mid>`), and bare (`<mid>`).
+
+    The two inline re-implementations (backfill_batches here, scan_dir in
+    moonglade_similar.py) are gone -- both now arrive here through the scan."""
     return Path(path).stem.split("_")[-1]
 
 
@@ -3657,43 +4187,138 @@ def _is_under(path, parent):
         return False
 
 
-def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
-    """All on-disk files whose media_id matches, anywhere under out_dir.
+def _kind_map(kinds):
+    """{ext: kind name} for a `kinds` argument.
 
-    Single source of truth for media-id -> file resolution, shared by resume
-    (`already_downloaded`), the gallery (`find_image_file`), and the duplicate
-    audit. Matches BOTH naming layouts in one pass:
+    `kinds` is a kind name or an iterable of them (keys of SCAN_KINDS). It also
+    accepts a raw iterable of ".ext" strings -- that is the compat path for
+    find_files_for_media_id(exts=...), whose callers pass an extension set
+    directly (e.g. already_downloaded_video's _VIDEO_EXTS)."""
+    if isinstance(kinds, str):
+        kinds = (kinds,)
+    out = {}
+    for k in kinds:
+        if k.startswith("."):
+            ext = k.lower()
+            out.setdefault(ext, _KIND_BY_EXT.get(ext, "other"))
+        else:
+            for ext in SCAN_KINDS[k]:
+                out[ext] = k
+    return out
+
+
+def _split_exclusions(exclude):
+    """(top-level subtree names, any-depth dir names) -- see named disagreement 2.
+
+    A plain "gallery" prunes out_dir/gallery only. A "**/gallery" prunes any
+    directory of that name at any depth, matched case-insensitively (which is what
+    moonglade_similar.scan_dir has always done, and what run_download's own
+    name-based prune does in practice on Windows)."""
+    tops, anywhere = [], set()
+    for name in exclude:
+        if name.startswith("**/"):
+            anywhere.add(name[3:].lower())
+        else:
+            tops.append(name)
+    return tops, anywhere
+
+
+def scan_library(out_dir, *, kinds=("image",), include=(), exclude=QUARANTINE_EXCLUDE):
+    """Walk the library tree once and yield a MediaEntry per media file.
+
+    out_dir   the scan root. Everything (`rel`, `bucket`, `exclude`) is relative
+              to it -- so --import-local can point this at an EXTERNAL folder and
+              get the same rules with no exclusions.
+    kinds     which extension families count. See SCAN_KINDS / _kind_map.
+    include   restrict the walk to these top-level subtrees ("only look under
+              batches/"). Empty = the whole tree. A named subtree that does not
+              exist simply yields nothing.
+    exclude   directory names to prune. Plain name = the top-level subtree;
+              "**/name" = that name at any depth (named disagreement 2).
+
+    Prunes excluded subtrees BEFORE descending, so their entries are never
+    enumerated at all -- that is what made the health panel usable at 35k images
+    (owner report 2026-08-06) and what keeps run_download's startup index cheap.
+    Reads is_file/size straight off the DirEntry, which on Windows comes from the
+    directory read itself: no per-file syscall.
+
+    Skips `.part` temp files (INVARIANT 3). Does NOT apply the zero-byte rule --
+    that one is the caller's, and `size` is reported so the caller can apply it.
+    """
+    root = Path(out_dir)
+    kind_of = _kind_map(kinds)
+    top_names, any_names = _split_exclusions(exclude)
+    pruned = {os.path.normcase(str(root / n)) for n in top_names}
+    starts = [str(root / n) for n in include] or [str(root)]
+
+    for start in starts:
+        stack = [start]
+        while stack:
+            try:
+                with os.scandir(stack.pop()) as it:
+                    for e in it:
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                if (os.path.normcase(e.path) not in pruned
+                                        and e.name.lower() not in any_names):
+                                    stack.append(e.path)
+                                continue
+                            if not e.is_file(follow_symlinks=False):
+                                continue
+                        except OSError:
+                            continue
+                        name = e.name
+                        if name.endswith(".part"):
+                            continue
+                        kind = kind_of.get(os.path.splitext(name)[1].lower())
+                        if kind is None:
+                            continue
+                        try:
+                            size = e.stat(follow_symlinks=False).st_size
+                        except OSError:
+                            size = None
+                        p = Path(e.path)
+                        rel = p.relative_to(root)
+                        yield MediaEntry(p, rel, bucket_of(rel), media_id_of(name),
+                                         size, kind)
+            except OSError:
+                continue
+
+
+def files_for(out_dir, media_id, *, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
+    """Every on-disk file whose media_id is exactly `media_id`. The one-id view.
+
+    BOTH naming layouts in one pass:
       * prefixed   `prompt_task_<mid>.ext` / `NN_<mid>.ext`
       * bare       `<mid>.ext`   (single-image --organize month files)
-
     The exact `media_id_of(p) == mid` check prevents substring collisions (a
-    longer id ending in these digits). Skips `.part`, zero-byte files, gallery
-    thumbnails (unless include_gallery=True), and quarantined files under
-    _duplicates/ or _deleted/ (so a quarantined copy never counts as a live
-    "survivor" and resume treats it as not-present). Returns a list of Paths.
+    longer id ending in these digits).
 
-    `exts` defaults to `_IMAGE_EXTS` (this function's historical, still image-only
-    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
-    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
-    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
-    in moonglade_backup.py -- so the SAME exact-match + quarantine-exclusion
-    contract applies to videos, not just images.
+    Zero-byte files are excluded HERE, not left to the caller, because this is the
+    resume/lookup matcher and "the file exists but is empty" has to read as
+    not-downloaded (INVARIANT 3): treating it as present strands the catalog row
+    pointing at a dead file that no --update ever re-fetches.
+
+    Uses a targeted glob rather than scan_library's full walk -- it is called once
+    per media id inside loops, so a whole-tree walk per id is quadratic (see the
+    section header, "one module, two traversals"). The rules are the same ones.
     """
+    root = Path(out_dir)
     mid = str(media_id)
-    match_exts = _IMAGE_EXTS if exts is None else exts
-    gallery_dir = out_dir / "gallery"
-    quarantine_dirs = (out_dir / "_duplicates", out_dir / DELETED_DIRNAME)
+    kind_of = _kind_map(kinds)
+    top_names, any_names = _split_exclusions(exclude)
+    top_dirs = [root / n for n in top_names]
     matches = []
-    for p in out_dir.rglob("*{}.*".format(mid)):
-        if p.suffix.lower() not in match_exts:
+    for p in root.rglob("*{}.*".format(mid)):
+        if p.suffix.lower() not in kind_of:
             continue
         if p.name.endswith(".part"):
             continue
         if media_id_of(p) != mid:
             continue
-        if not include_gallery and _is_under(p, gallery_dir):
+        if any(_is_under(p, d) for d in top_dirs):
             continue
-        if any(_is_under(p, q) for q in quarantine_dirs):
+        if any_names and any_names & {q.lower() for q in p.relative_to(root).parts[:-1]}:
             continue
         try:
             if not p.is_file() or p.stat().st_size == 0:
@@ -3702,6 +4327,31 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
             continue
         matches.append(p)
     return matches
+
+
+def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None):
+    """All on-disk files whose media_id matches, anywhere under out_dir.
+
+    The named entry point onto `files_for` above -- kept under this name because
+    resume (`already_downloaded`), the gallery (`find_image_file`), the loom's
+    video fallback and the duplicate audit all call it by it, several of them with
+    an explicit `exts` set.
+
+    `exts` defaults to `_IMAGE_EXTS` (this matcher's historical, still image-only
+    default -- e.g. tests/test_loom_export_bundle.py pins that video media resolves
+    via a separate catalog-row fallback, NOT this matcher). Pass `exts=_VIDEO_EXTS`
+    (B16, audit 2026-07-21) for a video-aware sibling -- see already_downloaded_video
+    in moonglade_backup.py -- so the SAME exact-match + quarantine-exclusion
+    contract applies to videos, not just images.
+    """
+    exclude = (QUARANTINE_EXCLUDE if not include_gallery
+               else (DUPLICATES_DIRNAME, DELETED_DIRNAME))
+    return files_for(out_dir, media_id,
+                     kinds=(("image",) if exts is None else exts),
+                     exclude=exclude)
+# ---------------------------------------------------------------------------
+# END LIBRARY SCAN
+# ---------------------------------------------------------------------------
 
 
 def find_image_file(out_dir, media_id, filename):
@@ -3729,9 +4379,8 @@ def find_image_file(out_dir, media_id, filename):
     return matches[0] if matches else None
 
 
-# Accidental bulk deletes should be recoverable: purges MOVE files here instead of
-# destroying them (the catalog row is still removed, so the gallery stays clean).
-DELETED_DIRNAME = "_deleted"
+# DELETED_DIRNAME (the recoverable-purge folder) is defined in the LIBRARY SCAN
+# section above, beside the other directory names every walker shares.
 
 # How many tasks /api/delete-preview describes image-by-image before it stops and just
 # counts the rest. A DISPLAY bound only -- the totals it returns are always exact for
@@ -3897,27 +4546,29 @@ def make_video_thumbnail(video_path, thumb_path):
     (a fade, a flash) lose that contest by construction. The window is the first
     ~3s (72 frames at 24fps) so the poster still reads as the clip's opening,
     not a random mid-clip moment. The literal-first-frame fallback stays for
-    clips too short for the filter to get a batch."""
-    import shutil as _sh
-    import subprocess
+    clips too short for the filter to get a batch.
+
+    ffmpeg is reached through moonglade_backup's media_tools section -- one cached
+    availability probe, one place that owns the no-window flag, the timeouts and the
+    "never raises" rule. This used to run its own uncached shutil.which() per file
+    and two differently-shaped subprocess.run() calls."""
+    import moonglade_backup as core
     import tempfile
-    if Image is None or not _sh.which("ffmpeg"):
+    if Image is None or not core.ffmpeg_path():
         return False
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(suffix=".jpg")
         os.close(fd)
-        r = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error",
-             "-i", str(video_path), "-vf", "thumbnail=72", "-frames:v", "1", tmp],
-            capture_output=True, timeout=90, creationflags=_NO_WINDOW)
-        if r.returncode != 0 or not os.path.getsize(tmp):
+        r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+                             "-vf", "thumbnail=72", "-frames:v", "1", tmp],
+                            timeout=core.THUMB_TIMEOUT)
+        if not r.ok or not os.path.getsize(tmp):
             # clips shorter than the seek point: take the literal first frame
-            r = subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error",
-                 "-i", str(video_path), "-frames:v", "1", tmp],
-                capture_output=True, timeout=60, creationflags=_NO_WINDOW)
-        if r.returncode != 0 or not os.path.getsize(tmp):
+            r = core.run_ffmpeg(["-y", "-loglevel", "error", "-i", str(video_path),
+                                 "-frames:v", "1", tmp],
+                                timeout=core.THUMB_RETRY_TIMEOUT)
+        if not r.ok or not os.path.getsize(tmp):
             return False
         return make_thumbnail(Path(tmp), thumb_path)
     except Exception:
@@ -4223,7 +4874,8 @@ def empty_trash(out_dir, thumb_dir):
 # real subfolder structure under _duplicates/, and this feature's undo is
 # specified to put a file back exactly where it came from.
 # ---------------------------------------------------------------------------
-DUPLICATES_DIRNAME = "_duplicates"    # matches cmd_dedup()'s own quarantine_root name
+# DUPLICATES_DIRNAME (the dedup quarantine folder) is defined in the LIBRARY SCAN
+# section above, beside the other directory names every walker shares.
 
 
 def _quarantine_meta_path(dest):
@@ -4542,41 +5194,29 @@ def _validate_duplicate_pair(out_dir, db_path, match_type, keep, remove):
     return False, "unknown group type '{}'".format(match_type)
 
 
-def probe_has_audio(path, timeout=15):
+def probe_has_audio(path, timeout=None):
     """True if the media file has at least one audio stream (ffprobe). Fails soft to
     False (never raises) -- a probe failure means the Loom export treats the clip as
-    silent and pads it, which is safe; it must never crash the export."""
-    import shutil as _sh
-    import subprocess
-    if not _sh.which("ffprobe"):
-        return False
-    try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-             "stream=index", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=timeout,
-            creationflags=_NO_WINDOW)
-        return bool(r.stdout.strip())
-    except Exception:
-        return False
+    silent and pads it, which is safe; it must never crash the export.
+
+    Gallery-side face of moonglade_backup's `media_tools.has_audio`, which answers three
+    ways: True, False, and None for "ffprobe could not look at all". The export's contract
+    is the two-way one, so the unanswerable case reads as silent -- deliberately, and in
+    this one place rather than at each of the export's own branches. `timeout=None` takes
+    media_tools' probe policy; the number does not live here any more."""
+    import moonglade_backup as core
+    return bool(core.has_audio(path, timeout=timeout))
 
 
-def probe_duration(path, timeout=15):
+def probe_duration(path, timeout=None):
     """Real duration in seconds via ffprobe, or None on failure (missing ffprobe,
-    unreadable file, non-numeric output). Never raises."""
-    import shutil as _sh
-    import subprocess
-    if not _sh.which("ffprobe"):
-        return None
-    try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=timeout,
-            creationflags=_NO_WINDOW)
-        return float(r.stdout.strip())
-    except (subprocess.SubprocessError, OSError, ValueError):
-        return None
+    unreadable file, non-numeric output). Never raises.
+
+    Gallery-side face of moonglade_backup's `media_tools.duration` -- see it for why
+    there is only one implementation of this question now, and why it answers at full
+    precision. `timeout=None` takes media_tools' probe policy."""
+    import moonglade_backup as core
+    return core.duration(path, timeout=timeout)
 
 
 def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, workers=8):
@@ -5075,6 +5715,134 @@ def _redact_host_paths_cli(out_dir, msg):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Auth tiers -- DECLARED AT THE ROUTE, enforced in one place
+# ---------------------------------------------------------------------------
+# A route's auth tier is a property OF THE ROUTE, so it is written on the route.
+# It used to live in tests/test_route_tiers.py's ROUTE_TIERS table instead, which
+# meant every route addition edited two files in two repositories' worth of
+# context -- and the table had already drifted past every credit-spending route
+# once (see that file's own header). The decorator below hangs the declaration on
+# the view function; _enforce_front_door() reads it back off app.view_functions at
+# request time; create_app() refuses to return an app in which any registered rule
+# has no declaration. The test still enumerates the url_map and still proves each
+# tier against a live request -- it just no longer DECLARES anything.
+PUBLIC = "PUBLIC"        # reachable with no session at all (the login surface itself)
+LOGIN = "LOGIN"          # any logged-in session, local or LAN
+LOCALHOST = "LOCALHOST"  # a logged-in session AND a loopback remote_addr
+TIERS = (PUBLIC, LOGIN, LOCALHOST)
+
+# The 403 body a LOCALHOST route refuses with. Three routes say something more
+# specific instead (see their `message=`); the wording of all four is a contract
+# the front end reads, so it is carried here verbatim rather than regenerated.
+LOCALHOST_REFUSAL = "localhost-only"
+
+_TIER_ATTR = "_mg_route_tier"
+
+
+def tier(default, message=LOCALHOST_REFUSAL, **by_method):
+    """Declare this view's auth tier. `@tier(LOGIN)`, `@tier(LOCALHOST)`, `@tier(PUBLIC)`.
+
+    A per-method override keeps a split route declarative instead of pushing half
+    of it back into the handler body: `/api/library-path` and `/api/panel/schedule`
+    are `@tier(LOGIN, POST=LOCALHOST)` -- readable at the route, and enforced by
+    the same gate as everything else.
+
+    `message` overrides the `error` string in the 403 a LOCALHOST route refuses
+    with, for the three routes whose hand-written guard said something more
+    specific than "localhost-only" (deleting from PixAI; importing onto the
+    server's machine). It is the message only -- the status and JSON shape are
+    the same for every tier refusal.
+
+    Pick the tier by what the handler can DO, not by what feels convenient:
+      LOGIN     -- browse the library, spend the owner's credits, manage your OWN
+                   account. A signed-in LAN device is NOT read-only; that is the
+                   whole point of the tier (see docs/DECISIONS.md).
+      LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
+                   PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
+                   maintenance, or shelling out on the SERVER machine.
+      PUBLIC    -- the login surface and the static art it renders. Nothing else.
+
+    A route whose LOCALHOST requirement depends on its ARGUMENTS rather than on
+    its URL is not expressible as a tier and must not be forced into one:
+    /api/panel/run demands loopback only for a destructive action, and
+    /api/users/remove only for someone else's account. Those declare the floor
+    the gate can actually enforce (LOGIN) and keep their own conditional check,
+    which their own test files cover."""
+    if default not in TIERS:
+        raise ValueError("unknown auth tier {!r}; expected one of {}".format(default, TIERS))
+    bad = {m: t for m, t in by_method.items() if t not in TIERS}
+    if bad:
+        raise ValueError("unknown auth tier(s) in per-method override: {!r}".format(bad))
+
+    declaration = (default, {m.upper(): t for m, t in by_method.items()}, message)
+
+    def _declare(view):
+        setattr(view, _TIER_ATTR, declaration)
+        return view
+    return _declare
+
+
+def route_tier(view, method):
+    """The tier that governs `view` for `method`, or None if it declares none."""
+    declaration = getattr(view, _TIER_ATTR, None)
+    if declaration is None:
+        return None
+    default, by_method, _message = declaration
+    return by_method.get(method, default)
+
+
+def route_tier_message(view):
+    """The `error` string this view's LOCALHOST refusal carries."""
+    declaration = getattr(view, _TIER_ATTR, None)
+    return LOCALHOST_REFUSAL if declaration is None else declaration[2]
+
+
+def declare_endpoint_tier(app, endpoint, default, message=LOCALHOST_REFUSAL, **by_method):
+    """Declare a tier for an endpoint whose view function this module does not define.
+
+    Exactly one exists: Flask's built-in `static`. It is NOT special-cased away --
+    `if rule.endpoint == "static": continue` is the single most common way a
+    catch-all route rule grows a hole, and /static/ is gated like everything else."""
+    view = app.view_functions[endpoint]
+    try:
+        tier(default, message=message, **by_method)(view)
+    except (AttributeError, TypeError):
+        # A bound method or C function can't carry an attribute; wrap it once.
+        import functools
+
+        @functools.wraps(view)
+        def _shim(*a, **k):
+            return view(*a, **k)
+        app.view_functions[endpoint] = tier(default, message=message, **by_method)(_shim)
+
+
+def assert_every_route_declares_a_tier(app):
+    """Refuse to hand back an app in which any registered rule has no tier.
+
+    This is the half of the old test table that could never be a test: a
+    declaration that lives at the route can only be MISSING at the route, and the
+    cheapest possible moment to say so is app creation, not CI. Adding a route
+    without a tier now fails the very first request anyone makes -- including the
+    developer's own."""
+    missing = sorted(
+        {(rule.endpoint, str(rule)) for rule in app.url_map.iter_rules()
+         if route_tier(app.view_functions.get(rule.endpoint), "GET") is None})
+    if missing:
+        raise AssertionError(
+            "{} registered route(s) declare NO auth tier:\n{}\n\n"
+            "FIX: put @tier(...) on the view, under its @app.route(...):\n"
+            "    @app.route(\"/api/thing\", methods=[\"POST\"])\n"
+            "    @tier(LOGIN)\n"
+            "    def api_thing():\n"
+            "Choose by what the handler can DO -- see tier()'s own docstring. The\n"
+            "tier is not paperwork: every credit-spending route was missing from\n"
+            "the hand-maintained lists that preceded this mechanism, and nothing\n"
+            "noticed until a route-gating audit found it."
+            .format(len(missing),
+                    "\n".join("    {} ({})".format(r, e) for e, r in missing)))
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -5122,6 +5890,9 @@ def create_app(out_dir: Path):
     db_path = out_dir / "catalog.db"
     build_stamp = _build_stamp()
     init_db(db_path)
+    migrate(db_path)          # say the schema upgrade out loud at the entry point --
+                              # catalog() would do it lazily anyway, and the per-process
+                              # memo makes this call free for every later open
     set_telemetry_out(out_dir)     # bare telem_* bumps land in this install's ledger
     backfill_batches(out_dir, db_path)
     thumb_dir = out_dir / "gallery" / "thumbs"
@@ -5569,16 +6340,11 @@ def create_app(out_dir: Path):
     def _collected_from_catalog(tid):
         """A finished collect's outcome, re-read from the catalog, in
         collect_generation's return shape (saved=0: THIS caller downloaded nothing)."""
-        con = _connect(db_path)
-        try:
-            rows = con.execute("SELECT media_id, is_video FROM catalog WHERE task_id=?",
-                               (str(tid),)).fetchall()
-        finally:
-            con.close()
+        rows = task_media(db_path, tid)
         if not rows:
             return None
-        return {"media_ids": [r[0] for r in rows], "saved": 0,
-                "is_video": any(str(r[1] or "") == "1" for r in rows)}
+        return {"media_ids": [r["media_id"] for r in rows], "saved": 0,
+                "is_video": any(str(r["is_video"] or "") == "1" for r in rows)}
 
     def _collect_single_flight(core, session, tid):
         """core.collect_generation, but never twice concurrently for the same task id."""
@@ -5808,7 +6574,8 @@ def create_app(out_dir: Path):
         try:
             session = core._make_session(None)
             conn = core.find_connection(
-                core.gql(session, core.page_variables(WATCH_CATCHUP_TASKS)))
+                core.gql(session, core.page_variables(
+                    WATCH_CATCHUP_TASKS, core._client_of(session).user_id)))
             edges = (conn or {}).get("edges") or []
             missed = []
             for edge in edges:
@@ -6003,6 +6770,7 @@ def create_app(out_dir: Path):
         session.permanent = True
 
     @app.route("/login")
+    @tier(PUBLIC)
     def login():
         """The sign-in page: serves the React shell (LoginPage.jsx) for EVERY request,
         including from the server's own machine -- there is no localhost bypass (see
@@ -6041,11 +6809,12 @@ def create_app(out_dir: Path):
             boot=boot)
 
     @app.route("/api/login", methods=["POST"])
+    @tier(PUBLIC)
     def api_login():
         """JSON sign-in AND first-run account creation for the React Login page
         (2026-08-02) -- docs/DECISIONS.md's 2026-07-31 feasibility map called
         this out explicitly: 'A SPA needs real POST /api/login -> JSON... before
-        auth can be driven from React at all.' Public (see _PUBLIC_PATHS) -- an
+        auth can be driven from React at all.' Public (@tier(PUBLIC)) -- an
         unauthenticated caller is exactly who needs to reach this.
 
         mode="create" (added once design_handoff/request-bootstrap-account-creation.md
@@ -6145,12 +6914,13 @@ def create_app(out_dir: Path):
     # Jinja/user input involved, so a plain string is safer than round-tripping it
     # through render_template_string for nothing.
     @app.route("/api/logout", methods=["POST"])
+    @tier(PUBLIC)
     def api_logout():
         """JSON sign-out for the React app (2026-08-02) -- POST-only mirror of
         logout()'s own POST branch; see that route's docstring for the full
         CSRF/revoke-scope reasoning, identical here (same shared
         bump_web_user_session_epoch, same scope="this-device" opt-out of the
-        global revoke). Public (see _PUBLIC_PATHS): an already-dead cookie
+        global revoke). Public (@tier(PUBLIC)): an already-dead cookie
         must still be able to shed itself locally with no valid session to
         check a CSRF token against -- same "fail toward MORE cleanup, never
         less" shape as the classic route, so this skips the CSRF check
@@ -6178,90 +6948,100 @@ def create_app(out_dir: Path):
     # ------------------------------------------------------------------
     # THE front door: DEFAULT-DENY for every request, enforced in one place.
     # ------------------------------------------------------------------
-    # Allowlist is intentionally tiny: /login (GET-only since the classic cut,
-    # 2026-08-08 -- it renders the React sign-in shell), the React JSON
-    # sign-in/sign-out, and the public /branding/ art prefix below.
-    # /branding/ IS public (see _PUBLIC_PREFIXES below): it was briefly left
-    # gated on the theory that a missing logo is a harmless degrade, but the
-    # actual effect was the real chosen mark/banner/favicon never rendering on
-    # the one page every visitor -- including a not-yet-authenticated LAN
-    # device -- is guaranteed to see. That route only serves static drop-in
-    # art (banner/logo/marks/mascots) with path traversal already rejected
-    # (see branding()); there's no user data, credential, or spend behind it,
-    # so it carries the same public trust tier as /login itself.
-    _PUBLIC_PATHS = frozenset({
-        "/login",
-        # The React app's JSON sign-in/sign-out (2026-08-02) -- an
-        # unauthenticated caller is exactly who needs to reach /api/login,
-        # and /api/logout must stay reachable by an already-dead cookie (an
-        # expired session still deserves a clean local sign-out).
-        "/api/login", "/api/logout",
-    })
-    _PUBLIC_PREFIXES = (
-        "/branding/",
-        # The React bundle (2026-08-02): LoginPage.jsx's own shell needs its
-        # compiled CSS/JS to render at all, and it renders for a visitor who
-        # by definition is not authenticated yet -- same public tier as
-        # /branding/ and /manifest.webmanifest above (plain compiled code, no
-        # user data, no catalog, no credential). LOGIN_PAGE below deliberately
-        # does NOT reference the 4 /static/mg-*.js custom-element scripts
-        # next_gallery()'s NEXT_PAGE loads -- none of that (pickers, cost
-        # badge, upscale panel) exists on the login page, so those stay
-        # exactly as gated as they always were.
-        "/next/assets/",
-    )
     # Routes whose contract is JSON, not an HTML page -- these get a JSON 401
     # instead of a login redirect, so a fetch(...).then(r => r.json()) caller
     # still gets parseable JSON instead of choking on the login page's HTML.
     # ONE prefix since the classic cut (2026-08-08): the two legacy non-/api/
     # JSON routes (/rate/<id>, /edit-prompt/<id>) were renamed under /api/.
+    # This selects the SHAPE of a refusal, never whether to refuse -- that is
+    # the route's own @tier declaration, and this list must never grow into a
+    # second, parallel one.
     _JSON_GATE_PREFIXES = ("/api/",)
 
     @app.before_request
     def _enforce_front_door():
-        """THE gate: every request must satisfy _is_authorized_request() (a
-        logged-in session ONLY -- no localhost bypass, see that function's
-        docstring further down) to reach anything beyond the tiny allowlist
-        above. This replaced 43
-        individual, easy-to-forget `if not _is_authorized_request(): ...` blocks
-        that used to sit one-per-route (see CHANGELOG.md for the full list) with
-        one place that can't be skipped when a new route is added later --
-        exactly the gap a prior adversarial review flagged: `/`, `/image/<id>`,
-        `/delete/<id>`, `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`,
-        `/collection-add`, `/collection-remove`, `/bulk-replace-prompt`,
-        `/panel`, `/duplicates`, `/health`, the raw asset routes (`/thumbs/`,
-        `/img/`, `/video-file/`, `/full/`, `/badge-thumb/`,
-        `/contact-sheet`), `/export-zip`, `/manifest.webmanifest`, `/sw.js`, and
-        `/api/gallery-images`, `/api/similar`, `/api/collections`,
-        `/api/contests`, `/api/achievements`, `/api/skin`, `/api/ach-event`,
-        `/api/your-art`, `/api/loom/export-status`, `/api/loom/export-file`,
-        `/api/ping` had NO auth check of any kind before this hook existed.
-        `/branding/` is in that same "previously wide open" list, and
-        deliberately went back to public (see `_PUBLIC_PREFIXES`) rather than
-        joining the rest: it's static cosmetic art (logo/marks/mascots), not
-        gallery content, and the login page itself needs to render it for a
-        visitor who by definition isn't authenticated yet.
+        """THE gate: every request is refused unless its route's own @tier
+        declaration lets it through.
 
-        `/api/branding/shortcut` is deliberately NOT loosened by this hook
-        passing a logged-in remote session through as "authorized": its own
-        handler re-checks the stricter `_is_local_request()` underneath,
-        because it shells out to a host-local admin API on the machine the
-        SERVER process runs on -- a categorically different trust tier than
-        "browse the library" or "spend the owner's credits". See that route's
-        docstring."""
-        if request.path in _PUBLIC_PATHS or request.path.startswith(_PUBLIC_PREFIXES):
+        The tier is read off the view function (see tier() / route_tier()), so
+        this hook holds NO list of paths. It used to hold two -- _PUBLIC_PATHS
+        and _PUBLIC_PREFIXES -- which were the public tier written a second
+        time, in a second place, keyed on a string prefix rather than on the
+        route. Those are now `@tier(PUBLIC)` on login / api_login / api_logout /
+        branding / next_assets, and mean exactly what they meant before:
+        /branding/ is public because it is static drop-in art (logo, marks,
+        mascots, banners) with traversal already rejected in branding(), and the
+        login page every unauthenticated visitor sees has to render it; the
+        /next/assets/ bundle is public for the same reason -- LoginPage.jsx's
+        own compiled CSS/JS, no user data, no catalog, no credential. The 4
+        /static/mg-*.js custom-element scripts are NOT in that set: the login
+        page never loads them, and `static` stays LOGIN.
+
+        Three tiers, one place:
+          PUBLIC    -> through, no session needed.
+          LOGIN     -> _is_authorized_request() (a logged-in session ONLY -- no
+                       localhost bypass, see that function's docstring further
+                       down).
+          LOCALHOST -> that same session check AND _is_local_request().
+
+        The LOCALHOST arm is what changed on 2026-08-23. It used to be absent:
+        this hook only ever asked "is the session valid?", so it passed a
+        logged-in LAN device straight through, and each localhost-only handler
+        opened with its own hand-written `if not _is_local_request(): return
+        jsonify({"error": "localhost-only"}), 403`. Nothing structural kept
+        those there -- the check was silently deleted from api_panel_cancel and
+        api_panel_schedule (commit 0fd8cee) and never written at all in
+        api_setup_save_key, while all three docstrings went on claiming
+        "localhost-only". The refusal body is unchanged (same status, same JSON,
+        same wording, including the three routes that say something more
+        specific via `message=`); it is only issued from one place now.
+
+        A route whose localhost requirement depends on its ARGUMENTS keeps its
+        own conditional check, because that is not a tier: /api/panel/run
+        demands loopback only for a destructive action (14 of the 20
+        PANEL_ACTIONS are not, and a LAN account may run every one of them),
+        and /api/users/remove and /api/users/password only for an account that
+        is not the caller's own. Those declare the floor the gate can enforce.
+
+        This hook replaced 43 individual, easy-to-forget
+        `if not _is_authorized_request(): ...` blocks that used to sit
+        one-per-route (see CHANGELOG.md for the full list) with one place that
+        can't be skipped when a new route is added later -- exactly the gap a
+        prior adversarial review flagged: `/`, `/image/<id>`, `/delete/<id>`,
+        `/delete-bulk`, `/rate/<id>`, `/edit-prompt/<id>`, `/collection-add`,
+        `/collection-remove`, `/bulk-replace-prompt`, `/panel`, `/duplicates`,
+        `/health`, the raw asset routes (`/thumbs/`, `/img/`, `/video-file/`,
+        `/full/`, `/badge-thumb/`, `/contact-sheet`), `/export-zip`,
+        `/manifest.webmanifest`, `/sw.js`, and `/api/gallery-images`,
+        `/api/similar`, `/api/collections`, `/api/contests`,
+        `/api/achievements`, `/api/skin`, `/api/ach-event`, `/api/your-art`,
+        `/api/loom/export-status`, `/api/loom/export-file`, `/api/ping` had NO
+        auth check of any kind before this hook existed."""
+        view = app.view_functions.get(request.endpoint or "")
+        # No rule matched (a 404 in waiting), so there is no declaration to
+        # read. Gate it as LOGIN, exactly as the old path-prefix version did:
+        # an anonymous caller gets the login redirect, not a 404 that maps the
+        # app for them. A REGISTERED route can never land here -- create_app
+        # refuses to return an app with an undeclared rule.
+        level = route_tier(view, request.method) if view is not None else LOGIN
+        if level is None:
+            level = LOGIN
+        if level == PUBLIC:
             return None
-        if _is_authorized_request():
-            return None
-        if request.path.startswith(_JSON_GATE_PREFIXES):
-            return jsonify({"error": "authentication required"}), 401
-        return redirect(url_for("login", next=_safe_next(request.path) or ""))
+        if not _is_authorized_request():
+            if request.path.startswith(_JSON_GATE_PREFIXES):
+                return jsonify({"error": "authentication required"}), 401
+            return redirect(url_for("login", next=_safe_next(request.path) or ""))
+        if level == LOCALHOST and not _is_local_request():
+            return jsonify({"error": route_tier_message(view)}), 403
+        return None
 
     _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
     # (Used to live beside the classic /health page; the page died in the 2026-08-08 cut,
     # the cache moved here to its one surviving consumer.)
 
     @app.route("/api/health")
+    @tier(LOGIN)
     def api_health():
         """The health dashboard's data as JSON -- gap-audit route #10, consumed by the
         React app's HealthOverlay (the in-app modal that replaces bouncing to the
@@ -6288,6 +7068,7 @@ def create_app(out_dir: Path):
         return jsonify(payload)
 
     @app.route("/api/panel/summary")
+    @tier(LOGIN)
     def api_panel_summary():
         """JSON twin of /panel's own aggregation, for the React Control Panel overlay --
         same data, same local/destructive action-visibility rule (see /panel's own long
@@ -6347,6 +7128,7 @@ def create_app(out_dir: Path):
         return bool(live_csrf) and secrets.compare_digest(submitted_csrf, live_csrf)
 
     @app.route("/api/users/add", methods=["POST"])
+    @tier(LOCALHOST)
     def api_users_add():
         """Add a new gallery web-login account from the Panel's Users tab.
 
@@ -6377,8 +7159,6 @@ def create_app(out_dir: Path):
         write would silently reset the first request's just-created password.
         (Same root-cause family as /api/users/remove's last-account race -- see
         that route's docstring.)"""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
@@ -6402,6 +7182,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/remove", methods=["POST"])
+    @tier(LOGIN)
     def api_users_remove():
         """Remove a gallery web-login account from the Panel's Users tab.
 
@@ -6450,6 +7231,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "username": username})
 
     @app.route("/api/users/password", methods=["POST"])
+    @tier(LOGIN)
     def api_users_password():
         """Change an account's password from the Panel's Users tab.
 
@@ -6521,12 +7303,14 @@ def create_app(out_dir: Path):
                         "still_signed_in_here": target == me})
 
     @app.route("/api/ping")
+    @tier(LOGIN)
     def api_ping():
         """Cheap liveness probe — the Stop/Restart reconnect overlay polls this. Login required
         (any session, local or LAN)."""
         return jsonify({"ok": True})
 
     @app.route("/api/server/stop", methods=["POST"])
+    @tier(LOGIN)
     def api_server_stop():
         """Shut the server down cleanly from the browser (Homebridge-style) instead of Task
         Manager. Login required (any session, local or LAN). Under the managed launcher this ends the whole app.
@@ -6546,6 +7330,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "stop"})
 
     @app.route("/api/library-path", methods=["GET", "POST"])
+    @tier(LOGIN, POST=LOCALHOST)
     def api_library_path():
         """Read or set the library folder (config.json's LIBRARY_DIR).
 
@@ -6577,8 +7362,6 @@ def create_app(out_dir: Path):
                 "local": local,
                 "supervised": _supervised(),
             })
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         want = str(body.get("path") or "").strip().strip('"')
         if not want:
@@ -6622,6 +7405,7 @@ def create_app(out_dir: Path):
                         "supervised": _supervised(), "restart_needed": str(target) != str(out_dir)})
 
     @app.route("/api/server/restart", methods=["POST"])
+    @tier(LOGIN)
     def api_server_restart():
         """Restart the server from the browser. Needs the managed launcher (Serve Gallery),
         which relaunches on exit code 42; otherwise the process would just stop. Login required (any session, local or LAN)."""
@@ -6636,6 +7420,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "restart"})
 
     @app.route("/export-csv")
+    @tier(LOGIN)
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
         not a copy silently written into the backup folder. Built in memory. Authorized only.
@@ -6676,6 +7461,7 @@ def create_app(out_dir: Path):
                              datetime.date.today().isoformat()))
 
     @app.route("/api/panel/run", methods=["POST"])
+    @tier(LOGIN)
     def api_panel_run():
         """Start a whitelisted maintenance job as a background subprocess. Safe/read-only
         actions are open to any authorized session (local or logged-in LAN); destructive
@@ -6736,6 +7522,7 @@ def create_app(out_dir: Path):
             pass
 
     @app.route("/api/import-task", methods=["POST"])
+    @tier(LOGIN)
     def api_import_task():
         """Pull ONE generation/edit task's media into the gallery by its task id -- recovers
         edits + anything stuck in Favorites that --update's listing skips (edits aren't in that
@@ -6753,15 +7540,10 @@ def create_app(out_dir: Path):
             return jsonify({"error": "enter a numeric task id"}), 200
         # "Look behind the milk": if this task is already catalogued, don't re-fetch --
         # just report it's here + hand back its media so the UI can jump straight to it.
-        con = _connect(db_path)
-        try:
-            pre_rows = con.execute(
-                "SELECT media_id, is_video FROM catalog WHERE task_id=?", (tid,)).fetchall()
-        finally:
-            con.close()
+        pre_rows = task_media(db_path, tid)
         if pre_rows:
-            pre = [r[0] for r in pre_rows]
-            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0][1]))
+            pre = [r["media_id"] for r in pre_rows]
+            _close_orphan_if_resolved(tid, pre, bool(pre_rows[0]["is_video"]))
             return jsonify({"ok": True, "already": True, "saved": 0, "media_ids": pre})
         job_id = "import-" + tid[-8:]
         _log_job(job_id, status="running", type="import", label="Import task " + tid)
@@ -6780,6 +7562,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/panel/status")
+    @tier(LOGIN)
     def api_panel_status():
         """Live state of the running maintenance job, for the Panel's progress UI.
 
@@ -6818,6 +7601,7 @@ def create_app(out_dir: Path):
                             "lines": lines})
 
     @app.route("/api/watch/status")
+    @tier(LOGIN)
     def api_watch_status():
         """Live-mirror watcher health: is the push WebSocket connected right now, when
         did it last see an event, how many gens has it mirrored this server run."""
@@ -6825,6 +7609,7 @@ def create_app(out_dir: Path):
             return jsonify(dict(_watch_status))
 
     @app.route("/api/panel/cancel", methods=["POST"])
+    @tier(LOCALHOST)
     def api_panel_cancel():
         """Stop the running maintenance job from the browser (no Task Manager). Terminates the
         subprocess; the reader marks it 'cancelled'.
@@ -6838,8 +7623,6 @@ def create_app(out_dir: Path):
         row but only writes catalog_updates via save_catalog() AFTER the loop, so a
         mid-run terminate leaves files physically moved on disk while catalog.db still
         points at their old paths. Undo survives; catalog/disk coherence does not."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _panel_lock:
             proc = _panel_job.get("proc")
             running = _panel_job["status"] == "running"
@@ -6854,6 +7637,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "action": "cancel"})
 
     @app.route("/api/panel/schedule", methods=["GET", "POST"])
+    @tier(LOGIN, POST=LOCALHOST)
     def api_panel_schedule():
         """Panel settings: the automated-task schedule + the download-workers count. GET
         returns the current settings; POST MERGES only the fields present (so the schedule
@@ -6870,8 +7654,6 @@ def create_app(out_dir: Path):
         owner would never see it configured. And `workers` is not schedule-scoped:
         _panel_run reads it for EVERY run including the owner's own local button
         clicks, so this endpoint also sets the concurrency of local maintenance jobs."""
-        if request.method == "POST" and not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         with _sched_lock:
             s = _load_sched()
             if request.method == "POST":
@@ -6901,17 +7683,10 @@ def create_app(out_dir: Path):
         whether the picture is one of a batch or the only one this task made -- because
         `deleteBatchMedia` on a task's last image is a different act from trimming one frame
         out of four, and the dialog should not make them look the same."""
-        tid = str(task_id or "").strip()
-        if not tid:
-            return 0
-        try:
-            with sqlite3.connect(str(db_path)) as con:
-                return int(con.execute(
-                    "SELECT COUNT(*) FROM catalog WHERE task_id = ?", (tid,)).fetchone()[0])
-        except sqlite3.Error:
-            return 0
+        return task_media_count(db_path, task_id)
 
     @app.route("/api/delete-image", methods=["POST"])
+    @tier(LOCALHOST)
     def api_delete_image():
         """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
 
@@ -6929,8 +7704,6 @@ def create_app(out_dir: Path):
         gate, and a route that acted without it would make that prompt decorative.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "not confirmed"}), 400
@@ -6968,6 +7741,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "media_id": mid, "task_id": tid})
 
     @app.route("/api/delete-local", methods=["POST"])
+    @tier(LOGIN)
     def api_delete_local():
         """JSON twin of /delete-bulk (and /delete/<id>) for fetch()-driven clients:
         quarantine the selected media to out_dir/_deleted/ through the SAME
@@ -7006,52 +7780,6 @@ def create_app(out_dir: Path):
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
 
-    def _resolve_delete_targets(con, media_ids):
-        """The shared selection -> (task ids, local-only rows) resolution behind BOTH
-        /api/delete-preview and delete_tasks_bulk. Shared rather than copied so the
-        preview cannot drift from the action it previews: a dialog that lists a different
-        blast radius than the delete then takes is worse than showing nothing at all.
-
-        Returns (sel_rows, task_ids, local_only) where task_ids is sorted+deduped (one
-        cloud delete per task no matter how many of its images were selected) and
-        local_only holds the rows with no task id at all -- imports, which have nothing
-        on PixAI to delete and are purged locally only."""
-        sel_rows = [con.execute(
-            "SELECT media_id, task_id, filename FROM catalog WHERE media_id=?", (m,)
-        ).fetchone() for m in media_ids]
-        sel_rows = [dict(r) for r in sel_rows if r]
-        task_ids = sorted({(r.get("task_id") or "").strip()
-                           for r in sel_rows if (r.get("task_id") or "").strip()})
-        local_only = [r for r in sel_rows if not (r.get("task_id") or "").strip()]
-        return sel_rows, task_ids, local_only
-
-    # sqlite's default host-parameter ceiling is 999, and this is well inside it while
-    # still cutting a big selection to a handful of passes.
-    _TASK_CHUNK = 400
-
-    def _members_of_tasks(con, task_ids):
-        """{task_id: [row, ...]} for every media in the given tasks, in ONE chunked pass
-        instead of a query per task.
-
-        `catalog` indexes media_id (its PRIMARY KEY), created_at, model_name, rating and
-        batch -- there is NO index on task_id, so each `WHERE task_id=?` is a full table
-        scan. Measured on a 36,000-row catalog: 24 such queries cost 216ms, 100 cost
-        1.04s and 800 cost 8.6s, all of it inside the request /api/delete-preview's
-        dialog is waiting on; the same 800 tasks fetched with chunked `IN` cost 38ms.
-        Rows come back grouped and sorted here rather than relying on the query's order,
-        because one statement now returns several tasks interleaved."""
-        out = {}
-        for i in range(0, len(task_ids), _TASK_CHUNK):
-            chunk = task_ids[i:i + _TASK_CHUNK]
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
-                "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
-            for r in rows:
-                out.setdefault(r["task_id"], []).append(r)
-        for members in out.values():
-            members.sort(key=lambda r: r["media_id"])
-        return out
-
     def _preview_entry(row, selected_ids):
         """One /api/delete-preview media entry: what it is, whether the user actually
         picked it, and the media_id whose thumbnail exists on disk -- or None for
@@ -7070,6 +7798,7 @@ def create_app(out_dir: Path):
                 "selected": mid in selected_ids, "thumb": thumb}
 
     @app.route("/api/delete-preview", methods=["POST"])
+    @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
         anything fires. Read-only: a few catalog reads, no network, no PixAI call.
@@ -7078,9 +7807,9 @@ def create_app(out_dir: Path):
         whole batch, cloud AND local. The confirm dialog said that in prose but never
         showed WHICH siblings, so the single irreversible action in this app was also
         the only one whose real scope the user could not see before committing to it.
-        This resolves the selection through _resolve_delete_targets (the same helper
-        delete_tasks_bulk uses, deliberately) and then expands each task to its full
-        catalog membership.
+        This resolves the selection through the delete_preview_rows catalog verb,
+        which shares its target resolution with /api/delete-tasks deliberately, and
+        then expands each task to its full catalog membership.
 
         LOCALHOST, mirroring the action it previews rather than the data it reads. The
         catalog rows themselves are ordinary LOGIN-tier browsing material (a LAN
@@ -7092,8 +7821,6 @@ def create_app(out_dir: Path):
 
         Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
         the entire selection, because the totals are what the user reads to decide."""
-        if not _is_local_request():
-            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -7103,29 +7830,22 @@ def create_app(out_dir: Path):
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
 
-        con = _connect(db_path)
-        try:
-            sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
-            selected = {r["media_id"] for r in sel_rows}
-            members_by_task = _members_of_tasks(con, task_ids)
-            tasks, total_media = [], 0
-            for tid in task_ids:
-                members = members_by_task.get(tid, [])
-                total_media += len(members)
-                if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
-                    continue          # keep counting, stop describing
-                tasks.append({"task_id": tid,
-                              "media": [_preview_entry(m, selected) for m in members]})
-            # Imports have no task, so nothing about them is task-level -- but they ARE
-            # part of what the button removes, and the dialog has to show them or its
-            # file count won't add up. Capped on the same DISPLAY budget as the tasks.
-            shown_local = [con.execute(
-                "SELECT media_id, is_video, poster_media_id FROM catalog WHERE media_id=?",
-                (r["media_id"],)).fetchone()
-                for r in local_only[:DELETE_PREVIEW_TASK_CAP]]
-            local_entries = [_preview_entry(m, selected) for m in shown_local if m]
-        finally:
-            con.close()
+        blast = delete_preview_rows(db_path, media_ids)
+        sel_rows, task_ids = blast["sel_rows"], blast["task_ids"]
+        local_only = blast["local_only"]
+        selected = {r["media_id"] for r in sel_rows}
+        tasks, total_media = [], 0
+        for tid in task_ids:
+            members = blast["members_by_task"].get(tid, [])
+            total_media += len(members)
+            if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
+                continue          # keep counting, stop describing
+            tasks.append({"task_id": tid,
+                          "media": [_preview_entry(m, selected) for m in members]})
+        # Imports have no task, so nothing about them is task-level -- but they ARE
+        # part of what the button removes, and the dialog has to show them or its
+        # file count won't add up. Capped on the same DISPLAY budget as the tasks.
+        local_entries = [_preview_entry(m, selected) for m in blast["local_rows"]]
 
         return jsonify({
             "tasks": tasks,
@@ -7192,16 +7912,9 @@ def create_app(out_dir: Path):
                         failed += 1
                         done += 1; _tick(); continue
                     if purge_local:
-                        con2 = _connect(db_path)
-                        try:
-                            media = con2.execute(
-                                "SELECT media_id, filename FROM catalog WHERE task_id=?", (tid,)
-                            ).fetchall()
-                        finally:
-                            con2.close()
-                        for m in media:
+                        for m in task_media(db_path, tid):
                             try:
-                                _purge_local(m[0], m[1]); removed += 1
+                                _purge_local(m["media_id"], m["filename"]); removed += 1
                             except OSError:
                                 # This task's cloud delete has ALREADY fired, so one file the
                                 # OS won't let go of must not take the whole loop down with it:
@@ -7237,10 +7950,11 @@ def create_app(out_dir: Path):
         return job_id, total, None
 
     @app.route("/api/delete-tasks", methods=["POST"])
+    @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_tasks():
         """JSON twin of /delete-tasks-bulk: same LOCALHOST tier (and for the same
         reason -- this MUTATES THE OWNER'S REAL CLOUD ACCOUNT, irreversibly), same
-        _resolve_delete_targets selection so /api/delete-preview keeps describing
+        delete_targets selection so /api/delete-preview keeps describing
         exactly what this route then does, and the same off-thread worker via
         _start_bulk_delete -- which routes every cloud delete through
         core.delete_task_gql, the single-attempt _check_read_only'd choke point the
@@ -7257,8 +7971,6 @@ def create_app(out_dir: Path):
         inside delete_task_gql: failing fast with one readable refusal beats
         spawning a job whose every task then fails red on the Activity card."""
         import moonglade_backup as core   # lazy: avoid import cycle
-        if not _is_local_request():
-            return jsonify({"error": "deleting from PixAI is localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         purge_local = bool(body.get("purge_local", True))
         task_ids = sorted({str(t).strip() for t in (body.get("task_ids") or [])
@@ -7268,11 +7980,7 @@ def create_app(out_dir: Path):
             media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
             if not media_ids:
                 return jsonify({"error": "no task_ids or media_ids given"}), 400
-            con = _connect(db_path)
-            try:
-                _sel_rows, task_ids, local_only = _resolve_delete_targets(con, media_ids)
-            finally:
-                con.close()
+            _sel_rows, task_ids, local_only = delete_targets(db_path, media_ids)
         if not purge_local:
             local_only = []          # cloud-only mode: imports have no cloud side
         if not (task_ids or local_only):
@@ -7301,6 +8009,7 @@ def create_app(out_dir: Path):
     # -------------------------------------------------------------------
 
     @app.route("/api/trash/list")
+    @tier(LOGIN)
     def api_trash_list():
         """List out_dir/_deleted/ for the Control Panel's Trash panel -- a directory
         scan, not a catalog query (purge_media_local's whole point is that the
@@ -7325,6 +8034,7 @@ def create_app(out_dir: Path):
                         "page": page, "limit": limit})
 
     @app.route("/api/trash/restore", methods=["POST"])
+    @tier(LOGIN)
     def api_trash_restore():
         """Restore one or more quarantined files back into the library. LOGIN tier --
         recovering something you (or anyone signed in) deleted is not the same trust
@@ -7346,6 +8056,7 @@ def create_app(out_dir: Path):
         return jsonify({"restored": restored, "errors": errors})
 
     @app.route("/api/trash/delete-forever", methods=["POST"])
+    @tier(LOCALHOST)
     def api_trash_delete_forever():
         """Permanently destroy one or more SELECTED quarantined files -- no more
         recovery after this. LOCALHOST-only (the owner physically at the machine),
@@ -7357,8 +8068,6 @@ def create_app(out_dir: Path):
         what actually stands between a misclick and data loss; confirm=true here just
         proves the client meant to send the request at all, it is not itself the
         security boundary -- the LOCALHOST check is."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
@@ -7371,13 +8080,12 @@ def create_app(out_dir: Path):
         return jsonify({"deleted": n})
 
     @app.route("/api/trash/empty", methods=["POST"])
+    @tier(LOCALHOST)
     def api_trash_empty():
         """Empty the ENTIRE trash -- every file under out_dir/_deleted/, not just a
         selection. Same LOCALHOST + confirm=true contract as
         api_trash_delete_forever() (see its docstring); the client demands the same
         typed "DELETE" word first (Trash.emptyAll())."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         if not body.get("confirm"):
             return jsonify({"error": "confirm required"}), 400
@@ -7386,6 +8094,7 @@ def create_app(out_dir: Path):
         return jsonify({"deleted": n})
 
     @app.route("/api/rate/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def rate(media_id):
         data = request.get_json(silent=True) or {}
         try:
@@ -7396,6 +8105,7 @@ def create_app(out_dir: Path):
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/rebuild-poster/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def rebuild_poster(media_id):
         """Regenerate ONE video's poster thumbnail from its file, replacing the cached
         one. For a clip whose cached poster is wrong -- e.g. a fade-in that was
@@ -7428,12 +8138,14 @@ def create_app(out_dir: Path):
         return json.dumps({"ok": True, "thumb": "/thumbs/" + media_id + ".jpg?v=" + str(int(time.time()))}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/edit-prompt/<media_id>", methods=["POST"])
+    @tier(LOGIN)
     def edit_prompt(media_id):
         data = request.get_json(silent=True) or {}
         update_prompt_full(db_path, media_id, data.get("prompt", ""))
         return json.dumps({"ok": True}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/collection", methods=["POST"])
+    @tier(LOGIN)
     def api_collection():
         """JSON twin of /collection-add + /collection-remove for fetch()-driven
         clients: one route, `action` picks the direction, same add_to_collection /
@@ -7456,6 +8168,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
 
     @app.route("/api/replace-prompts", methods=["POST"])
+    @tier(LOGIN)
     def api_replace_prompts():
         """JSON twin of /bulk-replace-prompt: same bulk_replace_prompt helper (plain
         substring find/replace over prompt_full, counting only rows that actually
@@ -7544,6 +8257,7 @@ def create_app(out_dir: Path):
             return None
 
     @app.route("/thumbs/<media_id>.jpg")
+    @tier(LOGIN)
     def thumb(media_id):
         # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
         if (request.args.get("s") or "") == "32" and "/" not in media_id \
@@ -7559,6 +8273,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/video-file/<media_id>")
+    @tier(LOGIN)
     def video_file(media_id):
         row = get_row(db_path, media_id)
         if not row or row.get("is_video") != "1":
@@ -7589,6 +8304,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/full/<media_id>")
+    @tier(LOGIN)
     def full_image(media_id):
         # Resolve a media_id to its full-res file on the fly (used by the
         # lightbox so the index page doesn't precompute 250 image paths).
@@ -7605,6 +8321,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/export-zip", methods=["POST"])
+    @tier(LOGIN)
     def export_zip():
         # Stream a ZIP of the selected files. Default is STORED (no recompression) --
         # they're already compressed. Optional export-time transforms: convert to
@@ -7713,9 +8430,14 @@ def create_app(out_dir: Path):
     # must never let an UNAUTHENTICATED device use the key or spend credits, but
     # a logged-in LAN session is deliberately trusted the same as the owner at
     # the keyboard (see CHANGELOG.md's "Real session-based web login" entry).
-    # _is_local_request() itself now backs only the one deliberately-narrower
-    # exception (/api/branding/shortcut, which shells out to the SERVER machine's
-    # own PowerShell/COM) -- see that route's docstring.
+    # _is_local_request() itself backs the deliberately-narrower LOCALHOST tier
+    # on top of that: since 2026-08-23 it is read in ONE place for every route
+    # that declares @tier(LOCALHOST) -- _enforce_front_door() -- rather than by
+    # a hand-written guard per handler. The only direct callers left are the
+    # three routes whose localhost requirement depends on their ARGUMENTS and so
+    # is not a tier (/api/panel/run's destructive actions, /api/users/remove and
+    # /api/users/password for an account that is not the caller's own) and a
+    # handful of purely-informational reads (a boot flag, a withheld host path).
     #
     # FAILS CLOSED on a missing/empty remote_addr: a prior version treated
     # "" as local, which is safe under
@@ -7745,10 +8467,13 @@ def create_app(out_dir: Path):
         so the web app remains unreachable, from any address including
         127.0.0.1, to anything but /login until an account exists and signs in.
         `_is_local_request()` still exists and is still used, but ONLY as an
-        independent, stricter, ADDITIONAL requirement on the couple of routes
-        that must never run for a remote session even when logged in
-        (/api/branding/shortcut, destructive Panel actions) -- it is no longer
-        consulted here.
+        independent, stricter, ADDITIONAL requirement on the routes that must
+        never run for a remote session even when logged in -- the LOCALHOST tier
+        (every route carrying `@tier(LOCALHOST)`, enforced by
+        _enforce_front_door() right after this function returns true), plus the
+        few argument-dependent cases that are not a tier (destructive Panel
+        actions, changing or removing an account that is not the caller's own).
+        It is no longer consulted here.
 
         Every genuine access-control gate that used to read `_is_local_request()`
         was converted to this during the LAN-auth pass; a few purely-informational
@@ -7950,6 +8675,7 @@ def create_app(out_dir: Path):
         return s
 
     @app.route("/api/model-search")
+    @tier(LOGIN)
     def api_model_search():
         """Search PixAI models/LoRAs for the picker grid. Read-only, owner's key. Login required
         (any session, local or LAN).
@@ -8037,7 +8763,7 @@ def create_app(out_dir: Path):
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
                     lora_base_type=(base_type if usage == "LORA" else ""),
-                    author_id=core.USER_ID or "")
+                    author_id=core._client_of(session).user_id or "")
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
             # to fall through to REST, whose own docstring says it "silently ignores market
@@ -8068,6 +8794,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "results": []}), 200
 
     @app.route("/api/model-version")
+    @tier(LOGIN)
     def api_model_version():
         """Resolve a model_id (from the grid) to its generatable version id + the version
         metadata the picker needs: model_type (for LoRA↔base compat), lora_base_model_type,
@@ -8105,6 +8832,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
     @app.route("/api/task-params/<task_id>")
+    @tier(LOGIN)
     def api_task_params(task_id):
         """A task's submit parameters, reduced to what Remix (issue #4) needs:
         the task's LoRAs -- exact {version_id, weight} pairs straight off
@@ -8179,6 +8907,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/video-task-params/<task_id>")
+    @tier(LOGIN)
     def api_video_task_params(task_id):
         """A VIDEO task's submit parameters, reduced to what "↺ Remix for videos"
         (SCOPE_2026-08-17 §2) needs: the shot kind (i2v / flf / r2v) and every
@@ -8291,6 +9020,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/image-meta/<media_id>")
+    @tier(LOGIN)
     def api_image_meta(media_id):
         """The one catalog row the Upscale panel needs, by media_id. Read-only, no network.
 
@@ -8331,6 +9061,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/gallery-images")
+    @tier(LOGIN)
     def api_gallery_images():
         """Pick-from-your-gallery source for the create surfaces + The Loom: recent (or
         keyword-filtered) IMAGE media_ids with thumbnails -> use the media_id full-res, no
@@ -8379,6 +9110,7 @@ def create_app(out_dir: Path):
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
+    @tier(LOGIN)
     def api_similar(media_id):
         """'More like this': the k catalog images most visually similar to media_id, via the
         moonglade_similar CLIP sidecar index. Mirrors /api/gallery-images's shape so the client
@@ -8437,11 +9169,13 @@ def create_app(out_dir: Path):
         return jsonify({"images": out, "total": len(out), "query": str(media_id)})
 
     @app.route("/api/collections")
+    @tier(LOGIN)
     def api_collections():
         """Collection names for the picker/filter dropdowns. Read-only, local catalog."""
         return jsonify({"collections": unique_collections(db_path)})
 
     @app.route("/branding/<path:fname>")
+    @tier(PUBLIC)
     def branding(fname):
         """Serve branding art. The URL vocabulary is PUBLIC role names
         (/branding/marks/..., /branding/bridge/emotion/...); the on-disk tree
@@ -8494,6 +9228,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/badge-thumb/<aid>.png")
+    @tier(LOGIN)
     def badge_thumb(aid):
         """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
         truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
@@ -8541,6 +9276,7 @@ def create_app(out_dir: Path):
         return resp
 
     @app.route("/contact-sheet")
+    @tier(LOGIN)
     def contact_sheet():
         """Print-ready views for physical output. ?format=letter (grid, default) |
         photo (single 4x6) | strip (photo-booth: 2x2in strips on a 4x6, for the
@@ -8656,6 +9392,7 @@ def create_app(out_dir: Path):
         return html
 
     @app.route("/api/contact-sheet")
+    @tier(LOGIN)
     def api_contact_sheet():
         """JSON twin of /contact-sheet -- feeds the React ContactSheetOverlay's on-screen
         preview and its own native (window.print()) output. Same source selection as the
@@ -8706,6 +9443,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/duplicates")
+    @tier(LOGIN)
     def api_duplicates():
         """Real, working duplicate-groups listing for the React Duplicate Review overlay
         (the parked affordance in HealthOverlay.jsx's Duplicates/Reclaimable stat tiles).
@@ -8766,8 +9504,8 @@ def create_app(out_dir: Path):
 
         # ---- same_media (Class A) -------------------------------------------
         # No arbitrary cap here -- the classic page's limit=300 exists to keep an HTML
-        # render short, not because the underlying scan is expensive (one rglob pass,
-        # no hashing); this route reports the real count instead of silently truncating.
+        # render short, not because the underlying scan is expensive (one scan_library
+        # pass, no hashing); this route reports the real count instead of truncating.
         class_a = duplicate_groups(out_dir, limit=100000)
         rows_a = {r["media_id"]: r for r in rows_for_media_ids(db_path, [g["media_id"] for g in class_a])}
         for g in class_a:
@@ -8867,6 +9605,7 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/duplicates/resolve", methods=["POST"])
+    @tier(LOGIN)
     def api_duplicates_resolve():
         """The destructive half of Duplicate Review: quarantines the LOSING
         copies of one or more duplicate groups into out_dir/_duplicates/, via
@@ -8995,6 +9734,7 @@ def create_app(out_dir: Path):
                         "reclaimed_bytes": sum(q.get("size", 0) for q in quarantined)})
 
     @app.route("/api/duplicates/undo", methods=["POST"])
+    @tier(LOGIN)
     def api_duplicates_undo():
         """Reverses ONE quarantine_duplicate_file() call (see its own docstring
         and restore_quarantined_duplicate()): moves a single quarantined
@@ -9025,6 +9765,7 @@ def create_app(out_dir: Path):
         return jsonify(result)
 
     @app.route("/api/account")
+    @tier(LOGIN)
     def api_account():
         """Credits + free-card balance for the header chip. Read-only; login required.
         Fails soft to nulls so the header never breaks."""
@@ -9128,6 +9869,7 @@ def create_app(out_dir: Path):
             return default
 
     @app.route("/api/account/card-history")
+    @tier(LOGIN)
     def api_account_card_history():
         """Benefit-card (kaisuuken) usage. ?all=1 -> the lifetime type roster
         (kaisuuken_type_catalog); otherwise the recent usage events (list_kaisuuken_logs,
@@ -9142,6 +9884,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/account/coupons")
+    @tier(LOGIN)
     def api_account_coupons():
         """Coupons / Credit Boost. On-hand (available|locked) by default; ?history=1 swaps
         to redeemed|expired. Informational only -- no redeem/apply here by design. Read-only,
@@ -9157,6 +9900,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/account/credit-log")
+    @tier(LOGIN)
     def api_account_credit_log():
         """Full credit movement history (purchase/gift/spend/refund). Newest-first;
         BACKWARD-paginated via ?before=<cursor>. Optional ?reason=<type> filter. Read-only."""
@@ -9170,6 +9914,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/stats")
+    @tier(LOGIN)
     def api_stats():
         """Catalog totals for fetch()-driven headers: the SAME numbers the classic
         template bakes into its banner (catalog_counts -- images, videos, distinct
@@ -9199,6 +9944,7 @@ def create_app(out_dir: Path):
                         "coverage_pct": coverage})
 
     @app.route("/api/setup/save-key", methods=["POST"])
+    @tier(LOCALHOST)
     def api_setup_save_key():
         """First-run wizard: validate the submitted key with a real, read-only account_info
         call, and only write config.json AFTER that succeeds -- never write first and hope.
@@ -9220,8 +9966,6 @@ def create_app(out_dir: Path):
         could point the owner's generations at a foreign API key -- on a server started
         without a key (the exact first-run state this endpoint exists for) load_token's
         fresh-disk fallback picks it up on the very next spend."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         key = (body.get("api_key") or "").strip()
         if not key:
@@ -9286,6 +10030,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "credits": credits})
 
     @app.route("/api/assets/status")
+    @tier(LOGIN)
     def api_assets_status():
         """The asset container's current state: whether a (re)fetch is needed and,
         if a fetch is running/just finished/just failed, its live progress. LOGIN
@@ -9306,13 +10051,12 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/assets/fetch", methods=["POST"])
+    @tier(LOCALHOST)
     def api_assets_fetch():
         """Start the asset container fetch. LOCALHOST-ONLY, same trust class as
         /api/setup/save-key just above -- it writes a real file into the app
         root. Single-flight: a second call while one is already running is a
         409, matching /api/panel/run's own busy shape, not a second job."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         started = _asset_job.start()
         if not started:
             st = _asset_job.status()
@@ -9322,6 +10066,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True})
 
     @app.route("/api/claim", methods=["POST"])
+    @tier(LOGIN)
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
         money moves). Login required; the header click IS the confirmation. One bad claim
@@ -9381,6 +10126,7 @@ def create_app(out_dir: Path):
         return _read_snips_file(_legacy_snips_path())
 
     @app.route("/api/snippets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_snippets():
         """Prompt snippets/favorites, stored PER-ACCOUNT (out_dir/prompt_snippets/<user>.json)
         so one signed-in account can't see or wholesale-clobber another's -- same split saved
@@ -9407,6 +10153,7 @@ def create_app(out_dir: Path):
     _ach_lock = threading.Lock()
 
     @app.route("/api/contests")
+    @tier(LOGIN)
     def api_contests():
         """The live PixAI contest board (community + official). Read-only PUBLIC data (not
         owner-private, no spend), so NOT localhost-gated -- the owner browsing over LAN still
@@ -9422,6 +10169,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
 
     @app.route("/api/artwork-views")
+    @tier(LOGIN)
     def api_artwork_views():
         """Live view count for one published artwork -> the detail page's Views metric.
         Login required; uses the owner's key. ?id=<artwork_id>."""
@@ -9435,6 +10183,7 @@ def create_app(out_dir: Path):
             return jsonify({"views": None, "error": _redact_host_paths(str(e))[:120]}), 200
 
     @app.route("/api/your-art")
+    @tier(LOGIN)
     def api_your_art():
         """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
         so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
@@ -9464,6 +10213,7 @@ def create_app(out_dir: Path):
         return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
 
     @app.route("/api/myart/items")
+    @tier(LOGIN)
     def api_myart_items():
         """Card-ready rows for the My Art tabbed gallery (Frontend Gallery.dc.html's
         ovMyArt, rebuilt 2026-08-06): every catalog row that exists as a PixAI ARTWORK
@@ -9472,50 +10222,28 @@ def create_app(out_dir: Path):
         held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
         arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
         already serves. The Artworks/Animations tab split is the is_video flag."""
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
-                " created_at, art_tags, is_published,"
-                " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
-                " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
-                " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
-                " ORDER BY created_at DESC").fetchall()
-        finally:
-            con.close()
         items = []
-        for (mid, aid, title, preview, is_video, is_nsfw, created, tags, pub,
-             likes, comments) in rows:
+        for r in myart_items(db_path):
+            mid, title, preview = r["media_id"], r["title"], r["prompt_preview"]
+            created, tags = r["created_at"], r["art_tags"]
             items.append({
-                "media_id": mid, "artwork_id": aid,
+                "media_id": mid, "artwork_id": r["artwork_id"],
                 "title": (title or "").strip() or (preview or "").strip()[:60] or mid,
                 "thumb": "/thumbs/%s.jpg" % mid,
-                "is_video": is_video == "1", "is_nsfw": is_nsfw == "1",
+                "is_video": r["is_video"] == "1", "is_nsfw": r["is_nsfw"] == "1",
                 "date": (created or "")[:10],
                 "created_at": created or "",
                 "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
-                "public": pub == "1", "likes": likes, "comments": comments,
+                "public": r["is_published"] == "1",
+                "likes": r["likes"], "comments": r["comments"],
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
         # than making the overlay fetch the whole Control Panel summary for one field.
         return jsonify({"items": items, "csrf": session.get("csrf", "")})
 
-    def _artwork_row(mid):
-        """The catalog row behind one media_id (artwork_id/task_id/title), or None."""
-        con = _connect(db_path)
-        try:
-            r = con.execute(
-                "SELECT media_id, artwork_id, task_id, title, art_tags, is_published"
-                " FROM catalog WHERE media_id = ? LIMIT 1", (str(mid),)).fetchone()
-        finally:
-            con.close()
-        if not r:
-            return None
-        return {"media_id": r[0], "artwork_id": r[1], "task_id": r[2],
-                "title": r[3], "art_tags": r[4], "is_published": r[5]}
-
     @app.route("/api/myart/publish", methods=["POST"])
+    @tier(LOGIN)
     def api_myart_publish():
         """Publish / unpublish / re-tag / delete one of the owner's artworks -- the My Art
         card actions and the Lightbox/Details Publish button.
@@ -9542,7 +10270,7 @@ def create_app(out_dir: Path):
         mid = str(body.get("media_id") or "").strip()
         if action not in ("publish", "visibility", "tags", "delete"):
             return jsonify({"error": "unknown action"}), 400
-        row = _artwork_row(mid)
+        row = artwork_row(db_path, mid)
         if not row:
             return jsonify({"error": "unknown media id"}), 400
         confirm = bool(body.get("confirm"))
@@ -9619,25 +10347,21 @@ def create_app(out_dir: Path):
             return jsonify({"error": str(e)}), 502
 
         # Mirror the change into the catalog so the grid reflects it without a full sync.
-        con = _connect(db_path)
-        try:
-            if action == "delete":
-                con.execute("UPDATE catalog SET artwork_id='', is_published='0' WHERE media_id=?", (mid,))
-            else:
-                if action == "publish":
-                    con.execute("UPDATE catalog SET artwork_id=?, is_published=? WHERE media_id=?",
-                                (result.get("artwork_id") or "", "0" if private else "1", mid))
-                if private is not None:
-                    con.execute("UPDATE catalog SET is_published=? WHERE media_id=?",
-                                ("0" if private else "1", mid))
-                if tags is not None:
-                    con.execute("UPDATE catalog SET art_tags=? WHERE media_id=?",
-                                (", ".join(str(t).lstrip("#").strip() for t in tags), mid))
-                if title is not None:
-                    con.execute("UPDATE catalog SET title=? WHERE media_id=?", (title, mid))
-            con.commit()
-        finally:
-            con.close()
+        if action == "delete":
+            publish_state(db_path, mid, artwork_id="", published=False)
+        else:
+            changed = {}
+            if action == "publish":
+                changed["artwork_id"] = result.get("artwork_id") or ""
+                changed["published"] = not private
+            if private is not None:
+                changed["published"] = not private
+            if tags is not None:
+                changed["art_tags"] = ", ".join(
+                    str(t).lstrip("#").strip() for t in tags)
+            if title is not None:
+                changed["title"] = title
+            publish_state(db_path, mid, **changed)
         result["unmatched_tags"] = unmatched
         return jsonify(result)
 
@@ -9649,6 +10373,7 @@ def create_app(out_dir: Path):
                 "title": (row["title"] or "").strip() or (row["prompt_preview"] or "").strip()[:48]}
 
     @app.route("/api/lineage/<media_id>")
+    @tier(LOGIN)
     def api_lineage(media_id):
         """The family tree of one image, for Image Details' LINEAGE panel:
           * siblings -- the other outputs of the SAME generation task (share task_id; up to
@@ -9659,35 +10384,21 @@ def create_app(out_dir: Path):
         Pure catalog read, no network. Any dimension can be empty (an original txt2img with
         a batch size of 1 and no derivatives has an empty tree)."""
         mid = str(media_id or "").strip()
-        con = _connect(db_path)
-        try:
-            me = con.execute(
-                "SELECT media_id, task_id, source_media_id, derive_kind FROM catalog"
-                " WHERE media_id = ? LIMIT 1", (mid,)).fetchone()
-            if not me:
-                return jsonify({"error": "unknown media id"}), 404
-            cols = ("media_id, is_video, title, prompt_preview")
-            siblings = []
-            if me["task_id"]:
-                siblings = [_lineage_card(r) for r in con.execute(
-                    "SELECT %s FROM catalog WHERE task_id = ? AND media_id != ?"
-                    " ORDER BY media_id" % cols, (me["task_id"], mid)).fetchall()]
-            parent = None
-            if me["source_media_id"]:
-                pr = con.execute("SELECT %s FROM catalog WHERE media_id = ? LIMIT 1" % cols,
-                                 (me["source_media_id"],)).fetchone()
-                if pr:
-                    parent = dict(_lineage_card(pr), kind=me["derive_kind"] or "derived")
-            children = [dict(_lineage_card(r), kind=(r["derive_kind"] or "derived"))
-                        for r in con.execute(
-                            "SELECT %s, derive_kind FROM catalog WHERE source_media_id = ?"
-                            " ORDER BY created_at" % cols, (mid,)).fetchall()]
-        finally:
-            con.close()
-        return jsonify({"media_id": mid, "siblings": siblings,
-                        "parent": parent, "children": children})
+        tree = lineage(db_path, mid)
+        if tree is None:
+            return jsonify({"error": "unknown media id"}), 404
+        parent = tree["parent"]
+        return jsonify({
+            "media_id": mid,
+            "siblings": [_lineage_card(r) for r in tree["siblings"]],
+            "parent": (dict(_lineage_card(parent), kind=parent["kind"])
+                       if parent else None),
+            "children": [dict(_lineage_card(r), kind=r["kind"])
+                         for r in tree["children"]],
+        })
 
     @app.route("/api/siblings", methods=["POST"])
+    @tier(LOGIN)
     def api_siblings():
         """Page-batched Sibling Strip data for the card placard (issue #30): every
         output of each requested task, in ONE query. The per-card /api/lineage fetch
@@ -9726,16 +10437,7 @@ def create_app(out_dir: Path):
                 break
         by_task = {}
         if ids:
-            con = _connect(db_path)
-            try:
-                rows = con.execute(
-                    "SELECT task_id, media_id, is_video, batch_index FROM catalog"
-                    " WHERE task_id IN (%s) AND task_id != ''"
-                    " ORDER BY task_id, media_id" % ",".join("?" * len(ids)),
-                    ids).fetchall()
-            finally:
-                con.close()
-            for r in rows:
+            for r in sibling_media(db_path, ids):
                 mid = str(r["media_id"] or "")
                 if not mid:
                     continue
@@ -9762,6 +10464,7 @@ def create_app(out_dir: Path):
                     members.sort(key=lambda m: m["batch_index"])
         return jsonify({"by_task": by_task})
 
+    @tier(LOGIN)
     @app.route("/api/series", methods=["POST"])
     def api_series():
         """Page-batched dial-in series membership for the card placard and the
@@ -9811,6 +10514,7 @@ def create_app(out_dir: Path):
                             "title": s["title"]}
         return jsonify({"by_task": out})
 
+    @tier(LOGIN)
     @app.route("/api/series/<sid>")
     def api_series_detail(sid):
         """One series' full struct for C's SESSION strip and B's expansion
@@ -9830,6 +10534,7 @@ def create_app(out_dir: Path):
         return jsonify(s)
 
     @app.route("/api/train/recent-tasks")
+    @tier(LOGIN)
     def api_train_recent_tasks():
         """Recent generations grouped by task, for the mobile Train dataset picker
         (Moonglade Mobile.dc.html's 'tap a task, it adds its images' tile grid). Desktop's
@@ -9844,29 +10549,12 @@ def create_app(out_dir: Path):
             limit = max(1, min(int(request.args.get("limit") or 18), 60))
         except ValueError:
             limit = 18
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, created_at FROM catalog"
-                " WHERE task_id != '' AND is_video != '1' AND filename != ''"
-                " ORDER BY created_at DESC LIMIT 400").fetchall()
-        finally:
-            con.close()
-        groups, order = {}, []
-        for r in rows:
-            tid = r["task_id"]
-            if tid not in groups:
-                if len(order) >= limit:
-                    continue
-                groups[tid] = []
-                order.append(tid)
-            if tid in groups:
-                groups[tid].append(r["media_id"])
-        tasks = [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid]),
-                  "thumb": "/thumbs/%s.jpg" % groups[tid][0]} for tid in order]
+        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0])
+                 for t in recent_train_tasks(db_path, limit)]
         return jsonify({"tasks": tasks})
 
     @app.route("/api/train/quota")
+    @tier(LOGIN)
     def api_train_quota():
         """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
         NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
@@ -9878,6 +10566,7 @@ def create_app(out_dir: Path):
                             "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/train/models")
+    @tier(LOGIN)
     def api_train_models():
         """Trainable base models grouped by architecture (the train panel's Model Type ->
         Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
@@ -9894,6 +10583,7 @@ def create_app(out_dir: Path):
 
     @app.route("/api/train/cover")
     @app.route("/api/pixai-cdn/thumb")   # the general name -- covers My Art's LoRA cards too
+    @tier(LOGIN)
     def api_train_cover():
         """Proxy a PixAI CDN thumbnail (images-ng.pixai.art), which the browser can't load
         cross-origin from localhost but the server fetches fine. Started as the Train
@@ -9928,6 +10618,7 @@ def create_app(out_dir: Path):
             return ("fetch failed", 502)
 
     @app.route("/api/train/submit", methods=["POST"])
+    @tier(LOGIN)
     def api_train_submit():
         """Submit a LoRA training task -- PREVIEW-FIRST, like /api/myart/publish.
 
@@ -9996,6 +10687,7 @@ def create_app(out_dir: Path):
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
     @app.route("/api/achievements")
+    @tier(LOGIN)
     def api_achievements():
         """Milestone progress + skin unlocks, computed from local catalog stats +
         the persisted telemetry counters. Read-only catalog data (no spend, no
@@ -10107,6 +10799,7 @@ def create_app(out_dir: Path):
         return jsonify(result)
 
     @app.route("/api/skin", methods=["POST"])
+    @tier(LOGIN)
     def api_skin():
         """Set the active cosmetic skin. Only an *earned* skin may be applied (server checks
         against current unlocks), so a client can't force a locked palette. Persists to
@@ -10136,6 +10829,7 @@ def create_app(out_dir: Path):
         return jsonify({"skin": skin})
 
     @app.route("/api/ach-event", methods=["POST"])
+    @tier(LOGIN)
     def api_ach_event():
         """Feat-event beacon from the front-end: the Starfall konami egg, the
         in-app manual, and narrator pokes. Whitelisted event names only; each is
@@ -10155,6 +10849,7 @@ def create_app(out_dir: Path):
         return jsonify({"error": "unknown event"}), 400
 
     @app.route("/api/mirror/status")
+    @tier(LOGIN)
     def api_mirror_status():
         """Read-only status of 'Mirror to PixAI website': the toggle flag + the stored
         JWT's days-left, decoded OFFLINE (no network). NEVER returns the token (review
@@ -10165,6 +10860,7 @@ def create_app(out_dir: Path):
                         "days_left": core.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/mirror/enable", methods=["POST"])
+    @tier(LOCALHOST)
     def api_mirror_enable():
         """Set the MIRROR_TO_PIXAI toggle in config.json. LOCALHOST-ONLY: it rewrites
         config.json (the file that also holds PIXAI_API_KEY, AUTH_USERS, AUTH_SECRET_KEY),
@@ -10175,8 +10871,6 @@ def create_app(out_dir: Path):
         wipe _save_config's docstring exists to prevent -- _load_config()'s ValueError->{}
         cannot tell a corrupt file from an empty one). Serialized on _accounts_lock with the
         other config writers."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         import moonglade_backup as core
         want = bool((request.get_json(silent=True) or {}).get("enabled"))
         cfg_path = Path(core.__file__).resolve().parent / "config.json"
@@ -10204,6 +10898,7 @@ def create_app(out_dir: Path):
         return jsonify({"enabled": want})
 
     @app.route("/api/mirror/connect", methods=["POST"])
+    @tier(LOGIN)
     def api_mirror_connect():
         """Bootstrap/refresh the mirror session: read the pixai.art session from THIS
         machine's browser, roll the JWT via refreshToken, store it. Reports only ok +
@@ -10224,6 +10919,7 @@ def create_app(out_dir: Path):
                         "days_left": core.jwt_days_left(jwt) if jwt else None})
 
     @app.route("/api/branding", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_branding():
         """The banner mark (the icon beside the title) + its animation. GET and POST both
         require login (any session, local or LAN) -- cosmetic, so any authorized device may
@@ -10263,6 +10959,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
 
     @app.route("/api/branding/slot", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_upload():
         """Upload a new asset into one Branding slot (the three banner slots --
         Control Panel.dc.html's 'From disk' chip; mascots/rewards are NOT slots,
@@ -10304,6 +11001,7 @@ def create_app(out_dir: Path):
         return jsonify({"slot": slot, "item": item, "assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/crop", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_crop():
         """Update one uploaded asset's zoom/cropX/cropY transform (Control
         Panel.dc.html's three banner sliders). LOGIN tier, same as the upload
@@ -10324,6 +11022,7 @@ def create_app(out_dir: Path):
         return jsonify({"assets": list_slot_assets(out_dir, slot)})
 
     @app.route("/api/branding/slot/active", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_slot_active():
         """Pick which already-uploaded asset is active for a slot. LOGIN tier,
         same as the upload route. There is no "clear to none" -- see
@@ -10335,6 +11034,7 @@ def create_app(out_dir: Path):
         return jsonify({"slots": branding_slots_payload(out_dir)})
 
     @app.route("/api/branding/mark/custom", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_mark_custom():
         """Upload The Great Library's custom mark (Control Panel.dc.html's 6th
         marks tile). LOGIN tier + a real server-side achievement check -- unlike
@@ -10359,6 +11059,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/mark/custom/remove", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_mark_custom_remove():
         """Remove an uploaded custom mark (Control Panel.dc.html's Remove chip).
         LOGIN tier, same as the upload route above."""
@@ -10370,6 +11071,7 @@ def create_app(out_dir: Path):
         return jsonify({"mark": cfg["mark"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/banners/earned")
+    @tier(LOGIN)
     def api_branding_banners_earned():
         """The earned-banner picks BannerEditor's locked/earned tile row renders.
         One entry today (great_library, gated on the-great-library); void_banner
@@ -10386,6 +11088,7 @@ def create_app(out_dir: Path):
         }]})
 
     @app.route("/api/branding/banner/earned", methods=["POST"])
+    @tier(LOGIN)
     def api_branding_banner_earned():
         """Apply an earned banner as the banner_main flat. Server gate is
         authoritative (the UI's locked tile is cosmetic): 403 until the
@@ -10407,6 +11110,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True})
 
     @app.route("/api/branding/shortcut", methods=["POST"])
+    @tier(LOCALHOST)
     def api_branding_shortcut():
         """Write/refresh the Desktop launcher shortcut with the chosen mark's
         .ico. A .pyw can't carry an icon; the .lnk can -- this IS the app icon.
@@ -10423,8 +11127,6 @@ def create_app(out_dir: Path):
         the rest of the branding-writes group during the LAN-auth conversion
         pass (unlike GET/POST /api/branding just above, which only writes
         out_dir/branding.json -- ordinary app data, correctly broadened)."""
-        if not _is_local_request():
-            return jsonify({"error": "localhost-only"}), 403
         body = request.get_json(silent=True) or {}
         mark = str(body.get("mark") or load_branding(out_dir)["mark"])
         # Whitelist before anything touches the shell: only a known cut mark id
@@ -10438,6 +11140,7 @@ def create_app(out_dir: Path):
         return jsonify({"ok": True, "lnk": lnk})
 
     @app.route("/api/suggest-prompt")
+    @tier(LOGIN)
     def api_suggest_prompt():
         """Image-to-prompt for the gallery's 'Suggest prompt' button: PixAI's tag list +
         NL description for a media_id. Read-only and free; login required. ?media_id="""
@@ -10451,6 +11154,7 @@ def create_app(out_dir: Path):
             return jsonify({"suggestions": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/tag-suggest")
+    @tier(LOGIN)
     def api_tag_suggest():
         """Tag autocomplete for the drawer's prompt boxes (the site's Tag Suggestions
         dropdown). Read-only and free; login required. ?q=<prefix>."""
@@ -10464,6 +11168,7 @@ def create_app(out_dir: Path):
             return jsonify({"tags": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/upload", methods=["POST"])
+    @tier(LOGIN)
     def api_upload():
         """Upload a local file from the picker -> PixAI media_id (the same free
         3-step S3 handshake as the CLI's --upload). Login required,
@@ -10510,6 +11215,7 @@ def create_app(out_dir: Path):
                     _sh.copyfileobj(src, dst)
 
     @app.route("/api/import-local", methods=["POST"])
+    @tier(LOCALHOST, message="this imports files onto the server's machine; localhost-only")
     def api_import_local():
         """Import local files into the catalog as source='local' -- the web equivalent of the
         CLI's --import-local. Accepts multipart `files` (images/videos); a `.zip` is expanded.
@@ -10523,8 +11229,6 @@ def create_app(out_dir: Path):
         Saves the uploads to a temp dir (expanding any zip), then reuses
         core.run_import_local (copy -> imported/ + catalog source='local' + thumbnail, path
         dedup), tags an optional collection, and returns counts. Synchronous for now."""
-        if not _is_local_request():
-            return jsonify({"error": "this imports files onto the server's machine; localhost-only"}), 403
         import os as _os
         import tempfile
         import shutil
@@ -10568,109 +11272,29 @@ def create_app(out_dir: Path):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def _gen_args_from_payload(p):
-        """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
-        feeds to core._gen_parameters -- so web + CLI build identical params (one source
-        of truth). Clamped to safe ranges, and every clamp that actually fired is listed on
-        the returned namespace as `.clamped` = [{field, asked, used}] so the route can tell
-        the caller its request was rewritten instead of charging for the difference."""
-        from types import SimpleNamespace
-        import moonglade_backup as core          # module-local, like every other use here
-        p = p or {}
-        def num(k, d, cast=int):
-            try:
-                return cast(p.get(k, d))
-            except (TypeError, ValueError):
-                return d
-        # "Clamped to safe ranges" was, until this existed, true of `count` alone: width,
-        # height, steps and cfg went through num() with no ceiling and straight into a real
-        # paid submit, because core._gen_parameters only FLOORS width/height to 64 (via
-        # _dim) and caps nothing at all. /api/generate is LOGIN-tier on purpose -- any
-        # signed-in LAN device may spend -- so the drawer's own HTML min/max attributes are
-        # the only bound a well-behaved client honours and a hand-rolled POST honours none:
-        # {"width": 999999999, "steps": 999999} reached PixAI, priced at whatever that
-        # produces. Clamp here, where the docstring promises it.
-        #
-        # The ceilings are read off the drawer's OWN controls, not invented:
-        #   width/height  64..4096  -- #gen-cw / #gen-ch (min=64 max=4096 step=8), and the
-        #                              drawer's d8() already clamps to exactly that before
-        #                              it POSTs, so this is the same number twice
-        #   steps         1..150    -- #gen-steps, and gateField()'s defMin/defMax
-        #   cfg           1..30     -- #gen-cfg, and gateField()'s defMin/defMax
-        # Same idiom core._gen_parameters uses for the Hires knobs ("bounds read off the
-        # live dialog's own controls: strength 0.01-0.99, steps 1-50").
-        #
-        # These are NOT provably the widest the UI can emit, and an earlier draft of this
-        # comment claimed they were ("a model publishing tighter `restrictions` narrows the
-        # browser field further"). gateField() REPLACES the field's min/max with whatever
-        # `restrictions` carries rather than clipping them, and `restrictions` is live PixAI
-        # data -- so a model publishing samplingSteps.max = 200 would widen the drawer's own
-        # control and the drawer would legitimately POST 200.
-        #
-        # Which is exactly why a clamp that FIRES is recorded instead of applied in silence.
-        # Clamping is substitution on a paid path: the caller asked for one generation and
-        # is charged for a different one, and doing that without a word is a worse failure
-        # than the absurd value the clamp exists to refuse -- the money is gone either way,
-        # and only the version that says so tells you what it bought. `adjusted` is that
-        # receipt; /api/generate hands it back in the response (see api_generate). No
-        # price/charge split comes of it either way: /api/price builds its params through
-        # this same function, so the badge already quotes the clamped request.
-        adjusted = []
+    # --- the gallery's end of the one payload road ---------------------------------
+    # core.build_request is the only place a PixAI `parameters` dict is built for the web
+    # (see its section in moonglade_backup.py). These two supply the lookups it cannot do
+    # on its own, and they differ in EXACTLY one field, deliberately: a quote never
+    # resolves a source image.
 
-        def clamp(field, v, lo, hi):
-            c = max(lo, min(hi, v))
-            if c != v:
-                adjusted.append({"field": field, "asked": v, "used": c})
-            return c
-        loras = []
-        for lo in (p.get("loras") or []):
-            vid = str((lo or {}).get("version_id") or "").strip()
-            if vid:
-                loras.append((vid, (lo or {}).get("weight", 0.7)))
-        seed_raw = str(p.get("seed") or "").strip()
-        hp = p.get("high_priority") in (True, "1", "true", "on")
-        return SimpleNamespace(
-            params_json="", prompt=(p.get("prompt") or "").strip(),
-            negative=(p.get("negative") or "").strip(),
-            model=(p.get("version_id") or "").strip(),
-            width=clamp("width", num("width", 512), 64, 4096),
-            height=clamp("height", num("height", 512), 64, 4096),
-            steps=clamp("steps", num("steps", 25), 1, 150),
-            cfg=clamp("cfg", num("cfg", 7, float), 1.0, 30.0),
-            count=clamp("count", num("count", 1), 1, 4),
-            # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
-            # members-only); core's submit downgrades that to Low on its own if PixAI
-            # says this account isn't entitled, so an expired membership no longer
-            # breaks every generate/edit/upscale at once.
-            priority=(core.PRIORITY_HIGH if hp else core.PRIORITY_TURBO),
-            mode=(p.get("mode") or "auto"),
-            seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
-            lora=loras,
-            # .lower() matters: a JSON `false` arrives as Python False, and
-            # str(False) is "False" -- which did NOT match the lowercase tuple, so
-            # every explicitly-disabled prompt helper was submitted as ENABLED.
-            # Found 2026-07-29 reviewing the pilot's port; it bit the classic
-            # drawer's unchecked box identically.
-            prompt_helper=(str(p.get("prompt_helper", "1")).lower()
-                           not in ("0", "false", "off", "none")),
-            ref_media_id=str(p.get("ref_media_id") or "").strip(),
-            ref_strength=num("ref_strength", 0.55, float),
-            # Upscale + boosters. num() returns its default for a missing/blank value, so
-            # None here means "the drawer's Upscale control is Off" and the builder omits
-            # every one of these keys -- an absent control must not change the submit.
-            enlarge=num("enlarge", None, float),
-            enlarge_model=str(p.get("enlarge_model") or "").strip(),
-            upscale=num("upscale", None, float),
-            upscale_denoising_strength=num("upscale_denoise", None, float),
-            upscale_denoising_steps=num("upscale_denoise_steps", None, int),
-            face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
-            quality_tag=str(p.get("quality_tag") or "").strip(),
-            kaisuuken_id="", no_card=bool(p.get("no_card")),
-            # core._gen_parameters reads named attributes only, so carrying the receipt on
-            # the namespace costs the submit shape nothing and keeps it beside the values it
-            # describes -- a caller cannot pick up the args and lose the record of what was
-            # changed to make them.
-            clamped=adjusted)
+    def _price_resolver(core, gsession):
+        """For a QUOTE. Same model resolution and same per-account preset lookup as the
+        submit, and NO media resolver: _input_media_id uploads, and /api/price fires on
+        every keystroke in the drawer -- resolving here would upload the same file once
+        per character. A quote needs the SHAPE, not an upload-kind id."""
+        return core.RequestResolver(
+            model_version=core.model_version_resolver(gsession),
+            preset=lambda u, name: _load_presets(u).get(name))
+
+    def _submit_resolver(core, gsession):
+        """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
+        a generation OUTPUT, and PixAI refuses one as an input on the Edit and Fix paths
+        (the Loom's video routes resolve their own frames -- see loom_generate)."""
+        return core.RequestResolver(
+            model_version=core.model_version_resolver(gsession),
+            preset=lambda u, name: _load_presets(u).get(name),
+            media_id=lambda v: _input_media_id(core, gsession, v))
 
     _presets_lock = threading.Lock()
 
@@ -10711,56 +11335,8 @@ def create_app(out_dir: Path):
             return _read_presets_data(own)
         return _read_presets_data(_legacy_presets_path())
 
-    def _edit_params_from_payload(core, p, user, session=None):
-        """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
-        catalog media_id (the image being edited). A `preset` name swaps in a locally
-        banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
-        `user`'s own per-account presets. Returns None if no source.
-
-        `session` is REQUIRED for a real submit and deliberately omitted for pricing.
-        With it, every source id is run through _input_media_id -- a catalog id is a
-        generation OUTPUT and PixAI refuses it as an input. Without it, ids are left
-        alone: /api/price only needs the SHAPE to compute a cost, and uploading on every
-        cost check would upload the same file repeatedly while the user types."""
-        p = p or {}
-        src = str(p.get("source") or "").strip()
-        if not src:
-            return None
-        instruction = (p.get("instruction") or "").strip()
-        scene_id, model_id = "", ""
-        preset_name = str(p.get("preset") or "").strip()
-        if preset_name:
-            pre = _load_presets(user).get(preset_name)
-            if not pre:
-                return None
-            instruction = pre.get("prompt") or instruction
-            scene_id = pre.get("scene_id") or ""
-            model_id = pre.get("model_id") or ""
-        # A preset pins its own model; otherwise resolve from the Edit-card model picker.
-        if not model_id:
-            model_id = core.edit_model_id(p.get("edit_model") or "") or core.EDIT_PRO_MODEL_ID
-        # quality: omitted (passed "") for models with no quality option (Reference Pro);
-        # default medium only when the client sent no quality key at all.
-        q = p.get("quality")
-        if q is None:
-            q = "medium"
-        res, q, asp = core.clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
-                                             (p.get("aspect") or "3:4"))   # never send an invalid knob
-        kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id, model_id=model_id)
-        # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
-        # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
-        media = p.get("sources")
-        media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
-        if not media:
-            media = [src]
-        spec = core.edit_model_by_id(model_id)
-        if spec:
-            media = media[:spec["max_refs"]] or [src]
-        if session is not None:            # real submit -- see the docstring
-            media = [_input_media_id(core, session, m) for m in media]
-        return core.build_chat_edit_parameters(instruction, media, **kwargs)
-
     @app.route("/api/presets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_presets():
         """Toolbox presets, stored per-account under out_dir/toolbox_presets/ (preset
         prompts are PixAI-authored content, so they live as the owner's own captured
@@ -10876,6 +11452,7 @@ def create_app(out_dir: Path):
         return isinstance(q, str) and q.startswith("?") and len(q) <= 4096
 
     @app.route("/api/view-presets", methods=["GET", "POST"])
+    @tier(LOGIN)
     def api_view_presets():
         """Saved-view presets (the gallery's "Saved views…" dropdown): {name: query
         string}, stored server-side under out_dir/view_presets/ so a view saved at the
@@ -10919,83 +11496,6 @@ def create_app(out_dir: Path):
                 tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
-
-    def _params_and_nocard(core, p, user, is_member=None):
-        """Route a drawer payload to generate, edit, fix, or video params. Returns (params,
-        no_card, note). note is set (params None) when something's missing. `user` is
-        only consulted on the edit path (a preset lookup is per-account)."""
-        p = p or {}
-        if p.get("mode") == "edit":
-            params = _edit_params_from_payload(core, p, user)
-            return (params, bool(p.get("no_card")),
-                    None if params else "pick an image to edit")
-        if p.get("mode") == "fix":
-            # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
-            # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
-            # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
-            # shape (see its docstring for the measurement).
-            src = str(p.get("source") or "").strip()
-            if not src:
-                return None, True, "pick an image to fix"
-            try:
-                params = core.build_fixer_price_parameters(src, p.get("boxes") or [])
-            except core.PixAIError:
-                return None, True, "drag a box over a hand or face"
-            # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
-            # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
-            # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
-            # synthesized params. Letting the card check run would paint the badge emerald
-            # "FREE -- a card covers this" over an action about to charge full credits.
-            return params, True, None
-        if p.get("mode") in ("I2V", "FLF", "R2V"):
-            imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
-            vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip()]
-            auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip()]
-            # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
-            # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
-            # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
-            # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
-            has_ref = imgs or (p["mode"] == "R2V" and (vids or auds))
-            if not has_ref:
-                return None, bool(p.get("no_card")), "pick a source image"
-            try:
-                params = core.build_shot_video_params(
-                    p["mode"], (p.get("prompt") or "").strip(), image_ids=imgs,
-                    video_ids=vids, audio_ids=auds,
-                    duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
-                    model=(p.get("video_model") or ""),
-                    camera_movement=(p.get("camera_movement") or ""),
-                    quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"),
-                    negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")),
-                    use_prompt_helper=bool(p.get("prompt_helper")))
-            except core.PixAIError as e:
-                return None, bool(p.get("no_card")), _redact_host_paths(str(e))[:140]
-            return params, bool(p.get("no_card")), None
-        if p.get("mode") == "enhance":
-            # [MAJOR] An enhance/panelplugin task is priced by its workflow id, which is
-            # deliberately NOT in core._PRICE_SCALARS: pricing the workflow-less shape that would
-            # survive the allowlist returns a confident WRONG number. So we do NOT call price_task
-            # for enhance -- we return (None, ...) here, which api_price renders as cost:None
-            # ("couldn't verify the cost"). Adding the workflow-id scalar to the allowlist needs a
-            # live measurement first (a separately authorized step); until then, no number is the
-            # honest answer. Returning here also keeps an enhance payload from ever reaching the
-            # pricing endpoint (test_web_pick.py's enhance-price guard).
-            return None, bool(p.get("no_card")), "couldn't verify the cost of an AI preset yet"
-        args = _gen_args_from_payload(p)
-        if not args.model:
-            return None, args.no_card, "pick a model"
-        # Same entitlement the submit applies, so the badge cannot quote a price for a
-        # members-only option that will be stripped before it is sent.
-        args.is_member = is_member
-        try:
-            return core._gen_parameters(args), args.no_card, None
-        except core.PixAIError as e:
-            # Same shape as the I2V branch above: a builder refusal (asking for both
-            # upscale methods at once) becomes the badge's own note, not a 500.
-            return None, args.no_card, _redact_host_paths(str(e))[:140]
 
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
@@ -11055,9 +11555,17 @@ def create_app(out_dir: Path):
         return msg
 
     @app.route("/api/price", methods=["POST"])
+    @tier(LOGIN)
     def api_price():
-        """Live cost + free-card check for the drawer's current settings (generate OR
-        edit). Read-only (no spend). Login required (any session, local or LAN)."""
+        """Live cost + free-card check for the drawer's current settings (generate, edit,
+        fix, video or an AI preset). Read-only (no spend). Login required (any session,
+        local or LAN).
+
+        This route and every create route build their shape through the SAME
+        core.build_request, so the badge quotes the request that will actually submit --
+        it is not a second, price-flavoured road that happens to agree. /api/price is the
+        one caller that does NOT pin a mode: it serves every road, so the payload's own
+        `mode` picks one."""
         try:
             user = str(session.get("user") or "")
             # NOT `core, session = _gen_session()` -- session is assigned that way further
@@ -11067,87 +11575,56 @@ def create_app(out_dir: Path):
             # the PixAI API session distinctly, the same fix already applied in api_presets.
             core, gsession = _gen_session()
             body = request.get_json(silent=True) or {}
-            # Resolve a bare base model_id -> its current version, exactly as /api/generate
-            # does, so a caller that knows only the base model still gets a real cost +
-            # free-card check instead of a "pick a model" note. The Loom's Image tab is
-            # precisely that caller: its model picker emits {model_id, title} with no
-            # version_id, and its price check (confirmSpend) would otherwise always fall to
-            # "couldn't verify the cost". The web drawer already sends version_id, so this
-            # only fires for the model_id-only path.
-            if (not str(body.get("version_id") or "").strip()
-                    and str(body.get("model_id") or "").strip()
-                    and not body.get("mode")):
-                _vid = (core.resolve_version_meta(gsession, str(body["model_id"]).strip()) or {}).get("version_id") or ""
-                if _vid:
-                    body = {**body, "version_id": _vid}
-            params, no_card, note = _params_and_nocard(
-                core, body, user, _account_is_member(core, gsession))
-            if params is None:
-                return jsonify({"cost": None, "free": False, "note": note})
-            cost = core.price_task(gsession, params)
-            best = None if no_card else core.match_kaisuuken(gsession, params, enrich=True)
-            # `free` is core.card_covers(best), NOT bool(best): a multi-ticket video can MATCH
-            # a card the account holds too few tickets of (issue #15), and that case is paid
-            # at the full price -- the site attaches nothing. One predicate shared with the
-            # CLI preview and _apply_kaisuuken so this badge can never say FREE while the
-            # submit charges. `cards` is the HELD count (kept under its old name for the
-            # badge's "(N left)"); the job's ticket cost is `cards_needed`, and `card_short`
-            # is the honest flag the badge renders as "not enough -- costs the full price".
-            covered = core.card_covers(best)
-            return jsonify({"cost": cost, "free": covered,
-                            "cards": (best or {}).get("total"),
-                            "cards_held": (best or {}).get("total"),
-                            "cards_needed": (best or {}).get("consumeAmount"),
-                            "card_short": bool(best) and not covered,
-                            "card_name": (best or {}).get("name"),
-                            # The Loom's batch tally keys its per-template ticket pool on
-                            # this (falls back to card_name when absent) -- see
-                            # loom-core.js tallyPricesDetailed.
-                            "card_template": (best or {}).get("templateId"),
-                            "card_expires": (best or {}).get("expiresAt")})
+            try:
+                req = core.build_request(body, user=user,
+                                         is_member=_account_is_member(core, gsession),
+                                         resolve=_price_resolver(core, gsession))
+            except core.PixAIError as e:
+                # A builder refusal (both upscale methods at once, an unknown video mode)
+                # becomes the badge's own note, not a 500 and not a number.
+                return jsonify({"cost": None, "free": False,
+                                "note": _redact_host_paths(str(e))[:140]})
+            return jsonify(core.price(gsession, req))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
 
     @app.route("/api/generate", methods=["POST"])
+    @tier(LOGIN)
     def api_generate():
         """Submit a generation from the drawer, wait, and catalog it into THIS gallery's
         backup. Login required -- any session, local or LAN, deliberately: spending from a
         signed-in tablet is the point of the login. A matching free card is
-        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}."""
+        auto-applied unless no_card is set. Returns {task_id, media_ids, paid_credit}.
+
+        The shape comes from core.build_request -- the same call /api/price makes -- and
+        goes out through core.submit, which is where READ_ONLY and the free card are
+        decided for every create route at once. What is left here is what only a route
+        knows: the entitlement read, the LoRA cap, telemetry, and the clamp receipt."""
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
-            args = _gen_args_from_payload(body)
-            # Authoritative model resolution: if the drawer sent the base model_id, resolve
-            # its REAL version list server-side and never trust the client's version_id blind.
-            # picker-parity-round2 (2026-07-24): the client's version_id is now honored IF it
-            # names one of model_id's own real versions (the version picker lets the owner
-            # choose a specific release, not just the latest) -- otherwise (absent, stale from
-            # a fast model switch, or belonging to a DIFFERENT model_id entirely) this falls
-            # back to the newest version, exactly like before this existed. Either way the
-            # client's raw version_id is NEVER submitted un-validated, which is what originally
-            # stopped gens landing as "Unknown model" + missing the feed. Falls back to the
-            # client version_id as-is only when no model_id was sent at all (back-compat).
-            _mid = str(body.get("model_id") or "").strip()
-            if _mid:
-                _client_vid = str(body.get("version_id") or "").strip()
-                _versions = core.list_model_versions(session, _mid)
-                _chosen = next((v for v in _versions if v.get("version_id") == _client_vid),
-                               None) if _client_vid else None
-                if _chosen:
-                    args.model = _chosen["version_id"]
-                elif _versions:
-                    args.model = _versions[0]["version_id"]
-            if not args.model:
-                return jsonify({"error": "pick a model first"}), 400
-            if not args.prompt:
-                return jsonify({"error": "enter a prompt"}), 400
             # Members-only options are dropped for an account PixAI reports as non-member.
-            # Set on the args (not inside the builder) so the CLI keeps its own path and the
-            # price call below can set the identical flag -- the badge must quote the shape
+            # Handed to the builder (not decided inside it) so the CLI keeps its own path
+            # and /api/price passes the identical flag -- the badge must quote the shape
             # that will actually submit.
             _ent = _entitlements(core, session)
-            args.is_member = _ent["is_member"]
+            # mode="image" pins the road: `mode` in THIS payload is the inferenceProfile
+            # quality setting ("auto"/"lite"/"pro"/...), not a road name, so an
+            # unpinned {"mode": "I2V"} POST here would otherwise build and pay for a video.
+            # `params` is bound for the failure log below, which reads it through
+            # locals().get() -- see _log_gen_failure.
+            req = core.build_request(body, mode="image", is_member=_ent["is_member"],
+                                     resolve=_submit_resolver(core, session))
+            params = req.parameters
+            # Authoritative model resolution happened inside build_request (see
+            # core.model_version_resolver): the client's version_id is honored only when
+            # it names one of model_id's own real versions, else the newest, and it is
+            # never submitted un-validated -- which is what originally stopped gens
+            # landing as "Unknown model" + missing the feed.
+            if not req.model_version_id:
+                return jsonify({"error": "pick a model first"}), 400
+            if not (body.get("prompt") or "").strip():
+                return jsonify({"error": "enter a prompt"}), 400
             # The per-generation LoRA cap was CLIENT-ONLY until 2026-07-28: both the gallery
             # drawer and the Loom disable their own submit button over the cap, and nothing
             # checked it here -- so any path that is not one of those two buttons (a stale
@@ -11157,18 +11634,14 @@ def create_app(out_dir: Path):
             # changes the picture he asked for, and a refusal costs nothing because no task
             # is created either way. Fails OPEN on an unknown cap.
             _cap = _ent["lora_cap"]
-            if _cap is not None and len(getattr(args, "lora", None) or []) > _cap:
+            if _cap is not None and len(req.lora_version_ids) > _cap:
                 return jsonify({"error": "Your account allows {} LoRA{} per generation — "
                                          "remove {} to continue.".format(
                                              _cap, "" if _cap == 1 else "s",
-                                             len(args.lora) - _cap)}), 400
-            params = core._gen_parameters(args)
-            core._apply_kaisuuken(session, params, args)   # attach free card unless no_card
-            task_id = core.submit_generation(session, params)
+                                             len(req.lora_version_ids) - _cap)}), 400
+            task_id = core.submit(session, req)["task_id"]
             try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
-                lvids = [str((lo or {}).get("version_id") or "").strip()
-                         for lo in (body.get("loras") or [])]
-                lvids = [v for v in lvids if v]
+                lvids = req.lora_version_ids
                 if lvids:
                     telem_bump("lora_used", out_dir=out_dir)
                     telem_max("lora_stacked", len(lvids), out_dir=out_dir)
@@ -11177,7 +11650,7 @@ def create_app(out_dir: Path):
             except Exception:
                 pass
             out = {"task_id": task_id}
-            if getattr(args, "clamped", None):
+            if req.adjusted:
                 # A clamp fired: this submit is NOT the one that was asked for, and the
                 # caller has just been charged for it. Say so in the response rather than
                 # letting the substitution pass unremarked -- the whole hazard M20's clamp
@@ -11186,19 +11659,22 @@ def create_app(out_dir: Path):
                 # (the finding's own threat model) and the drawer itself, whose steps/cfg
                 # controls adopt a model's published `restrictions` verbatim and so can
                 # legitimately offer a number this clamp then rewrites.
-                out["adjusted"] = args.clamped
+                out["adjusted"] = req.adjusted
             return jsonify(out)
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/generate", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/edit", methods=["POST"])
+    @tier(LOGIN)
     def api_edit():
         """Instruct-edit an existing gallery image ('make it night'). Login required;
         auto-applies an Edit-Pro card unless no_card. Catalogs the result into this
-        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}."""
+        backup, same as /api/generate. Returns {task_id, media_ids, paid_credit}.
+
+        Same road as the badge: core.build_request builds the `chat` shape /api/price
+        quoted, core.submit is the one READ_ONLY + free-card choke."""
         try:
-            from types import SimpleNamespace
             user = str(session.get("user") or "")
             # gsession, not `core, session = _gen_session()` -- see api_price's identical
             # comment: session is Flask's, reassigning it here would make every reference
@@ -11206,14 +11682,14 @@ def create_app(out_dir: Path):
             # the read above), not a read of Flask's session.
             core, gsession = _gen_session()
             p = request.get_json(silent=True) or {}
-            params = _edit_params_from_payload(core, p, user, gsession)
+            req = core.build_request(p, mode="edit", user=user,
+                                     resolve=_submit_resolver(core, gsession))
+            params = req.parameters          # bound for _log_gen_failure's locals().get()
             if params is None:
                 return jsonify({"error": "pick an image to edit (and a valid preset if set)"}), 400
             if not (p.get("preset") or "").strip() and not (p.get("instruction") or "").strip():
                 return jsonify({"error": "describe the edit"}), 400
-            core._apply_kaisuuken(gsession, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(gsession, params)
+            task_id = core.submit(gsession, req)["task_id"]
             telem_bump("edits", out_dir=out_dir)          # The Restoration Wing
             telem_set_add("tools", "edit", out_dir=out_dir)
             return jsonify({"task_id": task_id})
@@ -11229,6 +11705,7 @@ def create_app(out_dir: Path):
     _ENH_PRICE_TTL = 3600.0
 
     @app.route("/api/enhance/presets")
+    @tier(LOGIN)
     def api_enhance_presets():
         """The six Bridge Enhance presets + LIVE per-preset cost (price + free-card), so the
         drawer's cost chips are honest rather than baked (the same 'fetch, don't bake' rule Fix
@@ -11280,6 +11757,7 @@ def create_app(out_dir: Path):
         return jsonify({"presets": out})
 
     @app.route("/api/enhance", methods=["POST"])
+    @tier(LOGIN)
     def api_enhance():
         """One-click AI preset (PixAI panelplugin workflow) on the Edit tab's source image --
         the mirror-gated Bridge tier (drift §44 / SCOPE §3). Accepts `workflow_id` OR
@@ -11303,31 +11781,20 @@ def create_app(out_dir: Path):
             return jsonify({"error": "Mirror to PixAI must be armed to run AI presets — "
                                      "nothing was submitted, no credits spent"}), 409
         try:
-            from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            wid = str(p.get("workflow_id") or "").strip()
-            wname = str(p.get("workflow_name") or "").strip()
-            if not src:
-                return jsonify({"error": "pick an image first"}), 400
-            if not (wid or wname):
-                return jsonify({"error": "pick an AI preset"}), 400
-            # workflow_name wins inside the builder when both are set; a preset is pinned to
-            # exactly one of the two (numeric id OR author/workflow name) in the caller.
-            # Change Emotion carries a control: pass the picked expression, and ONLY for that
-            # preset (an unknown input on the others would be a stray arg on a spend submit).
-            # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants the
-            # danbooru TAG STRING, so translate key->tag here (unknown key falls back to itself).
-            emotion_key = str(p.get("emotion") or "").strip()
-            emotion_tag = core.ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
-            extra = ({core.ENHANCE_EMOTION_ARG: emotion_tag}
-                     if emotion_tag and wname == core.ENHANCE_EMOTION_WORKFLOW else None)
-            params = core.build_panelplugin_parameters(src, wid, workflow_name=wname,
-                                                       extra_inputs=extra)
-            core._apply_kaisuuken(session, params,
-                                  SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-            task_id = core.submit_generation(session, params)
+            # Same road as every other create: build_request resolves the source image,
+            # translates the Change-Emotion control and calls build_panelplugin_parameters;
+            # core.submit is the READ_ONLY + free-card choke. A panelplugin task can never
+            # be covered by a card (measured 2026-08-18) -- the check simply returns no
+            # match -- but it costs nothing to ride the same choke and it is one fewer
+            # spend path with a guard of its own to get wrong.
+            req = core.build_request(p, mode="enhance",
+                                     resolve=_submit_resolver(core, session))
+            params = req.parameters          # bound for _log_gen_failure's locals().get()
+            if params is None:
+                return jsonify({"error": req.note}), 400
+            task_id = core.submit(session, req)["task_id"]
             # [BLOCKER] Telemetry is DEFERRED, not fired here: submit_generation returns the id at
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
@@ -11335,13 +11802,15 @@ def create_app(out_dir: Path):
             # counts a workflowName preset too. The three producers fire from /api/task-status's
             # terminal-success branch via _fire_enhance_telemetry.
             with _enhance_pending_lock:
-                _enhance_pending[str(task_id)] = wname or wid
+                _enhance_pending[str(task_id)] = (str(p.get("workflow_name") or "").strip()
+                                                  or str(p.get("workflow_id") or "").strip())
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
                 "/api/enhance", e, locals().get("params"))[:300]}), 200
 
     @app.route("/api/enhance/emotions")
+    @tier(LOGIN)
     def api_enhance_emotions():
         """The staged Change-Emotion options: each emotion-role <key>.<img>
         (loose OR packed in the container), keyed by filename stem. The picker self-populates
@@ -11405,6 +11874,7 @@ def create_app(out_dir: Path):
                 "custom": bool(sc.get("custom"))}
 
     @app.route("/api/scenes")
+    @tier(LOGIN)
     def api_scenes():
         """The AI-Tools scene catalog + each scene's control schema, so the nav modal browses
         and the gen drawer renders the right form. 'Fetch, don't bake': the list is pulled LIVE
@@ -11430,6 +11900,7 @@ def create_app(out_dir: Path):
         return jsonify({"scenes": out})
 
     @app.route("/api/scene", methods=["POST"])
+    @tier(LOGIN)
     def api_scene():
         """Generate one AI-Tools scene (createChatEditingSceneTask) on the picked source
         image(s). Mirror-gated FIRST, before any upload/build/submit: a scene task submitted on
@@ -11468,26 +11939,33 @@ def create_app(out_dir: Path):
                                   "media_ct": len(locals().get("media") or [])})[:300]}), 200
 
     @app.route("/api/fix", methods=["POST"])
+    @tier(LOGIN)
     def api_fix():
         """Submit a hand/face fixer task from the Edit-tab canvas. `boxes` are original-image
-        pixel coords. Login required; returns {task_id} for the async poller."""
+        pixel coords. Login required; returns {task_id} for the async poller.
+
+        The Fix is the one road whose submit body is NOT `parameters`: /v2/task/fixer takes
+        {mediaId, boxes}, so the request carries those and core.submit sends them. Its
+        `parameters` are the synthesized chat.fixer shape /api/price quotes off the same
+        request -- built here too, so the badge and the spend cannot describe different
+        boxes."""
         try:
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
-            src = _input_media_id(core, session, str(p.get("source") or "").strip())
-            boxes = p.get("boxes") or []
-            if not src:
+            req = core.build_request(p, mode="fix",
+                                     resolve=_submit_resolver(core, session))
+            if not req.media_id:
                 return jsonify({"error": "pick an image first"}), 400
-            if not boxes:
+            if not req.boxes:
                 return jsonify({"error": "draw a box over a hand or face"}), 400
             # The exact body submit_fixer POSTs to /v2/task/fixer, named here so the failure
             # log below has the REQUEST SHAPE to report, the same way /api/generate and
-            # /api/edit hand it their `params`. Built from the route's own inputs rather
+            # /api/edit hand it their `params`. Built from the request's own inputs rather
             # than re-running clean_fix_boxes(), so nothing on the error path can itself
             # raise; a box the cleaner would have dropped is still worth seeing, because
             # "which boxes did we actually ask about" is half the diagnosis.
-            fix_params = {"mediaId": src, "boxes": boxes}
-            task_id = core.submit_fixer(session, src, boxes)
+            fix_params = {"mediaId": req.media_id, "boxes": req.boxes}
+            task_id = core.submit(session, req)["task_id"]
             telem_set_add("tools", "fix", out_dir=out_dir)   # Full Toolbox
             return jsonify({"task_id": task_id})
         except Exception as e:
@@ -11637,10 +12115,11 @@ def create_app(out_dir: Path):
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
-<link rel="icon" href="/branding/favicon.ico">
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
 <meta name="theme-color" content="#0a0818">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
@@ -11679,9 +12158,9 @@ __UPSCALE_CONST__
     #      surfaces that don't exist on the login page at all -- dead weight
     #      to parse before a visitor has even signed in.
     #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
-    #      allowlist, and never needed to be until now -- only
-    #      /next/assets/ (this page's own bundle/stylesheet) was added to
-    #      _PUBLIC_PREFIXES. Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      public tier, and never needed to be until now -- only
+    #      /next/assets/ (this page's own bundle/stylesheet) is
+    #      @tier(PUBLIC). Reusing NEXT_PAGE unmodified would have 404/401'd
     #      an unauthenticated visitor's <script> requests for all 8 -- caught
     #      live: those requests 302'd back to /login (the front door redoing
     #      its own job on itself), the module script's own fetch got HTML
@@ -11694,10 +12173,11 @@ __UPSCALE_CONST__
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
-<link rel="icon" href="/branding/favicon.ico">
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
 <meta name="theme-color" content="#0a0818">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
@@ -11720,6 +12200,7 @@ __DESIGN_TOKENS__
     # keep working. One endpoint, two paths -- no redirect hop, same tier.
     @app.route("/")
     @app.route("/next")
+    @tier(LOGIN)
     def next_gallery():
         session.setdefault("csrf", secrets.token_hex(16))
         brand = brand_context(out_dir)
@@ -11775,6 +12256,7 @@ __DESIGN_TOKENS__
             boot=boot)
 
     @app.route("/next/assets/<path:fname>")
+    @tier(PUBLIC)
     def next_assets(fname):
         resp = send_from_directory(str(_NEXT_DIST), fname)
         # The bundle changes on every `npm run build` with NO url change, and this
@@ -11789,6 +12271,7 @@ __DESIGN_TOKENS__
         return resp
 
     @app.route("/api/next/library")
+    @tier(LOGIN)
     def api_next_library():
         """The new gallery's own listing surface -- full filter set, clean field
         names, one purpose. Reads the same catalog engine (query_catalog) as
@@ -11852,6 +12335,7 @@ __DESIGN_TOKENS__
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
 
     @app.route("/api/next/detail/<media_id>")
+    @tier(LOGIN)
     def api_next_detail(media_id):
         """The pilot's Details view backing data -- classic's detail() route (~12254),
         JSON instead of a server-rendered page. Full row, plus prev_id/next_id computed
@@ -11920,6 +12404,7 @@ __DESIGN_TOKENS__
         return base.timestamp() + ms
 
     @app.route("/api/next/history")
+    @tier(LOGIN)
     def api_next_history():
         """Read-only feed for the Generate dock's History mode: the last `days` LOCAL
         calendar days of finished runs (catalog rows by created_at, newest first, empty
@@ -11985,40 +12470,24 @@ __DESIGN_TOKENS__
             except ValueError:
                 return None
 
-        where, params = _build_where("", "", "", "", media_type=media, source=source)
         since_utc, until_utc = utc_iso(start_local), utc_iso(end_local)
-        con = _connect(db_path)
-        try:
-            rows = con.execute(
-                "SELECT media_id, task_id, is_video, created_at, width, height, model_id, "
-                "COALESCE(NULLIF(model_name,''), NULLIF(video_model,''), model_id, '') AS model, "
-                "SUBSTR(COALESCE(NULLIF(prompt_full,''), prompt_preview, ''), 1, 300) AS prompt, "
-                "video_duration, paid_credit, source "
-                "FROM catalog WHERE {} AND created_at >= ? AND created_at < ? "
-                "ORDER BY created_at DESC, media_id DESC".format(where),
-                params + [since_utc, until_utc]).fetchall()
-            # Paging cursor: the NEWEST row older than this window, so the next page
-            # opens on a day that has runs instead of a run of empty days.
-            older = con.execute(
-                "SELECT created_at FROM catalog WHERE {} AND created_at < ? "
-                "ORDER BY created_at DESC LIMIT 1".format(where),
-                params + [since_utc]).fetchone()
-            next_before, older_days = None, 0
-            older_ts = _history_ts(older[0]) if older else None
-            if older_ts is not None:
-                nb_date = local_date(older_ts) + timedelta(days=1)
-                nb_local = datetime(nb_date.year, nb_date.month, nb_date.day, tzinfo=tzinfo)
-                next_before = nb_date.isoformat()
-                older_days = len({
-                    local_date(t) for t in (
-                        _history_ts(r[0]) for r in con.execute(
-                            "SELECT created_at FROM catalog WHERE {} AND created_at >= ? "
-                            "AND created_at < ?".format(where),
-                            params + [utc_iso(nb_local - timedelta(days=days)),
-                                      utc_iso(nb_local)]).fetchall())
-                    if t is not None})
-        finally:
-            con.close()
+        page = history_page(db_path, since_utc, until_utc, media=media, source=source)
+        rows = page["rows"]
+        # Paging cursor: the NEWEST row older than this window, so the next page
+        # opens on a day that has runs instead of a run of empty days.
+        next_before, older_days = None, 0
+        older_ts = _history_ts(page["older_created_at"]) if page["older_created_at"] else None
+        if older_ts is not None:
+            nb_date = local_date(older_ts) + timedelta(days=1)
+            nb_local = datetime(nb_date.year, nb_date.month, nb_date.day, tzinfo=tzinfo)
+            next_before = nb_date.isoformat()
+            older_days = len({
+                local_date(t) for t in (
+                    _history_ts(c) for c in history_created_ats(
+                        db_path,
+                        utc_iso(nb_local - timedelta(days=days)), utc_iso(nb_local),
+                        media=media, source=source))
+                if t is not None})
 
         buckets = {}
         for i in range(days):
@@ -12125,6 +12594,7 @@ __DESIGN_TOKENS__
         })
 
     @app.route("/loom/vendor/<path:fname>")
+    @tier(LOGIN)
     def loom_vendor(fname):
         """Serve the Loom's vendored JS (React/ReactDOM UMD builds) from
         loom/vendor/ so the page paints with zero network calls. Path-safe; absent
@@ -12142,6 +12612,7 @@ __DESIGN_TOKENS__
         return send_from_directory(str(vdir), fname, max_age=31536000)
 
     @app.route("/loom/dist/<path:fname>")
+    @tier(LOGIN)
     def loom_dist(fname):
         """Serve the esbuild-bundled Loom (loom/dist/, built by `npm run build` in
         loom/) -- the Loom's SOLE delivery path since the Babel-standalone retirement
@@ -12160,6 +12631,7 @@ __DESIGN_TOKENS__
         return send_from_directory(str(ddir), fname, max_age=0)
 
     @app.route("/loom")
+    @tier(LOGIN)
     def loom():
         """Serve the Seedance video-storyboard tool inside the gallery, persisted to the
         backend (window.storage swapped for /api/loom/*). Authorized only.
@@ -12179,6 +12651,7 @@ __DESIGN_TOKENS__
         return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
 
     @app.route("/api/loom/get")
+    @tier(LOGIN)
     def loom_get():
         user = str(session.get("user") or "")
         if not user:
@@ -12188,6 +12661,7 @@ __DESIGN_TOKENS__
             return jsonify({"value": _loom_kv_read(user, request.args.get("key") or "")})
 
     @app.route("/api/loom/set", methods=["POST"])
+    @tier(LOGIN)
     def loom_set():
         user = str(session.get("user") or "")
         if not user:
@@ -12205,6 +12679,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/loom/list")
+    @tier(LOGIN)
     def loom_list():
         from urllib.parse import unquote
         user = str(session.get("user") or "")
@@ -12226,6 +12701,7 @@ __DESIGN_TOKENS__
         return jsonify({"keys": sorted(k for k in keys if k.startswith(pre))})
 
     @app.route("/api/loom/delete", methods=["POST"])
+    @tier(LOGIN)
     def loom_delete():
         user = str(session.get("user") or "")
         if not user:
@@ -12314,6 +12790,7 @@ __DESIGN_TOKENS__
         return fallback[0] if fallback else None
 
     @app.route("/api/loom/handoff", methods=["POST"])
+    @tier(LOGIN)
     def loom_handoff():
         """Frame handoff: given a generated shot's video media_id, extract its LAST frame,
         upload it, and return the new frame media_id -- which the storyboard sets as the
@@ -12343,12 +12820,16 @@ __DESIGN_TOKENS__
             if not core.extract_last_frame(str(vid), str(png), at_seconds=trim_out):
                 return jsonify({"error": "could not extract the last frame (ffmpeg)"}), 200
             frame_mid = core.upload_media(session, str(png))
-            dur = core.probe_video_duration(str(vid))
+            # media_tools.duration answers at full precision; 2dp is this route's own
+            # display choice for the Edit Bay's reel, made where it is visible.
+            _dur = core.duration(str(vid))
+            dur = round(_dur, 2) if _dur is not None else None
             return jsonify({"frame_media_id": str(frame_mid), "duration": dur})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/import-frames", methods=["POST"])
+    @tier(LOGIN)
     def loom_import_frames():
         """Give an IMPORTED clip the two stills it never had.
 
@@ -12396,13 +12877,14 @@ __DESIGN_TOKENS__
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
 
     @app.route("/api/loom/video-duration")
+    @tier(LOGIN)
     def loom_video_duration():
         """Real duration (seconds) of an already-catalogued video, via ffprobe on the local
         file -- fallback for the Footage tab's import-as-footage picker (loom/master-
         storyboard.jsx's importPickedFootage) when the catalog's own video_duration column
         is blank (rows predating that column, or whose request-duration was never captured
         -- see CATALOG_FIELDS/video_duration). Shares _find_local_video_file and
-        probe_video_duration with /api/loom/handoff (the latter also powers the Edit Bay's
+        media_tools.duration with /api/loom/handoff (the latter also powers the Edit Bay's
         reel) -- same resolver, same probing utility, nothing new invented. Read-only,
         local-file-only -- no PixAI session needed. Login required, matching every other
         /api/loom/* route."""
@@ -12417,11 +12899,13 @@ __DESIGN_TOKENS__
             if vid is None:
                 return jsonify({"error": "video file not found locally", "duration": None}), 200
             import moonglade_backup as core
-            return jsonify({"duration": core.probe_video_duration(str(vid))})
+            _dur = core.duration(str(vid))   # 2dp is this route's display choice, not the probe's
+            return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
 
     @app.route("/api/loom/generate", methods=["POST"])
+    @tier(LOGIN)
     def loom_generate():
         """Generate a storyboard SHOT on PixAI (the video 'Copy shot' -> 'Generate shot').
         Resolves the shot's @-ordered images (upload data-URLs / pass media_ids) -> the PixAI
@@ -12430,7 +12914,6 @@ __DESIGN_TOKENS__
         try:
             import base64
             import hashlib
-            from types import SimpleNamespace
             core, session = _gen_session()
             p = request.get_json(silent=True) or {}
             updir = out_dir / "loom" / "_uploads"
@@ -12491,29 +12974,20 @@ __DESIGN_TOKENS__
             video_ids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
             audio_ids = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
 
-            def _params_for(imgs):
-                return core.build_shot_video_params(
-                    p.get("mode") or "R2V", (p.get("prompt") or "").strip(),
-                    image_ids=imgs, video_ids=video_ids, audio_ids=audio_ids,
-                    duration=p.get("duration") or 5,
-                    generate_audio=bool(p.get("generate_audio") or p.get("audio")),
-                    model=(p.get("video_model") or ""),
-                    camera_movement=(p.get("camera_movement") or ""),
-                    quality=(p.get("quality") or "professional"),
-                    audio_language=(p.get("audio_language") or "english"),
-                    negative=(p.get("negative") or "").strip(),
-                    is_private=bool(p.get("is_private")),
-                    use_prompt_helper=bool(p.get("prompt_helper")))
+            def _request_for(imgs):
+                # The ONE video road: build_request(mode="video") builds the shot the
+                # Loom's own cost badge priced through /api/price, and core.submit is
+                # the READ_ONLY + free-card choke. Frames are resolved HERE (data-URL
+                # upload / catalog passthrough -- see resolve_img) and handed in already
+                # resolved, so the request carries exactly the ids that go out.
+                return core.build_request({**p, "images": imgs,
+                                           "video_refs": video_ids,
+                                           "audio_refs": audio_ids}, mode="video")
 
-            def _card(prm):
-                core._apply_kaisuuken(
-                    session, prm,
-                    SimpleNamespace(kaisuuken_id="", no_card=bool(p.get("no_card"))))
-
-            params = _params_for(image_ids)
-            _card(params)
+            req = _request_for(image_ids)
+            params = req.parameters      # bound for _log_gen_failure's locals().get()
             try:
-                task_id = core.submit_generation(session, params)
+                task_id = core.submit(session, req)["task_id"]
             except core.PixAIError as e:
                 # SURVEYED, not guessed. getTaskById across the owner's own video history
                 # (2026-07-26, read-only, no credits) found EVERY i2vPro task carrying an
@@ -12562,9 +13036,9 @@ __DESIGN_TOKENS__
                 # base64 blob as a media id (adversarial review, 2026-08-22).
                 image_ids = [m for m in ((_input_media_id(core, session, raw) if raw.isdigit() else rid)
                                          for raw, rid in resolved) if m]
-                params = _params_for(image_ids)
-                _card(params)
-                task_id = core.submit_generation(session, params)
+                req = _request_for(image_ids)
+                params = req.parameters   # rebound for the failure log below
+                task_id = core.submit(session, req)["task_id"]
             try:                       # Master of the Loom + Storyweaver telemetry
                 mode = str(p.get("mode") or "R2V").upper()
                 if mode in ("I2V", "FLF", "R2V"):
@@ -12580,13 +13054,21 @@ __DESIGN_TOKENS__
 
     def _run_export(cmd, out_path, total_sec):
         """Run the ffmpeg concat in a thread, parsing time= for progress. The output
-        (--pix_fmt yuv420p h264) is a normal mp4 the browser can play + download."""
+        (--pix_fmt yuv420p h264) is a normal mp4 the browser can play + download.
+
+        This is the one media invocation that stays a Popen rather than going through
+        media_tools' run_ffmpeg: the export streams ffmpeg's stderr line by line to drive
+        a progress bar, and a run_* that waits for the process to finish cannot report
+        progress on a job that takes minutes. It still takes its BINARY and its no-window
+        FLAG from media_tools (cmd[0] is core.ffmpeg_path(), set by the caller), so the
+        two things that drifted between call sites are still decided in one place."""
         import subprocess, re as _re
+        import moonglade_backup as core
         tpat = _re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                     text=True, bufsize=1, encoding="utf-8", errors="replace",
-                                    creationflags=_NO_WINDOW)
+                                    creationflags=core.NO_WINDOW)
             with _export_lock:
                 _export_job["proc"] = proc
             for line in iter(proc.stderr.readline, ""):
@@ -12610,6 +13092,7 @@ __DESIGN_TOKENS__
                 _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
 
     @app.route("/api/loom/export", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export():
         """Trim each finished shot to its in/out and concat into one 720p mp4 -- the
         rough cut becomes a real deliverable. Async (ffmpeg in a thread); poll
@@ -12623,10 +13106,11 @@ __DESIGN_TOKENS__
         it either drops the audio track entirely (when there was no real audio anywhere, so
         nothing is lost) or refuses and names the shot (when real audio would be thrown out
         of sync by it). See the span pre-pass below. body: {clips:[{mid,in,out}], total_seconds}"""
-        import shutil
-        if not shutil.which("ffmpeg"):
+        import moonglade_backup as core
+        if not core.ffmpeg_path():
             return jsonify({"error": "ffmpeg is not on PATH -- install it to export."}), 400
-        # ffprobe deliberately is NOT gated here alongside ffmpeg. It usually ships in the
+        # ffprobe deliberately is NOT gated here alongside ffmpeg -- media_tools resolves the
+        # two separately for exactly this reason. It usually ships in the
         # same package, and probe_has_audio()/probe_duration() both fail soft when it is
         # absent -- which means on a machine with ffmpeg but no ffprobe EVERY clip reads as
         # silent and no duration is readable, i.e. the common untrimmed shot would trip an
@@ -12758,7 +13242,7 @@ __DESIGN_TOKENS__
                 % (len(unmeasurable), ", ".join(unmeasurable[:5]),
                    " ffprobe is not installed -- it ships with the full ffmpeg build, and "
                    "installing it restores measured lengths and audio."
-                   if not shutil.which("ffprobe") else ""))
+                   if not core.ffprobe_path() else ""))
             try:
                 import logging as _logging
                 _logging.getLogger(__name__).warning(
@@ -12767,7 +13251,7 @@ __DESIGN_TOKENS__
                     "padding with a guessed length.",
                     len(unmeasurable), ", ".join(unmeasurable[:5]),
                     " (ffprobe is not on PATH; it ships with the full ffmpeg build)"
-                    if not shutil.which("ffprobe") else "")
+                    if not core.ffprobe_path() else "")
             except Exception:
                 pass
         need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
@@ -12795,7 +13279,9 @@ __DESIGN_TOKENS__
         fc = ";".join(parts) + ";" + labels + (
             "concat=n=%d:v=1:a=1[vout][aout]" if audio_track else "concat=n=%d:v=1:a=0[vout]"
         ) % len(segs)
-        cmd = ["ffmpeg", "-y"]
+        # The binary comes from media_tools, not a bare name on PATH -- the one
+        # resolution, shared with every other ffmpeg call in the app.
+        cmd = [core.ffmpeg_path(), "-y"]
         for (path, _ci, _co, _ha, _cr, _m) in segs:
             cmd += ["-i", path]
         if need_silence:
@@ -12820,12 +13306,14 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True, "shots": len(segs), "audio": audio_track})
 
     @app.route("/api/loom/export-status")
+    @tier(LOGIN)
     def api_loom_export_status():
         with _export_lock:
             return jsonify({k: _export_job[k] for k in
                             ("status", "progress", "elapsed", "out", "error", "warning")})
 
     @app.route("/api/loom/export-file")
+    @tier(LOGIN)
     def api_loom_export_file():
         name = _export_job.get("out") or "loom_cut.mp4"
         if not (_export_dir / name).exists():
@@ -12834,6 +13322,7 @@ __DESIGN_TOKENS__
                                    download_name="moonglade-loom-cut.mp4")
 
     @app.route("/api/loom/export-cancel", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export_cancel():
         with _export_lock:
             proc = _export_job.get("proc")
@@ -12854,15 +13343,12 @@ __DESIGN_TOKENS__
     # id already resolvable on the receiving machine is simply skipped (both sides already
     # have it); one that isn't gets copied into imported/ and cataloged fresh. That also
     # makes re-importing the same bundle twice a no-op the second time.
-    _BUNDLE_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}  # mirrors backup.py's
-    # _VIDEO_EXTS. It cannot be a MODULE-LEVEL import -- backup.py imports this file, so the
-    # reverse at import time is a cycle -- but a function-body `import moonglade_backup as
-    # core` inside create_app is fine and is what the rest of this file does (the delete
-    # paths, _find_local_video_file). An earlier version of this comment said the constant
-    # was "not imported directly" as if the layering forbade it outright; it doesn't, and
-    # _find_local_video_file now reads core._VIDEO_EXTS exactly that way. This one stays a
-    # literal only because it is bound while create_app is still building its namespace;
-    # if the two lists ever drift, do the lazy import here too rather than re-typing them.
+    _BUNDLE_VIDEO_EXTS = _VIDEO_EXTS   # THE video extension set, not a fourth copy of it.
+    # It used to be a re-typed literal here, because the set lived in backup.py and
+    # backup.py imports this file, so a module-level import back the other way is a
+    # cycle. The 2026-08-23 library-scan collapse moved the set into THIS module's
+    # LIBRARY SCAN section (it is the `"video"` kind), which is what backup.py now
+    # imports -- so the reason for the copy is gone along with the copy.
 
     def _loom_collect_media_ids(project):
         """Every real (catalog) media_id a project references -- resultMid, both frame
@@ -12950,6 +13436,7 @@ __DESIGN_TOKENS__
         return ",".join(out)
 
     @app.route("/api/loom/export-bundle", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_export_bundle():
         """Full-bundle export: a zip of project.json (the lightweight Backup .json's
         {project, thumbs}, plus a `missing_media` manifest this tier alone can produce
@@ -13006,6 +13493,7 @@ __DESIGN_TOKENS__
         return resp
 
     @app.route("/api/loom/import-bundle", methods=["POST"])
+    @tier(LOGIN)
     def api_loom_import_bundle():
         """Accepts a full-bundle zip (see export-bundle), catalogs any media this machine
         doesn't already have (source='api' -- it's real PixAI media, just synced via the
@@ -13161,6 +13649,7 @@ __DESIGN_TOKENS__
             _enhance_pending.pop(str(tid), None)
 
     @app.route("/api/task-status")
+    @tier(LOGIN)
     def api_task_status():
         """Poll a submitted task: {phase: running|done|failed}. On 'done' it downloads +
         catalogs the result into this backup and returns media_ids + paid_credit. Read-only
@@ -13267,6 +13756,7 @@ __DESIGN_TOKENS__
                             "status": "checking… ({})".format(_redact_host_paths(str(e))[:160])}), 200
 
     @app.route("/api/jobs")
+    @tier(LOGIN)
     def api_jobs():
         """Reconstructed job list for the Jobs card (newest-first) -- the paper trail that
         survives a reload. The card polls this. Login required, like the creation suite.
@@ -13289,6 +13779,7 @@ __DESIGN_TOKENS__
         return jsonify({"jobs": jobs})
 
     @app.route("/api/jobs", methods=["POST"])
+    @tier(LOGIN)
     def api_jobs_register():
         """Register/update a job in the log. The Jobs card calls this the moment a gen is
         submitted (status=running) so it shows immediately; the authoritative done/failed
@@ -13317,6 +13808,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/jobs/dismiss", methods=["POST"])
+    @tier(LOGIN)
     def api_jobs_dismiss():
         """Dismiss one job (job_id) or every finished job (finished:true) from the card --
         this is how a sticky failure gets cleared. Login required (any session, local or LAN)."""
@@ -13337,6 +13829,7 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     @app.route("/api/workflows")
+    @tier(LOGIN)
     def api_workflows():
         """Live enhance-workflow catalog (id + name + type) for the Bridge picker. Read-only;
         login required (uses the owner's key). Restored 2026-08-18 for parity -- NOTE: this
@@ -13393,6 +13886,17 @@ __DESIGN_TOKENS__
         # header lands on the 401 too -- pinned by test_web_auth.
         resp.headers["X-Moonglade"] = "1"
         return resp
+
+    # Flask's own `static` endpoint is the one route this module does not define,
+    # so it is the one that cannot carry a @tier at its `def`. It is declared
+    # here rather than skipped: /static/ is gated by the front door exactly like
+    # everything else, and `if rule.endpoint == "static": continue` is the single
+    # most common way a catch-all route rule grows a hole.
+    declare_endpoint_tier(app, "static", LOGIN)
+
+    # Every registered rule must now carry a tier -- checked here, at app
+    # creation, not in CI. See assert_every_route_declares_a_tier().
+    assert_every_route_declares_a_tier(app)
 
     return app
 

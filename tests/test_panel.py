@@ -591,14 +591,19 @@ def test_schedule_write_is_localhost_only_but_read_is_not(tmp_path):
 # --- The Loom: ffmpeg export of the rough cut (mocked -- no real ffmpeg) ---
 
 def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
-    import subprocess, shutil, io, time
+    import subprocess, io, time
+    import moonglade_backup as core
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_v1.mp4").write_bytes(b"fakemp4")   # media_id 'v1'
     # the export resolves the clip via the catalog row (is_video + filename)
     save_catalog(tmp_path / "catalog.db", [
         _row(media_id="v1", filename="videos/shot_v1.mp4", is_video="1",
              created_at="2025-01-01T00:00:00")])
-    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+    # Re-pinned onto media_tools' availability seam: a global shutil.which patch no
+    # longer reaches the export, which asks core.ffmpeg_path(). "ffmpeg" is kept as
+    # the resolved path so argv[0] still reads "ffmpeg" for the guard below.
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
 
     class FakeProc:
         def __init__(self, argv):
@@ -636,8 +641,8 @@ def test_loom_export_runs_and_downloads(tmp_path, monkeypatch):
 
 
 def test_loom_export_needs_a_video(tmp_path, monkeypatch):
-    import shutil
-    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg")
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
     cli = _authed_client(tmp_path)
     r = cli.post("/api/loom/export", json={"clips": [{"mid": "nope", "in": 0}]})
     assert r.status_code == 400 and "no finished shot" in r.get_json()["error"]
@@ -646,38 +651,51 @@ def test_loom_export_needs_a_video(tmp_path, monkeypatch):
 # --- probe_has_audio / probe_duration: pure ffprobe wrappers, fail-soft ---------
 
 def test_probe_has_audio(monkeypatch):
-    import subprocess, shutil
-    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe" if n == "ffprobe" else None)
+    """Availability is re-pinned on media_tools' ffprobe_path() -- the gallery no longer
+    runs a shutil.which() of its own -- and R now carries the returncode/stderr a real
+    CompletedProcess has. Every assertion is the original one: the gallery face of this
+    probe still answers True/False, never None, and never raises."""
+    import subprocess
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
-        def __init__(self, out):
+        def __init__(self, out, rc=0):
             self.stdout = out
+            self.returncode = rc
+            self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("0\n"))
     assert g.probe_has_audio("clip.mp4") is True
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(""))
     assert g.probe_has_audio("silent.mp4") is False          # no stream index -> no audio
-    monkeypatch.setattr(shutil, "which", lambda n: None)
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
     assert g.probe_has_audio("clip.mp4") is False            # ffprobe missing -> fail soft
 
     def _boom(*a, **k):
         raise OSError("gone")
-    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
     monkeypatch.setattr(subprocess, "run", _boom)
     assert g.probe_has_audio("clip.mp4") is False             # never raises
 
 
 def test_probe_duration(monkeypatch):
-    import subprocess, shutil
-    monkeypatch.setattr(shutil, "which", lambda n: "/bin/ffprobe")
+    """Same re-pin as test_probe_has_audio. 5.234 is deliberately three decimals: the
+    surviving probe answers at FULL precision, and a caller that wants fewer rounds at
+    its own call site."""
+    import subprocess
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "/bin/ffprobe")
 
     class R:
-        def __init__(self, out):
+        def __init__(self, out, rc=0):
             self.stdout = out
+            self.returncode = rc
+            self.stderr = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("5.234\n"))
     assert g.probe_duration("clip.mp4") == 5.234
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: R("not-a-number\n"))
     assert g.probe_duration("clip.mp4") is None                # never raises on garbage
-    monkeypatch.setattr(shutil, "which", lambda n: None)
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
     assert g.probe_duration("clip.mp4") is None                # ffprobe missing -> None
 
 
@@ -686,8 +704,11 @@ def test_probe_duration(monkeypatch):
 def _mock_export_ffmpeg(monkeypatch):
     """Same FakeProc convention as test_loom_export_runs_and_downloads, but captures
     every argv so the constructed ffmpeg command is inspectable."""
-    import subprocess, shutil, io
-    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+    import subprocess, io
+    import moonglade_backup as core
+    # ffmpeg present, ffprobe absent -- asked of media_tools now, not shutil.which.
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
     captured = []
 
     class FakeProc:

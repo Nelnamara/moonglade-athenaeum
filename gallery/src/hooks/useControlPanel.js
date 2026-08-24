@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
    ControlPanelOverlay.jsx (2026-08-03) into its own hook -- summary/achievements fetch,
@@ -51,24 +52,6 @@ const POLL_MS = 1200;
 const PING_MS = 800;
 const PING_TRIES_MAX = 50;
 
-// Never throws: a network failure or non-JSON body resolves to {error} instead of
-// rejecting. Dozens of Panel actions await this between setBusy(true)/setBusy(false)
-// with no try/catch -- a rejection skipped the reset and latched that control busy
-// forever (importTask's 'running' guard even blocked all future clicks). Resolving
-// {error} routes every failure through the d.error branch callers already have.
-// Found by the 2026-08-07 branch review.
-export async function postJSON(url, body) {
-  try {
-    const r = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    return await r.json();
-  } catch (e) {
-    return { error: String((e && e.message) || e) };
-  }
-}
-
 // Ported verbatim from ControlPanelOverlay.jsx's own DEDUP_STAGES -- the Tend section's
 // dedup pipeline order, shared so a second, drifting copy never has to exist.
 export const DEDUP_STAGES = [
@@ -86,7 +69,7 @@ export const DEDUP_STAGES = [
 // load reads localStorage first. Missing this meant picking a skin here changed nothing
 // visible anywhere outside the clicked card's own checkmark.
 async function applySkin(id, achievements, setAchievements) {
-  const d = await postJSON("/api/skin", { skin: id });
+  const d = await apiPost("/api/skin", { skin: id });
   if (d.error) return d;
   setAchievements({ ...achievements, skin: id });
   if (id === "moonglade") document.documentElement.removeAttribute("data-skin");
@@ -144,9 +127,9 @@ export default function useControlPanel() {
 
   const fetchSummary = async () => {
     try {
-      const r = await fetch("/api/panel/summary");
-      if (!r.ok) throw new Error();
-      setSummary(await r.json());
+      const d = await apiGet("/api/panel/summary");
+      if (d.error) throw new Error(d.error);
+      setSummary(d);
       setSummaryErr("");
     } catch {
       setSummaryErr("Couldn't load the Panel — network error, try reopening it.");
@@ -160,26 +143,25 @@ export default function useControlPanel() {
   // error string rather than pretending a LAN toggle stuck).
   const fetchPanelHistory = async () => {
     try {
-      const r = await fetch("/api/jobs");
-      const d = await r.json();
+      const d = await apiGet("/api/jobs");
       setPanelHistory((d.jobs || []).filter((j) => j.type === "panel" && !j.dismissed));
     } catch { /* the ledger view just renders empty -- non-critical */ }
   };
   const fetchSchedule = async () => {
     try {
-      const r = await fetch("/api/panel/schedule");
-      if (r.ok) setSchedule(await r.json());
+      const d = await apiGet("/api/panel/schedule");
+      if (!d.error) setSchedule(d);
     } catch { /* standing-order row stays hidden -- non-critical */ }
   };
   const saveSchedule = async (patch) => {
-    const d = await postJSON("/api/panel/schedule", patch);
+    const d = await apiPost("/api/panel/schedule", patch);
     if (!d.error) setSchedule(d);
     return d;
   };
   const fetchAchievements = async () => {
     try {
-      const r = await fetch("/api/achievements");
-      setAchievements(await r.json());
+      const d = await apiGet("/api/achievements");
+      if (!d.error) setAchievements(d);
     } catch { /* Skins sections just stay hidden without this — non-critical */ }
   };
 
@@ -196,8 +178,7 @@ export default function useControlPanel() {
     // nav tab switch (see this file's header comment's "OUTER-TAB-SWITCH SAFETY" section).
     (async () => {
       try {
-        const r = await fetch("/api/panel/status");
-        const d = await r.json();
+        const d = await apiGet("/api/panel/status");
         if (d.status === "running") {
           runningKeyRef.current = d.action;
           setRunning({ action: d.action, label: d.label || d.action });
@@ -226,8 +207,8 @@ export default function useControlPanel() {
   const tick = async () => {
     let d;
     try {
-      const r = await fetch("/api/panel/status");
-      d = await r.json();
+      d = await apiGet("/api/panel/status");
+      if (d.error) return;
     } catch { return; }
     if (d.status === "running") {
       setProgress(d.progress || null);
@@ -305,7 +286,7 @@ export default function useControlPanel() {
     const body = { action: key };
     if (spec.destructive) body.confirm = true;
     if (spec.int_param) body.n = extra != null ? extra : (spec.int_default || 1);
-    const d = await postJSON("/api/panel/run", body);
+    const d = await apiPost("/api/panel/run", body);
     if (d.error) { runningKeyRef.current = null; setJobError(d.error); return; }
     setRunning({ action: key, label: d.label || spec.label || key });
     pollRef.current = setInterval(tick, POLL_MS);
@@ -316,7 +297,7 @@ export default function useControlPanel() {
   // stays visible to every session on purpose -- hiding it would move a security decision
   // into the UI -- but a LAN session's refusal must still be SEEN, not swallowed).
   const stopJob = async () => {
-    const d = await postJSON("/api/panel/cancel", {});
+    const d = await apiPost("/api/panel/cancel", {});
     if (d && d.error) setJobError(d.error);
   };
 
@@ -329,9 +310,9 @@ export default function useControlPanel() {
     const id = taskId.trim();
     if (!id || taskState === "running") return;
     setTaskState("running");
-    const d = await postJSON("/api/import-task", { task_id: id });
+    const d = await apiPost("/api/import-task", { task_id: id });
     if (d.error) { setTaskState({ error: d.error }); return; }
-    setTaskState({ done: true, saved: d.saved });
+    setTaskState({ done: true, saved: d.saved, already: !!d.already, media_ids: d.media_ids });
     fetchSummary();
   };
 
@@ -349,12 +330,12 @@ export default function useControlPanel() {
   };
   const doPower = async () => {
     if (power === "stop") {
-      const d = await postJSON("/api/server/stop", {}).catch(() => null);
+      const d = await apiPost("/api/server/stop", {}).catch(() => null);
       if (powerCancelledRef.current) return; // Cancel was clicked while this was in flight
       if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
       _watch(false);
     } else {
-      const d = await postJSON("/api/server/restart", {}).catch(() => null);
+      const d = await apiPost("/api/server/restart", {}).catch(() => null);
       if (powerCancelledRef.current) return;
       if (d && d.error) { setPowerErr(d.error); setPowerPhase("failed"); return; }
       _watch(true);
@@ -367,12 +348,17 @@ export default function useControlPanel() {
     let tries = 0, sawDown = false;
     pingRef.current = setInterval(() => {
       tries++;
-      fetch("/api/ping", { cache: "no-store" }).then((r) => r.ok).then((ok) => {
+      // A refused ping is a refused ping: a dropped connection AND an error status both mean
+      // this server is not answering, which is the whole signal here. (It used to be only the
+      // transport rejection -- a 5xx from a half-down server read as "still up".)
+      apiGet("/api/ping", null, { cache: "no-store" }).then((d) => {
+        const ok = !d.error;
         if (comeBack && ok && sawDown) { clearInterval(pingRef.current); window.location.reload(); }
         if (comeBack && ok && tries >= 8 && !sawDown) { clearInterval(pingRef.current); window.location.reload(); }
-      }).catch(() => {
-        sawDown = true;
-        if (!comeBack) { clearInterval(pingRef.current); setPowerPhase("done"); }
+        if (!ok) {
+          sawDown = true;
+          if (!comeBack) { clearInterval(pingRef.current); setPowerPhase("done"); }
+        }
       });
       if (tries > PING_TRIES_MAX) {
         clearInterval(pingRef.current);

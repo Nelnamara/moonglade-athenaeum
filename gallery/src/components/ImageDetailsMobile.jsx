@@ -4,6 +4,7 @@ import MobileSheet from "./MobileSheet.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import { apiGet } from "../api.js";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
 

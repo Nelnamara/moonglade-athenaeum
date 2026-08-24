@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 
 /* useDuplicateReview -- DuplicateReviewOverlay.jsx's fetch/state/keeper-
    selection/resolve/undo/auto-resolve logic, mechanically lifted out
@@ -71,21 +72,6 @@ export function bestKeeperPath(g) {
   return best ? best.path : null;
 }
 
-export async function postJSON(url, body) {
-  try {
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || (d && d.error)) return { error: (d && d.error) || (url + " failed: " + r.status) };
-    return d || {};
-  } catch (e) {
-    return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
-  }
-}
-
 export default function useDuplicateReview({ csrf, onResolved } = {}) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -104,16 +90,15 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
   // needs no lazy/ensureLoaded indirection -- a plain effect covers both.
   useEffect(() => {
     let dead = false;
-    fetch("/api/duplicates")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+    apiGet("/api/duplicates")
       .then((d) => {
         if (dead) return;
+        if (d.error) { setErr(d.error); return; }
         setData(d);
         const initKeepers = {};
         (d.groups || []).forEach((g) => { initKeepers[g.id] = bestKeeperPath(g); });
         setKeeperByGroup(initKeepers);
-      })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+      });
     return () => { dead = true; };
   }, []);
 
@@ -183,7 +168,7 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     if (!resolution) return;
     setGroupBusy(g.id, true);
     clearGroupError(g.id);
-    const d = await postJSON("/api/duplicates/resolve", { csrf, resolutions: [resolution] });
+    const d = await apiPost("/api/duplicates/resolve", { csrf, resolutions: [resolution] });
     setGroupBusy(g.id, false);
     if (d.error) { setGroupErrorMsg(g.id, d.error); return; }
     const quarantined = d.quarantined || [];
@@ -205,7 +190,7 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     setGroupBusy(g.id, true);
     const items = info.quarantined || [];
     const results = await Promise.all(
-      items.map((q) => postJSON("/api/duplicates/undo", { csrf, quarantine_path: q.quarantine_path })));
+      items.map((q) => apiPost("/api/duplicates/undo", { csrf, quarantine_path: q.quarantine_path })));
     setGroupBusy(g.id, false);
 
     // Partition by real outcome instead of bailing whole-group on ANY
@@ -257,7 +242,7 @@ export default function useDuplicateReview({ csrf, onResolved } = {}) {
     if (autoBusy || !autoResolutions.length) return;
     setAutoBusy(true);
     setAutoError("");
-    const d = await postJSON("/api/duplicates/resolve", { csrf, resolutions: autoResolutions });
+    const d = await apiPost("/api/duplicates/resolve", { csrf, resolutions: autoResolutions });
     setAutoBusy(false);
     if (d.error) { setAutoError(d.error); return; }
     const byGroup = {};

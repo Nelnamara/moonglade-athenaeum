@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { friendlyGenErr } from "./genCore.js";
 
-/* ONE submit path for every spend route the pilot touches (/api/generate,
-   /api/edit, /api/fix). The classic has runTask; this is its port, and it exists
-   as one function so the spend-safety contract cannot drift between the three
-   surfaces the way friendlyGenErr drifted into four hand-maintained copies.
+/* ONE submit path for every spend route the pilot touches: /api/generate, /api/edit,
+   /api/fix, /api/enhance, /api/scene, /api/loom/generate. The classic has runTask; this is
+   its port, and it exists as one function so the spend-safety contract cannot drift between
+   the surfaces the way friendlyGenErr drifted into four hand-maintained copies.
 
    The contract, enforced here:
    - NO retry, ever. gql_mutate's no-retry covers the server->PixAI hop only; a
@@ -20,8 +20,22 @@ import { friendlyGenErr } from "./genCore.js";
      gap in the reel rebuild -- see RunsReel.jsx).
 
    `emit(patch)` is how the caller paints its own result line; it is called with
-   {text, kind, media?} patches. Returns the task_id, or null. */
-export async function submitTask(route, payload, { label, emit }) {
+   {text, kind, media?} patches. Returns the task_id, or null.
+
+   `onPhase(phase, data)` (optional) is the second half of the host seam: it fires on EVERY
+   tracker phase -- "running", "slow", "stale", "done", "failed", "stalled" -- carrying that
+   poll's /api/task-status body. emit() paints the generic line; onPhase is for a host that
+   must do something the road cannot know about, chiefly DISPATCH ITS OWN DOM EVENTS (the video
+   drawer's mg-result / mg-error / mg-slow / mg-paused, which the Loom and the gallery shell
+   both listen for). It runs AFTER that phase's own emit patch, deliberately: a host that wants
+   a richer line than the road's generic one -- thumbnails, an amber "still going" tier, a grey
+   "paused" that is pointedly not an error -- repaints over it in the same tick, and React
+   batches the two writes into one render. The road stays the only thing that SUBMITS; what a
+   surface says about a phase remains the surface's own business.
+
+   `count` overrides payload.count for the Runs-reel placeholder; callers that keep it on the
+   payload (all of them today) need not pass it. */
+export async function submitTask(route, payload, { label, emit, count, onPhase }) {
   let d;
   try {
     const r = await fetch(route, {
@@ -86,7 +100,9 @@ export async function submitTask(route, payload, { label, emit }) {
         text: "This tab stopped watching after 6h — the task may still finish; check the Activity tray.",
       });
     }
-  }, payload.count);
+    // Last, so a host's own rendering of this phase wins over the generic line above.
+    if (onPhase) onPhase(phase, data);
+  }, count == null ? payload.count : count);
   return d.task_id;
 }
 

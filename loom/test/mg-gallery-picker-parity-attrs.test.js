@@ -27,7 +27,9 @@ test("the render only shows each surface when its prop is on", () => {
 
 test("upload POSTs to /api/upload and picks the result", () => {
   assert.match(src, /const doUpload = \(\) =>/);
-  assert.match(src, /fetch\("\/api\/upload", \{ method: "POST", body: fd \}\)/);
+  // Re-anchored 2026-08-23: the multipart POST is api.js's apiUpload now -- same route, same
+  // FormData, one place that decides what an error answer is.
+  assert.match(src, /apiUpload\("\/api\/upload", fd\)/);
   assert.match(src, /pick\(\{ media_id: d\.media_id, prompt: "", thumb: URL\.createObjectURL\(f\) \}\)/);
 });
 

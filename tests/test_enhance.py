@@ -155,12 +155,11 @@ def test_enhance_plugins_dict_and_dead_plugin_branch_are_gone():
 
 # ---- the Bridge tier: mirror gate, deferred telemetry, lineage ----
 
-def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch):
+def test_enhance_refuses_when_mirror_off(tmp_path, monkeypatch, pixai):
     """[BLOCKER] The FIRST line of /api/enhance is the backend mirror gate. With the mirror OFF,
     a panelplugin submit would otherwise fall through submit_generation's mirror-off branch to
     the API-key session -- the paid-then-reaped-at-60-min bug the whole surface was deleted for.
     So a mirror-off request must 409 and submit NOTHING (no createGenerationTask, no charge)."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "mirror_enabled", lambda: False)          # mirror OFF
     submitted = {"n": 0}
     monkeypatch.setattr(core, "submit_generation",

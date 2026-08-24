@@ -248,28 +248,37 @@ def similar(query_path, k: int = 48, exclude_media_id=None):
 
 
 def scan_dir(root, cap=None):
-    """Helper: yield (media_id, path) for every image under root (media_id = INVARIANT 1,
-    the last '_'-delimited stem chunk). For bootstrap builds off the organized backup tree.
+    """Helper: yield (media_id, path) for every embeddable image under root
+    (media_id = INVARIANT 1). For bootstrap builds off the organized backup tree.
 
-    Skips gallery/ (thumbnails) plus the two quarantine dirs, _duplicates/ (--dedup) and
-    _deleted/ (gallery delete) -- the same exclusion set moonglade_gallery.py's
-    find_image_file/find_files_for_media_id use (INVARIANT 6), so a purged or quarantined
-    image never gets (re-)embedded into the similarity index."""
-    exts = {".png", ".jpg", ".jpeg", ".webp"}
-    excluded_dirs = {"gallery", "_duplicates", "_deleted"}
-    root = Path(root)
+    The similarity index's view of the ONE library scan (moonglade_gallery.py's
+    "LIBRARY SCAN" section). It asks for two things the other nine walkers do not:
+
+      * kinds=("embeddable",) -- {.png,.jpg,.jpeg,.webp}, deliberately NARROWER
+        than the shared image set, which also carries .gif and .avif. Those are
+        real library images; they are just not fed to CLIP. (Named disagreement 1
+        in the scan's header -- a caller choice, not a bug to widen.)
+      * QUARANTINE_EXCLUDE_ANYWHERE -- gallery/ (thumbnails) plus the two
+        quarantine dirs, _duplicates/ (--dedup) and _deleted/ (gallery delete),
+        matched by directory NAME at any depth UNDER root rather than as
+        top-level subtrees, so a purged or quarantined image never gets
+        (re-)embedded. Matching under root (not against the absolute path) is what
+        stops an ANCESTOR folder that happens to share one of these names -- a
+        library at D:\\Photos\\Gallery\\pixai_backup -- from skipping every image
+        in the library and building an EMPTY index with no error.
+
+    The gallery is imported here rather than at module top because the dependency
+    only runs one way at import time: the gallery imports THIS module lazily,
+    inside its /api/similar handler.
+    """
+    from moonglade_gallery import scan_library, QUARANTINE_EXCLUDE_ANYWHERE
     n = 0
-    for p in root.rglob("*"):
-        # Match the exclusion against the path UNDER root only. Path.parts walks all the way up
-        # to the drive root, so testing the whole path let an ANCESTOR folder that happens to
-        # share one of these names -- a library living at D:\Photos\Gallery\pixai_backup -- skip
-        # every image in the library: the index then built EMPTY, with no error, just nothing
-        # indexed.
-        if p.suffix.lower() in exts and not excluded_dirs & {q.lower() for q in p.relative_to(root).parts}:
-            yield (p.stem.split("_")[-1], p)
-            n += 1
-            if cap and n >= cap:
-                return
+    for e in scan_library(root, kinds=("embeddable",),
+                          exclude=QUARANTINE_EXCLUDE_ANYWHERE):
+        yield (e.media_id, e.path)
+        n += 1
+        if cap and n >= cap:
+            return
 
 
 # This module must be IMPORTED, never run as `python moonglade_similar.py` — Pixeltable rejects

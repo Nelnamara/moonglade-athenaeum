@@ -16,6 +16,8 @@
    unleashed() is KEPT (it gates the roast text on the live celebration; the React Folio manages
    the same localStorage key), as are syncSkin/applySkin (check() reconciles the active skin). */
 
+import { apiGet } from "../api.js";
+
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
 function unleashed() {
@@ -38,10 +40,8 @@ function syncSkin(d) {           // server is source of truth; reconcile the pre
 }
 
 function load(mark) {
-  fetch("/api/achievements" + (mark ? "?mark=1" : ""))
-    .then((r) => r.json())
-    .then((d) => { data = d; if (mark) toastNew(d); syncSkin(d); })
-    .catch(() => {});
+  apiGet("/api/achievements" + (mark ? "?mark=1" : ""))
+    .then((d) => { if (d.error) return; data = d; if (mark) toastNew(d); syncSkin(d); });
 }
 
 function toastNew(d) {

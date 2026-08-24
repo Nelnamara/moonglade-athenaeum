@@ -14,9 +14,33 @@ if they stopped being.
 
 This file does not enumerate paths. It enumerates `app.url_map` -- the single
 source of truth for what is actually routable -- and asserts that EVERY
-registered (endpoint, method) pair both DECLARES a tier below and has that tier
-ENFORCED against a live request. Add a route and forget to declare it: the first
-test in this file fails and names your route.
+registered (endpoint, method) pair both DECLARES a tier and has that tier
+ENFORCED against a live request.
+
+THE TIER IS NOT DECLARED HERE ANY MORE (2026-08-23)
+---------------------------------------------------
+It used to be. This file carried a literal (endpoint, method) -> tier table that
+mirrored every @app.route registration in moonglade_gallery.py, which made the
+tier -- a property OF THE ROUTE -- live in the test instead of on the route, and
+made every route addition a two-file edit. It also made this file the third
+most-churned test artefact in the repo.
+
+The tier now rides the route as `@tier(LOGIN)` / `@tier(LOCALHOST)` /
+`@tier(PUBLIC)` (moonglade_gallery.tier), _enforce_front_door() reads it off
+app.view_functions at request time, and create_app() refuses to return an app in
+which any registered rule declares nothing -- so an undeclared route now fails at
+app creation rather than waiting for CI.
+
+What this file kept is everything that was ever load-bearing:
+  * it still ENUMERATES app.url_map rather than a list of paths;
+  * it still fails, by name, on a route with no tier -- and additionally proves
+    the app-creation assertion really fires (test_undeclared_route_fails_at_app_creation);
+  * it still proves all three tiers against a LIVE REQUEST, including the one
+    assertion whose absence let three gate regressions ship in a single week:
+    a LOCALHOST route must refuse an AUTHENTICATED NON-LOCAL session;
+  * and it adds TIER_SNAPSHOT below, a generated golden list, so that CHANGING a
+    route's tier is a visible diff in review rather than a silent one-word edit
+    somewhere in a 13,000-line module.
 
 WHY (endpoint, method) AND NOT THE RULE STRING
 ----------------------------------------------
@@ -27,7 +51,8 @@ Two real shapes in this app defeat a dict keyed on the rule string:
     login-only so a LAN Panel can render its settings; POST is localhost-only).
     Keyed on the endpoint alone, the two tiers collapse into one and the weaker
     one wins.
-(endpoint, method) is the smallest key that separates both.
+(endpoint, method) is the smallest key that separates both. The declaration
+carries that split natively -- `@tier(LOGIN, POST=LOCALHOST)`.
 
 WHAT THIS FILE DELIBERATELY DOES NOT DO
 ---------------------------------------
@@ -36,7 +61,10 @@ reachable means executing its handler, and these handlers spend the owner's
 credits, delete from their real PixAI account, and move files on disk. This file
 proves REFUSAL only -- that is the security-relevant direction, and it is the one
 that can be proven without side effects. Per-route success paths belong in the
-per-feature test files that already own them.
+per-feature test files that already own them. (The one exception at the bottom is
+deliberate and narrow: /api/panel/status is read with a real session because what
+it must NOT hand a LAN caller is only observable past the gate, and reading job
+state spends, deletes and moves nothing.)
 """
 import re
 
@@ -44,18 +72,24 @@ import pytest
 
 import moonglade_gallery
 import moonglade_backup as core
-from moonglade_gallery import create_app
+from moonglade_gallery import (
+    LOCALHOST,
+    LOGIN,
+    PUBLIC,
+    TIERS,
+    create_app,
+    route_tier,
+    assert_every_route_declares_a_tier,
+)
 
 
 LAN = "203.0.113.5"      # TEST-NET-3 -- the "some other device on the LAN" stand-in
                          # used throughout tests/test_web_auth.py.
 
-# ---------------------------------------------------------------------------
-# The tiers
-# ---------------------------------------------------------------------------
-PUBLIC = "PUBLIC"        # reachable with no session at all (the login surface itself)
-LOGIN = "LOGIN"          # any logged-in session, local or LAN
-LOCALHOST = "LOCALHOST"  # a logged-in session AND a loopback remote_addr
+# The tier names themselves are imported, not restated: PUBLIC (reachable with no
+# session at all), LOGIN (any logged-in session, local or LAN), LOCALHOST (a
+# logged-in session AND a loopback remote_addr). Restating them here is how the
+# test and the app drift apart one rename at a time.
 
 # The two refusal shapes the front door emits (see _enforce_front_door()). Routes
 # whose historical contract is JSON get a parseable 401; everything else gets a
@@ -66,336 +100,173 @@ _REDIRECT_CODES = (301, 302, 303, 307, 308)
 
 
 # ---------------------------------------------------------------------------
-# THE DECLARATION TABLE -- keyed (endpoint, method)
+# THE GOLDEN SNAPSHOT -- generated, never hand-authored
 # ---------------------------------------------------------------------------
-# Adding a route to moonglade_gallery.py? Add it here too, or
-# test_every_registered_route_declares_a_tier fails and names it. Pick the tier
-# by what the handler can DO, not by what feels convenient:
-#   LOGIN     -- browse the library, spend the owner's credits, manage your OWN
-#                account. Managing OTHER accounts (adding one, removing one that
-#                isn't yours) is LOCALHOST -- see api_users_add/_remove.
-#   LOCALHOST -- irreversible cloud deletion, writes to config.json (which holds
-#                PIXAI_API_KEY / AUTH_SECRET_KEY / AUTH_USERS), file-moving
-#                maintenance, or shelling out on the SERVER machine. A logged-in
-#                LAN session must NOT reach these; the handler needs its own
-#                `if not _is_local_request(): return ..., 403` on top of the
-#                front door, because the front door alone will let it through.
-#   PUBLIC    -- the login surface and the static art it renders. Nothing else.
-#                Marking a route PUBLIC also requires declaring its expected
-#                anonymous status in PUBLIC_EXPECTED_STATUS below; that friction
-#                is intentional, so PUBLIC cannot be used as a quiet way to mute
-#                this file.
-ROUTE_TIERS = {
-    # -- the login surface: the only genuinely public tier -------------------
-    ("login", "GET"): PUBLIC,
-    # JSON siblings (2026-08-02, the React Login page) -- an unauthenticated
-    # caller is exactly who needs to reach api_login; api_logout must stay
-    # reachable by an already-dead cookie for the same reason logout() does.
-    ("api_login", "POST"): PUBLIC,
-    ("api_logout", "POST"): PUBLIC,
-    # The React bundle (2026-08-02) -- LoginPage.jsx's own shell needs its
-    # compiled CSS/JS to render for a visitor who by definition isn't
-    # authenticated yet. Same public tier as branding/manifest: plain
-    # compiled code, no user data, no catalog, no credential.
-    ("next_assets", "GET"): PUBLIC,
-    ("branding", "GET"): PUBLIC,
+# One line per (rule, method), "<rule> [<METHOD>] <TIER>", sorted. This is NOT the
+# old declaration table wearing a new hat, and the difference is the whole point:
+#   * it declares nothing -- moonglade_gallery.py's @tier decorators do that, and
+#     this list is generated FROM them (the failure message below prints the
+#     replacement to paste);
+#   * a NEW route therefore needs a judgement call in exactly one place (which
+#     @tier to put on it) plus a mechanical paste here;
+#   * but CHANGING an existing route's tier -- the edit that actually matters and
+#     the one a 13,000-line diff can hide -- shows up here as a one-line diff with
+#     the old tier and the new one side by side in review.
+# Do not "fix" a failure here by editing the line to match. Read the diff first:
+# if the tier moved and you did not mean it to, the bug is in the decorator.
+TIER_SNAPSHOT = [
+    "/ [GET] LOGIN",
+    "/api/account [GET] LOGIN",
+    "/api/account/card-history [GET] LOGIN",
+    "/api/account/coupons [GET] LOGIN",
+    "/api/account/credit-log [GET] LOGIN",
+    "/api/ach-event [POST] LOGIN",
+    "/api/achievements [GET] LOGIN",
+    "/api/artwork-views [GET] LOGIN",
+    "/api/assets/fetch [POST] LOCALHOST",
+    "/api/assets/status [GET] LOGIN",
+    "/api/branding [GET] LOGIN",
+    "/api/branding [POST] LOGIN",
+    "/api/branding/banner/earned [POST] LOGIN",
+    "/api/branding/banners/earned [GET] LOGIN",
+    "/api/branding/mark/custom [POST] LOGIN",
+    "/api/branding/mark/custom/remove [POST] LOGIN",
+    "/api/branding/shortcut [POST] LOCALHOST",
+    "/api/branding/slot [POST] LOGIN",
+    "/api/branding/slot/active [POST] LOGIN",
+    "/api/branding/slot/crop [POST] LOGIN",
+    "/api/claim [POST] LOGIN",
+    "/api/collection [POST] LOGIN",
+    "/api/collections [GET] LOGIN",
+    "/api/contact-sheet [GET] LOGIN",
+    "/api/contests [GET] LOGIN",
+    "/api/delete-image [POST] LOCALHOST",
+    "/api/delete-local [POST] LOGIN",
+    "/api/delete-preview [POST] LOCALHOST",
+    "/api/delete-tasks [POST] LOCALHOST",
+    "/api/duplicates [GET] LOGIN",
+    "/api/duplicates/resolve [POST] LOGIN",
+    "/api/duplicates/undo [POST] LOGIN",
+    "/api/edit [POST] LOGIN",
+    "/api/edit-prompt/<media_id> [POST] LOGIN",
+    "/api/enhance [POST] LOGIN",
+    "/api/enhance/emotions [GET] LOGIN",
+    "/api/enhance/presets [GET] LOGIN",
+    "/api/fix [POST] LOGIN",
+    "/api/gallery-images [GET] LOGIN",
+    "/api/generate [POST] LOGIN",
+    "/api/health [GET] LOGIN",
+    "/api/image-meta/<media_id> [GET] LOGIN",
+    "/api/import-local [POST] LOCALHOST",
+    "/api/import-task [POST] LOGIN",
+    "/api/jobs [GET] LOGIN",
+    "/api/jobs [POST] LOGIN",
+    "/api/jobs/dismiss [POST] LOGIN",
+    "/api/library-path [GET] LOGIN",
+    "/api/library-path [POST] LOCALHOST",
+    "/api/lineage/<media_id> [GET] LOGIN",
+    "/api/login [POST] PUBLIC",
+    "/api/logout [POST] PUBLIC",
+    "/api/loom/delete [POST] LOGIN",
+    "/api/loom/export [POST] LOGIN",
+    "/api/loom/export-bundle [POST] LOGIN",
+    "/api/loom/export-cancel [POST] LOGIN",
+    "/api/loom/export-file [GET] LOGIN",
+    "/api/loom/export-status [GET] LOGIN",
+    "/api/loom/generate [POST] LOGIN",
+    "/api/loom/get [GET] LOGIN",
+    "/api/loom/handoff [POST] LOGIN",
+    "/api/loom/import-bundle [POST] LOGIN",
+    "/api/loom/import-frames [POST] LOGIN",
+    "/api/loom/list [GET] LOGIN",
+    "/api/loom/set [POST] LOGIN",
+    "/api/loom/video-duration [GET] LOGIN",
+    "/api/mirror/connect [POST] LOGIN",
+    "/api/mirror/enable [POST] LOCALHOST",
+    "/api/mirror/status [GET] LOGIN",
+    "/api/model-search [GET] LOGIN",
+    "/api/model-version [GET] LOGIN",
+    "/api/myart/items [GET] LOGIN",
+    "/api/myart/publish [POST] LOGIN",
+    "/api/next/detail/<media_id> [GET] LOGIN",
+    "/api/next/history [GET] LOGIN",
+    "/api/next/library [GET] LOGIN",
+    "/api/panel/cancel [POST] LOCALHOST",
+    "/api/panel/run [POST] LOGIN",
+    "/api/panel/schedule [GET] LOGIN",
+    "/api/panel/schedule [POST] LOCALHOST",
+    "/api/panel/status [GET] LOGIN",
+    "/api/panel/summary [GET] LOGIN",
+    "/api/ping [GET] LOGIN",
+    "/api/pixai-cdn/thumb [GET] LOGIN",
+    "/api/presets [GET] LOGIN",
+    "/api/presets [POST] LOGIN",
+    "/api/price [POST] LOGIN",
+    "/api/rate/<media_id> [POST] LOGIN",
+    "/api/rebuild-poster/<media_id> [POST] LOGIN",
+    "/api/replace-prompts [POST] LOGIN",
+    "/api/scene [POST] LOGIN",
+    "/api/scenes [GET] LOGIN",
+    "/api/server/restart [POST] LOGIN",
+    "/api/server/stop [POST] LOGIN",
+    "/api/setup/save-key [POST] LOCALHOST",
+    "/api/siblings [POST] LOGIN",
+    "/api/similar/<media_id> [GET] LOGIN",
+    "/api/skin [POST] LOGIN",
+    "/api/snippets [GET] LOGIN",
+    "/api/snippets [POST] LOGIN",
+    "/api/stats [GET] LOGIN",
+    "/api/suggest-prompt [GET] LOGIN",
+    "/api/tag-suggest [GET] LOGIN",
+    "/api/task-params/<task_id> [GET] LOGIN",
+    "/api/task-status [GET] LOGIN",
+    "/api/train/cover [GET] LOGIN",
+    "/api/train/models [GET] LOGIN",
+    "/api/train/quota [GET] LOGIN",
+    "/api/train/recent-tasks [GET] LOGIN",
+    "/api/train/submit [POST] LOGIN",
+    "/api/trash/delete-forever [POST] LOCALHOST",
+    "/api/trash/empty [POST] LOCALHOST",
+    "/api/trash/list [GET] LOGIN",
+    "/api/trash/restore [POST] LOGIN",
+    "/api/upload [POST] LOGIN",
+    "/api/users/add [POST] LOCALHOST",
+    "/api/users/password [POST] LOGIN",
+    "/api/users/remove [POST] LOGIN",
+    "/api/video-task-params/<task_id> [GET] LOGIN",
+    "/api/view-presets [GET] LOGIN",
+    "/api/view-presets [POST] LOGIN",
+    "/api/watch/status [GET] LOGIN",
+    "/api/workflows [GET] LOGIN",
+    "/api/your-art [GET] LOGIN",
+    "/badge-thumb/<aid>.png [GET] LOGIN",
+    "/branding/<path:fname> [GET] PUBLIC",
+    "/contact-sheet [GET] LOGIN",
+    "/export-csv [GET] LOGIN",
+    "/export-zip [POST] LOGIN",
+    "/full/<media_id> [GET] LOGIN",
+    "/login [GET] PUBLIC",
+    "/loom [GET] LOGIN",
+    "/loom/dist/<path:fname> [GET] LOGIN",
+    "/loom/vendor/<path:fname> [GET] LOGIN",
+    "/next [GET] LOGIN",
+    "/next/assets/<path:fname> [GET] PUBLIC",
+    "/static/<path:filename> [GET] LOGIN",
+    "/thumbs/<media_id>.jpg [GET] LOGIN",
+    "/video-file/<media_id> [GET] LOGIN",
+]
 
-    # -- LOCALHOST-ONLY: a logged-in LAN session is NOT enough ---------------
-    # Every one of these had its localhost check silently dropped or never
-    # written at some point (see each handler's docstring); three of them were
-    # only caught by a 2026-07-19 route-gating audit.
-    ("api_branding_shortcut", "POST"): LOCALHOST,   # shells out to host PowerShell/COM
-    ("api_panel_cancel", "POST"): LOCALHOST,        # terminates a file-moving job mid-run
-    ("api_panel_run", "POST"): LOCALHOST,           # destructive actions only -- see PROBE_BODIES
-    ("api_panel_schedule", "POST"): LOCALHOST,      # writes the schedule + global workers count
-    ("api_setup_save_key", "POST"): LOCALHOST,      # rewrites config.json
-    ("api_assets_status", "GET"): LOGIN,            # read-only progress poll, no host detail
-    ("api_assets_fetch", "POST"): LOCALHOST,        # writes moonglade.dat into the app root
-    # The library folder. GET is LOGIN -- the Panel shows the current folder to whoever
-    # can already open the Panel, and it withholds the host path from a non-local caller
-    # exactly as /panel does. POST rewrites config.json too, so it matches save-key above.
-    ("api_library_path", "GET"): LOGIN,
-    ("api_library_path", "POST"): LOCALHOST,
-    # JSON twin of delete_tasks_bulk (the React gallery's fetch() version). SAME
-    # tier for the SAME reason: it destroys on the owner's real cloud account.
-    # Being /api/-prefixed it refuses with the standard 403 JSON, not the form
-    # route's redirect -- so no LOCALHOST_REFUSAL_IS_REDIRECT entry.
-    ("api_delete_tasks", "POST"): LOCALHOST,
-    # Per-image cloud delete. Same tier and the same reason as the task-level
-    # delete above: it destroys on the owner's real PixAI account, and a logged-in
-    # LAN session unlocks browsing and spending, not irreversible deletion.
-    ("api_delete_image", "POST"): LOCALHOST,
-    # Read-only (one catalog query, no network) but declared at the tier of the action
-    # it previews, not the data it reads: it is step one of delete_tasks_bulk's flow and
-    # nothing else calls it. See its docstring.
-    ("api_delete_preview", "POST"): LOCALHOST,
-    ("api_import_local", "POST"): LOCALHOST,         # writes files into the backup + shells thumbnails
-    ("api_users_add", "POST"): LOCALHOST,           # mints a new persistent login (2026-07-22)
-    ("api_trash_delete_forever", "POST"): LOCALHOST,  # irreversible local file deletion (2026-07-24)
-    ("api_trash_empty", "POST"): LOCALHOST,           # irreversible local file deletion (2026-07-24)
-
-    # -- LOGIN: any authorized session ---------------------------------------
-    # JSON twin of the health page (the React HealthOverlay's data) -- same tier
-    # for the same reason: collection metrics for any signed-in session.
-    ("api_health", "GET"): LOGIN,
-    # JSON twin of /panel's own aggregation, for the React Control Panel overlay --
-    # same tier, same data, out_dir/destructive-action visibility already narrowed
-    # inside the handler itself for a non-local caller (matching /panel's own rule).
-    ("api_panel_summary", "GET"): LOGIN,
-    ("loom", "GET"): LOGIN,
-    ("contact_sheet", "GET"): LOGIN,
-    # JSON twin of /contact-sheet (the React ContactSheetOverlay's data) -- same tier,
-    # same data selection, no destructive action. Native React print replaces the page
-    # route's window.print() for the new front door; the page route itself is untouched.
-    ("api_contact_sheet", "GET"): LOGIN,
-    # The manifest body is a compile-time constant (no user data, no install paths), and
-    # the browser fetches it unprompted from the public login page -- gating it only bought
-    # a self-inflicted redirect. /sw.js is the same CLASS of asset but is NOT bundled in
-    # with it: serving the worker script is a separate question from what the worker
-    # caches, and the cache-survives-sign-out concern has to be settled on its own.
-    # Flask's own static endpoint is NOT special-cased away here on purpose.
-    # `if rule.endpoint == "static": continue` is the single most common way a
-    # catch-all route test grows a hole; /static/ is gated by the front door
-    # like everything else, so it is declared like everything else.
-    ("static", "GET"): LOGIN,
-
-    # raw asset / media routes
-    ("thumb", "GET"): LOGIN,
-    ("full_image", "GET"): LOGIN,
-    ("video_file", "GET"): LOGIN,
-    ("badge_thumb", "GET"): LOGIN,
-    ("loom_dist", "GET"): LOGIN,
-    ("loom_vendor", "GET"): LOGIN,
-
-    # The React gallery pilot at /next. LOGIN, exactly like the classic gallery
-    # it mirrors: it browses the library and opens the same spend surfaces, so
-    # a signed-in LAN session may use it (spending from a signed-in tablet is
-    # the point) -- nothing here writes config or moves files.
-    ("next_gallery", "GET"): LOGIN,
-    ("api_next_library", "GET"): LOGIN,
-    ("api_next_detail", "GET"): LOGIN,
-    # The Generate dock's History feed: catalog rows + jobs.jsonl, a pure local read.
-    ("api_next_history", "GET"): LOGIN,
-
-    # library mutation (local only in effect, but LAN-authorized by design)
-    ("rate", "POST"): LOGIN,
-    ("edit_prompt", "POST"): LOGIN,
-    ("rebuild_poster", "POST"): LOGIN,          # rewrites one regenerable local thumb; no cloud/config
-    ("api_siblings", "POST"): LOGIN,            # page-batched Sibling Strip read (#30); pure catalog, no network
-    ("api_series", "POST"): LOGIN,              # page-batched dial-in series read (#34); pure catalog, no network
-    ("api_series_detail", "GET"): LOGIN,        # one series' ordered steps (#34); pure catalog, no network
-    # JSON twins of the redirect-page bulk actions above (the React gallery's
-    # fetch() versions). Each takes the SAME tier as the page route it mirrors:
-    # local quarantine, collection labels and prompt find/replace are reversible
-    # library curation, the LOGIN tier's whole definition.
-    ("api_delete_local", "POST"): LOGIN,      # same path/tier as delete_bulk
-    ("api_collection", "POST"): LOGIN,        # same as collection_add/_remove
-    ("api_replace_prompts", "POST"): LOGIN,   # same as bulk_replace
-    ("export_zip", "POST"): LOGIN,
-    ("export_csv_download", "GET"): LOGIN,
-
-    # trash / quarantine panel (2026-07-24) -- restore is LOGIN (recovering
-    # something is not the same trust question as destroying it forever); see
-    # api_trash_delete_forever/api_trash_empty above in the LOCALHOST section.
-    ("api_trash_list", "GET"): LOGIN,
-    ("api_trash_restore", "POST"): LOGIN,
-
-    # Duplicate Review's destructive half (2026-08-02): quarantine/undo move a
-    # file to/from out_dir/_duplicates/, never hard-delete -- the SAME class of
-    # action as api_delete_local/api_trash_restore just above (a reversible
-    # local file move), so LOGIN, not LOCALHOST, by the identical reasoning
-    # those two already establish. CSRF is checked INSIDE the handler
-    # (_check_csrf, the explicit-token class) precisely because this tier alone
-    # doesn't cover that -- this file only proves the tier gate, not the CSRF
-    # gate; see tests/test_duplicates_resolve.py for CSRF coverage.
-    ("api_duplicates_resolve", "POST"): LOGIN,
-    ("api_duplicates_undo", "POST"): LOGIN,
-
-    # credit-spending generation surface -- the routes the hand-maintained
-    # lists in test_web_auth.py never covered.
-    ("api_generate", "POST"): LOGIN,
-    ("api_edit", "POST"): LOGIN,
-    ("api_fix", "POST"): LOGIN,
-    # The Bridge tier's mirror-gated Enhance submit. LOGIN, like every other spend route:
-    # spending the owner's credits from a signed-in LAN session is allowed; the panelplugin
-    # safety (never on the API key) is the route's own mirror gate, not a URL-tier question.
-    ("api_enhance", "POST"): LOGIN,
-    # The Bridge Enhance preset list + LIVE per-preset cost (price + free-card). Read-only,
-    # owner's key, spends nothing -- same tier as api_workflows below and the other read-only feeds.
-    ("api_enhance_presets", "GET"): LOGIN,
-    # The Change-Emotion picker options (staged emotion-role art, served under the public
-    # /branding/bridge/emotion/ URLs). Read-only, spends nothing -- LOGIN like the rest of
-    # the Enhance surface.
-    ("api_enhance_emotions", "GET"): LOGIN,
-    # The Bridge AI-Tools scene catalog (browse) + scene submit (generate). GET is read-only;
-    # POST spends. LOGIN like the Enhance pair -- the panelplugin-style safety (never on the API
-    # key) is each route's own mirror gate, not a URL-tier question.
-    ("api_scenes", "GET"): LOGIN,
-    ("api_scene", "POST"): LOGIN,
-    # The Bridge Enhance-workflow catalog. Read-only, owner's key -- same tier as the other
-    # read-only picker feeds (api_model_search etc.).
-    ("api_workflows", "GET"): LOGIN,
-    ("loom_generate", "POST"): LOGIN,
-    ("api_upload", "POST"): LOGIN,
-    ("api_price", "POST"): LOGIN,
-    ("api_claim", "POST"): LOGIN,
-    ("api_import_task", "POST"): LOGIN,
-
-    # read-only API surface
-    ("api_account", "GET"): LOGIN,
-    ("api_account_card_history", "GET"): LOGIN,
-    ("api_account_coupons", "GET"): LOGIN,
-    ("api_account_credit_log", "GET"): LOGIN,
-    ("api_achievements", "GET"): LOGIN,
-    ("api_artwork_views", "GET"): LOGIN,
-    ("api_collections", "GET"): LOGIN,
-    ("api_contests", "GET"): LOGIN,
-    # JSON duplicate-groups listing for the React Duplicate Review overlay (2026-08-02) --
-    # same tier as the classic /duplicates page it succeeds: read-only, browses the
-    # owner's own collection, no filesystem mutation (quarantine/Resolve lives at
-    # api_duplicates_resolve/api_duplicates_undo below).
-    ("api_duplicates", "GET"): LOGIN,
-    ("api_gallery_images", "GET"): LOGIN,
-    # Read-only single-row lookup for <UpscalePanel>. LOGIN, same as its sibling
-    # above and for the same reason: it reads only the local catalog and returns what
-    # the gallery already serves openly, so a LOCALHOST gate would add no protection
-    # while breaking the panel for the owner browsing over his own LAN. The spend is
-    # gated on /api/generate, which is where an upscale is actually submitted.
-    ("api_image_meta", "GET"): LOGIN,
-    ("api_model_search", "GET"): LOGIN,
-    ("api_model_version", "GET"): LOGIN,
-    # Remix's recipe recovery (issue #4): read-only, membership-checked against
-    # the local catalog, and the composer's own gates still stand between a
-    # prefill and a paid generate -- same tier reasoning as api_model_version.
-    ("api_task_params", "GET"): LOGIN,
-    # "↺ Remix for videos" (SCOPE_2026-08-17 §2): the video sibling of api_task_params.
-    # Same tier for the same reasons -- read-only, membership-checked against the local
-    # catalog, prefill-only; the Video composer's price-identity gate stands between a
-    # prefill and a paid generate.
-    ("api_video_task_params", "GET"): LOGIN,
-    # Mirror-to-PixAI: status (offline, no token), the toggle flag write, and the
-    # connect/bootstrap (server reads its OWN local browser -- no credential crosses
-    # the network). LOGIN tier; the spend gate stays on the create path.
-    ("api_mirror_status", "GET"): LOGIN,
-    ("api_mirror_enable", "POST"): LOCALHOST,       # rewrites config.json (holds the auth block)
-    ("api_mirror_connect", "POST"): LOGIN,
-    ("api_ping", "GET"): LOGIN,
-    ("api_similar", "GET"): LOGIN,
-    # Catalog totals + backup coverage for fetch()-driven headers: the same
-    # numbers index() bakes into the classic banner and /api/account already
-    # serves, at the same tier as both.
-    ("api_stats", "GET"): LOGIN,
-    ("api_suggest_prompt", "GET"): LOGIN,
-    ("api_tag_suggest", "GET"): LOGIN,
-    ("api_task_status", "GET"): LOGIN,
-    ("api_watch_status", "GET"): LOGIN,
-    ("api_your_art", "GET"): LOGIN,
-    ("api_myart_items", "GET"): LOGIN,          # catalog read, same tier as /api/your-art
-    ("api_lineage", "GET"): LOGIN,               # pure catalog read, same tier
-    # Mutates the PixAI ACCOUNT (publish/re-tag/delete an artwork) but spends nothing and
-    # is cosmetic-adjacent in the same way the branding slot routes are -- LOGIN tier,
-    # like every other account-touching web action here (/api/generate, /api/claim), with
-    # explicit-token CSRF and a preview-before-confirm step doing the real protecting.
-    ("api_myart_publish", "POST"): LOGIN,
-    ("api_train_recent_tasks", "GET"): LOGIN,    # pure catalog read, free
-    ("api_train_quota", "GET"): LOGIN,           # read-only quota read, free
-    ("api_train_models", "GET"): LOGIN,          # read-only trainable-model list, free
-    ("api_train_cover", "GET"): LOGIN,           # host-guarded CDN thumbnail proxy, free
-                                                  # (two routes -> one endpoint: /api/train/cover
-                                                  # + /api/pixai-cdn/thumb both map to api_train_cover)
-    # The app's newest SPEND path. LOGIN tier like every other spend route here
-    # (/api/generate et al); the real protection is preview-first + explicit-token
-    # CSRF + the server's refusal to submit a PAID training without accept_credit_cost.
-    ("api_train_submit", "POST"): LOGIN,
-
-    # jobs -- ONE rule string, TWO endpoints (the case a rule-keyed dict drops)
-    ("api_jobs", "GET"): LOGIN,
-    ("api_jobs_register", "POST"): LOGIN,
-    ("api_jobs_dismiss", "POST"): LOGIN,
-
-    # Loom
-    ("loom_get", "GET"): LOGIN,
-    ("loom_list", "GET"): LOGIN,
-    ("loom_set", "POST"): LOGIN,
-    ("loom_delete", "POST"): LOGIN,
-    ("loom_handoff", "POST"): LOGIN,
-    ("loom_import_frames", "POST"): LOGIN,
-    ("loom_video_duration", "GET"): LOGIN,
-    ("api_loom_export", "POST"): LOGIN,
-    ("api_loom_export_bundle", "POST"): LOGIN,
-    ("api_loom_export_cancel", "POST"): LOGIN,
-    ("api_loom_export_file", "GET"): LOGIN,
-    ("api_loom_export_status", "GET"): LOGIN,
-    ("api_loom_import_bundle", "POST"): LOGIN,
-
-    # panel / settings / accounts
-    ("api_panel_status", "GET"): LOGIN,
-    ("api_panel_schedule", "GET"): LOGIN,   # GET login-only, POST localhost -- see above
-    ("api_presets", "GET"): LOGIN,
-    ("api_presets", "POST"): LOGIN,
-    ("api_view_presets", "GET"): LOGIN,    # saved views roam desktop<->tablet: that IS the login tier
-    ("api_view_presets", "POST"): LOGIN,   # small cosmetic json in out_dir, same trust as api_skin
-    ("api_snippets", "GET"): LOGIN,
-    ("api_snippets", "POST"): LOGIN,
-    ("api_branding", "GET"): LOGIN,
-    ("api_branding", "POST"): LOGIN,
-    # Branding-tab slot uploads (banner_main/banner_login/banner_loom since the
-    # 2026-08-13 unlock split; originally 2026-08-05) -- same trust level as
-    # api_branding just above: cosmetic app data written into the branding tree
-    # under branding_root(), not config.json, not a host-filesystem action
-    # outside that tree (unlike api_branding_shortcut, which stays LOCALHOST
-    # for shelling out to PowerShell/COM).
-    ("api_branding_slot_upload", "POST"): LOGIN,
-    ("api_branding_slot_crop", "POST"): LOGIN,
-    ("api_branding_slot_active", "POST"): LOGIN,
-    # Custom Mark upload slot (the-great-library reward, 2026-08-09) -- same
-    # trust level as the slot uploads above, plus its own real server-side
-    # achievement-earned check (see api_branding_mark_custom's docstring).
-    ("api_branding_mark_custom", "POST"): LOGIN,
-    ("api_branding_mark_custom_remove", "POST"): LOGIN,
-    # Earned-banner pick (the-great-library reward, bundle-v2 2026-08-21) --
-    # LOGIN, mirroring api_branding_mark_custom above: GET lists the picks
-    # (read-only, and the png URL it returns is itself seal-gated by the
-    # /branding/ route), POST's real protection is its own server-side
-    # achievement-earned check (403 until the-great-library is earned).
-    ("api_branding_banners_earned", "GET"): LOGIN,
-    ("api_branding_banner_earned", "POST"): LOGIN,
-    ("api_skin", "POST"): LOGIN,
-    ("api_ach_event", "POST"): LOGIN,
-    # api_users_remove is LOGIN, not LOCALHOST, because it is genuinely reachable
-    # for a LAN session -- but ONLY to remove its OWN account; removing anyone
-    # else is refused with the same 403 a LOCALHOST route would give, enforced
-    # inside the handler on the submitted username vs session["user"], not by
-    # tier. The two generic tier tests below can't express "reachable, but only
-    # for this one argument value" -- see tests/test_panel_users.py for the
-    # LAN-self-succeeds / LAN-other-refused pair that actually covers it.
-    ("api_users_remove", "POST"): LOGIN,
-    # api_users_password is LOGIN for the same reason as api_users_remove: a LAN
-    # session can genuinely reach it, but ONLY for its OWN account and ONLY by
-    # proving the current password. Changing SOMEONE ELSE'''S is refused with the
-    # same 403 a LOCALHOST route would give, enforced in the handler on the
-    # submitted username vs session["user"] rather than by tier -- and a LOCALHOST
-    # caller additionally skips the current-password proof, which is what finally
-    # makes a forgotten password recoverable without the CLI. Neither of those is
-    # expressible as a tier, so see tests/test_panel_users.py for the pairs that
-    # actually cover them.
-    ("api_users_password", "POST"): LOGIN,
-
-    # RESOLVED (owner decision 2026-07-19, see CHANGELOG): api_server_stop /
-    # api_server_restart stay in the broader "any logged-in LAN session" tier
-    # on purpose, not LOCALHOST. Their docstrings were updated to say "Login
-    # required" to match, closing the docstring-says-localhost /
-    # code-says-nothing gap the route-gating audit had flagged. LOGIN here is
-    # the intended, current design, not a stand-in for an unresolved decision.
-    ("api_server_stop", "POST"): LOGIN,
-    ("api_server_restart", "POST"): LOGIN,
-}
 
 # Marking something PUBLIC costs you a second, explicit statement of what an
 # anonymous caller actually gets. /logout is why this is not just "assert not
 # redirected to /login": an anonymous GET /logout is a harmless no-op that
 # redirects to /login all by itself, which is indistinguishable from the front
 # door intercepting it unless the expectation is spelled out per route.
+#
+# This survived the move of the tiers onto the routes on purpose. The friction is
+# the feature: @tier(PUBLIC) is one word and exempts a route from
+# test_no_route_is_reachable_without_a_session, so it must cost a second,
+# deliberate statement made in the test rather than beside the decorator.
 PUBLIC_EXPECTED_STATUS = {
     ("login", "GET"): {200},
     # a 200 page now, not a redirect -- it has to run script client-side to purge
@@ -407,17 +278,19 @@ PUBLIC_EXPECTED_STATUS = {
     ("branding", "GET"): {404},    # missing art 404s; it must never redirect to /login
 }
 
-# A few routes only reach their localhost gate with a meaningful payload.
-# api_panel_run's check is `if spec["destructive"] and not _is_local_request()`,
-# so an empty body stops at "unknown action" (400) and proves nothing.
+# A few routes only reach a meaningful decision with a meaningful payload.
+# api_panel_run's own conditional check is `if spec["destructive"] and not
+# _is_local_request()`, so an empty body stops at "unknown action" (400) and
+# proves nothing.
 PROBE_BODIES = {
     ("api_panel_run", "POST"): {"json": {"action": "organize", "confirm": True}},
 }
 
-# Not every localhost refusal is a 403. delete_tasks_bulk is a form POST that
-# refuses by redirecting back to the gallery with ?delerr=..., because a 403 JSON
-# blob would be a dead end in the browser flow it belongs to. Declared, not
-# guessed -- and asserted just as strictly.
+# Not every localhost refusal is a 403. A form POST that refuses by redirecting
+# back to the gallery with an error query string would be declared here, because
+# a 403 JSON blob is a dead end in a browser flow. Empty today -- every
+# LOCALHOST-tier route is /api/-prefixed and refuses with the 403 JSON the front
+# door emits. Declared, not guessed -- and asserted just as strictly.
 LOCALHOST_REFUSAL_IS_REDIRECT = {
 }
 
@@ -472,6 +345,30 @@ def _registered_pairs(app):
         for method in (rule.methods or set()) - {"HEAD", "OPTIONS"}:
             pairs[(rule.endpoint, method)] = rule
     return pairs
+
+
+def _declared_tier(app, endpoint, method):
+    """The tier the ROUTE declares for this method -- read exactly the way
+    _enforce_front_door() reads it, off app.view_functions, so this file cannot
+    pass while the gate is looking somewhere else."""
+    return route_tier(app.view_functions.get(endpoint), method)
+
+
+def _snapshot_lines(app):
+    """The generated golden list: one "<rule> [<METHOD>] <TIER>" per routable pair.
+
+    Keyed on (rule, method) rather than (endpoint, method) because this list is
+    read by humans in a diff, and the URL is what a reviewer recognises. Both
+    shapes that defeat a rule-keyed DICT are still distinct LINES here: /api/jobs
+    appears twice (GET and POST, different endpoints), and so does
+    /api/panel/schedule (GET LOGIN, POST LOCALHOST).
+    """
+    lines = []
+    for rule in app.url_map.iter_rules():
+        view = app.view_functions[rule.endpoint]
+        for method in sorted((rule.methods or set()) - {"HEAD", "OPTIONS"}):
+            lines.append("{} [{}] {}".format(rule, method, route_tier(view, method)))
+    return sorted(lines)
 
 
 @pytest.fixture()
@@ -592,50 +489,135 @@ def _anonymous_refusal_problem(path, resp):
 # ---------------------------------------------------------------------------
 
 def test_every_registered_route_declares_a_tier(app):
-    registered = set(_registered_pairs(app))
-    declared = set(ROUTE_TIERS)
+    """The tier is read back off the ROUTE, exactly where the gate reads it.
 
-    undeclared = sorted(registered - declared)
-    stale = sorted(declared - registered)
+    create_app() already refuses to build an app that fails this (see
+    test_undeclared_route_fails_at_app_creation below), so reaching this
+    assertion at all means something got past that -- a view function replaced
+    after registration, an endpoint added to app.view_functions by hand, a
+    blueprint registered late. It stays because "the constructor checks it" and
+    "the suite checks it" fail in different ways.
+    """
+    undeclared = sorted(
+        (endpoint, method) for (endpoint, method) in _registered_pairs(app)
+        if _declared_tier(app, endpoint, method) is None)
 
-    problems = []
-    if undeclared:
-        problems.append(
-            "{} route(s) are registered in app.url_map but declare NO auth tier:\n"
-            "{}\n"
-            "\n"
-            "FIX: add each one to ROUTE_TIERS in tests/test_route_tiers.py, as\n"
-            "    (\"<endpoint>\", \"<METHOD>\"): LOGIN,\n"
-            "choosing the tier by what the handler can DO:\n"
-            "  LOGIN     - browse the library, spend the owner's credits, manage accounts.\n"
-            "  LOCALHOST - irreversible cloud deletion, config.json writes, file-moving\n"
-            "              maintenance, or shelling out on the server machine. This tier\n"
-            "              is NOT free: the front door does not enforce it, so the handler\n"
-            "              itself must start with\n"
-            "                  if not _is_local_request():\n"
-            "                      return jsonify({{\"error\": \"localhost-only\"}}), 403\n"
-            "  PUBLIC    - the login surface only; also requires an entry in\n"
-            "              PUBLIC_EXPECTED_STATUS.\n"
-            "This failure is not bureaucracy: every credit-spending route\n"
-            "(/api/generate, /api/edit, /api/fix, /api/loom/generate) was\n"
-            "missing from the hand-maintained lists in tests/test_web_auth.py\n"
-            "for exactly this reason, and nothing noticed."
-            .format(len(undeclared),
-                    "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in undeclared)))
-    if stale:
-        problems.append(
-            "{} declaration(s) in ROUTE_TIERS no longer match any registered route:\n"
-            "{}\n"
-            "FIX: delete them. A stale declaration is a tier assertion that silently\n"
-            "stopped running -- the same rot this file exists to prevent."
-            .format(len(stale),
-                    "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in stale)))
+    assert not undeclared, (
+        "{} route(s) are registered in app.url_map but declare NO auth tier:\n"
+        "{}\n"
+        "\n"
+        "FIX: put the tier ON the route in moonglade_gallery.py, under its\n"
+        "@app.route(...):\n"
+        "    @app.route(\"/api/thing\", methods=[\"POST\"])\n"
+        "    @tier(LOGIN)\n"
+        "    def api_thing():\n"
+        "choosing the tier by what the handler can DO:\n"
+        "  LOGIN     - browse the library, spend the owner's credits, manage your\n"
+        "              OWN account. A signed-in LAN device is NOT read-only.\n"
+        "  LOCALHOST - irreversible cloud deletion, config.json writes, file-moving\n"
+        "              maintenance, or shelling out on the server machine. The front\n"
+        "              door enforces this for you; do NOT also hand-write\n"
+        "              `if not _is_local_request(): return ..., 403` in the handler.\n"
+        "  PUBLIC    - the login surface only; also requires an entry in\n"
+        "              PUBLIC_EXPECTED_STATUS in this file.\n"
+        "This failure is not bureaucracy: every credit-spending route\n"
+        "(/api/generate, /api/edit, /api/fix, /api/loom/generate) was\n"
+        "missing from the hand-maintained lists in tests/test_web_auth.py\n"
+        "for exactly this reason, and nothing noticed."
+        .format(len(undeclared),
+                "\n".join("    (\"{}\", \"{}\")".format(e, m) for e, m in undeclared)))
 
-    assert not problems, "\n\n".join(problems)
+
+def test_undeclared_route_fails_at_app_creation(app):
+    """The completeness check is enforced at APP CREATION, not just in CI.
+
+    This is the half of the old declaration table that could never be a test.
+    While the tier lived here, a route with no tier was a red CI run; now it is a
+    server that refuses to start, which is the earliest and loudest moment
+    available. Proven the only honest way -- by registering a route that declares
+    nothing on a real app and calling the very function create_app() calls.
+    """
+    app.add_url_rule("/probe/undeclared", "probe_undeclared", lambda: "")
+
+    with pytest.raises(AssertionError) as excinfo:
+        assert_every_route_declares_a_tier(app)
+
+    message = str(excinfo.value)
+    assert "/probe/undeclared" in message, (
+        "the app-creation assertion fired but did not NAME the offending route; a\n"
+        "failure that makes you go looking is most of a failure that gets ignored.\n"
+        "Got: {}".format(message))
+    assert "@tier(" in message, (
+        "the app-creation assertion did not tell the reader how to fix it. Got: "
+        "{}".format(message))
+
+
+def test_declared_tiers_are_known_values(app):
+    """The tiers themselves stay meaningful.
+
+    tier() rejects an unknown name at decoration time, so this is belt-and-braces
+    against a declaration reaching the gate some other way -- and it is cheap.
+    Inventing a fourth tier without teaching _enforce_front_door() to enforce it
+    produces a declaration that asserts nothing.
+    """
+    bad = {(e, m): _declared_tier(app, e, m)
+           for (e, m) in _registered_pairs(app)
+           if _declared_tier(app, e, m) not in TIERS}
+    assert not bad, (
+        "unknown tier value(s) declared on route(s): {}\n"
+        "Only {} exist.".format(bad, ", ".join(TIERS)))
 
 
 # ---------------------------------------------------------------------------
-# 2. Enforcement, anonymous: everything non-PUBLIC refuses a session-less caller
+# 2. The golden snapshot: a tier CHANGE is a visible diff
+# ---------------------------------------------------------------------------
+
+def test_tier_snapshot_matches_the_declarations(app):
+    current = _snapshot_lines(app)
+    if current == list(TIER_SNAPSHOT):
+        return
+
+    expected = set(TIER_SNAPSHOT)
+    added = [l for l in current if l not in expected]
+    removed = [l for l in TIER_SNAPSHOT if l not in set(current)]
+
+    # A route whose TIER moved appears once in each list at the same rule+method.
+    def _key(line):
+        return line.rsplit(" ", 1)[0]
+    moved_keys = {_key(l) for l in added} & {_key(l) for l in removed}
+    moved = sorted(
+        "  {}: {} -> {}".format(k,
+                                next(l.rsplit(" ", 1)[1] for l in removed if _key(l) == k),
+                                next(l.rsplit(" ", 1)[1] for l in added if _key(l) == k))
+        for k in moved_keys)
+
+    parts = []
+    if moved:
+        parts.append("{} route(s) CHANGED TIER -- read these before anything else:\n{}"
+                     .format(len(moved), "\n".join(moved)))
+    new_routes = [l for l in added if _key(l) not in moved_keys]
+    gone_routes = [l for l in removed if _key(l) not in moved_keys]
+    if new_routes:
+        parts.append("{} new route(s):\n{}".format(
+            len(new_routes), "\n".join("  " + l for l in new_routes)))
+    if gone_routes:
+        parts.append("{} route(s) no longer registered:\n{}".format(
+            len(gone_routes), "\n".join("  " + l for l in gone_routes)))
+
+    parts.append(
+        "TIER_SNAPSHOT in this file is GENERATED from the @tier declarations in\n"
+        "moonglade_gallery.py -- it never declares anything itself. If the change\n"
+        "above is intended, replace TIER_SNAPSHOT with exactly this:\n\n"
+        "TIER_SNAPSHOT = [\n{}\n]\n\n"
+        "If a tier moved and you did not mean it to, fix the @tier decorator --\n"
+        "not this list. That is the entire reason this list exists."
+        .format("\n".join('    "{}",'.format(l) for l in current)))
+
+    assert False, "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 3. Enforcement, anonymous: everything non-PUBLIC refuses a session-less caller
 # ---------------------------------------------------------------------------
 
 def test_no_route_is_reachable_without_a_session(app, armed):
@@ -645,7 +627,7 @@ def test_no_route_is_reachable_without_a_session(app, armed):
     cli = app.test_client()
     failures = []
     for (endpoint, method), rule in sorted(_registered_pairs(app).items()):
-        if ROUTE_TIERS.get((endpoint, method)) == PUBLIC:
+        if _declared_tier(app, endpoint, method) == PUBLIC:
             continue
         path = _probe_url(rule)
         body = PROBE_BODIES.get((endpoint, method), {})
@@ -662,38 +644,48 @@ def test_no_route_is_reachable_without_a_session(app, armed):
         "Each line below is a route reachable with no credentials whatsoever:\n"
         "{}\n\n"
         "FIX: routes are gated centrally by _enforce_front_door() in\n"
-        "moonglade_gallery.py -- if one of these got through, either it was added to\n"
-        "_PUBLIC_PATHS/_PUBLIC_PREFIXES (revert that unless it is genuinely part\n"
-        "of the login surface) or the hook itself regressed, which would be a\n"
-        "whole-app authentication bypass and should be treated as such."
+        "moonglade_gallery.py -- if one of these got through, either it declares\n"
+        "@tier(PUBLIC) (revert that unless it is genuinely part of the login\n"
+        "surface) or the hook itself regressed, which would be a whole-app\n"
+        "authentication bypass and should be treated as such."
         .format(len(failures), "\n".join(failures)))
 
 
 # ---------------------------------------------------------------------------
-# 3. Enforcement, LOCALHOST: being logged in is NOT enough
+# 4. Enforcement, LOCALHOST: being logged in is NOT enough
 # ---------------------------------------------------------------------------
 
 def test_localhost_only_routes_refuse_an_authenticated_lan_session(app, armed):
     """THE assertion whose absence let three real regressions ship.
 
-    The front door only ever asks "is this a valid session?", so it passes a
-    logged-in LAN device straight through to these handlers. The localhost check
-    lives in the handler body and nothing structural keeps it there: it was
-    silently deleted from api_panel_cancel and api_panel_schedule (commit
-    0fd8cee), and never written at all in api_setup_save_key, while all three
-    docstrings went on claiming "localhost-only". Anonymous probing cannot catch
-    that class of bug -- the front door refuses those requests for unrelated
-    reasons and the missing check is never reached. Only an AUTHENTICATED,
-    NON-LOCAL probe reaches it.
+    A valid session is not a local one. The gate must additionally require
+    loopback for these routes, and only an AUTHENTICATED, NON-LOCAL probe reaches
+    that decision at all -- an anonymous probe is refused for unrelated reasons
+    and never gets near it. That is exactly how the original bugs hid: the
+    localhost check was silently deleted from api_panel_cancel and
+    api_panel_schedule (commit 0fd8cee) and never written at all in
+    api_setup_save_key, while all three docstrings went on claiming
+    "localhost-only".
+
+    The check used to live in each handler body, one hand-written `if not
+    _is_local_request()` at a time, with nothing structural keeping it there.
+    Since 2026-08-23 it is the front door reading the route's own @tier(LOCALHOST)
+    -- but this assertion is unchanged and is the reason that move is safe to
+    make: it proves the enforcement from the outside, against a live request, and
+    does not care where the check lives.
     """
     cli = _login(app)
-    declared = [(k, v) for k, v in sorted(ROUTE_TIERS.items()) if v == LOCALHOST]
-    assert declared, "no LOCALHOST routes declared -- did the tier table get gutted?"
-
     pairs = _registered_pairs(app)
+    declared = sorted((e, m) for (e, m) in pairs
+                      if _declared_tier(app, e, m) == LOCALHOST)
+    assert declared, (
+        "no LOCALHOST routes are declared anywhere in the app -- either every one "
+        "of them lost its @tier(LOCALHOST), or this test stopped finding them. "
+        "Both are emergencies.")
+
     failures = []
-    for (endpoint, method), _ in declared:
-        rule = pairs[(endpoint, method)]     # completeness test guarantees presence
+    for (endpoint, method) in declared:
+        rule = pairs[(endpoint, method)]
         path = _probe_url(rule)
         body = PROBE_BODIES.get((endpoint, method), {})
         resp = cli.open(path, method=method,
@@ -716,33 +708,73 @@ def test_localhost_only_routes_refuse_an_authenticated_lan_session(app, armed):
     assert not failures, (
         "{} LOCALHOST-only route(s) accepted an AUTHENTICATED request from a "
         "non-local address ({}):\n{}\n\n"
-        "FIX: the front door cannot enforce this tier -- it only checks that a\n"
-        "session is valid, and this session IS valid. The handler itself must\n"
-        "carry the check, as its FIRST action:\n"
-        "    if not _is_local_request():\n"
-        "        return jsonify({{\"error\": \"localhost-only\"}}), 403\n"
-        "If the route is genuinely fine for a logged-in LAN device, move it to\n"
-        "LOGIN in ROUTE_TIERS and say why in its docstring -- do not leave the\n"
-        "declaration and the code disagreeing, which is the exact state\n"
+        "FIX: the route declares @tier(LOCALHOST) and the front door is supposed\n"
+        "to enforce it -- a failure here is the GATE regressing, not one handler\n"
+        "forgetting a check, and every LOCALHOST route in the app is affected at\n"
+        "once. Look at _enforce_front_door()'s LOCALHOST arm first.\n"
+        "If the route is genuinely fine for a logged-in LAN device, change its\n"
+        "declaration to @tier(LOGIN) and say why in its docstring -- do not leave\n"
+        "the declaration and the code disagreeing, which is the exact state\n"
         "api_panel_cancel / api_panel_schedule / api_setup_save_key were found in."
         .format(len(failures), LAN, "\n".join(failures)))
 
 
+def test_localhost_refusal_body_is_the_declared_one(app, armed):
+    """The 403's wording is a contract, not a detail.
+
+    The front end reads `error` off these responses, and three routes say
+    something more specific than "localhost-only" (deleting from PixAI; importing
+    onto the server's machine) -- wording that used to be written into each
+    handler's own guard and now rides the declaration as `message=`. Moving where
+    a string is produced is exactly the kind of refactor that silently rewords it.
+    """
+    cli = _login(app)
+    pairs = _registered_pairs(app)
+    failures = []
+    for (endpoint, method) in sorted(pairs):
+        if _declared_tier(app, endpoint, method) != LOCALHOST:
+            continue
+        if (endpoint, method) in LOCALHOST_REFUSAL_IS_REDIRECT:
+            continue
+        resp = cli.open(_probe_url(pairs[(endpoint, method)]), method=method,
+                        environ_overrides={"REMOTE_ADDR": LAN},
+                        **PROBE_BODIES.get((endpoint, method), {}))
+        body = resp.get_json(silent=True)
+        expected = moonglade_gallery.route_tier_message(app.view_functions[endpoint])
+        if body != {"error": expected}:
+            failures.append("  {} ({}): expected {!r}, got {!r}".format(
+                method, endpoint, {"error": expected}, body))
+
+    assert not failures, (
+        "{} LOCALHOST refusal(s) did not carry the declared message:\n{}\n\n"
+        "FIX: the message comes from the route's own @tier(..., message=...); the\n"
+        "front door must emit it verbatim."
+        .format(len(failures), "\n".join(failures)))
+
+
 # ---------------------------------------------------------------------------
-# 4. The PUBLIC tier is real, and is not a mute button
+# 5. The PUBLIC tier is real, and is not a mute button
 # ---------------------------------------------------------------------------
 
 def test_public_routes_are_actually_public(app, armed):
     """Guards the other direction: a PUBLIC declaration exempts a route from
-    test 2, so PUBLIC must cost something to claim. Each one has to state the
+    test 3, so PUBLIC must cost something to claim. Each one has to state the
     status an anonymous caller really gets, and get it right."""
-    undeclared = sorted(set(k for k, v in ROUTE_TIERS.items() if v == PUBLIC)
-                        - set(PUBLIC_EXPECTED_STATUS))
+    public_routes = sorted((e, m) for (e, m) in _registered_pairs(app)
+                           if _declared_tier(app, e, m) == PUBLIC)
+    undeclared = sorted(set(public_routes) - set(PUBLIC_EXPECTED_STATUS))
     assert not undeclared, (
-        "route(s) declared PUBLIC without an expected anonymous status: {}\n"
-        "FIX: add each to PUBLIC_EXPECTED_STATUS. PUBLIC exempts a route from\n"
-        "test_no_route_is_reachable_without_a_session, so it must be spelled out,\n"
-        "never inferred.".format(undeclared))
+        "route(s) declared @tier(PUBLIC) without an expected anonymous status: {}\n"
+        "FIX: add each to PUBLIC_EXPECTED_STATUS in this file. PUBLIC exempts a\n"
+        "route from test_no_route_is_reachable_without_a_session, so it must be\n"
+        "spelled out here, never inferred from the decorator alone."
+        .format(undeclared))
+
+    stale = sorted(set(PUBLIC_EXPECTED_STATUS) - set(public_routes))
+    assert not stale, (
+        "PUBLIC_EXPECTED_STATUS entr(ies) no longer name a PUBLIC route: {}\n"
+        "FIX: delete them. A stale expectation is an assertion that silently\n"
+        "stopped running.".format(stale))
 
     cli = app.test_client()
     pairs = _registered_pairs(app)
@@ -757,27 +789,26 @@ def test_public_routes_are_actually_public(app, armed):
 
     assert not failures, (
         "{} PUBLIC route(s) did not answer anonymously as declared:\n{}\n\n"
-        "FIX: if the route became gated, that may be correct -- move it out of\n"
-        "PUBLIC in ROUTE_TIERS rather than loosening the expectation here."
+        "FIX: if the route became gated, that may be correct -- change its\n"
+        "declaration away from @tier(PUBLIC) rather than loosening the\n"
+        "expectation here."
         .format(len(failures), "\n".join(failures)))
 
 
 # ---------------------------------------------------------------------------
-# 5. The tiers themselves stay meaningful
+# 6. Routes whose localhost requirement is NOT a tier
 # ---------------------------------------------------------------------------
-
-def test_declared_tiers_are_known_values():
-    bad = {k: v for k, v in ROUTE_TIERS.items() if v not in (PUBLIC, LOGIN, LOCALHOST)}
-    assert not bad, (
-        "unknown tier value(s) in ROUTE_TIERS: {}\n"
-        "Only PUBLIC / LOGIN / LOCALHOST exist. Inventing a fourth tier in the\n"
-        "table without teaching this file to enforce it produces a declaration\n"
-        "that asserts nothing.".format(bad))
-
-
-# ---------------------------------------------------------------------------
-# 6. Field-level disclosure: a LOGIN route may still withhold part of its body
-# ---------------------------------------------------------------------------
+# Two shapes here are deliberately NOT expressible as a tier, and both are
+# LOGIN-tier routes that narrow themselves further inside the handler:
+#   * a LOGIN route may withhold part of its BODY from a LAN caller
+#     (/api/panel/status);
+#   * a LOGIN route may refuse one ARGUMENT to a LAN caller (/api/panel/run's
+#     destructive actions; /api/users/remove and /api/users/password for an
+#     account that is not the caller's own -- those two are covered by
+#     tests/test_panel_users.py).
+# Forcing any of them to @tier(LOCALHOST) would refuse the LAN caller the
+# perfectly legitimate rest of the route, which is the "LAN = read-only" framing
+# docs/DECISIONS.md explicitly rejects.
 
 _PANEL_REDACTION = "(job output is shown only on the server's own screen)"
 
@@ -827,9 +858,15 @@ def test_panel_status_is_not_blanket_localhost_gated(app):
             "localhost-gated instead of having only its one leaky field fixed.".format(field))
 
 
-
-
-
-
-
-
+# /api/panel/run's destructive-action refusal from an AUTHENTICATED LAN session is
+# proven in tests/test_panel.py::test_destructive_action_refuses_authenticated_lan_session,
+# which also proves the same account succeeds from loopback and that nothing was
+# spawned in the refused case -- more than the generic sweep in this file could say.
+# It is named here because while the tiers lived in this file, api_panel_run was
+# declared LOCALHOST and PROBE_BODIES fed the generic sweep a destructive action, so
+# that refusal was ALSO proven here as a side effect. The declaration was never quite
+# true -- a blanket LOCALHOST gate would refuse the 14 non-destructive PANEL_ACTIONS a
+# LAN account is entitled to run -- so the route now declares the floor the gate can
+# actually enforce, @tier(LOGIN), and keeps its own `spec["destructive"] and not
+# _is_local_request()` check. Nothing was lost in that correction; this comment exists
+# so the next reader can confirm it rather than assume it.

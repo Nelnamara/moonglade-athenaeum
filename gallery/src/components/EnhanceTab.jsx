@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
 import { ResultLines } from "./EditTab.jsx";
+import { apiGet } from "../api.js";
 
 /* The Enhance sub-tab, built to PixAI's real Enhance surface (labeled capture
    `enhance__preset-tab.png`) adapted to the drawer: a grid of the six panelplugin presets
@@ -49,10 +50,8 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
   useEffect(() => {
     if (!armed) { setPresets(null); return undefined; }
     let live = true;
-    fetch("/api/enhance/presets")
-      .then((r) => r.json())
-      .then((d) => { if (live) setPresets((d && d.presets) || []); })
-      .catch(() => { if (live) setPresets([]); });
+    apiGet("/api/enhance/presets")
+      .then((d) => { if (live) setPresets((d && d.presets) || []); });
     return () => { live = false; };
   }, [armed]);
 
@@ -60,10 +59,8 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
   useEffect(() => {
     if (!armed || sel !== "emotion" || emotions !== null) return undefined;
     let live = true;
-    fetch("/api/enhance/emotions")
-      .then((r) => r.json())
-      .then((d) => { if (live) setEmotions((d && d.emotions) || []); })
-      .catch(() => { if (live) setEmotions([]); });
+    apiGet("/api/enhance/emotions")
+      .then((d) => { if (live) setEmotions((d && d.emotions) || []); });
     return () => { live = false; };
   }, [armed, sel, emotions]);
 

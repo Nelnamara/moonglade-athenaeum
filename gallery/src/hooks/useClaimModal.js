@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiPost } from "../api.js";
 
 /* Daily-claim popup's own state/handlers -- extracted so App.jsx (desktop) and
    AppMobile.jsx (mobile) can each mount <ClaimModal> off the SAME logic
@@ -90,8 +91,7 @@ export default function useClaimModal(account, refreshAccount) {
     setClaiming(true);
     setError("");
     try {
-      const r = await fetch("/api/claim", { method: "POST" });
-      const d = await r.json();
+      const d = await apiPost("/api/claim");
       if (d && d.error) {
         setError(d.error);
         setClaiming(false);

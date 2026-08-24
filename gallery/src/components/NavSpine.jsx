@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "../styles/shell.css";
+import { apiGet, apiPost } from "../api.js";
 
 /* The glyph-spine nav — the DC separator-bar pills (Frontend Gallery.dc.html
    NAV_ORDER + drift §16): Panel and Log Out are PAGE navigations; the other six
@@ -65,10 +66,8 @@ export default function NavSpine({ boot, onOverlay }) {
   useEffect(() => {
     let alive = true;
     const read = () => {
-      fetch("/api/mirror/status")
-        .then((r) => r.json())
-        .then((d) => { if (alive) setArmed(!!(d && d.enabled)); })
-        .catch(() => {});
+      apiGet("/api/mirror/status")
+        .then((d) => { if (alive) setArmed(!!(d && d.enabled)); });
     };
     read();
     window.addEventListener("mg-mirror-changed", read);
@@ -90,10 +89,7 @@ export default function NavSpine({ boot, onOverlay }) {
      cookie or a dropped request must still clear local state and navigate,
      never strand the user on a page that thinks it's signed in. */
   const logout = () => {
-    fetch("/api/logout", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csrf: boot.csrf || "" }),
-    }).catch(() => {}).then(() => {
+    apiPost("/api/logout", { csrf: boot.csrf || "" }).then(() => {
       const go = () => { window.location.href = "/login"; };
       if ("caches" in window) {
         caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))).catch(() => {}).then(go);

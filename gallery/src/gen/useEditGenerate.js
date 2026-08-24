@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EDIT_DEFAULTS, buildEditPayload, editGate, switchEditModel } from "./editCore.js";
+import {
+  EDIT_DEFAULTS, EDIT_PRICE_KEY_SKIP, buildEditPayload, editGate, switchEditModel,
+} from "./editCore.js";
 import { submitTask, useResultLines } from "./submitTask.js";
+import usePriceProbe from "./usePriceProbe.js";
 
 /* Create tab, Edit mode's own generation hook -- the mobile-shell counterpart
    to useGenerate.js, lifted for the IDENTICAL reason (see AppMobile.jsx's own
@@ -22,52 +25,41 @@ import { submitTask, useResultLines } from "./submitTask.js";
    genCore.js's buildPayload/goGate are Image-only and do not apply to an
    edit_model/source/refs/instruction/preset payload at all.
 
-   The price debounce below is a DELIBERATE separate instance (its own
-   seq/timer, its own costRef supplied by the caller) -- ported verbatim from
-   EditTab.jsx's own header comment on why: "sharing them with the image
-   tab's is exactly what caused the classic's historical no-price-on-?edit=
-   bug." AppMobile.jsx passes a second, dedicated costRef here, distinct from
-   Image mode's. */
+   The price probe below is a DELIBERATE separate INSTANCE of the shared
+   gen/usePriceProbe.js (its own debounce/seq/verdict, its own costRef supplied
+   by the caller) -- ported verbatim from EditTab.jsx's own header comment on
+   why: "sharing them with the image tab's is exactly what caused the classic's
+   historical no-price-on-?edit= bug." AppMobile.jsx passes a second, dedicated
+   costRef here, distinct from Image mode's. */
 export default function useEditGenerate({ costRef }) {
   const [s, setS] = useState(EDIT_DEFAULTS);
   const [busy, setBusy] = useState(false);
   const [results, openLine] = useResultLines();
   const busyRef = useRef(false);
-  const seq = useRef(0);
-  const timer = useRef(0);
 
   const set = useCallback((patch) => setS((old) => ({ ...old, ...patch })), []);
 
-  /* Own debounce + seq pair, own costRef -- see header comment. Mirrors
-     EditTab.jsx's fireCost exactly: POSTs buildEditPayload(s), the SAME
-     object /api/edit receives on submit, so a quote can never describe a
-     different edit than what goes out. */
-  const fireCost = useCallback(() => {
-    const mine = ++seq.current;
-    const badge = costRef.current;
-    if (!(s.source || "").trim()) { if (badge && badge.clear) badge.clear(); return; }
-    if (badge && badge.setChecking) badge.setChecking();
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildEditPayload(s)),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (mine === seq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => { if (mine === seq.current && costRef.current) costRef.current.setPrice(null); });
-  }, [s, costRef]);
-
+  /* The SAME buildEditPayload the submit sends, so a quote can never describe a
+     different edit than what goes out. Idle when there is no source: a plain
+     clear() back to the badge's own hint, which is a verdict -- editGate() is
+     what refuses the submit there, and it must stay reachable. */
+  const build = useCallback(() => {
+    const p = buildEditPayload(s);
+    return { payload: p, idle: (s.source || "").trim() ? null : true };
+  }, [s]);
+  const probe = usePriceProbe({ build, costRef, skipKeys: EDIT_PRICE_KEY_SKIP });
   /* Exposed so the presentation layer's mount effect can prime the badge the
-     instant it creates the <mg-cost-badge> element -- identical contract to
-     useGenerate.js's own refreshPrice(). */
-  const refreshPrice = useCallback(() => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(fireCost, 250);
-  }, [fireCost]);
+     instant its <CostBadge> exists -- identical contract to useGenerate.js's own
+     refreshPrice(). */
+  const refreshPrice = probe.refresh;
+  const priceOk = probe.canSubmit;
 
-  // Reprices on ANY field change, matching EditTab.jsx's own effect deps
-  // exactly (unlike Image mode, which excludes prompt text from repricing --
-  // this is the desktop reference's real, already-shipped behavior, ported
-  // as-is rather than redesigned).
+  // Re-prices on ANY field change, matching EditTab.jsx's own effect deps
+  // exactly. BEHAVIOUR CHANGE 2026-08-22: the instruction is in the probe's
+  // identity skip (EDIT_PRICE_KEY_SKIP), so a keystroke now short-circuits
+  // instead of blanking the badge and disabling ✦ Edit for 250ms + one RTT --
+  // an edit's price cannot move on its text. The dep list is left broad because
+  // the short-circuit makes the extra calls free.
   useEffect(() => { refreshPrice(); }, [s, refreshPrice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Switching model keeps the knobs the new model can take, corrects the rest
@@ -94,13 +86,20 @@ export default function useEditGenerate({ costRef }) {
      contract, the SAME shared path /api/generate and /api/fix use. */
   const run = useCallback(async () => {
     if (busyRef.current || editGate(s)) return;
+    // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the
+    // click that slips through a stale render (a keyboard Enter needs no repaint).
+    if (!priceOk) { refreshPrice(); return; }
     busyRef.current = true;
     setBusy(true);
     const emit = openLine("Submitting…");
     await submitTask("/api/edit", buildEditPayload(s), { label: "Edited", emit });
     busyRef.current = false;
     setBusy(false);
-  }, [s, openLine]);
+    // The submit DEBITED credits or a card; the payload is byte-identical, so only
+    // a FORCED re-price gets past the short-circuit.
+    refreshPrice({ force: true });
+  }, [s, openLine, priceOk, refreshPrice]);
 
-  return { s, set, busy, results, chooseModel, addRef, dropRef, run, refreshPrice, gate };
+  return { s, set, busy, results, chooseModel, addRef, dropRef, run, refreshPrice, gate,
+           canSubmit: priceOk };
 }

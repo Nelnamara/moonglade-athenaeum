@@ -26,7 +26,7 @@ import useClaimModal from "./hooks/useClaimModal.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
-  postJSON, downloadZipForm, resolveVideoIds,
+  apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
 import { buildUrl, readPage, readImage } from "./gen/urlState.js";
@@ -60,17 +60,20 @@ export default function App({ boot }) {
   // ?page=N on first load (#31, "Where the Refit Broke" #7): the classic addressed
   // pages in the URL; the refit hardcoded page 1. Read once, handed to the hook.
   const [initialPage] = useState(() => readPage(window.location.search));
+  /* The library state, kept whole as `lib` AND spread for this file's own use. The whole
+     object is what surfaces built ON the library take (LibraryBar); the spread is what the
+     shell reads directly. One source, two views of it -- not two copies. */
+  const lib = useLibrary({ initialPage });
   const {
     // filters
-    media, setMedia, shelf, setShelf, perPage, setPerPage,
-    query, setQuery, applied, setApplied, adv, setAdv, flyOpen, setFlyOpen,
+    media, shelf, perPage, query, applied, adv, setAdv,
     // data
     items, setItems, total, page, pages, loading,
     // load + filter verbs
-    load, applyAdvanced, advCount, submitQuery, resetAll,
+    load, applyAdvanced,
     // selection
-    selectMode, setSelectMode, selected, setSelected, toggleSelected,
-  } = useLibrary({ initialPage });
+    selectMode, selected, setSelected, toggleSelected,
+  } = lib;
   const [account, setAccount] = useState(null);
   const refreshAccount = () => fetchAccount().then(setAccount);
   const claimModal = useClaimModal(account, refreshAccount);
@@ -360,11 +363,15 @@ export default function App({ boot }) {
   /* Generation completions refresh the library + credits chip.
      THREE channels, because there are three producers:
      - mg-gen-done: our own image submit path (useGenerate);
-     - mg-submit:   the SHARED video drawer accepting a task -- it owns its own
-                    poll, so it gets Jobs.register (never Jobs.track, which
-                    would double-poll: the Loom's pinned contract);
+     - mg-submit:   the SHARED video drawer accepting a task;
      - mg-result:   that drawer finishing, which is when credits actually moved.
-     The same submit/result pair also ticks the shell's live-run counter. */
+     The same submit/result pair also ticks the shell's live-run counter.
+     NO Jobs.register here (2026-08-23). This listener used to be what registered a
+     video with the Job Tracker, which quietly made tracking a property of WHICH SHELL
+     the drawer happened to be mounted in -- and AppMobile.jsx has no such listener, so
+     a video started from the phone never reached /api/jobs, the Activity tray or the
+     orphan sweep. The drawer now submits through gen/submitTask.js, whose Jobs.track
+     registers on the way past; registration belongs to the submit road, not the shell. */
   useEffect(() => {
     const refresh = () => { load(1, true); fetchAccount().then(setAccount); };
     // mg-gen-done also nudges the Folio of Honors to check-and-celebrate any newly
@@ -372,9 +379,7 @@ export default function App({ boot }) {
     // has outside a hard page load, so it belongs here alongside the grid/account
     // refresh. Guarded like window.Toast/window.Jobs elsewhere in this file.
     const onGenDone = () => { refresh(); if (window.Ach) window.Ach.check(); };
-    const onSubmit = (e) => {
-      const id = e.detail && (e.detail.task_id || e.detail.taskId);
-      if (id && window.Jobs) window.Jobs.register(id, "Rendered");
+    const onSubmit = () => {
       setRunning((r) => ({ ...r, count: r.count + 1 }));
     };
     const onResult = () => {
@@ -430,14 +435,12 @@ export default function App({ boot }) {
       // visuals wait for the beacon to land, or the very first trigger races
       // its own unlock and the art 404s. Fail-soft on a beacon error: the
       // stars/toast still play (the img/audio just may not resolve).
-      fetch("/api/ach-event", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event: "konami" }),
-        // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
-        // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
-        // public source, so a clone can't read the egg's payoff before finding it. Fail-soft
-        // to a generic line if the fetch fails or the feat hasn't resolved yet.
-      }).catch(() => {}).then(() => fetch("/api/achievements").then((r) => r.json()).catch(() => null))
+      // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
+      // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
+      // public source, so a clone can't read the egg's payoff before finding it -- a
+      // failed read answers {error}, and the sub-line falls back to its generic string.
+      apiPost("/api/ach-event", { event: "konami" })
+        .then(() => apiGet("/api/achievements"))
         .then((data) => {
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
         const stars = [];
@@ -500,7 +503,7 @@ export default function App({ boot }) {
       const name = window.prompt(
         "Add " + selIds.length + " image(s) to which collection? (a name; files are NOT moved)");
       if (name === null || !name.trim()) return;
-      const d = await postJSON("/api/collection",
+      const d = await apiPost("/api/collection",
         { action: "add", collection: name.trim(), media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -510,7 +513,7 @@ export default function App({ boot }) {
       if (!window.confirm(
         "Remove " + selIds.length + " item(s) from the collection “" + name + "”?\n\n" +
         "Only the collection label is removed — no files are deleted and nothing leaves your PixAI account.")) return;
-      const d = await postJSON("/api/collection",
+      const d = await apiPost("/api/collection",
         { action: "remove", collection: name, media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -541,14 +544,8 @@ export default function App({ boot }) {
     // parsePresetQuery) or "export" (from_year/from_month, what _filters_from_args reads).
     buildViewQuery: (draftAdv, style) =>
       filterQueryString({ applied, media, shelf, adv: draftAdv || adv, perPage }, style),
-    saveView: (name, query) => fetch("/api/view-presets", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, query }),
-    }).then((r) => r.json()),
-    deleteView: (name) => fetch("/api/view-presets", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ delete: name }),
-    }).then((r) => r.json()),
+    saveView: (name, query) => apiPost("/api/view-presets", { name, query }),
+    deleteView: (name) => apiPost("/api/view-presets", { delete: name }),
     downloadZip: () => downloadZipForm(selIds),
     replacePrompt: async () => {
       const find = window.prompt(
@@ -558,7 +555,7 @@ export default function App({ boot }) {
       if (repl === null) return;
       if (!window.confirm('Replace "' + find + '" with "' + repl + '" across ' +
         selIds.length + " prompt(s)? This edits catalog.db.")) return;
-      const d = await postJSON("/api/replace-prompts",
+      const d = await apiPost("/api/replace-prompts",
         { find, replace: repl, media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
@@ -567,7 +564,7 @@ export default function App({ boot }) {
       if (!window.confirm(
         "Remove " + selIds.length + " image" + (selIds.length !== 1 ? "s" : "") +
         " from the local catalog? Files move to the _deleted/ folder (recoverable); the cloud task is untouched.")) return;
-      const d = await postJSON("/api/delete-local", { media_ids: selIds });
+      const d = await apiPost("/api/delete-local", { media_ids: selIds });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
@@ -576,7 +573,7 @@ export default function App({ boot }) {
       // it does not replace the guard.
       const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
       if (typed !== "DELETE") { window.alert("Cancelled."); return; }
-      const d = await postJSON("/api/delete-tasks", { media_ids: ids });
+      const d = await apiPost("/api/delete-tasks", { media_ids: ids });
       if (d.error) { window.alert(d.error); return; }
       afterMutation();
     },
@@ -598,7 +595,7 @@ export default function App({ boot }) {
     const suggested = "Contest: " + (contest.title || "(untitled)") + ends;
     const name = window.prompt("Add " + selIds.length + " image(s) to which collection?", suggested);
     if (name === null || !name.trim()) return;
-    const d = await postJSON("/api/collection",
+    const d = await apiPost("/api/collection",
       { action: "add", collection: name.trim(), media_ids: selIds });
     if (d.error) { window.alert(d.error); return; }
     afterMutation();
@@ -608,7 +605,6 @@ export default function App({ boot }) {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
     try {
-      const { rateImage } = await import("./api.js");
       await rateImage(mid, value);
     } catch {
       /* a failed rate leaves the optimistic value; the next load corrects it */
@@ -716,22 +712,10 @@ export default function App({ boot }) {
           onFolio={() => openOverlay("folio")}
           libraryBar={
             <LibraryBar
-              boot={boot} account={account}
-              media={media} setMedia={setMedia}
-              perPage={perPage} setPerPage={setPerPage}
-              shelf={shelf} setShelf={setShelf}
-              query={query} setQuery={setQuery} submitQuery={submitQuery} resetAll={resetAll}
-              blur={blur} setBlur={setBlur}
-              selectMode={selectMode} setSelectMode={setSelectMode}
-              selectedCount={selected.size}
-              selectedIds={selIds}
-              clearSelection={() => setSelected(new Set())}
-              collections={collections}
+              lib={lib}
+              boot={boot}
               actions={actions}
-              adv={adv} advCount={advCount}
-              flyOpen={flyOpen} setFlyOpen={setFlyOpen}
-              applyAdvanced={applyAdvanced}
-              onGenerate={openDock}
+              collections={collections}
               layout={layout} setLayout={setLayout}
             />
           }

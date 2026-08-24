@@ -4,6 +4,7 @@ import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
   planLoraRestore,
 } from "../gen/genCore.js";
+import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
@@ -122,9 +123,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   useEffect(() => {
     if (!open) return undefined;
     let live = true;
-    fetch("/api/mirror/status").then((r) => r.json())
-      .then((d) => { if (live) setMirrorArmed(!!(d && d.enabled)); })
-      .catch(() => { /* leave prior state */ });
+    apiGet("/api/mirror/status")
+      .then((d) => { if (live) setMirrorArmed(!!(d && d.enabled)); });   // an error leaves prior state
     return () => { live = false; };
   }, [open, sub]);
   // Lineage: "reusing settings from run #N" -- a LOCAL annotation only (no
@@ -181,18 +181,14 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
   useEffect(() => {
     if (!snippetsOpen || snips !== null) return;
     let dead = false;
-    fetch("/api/snippets").then((r) => r.json())
-      .then((d) => { if (!dead) setSnips(Array.isArray(d.snippets) ? d.snippets : []); })
-      .catch(() => { if (!dead) setSnips([]); });
+    apiGet("/api/snippets")
+      .then((d) => { if (!dead) setSnips(Array.isArray(d.snippets) ? d.snippets : []); });
     return () => { dead = true; };
   }, [snippetsOpen, snips]);
   const persistSnips = (list) => {
     setSnips(list); setSnipErr("");
-    fetch("/api/snippets", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ snippets: list }) })
-      .then((r) => r.json())
-      .then((d) => { if (!d || d.error) setSnipErr((d && d.error) || "The server rejected the save."); })
-      .catch(() => setSnipErr("Network error — not saved."));
+    apiPost("/api/snippets", { snippets: list })
+      .then((d) => { if (!d || d.error) setSnipErr((d && d.error) || "The server rejected the save."); });
   };
   const snipTrunc = (t) => (String(t).length > 44 ? String(t).slice(0, 44) + "…" : t);
   /* The composer (and so ★ Snippets) is shared by every tab now: read/insert against
@@ -250,10 +246,8 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      poll while the dock is open or anything is still running. ---- */
   const [jobs, setJobs] = useState([]);
   const fetchJobs = useCallback(() => {
-    fetch("/api/jobs")
-      .then((r) => r.json())
-      .then((d) => setJobs(((d && d.jobs) || []).filter((j) => j.type === "generate")))
-      .catch(() => {});
+    apiGet("/api/jobs")
+      .then((d) => setJobs(((d && d.jobs) || []).filter((j) => j.type === "generate")));
   }, []);
   useEffect(() => {
     fetchJobs();
@@ -320,7 +314,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      remount, exactly as the old re-created element did. (Unchanged machinery; g
      intentionally out of the deps so this fires on entry, not every keystroke.) */
   useEffect(() => {
-    if (open && tab === "image") g.refreshPrice();
+    if (open && tab === "image") g.refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tab]);
 
@@ -461,28 +455,18 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     setPrefillBusy(true);
     const notes = [];
     try {
-      let row;
-      try {
-        const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
-        const d = await r.json();
-        if (d.error || !d.row) {
-          if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
-          return;
-        }
-        row = d.row;
-      } catch {
-        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
+      const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+      if (d.error || !d.row) {
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
         return;
       }
+      const row = d.row;
       if (!live()) return;
       let modelOk = false;
       if (row.model_id) {
-        let baseId = "";
-        try {
-          const rv = await fetch("/api/model-version?version_id=" + encodeURIComponent(row.model_id));
-          const dv = await rv.json();
-          baseId = (dv && dv.model_id) || "";
-        } catch { /* soft-fail: leave the composer's model untouched below */ }
+        // soft-fail: an error answer leaves the composer's model untouched below
+        const dv = await apiGet("/api/model-version?version_id=" + encodeURIComponent(row.model_id));
+        const baseId = (dv && dv.model_id) || "";
         if (!live()) return;
         if (baseId) {
           const applied = await g.applyModelRow({ model_id: baseId, title: row.model_name || row.model_id, preview_url: "" });
@@ -522,25 +506,21 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         // never wire them onto whatever model happened to be selected
         if (hadLoras) notes.push("LoRAs not loaded without the model");
       } else {
-        try {
-          const rt = await fetch("/api/task-params/" + encodeURIComponent(row.task_id));
-          const dt = await rt.json();
-          if (!live()) return;
-          if (dt.error) {
-            if (hadLoras) notes.push("LoRAs could not be restored");
-          } else {
-            // dedup/count/cross-check logic is the PURE planLoraRestore
-            // (genCore.js) so the node harness can pin it -- see
-            // loom/test/mg-remix-lora-plan.test.js
-            const plan = planLoraRestore(dt, hadLoras);
-            for (const lr of plan.rows) {
-              await g.addLora(lr);          // exact version_id + weight ride the row itself
-              if (!live()) return;
-            }
-            notes.push(...plan.notes);
-          }
-        } catch {
+        // an unreadable task record IS the "could not be restored" case -- same note either way
+        const dt = await apiGet("/api/task-params/" + encodeURIComponent(row.task_id));
+        if (!live()) return;
+        if (dt.error) {
           if (hadLoras) notes.push("LoRAs could not be restored");
+        } else {
+          // dedup/count/cross-check logic is the PURE planLoraRestore
+          // (genCore.js) so the node harness can pin it -- see
+          // loom/test/mg-remix-lora-plan.test.js
+          const plan = planLoraRestore(dt, hadLoras);
+          for (const lr of plan.rows) {
+            await g.addLora(lr);          // exact version_id + weight ride the row itself
+            if (!live()) return;
+          }
+          notes.push(...plan.notes);
         }
       }
       setTab("image");
@@ -584,31 +564,22 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     const live = () => prefillSeq.current === my;   // stale flows stop applying, wholesale
     setPrefillBusy(true);
     try {
-      let row;
-      try {
-        const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
-        const d = await r.json();
-        if (d.error || !d.row) {
-          if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
-          return;
-        }
-        row = d.row;
-      } catch {
-        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: "Network error." });
+      const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+      if (d.error || !d.row) {
+        if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't load that run's settings", msg: d.error || "" });
         return;
       }
+      const row = d.row;
       if (!live()) return;
       // The task recipe. A read failure (network, delisted, unreadable) is soft: the pure
       // mapping falls back to the catalog row and discloses "no task record" itself.
       let taskParams = null;
       const tid = taskId || row.task_id || "";
       if (tid) {
-        try {
-          const rt = await fetch("/api/video-task-params/" + encodeURIComponent(tid));
-          const dt = await rt.json();
-          if (!live()) return;
-          if (!dt.error) taskParams = dt;
-        } catch { /* soft-fail -> catalog-only prefill, disclosed by videoRemixFromRow */ }
+        // soft-fail -> catalog-only prefill, disclosed by videoRemixFromRow
+        const dt = await apiGet("/api/video-task-params/" + encodeURIComponent(tid));
+        if (!live()) return;
+        if (!dt.error) taskParams = dt;
       }
       if (!live()) return;
       const { prefill, notes } = videoRemixFromRow(row, taskParams);
@@ -646,14 +617,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     // two fast tile clicks could resolve out of order and land the OLDER recipe. Bump here
     // and bail if a newer prefill started while we were waiting; the callees bump again.
     const my = ++prefillSeq.current;
-    try {
-      const r = await fetch("/api/next/detail/" + encodeURIComponent(mediaId));
-      const d = await r.json();
-      if (prefillSeq.current !== my) return;   // superseded -- a newer click won
-      if (d && d.row && String(d.row.is_video) === "1") {
-        return prefillVideoFromRun(idHint || (d.row && d.row.task_id) || "", mediaId);
-      }
-    } catch { /* fall through -- prefillFromRun re-fetches and reports its own error */ }
+    // an error answer falls through -- prefillFromRun re-fetches and reports its own error
+    const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
+    if (prefillSeq.current !== my) return undefined;   // superseded -- a newer click won
+    if (d && d.row && String(d.row.is_video) === "1") {
+      return prefillVideoFromRun(idHint || (d.row && d.row.task_id) || "", mediaId);
+    }
     return prefillFromRun(idHint, mediaId);
   }, [prefillFromRun, prefillVideoFromRun]);
 
@@ -1231,8 +1200,12 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
                     idle hint -- via the badge's own hint API, never hand-written text */}
                 <CostBadge ref={costRef} stack count={s.count} balance={balance}
                   hint="Pick a model to see the cost." />
-                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy ? " off" : "")}
-                  disabled={!!gate || g.busy || prefillBusy}
+                {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the
+                    quote on the badge must have been priced off the payload this click submits
+                    (gen/priceProbeCore.js). generate() refuses the same way, for the keyboard
+                    Enter that fires against a stale render. */}
+                <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || !g.canSubmit ? " off" : "")}
+                  disabled={!!gate || g.busy || prefillBusy || !g.canSubmit}
                   title={prefillBusy ? "Restoring the recipe…"
                     : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
                   onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
