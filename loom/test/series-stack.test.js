@@ -99,6 +99,11 @@ describe("(d) hero never features a stack (Grid.jsx)", () => {
     assert.ok(grid.includes(
       "const hero = (i % HERO_EVERY === 0) && !it.is_video && !stackKind(it);"));
   });
+  test("the masonry feature-slot skips a stack too, for the same reason as hero", () => {
+    // a stacked cover is a proxy for many, not a single showcase -- so it must not be
+    // promoted into a 2-col feature cell any more than into a hero slot.
+    assert.ok(grid.includes("if (arr[k].is_video || stackKind(arr[k])) continue;"));
+  });
 });
 
 describe("(e) a stack is NOT selectable; clicking it opens its view (Grid.jsx)", () => {
@@ -142,7 +147,11 @@ describe("grid.css: the stack deck + badges, contained inside the clipped card",
     assert.match(rule, /overflow: hidden;/);
   });
   test("the cover insets within the card; the two layers are absolute, behind it", () => {
-    assert.match(css, /\.mgg-card\.mgg-stack \.mgg-art \{[^}]*inset: 9px 9px 0 0;[^}]*z-index: 1;/);
+    // .mgg-art is a REPLACED <img>: the inset alone doesn't size it (left+right+width
+    // over-constrains, the browser drops `right` and paints full-width, 9px clipped off
+    // the bottom). The width/height calc is what actually frees the top-right sliver --
+    // pin it so a regression to the bare `inset` (or to width:auto -> intrinsic) fails here.
+    assert.match(css, /\.mgg-card\.mgg-stack \.mgg-art \{[^}]*inset: 9px 9px 0 0; width: calc\(100% - 9px\); height: calc\(100% - 9px\);[^}]*z-index: 1;/);
     const i = css.indexOf(".mgg-stack-layer {");
     const rule = css.slice(i, css.indexOf("}", i));
     assert.match(rule, /position: absolute; z-index: 0;/);

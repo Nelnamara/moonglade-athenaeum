@@ -145,8 +145,15 @@
    geometry is unchanged (a stack is one cell like any card). */
 .mgg-card.mgg-stack .mgg-art {
   /* shift the cover down-and-left, freeing a ~9px sliver at top + right for the
-     deck; it still meets the bottom edge so the caption overlays it as usual. */
-  inset: 9px 9px 0 0; border-radius: 9px; z-index: 1;
+     deck; it still meets the bottom edge so the caption overlays it as usual.
+     .mgg-art is an <img> (object-fit:cover) -- a REPLACED element -- so the base
+     width:100%/height:100% must be overridden explicitly: left/right/width all
+     non-auto over-constrains and the browser drops `right` (LTR), painting the
+     cover full-width with 9px clipped off the bottom (the deck then peeks only at
+     the top). width:auto is NOT the fix -- on an abs-pos replaced box it resolves
+     to the image's INTRINSIC size, not the gap. Size the box from the inset. */
+  inset: 9px 9px 0 0; width: calc(100% - 9px); height: calc(100% - 9px);
+  border-radius: 9px; z-index: 1;
 }
 .mgg-stack-layer {
   position: absolute; z-index: 0; pointer-events: none; border-radius: 9px;

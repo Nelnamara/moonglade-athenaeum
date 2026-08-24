@@ -189,11 +189,13 @@ export default function Grid({
         const offset = ((page % 3) + 2) % FEAT_CADENCE;
         for (let p = 0; p < arr.length; p++) {
           if (p % FEAT_CADENCE !== offset) continue;
-          // squarest (min |r-1|) non-video image in the next lookahead window
+          // squarest (min |r-1|) non-video image in the next lookahead window.
+          // A stack cover is excluded here for the same reason hero excludes it
+          // (#34 B): a stacked cover is a proxy for many, not a single showcase.
           let best = -1, bestScore = Infinity;
           const end = Math.min(p + FEAT_LOOKAHEAD, arr.length);
           for (let k = p; k < end; k++) {
-            if (arr[k].is_video) continue;
+            if (arr[k].is_video || stackKind(arr[k])) continue;
             const s = Math.abs(trueRatio(arr[k]) - 1);
             if (s < bestScore) { bestScore = s; best = k; }
           }

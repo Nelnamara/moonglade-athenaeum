@@ -1697,6 +1697,11 @@ def fold_series_units(rows_min, by_task):
     fold must see the entire filtered set, not one page. `total` = len(unit_order)."""
     unit_order, members, seen = [], {}, set()
     for r in rows_min:
+        # No media_id -> no card, exactly as the ungrouped path skips it. Guards
+        # against blank-media_id rows welding into one ("row","") unit and against a
+        # blank cover that rows_for_media_ids would later drop, leaving total > items.
+        if not str(r.get("media_id") or "").strip():
+            continue
         tid = str(r.get("task_id") or "")
         hit = by_task.get(tid) if tid else None
         if hit:

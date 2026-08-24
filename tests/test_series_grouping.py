@@ -325,3 +325,17 @@ def test_fold_series_units_keys_and_order():
     assert len(members[("series", "X1")]) == 2   # a + d
     assert len(members[("task", "Z")]) == 2      # b + c (batch collapses)
     assert len(members[("row", "e")]) == 1
+
+
+def test_fold_skips_blank_media_id_rows_like_the_ungrouped_path():
+    """A row with no media_id makes no card -- exactly as the ungrouped listing skips
+    it. Two such rows must NOT weld into one ('row','') unit, and none may open a unit
+    (a blank cover would later be dropped, leaving total > items)."""
+    rows = [
+        {"media_id": "a", "task_id": "Z", "created_at": "t1", "is_video": ""},
+        {"media_id": "", "task_id": "", "created_at": "t0", "is_video": ""},   # no id
+        {"media_id": None, "task_id": "", "created_at": "t0", "is_video": ""},  # no id
+    ]
+    unit_order, members = G.fold_series_units(rows, {})
+    assert unit_order == [("task", "Z")]          # only the real row; no ('row','') unit
+    assert ("row", "") not in members
