@@ -13770,6 +13770,26 @@ def main():
             _cli_job_finish(out, _job, error=e)
             raise
         _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
+        # Build any missing preview thumbnails so a plain --update (or full backup) leaves
+        # batch tiles renderable immediately. run_download writes image files + catalog rows
+        # but NO thumbs, and the /thumbs/<mid>.jpg route serves straight from the cache with
+        # no on-the-fly fallback -- so without this, freshly pulled images (esp. multi-image
+        # batches) have no thumbnail until the next --sync or a gallery-server start. Mirrors
+        # --sync's thumbnail tail; this is ONLY on the plain-download path (the --sync branch
+        # above runs its own build and returns, so it never double-runs). build_thumbnails
+        # skips thumbs already on disk, so a no-op update costs almost nothing -- and NOT
+        # force=True, which would rebuild every thumbnail. Fail-soft on purpose: a thumbnail
+        # hiccup must never crash a backup that already succeeded (the gallery server also
+        # rebuilds missing thumbs on its next start).
+        try:
+            thumb_dir = out / "gallery" / "thumbs"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            print("Building any missing preview thumbnails...")
+            _prog = getattr(args, "progress", None)
+            build_thumbnails(load_catalog(db_path), out, thumb_dir,
+                             progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
+        except Exception as e:                           # noqa: BLE001 -- additive, never fatal
+            vlog("thumbnail backfill after update skipped: {}".format(e))
     except PixAIError as e:
         sys.exit(str(e))
 

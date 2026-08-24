@@ -78,3 +78,38 @@ def test_sync_survives_reconcile_failure(monkeypatch, tmp_path, capsys, exc):
     out = capsys.readouterr().out
     assert "reconcile skipped" in out
     assert "Sync complete." in out
+
+
+def test_update_builds_missing_thumbnails(monkeypatch, tmp_path):
+    """A plain --update (not --sync) must backfill missing preview thumbnails. run_download
+    writes image files + catalog rows but no thumbs, so main() now mirrors --sync's thumbnail
+    tail on the plain-download path: build into out/gallery/thumbs straight from the catalog,
+    and NOT force=True (rebuild only the missing thumbs -- cheap on a no-op update). --sync must
+    still build exactly once: the plain-path addition sits behind the sync branch's own return,
+    so the two never both fire for one command."""
+    calls = []
+    seen = {}
+    _patch_chain(monkeypatch, calls)
+    # Override the chain's thumbnail stub with one that also captures the exact call args,
+    # so we can assert on the target dir and the force kwarg (the base stub discards **kw).
+    def _thumbs(rows, out_dir, thumb_dir, **kw):
+        calls.append("thumbnails")
+        seen.update(rows=rows, out_dir=out_dir, thumb_dir=thumb_dir, kw=kw)
+    monkeypatch.setattr(core, "build_thumbnails", _thumbs)
+
+    # --- plain --update: download, then the thumbnail backfill -- and nothing else
+    # (backfill / fix-models / reconcile are --sync-only). ---
+    monkeypatch.setattr(sys, "argv", ["prog", "--update", "--out", str(tmp_path)])
+    core.main()
+    assert calls == ["download", "thumbnails"]
+    assert seen["rows"][0]["media_id"] == "1"                       # fed straight from the catalog
+    assert seen["out_dir"] == tmp_path
+    assert seen["thumb_dir"] == tmp_path / "gallery" / "thumbs"     # canonical target
+    assert seen["kw"].get("force") in (None, False)                # missing thumbs only, never a full rebuild
+
+    # --- --sync must STILL build thumbnails exactly once (no double with the plain-path tail). ---
+    calls.clear()
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
+    core.main()
+    assert calls.count("thumbnails") == 1
+    assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
