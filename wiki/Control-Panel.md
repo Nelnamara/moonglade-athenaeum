@@ -18,8 +18,7 @@ Like every page in the gallery, it needs a login (see [Setup](Setup)).
 
 Images, videos and collections in your catalog, plus your live PixAI credit balance and
 free-card count. **⬇ Download catalog (CSV)** saves the whole catalog to your browser's
-Downloads — it does *not* write a file into your backup folder (the CLI's `--export-csv`
-still does that, for scripting).
+Downloads — it does *not* write a file into your backup folder.
 
 ## Running a maintenance job
 

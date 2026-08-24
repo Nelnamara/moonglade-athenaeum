@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
-                            save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
+                            save_catalog, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
                             # The one library scan (see moonglade_gallery.py's
@@ -69,21 +69,16 @@ from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, lo
 
 
 def _ensure_db(out):
-    """Return db_path after auto-migrating catalog.csv if the db is missing/empty.
+    """Return db_path, schema-migrated. Raises PixAIError if no catalog db exists.
 
-    Raises PixAIError if neither db nor csv exists.
+    The legacy catalog.csv auto-seed was retired 2026-08-24 (#19): a stale export
+    silently reseeding the catalog was a footgun, and catalog.db is the source of truth.
     """
     out = Path(out)
-    db_path  = out / "catalog.db"
-    csv_path = out / "catalog.csv"
+    db_path = out / "catalog.db"
     if _db_is_empty(db_path):
-        if csv_path.exists():
-            print("Migrating catalog.csv → catalog.db ...")
-            n = migrate_csv_to_db(csv_path, db_path)
-            print("Migrated {:,} rows.".format(n))
-        else:
-            raise PixAIError(
-                "No catalog found in {}. Run a download (or --collect-only) first.".format(out))
+        raise PixAIError(
+            "No catalog found in {}. Run a download (or --collect-only) first.".format(out))
     migrate(db_path)      # the CLI's entry point says the schema upgrade out loud; the
                           # catalog road's per-process memo makes it free from here on
     return db_path
@@ -12549,7 +12544,7 @@ def run_download(args, progress=None):
     raw_path = out / "raw_tasks.jsonl"
     db_path  = out / "catalog.db"
 
-    # Ensure db exists and is populated (auto-migrates catalog.csv if needed)
+    # Ensure the catalog db exists + is schema-migrated (raises if none; no CSV auto-seed, #19)
     try:
         db_path = _ensure_db(out)
     except PixAIError:
@@ -13235,8 +13230,6 @@ def main():
                          "recompressed copy') tier of GET /api/duplicates. Local Pillow work, no "
                          "network call -- --workers parallelizes it, --max caps how many rows "
                          "this run processes. Videos are skipped. Then exit.")
-    ap.add_argument("--export-csv", action="store_true",
-                    help="export catalog.db to catalog.csv for interop/backup, then exit")
     ap.add_argument("--sync-artworks", action="store_true",
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
                          "comments, aes score, tags) via listArtworks and merge it onto "
@@ -13551,7 +13544,6 @@ def main():
     out = Path(args.out)
     img_dir = out / "images"
     db_path  = out / "catalog.db"
-    csv_path = out / "catalog.csv"
     try:      # achievement telemetry: bare telem_* bumps land in this install's ledger
         from moonglade_gallery import set_telemetry_out
         set_telemetry_out(out)
@@ -13570,13 +13562,6 @@ def main():
             return
         if getattr(args, "sync_similar", False):
             run_sync_similar(args)
-            return
-        if args.export_csv:
-            if not db_path.exists():
-                sys.exit("No catalog.db found at {}.".format(db_path))
-            export_csv(db_path, csv_path)
-            print("Exported {:,} rows to {}.".format(
-                len(load_catalog(db_path)), csv_path))
             return
         if args.sync_artworks:
             # B15: same job-tracking + done_with_errors wiring --sync already has (see

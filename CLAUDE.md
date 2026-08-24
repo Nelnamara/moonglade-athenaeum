@@ -311,7 +311,6 @@ python moonglade_backup.py --backfill-full-meta --with-surface --workers 8   # g
 python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
 python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
 python moonglade_backup.py --catalog-stats            # summarize catalog.db
-python moonglade_backup.py --export-csv               # export catalog.db → CSV
 python moonglade_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
 python moonglade_backup.py --audit                    # read-only duplicate report → audit_report.csv
 python moonglade_backup.py --audit --no-content       # fast: same-media_id location dupes only

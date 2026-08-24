@@ -474,33 +474,9 @@ def _db_is_empty(db_path):
         return True
 
 
-def migrate_csv_to_db(csv_path, db_path):
-    """One-time migration: import catalog.csv into catalog.db.
-
-    Safe to re-run — existing rows are upserted, not duplicated.
-    Returns the number of rows imported.
-    """
-    csv_path = Path(csv_path)
-    if not csv_path.exists():
-        return 0
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    if not rows:
-        return 0
-    save_catalog(db_path, rows)
-    return len(rows)
-
-
-def export_csv(db_path, csv_path):
-    """Export catalog.db back to a CSV file (backup / interop)."""
-    rows = load_catalog(db_path)
-    csv_path = Path(csv_path)
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
-        writer.writeheader()
-        for r in rows:
-            writer.writerow({field: r.get(field, "") for field in CATALOG_FIELDS})
-
+# The legacy catalog.csv migrate/export helpers were retired 2026-08-24 (#19): the silent
+# auto-seed was a footgun and the on-disk dump was unused (catalog.db is the source of
+# truth). The web CSV *download* (/export-csv) is a separate, live feature and is unchanged.
 
 _SORT_SQL = {
     "oldest":      "created_at ASC",
@@ -7467,7 +7443,6 @@ def create_app(out_dir: Path):
     def export_csv_download():
         """Download the catalog as a CSV -- from the browser you get a real file (Downloads),
         not a copy silently written into the backup folder. Built in memory. Authorized only.
-        (The CLI --export-csv still writes to disk on purpose, for scripting.)
 
         Honours the gallery grid's OWN filter query string (?q=&model=&collection=&rating_min=
         &media=&from_year=...), so exporting from a filtered view exports that view rather
@@ -14109,15 +14084,11 @@ def main():
     # and let the server boot; the wizard banner is what guides them from there.
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    db_path  = out_dir / "catalog.db"
-    csv_path = out_dir / "catalog.csv"
+    db_path = out_dir / "catalog.db"
 
-    # Auto-migrate existing catalog.csv when db is missing or empty
-    if _db_is_empty(db_path) and csv_path.exists():
-        print("Migrating catalog.csv → catalog.db ...")
-        n = migrate_csv_to_db(csv_path, db_path)
-        print("Migrated {:,} rows.".format(n))
-    elif _db_is_empty(db_path):
+    # No catalog yet -> schema-init an empty db and boot; the setup wizard guides from
+    # there. The legacy catalog.csv auto-seed was retired 2026-08-24 (#19).
+    if _db_is_empty(db_path):
         init_db(db_path)
         print("No catalog yet in {} -- starting anyway. "
               "Use the setup wizard on the gallery's home page, "
