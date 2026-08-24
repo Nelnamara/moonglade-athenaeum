@@ -5,7 +5,7 @@ import { apiGet } from "../api.js";
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import CostBadge from "./CostBadge.jsx";
-import ModelPicker from "./ModelPicker.jsx";
+import { idleReason } from "./upscaleIdle.js";
 import "../styles/upscale-panel.css";
 
 /* UpscalePanel -- the React port of static/mg-upscale-panel.js's <mg-upscale-panel>: PixAI's
@@ -24,12 +24,19 @@ import "../styles/upscale-panel.css";
    Ported 2026-08-08 (no-vanilla campaign step 5). Kept a forwardRef + useImperativeHandle component
    so the consumers' imperative contract survives verbatim: upEl.current.open(mediaIdOrRow) /
    .close(), plus isOpen()/isClosing() replacing the desktop Lightbox's .hasAttribute("open")/
-   ("closing") reads. Embeds the shared React CostBadge (the cost line) and ModelPicker (the model
-   override) -- the latter also REPAIRS a regression: the vanilla did createElement('mg-model-picker')
-   gated on customElements.get('mg-model-picker'), which has returned undefined since that element
-   was ported to React ModelPicker (campaign step 3, file deleted), so the "Choose a model" override
-   showed "picker not loaded" for un-modeled images. (Upscale itself always worked -- it falls back
-   to core's UPSCALE_FALLBACK_VERSION_ID.)
+   ("closing") reads. Embeds the shared React CostBadge (the cost line).
+
+   NO MODEL CONTROL (2026-08-23). This panel has no ModelPicker and no "choose a model" affordance
+   at all -- it always upscales with the SOURCE IMAGE'S OWN model version, automatically, exactly
+   like PixAI's site. PixAI's upscale dialog has no model control: their submit spreads the
+   enlarge/upscale params, sets a FIXED model version and takes prompts/width/height off the
+   source's original task (../moonglade-internal/DECISIONS.md, "An upscale does not choose a model,
+   and the catalog's model_id is a VERSION id", 2026-07-27). The earlier port carried a
+   "Choose a model" override that contradicted that decision and produced the owner's long-standing
+   "upscale asks for a model" complaint; it is gone. The catalog's model_id is a model VERSION id,
+   so it travels as version_id; a source with no recorded model falls back to core's
+   UPSCALE_FALLBACK_VERSION_ID (served via window.MG_UPSCALE), which is PixAI's own upscale model.
+   The model note beside the cost is now purely informational ("<name> · from this image").
 
    Props: `inline` (render in flow -- the detail pages/mobile sheets -- vs a fixed flyout modal);
    `onDone({media_id, task_id})` optional, fired once a submit is accepted (the old bubbling
@@ -83,7 +90,6 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const [scalerOpen, setScalerOpen] = useState(false);
   const [denoise, setDenoise] = useState(0.6);
   const [denoiseSteps, setDenoiseSteps] = useState(26);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [msg, setMsg] = useState(null);            // {text, bad}
   const [busy, setBusy] = useState(false);
 
@@ -92,7 +98,6 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const closeTimer = useRef(0);
   const busyRef = useRef(false);
   const rootRef = useRef(null);
-  const pickHostRef = useRef(null);
   const scalerWrapRef = useRef(null);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -114,12 +119,22 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   // price what Go would submit, is the same split that let a disabled control charge; the
   // payload already carries fallbackVersion() as its version_id, so the quote is for exactly
   // what submits.
+  // ...and never with an effective ratio of 1 or below: a ratio <= 1 is not an upscale at all,
+  // and the server's _upscale_ratio silently DROPS it -- so submitting one is a paid same-size
+  // re-render, exactly the "upscale failed" the owner hit at the size ceiling. ratioDisabled is
+  // already true whenever mx <= 1, but the explicit effRatio > 1 makes "a submit can never send
+  // ratio <= 1" a local, provable property of this predicate rather than a consequence to trace.
   const goReady = phase !== "closed" && !!((src && src.model_id) || fallbackVersion())
-    && !isVideo && !ratioDisabled;
+    && !isVideo && !ratioDisabled && effRatio > 1;
 
-  // A shrinking cap (mode/image change) clamps the stored ratio so the thumb never exceeds max.
+  // A shrinking cap (mode/image change) clamps the stored ratio so the thumb never exceeds max --
+  // but ONLY when there is real headroom (mx > 1). Clamping to mx when mx is 1 (the source is at
+  // PixAI's pixel ceiling for this method) used to drag the stored ratio down to 1.0; switching
+  // to a method WITH headroom then carried that 1.0 into a submit, which _upscale_ratio drops ->
+  // a paid no-op. So the stored ratio keeps its last real value (>= the 1.1 slider floor) and is
+  // only ever pulled DOWN to a smaller-but-still-real cap.
   useEffect(() => {
-    if (mx && ratio > mx) setRatio(mx);
+    if (mx > 1 && ratio > mx) setRatio(mx);
   }, [mx, ratio]);
 
   let ratioMaxNote = "", dimsNote = "";
@@ -138,29 +153,35 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     ? (src.width + "×" + src.height + " source") : "This image has no recorded size.";
   const modeHint = (MODES.find((m) => m.key === mode) || MODES[0]).hint;
 
-  let modelNote = "", showPickBtn = false;
-  if (src && src.model_id) {
-    modelNote = (src.model_name || src.model_id) + (src.model_picked ? " · chosen" : " · from this image");
-  } else if (src && !isVideo) {
-    showPickBtn = true;
-    modelNote = src.local_import
-      ? "You imported this file, so PixAI has no record of which model made it. Upscaling with "
-        + "PixAI’s own upscale model — pick a different one if you’d rather."
-      : "Your catalog does not know which model made this image, so it will upscale with PixAI’s "
-        + "own upscale model. Pick a different one, or fill the catalog in with:  --backfill-full-meta";
+  // PURELY INFORMATIONAL. The upscale always uses the source's OWN model version automatically
+  // (see the header note and DECISIONS 2026-07-27) -- there is no model to pick and none to
+  // supply, so this only NAMES the model the picture was made with. A source with no recorded
+  // model shows a neutral "from this image" and never a prompt: it upscales under PixAI's own
+  // upscale model, which is exactly what the site does.
+  let modelNote = "";
+  if (src && !isVideo) {
+    modelNote = (src.model_id)
+      ? ((src.model_name || src.model_id) + " · from this image")
+      : "from this image";
   }
 
   // ---- the SAME body /api/price + /api/generate take from the drawer (verbatim _payload) -------
   const payload = () => {
     const s = src || {};
-    const r = ratioDisabled ? null : effRatio;
+    // Never carry a ratio of 1 or below: _upscale_ratio drops it server-side, so it would price
+    // and submit a same-size no-op. goReady already gates on effRatio > 1; this keeps the priced
+    // body honest even in a transient render where the two are momentarily out of step.
+    const r = (ratioDisabled || !(effRatio > 1)) ? null : effRatio;
     const body = {
-      // From the image: the catalog's model_id is the task's submitted `modelId` = a VERSION id
-      // (goes out as version_id; as model_id it hits the model->versions lookup, matches nothing,
-      // "pick a model first"). From the picker: a real MODEL id the server resolves to its current
-      // version. Nothing -> the version PixAI's own upscale submits.
-      model_id: s.model_picked ? (s.model_id || "") : "",
-      version_id: s.model_picked ? "" : (s.model_id || fallbackVersion()),
+      // The upscale always uses the source's OWN model version -- there is no model UI (PixAI's
+      // upscale dialog has none; DECISIONS 2026-07-27). The catalog's model_id is the task's
+      // submitted `modelId`, which IS a model VERSION id, so it travels as version_id (as model_id
+      // it hits the model->versions lookup, matches nothing, "pick a model first"). model_id is
+      // therefore ALWAYS empty here, and the server's model_version_resolver leaves a
+      // version_id-only body untouched -- the source's own version, exactly like the site. A
+      // source with no recorded model falls back to PixAI's own upscale model version.
+      model_id: "",
+      version_id: s.model_id || fallbackVersion(),
       prompt: s.prompt || "",
       negative: s.negative || "",
       width: parseInt(s.width, 10) || 0,
@@ -185,12 +206,15 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
 
   /* The shared price probe (gen/usePriceProbe.js) owns the debounce, the seq guard, the abort
      timeout and the payload-identity spend gate; this panel supplies the payload and the ONE
-     predicate above. Idle only when Go itself is impossible -- a plain clear() back to the
-     badge's own hint. (A failed fetch still passes null, which is the badge's red
+     predicate above. When Go is impossible the probe clears the badge to a one-shot hint: the
+     REAL reason (idleReason -- at the size ceiling, no recorded dimensions, a video), never the
+     old "the cost appears once this image has a model", which was a misdirection since an upscale
+     needs no model at all. (A failed fetch still passes null, which is the badge's red
      could-not-verify state, NOT clear(); the probe keeps that distinction.) */
-  const build = useCallback(() => ({ payload: payload(), idle: goReady ? null : true }),
+  const build = useCallback(
+    () => ({ payload: payload(), idle: goReady ? null : idleReason(src, mode, mx) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [src, mode, ratio, effRatio, scaler, denoise, denoiseSteps, ratioDisabled, goReady]);
+    [src, mode, ratio, effRatio, scaler, denoise, denoiseSteps, ratioDisabled, goReady, mx]);
   // Closed, the panel holds no armed timer and no request out (its consumers keep it mounted
   // between opens); re-opening forces a re-price, because the badge is idle again on screen.
   const probe = usePriceProbe({ build, costRef, enabled: phase !== "closed" });
@@ -218,30 +242,12 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     };
   }, [scalerOpen]);
 
-  // Reveal the picker at the top of the scroll container (the flyout IS the scroll container) and
-  // land focus in the search box -- the vanilla's _openPicker courtesy.
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const host = pickHostRef.current, root = rootRef.current;
-    if (!host || !root) return;
-    requestAnimationFrame(() => {
-      if (root.scrollHeight > root.clientHeight + 1) {
-        root.scrollTop = Math.max(0, host.offsetTop - root.offsetTop - 8);
-      } else {
-        try { host.scrollIntoView({ block: "nearest" }); } catch { /* older engines */ }
-      }
-      const q = host.querySelector("input");
-      if (q && q.focus) q.focus();
-    });
-  }, [pickerOpen]);
-
   // ---- imperative handle: the consumers' open/close contract, verbatim ------------------------
   useImperativeHandle(ref, () => ({
     open(what) {
       clearTimeout(closeTimer.current);
       setPhase("open");
       setMsg(null);
-      setPickerOpen(false);
       const mine = ++openSeq.current;
       // A slow first /api/image-meta landing after a second open() is discarded, so the panel --
       // and the PAID submit it is one click from making -- never binds to a stale picture.
@@ -279,18 +285,6 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
       closeTimer.current = setTimeout(() => setPhase("closed"), 340);
       return "closing";
     });
-  };
-
-  const onModelPick = (row) => {
-    if (!row || !row.model_id) return;
-    // Recorded on the source so every later price/submit carries it, flagged CHOSEN (the panel
-    // says which it is -- upscaling under a model the picture was not made with changes its look).
-    setSrc((s) => Object.assign({}, s, {
-      model_id: String(row.model_id),
-      model_name: row.title || String(row.model_id),
-      model_picked: true,
-    }));
-    setPickerOpen(false);
   };
 
   // ---- the spend: through the ONE submit road, like every other cost line ---------------------
@@ -445,26 +439,14 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
             </div>
           )}
 
+          {/* Purely informational: this picture's own model, used automatically. There is no
+              model control -- PixAI's upscale dialog has none (DECISIONS 2026-07-27). */}
           <div className="mgu-lbl">Model</div>
           <div className="mgu-note">{modelNote}</div>
-          {showPickBtn && !pickerOpen && (
-            <button
-              type="button" className="mgu-sel"
-              style={{ cursor: "pointer", textAlign: "left" }}
-              onClick={() => setPickerOpen(true)}
-            >
-              Choose a model…
-            </button>
-          )}
-          {pickerOpen && (
-            <div ref={pickHostRef} data-mgu="picker">
-              <ModelPicker kind="base" visible onPick={onModelPick} />
-            </div>
-          )}
 
           <CostBadge
             ref={costRef}
-            hint="The cost appears once this image has a model."
+            hint="Choose a ratio to see the cost."
             cardLabel="a card"
           />
 

@@ -6,6 +6,7 @@ network, no spend."""
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -676,8 +677,11 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
         "the no-model case must still submit via the fallback, not dead-disable Go"
     assert "const canGo = goReady && probe.canSubmit;" in src, \
         "Go is the panel's own readiness AND a price settled for THIS payload"
-    assert "idle: goReady ? null : true" in src, \
-        "the badge must price whenever Go is possible -- one predicate, not two"
+    # The badge prices whenever Go is possible; when it is NOT, the probe clears the badge to the
+    # REAL reason (idleReason), never the old single "the cost appears once this image has a model"
+    # hint -- an upscale needs no model, so a missing model is never the blocker.
+    assert "idle: goReady ? null : idleReason(src, mode, mx)" in src, \
+        "an unpriceable state must show its real reason, not a static model hint"
     assert "disabled={!canGo || busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
@@ -686,19 +690,72 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
 
 def test_upscale_sends_the_images_model_as_a_version_id():
     """The catalog's model_id is the task's submitted `modelId`, which IS a model VERSION
-    id -- so an upscale must send it as version_id.
+    id -- so an upscale sends it as version_id, and model_id is ALWAYS empty.
 
     Sent as model_id it entered /api/generate's model->versions lookup, matched nothing,
     and came back "pick a model first" on a picture whose model the panel was displaying
-    on screen. Only a model chosen in the PICKER is a real model id.
+    on screen. There is no picker any more (the panel has no model control at all -- see
+    test_upscale_panel_has_no_model_control), so the only shape is the automatic one: the
+    source's own version id, or the served fallback when the catalog recorded none. The
+    server's model_version_resolver leaves a version_id-only body (model_id empty) untouched,
+    which is exactly PixAI's "fixed model version off the source's task".
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
     body = src[src.index("const payload = ()"):src.index("const build = useCallback(")]
-    assert 'model_id: s.model_picked ? (s.model_id || "") : ""' in body, \
-        "only a PICKED model may travel as model_id"
-    assert 'version_id: s.model_picked ? "" : (s.model_id || fallbackVersion())' in body, \
-        "the image's own model id is a version id and must travel as version_id"
+    assert 'model_id: ""' in body, \
+        "an upscale never sends a model_id -- it uses the source's own model version"
+    assert "version_id: s.model_id || fallbackVersion()" in body, \
+        "the image's own model id is a version id and must travel as version_id, else the fallback"
+    # The 'picked' mode is gone entirely: no branch of the payload is conditional on a user pick.
+    assert "model_picked" not in body, \
+        "the panel no longer has a 'picked model' mode -- an upscale chooses no model"
+
+
+def _code_only(s):
+    """The UpscalePanel source with comments stripped, mirroring the JS structural tests'
+    codeOnly: the component's own docs legitimately DISCUSS "pick a model" / "Choose a model"
+    while explaining why those affordances were removed, so a raw substring check would trip on
+    the very prose that documents their absence. Block comments (incl. JSX {/* */}) and full-line
+    // comments go; inline URLs/operators on code lines are untouched."""
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    s = re.sub(r"(?m)^\s*//.*$", "", s)
+    return s
+
+
+def test_upscale_panel_has_no_model_control():
+    """The Upscale panel has NO model UI at all -- it always uses the source image's own model
+    version automatically, exactly like PixAI's site (which has no model control in its upscale
+    dialog: DECISIONS 2026-07-27, "An upscale does not choose a model...").
+
+    The panel's earlier "Choose a model" override contradicted that decision and produced the
+    owner's long-standing "upscale asks for a model" complaint. It is removed: no ModelPicker,
+    no picked-mode, and no string that implies the user picks or must supply a model. The price
+    probe's single "the cost appears once this image has a model" hint -- the misdirection the
+    owner hit on at-ceiling images -- is replaced by the real blocker (idleReason).
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    code = _code_only(src)
+    # The picker component and its handler are gone from the code entirely.
+    assert "ModelPicker" not in code, "the ModelPicker override must be removed, import and use"
+    assert "<ModelPicker" not in code
+    assert "model_picked" not in code, "the panel no longer has a picked-model mode"
+    assert "onModelPick" not in code
+    # No CODE string tells the user to pick/supply a model. (These phrases survive only in the
+    # doc comments that explain why the affordance is gone, which _code_only removes.)
+    for phrase in ("Choose a model", "pick a model", "has a model", "picker not loaded"):
+        assert phrase not in code, "a model-choice string survived in the panel code: " + phrase
+    # It always uses the source's own version; model_id is unconditionally empty.
+    assert 'model_id: ""' in src
+    # Go is gated on a real upscale ratio (> 1): a ratio <= 1 is not an upscale, and the server's
+    # _upscale_ratio drops it -- submitting one is a paid same-size no-op. This is the ceiling/clamp
+    # trap the owner's "upscale failed" most likely was.
+    assert "effRatio > 1" in src, "Go must never allow an effective ratio of 1 or below"
+    assert "if (mx > 1 && ratio > mx) setRatio(mx)" in src, \
+        "the clamp must not drag the stored ratio down to 1.0 at the pixel ceiling"
+    # The informational model note stays -- it NAMES the source's model, it does not offer a choice.
+    assert '" · from this image"' in src
 
 
 def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path, pixai):
