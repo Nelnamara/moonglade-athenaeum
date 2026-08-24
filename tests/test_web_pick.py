@@ -700,8 +700,19 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
         def close(self):
             pass
 
+        # rows_for_media_ids now opens through the catalog() context manager, so the
+        # fake connection is what that context yields; __enter__/__exit__ let this same
+        # object stand in for `with catalog(db_path) as con:`. (Re-pinned from the old
+        # g._connect patch, which convert-to-catalog turned into a no-op.)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+            return False
+
     import unittest.mock as mock
-    with mock.patch.object(g, "_connect", return_value=FakeCon()):
+    with mock.patch.object(g, "catalog", return_value=FakeCon()):
         rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
     assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
 

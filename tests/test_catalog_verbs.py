@@ -626,6 +626,30 @@ def test_the_structural_check_can_actually_fail():
     assert not any("Delete from PixAI" in f for f in found)   # prose stays prose
 
 
+def test_no_helper_opens_the_catalog_through_the_retired_connect_alias():
+    """The catalog-connect increment (2026-08-24) converted the last module-level
+    helpers off the deprecated `_connect()` alias to `with catalog(db_path) as con:`
+    and then retired `_connect` itself. Prove it stays retired: moonglade_gallery
+    defines no `_connect` function and NOTHING calls `_connect(...)` anywhere in the
+    module -- not just inside create_app (that is test_no_catalog_sql's job), but in
+    the helper set the alias existed for. A helper that grows its own
+    `con = _connect(db_path)` / `con.close()` pair again fails right here.
+
+    Walks the AST, so the substring `_connect` that still lives in the historical
+    comment block and the catalog() docstring -- prose about how the road used to
+    work -- is never mistaken for a definition or a call."""
+    tree = ast.parse(Path(g.__file__).read_text(encoding="utf-8"))
+    defs = [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_connect"]
+    calls = [n.lineno for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "_connect"]
+    assert not defs, "`_connect` was re-defined -- the alias was retired on purpose"
+    assert not calls, (
+        "a helper opens the catalog through `_connect(...)` again at line(s) {} -- "
+        "use `with catalog(db_path) as con:` instead".format(calls))
+
+
 def test_every_catalog_verb_returns_plain_data(tmp_path):
     """A verb hands back dicts and lists -- never a sqlite3.Row, never a live
     connection. A Row leaking out is how SQL creeps back into a handler: it is only
