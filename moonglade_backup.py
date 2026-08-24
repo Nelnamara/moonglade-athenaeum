@@ -5842,6 +5842,11 @@ def run_sync_artworks(args):
                          "Add USER_ID to config.json as a fallback.")
 
     by_mid = {}                      # media_id -> artwork fields
+    by_video_mid = {}                # videoMediaId -> artwork fields. An animation's
+                                     # catalog row is keyed by its MP4's media_id (is_video
+                                     # '1'), not the poster mediaId that `by_mid` holds, so
+                                     # without this map the video row never receives an
+                                     # artwork_id and the Animations tab stays empty (#20).
     videos = []                      # (video_media_id, title) for animated artworks
     with_videos = getattr(args, "with_videos", False)
     artworks = 0
@@ -5881,6 +5886,7 @@ def run_sync_artworks(args):
             vmid = node.get("videoMediaId")
             if vmid:
                 videos.append((str(vmid), meta.get("title") or node.get("id")))
+                by_video_mid[str(vmid)] = meta      # tag the animation's own row too (#20)
         print("  page {}: {} artworks (total {})".format(page, len(edges), artworks))
         if _prog:
             _prog(artworks, artworks, 0)
@@ -5894,7 +5900,9 @@ def run_sync_artworks(args):
     rows = load_catalog(db_path)
     matched = 0
     for r in rows:
-        m = by_mid.get(r.get("media_id"))
+        # match a row by its own media_id (still artworks) OR by a videoMediaId
+        # (animations, whose row is keyed by the mp4) -- #20.
+        m = by_mid.get(r.get("media_id")) or by_video_mid.get(r.get("media_id"))
         if not m:
             continue
         for k, v in m.items():
