@@ -11679,10 +11679,11 @@ def create_app(out_dir: Path):
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
-<link rel="icon" href="/branding/favicon.ico">
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
 <meta name="theme-color" content="#0a0818">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
@@ -11736,10 +11737,11 @@ __UPSCALE_CONST__
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
-<link rel="icon" href="/branding/favicon.ico">
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
 <meta name="theme-color" content="#0a0818">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
