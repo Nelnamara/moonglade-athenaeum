@@ -283,6 +283,23 @@ describe("host wiring source guards (no React harness in this suite)", () => {
     assert.doesNotMatch(ctx, /target\.isVideo \? \[\] :/);
   });
 
+  test("#28: the mousedown outside-close SKIPS clicks inside the menu (else every action no-ops)", () => {
+    // The capture-phase window mousedown listener must not close+unmount the menu on a menu
+    // item's OWN mousedown -- that fired before the item's onClick could run, so the WHOLE
+    // menu was a silent no-op. It now guards on ref.current.contains(e.target).
+    assert.ok(ctx.includes("const onDownOutside = (e) => { if (!(ref.current && ref.current.contains(e.target))) onClose(); };"));
+    assert.ok(ctx.includes('window.addEventListener("mousedown", onDownOutside, true);'));
+    // the old unconditional close-on-any-mousedown is gone
+    assert.ok(!ctx.includes('window.addEventListener("mousedown", close, true);'));
+  });
+
+  test("#28 scope-add: a video row gets a 'Rebuild poster' item; App wires it + imports the helper", () => {
+    assert.ok(ctx.includes('...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : [])'));
+    const app = src("gallery/src/App.jsx");
+    assert.ok(app.includes("onRebuildPoster: (mid) => rebuildPoster(mid)"));
+    assert.ok(app.includes("resolveVideoIds, rebuildPoster,"));
+  });
+
   test("DetailsView: Remix is no longer is_video-guarded, and ▶ Send to Video sends a video's source frame", () => {
     assert.match(details, /onVideo,/);                       // the new prop is destructured
     assert.match(details, />↺ Remix<\/button>/);

@@ -30,15 +30,21 @@ export default function GridContextMenu({ target, onClose, actions }) {
   }, [target.x, target.y]);
 
   useEffect(() => {
+    // Outside-click close. The capture-phase mousedown listener MUST skip clicks INSIDE the
+    // menu (#28): otherwise it closes -- unmounts -- the menu on a menu item's OWN mousedown,
+    // before that item's onClick can fire its action, so EVERY action was a silent no-op
+    // ("right-click Remix dead" -- in fact the whole menu was dead). The wrapper's
+    // bubble-phase onMouseDown stopPropagation can't help: a window capture listener fires
+    // first. (scroll/resize/Escape still close unconditionally -- there's no "inside" for them.)
+    const onDownOutside = (e) => { if (!(ref.current && ref.current.contains(e.target))) onClose(); };
     const close = () => onClose();
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    // capture:true so a click anywhere (including inside other overlays) closes it first.
-    window.addEventListener("mousedown", close, true);
+    window.addEventListener("mousedown", onDownOutside, true);
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mousedown", close, true);
+      window.removeEventListener("mousedown", onDownOutside, true);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", onKey);
@@ -55,6 +61,9 @@ export default function GridContextMenu({ target, onClose, actions }) {
     // so the item is offered on every row -- the same reason the Details footer no longer
     // hides its Remix button on videos.
     ["↺", "Remix", () => actions.onRemix(target.mid)],
+    // #28 scope-add: videos only -- re-extract this clip's poster on demand (same
+    // POST /api/rebuild-poster route as Image Details' button). Gated on target.isVideo.
+    ...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : []),
     ["✧", "Find similar", () => actions.onSimilar(target.mid)],
     ["⧉", "Copy id", () => actions.onCopyId(target.mid)],
     ["⤢", "Open details", () => actions.onDetails(target.mid)],

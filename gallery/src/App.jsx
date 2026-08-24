@@ -26,7 +26,7 @@ import useClaimModal from "./hooks/useClaimModal.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
-  apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds,
+  apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
 import { buildUrl, readPage, readImage } from "./gen/urlState.js";
@@ -678,6 +678,13 @@ export default function App({ boot }) {
     onSimilar: (mid) => setSimilarFor(mid),
     onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
     onDetails: openDetails,
+    // #28: rebuild a video's poster straight from the grid (the menu gates this on
+    // target.isVideo). Same route + toast as Image Details' "Rebuild poster" button.
+    onRebuildPoster: (mid) => rebuildPoster(mid).then((d) => {
+      if (window.Toast) window.Toast.show(d && d.ok
+        ? { kind: "ok", title: "Poster rebuilt" }
+        : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
+    }),
   };
   /* ✧ Similar from the Lightbox's chip or Details' "see all N" NAVIGATES here: the viewer
      (and the record) close and the gallery's own lookalike set -- the same SimilarModal the
