@@ -140,6 +140,33 @@ def test_the_receipt_records_the_asked_for_value_not_the_defaulted_one(tmp_path,
         "an unparseable steps became the default 25, which is not a clamp firing")
 
 
+def test_an_upscale_ratio_over_the_dimension_ceiling_is_named_in_the_response(tmp_path, monkeypatch):
+    """The enlarge/upscale CEILING clamp is a substitution on a paid path exactly like the
+    width/steps/cfg clamps: a 1400x784 source tops out at Hires 1.4, so a POSTed upscale of
+    1.9 is rendered and billed at 1.4. It rides the same `adjusted` receipt now instead of
+    being lowered in silence -- asked 1.9, used 1.4."""
+    body = {}
+    params = _generate_capture(tmp_path, monkeypatch, {
+        "version_id": "V1", "prompt": "a night elf druid",
+        "width": 1400, "height": 784, "upscale": 1.9}, out=body)
+    assert params["upscale"] == 1.4                      # what was actually submitted and billed
+    by_field = {a["field"]: a for a in body["adjusted"]}
+    assert by_field["upscale"] == {"field": "upscale", "asked": 1.9, "used": 1.4}, body["adjusted"]
+
+
+def test_an_upscale_ratio_within_the_dimension_ceiling_is_not_a_clamp(tmp_path, monkeypatch):
+    """The same 1.9 is legal in enlarge mode on that size (its ceiling is 1.9), so nothing is
+    substituted and no receipt entry appears -- a within-ceiling ratio must pass through
+    untouched, like any other in-range control."""
+    body = {}
+    params = _generate_capture(tmp_path, monkeypatch, {
+        "version_id": "V1", "prompt": "x",
+        "width": 1400, "height": 784, "enlarge": 1.9}, out=body)
+    assert params["enlarge"] == 1.9
+    assert "adjusted" not in body, (
+        "a within-ceiling upscale was not rewritten, so its response must carry no receipt")
+
+
 # ---------------------------------------------------------------------------
 # M21 -- a failed Fix leaves a trail, like every other spend route
 # ---------------------------------------------------------------------------
