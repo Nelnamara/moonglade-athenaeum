@@ -16,6 +16,7 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Fixed: three round-two follow-ups (2026-08-24) — importing a task **by id** now shows *already in your library — nothing new to fetch* on **mobile** too (the phone Control panel still read the misleading "imported — 0 added"); **The Loom**'s browser tab now loads the same `/branding/favicon.png` icon the gallery and login pages already got; and the **login** fields (username, password, confirm password) carry accessible names now, so a screen reader announces each one.
 - Fixed: **`--update` now builds missing thumbnails** (previously only `--sync`/server-start did), so batch tiles show right after a plain update. (2026-08-23)
 - Fixed: **the browser tab icon loads again** (2026-08-24). Both served shells asked for `/branding/favicon.ico`, but no `.ico` bytes ship — the favicon is a plain `favicon.png` — so the tab icon 404'd on every page, including the pre-sign-in login screen; `rel=icon` now points at the PNG through the same public `/branding` route, and the mobile-web-app meta is current (the modern `mobile-web-app-capable` sits beside the retained Apple one for older iOS).
 - Fixed: importing a task **by id** now says *already in your library — nothing new to fetch* when the task is already in your catalogue, instead of the misleading "imported — 0 added"; and on mobile, **Create ▸ Video** and the **LoRA picker list** scroll again (both were stuck — a touch-drag couldn't start a scroll). (2026-08-23)

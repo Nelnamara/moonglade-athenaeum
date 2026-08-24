@@ -413,7 +413,9 @@ export default function ControlMobile({ account }) {
           </div>
           <div className={"mgcp-tilenote" + (taskState === "running" ? " busy" : taskState?.done ? " ok" : "")}>
             {taskState === "running" ? "⟳ resolving the task on PixAI…"
-              : taskState?.done ? "✓ imported — " + taskState.saved + " added to the catalog"
+              : taskState?.done ? (taskState.already
+                ? "✓ already in your library — nothing new to fetch"
+                : "✓ imported — " + taskState.saved + " added to the catalog")
               : taskState?.error ? "⚠ " + taskState.error
               : "spends nothing — edits and Favorites strays Sync misses"}
           </div>
