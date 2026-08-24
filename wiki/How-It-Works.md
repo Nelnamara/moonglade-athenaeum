@@ -56,8 +56,8 @@ Task summaries carry `mediaId` / `batchMediaIds`, not URLs. Full-res comes from
 ## The catalog (`catalog.db`)
 SQLite, one row per media, keyed by `media_id`. All I/O goes through helpers in
 `moonglade_gallery.py`. Schema migrations live in **three places**: `CATALOG_FIELDS`,
-the `_CREATE_TABLE` DDL, and `_MIGRATIONS` (run on every connect, so existing DBs
-auto-upgrade). Columns span identity/timing, full meta (prompt/seed/steps/sampler/
+the `_CREATE_TABLE` DDL, and `_MIGRATIONS`. `migrate()` runs them once per process, on the first `catalog()`
+open for a path and memoized after, so existing DBs still auto-upgrade on first touch. Columns span identity/timing, full meta (prompt/seed/steps/sampler/
 cfg/model/loras/negative/clip-skip), published-artwork data, video fields, `source`
 (online/api/local), and `deleted_remote`.
 
@@ -95,10 +95,12 @@ not part of an `out_dir` backup; a fresh machine rebuilds it rather than restori
 2. **Resume is keyed on media id, checked before any network call.**
 3. **Incomplete/zero-byte files don't count as done**; downloads are atomic (`*.part` → replace).
 4. **`catalog.db` is the source of truth.**
-5. **`find_files_for_media_id` recognizes both naming layouts** — but it isn't one shared
-   matcher yet. Only the gallery calls it today; resume, the audit, and `--organize` each still
-   walk the tree independently with their own exclusion set. Consolidating onto a single matcher
-   is open work, not yet done.
+5. **The library folder is walked through one scanner** — `scan_library()` for the whole tree and
+   `files_for()` for a single media id, in the `LIBRARY SCAN` section, which own what a walk skips and
+   which extensions count. The ten callers that each used to walk the tree with their own exclusion set
+   (resume, the audit, `--organize`, `--import-local`, the Health page, the disk counter, the Similar
+   index and three more) now share it (2026-08-23); `find_files_for_media_id` recognizes both naming
+   layouts and rides the same scan.
 
 ## Testing
 Run `python -m pytest -q` from the repo root — pure functions, filesystem, catalog,
