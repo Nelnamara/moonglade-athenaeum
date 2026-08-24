@@ -6229,7 +6229,8 @@ def create_app(out_dir: Path):
         try:
             session = core._make_session(None)
             conn = core.find_connection(
-                core.gql(session, core.page_variables(WATCH_CATCHUP_TASKS)))
+                core.gql(session, core.page_variables(
+                    WATCH_CATCHUP_TASKS, core._client_of(session).user_id)))
             edges = (conn or {}).get("edges") or []
             missed = []
             for edge in edges:
@@ -8417,7 +8418,7 @@ def create_app(out_dir: Path):
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
                     lora_base_type=(base_type if usage == "LORA" else ""),
-                    author_id=core.USER_ID or "")
+                    author_id=core._client_of(session).user_id or "")
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
             # to fall through to REST, whose own docstring says it "silently ignores market

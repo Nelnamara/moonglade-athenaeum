@@ -1391,7 +1391,8 @@ def _quick_count(session, page_size=500):
         before = None
         total = 0
         while True:
-            conn = find_connection(gql(session, page_variables(page_size, before)))
+            conn = find_connection(gql(session, page_variables(
+                page_size, _client_of(session).user_id, before)))
             if not conn:
                 break
             for edge in conn.get("edges", []):
@@ -2368,8 +2369,15 @@ def download(session, url, stem, retries=3, convert=None,
             return ("fail", None)
 
 
-def page_variables(page_size, before=None):
-    v = {"last": page_size, "userId": USER_ID}
+def page_variables(page_size, user_id, before=None):
+    """History-feed query variables for `listUserTaskSummaries`.
+
+    `user_id` is passed in explicitly -- every call site already holds the session/client
+    this run authenticated as, so it reads `_client_of(session).user_id` and hands it here.
+    This helper no longer reaches for the module-level `USER_ID` global (it had no session
+    parameter, which is what made that global hard to retire): the account id now travels on
+    the client, not in a global the whole module shared."""
+    v = {"last": page_size, "userId": user_id}
     if before:
         v["before"] = before
     return v
@@ -4711,7 +4719,10 @@ def _make_session(token_val):
         else:
             raise PixAIError("config.json needs USER_ID (or set PIXAI_API_KEY to "
                              "auto-resolve it).")
-    return PixAIClient(session, auth_kind="api-key")
+    # Hand the resolved account id to the client so `client.user_id` carries it directly.
+    # The module global stays as the config seed / resolution home and the client's own
+    # `or USER_ID` fallback, but business logic now reads the id off the client, not here.
+    return PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
 
 
 # ===========================================================================
@@ -5564,7 +5575,8 @@ def run_probe(args):
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
     print("Fetching newest page...\n")
-    conn = find_connection(gql(session, page_variables(args.page_size)))
+    conn = find_connection(gql(session, page_variables(
+        args.page_size, _client_of(session).user_id)))
     if not conn:
         print("No connection found.")
         return
@@ -5660,7 +5672,8 @@ def run_count(args):
     batched_tasks = 0
     while True:
         page += 1
-        conn = find_connection(gql(session, page_variables(count_size, before)))
+        conn = find_connection(gql(session, page_variables(
+            count_size, _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges", [])
@@ -5706,7 +5719,8 @@ def run_count(args):
 def artwork_list_gql(session, before=None, last=50):
     """GET listArtworks for the owner's own authorId. Returns the Relay
     connection dict (edges + pageInfo) or None on failure."""
-    variables = {"authorId": str(USER_ID), "last": last, "tackLanguage": "en"}
+    variables = {"authorId": str(_client_of(session).user_id), "last": last,
+                 "tackLanguage": "en"}
     if before:
         variables["before"] = before
     # Rides the one transport seam (PixAIClient.persisted): same operationName, same
@@ -5779,7 +5793,7 @@ def run_sync_artworks(args):
     # isn't pinned in config.json. (Checking before this was the bug: it hard-failed on a config
     # that never lists USER_ID even though the key can resolve it.)
     session = _make_session(getattr(args, "token", None))
-    if not USER_ID:
+    if not _client_of(session).user_id:
         raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
                          "Add USER_ID to config.json as a fallback.")
 
@@ -5934,7 +5948,8 @@ def run_sync_videos(args):
     i2v_nodes, before, scanned = [], None, 0
     while True:
         conn = find_connection(gql(session, page_variables(
-            getattr(args, "page_size", 250) or 250, before)))
+            getattr(args, "page_size", 250) or 250,
+            _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -10202,7 +10217,7 @@ def run_account_info(args):
         credits = "{:,}".format(int(me.get("quotaAmount") or 0))
     except (TypeError, ValueError):
         credits = str(me.get("quotaAmount"))
-    print("Account ID       : {}".format(me.get("id") or USER_ID))
+    print("Account ID       : {}".format(me.get("id") or _client_of(session).user_id))
     print("Credits (balance): {}".format(credits))
     balance = credit_balance(session)
     if balance["free"] is not None or balance["paid"] is not None:
@@ -11575,7 +11590,8 @@ def run_reconcile_deleted(args):
     live, before, page = set(), None, 0
     while True:
         conn = find_connection(gql(session, page_variables(
-            getattr(args, "page_size", 250) or 250, before)))
+            getattr(args, "page_size", 250) or 250,
+            _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -12636,7 +12652,8 @@ def run_download(args, progress=None):
     try:
         while True:
             page += 1
-            conn = find_connection(gql(session, page_variables(args.page_size, before)))
+            conn = find_connection(gql(session, page_variables(
+                args.page_size, _client_of(session).user_id, before)))
             if not conn:
                 print("No connection; stopping.")
                 break

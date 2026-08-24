@@ -76,6 +76,47 @@ class TestGql:
             core.gql(mock_session, {"last": 10, "userId": "u1"})
 
 
+class TestPageVariablesTakesTheIdFromTheClient:
+    """USER_ID retirement (transport Stage 3): `page_variables` no longer reads the
+    module-level `USER_ID` global. It had no session parameter -- the one history-feed
+    helper that could not see the client -- which is exactly what made that global hard to
+    retire. Now the account id is passed in, sourced at each call site from the client the
+    run authenticated as (`_client_of(session).user_id`). These pin that the id travels as
+    an argument: two clients with different ids yield different history-feed variables, and
+    the module global no longer appears in the helper's executable body."""
+
+    def test_uses_the_passed_id_not_the_module_global(self, monkeypatch):
+        # Whatever the module global happens to be, the PASSED id is what lands on the wire.
+        monkeypatch.setattr(core, "USER_ID", "GLOBAL-MUST-NOT-APPEAR")
+        assert core.page_variables(30, "AAA") == {"last": 30, "userId": "AAA"}
+        assert core.page_variables(30, "BBB") == {"last": 30, "userId": "BBB"}
+
+    def test_two_clients_thread_their_own_ids(self):
+        # The call-site idiom is page_variables(size, _client_of(session).user_id, ...):
+        # build two clients with different ids and confirm each threads its own.
+        a = core.PixAIClient(object(), user_id="acct-A")
+        b = core.PixAIClient(object(), user_id="acct-B")
+        assert core.page_variables(30, core._client_of(a).user_id)["userId"] == "acct-A"
+        assert core.page_variables(30, core._client_of(b).user_id)["userId"] == "acct-B"
+
+    def test_before_cursor_still_threads(self):
+        assert core.page_variables(50, "acct-A", before="cur-1") == {
+            "last": 50, "userId": "acct-A", "before": "cur-1"}
+
+    def test_source_no_longer_reads_the_module_global(self):
+        """Structural guard: no `USER_ID` name is read in page_variables' executable body.
+        The docstring names it in prose (to explain the change) and is stripped first."""
+        import ast
+        import inspect
+        import textwrap
+        fn = ast.parse(textwrap.dedent(inspect.getsource(core.page_variables))).body[0]
+        body = fn.body[1:] if ast.get_docstring(fn) is not None else fn.body
+        names = {n.id for stmt in body for n in ast.walk(stmt) if isinstance(n, ast.Name)}
+        assert "USER_ID" not in names, (
+            "page_variables reads the USER_ID module global in code again -- the account id "
+            "must come from the passed-in client/param, not a module global")
+
+
 # ---------------------------------------------------------------------------
 # resolve_media()
 # ---------------------------------------------------------------------------
