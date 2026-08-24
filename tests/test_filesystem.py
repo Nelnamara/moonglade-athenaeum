@@ -1,5 +1,4 @@
 """Tests for filesystem-dependent functions (already_downloaded, catalog, load_token)."""
-import csv
 import json
 import os
 from pathlib import Path
@@ -526,8 +525,7 @@ def test_generate_preview_spends_nothing(tmp_path):
 
 from moonglade_gallery import (CATALOG_FIELDS, init_db, save_catalog, load_catalog,
                             update_rating, delete_from_catalog,
-                            update_prompt_full, bulk_replace_prompt,
-                            migrate_csv_to_db, export_csv, _db_is_empty)
+                            update_prompt_full, bulk_replace_prompt, _db_is_empty)
 
 
 def _make_row(**kwargs):
@@ -772,56 +770,6 @@ def test_bulk_replace_prompt_empty_find_is_noop(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [_make_row(media_id="m1", prompt_full="x")])
     assert bulk_replace_prompt(db, ["m1"], "", "y") == 0
-
-
-def test_migrate_csv_to_db(tmp_path):
-    csv_path = tmp_path / "catalog.csv"
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
-        w.writeheader()
-        w.writerow(_make_row(media_id="m1", filename="img.png", rating="3"))
-    db = tmp_path / "catalog.db"
-    n = migrate_csv_to_db(csv_path, db)
-    assert n == 1
-    loaded = load_catalog(db)
-    assert loaded[0]["media_id"] == "m1"
-    assert loaded[0]["rating"] == "3"
-
-
-def test_migrate_csv_to_db_is_idempotent(tmp_path):
-    """Running migration twice must not duplicate rows."""
-    csv_path = tmp_path / "catalog.csv"
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=CATALOG_FIELDS)
-        w.writeheader()
-        w.writerow(_make_row(media_id="m1", filename="img.png"))
-    db = tmp_path / "catalog.db"
-    migrate_csv_to_db(csv_path, db)
-    migrate_csv_to_db(csv_path, db)
-    assert len(load_catalog(db)) == 1
-
-
-def test_migrate_csv_missing_file_returns_zero(tmp_path):
-    db = tmp_path / "catalog.db"
-    n = migrate_csv_to_db(tmp_path / "nonexistent.csv", db)
-    assert n == 0
-
-
-def test_export_csv_roundtrip(tmp_path):
-    db = tmp_path / "catalog.db"
-    save_catalog(db, [
-        _make_row(media_id="m1", filename="a.png", rating="5"),
-        _make_row(media_id="m2", filename="b.png", rating=""),
-    ])
-    csv_out = tmp_path / "export.csv"
-    export_csv(db, csv_out)
-    assert csv_out.exists()
-    with open(csv_out, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert len(rows) == 2
-    by_id = {r["media_id"]: r for r in rows}
-    assert by_id["m1"]["rating"] == "5"
-    assert set(rows[0].keys()) == set(CATALOG_FIELDS)
 
 
 def test_count_backup_images_excludes_thumbnails(tmp_path):

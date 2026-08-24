@@ -285,7 +285,7 @@ These are either regenerated on demand or superseded by something newer.
 | Path | What it is |
 |---|---|
 | `pixai_backup/catalog.db.bak*` | Old catalog snapshots from past migrations. The live catalog is `catalog.db`; these are point-in-time copies kept in case a migration went wrong. Once you've used the app since, they're dead weight — and they are large, often ~85–100 MB each. |
-| `pixai_backup/catalog.csv` | The **legacy** catalog format. `_ensure_db()` migrated it into `catalog.db` automatically and nothing reads the CSV any more. (`--export-csv` writes a *fresh* one on demand, so deleting this loses nothing.) |
+| `pixai_backup/catalog.csv` | The **legacy** catalog format from the OG backup tool. Nothing reads or writes it any more — the silent auto-seed and the CLI `--export-csv` dump were both retired 2026-08-24; `catalog.db` is the source of truth, so deleting this loses nothing. (The **⬇ Download catalog (CSV)** button in the gallery is a separate in-browser download.) |
 | `serve.log` | The gallery server's console log. Rotating file logs live in `pixai_backup/logs/` instead. |
 | `__pycache__/`, `.pytest_cache/` | Python bytecode and test caches. Regenerated automatically. |
 | `pixai_gui_settings.json` | Settings for the **PySide6 desktop GUI, which was removed in v2.1.0**. Pure leftover. |
