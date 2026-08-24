@@ -13177,16 +13177,14 @@ def main():
                     help="normalize the WHOLE backup into YYYY-MM/ month folders with "
                          "descriptive filenames (no batch subfolders); writes a reversible "
                          "move-manifest. Idempotent + dry-runnable. Then exit")
-    ap.add_argument("--organize-adv", action="store_true",
-                    help="alias for --organize (kept for back-compat)")
     ap.add_argument("--undo-organize", action="store_true",
-                    help="revert the last --organize-adv run using organize_manifest.csv "
+                    help="revert the last --organize run using organize_manifest.csv "
                          "(move files back to their old paths), then exit")
     ap.add_argument("--embed-metadata", action="store_true",
-                    help="with --organize-adv, embed prompt/IDs/date into PNG/JPEG files "
+                    help="with --organize, embed prompt/IDs/date into PNG/JPEG files "
                          "(off by default; useful when pulling images into other apps)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="with --organize / --organize-adv / --undo-organize, show the "
+                    help="with --organize / --undo-organize, show the "
                          "plan without moving anything")
     # ON BY DEFAULT since 2026-07-25. This is a backup tool whose point is the catalog, and
     # full metadata was the one thing you only got by asking: a plain run or --update left
@@ -13775,7 +13773,7 @@ def main():
         if args.undo_organize:
             cmd_undo_organize(args, out)
             return
-        if args.organize or args.organize_adv:   # --organize-adv: back-compat alias
+        if args.organize:
             cmd_organize(args, out, img_dir, db_path)
             return
         if args.probe:
