@@ -207,6 +207,8 @@ TIER_SNAPSHOT = [
     "/api/replace-prompts [POST] LOGIN",
     "/api/scene [POST] LOGIN",
     "/api/scenes [GET] LOGIN",
+    "/api/series [POST] LOGIN",
+    "/api/series/<sid> [GET] LOGIN",
     "/api/server/restart [POST] LOGIN",
     "/api/server/stop [POST] LOGIN",
     "/api/setup/save-key [POST] LOCALHOST",
