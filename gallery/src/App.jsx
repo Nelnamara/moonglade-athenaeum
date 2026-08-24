@@ -60,10 +60,23 @@ export default function App({ boot }) {
   // ?page=N on first load (#31, "Where the Refit Broke" #7): the classic addressed
   // pages in the URL; the refit hardcoded page 1. Read once, handed to the hook.
   const [initialPage] = useState(() => readPage(window.location.search));
+  /* ---- session stacking (#34 direction B): the "Stack sessions" toggle. When
+     on, /api/next/library folds every task into ONE cover card (a multi-task
+     dial-in series, or a lone batch's siblings). Persisted like `layout`
+     (mg_gallery_group), default OFF so ungrouped mode is untouched for anyone who
+     never opts in. Declared BEFORE useLibrary because the hook takes it -- flipping
+     it re-fetches page 1 through load's dep on group. ---- */
+  const [group, setGroupState] = useState(() =>
+    localStorage.getItem("mg_gallery_group") === "series" ? "series" : "");
+  const setGroup = (on) => {
+    const v = on ? "series" : "";
+    localStorage.setItem("mg_gallery_group", v);
+    setGroupState(v);
+  };
   /* The library state, kept whole as `lib` AND spread for this file's own use. The whole
      object is what surfaces built ON the library take (LibraryBar); the spread is what the
      shell reads directly. One source, two views of it -- not two copies. */
-  const lib = useLibrary({ initialPage });
+  const lib = useLibrary({ initialPage, group });
   const {
     // filters
     media, shelf, perPage, query, applied, adv, setAdv,
@@ -357,7 +370,16 @@ export default function App({ boot }) {
   };
   const filterByBatch = (batch) => {
     closeDetails();
-    setAdv((old) => ({ ...old, batch }));
+    setAdv((old) => ({ ...old, batch, series: "" }));
+  };
+  /* Open a SERIES stack (#34 direction B) -- the mirror of filterByBatch: set the
+     `series` drill-down to the sid, which the backend resolves to the series'
+     member task_ids (?series=<sid>). load() suppresses the grouping fold while a
+     drill-down is active, so this lands on the series' members ungrouped; clearing
+     the filter (or Clear) snaps back to the still-lit stacked grid. */
+  const filterBySeries = (series) => {
+    closeDetails();
+    setAdv((old) => ({ ...old, series, batch: "" }));
   };
 
   /* Generation completions refresh the library + credits chip.
@@ -717,6 +739,7 @@ export default function App({ boot }) {
               actions={actions}
               collections={collections}
               layout={layout} setLayout={setLayout}
+              group={group} setGroup={setGroup}
             />
           }
         />
@@ -770,6 +793,8 @@ export default function App({ boot }) {
             openLightbox={setLbIndex}
             onRate={rate}
             onContextMenu={openContextMenu}
+            onOpenSeries={filterBySeries}
+            onOpenBatch={filterByBatch}
           />
         )}
       </main>

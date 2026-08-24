@@ -160,6 +160,33 @@ def test_group_series_pages_over_units(tmp_path):
     assert all("series" not in it for it in p2["items"] + p3["items"])
 
 
+# --- the batch marker (STEP 0) ----------------------------------------------------------
+
+def test_group_series_marks_a_batch_but_not_a_singleton(tmp_path):
+    """A folded ("task", tid) unit with >=2 surviving images carries batch{task_id,count}
+    and NO series key -- the grid renders it as a BATCH stack that opens via the existing
+    View-batch path (?batch=task_id). A 1-image task carries neither key: a plain
+    singleton, indistinguishable from an ungrouped card. Distinct models keep the two
+    tasks from chaining into a series."""
+    rows = []
+    rows += _task("B1", "a four output batch", "2026-08-20T10:00:00Z",
+                  ["b1a", "b1b", "b1c", "b1d"], model_id="MB", model_name="Batch Four")
+    rows += _task("S1", "one lone output only", "2026-08-20T09:00:00Z",
+                  ["s1"], model_id="MS", model_name="Solo One")
+    _seed(tmp_path, rows)
+    cli = _client(tmp_path)
+    d = cli.get("/api/next/library?group=series&page_size=50").get_json()
+    assert d["total"] == 2
+    # the 4-image batch: ONE card, batch.count == 4 (all survivors), no series key
+    batch = next(it for it in d["items"] if "batch" in it)
+    assert batch["batch"] == {"task_id": "B1", "count": 4}
+    assert "series" not in batch
+    assert batch["media_id"] in {"b1a", "b1b", "b1c", "b1d"}   # cover is one of its own
+    # the singleton: neither a batch nor a series marker
+    single = next(it for it in d["items"] if it["media_id"] == "s1")
+    assert "batch" not in single and "series" not in single
+
+
 # --- cover selection --------------------------------------------------------------------
 
 def test_series_cover_is_newest_image_even_when_newest_member_is_a_video(tmp_path):

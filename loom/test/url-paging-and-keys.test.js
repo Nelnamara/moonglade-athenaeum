@@ -84,9 +84,10 @@ describe("A. URL page addressing (App.jsx)", () => {
   test("(a) init reads ?page= and the hook's mount load honors it", () => {
     assert.match(app, /import \{ buildUrl, readPage, readImage \} from "\.\/gen\/urlState\.js";/);
     assert.match(app, /const \[initialPage\] = useState\(\(\) => readPage\(window\.location\.search\)\);/);
-    assert.match(app, /useLibrary\(\{ initialPage \}\)/);
+    // #34 direction B: the hook also takes the persisted `group` toggle (default off)
+    assert.match(app, /useLibrary\(\{ initialPage, group \}\)/);
     // the hook: the mount load takes initialPage; later filter changes still reset to 1
-    assert.match(lib, /export default function useLibrary\(\{ initialPage = 1 \} = \{\}\)/);
+    assert.match(lib, /export default function useLibrary\(\{ initialPage = 1, group = "" \} = \{\}\)/);
     assert.match(lib, /load\(first \? Math\.max\(1, initialPage \| 0\) : 1, true\);/);
     assert.doesNotMatch(lib, /useEffect\(\(\) => \{ load\(1, true\); \}, \[load\]\);/);
   });
@@ -154,7 +155,10 @@ describe("B. Grid arrow-key navigation (Grid.jsx)", () => {
     assert.match(handler, /if \(cur < last\) next = cur \+ 1;/);
     assert.match(handler, /else if \(k === "Home"\) next = 0;/);
     assert.match(handler, /else if \(k === "End"\) next = last;/);
-    assert.match(handler, /openLightbox\(origIndexByMid\.get\(cells\[cur\]\.it\.media_id\)\);/);
+    // Enter opens the lightbox on a focused singleton -- or the stack's own view when
+    // the focused card is a stack (#34 direction B: a stack navigates, never lightboxes).
+    assert.match(handler, /if \(stackKind\(itCur\)\) openStackFor\(itCur\);/);
+    assert.match(handler, /else openLightbox\(origIndexByMid\.get\(itCur\.media_id\)\);/);
     // Up/Down from the rendered layout: rects first, the first row's card count as the fallback
     assert.match(grid, /const verticalNeighbor = \(root, el, dir\) => \{/);
     assert.match(grid, /getBoundingClientRect\(\)/);

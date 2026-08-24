@@ -23,8 +23,11 @@ describe("Accession Stamp replaces the filename line (Grid.jsx)", () => {
     assert.doesNotMatch(grid, /shortName/);
     assert.doesNotMatch(cap, /it\.filename/);
   });
-  test("(b) the title renders ONLY under an it.title truthiness check -- never filename-derived", () => {
-    assert.match(cap, /\{it\.title \? <span className="mgg-title">\{it\.title\}<\/span> : null\}/);
+  test("(b) the title renders ONLY under a truthiness check -- never filename-derived", () => {
+    // #34 direction B: the gated variable is now `stampTitle` (the series title when
+    // this is a series stack, else it.title exactly as before) -- still ONE render,
+    // still never filename-derived. See stackKind/stampTitle in Grid.jsx.
+    assert.match(cap, /\{stampTitle \? <span className="mgg-title">\{stampTitle\}<\/span> : null\}/);
     // exactly one .mgg-title render, and it is the gated one
     assert.equal((cap.match(/mgg-title/g) || []).length, 1);
   });

@@ -12423,6 +12423,13 @@ __DESIGN_TOKENS__
                         "count_images": len(members[k]),
                         "title": s.get("title", ""),
                     }
+                elif k[0] == "task" and len(members[k]) >= 2:
+                    # A folded BATCH -- one task with >=2 surviving images (not a
+                    # multi-task series). Mark it so the grid renders a BATCH stack that
+                    # opens through the existing View-batch path (?batch=task_id). A lone
+                    # image (one survivor) carries no marker and renders as today's plain
+                    # singleton, indistinguishable from an ungrouped card.
+                    card["batch"] = {"task_id": k[1], "count": len(members[k])}
                 items.append(card)
         else:
             rows, total = query_catalog(
