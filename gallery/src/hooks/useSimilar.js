@@ -21,7 +21,6 @@ export default function useSimilar(mediaId) {
     const mine = ++seq.current;
     setState({ loading: true, images: [], error: "" });
     apiGet("/api/similar/" + encodeURIComponent(mediaId) + "?k=48")
-      .then((r) => r.json())
       .then((d) => {
         if (mine !== seq.current) return;
         const images = (d && d.images) || [];
