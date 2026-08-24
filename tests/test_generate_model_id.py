@@ -16,13 +16,12 @@ import moonglade_backup as core
 from tests.conftest import login_client
 
 
-def test_generate_reresolves_current_version_over_stale_client_version(tmp_path, monkeypatch):
+def test_generate_reresolves_current_version_over_stale_client_version(tmp_path, monkeypatch, pixai):
     RESOLVED = "1983308862240288769"   # the model's real current version
     STALE = "1861558740588989558"      # the raced version_id the drawer had cached
 
     # resolve_version_meta(model_id) -> RESOLVED, via its single /versions REST call
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [{"id": RESOLVED, "modelId": "M1"}])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(core, "_gen_parameters",
@@ -39,9 +38,8 @@ def test_generate_reresolves_current_version_over_stale_client_version(tmp_path,
     assert seen["submitted"]["modelId"] == RESOLVED
 
 
-def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch):
+def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch, pixai):
     """Backward compat: with no model_id sent, the client's version_id is used as-is."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
@@ -53,7 +51,7 @@ def test_generate_without_model_id_uses_client_version(tmp_path, monkeypatch):
     assert seen["model"] == "V-DIRECT"
 
 
-def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monkeypatch):
+def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monkeypatch, pixai):
     """Problem 4: the owner picked an OLDER release via the new version selector -- that
     real choice must actually be submitted, not silently overwritten back to latest."""
     LATEST, CHOSEN = "V-LATEST", "V-CHOSEN"
@@ -61,7 +59,6 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
         {"id": LATEST, "modelType": "SDXL_MODEL"},
         {"id": CHOSEN, "modelType": "SDXL_MODEL"},
     ])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(core, "_gen_parameters",
@@ -76,14 +73,13 @@ def test_generate_honors_an_explicitly_chosen_non_latest_version(tmp_path, monke
     assert seen["submitted"]["modelId"] == CHOSEN
 
 
-def test_generate_still_falls_back_to_latest_when_client_version_belongs_elsewhere(tmp_path, monkeypatch):
+def test_generate_still_falls_back_to_latest_when_client_version_belongs_elsewhere(tmp_path, monkeypatch, pixai):
     """The original anti-race guarantee must survive problem 4's change: a version_id that
     does NOT belong to model_id's own real version list (stale from a fast model switch, or
     just wrong) is NEVER trusted -- same outcome as before this feature existed."""
     LATEST = "V-LATEST"
     FOREIGN = "V-FROM-A-DIFFERENT-MODEL"
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [{"id": LATEST, "modelType": "SDXL_MODEL"}])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(core, "_gen_parameters",
@@ -97,12 +93,11 @@ def test_generate_still_falls_back_to_latest_when_client_version_belongs_elsewhe
     assert seen["model"] != FOREIGN
 
 
-def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_path, monkeypatch):
+def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_path, monkeypatch, pixai):
     """model_id resolves to nothing (deleted/private model) -- must not crash, and must not
     invent a version_id; args.model is left as whatever the client originally sent (matches
     the pre-problem-4 fallback, which also left args.model untouched when resolution failed)."""
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(core, "_gen_parameters", lambda args: seen.update(model=args.model) or {})
@@ -114,14 +109,13 @@ def test_generate_falls_back_to_latest_when_model_has_no_versions_at_all(tmp_pat
     assert seen["model"] == "V-WHATEVER"   # untouched, exactly like the no-model_id path
 
 
-def test_model_version_all_param_lists_every_version(tmp_path, monkeypatch):
+def test_model_version_all_param_lists_every_version(tmp_path, monkeypatch, pixai):
     """/api/model-version?all=1 (problem 4): the new list-mode, additive to the existing
     single-resolved-version default (unchanged, see the sibling tests above)."""
     monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: [
         {"id": "V2", "modelType": "SDXL_MODEL", "createdAt": "2026-07-01T00:00:00Z"},
         {"id": "V1", "modelType": "SDXL_MODEL", "createdAt": ""},
     ])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     client = login_client(tmp_path)
     r = client.get("/api/model-version?model_id=M1&all=1")
     assert r.status_code == 200, r.data
@@ -138,12 +132,11 @@ def test_model_version_all_param_lists_every_version(tmp_path, monkeypatch):
     assert d2["version_id"] == "V2" and "versions" not in d2
 
 
-def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path, monkeypatch):
+def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path, monkeypatch, pixai):
     """/api/model-version?version_id=X (2026-08-02): the Runs reel's reuse-prefill reverse
     lookup -- a run's catalog model_id is a VERSION id, and this is how prefillFromRun turns
     it back into the base model id applyModelRow's own version-listing flow expects."""
     monkeypatch.setattr(core, "resolve_model_base_id", lambda s, vid: "BASE-M1" if vid == "V1" else "")
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     client = login_client(tmp_path)
     r = client.get("/api/model-version?version_id=V1")
     assert r.status_code == 200, r.data

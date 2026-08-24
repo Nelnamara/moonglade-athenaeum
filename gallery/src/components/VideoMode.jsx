@@ -11,11 +11,14 @@ import VideoDrawer from "./VideoDrawer.jsx";
    alongside the cmode/setCmode state -- see AppMobile.jsx's own header comment for the full
    "why lifted" list.
 
-   Mounting this ONE level higher than CreateMobile.jsx is not cosmetic, and the reason SURVIVES
-   the vanilla->React port: VideoDrawer's unmount effect sweeps EVERY outstanding poll timer (its
-   pollTimers ref, mirroring the old custom element's disconnectedCallback), so unmounting it
-   mid-submit would silently stop tracking an already-charged video task while the server-side job
-   keeps running and billing. CreateMobile.jsx itself already never unmounted on an Image/Edit/
+   Mounting this ONE level higher than CreateMobile.jsx is not cosmetic. The ORIGINAL reason was
+   spend safety: VideoDrawer's unmount effect swept every outstanding poll timer it owned, so
+   unmounting it mid-submit silently stopped tracking an already-charged video task while the
+   server-side job kept running and billing. Since 2026-08-23 the drawer has no poll timers --
+   tracking is the Jobs engine's, outside React entirely -- so that specific loss is no longer
+   possible from here. The mount placement stays regardless: unmounting still discards the form's
+   live state (prompt, ref banks, result lines) mid-render, and re-mounting a spend control is not
+   something to do casually. CreateMobile.jsx itself already never unmounted on an Image/Edit/
    Video segmented-control switch (only `visible` toggles display:none) -- but CreateMobile.jsx is
    ALSO only rendered while AppMobile's OUTER tab === "create", so switching the bottom nav to
    Gallery or Control unmounted CreateMobile and, with it, this form -- the exact silent-tracking-

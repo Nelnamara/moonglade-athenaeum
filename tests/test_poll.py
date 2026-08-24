@@ -201,7 +201,7 @@ def test_delete_one_image_sends_the_right_mutation(monkeypatch):
     `updateGenerationTask(id: ID!, input: UpdateGenerationTaskInput!)` carrying
     `{deleteBatchMedia: {mediaId}}`."""
     seen = {}
-    monkeypatch.setattr(core, "gql_adhoc",
+    monkeypatch.setattr(core.PixAIClient, "_graphql_post",
                         lambda s, q, v=None, retries=3: seen.update(q=q, v=v or {},
                                                                     retries=retries) or
                         {"updateGenerationTask": {"id": "T1"}})
@@ -242,7 +242,7 @@ def test_delete_one_image_is_single_attempt(monkeypatch):
     def boom(*a, **k):
         calls.append(1)
         raise core.PixAIError("network blip")
-    monkeypatch.setattr(core, "gql_adhoc", boom)
+    monkeypatch.setattr(core.PixAIClient, "_graphql_post", boom)
     with pytest.raises(core.PixAIError):
         core.delete_batch_media_gql(object(), "T1", "M9")
     assert len(calls) == 1, "retried a destructive delete {} times".format(len(calls))

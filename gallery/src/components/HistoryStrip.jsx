@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet } from "../api.js";
 import {
   HISTORY_DAYS, anyRunning, costColor, costText, dayCells, dayLabel, mergeHistoryPages,
   olderLabel, tipLines, todayKey, tzMinutes,
@@ -107,8 +108,7 @@ export default function HistoryStrip({ onPrefill, onTip }) {
     const url = "/api/next/history?days=" + HISTORY_DAYS + "&tz=" + tz
       + (before ? "&before=" + encodeURIComponent(before) : "");
     setLoading(true);
-    return fetch(url)
-      .then((r) => r.json())
+    return apiGet(url)
       .then((d) => {
         if (!aliveRef.current) return;
         if (!d || d.error || !Array.isArray(d.days)) { setErr(true); return; }

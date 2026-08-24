@@ -4,7 +4,7 @@ import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
-import { rebuildPoster, fetchSeries } from "../api.js";
+import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
 import { seriesSuffix } from "../gen/seriesName.js";
 
@@ -253,10 +253,8 @@ export default function DetailsView({
     if (!mediaId) { setLineage(null); return; }
     let dead = false;
     setLineage(null);
-    fetch("/api/lineage/" + encodeURIComponent(mediaId))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!dead) setLineage(d); })
-      .catch(() => { if (!dead) setLineage(null); });
+    apiGet("/api/lineage/" + encodeURIComponent(mediaId))
+      .then((d) => { if (!dead) setLineage(d.error ? null : d); });
     return () => { dead = true; };
   }, [mediaId]);
 

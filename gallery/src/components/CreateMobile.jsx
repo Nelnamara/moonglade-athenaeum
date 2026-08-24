@@ -226,6 +226,7 @@ export const MODES = [
 export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
+  canSubmit: priceOk,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   const [flyKind, setFlyKind] = useState("base");
@@ -247,7 +248,7 @@ export default function CreateMobile({
      before this screen mounted, so this explicit prime is what shows the draft's
      price on entry (via costRef, never JSX). */
   useEffect(() => {
-    if (cmode === "image") refreshPrice();
+    if (cmode === "image") refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmode]);
 
@@ -257,7 +258,7 @@ export default function CreateMobile({
      reach edit/edit, by which commit the badge's ref is live -- never shared with
      Image's costRef (see useEditGenerate.js's header). */
   useEffect(() => {
-    if (cmode === "edit" && editSub === "edit") edit.refreshPrice();
+    if (cmode === "edit" && editSub === "edit") edit.refreshPrice({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmode, editSub]);
 
@@ -405,8 +406,9 @@ export default function CreateMobile({
                   </div>
                 )}
 
-                <button type="button" className={"cm-generate" + (edit.gate || edit.busy ? " off" : "")}
-                  disabled={!!edit.gate || edit.busy}
+                {/* Price-probe verdict ANDed into the existing gate -- same rule as Image mode. */}
+                <button type="button" className={"cm-generate" + (edit.gate || edit.busy || !edit.canSubmit ? " off" : "")}
+                  disabled={!!edit.gate || edit.busy || !edit.canSubmit}
                   title={edit.gate || "Submit the edit — this spends credits or a card"}
                   onClick={edit.run}>
                   {edit.busy ? "◌ Queued…" : "✦ Edit"}
@@ -540,8 +542,11 @@ export default function CreateMobile({
               </div>
             )}
 
-            <button type="button" className={"cm-generate" + (gate || busy ? " off" : "")}
-              disabled={!!gate || busy}
+            {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
+                badge must have been priced off the payload this click submits. generate()
+                refuses the same way (gen/priceProbeCore.js). */}
+            <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
+              disabled={!!gate || busy || !priceOk}
               title={gate || "Submit — this spends credits or a card"}
               onClick={() => generate(loraCap)}>
               {busy ? "◌ Queued…" : "✦ Generate"}

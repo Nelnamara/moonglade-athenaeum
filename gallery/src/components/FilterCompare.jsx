@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import MgArtFilters from "../art/artFilters.js";
+import { apiUpload } from "../api.js";
 
 /* The art-filters COMPARE OVERLAY -- Frontend Gallery.dc.html 591-658 + its getters
    (2944-2978), the Enhance sub-tab's '◉ Open filters' destination. This is the panel
@@ -123,10 +124,9 @@ export default function FilterCompare({ open, onClose, source, onSendToEdit }) {
       // keys purely on filename, not content).
       const tag = active + "_s" + Number(strength).toFixed(2).replace(".", "") + "_a" + angle;
       fd.append("files", blob, source + "_" + tag + ".png");
-      const r = await fetch("/api/import-local", { method: "POST", body: fd });
-      const d = await r.json();
+      const d = await apiUpload("/api/import-local", fd);
       if (d.error) {
-        const friendly = r.status === 403
+        const friendly = d.http_status === 403
           ? "This only works when you're at the machine running the server — not over LAN/tablet."
           : d.error;
         setMsg(friendly);
@@ -152,7 +152,7 @@ export default function FilterCompare({ open, onClose, source, onSendToEdit }) {
       if (!blob) return;
       const fd = new FormData();
       fd.append("file", blob, "filtered_" + active + ".png");
-      const d = await fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json());
+      const d = await apiUpload("/api/upload", fd);
       if (d.error || !d.media_id) { setMsg(d.error || "Upload failed."); return; }
       const name = rec.name || active;
       onClose();

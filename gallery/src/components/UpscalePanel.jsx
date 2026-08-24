@@ -1,8 +1,11 @@
 import React, {
-  forwardRef, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import { apiGet } from "../api.js";
+import usePriceProbe from "../gen/usePriceProbe.js";
+import { submitTask } from "../gen/submitTask.js";
 import CostBadge from "./CostBadge.jsx";
-import ModelPicker from "./ModelPicker.jsx";
+import { idleReason } from "./upscaleIdle.js";
 import "../styles/upscale-panel.css";
 
 /* UpscalePanel -- the React port of static/mg-upscale-panel.js's <mg-upscale-panel>: PixAI's
@@ -12,20 +15,28 @@ import "../styles/upscale-panel.css";
    at the larger size, ~3700). The ratio cap is DYNAMIC -- derived from the source's real dimensions
    against a per-mode output-pixel ceiling that the server ships in window.MG_UPSCALE (never a second
    hand-ported copy). What it submits is nothing new: an image-view upscale is an ordinary i2i
-   generation (mediaId + strength), so it POSTs the SAME /api/price and /api/generate the drawer
-   uses -- there is deliberately no /api/upscale (a second submit path is a second place for the
-   read-only guard / free-card check / job-tracker registration to be forgotten; those all live
-   SERVER-SIDE on /api/generate).
+   generation (mediaId + strength), so it takes the SAME /api/price and /api/generate the drawer
+   does -- there is deliberately no /api/upscale (a second submit path is a second place for the
+   read-only guard / free-card check / job-tracker registration to be forgotten; the first two
+   live SERVER-SIDE on /api/generate, and since 2026-08-23 the third is guaranteed by submitting
+   through gen/submitTask.js rather than by this panel's own fetch -- see doSubmit).
 
    Ported 2026-08-08 (no-vanilla campaign step 5). Kept a forwardRef + useImperativeHandle component
    so the consumers' imperative contract survives verbatim: upEl.current.open(mediaIdOrRow) /
    .close(), plus isOpen()/isClosing() replacing the desktop Lightbox's .hasAttribute("open")/
-   ("closing") reads. Embeds the shared React CostBadge (the cost line) and ModelPicker (the model
-   override) -- the latter also REPAIRS a regression: the vanilla did createElement('mg-model-picker')
-   gated on customElements.get('mg-model-picker'), which has returned undefined since that element
-   was ported to React ModelPicker (campaign step 3, file deleted), so the "Choose a model" override
-   showed "picker not loaded" for un-modeled images. (Upscale itself always worked -- it falls back
-   to core's UPSCALE_FALLBACK_VERSION_ID.)
+   ("closing") reads. Embeds the shared React CostBadge (the cost line).
+
+   NO MODEL CONTROL (2026-08-23). This panel has no ModelPicker and no "choose a model" affordance
+   at all -- it always upscales with the SOURCE IMAGE'S OWN model version, automatically, exactly
+   like PixAI's site. PixAI's upscale dialog has no model control: their submit spreads the
+   enlarge/upscale params, sets a FIXED model version and takes prompts/width/height off the
+   source's original task (../moonglade-internal/DECISIONS.md, "An upscale does not choose a model,
+   and the catalog's model_id is a VERSION id", 2026-07-27). The earlier port carried a
+   "Choose a model" override that contradicted that decision and produced the owner's long-standing
+   "upscale asks for a model" complaint; it is gone. The catalog's model_id is a model VERSION id,
+   so it travels as version_id; a source with no recorded model falls back to core's
+   UPSCALE_FALLBACK_VERSION_ID (served via window.MG_UPSCALE), which is PixAI's own upscale model.
+   The model note beside the cost is now purely informational ("<name> · from this image").
 
    Props: `inline` (render in flow -- the detail pages/mobile sheets -- vs a fixed flyout modal);
    `onDone({media_id, task_id})` optional, fired once a submit is accepted (the old bubbling
@@ -79,17 +90,14 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const [scalerOpen, setScalerOpen] = useState(false);
   const [denoise, setDenoise] = useState(0.6);
   const [denoiseSteps, setDenoiseSteps] = useState(26);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [msg, setMsg] = useState(null);            // {text, bad}
   const [busy, setBusy] = useState(false);
 
   const costRef = useRef(null);
   const openSeq = useRef(0);
-  const costSeq = useRef(0);
   const closeTimer = useRef(0);
   const busyRef = useRef(false);
   const rootRef = useRef(null);
-  const pickHostRef = useRef(null);
   const scalerWrapRef = useRef(null);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -104,12 +112,29 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
   const effRatio = mx ? Math.min(ratio, mx) : ratio;
   const [ow, oh] = outDims(w, hh, effRatio);
   const isVideo = !!(src && src.is_video);
-  const canSubmit = phase !== "closed" && !!((src && src.model_id) || fallbackVersion())
-    && !isVideo && !ratioDisabled;
+  // ONE predicate for Go AND the cost badge. It used to be two: the badge priced only when the
+  // source carried a real model_id, while Go also allowed the fallback version -- so a
+  // fallback-only picture (an imported file, or a catalog row with no model recorded) offered a
+  // live Upscale button with NO quote beside it. Pricing what Go would refuse, or refusing to
+  // price what Go would submit, is the same split that let a disabled control charge; the
+  // payload already carries fallbackVersion() as its version_id, so the quote is for exactly
+  // what submits.
+  // ...and never with an effective ratio of 1 or below: a ratio <= 1 is not an upscale at all,
+  // and the server's _upscale_ratio silently DROPS it -- so submitting one is a paid same-size
+  // re-render, exactly the "upscale failed" the owner hit at the size ceiling. ratioDisabled is
+  // already true whenever mx <= 1, but the explicit effRatio > 1 makes "a submit can never send
+  // ratio <= 1" a local, provable property of this predicate rather than a consequence to trace.
+  const goReady = phase !== "closed" && !!((src && src.model_id) || fallbackVersion())
+    && !isVideo && !ratioDisabled && effRatio > 1;
 
-  // A shrinking cap (mode/image change) clamps the stored ratio so the thumb never exceeds max.
+  // A shrinking cap (mode/image change) clamps the stored ratio so the thumb never exceeds max --
+  // but ONLY when there is real headroom (mx > 1). Clamping to mx when mx is 1 (the source is at
+  // PixAI's pixel ceiling for this method) used to drag the stored ratio down to 1.0; switching
+  // to a method WITH headroom then carried that 1.0 into a submit, which _upscale_ratio drops ->
+  // a paid no-op. So the stored ratio keeps its last real value (>= the 1.1 slider floor) and is
+  // only ever pulled DOWN to a smaller-but-still-real cap.
   useEffect(() => {
-    if (mx && ratio > mx) setRatio(mx);
+    if (mx > 1 && ratio > mx) setRatio(mx);
   }, [mx, ratio]);
 
   let ratioMaxNote = "", dimsNote = "";
@@ -128,29 +153,35 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     ? (src.width + "×" + src.height + " source") : "This image has no recorded size.";
   const modeHint = (MODES.find((m) => m.key === mode) || MODES[0]).hint;
 
-  let modelNote = "", showPickBtn = false;
-  if (src && src.model_id) {
-    modelNote = (src.model_name || src.model_id) + (src.model_picked ? " · chosen" : " · from this image");
-  } else if (src && !isVideo) {
-    showPickBtn = true;
-    modelNote = src.local_import
-      ? "You imported this file, so PixAI has no record of which model made it. Upscaling with "
-        + "PixAI’s own upscale model — pick a different one if you’d rather."
-      : "Your catalog does not know which model made this image, so it will upscale with PixAI’s "
-        + "own upscale model. Pick a different one, or fill the catalog in with:  --backfill-full-meta";
+  // PURELY INFORMATIONAL. The upscale always uses the source's OWN model version automatically
+  // (see the header note and DECISIONS 2026-07-27) -- there is no model to pick and none to
+  // supply, so this only NAMES the model the picture was made with. A source with no recorded
+  // model shows a neutral "from this image" and never a prompt: it upscales under PixAI's own
+  // upscale model, which is exactly what the site does.
+  let modelNote = "";
+  if (src && !isVideo) {
+    modelNote = (src.model_id)
+      ? ((src.model_name || src.model_id) + " · from this image")
+      : "from this image";
   }
 
   // ---- the SAME body /api/price + /api/generate take from the drawer (verbatim _payload) -------
   const payload = () => {
     const s = src || {};
-    const r = ratioDisabled ? null : effRatio;
+    // Never carry a ratio of 1 or below: _upscale_ratio drops it server-side, so it would price
+    // and submit a same-size no-op. goReady already gates on effRatio > 1; this keeps the priced
+    // body honest even in a transient render where the two are momentarily out of step.
+    const r = (ratioDisabled || !(effRatio > 1)) ? null : effRatio;
     const body = {
-      // From the image: the catalog's model_id is the task's submitted `modelId` = a VERSION id
-      // (goes out as version_id; as model_id it hits the model->versions lookup, matches nothing,
-      // "pick a model first"). From the picker: a real MODEL id the server resolves to its current
-      // version. Nothing -> the version PixAI's own upscale submits.
-      model_id: s.model_picked ? (s.model_id || "") : "",
-      version_id: s.model_picked ? "" : (s.model_id || fallbackVersion()),
+      // The upscale always uses the source's OWN model version -- there is no model UI (PixAI's
+      // upscale dialog has none; DECISIONS 2026-07-27). The catalog's model_id is the task's
+      // submitted `modelId`, which IS a model VERSION id, so it travels as version_id (as model_id
+      // it hits the model->versions lookup, matches nothing, "pick a model first"). model_id is
+      // therefore ALWAYS empty here, and the server's model_version_resolver leaves a
+      // version_id-only body untouched -- the source's own version, exactly like the site. A
+      // source with no recorded model falls back to PixAI's own upscale model version.
+      model_id: "",
+      version_id: s.model_id || fallbackVersion(),
       prompt: s.prompt || "",
       negative: s.negative || "",
       width: parseInt(s.width, 10) || 0,
@@ -173,26 +204,26 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     return body;
   };
 
-  // Price ONLY when the source has a real model_id (not the fallback) and the ratio is live --
-  // narrower than Go's gate on purpose (verbatim from the vanilla): a fallback-only image shows no
-  // price, and passing null on a failed fetch is the badge's could-not-verify state, not clear().
-  const doPrice = () => {
-    if (!src || !src.model_id || ratioDisabled) return;
-    const mine = ++costSeq.current;
-    const badge = costRef.current;
-    if (badge && badge.setChecking) badge.setChecking();
-    fetch("/api/price", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload()),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(d); })
-      .catch(() => { if (mine === costSeq.current && costRef.current) costRef.current.setPrice(null); });
-  };
-  // Re-price on any change to a pricing input (the vanilla fired _price from each handler).
-  useEffect(() => { doPrice(); },
+  /* The shared price probe (gen/usePriceProbe.js) owns the debounce, the seq guard, the abort
+     timeout and the payload-identity spend gate; this panel supplies the payload and the ONE
+     predicate above. When Go is impossible the probe clears the badge to a one-shot hint: the
+     REAL reason (idleReason -- at the size ceiling, no recorded dimensions, a video), never the
+     old "the cost appears once this image has a model", which was a misdirection since an upscale
+     needs no model at all. (A failed fetch still passes null, which is the badge's red
+     could-not-verify state, NOT clear(); the probe keeps that distinction.) */
+  const build = useCallback(
+    () => ({ payload: payload(), idle: goReady ? null : idleReason(src, mode, mx) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [src, mode, ratio, scaler, denoise, denoiseSteps, ratioDisabled]);
+    [src, mode, ratio, effRatio, scaler, denoise, denoiseSteps, ratioDisabled, goReady, mx]);
+  // Closed, the panel holds no armed timer and no request out (its consumers keep it mounted
+  // between opens); re-opening forces a re-price, because the badge is idle again on screen.
+  const probe = usePriceProbe({ build, costRef, enabled: phase !== "closed" });
+  // Re-price on any change to a pricing input (the vanilla fired _price from each handler).
+  useEffect(() => { probe.refresh(); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [src, mode, ratio, scaler, denoise, denoiseSteps, ratioDisabled, probe.refresh]);
+  // The Go gate: the panel's own readiness AND a settled quote for THIS payload.
+  const canGo = goReady && probe.canSubmit;
 
   // Global listeners for the custom scaler dropdown, added ONLY while open -- the cleanup is the
   // React answer to the vanilla's leak risk (globals removed only by _closeScaler).
@@ -211,30 +242,12 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     };
   }, [scalerOpen]);
 
-  // Reveal the picker at the top of the scroll container (the flyout IS the scroll container) and
-  // land focus in the search box -- the vanilla's _openPicker courtesy.
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const host = pickHostRef.current, root = rootRef.current;
-    if (!host || !root) return;
-    requestAnimationFrame(() => {
-      if (root.scrollHeight > root.clientHeight + 1) {
-        root.scrollTop = Math.max(0, host.offsetTop - root.offsetTop - 8);
-      } else {
-        try { host.scrollIntoView({ block: "nearest" }); } catch { /* older engines */ }
-      }
-      const q = host.querySelector("input");
-      if (q && q.focus) q.focus();
-    });
-  }, [pickerOpen]);
-
   // ---- imperative handle: the consumers' open/close contract, verbatim ------------------------
   useImperativeHandle(ref, () => ({
     open(what) {
       clearTimeout(closeTimer.current);
       setPhase("open");
       setMsg(null);
-      setPickerOpen(false);
       const mine = ++openSeq.current;
       // A slow first /api/image-meta landing after a second open() is discarded, so the panel --
       // and the PAID submit it is one click from making -- never binds to a stale picture.
@@ -245,9 +258,8 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
         else if (row.is_video) setMsg({ text: "Upscale works on images, not videos.", bad: true });
       };
       if (what && typeof what === "object") { done(what); return; }
-      fetch("/api/image-meta/" + encodeURIComponent(String(what)))
-        .then((r) => r.json())
-        .then((d) => done(d && !d.error ? d : null), () => done(null));
+      apiGet("/api/image-meta/" + encodeURIComponent(String(what)))
+        .then((d) => done(d && !d.error ? d : null));
     },
     close() {
       setPhase((p) => {
@@ -275,49 +287,62 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
     });
   };
 
-  const onModelPick = (row) => {
-    if (!row || !row.model_id) return;
-    // Recorded on the source so every later price/submit carries it, flagged CHOSEN (the panel
-    // says which it is -- upscaling under a model the picture was not made with changes its look).
-    setSrc((s) => Object.assign({}, s, {
-      model_id: String(row.model_id),
-      model_name: row.title || String(row.model_id),
-      model_picked: true,
-    }));
-    setPickerOpen(false);
-  };
+  // ---- the spend: through the ONE submit road, like every other cost line ---------------------
+  /* This panel POSTed /api/generate itself until 2026-08-23, with hand-rolled equivalents of the
+     road's guarantees (a busyRef double-submit latch, the canSubmit gate, a single no-retry
+     fetch). The equivalents were real; what could not be hand-rolled was the part that only the
+     road does -- Jobs.track, which REGISTERS the task. So an upscale ran, billed, and appeared
+     in no job log, no Activity tray and no orphan sweep, underneath a toast that said "Watch it
+     in Activity". This component's own header already argued that a second submit path is a
+     second place for the job-tracker registration to be forgotten; it was the one forgetting.
 
-  // ---- the spend (verbatim _submit): the ONLY POST /api/generate ------------------------------
-  const doSubmit = () => {
-    if (!canSubmit || busyRef.current) return;
+     The panel's result UI is now the road's `emit` adapter: an "err" patch becomes the inline
+     note it always showed, and the modal keeps its own shape -- close on success, toast, onDone.
+     No onPhase: this is a one-shot modal that is gone before the task finishes, and the tray it
+     now really does register with is where a finished upscale belongs. */
+  const doSubmit = async () => {
+    if (!goReady || busyRef.current) return;
+    // PAYLOAD IDENTITY gate -- the button is already disabled on it; this is the click that
+    // slips through a stale render (a keyboard Enter needs no repaint to fire).
+    if (!probe.canSubmit) { probe.refresh(); return; }
     busyRef.current = true;                         // latch, independent of render timing
     setBusy(true);
     const mid = src.media_id;                        // captured before the await
-    fetch("/api/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload()),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        busyRef.current = false; setBusy(false);
-        if (!d || d.error || !d.task_id) {
-          setMsg({ text: (d && d.error) || "Could not start the upscale.", bad: true });
-          return;
-        }
-        setMsg(null);
-        handleClose();
-        if (typeof onDone === "function") onDone({ media_id: mid, task_id: d.task_id });
-        if (window.Toast) {
-          window.Toast.show({
-            kind: "ok", title: "Upscale started",
-            msg: "Watch it in Activity · the result lands in your gallery",
-          });
-        }
-      })
-      .catch((e) => {
-        busyRef.current = false; setBusy(false);
-        setMsg({ text: "Could not start the upscale: " + ((e && e.message) || e), bad: true });
+    // This submit belongs to THIS open. A terminal patch landing after the panel was closed and
+    // re-opened on a different picture must not paint its note over the new one (the same
+    // stale-bind guard open() already applies to /api/image-meta).
+    const mine = openSeq.current;
+    let handedOff = false;   // set once the modal closes on success -- the tray owns it from there
+
+    const emit = (patch) => {
+      if (handedOff || mine !== openSeq.current) return;
+      if (patch.kind === "err") { setMsg({ text: patch.text, bad: true }); return; }
+      setMsg(null);
+    };
+
+    let tid = null;
+    try {
+      tid = await submitTask("/api/generate", payload(), { label: "Upscaled", emit });
+    } finally {
+      // The latch releases the moment the road answers, accepted or rejected -- never on a
+      // later phase, and never left stuck by a throw on the way back.
+      busyRef.current = false; setBusy(false);
+    }
+    if (!tid) return;   // the adapter already painted the reason inline
+    // The submit DEBITED credits or a card; the payload is byte-identical, so only a
+    // FORCED re-price gets past the short-circuit. (This panel closes on success, so the
+    // re-open's own forced prime usually gets there first -- kept so the rule reads the
+    // same on every cost line: a spend always invalidates the verdict that allowed it.)
+    probe.refresh({ force: true });
+    handedOff = true;
+    handleClose();
+    if (typeof onDone === "function") onDone({ media_id: mid, task_id: tid });
+    if (window.Toast) {
+      window.Toast.show({
+        kind: "ok", title: "Upscale started",
+        msg: "Watch it in Activity · the result lands in your gallery",
       });
+    }
   };
 
   const cls = "upscale-panel" + (inline ? " inline" : "")
@@ -414,30 +439,18 @@ const UpscalePanel = forwardRef(function UpscalePanel({ inline, onDone }, ref) {
             </div>
           )}
 
+          {/* Purely informational: this picture's own model, used automatically. There is no
+              model control -- PixAI's upscale dialog has none (DECISIONS 2026-07-27). */}
           <div className="mgu-lbl">Model</div>
           <div className="mgu-note">{modelNote}</div>
-          {showPickBtn && !pickerOpen && (
-            <button
-              type="button" className="mgu-sel"
-              style={{ cursor: "pointer", textAlign: "left" }}
-              onClick={() => setPickerOpen(true)}
-            >
-              Choose a model…
-            </button>
-          )}
-          {pickerOpen && (
-            <div ref={pickHostRef} data-mgu="picker">
-              <ModelPicker kind="base" visible onPick={onModelPick} />
-            </div>
-          )}
 
           <CostBadge
             ref={costRef}
-            hint="The cost appears once this image has a model."
+            hint="Choose a ratio to see the cost."
             cardLabel="a card"
           />
 
-          <button type="button" className="mgu-go" disabled={!canSubmit || busy} onClick={doSubmit}>
+          <button type="button" className="mgu-go" disabled={!canGo || busy} onClick={doSubmit}>
             {busy ? "Submitting…" : "Upscale"}
           </button>
           {msg && <div className={"mgu-note" + (msg.bad ? " bad" : "")}>{msg.text}</div>}

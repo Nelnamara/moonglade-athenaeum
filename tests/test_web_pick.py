@@ -176,7 +176,7 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     assert "is_nsfw" in loom_bundle or "isNsfw" in loom_bundle   # esbuild output stays in sync with the .jsx source
 
 
-def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch):
+def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_path, monkeypatch, pixai):
     """picker-parity-round2 (problem 3): LoRA search needs real per-row architecture data
     (modelType/loraBaseModelType) on EVERY search, not just category/Newest browsing -- REST
     has no such field to request (confirmed by inspecting its full response shape -- see
@@ -184,7 +184,6 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     model_search_market_gql (GraphQL), regardless of category/sort. Base-model search
     (kind=base) is UNCHANGED -- REST by default, GraphQL only for category/Newest."""
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1) or {"results": [], "has_more": False})
     monkeypatch.setattr(core, "model_search_market_gql",
@@ -199,7 +198,7 @@ def test_model_search_lora_always_uses_graphql_even_without_market_filters(tmp_p
     assert calls == {"rest": 1, "gql": 1}
 
 
-def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_path, monkeypatch):
+def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_path, monkeypatch, pixai):
     """Owner report 2026-07-26: "With popular selected, sorting by model type does nothing. With
     Newest selected it works as expected. Time based sorting also does nothing in Popular."
 
@@ -213,7 +212,6 @@ def test_base_filters_never_fall_through_to_the_backend_that_ignores_them(tmp_pa
     worth keeping and there is nothing to ignore.
     """
     calls = {"rest": 0, "gql": 0}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "model_search_rest",
                         lambda *a, **k: calls.__setitem__("rest", calls["rest"] + 1)
                         or {"results": [], "has_more": False})
@@ -262,11 +260,10 @@ def test_market_sorts_are_the_four_pixai_actually_has(monkeypatch):
     assert core.market_sort("nonsense; DROP TABLE") == core.market_sort("trending")
 
 
-def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch):
+def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatch, pixai):
     """base_type= (the caller's already-resolved selected base model_type) threads into
     annotate_lora_compat for kind=lora only -- a base-model search has nothing to
     compat-sort against, so it ignores the param entirely even if sent."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "model_search_market_gql",
                         lambda *a, **k: {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
                                           "has_more": False})
@@ -283,12 +280,11 @@ def test_model_search_base_type_annotates_lora_results_only(tmp_path, monkeypatc
     assert "compat" not in d3["results"][0]
 
 
-def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, monkeypatch):
+def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, monkeypatch, pixai):
     """AUDIT_2026-07-21: `base_type=` already reached this route for the compat sort/badge;
     it now ALSO drives PixAI's own generationModels(loraBaseModelTypes:) filter, which this
     app had never used -- the reason a DiT.2 user's LoRA browse came back 24-of-24 SD 1.5.
     One caller-supplied value, reused at every layer rather than a second parameter."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     gql = []
     monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
         gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "MMDIT26A_MODEL"}],
@@ -311,14 +307,13 @@ def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, mo
     assert gql[-1]["lora_base_type"] == ""
 
 
-def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch):
+def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch, pixai):
     """Owner report 2026-07-24: the picker never loads more than its first page. The
     unused `offset=` param is replaced by a unified `cursor=` the client just echoes back
     without needing to know which search path is serving it -- the route decides what an
     opaque cursor MEANS based on which path is active for THIS request. GraphQL: the
     literal cursor string, passed through as `after=`. REST: a plain base-10 offset,
     computed here (not inside model_search_rest, which only knows a raw int offset)."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     gql_calls = []
     monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
         gql_calls.append(k) or {"results": [], "has_more": True, "next_cursor": "GQL_NEXT"}))
@@ -363,7 +358,7 @@ def test_collections_endpoint(tmp_path):
     assert set(d["collections"]) == {"Banners", "Faves"}
 
 
-def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):
+def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch, pixai):
     seen = {}
 
     def fake_upload(session, path, *a, **k):
@@ -371,7 +366,6 @@ def test_upload_returns_media_id_and_cleans_temp(tmp_path, monkeypatch):
         assert os.path.exists(path)            # file was materialized for upload
         return "M123"
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "upload_media", fake_upload)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -388,19 +382,14 @@ def test_upload_requires_a_file(tmp_path):
     assert cli.post("/api/upload", data={}).status_code == 400
 
 
-def test_tag_search_gql_shapes_names(monkeypatch):
-    seen = {}
-
-    def fake_gql(session, q, variables=None, **k):
-        seen["q"], seen["vars"] = q, variables
-        return {"tags": {"edges": [{"node": {"name": "no humans"}},
-                                   {"node": {"name": "no shoes"}},
-                                   {"node": {}}]}}
-
-    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
-    out = core.tag_search_gql(object(), "no hu", first=8)
+def test_tag_search_gql_shapes_names(pixai):
+    pixai.on("tags", {"tags": {"edges": [{"node": {"name": "no humans"}},
+                                         {"node": {"name": "no shoes"}},
+                                         {"node": {}}]}})
+    out = core.tag_search_gql(pixai, "no hu", first=8)
     assert out == ["no humans", "no shoes"]          # nameless node dropped
-    assert "tags(q:" in seen["q"] and seen["vars"] == {"k": "no hu", "n": 8}
+    sent, = pixai.calls
+    assert "tags(q:" in sent.document and sent.variables == {"k": "no hu", "n": 8}
 
 
 def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
@@ -413,18 +402,16 @@ def test_tag_suggest_route_short_prefix_is_free(tmp_path, monkeypatch):
     assert cli.get("/api/tag-suggest?q=n").get_json() == {"tags": []}
 
 
-def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_tag_suggest_route_returns_tags(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "tag_search_gql", lambda s, q, first=8: ["no humans"])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/tag-suggest?q=no hu").get_json() == {"tags": ["no humans"]}
 
 
-def test_price_route_video_mode(tmp_path, monkeypatch):
+def test_price_route_video_mode(tmp_path, monkeypatch, pixai):
     """Video payloads price through build_shot_video_params + report the card count."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
@@ -440,13 +427,12 @@ def test_price_route_video_mode(tmp_path, monkeypatch):
     assert i2v["generateAudio"] is True
 
 
-def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monkeypatch):
+def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monkeypatch, pixai):
     """Issue #15: /api/price's `free` is core.card_covers(best), NOT bool(best). A 15s video
     can MATCH a multi-ticket card the account holds too few tickets of; the site attaches
     nothing and charges the full price, so the badge must never say FREE for it. The route
     also reports the ticket accounting (cards_needed / cards_held / card_short) the badge
     renders honestly, and keeps `cards` (= held) for the existing "(N left)" wording."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: 27500)
     body = {"mode": "I2V", "images": ["55"], "prompt": "pan", "duration": 15,
             "video_model": "v3.2"}
@@ -480,14 +466,13 @@ def test_price_route_free_only_when_the_card_covers_the_whole_job(tmp_path, monk
     assert d["cards"] is None and d["cards_held"] is None and d["cards_needed"] is None
 
 
-def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch):
+def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch, pixai):
     """The Loom sends `generate_audio` (matching /api/loom/generate's own key); the older
     `audio` key is the web drawer's. /api/price must accept either -- it used to only read
     `audio`, so a Loom price preview never reflected the real audio-enabled cost even though
     the actual generation correctly included it (a real, if smaller, mismatch fixed alongside
     wiring audio into the Loom for the first time)."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task",
                         lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken",
@@ -503,37 +488,34 @@ def test_price_route_reads_generate_audio_key_too(tmp_path, monkeypatch):
     assert i2v["audioLanguage"] == "none"   # PixAI's real SE-only value, not literal silence
 
 
-def test_price_route_video_needs_an_image(tmp_path, monkeypatch):
+def test_price_route_video_needs_an_image(tmp_path, monkeypatch, pixai):
     def boom(*a, **k):
         raise AssertionError("no pricing without a source image")
     monkeypatch.setattr(core, "price_task", boom)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "R2V", "images": []}).get_json()
     assert d["cost"] is None and "source image" in d["note"]
 
 
-def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, monkeypatch):
+def test_price_route_i2v_still_needs_an_image_even_with_video_refs(tmp_path, monkeypatch, pixai):
     # I2V/FLF are image-anchored -- a video_refs entry must NOT waive the image requirement
     # for those two modes, only for R2V (which the multi-parity build made a genuine option).
     def boom(*a, **k):
         raise AssertionError("no pricing without a source frame")
     monkeypatch.setattr(core, "price_task", boom)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/price", json={"mode": "I2V", "images": [], "video_refs": ["9"]}).get_json()
     assert d["cost"] is None and "source image" in d["note"]
 
 
-def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch):
+def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch, pixai):
     """Found while wiring the ref-slot expansion: R2V's price gate checked ONLY `images`,
     so a video-only or audio-only Multi-ref (both real, API-supported references) silently
     failed pricing with 'pick a source image' even though the submit itself would have
     worked. R2V must accept ANY reference kind alone."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
@@ -550,9 +532,8 @@ def test_price_route_r2v_prices_video_only_multiref(tmp_path, monkeypatch):
     assert seen["params"]["referenceVideo"]["referenceAudioMediaIds"] == ["7"]
 
 
-def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch):
+def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch, pixai):
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 27500)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
@@ -563,8 +544,20 @@ def test_price_route_threads_negative_and_channel(tmp_path, monkeypatch):
     assert seen["params"]["isPrivate"] is True
 
 
-def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def _account_reads(pixai):
+    """Register the two read-only /v2 reads `/api/account` makes besides the account query.
+
+    They have to be registered because the fake refuses what nobody registered -- which is
+    the point of it. Under the old blanket "/v2 blocked in tests" stub both calls raised a
+    PixAIError that `list_kaisuukens` / `list_claims` swallowed, so the route quietly
+    reported no cards and no claims and no test ever said so out loud."""
+    pixai.on("/kaisuuken/summary", {"kaisuukens": []})
+    pixai.on("/claim", {"claims": []})
+    return pixai
+
+
+def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch, pixai):
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 330990, "tasks": {"totalCount": 4}, "followerCount": 30, "followingCount": 4})
     monkeypatch.setattr(core, "list_kaisuukens",
@@ -581,8 +574,7 @@ def test_account_route_sums_cards_and_coverage(tmp_path, monkeypatch):
     assert d["followers"] == 30 and d["following"] == 4
 
 
-def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_snippets_roundtrip_and_persist(tmp_path, monkeypatch, pixai):
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     assert cli.get("/api/snippets").get_json() == {"snippets": []}
@@ -688,8 +680,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_snippets(tmp_path
     assert json.loads((tmp_path / "prompt_snippets.json").read_text(encoding="utf-8")) == ["from-before"]
 
 
-def test_suggest_prompt_route(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_suggest_prompt_route(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "suggest_prompt", lambda s, mid: ["1girl, night", "a girl at night"])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -709,8 +700,19 @@ def test_rows_for_media_ids_preserves_order_drops_missing():
         def close(self):
             pass
 
+        # rows_for_media_ids now opens through the catalog() context manager, so the
+        # fake connection is what that context yields; __enter__/__exit__ let this same
+        # object stand in for `with catalog(db_path) as con:`. (Re-pinned from the old
+        # g._connect patch, which convert-to-catalog turned into a no-op.)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+            return False
+
     import unittest.mock as mock
-    with mock.patch.object(g, "_connect", return_value=FakeCon()):
+    with mock.patch.object(g, "catalog", return_value=FakeCon()):
         rows = g.rows_for_media_ids("db", ["3", "1", "99", "2"])
     assert [r["media_id"] for r in rows] == ["3", "1", "2"]   # order kept, 99 dropped
 
@@ -746,14 +748,13 @@ def test_contact_sheet_photo_and_strip(tmp_path):
     assert strip.count("/full/1") == 4 and strip.count("/full/2") == 4
 
 
-def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
+def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch, pixai):
     """Frame handoff: find the shot's clip -> extract last frame -> upload -> media_id."""
     import moonglade_gallery as g
     (tmp_path / "videos").mkdir()
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     seen = {}
 
     def fake_extract(vp, out, at_seconds=None):
@@ -764,7 +765,7 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
         return out
     monkeypatch.setattr(core, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+    monkeypatch.setattr(core, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -774,7 +775,7 @@ def test_loom_handoff_extracts_and_uploads(tmp_path, monkeypatch):
     assert seen["at"] is None            # no trim_out -> take the clip's true last frame
 
 
-def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
+def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch, pixai):
     """A trimmed previous shot must hand off the frame at its trimOut (the point the cut
     ends on), not the untrimmed clip's real final frame -- else the continuity chain shows
     a frame the edit never plays."""
@@ -783,7 +784,6 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
     clip = tmp_path / "videos" / "shot_V9.mp4"
     clip.write_bytes(b"fake")
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     seen = {}
 
     def fake_extract(vp, out, at_seconds=None):
@@ -793,7 +793,7 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
         return out
     monkeypatch.setattr(core, "extract_last_frame", fake_extract)
     monkeypatch.setattr(core, "upload_media", lambda s, p: "FRAME123")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 5.0)
+    monkeypatch.setattr(core, "duration", lambda p: 5.0)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -802,15 +802,14 @@ def test_loom_handoff_is_trim_aware(tmp_path, monkeypatch):
     assert seen["at"] == 3.2             # the trimOut reached ffmpeg
 
 
-def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_loom_handoff_needs_local_clip(tmp_path, monkeypatch, pixai):
     cli = _authed_client(tmp_path, [_row(media_id="X", filename="a_x.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.post("/api/loom/handoff", json={"video_media_id": "nope"}).get_json()
     assert "not downloaded" in d["error"]
 
 
-def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
+def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch, pixai):
     """B17 (audit 2026-07-21): the fallback resolver's bare '*<mid>.*' glob had no
     quarantine exclusion -- a file under _deleted/ (a local purge) was a valid hit,
     so a purged clip could be extracted and uploaded to seed the next (paid) shot.
@@ -821,7 +820,6 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     calls = []
     monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
@@ -832,7 +830,7 @@ def test_loom_handoff_ignores_deleted_quarantine(tmp_path, monkeypatch):
     assert "not downloaded" in d["error"]
 
 
-def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
+def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch, pixai):
     """B17 (audit 2026-07-21): the fallback glob had no media_id_of(p) == mid check,
     so a SHORTER media_id could match as a substring of a longer, UNRELATED one's
     filename -- e.g. a request for 'V9' resolving to a clip whose real id is '9V9'."""
@@ -840,7 +838,6 @@ def test_loom_handoff_requires_exact_media_id_match(tmp_path, monkeypatch):
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "other_9V9.mp4").write_bytes(b"fake")   # real media_id is "9V9"
 
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     calls = []
     monkeypatch.setattr(core, "extract_last_frame", lambda *a, **k: calls.append(a) or None)
 
@@ -857,7 +854,7 @@ def test_loom_video_duration_probes_local_file(tmp_path, monkeypatch):
     the real local file via ffprobe instead of leaving an imported clip's length wrong."""
     (tmp_path / "videos").mkdir()
     (tmp_path / "videos" / "shot_V9.mp4").write_bytes(b"fake")
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: 7.25)
+    monkeypatch.setattr(core, "duration", lambda p: 7.25)
 
     cli = _authed_client(tmp_path, [_row(media_id="V9", filename="videos/shot_V9.mp4",
                                   is_video="1", created_at="2025-01-01T00:00:00")])
@@ -893,7 +890,7 @@ def test_loom_video_duration_ignores_deleted_quarantine(tmp_path, monkeypatch):
     qdir.mkdir()
     (qdir / "shot_V9.mp4").write_bytes(b"fake")
     calls = []
-    monkeypatch.setattr(core, "probe_video_duration", lambda p: calls.append(p) or 9.0)
+    monkeypatch.setattr(core, "duration", lambda p: calls.append(p) or 9.0)
 
     cli = _authed_client(tmp_path, [])
     d = cli.get("/api/loom/video-duration?media_id=V9").get_json()
@@ -933,8 +930,7 @@ def test_edit_scene_id_passthrough():
     assert "sceneId" not in core.build_chat_edit_parameters("x", ["55"])
 
 
-def test_presets_import_and_use(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_presets_import_and_use(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "character-card",
                        "chat": {"prompts": "BIG CANNED PROMPT",
@@ -948,7 +944,6 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert "prompt" not in lst["character-card"]          # GET never leaks the prompt body
     # price path uses the banked preset: canned prompt + sceneId + its model
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli.post("/api/price", json={"mode": "edit", "source": "55",
@@ -958,13 +953,12 @@ def test_presets_import_and_use(tmp_path, monkeypatch):
     assert seen["p"]["chat"]["modelId"] == "1948514378441961474"
 
 
-def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatch):
+def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatch, pixai):
     """Same split saved views/snippets/Loom storyboards already got: Toolbox presets
     were install-wide (one shared toolbox_presets.json), so any signed-in account
     could read AND wholesale-overwrite every other account's imported presets."""
     from moonglade_gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "alice-scene",
                        "chat": {"prompts": "ALICE PROMPT", "modelId": "1"}}})
@@ -987,14 +981,13 @@ def test_one_account_cannot_see_or_clobber_anothers_presets(tmp_path, monkeypatc
         "bob's save wiped alice's presets -- the store is not per-account")
 
 
-def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, monkeypatch):
+def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, monkeypatch, pixai):
     """B14 residual: toolbox_presets was the most recently split store, and it copied
     _view_presets_path's exact quote(username, safe="") keying -- inheriting the same
     case-collision bug. FAILS before the fix on this filesystem: nel's presets
     read/save clobbers Nel's."""
     from moonglade_gallery import create_app
     from tests.conftest import login_test_client
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "upper-scene",
                        "chat": {"prompts": "UPPER PROMPT", "modelId": "1"}}})
@@ -1016,11 +1009,10 @@ def test_presets_are_independent_for_accounts_differing_only_by_case(tmp_path, m
         "nel's save wiped Nel's presets -- case-collision on disk")
 
 
-def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch):
+def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path, monkeypatch, pixai):
     """Upgrade path: nothing disappears the moment the store goes per-account. An
     account with no file of its own falls back to the old shared toolbox_presets.json
     (read-only) -- exactly what it saw before the split -- and diverges on first save."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid: {
         "parameters": {"sceneId": "new-scene",
                        "chat": {"prompts": "NEW PROMPT", "modelId": "3"}}})
@@ -1041,7 +1033,7 @@ def test_account_without_its_own_file_still_sees_legacy_shared_presets(tmp_path,
     assert set(legacy) == {"from-before"}
 
 
-def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path, monkeypatch):
+def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path, monkeypatch, pixai):
     """Caught in adversarial review: --out defaults to a relative "pixai_backup" and
     main() never resolves it before create_app(out_dir). Unresolved, str(out_dir) for
     an out_dir given as "." (the exact scenario `--out .` produces) is a bare, generic
@@ -1061,7 +1053,6 @@ def test_redaction_does_not_over_redact_when_out_dir_is_a_relative_path(tmp_path
     save_catalog(out_dir / "catalog.db", [_row(media_id="1", filename="a_1.png",
                                           created_at="2025-01-01T00:00:00")])
     cli = login_client(out_dir)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     def boom(*a, **k):
         raise RuntimeError("retry in 0.5s. version 2.1.0. see release notes.")
@@ -1103,9 +1094,13 @@ def test_error_responses_redact_host_paths_even_with_a_space_in_the_directory_na
     assert str(out_dir) not in body
     assert "John Smith" not in body
     assert "<host-path>" in body
+    # the outer error exit shares the badge's shape: cost:None AND free:False, so the cost
+    # badge (which reads `free`) renders nothing spendable rather than an undefined field.
+    d = r.get_json()
+    assert d["cost"] is None and d["free"] is False
 
 
-def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
+def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch, pixai):
     """The sweep touched 37 sites across the file, not one -- prove a SECOND,
     differently-shaped site (different local variable names, different sibling JSON
     keys) got the same treatment, not just the one this file happens to exercise most.
@@ -1114,7 +1109,6 @@ def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch):
     would never actually appear in a real error message.)"""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     def boom(*a, **k):
         raise RuntimeError("upstream call failed, see {}\\log.txt".format(tmp_path))
@@ -1172,14 +1166,13 @@ def test_redaction_catches_a_slash_flipped_windows_path(tmp_path, monkeypatch):
     assert "<host-path>" in body
 
 
-def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch):
+def test_redaction_still_does_not_eat_ordinary_messages(tmp_path, monkeypatch, pixai):
     """The degenerate-candidate guard must survive the case-insensitive rewrite: an ordinary
     message containing no host path at all comes back untouched. This is the regression the
     length floor and the resolve() both exist for -- a looser matcher is exactly how that
     class of bug returns."""
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
 
     def boom(*a, **k):
         raise RuntimeError("upstream said: retry in 0.5s (attempt 2 of 3)")
@@ -1234,15 +1227,12 @@ _CONTEST_PAGES = {
 }
 
 
-def test_list_contests_normalizes_and_pages(monkeypatch):
-    seen = []
-    def fake_get(s, path, params=None, **k):
-        seen.append((path, params.get("page")))
-        return _CONTEST_PAGES[params["page"]]
-    monkeypatch.setattr(core, "_rest_get", fake_get)
+def test_list_contests_normalizes_and_pages(pixai):
+    pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
     # active_only walks BOTH pages (a running contest hides on page 2) and keeps only 'running'
-    active = core.list_contests(object(), active_only=True)
+    active = core.list_contests(pixai, active_only=True)
     assert [c["id"] for c in active] == ["1", "2", "4"]      # the 'ended' one dropped, page-2 kept
+    seen = [(c.path, c.params.get("page")) for c in pixai.calls]
     assert ("/contest/list", 2) in seen                      # paged through
     c0 = active[0]
     assert c0["title"] == "Summer Embers" and c0["type"] == "official" and c0["active"] is True
@@ -1250,14 +1240,12 @@ def test_list_contests_normalizes_and_pages(monkeypatch):
     assert c0["cover_url"] == "https://api.pixai.art/v1/media/M1/thumbnail"
     assert c0["prize_amount"] == 29000000
     # all -> the ended one is included
-    allc = core.list_contests(object(), active_only=False)
+    allc = core.list_contests(pixai, active_only=False)
     assert any(c["id"] == "3" and c["active"] is False for c in allc)
 
 
-def test_api_contests_route(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "_rest_get",
-                        lambda s, path, params=None, **k: _CONTEST_PAGES[params["page"]])
+def test_api_contests_route(tmp_path, pixai):
+    pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/contests").get_json()             # default = active only
@@ -1265,9 +1253,8 @@ def test_api_contests_route(tmp_path, monkeypatch):
     assert all(c["active"] for c in d["contests"])
 
 
-def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
+def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch, pixai):
     import moonglade_gallery as g
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     # views come from a per-artwork call; mock it deterministically off the artwork_id
     monkeypatch.setattr(core, "artwork_views", lambda s, aid: {"aw1": 500, "aw2": 90}.get(aid, 0))
     cli = _authed_client(tmp_path, [
@@ -1288,8 +1275,7 @@ def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch):
     assert d["items"][0]["views"] == 500
 
 
-def test_artwork_views_route(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_artwork_views_route(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "artwork_views", lambda s, aid: 174)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                   created_at="2025-01-01T00:00:00")])
@@ -1413,11 +1399,10 @@ def test_edit_model_id_and_quality_omit():
     assert ep["chat"]["modelConfig"]["quality"] == "high"
 
 
-def test_edit_price_uses_selected_model(tmp_path, monkeypatch):
+def test_edit_price_uses_selected_model(tmp_path, monkeypatch, pixai):
     """The Edit card's model picker drives the submitted modelId + valid option set:
     Reference Pro -> model 1948..., 4K/21:9, no quality; Edit Pro -> Edit Pro model + quality."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1445,11 +1430,10 @@ def test_clamp_edit_config_snaps_to_model_caps():
     assert core.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
 
 
-def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
+def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch, pixai):
     """End-to-end: Reference Pro sent with Edit-Pro-style knobs (the preset-mismatch case) is
     clamped server-side to valid values before the params ever reach PixAI."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1459,11 +1443,10 @@ def test_edit_price_clamps_invalid_knobs(tmp_path, monkeypatch):
     assert mc["resolution"] == "2K" and "quality" not in mc      # snapped + quality dropped
 
 
-def test_edit_multi_reference_sources(tmp_path, monkeypatch):
+def test_edit_multi_reference_sources(tmp_path, monkeypatch, pixai):
     """Multi-image references: the Edit card sends sources[] -> chat.mediaIds carries them all
     (primary first), capped to the model's ref limit; falls back to [source] when absent."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1503,6 +1486,25 @@ def test_css_cascade_resolver_can_actually_fail(tmp_path):
     # A higher-specificity earlier rule still beats a later bare one.
     assert winning(css_rules("<style>#d.x{width:1px;}#d{width:2px;}</style>"),
                    element(id="d", classes={"x"}), "width", PHONE).value == "1px"
+
+
+def test_mobile_video_overlay_scroller_is_the_touchable_host_not_the_ghost_wrap():
+    """FIX (2026-08-23): mobile Create > Video was stuck -- the overlay .cm-videowrap is
+    pointer-events:none (so a tap in its reserved seg-control gap falls through to the real
+    control beneath), which ALSO makes it un-hit-testable, so a touch-drag on it could never
+    start a scroll. The scroller has to be the pointer-events:auto content host instead.
+    Resolve the real cascade (create-mobile.css) and require that .cm-videohost -- NOT the
+    ghost wrap -- is what declares overflow-y:auto, so a future edit that moves the scroll
+    back onto the untouchable wrap fails here instead of silently freezing Video mode again."""
+    css = "<style>" + (Path(__file__).resolve().parents[1] / "gallery" / "src"
+                       / "styles" / "create-mobile.css").read_text(encoding="utf-8") + "</style>"
+    rules = css_rules(css)
+    host = element(classes={"cm-videohost"}, ancestors=[dict(classes={"cm-videowrap"})])
+    win = winning(rules, host, "overflow-y", PHONE)
+    assert win is not None and win.value == "auto", "the touchable .cm-videohost must be the scroller"
+    # ...and the untouchable tap-through wrap must NOT itself be an overflow-y scroller.
+    assert winning(rules, element(classes={"cm-videowrap"}), "overflow-y", PHONE) is None, \
+        "the pointer-events:none wrap must not be the scroller"
 
 
 def test_video_v40_full_cost_warning():
@@ -1633,7 +1635,7 @@ def test_generate_drawer_blocks_submit_on_unresolved_lora():
     assert "onToggle && onToggle({ ...entry, failed: true }, true);" in picker_jsx
 
 
-def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch):
+def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch, pixai):
     """[MAJOR] The Bridge restored an enhance surface, but /api/price still must NOT quote a
     number for it. An enhance/panelplugin task is priced by its workflow id, which is
     deliberately NOT in core._PRICE_SCALARS -- price_task would price the workflow-less shape
@@ -1642,7 +1644,6 @@ def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch):
     no misleading price is shown. (Adding the workflow-id scalar needs a live measurement first
     -- a separately authorized step.)"""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(p=params) or 8000)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1652,7 +1653,7 @@ def test_price_enhance_mode_returns_no_cost(tmp_path, monkeypatch):
     assert not seen, "enhance must not reach the pricing endpoint (it can't be priced yet)"
 
 
-def test_import_task_by_id(tmp_path, monkeypatch):
+def test_import_task_by_id(tmp_path, monkeypatch, pixai):
     """Panel 'Recover a task by ID' -> collect_generation. LOGIN tier (not localhost --
     see below); numeric-only; recovers edits/favorites-only tasks Sync's listing skips.
 
@@ -1669,7 +1670,6 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     authenticated non-local session against every registered route. It is deliberately
     LOGIN, not localhost: recovering your own finished media spends nothing."""
     called = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: called.update(tid=tid) or {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1691,7 +1691,7 @@ def test_import_task_by_id(tmp_path, monkeypatch):
     # the React app owns the recover-a-task surface now.)
 
 
-def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatch):
+def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatch, pixai):
     """THE BUG (docs/AUDIT_2026-07-21.md, owner-2026-07-23, task 2037215124834251576):
     a generation finishes on PixAI's side but our own /api/task-status never gets a
     chance to run for it -- the polling browser tab closed, or a transient exception
@@ -1702,7 +1702,6 @@ def test_import_task_closes_the_original_orphaned_job_entry(tmp_path, monkeypatc
     (which, for a web-submitted generate job, IS the numeric task id), so the Activity
     card kept spinning on the orphan forever even after the real media had landed.
     Recovering the same task id an orphan is keyed on must close that original entry."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1740,11 +1739,10 @@ def test_import_task_closes_orphan_on_the_already_cataloged_path_too(tmp_path):
     assert by_id[tid]["status"] == "done", "the already-cataloged path left the orphan spinning"
 
 
-def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
+def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch, pixai):
     """If the owner already dismissed the orphaned entry by hand, a later recovery must
     not resurrect it with a new event -- dismiss is an explicit user action and stays
     respected, same as every other job in the log."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, tid, out, **k: {"saved": 1, "media_ids": ["m1"], "is_video": False})
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
@@ -1761,12 +1759,11 @@ def test_import_task_leaves_a_dismissed_orphan_alone(tmp_path, monkeypatch):
     assert jobs_by_id[tid]["dismissed"] is True
 
 
-def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
+def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch, pixai):
     """The header balance surface exposes per-card breakdown (name + type/category) + soonest
     expiry, claimable free credits, and the subscription cliff — the data the chip/badge/
     warnings render. Category was fetched by list_kaisuukens all along but used to be dropped
     before reaching cards_by, so the tooltip could never say "Model Card" vs "Video Card"."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140, "subscription": {"endAt": "2026-07-27T00:00:00Z", "cancelAtPeriodEnd": True}})
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
@@ -1784,12 +1781,11 @@ def test_account_surfaces_cards_claim_and_subscription(tmp_path, monkeypatch):
     assert d["sub"]["end"] == "2026-07-27" and d["sub"]["cancel"] is True
 
 
-def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypatch):
+def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypatch, pixai):
     """A kaisuuken row with no category (e.g. an older PixAI response shape, or the CLI's
     own list_kaisuukens() before this field existed) must not blow up the route -- category
     defaults to '' rather than None, so the JS tooltip's `k.category ? ... : ''` check is
     always comparing against a string, never null."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
         {"name": "Legacy Card", "count": 1, "expires": ""}])
@@ -1799,7 +1795,7 @@ def test_account_cards_by_category_defaults_empty_when_absent(tmp_path, monkeypa
     assert d["cards_by"][0]["category"] == ""
 
 
-def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path, monkeypatch):
+def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path, monkeypatch, pixai):
     """This test used to assert /api/account returned a normalized `roles` list. That whole
     feature is gone, because fetching it was breaking everything else: `me.roles` is a
     RoleConnection, and selecting it bare failed GraphQL validation for the ENTIRE account
@@ -1810,7 +1806,7 @@ def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path,
     account read down with it. What this now guards is the thing that actually matters and
     that the roles work silently broke: the endpoint still serves real credits.
     """
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 1850640})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                          created_at="2025-01-01T00:00:00")])
@@ -1819,14 +1815,14 @@ def test_account_endpoint_still_serves_credits_after_the_roles_removal(tmp_path,
     assert "roles" not in body, "roles is back in the payload; see _ACCOUNT_QUERY's guard"
 
 
-def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
+def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch, pixai):
     """PixAI's own account API already returns the account's real per-generation LoRA
     entitlement (membership.privilege.{lora,freeUserLora}) -- account_info() already fetches
     it (see the CLI's --account dashboard, run_account_info), but nothing ever exposed it to
     the web app, so the picker had no idea what the real cap was. `lora` wins when both are
     present (mirrors the CLI's own field-check order); `free_user_lora` is the fallback for
     an account with no paid `lora` entitlement at all."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140,
         "membership": {"privilege": {"lora": 15, "freeUserLora": 2}}})
@@ -1835,8 +1831,8 @@ def test_account_surfaces_the_real_membership_lora_cap(tmp_path, monkeypatch):
     assert d["lora_cap"] == 15
 
 
-def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch, pixai):
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {
         "quotaAmount": 140,
         "membership": {"privilege": {"freeUserLora": 2}}})
@@ -1845,7 +1841,7 @@ def test_account_lora_cap_falls_back_to_free_user_lora(tmp_path, monkeypatch):
     assert d["lora_cap"] == 2
 
 
-def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monkeypatch):
+def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monkeypatch, pixai):
     """A NON-MEMBER is not "unknown" -- they are the free tier, and the cap is 3.
 
     This test used to assert None, which is exactly the bug it now guards against: when the
@@ -1856,7 +1852,7 @@ def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monk
     owner, 2026-07-28). PixAI's own panel prints "Free: 0/3   Max: 15" beside the LoRA
     section, so 3 is measured, not assumed.
     """
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {"quotaAmount": 140})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
@@ -1864,10 +1860,10 @@ def test_account_lora_cap_is_the_free_tier_when_membership_absent(tmp_path, monk
     assert d["is_member"] is False
 
 
-def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypatch):
+def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypatch, pixai):
     """An account we could not READ is the only real unknown, and it must fail OPEN --
     a transient GraphQL blip must never strip a paying member's entitlements."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _account_reads(pixai)
     monkeypatch.setattr(core, "account_info", lambda s: {})
     cli = _authed_client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     d = cli.get("/api/account").get_json()
@@ -1875,12 +1871,11 @@ def test_account_entitlements_unknown_when_account_unreadable(tmp_path, monkeypa
     assert d["is_member"] is None
 
 
-def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch):
+def test_claim_endpoint_gated_and_claims_ready(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: [
         {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
         {"id": "agent-startup-stamina", "amount": 15, "canClaim": False}])   # not ready -> skipped
     claimed = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: claimed.append(cid))
     cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     # An unauthenticated LAN request is refused -- checked first, while `cli` is still
@@ -1906,24 +1901,26 @@ def test_thumbnails_are_not_served_immutable(tmp_path):
         "thumbnails are rewritten in place; 'immutable' pins the stale one. Got: " + hdr)
 
 
-def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, monkeypatch):
+def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, monkeypatch, pixai):
     """The Loom's Image / Edit / Reference tabs now price their REAL submit body through
     /api/price before spending (confirmSpend, the same fail-closed gate the video shots use).
     Each client shape must route to a priceable params object. If a key were wrong,
-    _params_and_nocard returns a `note` (params None), price_task is never called, and the
-    client guardrail degrades to a permanent "couldn't verify the cost" that can never show
-    the true credits/free-card state -- exactly the silent-spend seam this closes.
+    core.build_request returns a `note` (parameters None), price_task is never called, and
+    the client guardrail degrades to a permanent "couldn't verify the cost" that can never
+    show the true credits/free-card state -- exactly the silent-spend seam this closes.
 
     Bites: revert any of confirmSpend's price bodies to a mismatched key and the matching
     cost assertion drops from 1200 to None."""
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(params=params) or 1200)
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, params, enrich=False: None)  # no free card
     # The Loom Image picker emits model_id only (no version_id); /api/price resolves it to a
-    # version the same way /api/generate does. Stub that resolve so the test needs no network.
-    monkeypatch.setattr(core, "resolve_version_meta",
-                        lambda s, mid: {"version_id": "ver_" + str(mid)})
+    # version the same way /api/generate does -- literally the same way now, through
+    # core.model_version_resolver, so this pins list_model_versions (the validating resolve
+    # /api/generate always used) rather than the weaker rows[0] resolve_version_meta the
+    # price route used to run on its own. Stubbed so the test needs no network.
+    monkeypatch.setattr(core, "list_model_versions",
+                        lambda s, mid: [{"version_id": "ver_" + str(mid)}])
     cli = _authed_client(tmp_path, [_row(media_id="99", filename="b_99.png",
                                          created_at="2025-01-01T00:00:00")])
 

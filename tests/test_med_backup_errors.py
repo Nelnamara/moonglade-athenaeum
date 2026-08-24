@@ -206,7 +206,10 @@ class TestM03BookmarksStatus:
 
     def test_persisted_query_rotation_still_gets_its_own_message(self, mock_session, mocker):
         """An APQ miss answers {"errors":[...]} with NO 'data' key at all, so the errors
-        branch has to be tested before the shape guard or the self-healing hint is lost."""
+        branch has to be tested before the shape guard or the self-healing hint is lost. That
+        ordering now lives in the seam (PixAIClient.persisted reads `errors` -- and the
+        PersistedQueryNotFound special case -- before the missing-`data` guard), so the
+        recapture hint the seam raises ('Recapture the hash') is what surfaces here."""
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.ok = True
@@ -214,7 +217,7 @@ class TestM03BookmarksStatus:
         resp.json.return_value = {"errors": [{"message": "PersistedQueryNotFound"}]}
         mock_session.get.return_value = resp
 
-        with pytest.raises(core.PixAIError, match="hash has rotated"):
+        with pytest.raises(core.PixAIError, match="Recapture"):
             core._bookmarks_persisted(mock_session, **_persisted_args())
 
 
@@ -229,7 +232,10 @@ def _ffmpeg_refuses(monkeypatch, stderr=b"[mp4 @ 0x55] could not find sample tab
     def fake_run(cmd, **kw):
         seen.update(kw)
         seen.setdefault("calls", []).append(cmd)
-        return SimpleNamespace(returncode=1, stderr=stderr)
+        # A faithful CompletedProcess shape: media_tools' runner reads BOTH streams
+        # (stderr is where ffmpeg says why it refused; stdout is piped too, and with
+        # -v error it is empty on every road).
+        return SimpleNamespace(returncode=1, stdout=b"", stderr=stderr)
     monkeypatch.setattr(subprocess, "run", fake_run)
     return seen
 
@@ -239,7 +245,7 @@ def _ffmpeg_succeeds(monkeypatch):
     def fake_run(cmd, **kw):
         from pathlib import Path
         Path(cmd[-1]).write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
-        return SimpleNamespace(returncode=0, stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
 
@@ -252,7 +258,7 @@ class TestM04Faststart:
         clip = tmp_path / "nf.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
         before = clip.read_bytes()
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         seen = _ffmpeg_refuses(
             monkeypatch, b"[mp4 @ 0x55] track 1: could not find sample table\n")
 
@@ -269,7 +275,7 @@ class TestM04Faststart:
         both "ffmpeg refused" and "there was nothing to do", which is fine for the collect-time
         callers that only want the file made streamable -- but a sweep that has to name the
         clips still broken cannot tell them apart, and so named the wrong ones."""
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         already = tmp_path / "already.mp4"
         already.write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))
         gone = tmp_path / "gone.mp4"
@@ -290,7 +296,7 @@ class TestM04Faststart:
         vdir.mkdir()
         (vdir / "ok.mp4").write_bytes(_mp4(b"ftyp", b"moov", b"mdat"))    # already faststart
         (vdir / "broken.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch)                                      # ffmpeg refuses it
 
         res = core.run_faststart_videos(SimpleNamespace(out=str(tmp_path)))
@@ -316,7 +322,7 @@ class TestM04Faststart:
         vdir = tmp_path / "videos"
         vdir.mkdir()
         (vdir / "raced.mp4").write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_succeeds(monkeypatch)
         asked = {"n": 0}
 
@@ -346,7 +352,7 @@ class TestM04Faststart:
         vdir.mkdir()
         clip = vdir / "purged.mp4"
         clip.write_bytes(_mp4(b"ftyp", b"mdat", b"moov"))
-        monkeypatch.setattr(core, "_ffmpeg_path", lambda: "ffmpeg")
+        monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
         _ffmpeg_refuses(monkeypatch, b"purged.mp4: No such file or directory\n")
 
         def purge_then_answer(p):
@@ -564,11 +570,11 @@ class TestM18ModelLookupFailure:
                                                "model_id": vid, "model_name": vid},
         ])
         monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        resp = mocker.MagicMock()
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"data": {"generationModelVersion": None}}
+        # A faithful PixAI 200 (via _reply) carrying generationModelVersion: null -- the seam
+        # (PixAIClient.persisted) now inspects the HTTP status, so the response has to model a
+        # real one, not a bare MagicMock whose status_code compares truthy against >= 500.
         session = mocker.MagicMock()
-        session.get.return_value = resp
+        session.get.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
         mocker.patch.object(core, "_make_session", return_value=session)
 
         res = core.run_fix_models(SimpleNamespace(

@@ -224,7 +224,7 @@ def test_backfill_phash_nothing_to_do_is_safe(tmp_path):
 
 def test_migration_adds_phash_to_existing_db_without_data_loss(tmp_path):
     import sqlite3
-    from moonglade_gallery import _connect, load_catalog
+    from moonglade_gallery import migrate, load_catalog
 
     assert "phash" in CATALOG_FIELDS
     pre_fields = [f for f in CATALOG_FIELDS if f != "phash"]
@@ -238,7 +238,7 @@ def test_migration_adds_phash_to_existing_db_without_data_loss(tmp_path):
     con.commit()
     con.close()
 
-    rows = load_catalog(db)          # -> _connect() runs _MIGRATIONS
+    rows = load_catalog(db)          # first open of this path -> migrate() runs _MIGRATIONS
     assert rows[0]["media_id"] == "m1" and rows[0]["filename"] == "keep.png"
     assert rows[0]["rating"] == "5"                 # no data loss
     assert rows[0]["phash"] in ("", None)           # migrated in, blank default
@@ -248,4 +248,6 @@ def test_migration_adds_phash_to_existing_db_without_data_loss(tmp_path):
     save_catalog(db, [row])
     got = load_catalog(db)[0]
     assert got["phash"] == "abcdef0123456789" and got["filename"] == "keep.png"
-    _connect(db).close()             # re-connect after the fact stays harmless (idempotent)
+    migrate(db, force=True)          # re-running the DDL stays harmless (idempotent) --
+                                     # force, or the per-process memo would skip it and
+                                     # this line would prove nothing

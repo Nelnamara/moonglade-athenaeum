@@ -37,19 +37,17 @@ def test_normalize_video_card_has_no_model_route():
 
 # ---- list_kaisuukens: GET /v2/kaisuuken/summary, soft-fail ----
 
-def test_list_kaisuukens_from_summary(monkeypatch):
-    monkeypatch.setattr(core, "_rest_get", lambda s, path, **k: {
+def test_list_kaisuukens_from_summary(pixai):
+    pixai.on("/kaisuuken/summary", {
         "kaisuukens": [{"count": 16, "templateName": "Tsubaki.2 Only", "categoryName": "Model Card",
                         "routeToNative": "pixai://x?modelVersionId=123"}]})
-    cards = core.list_kaisuukens(object())
+    cards = core.list_kaisuukens(pixai)
     assert len(cards) == 1 and cards[0]["count"] == 16 and cards[0]["model_version_id"] == "123"
 
 
-def test_list_kaisuukens_fails_soft(monkeypatch):
-    def boom(*a, **k):
-        raise core.PixAIError("network down")
-    monkeypatch.setattr(core, "_rest_get", boom)
-    assert core.list_kaisuukens(object()) == []   # error => [] not a crash
+def test_list_kaisuukens_fails_soft(pixai):
+    pixai.fail("/kaisuuken/summary", core.PixAIError("network down"))
+    assert core.list_kaisuukens(pixai) == []   # error => [] not a crash
 
 
 # ---- match_kaisuuken: POST /v2/kaisuuken/check -> nearest-expiry ticket id ----
@@ -61,24 +59,20 @@ _MATCH_RESP = {"matches": [{"templateId": "tpl-1", "total": 16, "kaisuukens": [
 ]}], "total": 16}
 
 
-def test_match_picks_nearest_expiry(monkeypatch):
-    seen = {}
-    def fake_post(s, path, body, **k):
-        seen["path"] = path
-        seen["body"] = body
-        return _MATCH_RESP
-    monkeypatch.setattr(core, "_rest_post", fake_post)
-    best = core.match_kaisuuken(object(), {"modelId": "1983308862240288769"})
+def test_match_picks_nearest_expiry(pixai):
+    pixai.on("/kaisuuken/check", _MATCH_RESP)
+    best = core.match_kaisuuken(pixai, {"modelId": "1983308862240288769"})
     assert best["id"] == "id-soon"                    # soonest expiry wins
     assert best["templateId"] == "tpl-1" and best["total"] == 16
-    assert seen["path"] == "/kaisuuken/check"
-    assert seen["body"]["type"] == "generation-task"
-    assert seen["body"]["parameters"] == {"modelId": "1983308862240288769"}
+    sent, = pixai.calls
+    assert sent.path == "/kaisuuken/check" and sent.verb == "rest_post"
+    assert sent.body["type"] == "generation-task"
+    assert sent.body["parameters"] == {"modelId": "1983308862240288769"}
 
 
-def test_match_no_matches_returns_none(monkeypatch):
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"matches": [], "total": 0})
-    assert core.match_kaisuuken(object(), {"modelId": "x"}) is None
+def test_match_no_matches_returns_none(pixai):
+    pixai.on("/kaisuuken/check", {"matches": [], "total": 0})
+    assert core.match_kaisuuken(pixai, {"modelId": "x"}) is None
 
 
 def test_target_model_id_reads_top_level_and_chat():
@@ -101,43 +95,42 @@ _SUMMARY = [
 ]
 
 
-def test_match_enrich_prefers_model_matching_card(monkeypatch):
+def test_match_enrich_prefers_model_matching_card(monkeypatch, pixai):
     """Both cards match + the Reference one expires SOONER. Old behavior grabbed nearest-
     expiry (Reference). enrich=True must instead pick the EDIT card because the generation
     targets the Edit Pro model -- so an edit spends an Edit card, not a Reference one."""
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    pixai.on("/kaisuuken/check", _TWO_CARDS)
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: _SUMMARY)
     edit_params = core.build_chat_edit_parameters("x", ["10"])   # chat.modelId = Edit Pro
-    best = core.match_kaisuuken(object(), edit_params, enrich=True)
+    best = core.match_kaisuuken(pixai, edit_params, enrich=True)
     assert best["id"] == "edit-tkt" and best["templateId"] == "tpl-edit"
     assert best["name"] == "Edit Pro Only"                       # honest label data
 
 
-def test_match_without_enrich_keeps_nearest_expiry(monkeypatch):
+def test_match_without_enrich_keeps_nearest_expiry(monkeypatch, pixai):
     """Default (enrich=False) is unchanged: nearest-expiry across all matches, no summary
     call, no name -- so existing callers behave exactly as before."""
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    pixai.on("/kaisuuken/check", _TWO_CARDS)
     monkeypatch.setattr(core, "list_kaisuukens",
                         lambda s: (_ for _ in ()).throw(AssertionError("must not fetch summary")))
-    best = core.match_kaisuuken(object(), core.build_chat_edit_parameters("x", ["10"]))
+    best = core.match_kaisuuken(pixai, core.build_chat_edit_parameters("x", ["10"]))
     assert best["id"] == "ref-tkt"                               # sooner expiry wins, model-blind
     assert "name" not in best
 
 
-def test_match_enrich_falls_back_when_no_model_match(monkeypatch):
+def test_match_enrich_falls_back_when_no_model_match(monkeypatch, pixai):
     """enrich=True but the gen's model matches NO eligible card's model -> don't drop the
     free card; fall back to nearest-expiry across all (still names it)."""
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: _TWO_CARDS)
+    pixai.on("/kaisuuken/check", _TWO_CARDS)
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: _SUMMARY)
-    best = core.match_kaisuuken(object(), {"modelId": "9999-unknown"}, enrich=True)
+    best = core.match_kaisuuken(pixai, {"modelId": "9999-unknown"}, enrich=True)
     assert best["id"] == "ref-tkt"                               # nearest-expiry fallback
     assert best["name"] == "Reference Pro Only"
 
 
-def test_match_fails_soft(monkeypatch):
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("400")))
-    assert core.match_kaisuuken(object(), {"modelId": "x"}) is None
+def test_match_fails_soft(pixai):
+    pixai.fail("/kaisuuken/check", core.PixAIError("400"))
+    assert core.match_kaisuuken(pixai, {"modelId": "x"}) is None
 
 
 def test_match_empty_params_returns_none():
@@ -184,7 +177,7 @@ def test_apply_no_match_pays_credits(monkeypatch):
     assert "kaisuukenId" not in params
 
 
-def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(monkeypatch):
+def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(pixai):
     """A transient failure of the free-card check must NOT be treated as 'no card
     exists' at spend time -- match_kaisuuken's normal fail-soft contract collapses
     'genuinely no match' and 'the check itself errored' into the same None, and until
@@ -192,29 +185,24 @@ def test_apply_kaisuuken_check_failure_aborts_instead_of_silently_paying(monkeyp
     real credits on a generation that may have been promised as free moments earlier.
     The fix retries once, then ABORTS the submission with a clear error instead of
     falling through to "no matching free card -> this will spend credits."."""
-    calls = []
-    def flaky(*a, **k):
-        calls.append(1)
-        raise core.PixAIError("503 upstream hiccup")
-    monkeypatch.setattr(core, "_rest_post", flaky)
+    pixai.fail("/kaisuuken/check", core.PixAIError("503 upstream hiccup"))
     params = {"modelId": "m"}
     with pytest.raises(core.PixAIError, match="Lost to the Void"):
-        core._apply_kaisuuken(object(), params, _args())
+        core._apply_kaisuuken(pixai, params, _args())
     assert "kaisuukenId" not in params
-    assert len(calls) >= 2   # retried at least once before giving up rather than guessing
+    # retried at least once before giving up rather than guessing
+    assert len(pixai.calls_for("/kaisuuken/check")) >= 2
 
 
 # ---- run_cards display (list_kaisuukens stubbed) ----
 
-def test_run_cards_empty(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_cards_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [])
     assert core.run_cards(SimpleNamespace(token=None)) == {"cards": 0}
     assert "No free cards" in capsys.readouterr().out
 
 
-def test_run_cards_lists_with_total(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_cards_lists_with_total(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
         {"name": "Tsubaki.2 Only", "count": 16, "category": "Model Card",
          "task_types": ["image-gen"], "model_version_id": "1983308862240288769",
@@ -249,22 +237,16 @@ def test_params_no_kaisuuken_by_default():
 # ---- list_kaisuuken_logs: GET /v2/kaisuuken/logs -- the per-redemption "paper trail",
 # distinct from /v2/kaisuuken/summary's live held-count. Verified live 2026-08-02. ----
 
-def test_list_kaisuuken_logs_normalizes_real_shape(monkeypatch):
-    seen = {}
-
-    def fake_get(s, path, params=None, **k):
-        seen["path"] = path
-        seen["params"] = params
-        return {"data": [
+def test_list_kaisuuken_logs_normalizes_real_shape(pixai):
+    pixai.on("/kaisuuken/logs", {"data": [
             {"id": "rec-1", "kaisuukenId": "k-1", "templateCode": "common-tsubaki-2",
              "categoryCode": "Model Card", "templateName": "Tsubaki.2 Only",
              "taskType": "image-gen", "taskId": "2040084122530788759", "action": "consumed",
              "creditCost": 3200, "createdAt": "2026-07-31T17:16:00.000Z"},
-        ], "pageInfo": {"hasNextPage": True, "endCursor": "cursor-abc"}}
-
-    monkeypatch.setattr(core, "_rest_get", fake_get)
-    result = core.list_kaisuuken_logs(object(), first=20)
-    assert seen["path"] == "/kaisuuken/logs" and seen["params"] == {"first": 20}
+    ], "pageInfo": {"hasNextPage": True, "endCursor": "cursor-abc"}})
+    result = core.list_kaisuuken_logs(pixai, first=20)
+    sent, = pixai.calls
+    assert sent.path == "/kaisuuken/logs" and sent.params == {"first": 20}
     assert result["has_next"] is True and result["end_cursor"] == "cursor-abc"
     row = result["logs"][0]
     assert row["template_name"] == "Tsubaki.2 Only" and row["category"] == "Model Card"
@@ -272,23 +254,15 @@ def test_list_kaisuuken_logs_normalizes_real_shape(monkeypatch):
     assert row["task_id"] == "2040084122530788759"
 
 
-def test_list_kaisuuken_logs_passes_cursor_when_given(monkeypatch):
-    seen = {}
-
-    def fake_get(s, path, params=None, **k):
-        seen["params"] = params
-        return {"data": [], "pageInfo": {}}
-
-    monkeypatch.setattr(core, "_rest_get", fake_get)
-    core.list_kaisuuken_logs(object(), first=50, after="cursor-xyz")
-    assert seen["params"] == {"first": 50, "after": "cursor-xyz"}
+def test_list_kaisuuken_logs_passes_cursor_when_given(pixai):
+    pixai.on("/kaisuuken/logs", {"data": [], "pageInfo": {}})
+    core.list_kaisuuken_logs(pixai, first=50, after="cursor-xyz")
+    assert pixai.calls[0].params == {"first": 50, "after": "cursor-xyz"}
 
 
-def test_list_kaisuuken_logs_fails_soft(monkeypatch):
-    def boom(*a, **k):
-        raise core.PixAIError("network down")
-    monkeypatch.setattr(core, "_rest_get", boom)
-    assert core.list_kaisuuken_logs(object()) == {
+def test_list_kaisuuken_logs_fails_soft(pixai):
+    pixai.fail("/kaisuuken/logs", core.PixAIError("network down"))
+    assert core.list_kaisuuken_logs(pixai) == {
         "logs": [], "has_next": False, "end_cursor": None}
 
 
@@ -297,7 +271,7 @@ def test_list_kaisuuken_logs_fails_soft(monkeypatch):
 # out, e.g. Reference Pro Only / Edit Pro Only both did exactly that between 2026-07-06
 # and 2026-08-02.) ----
 
-def test_kaisuuken_type_catalog_pages_until_exhausted(monkeypatch):
+def test_kaisuuken_type_catalog_pages_until_exhausted(pixai):
     pages = [
         {"data": [
             {"templateName": "Tsubaki.2 Only", "categoryCode": "Model Card",
@@ -315,13 +289,13 @@ def test_kaisuuken_type_catalog_pages_until_exhausted(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fake_get(s, path, params=None, **k):
+    def next_page(call):
         i = calls["n"]
         calls["n"] += 1
         return pages[i]
 
-    monkeypatch.setattr(core, "_rest_get", fake_get)
-    result = core.kaisuuken_type_catalog(object())
+    pixai.on("/kaisuuken/logs", next_page)
+    result = core.kaisuuken_type_catalog(pixai)
     assert result["pages_read"] == 2 and result["hit_page_cap"] is False
     assert set(result["templates"].keys()) == {"Tsubaki.2 Only", "Edit Pro Only"}
     edit_pro = result["templates"]["Edit Pro Only"]
@@ -330,30 +304,26 @@ def test_kaisuuken_type_catalog_pages_until_exhausted(monkeypatch):
     assert edit_pro["first_seen"] == "2026-07-06T00:00:00Z"            # older of its 2 rows
 
 
-def test_kaisuuken_type_catalog_respects_page_cap(monkeypatch):
+def test_kaisuuken_type_catalog_respects_page_cap(pixai):
     """A log that NEVER runs out (hasNextPage always True) must stop at max_pages, not hang
     -- an old account paging forever would otherwise hammer PixAI's API indefinitely."""
-    def fake_get(s, path, params=None, **k):
-        return {"data": [{"templateName": "X", "categoryCode": "", "taskType": "",
-                           "action": "consumed", "createdAt": "2026-01-01T00:00:00Z"}],
-                "pageInfo": {"hasNextPage": True, "endCursor": "always-more"}}
-
-    monkeypatch.setattr(core, "_rest_get", fake_get)
-    result = core.kaisuuken_type_catalog(object(), max_pages=3)
+    pixai.on("/kaisuuken/logs",
+             {"data": [{"templateName": "X", "categoryCode": "", "taskType": "",
+                        "action": "consumed", "createdAt": "2026-01-01T00:00:00Z"}],
+              "pageInfo": {"hasNextPage": True, "endCursor": "always-more"}})
+    result = core.kaisuuken_type_catalog(pixai, max_pages=3)
     assert result["pages_read"] == 3 and result["hit_page_cap"] is True
 
 
-def test_kaisuuken_type_catalog_empty_history(monkeypatch):
-    monkeypatch.setattr(core, "_rest_get", lambda s, path, params=None, **k: {
-        "data": [], "pageInfo": {"hasNextPage": False}})
-    result = core.kaisuuken_type_catalog(object())
+def test_kaisuuken_type_catalog_empty_history(pixai):
+    pixai.on("/kaisuuken/logs", {"data": [], "pageInfo": {"hasNextPage": False}})
+    result = core.kaisuuken_type_catalog(pixai)
     assert result == {"templates": {}, "pages_read": 1, "hit_page_cap": False}
 
 
 # ---- run_card_history display (list_kaisuuken_logs / kaisuuken_type_catalog stubbed) ----
 
-def test_run_card_history_empty(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_card_history_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_kaisuuken_logs", lambda s, **k: {
         "logs": [], "has_next": False, "end_cursor": None})
     res = core.run_card_history(SimpleNamespace(token=None, card_history_all=False,
@@ -362,8 +332,7 @@ def test_run_card_history_empty(monkeypatch, capsys):
     assert "No benefit-card history" in capsys.readouterr().out
 
 
-def test_run_card_history_lists_recent(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_card_history_lists_recent(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_kaisuuken_logs", lambda s, **k: {
         "logs": [{"template_name": "Tsubaki.2 Only", "action": "consumed",
                   "task_id": "2040084122530788759", "created_at": "2026-07-31T17:16:00Z",
@@ -378,8 +347,7 @@ def test_run_card_history_lists_recent(monkeypatch, capsys):
     assert "--card-history-all" in out            # points at how to see more
 
 
-def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_card_history_all_prints_type_catalog(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "kaisuuken_type_catalog", lambda s, **k: {
         "templates": {
             "Tsubaki.2 Only": {"category": "Model Card", "task_type": "image-gen",
@@ -421,15 +389,12 @@ def _video_params(duration=15):
     return {"modelId": "vid-model", "i2vPro": {"duration": duration}}
 
 
-def test_match_sends_version_2_generation_task(monkeypatch):
-    seen = {}
-    def fake_post(s, path, body, **k):
-        seen["body"] = body
-        return {"matches": [_v2_match()], "total": 16}
-    monkeypatch.setattr(core, "_rest_post", fake_post)
-    core.match_kaisuuken(object(), {"modelId": "m"})
-    assert seen["body"]["type"] == "generation-task"
-    assert seen["body"]["version"] == 2 and isinstance(seen["body"]["version"], int)
+def test_match_sends_version_2_generation_task(pixai):
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match()], "total": 16})
+    core.match_kaisuuken(pixai, {"modelId": "m"})
+    body = pixai.calls[0].body
+    assert body["type"] == "generation-task"
+    assert body["version"] == 2 and isinstance(body["version"], int)
 
 
 @pytest.mark.parametrize("raw,need", [
@@ -439,57 +404,52 @@ def test_match_sends_version_2_generation_task(monkeypatch):
     ("2", 2),       # string from a loose serializer
     (2, 2),
 ])
-def test_match_parses_consume_amount_defensively(monkeypatch, raw, need):
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: {"matches": [_v2_match(consume=raw)], "total": 16})
-    best = core.match_kaisuuken(object(), {"modelId": "m"})
+def test_match_parses_consume_amount_defensively(pixai, raw, need):
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match(consume=raw)], "total": 16})
+    best = core.match_kaisuuken(pixai, {"modelId": "m"})
     assert best["consumeAmount"] == need
 
 
 @pytest.mark.parametrize("raw,held", [("5", 5), (None, None), (5, 5)])
-def test_match_parses_total_defensively(monkeypatch, raw, held):
+def test_match_parses_total_defensively(pixai, raw, held):
     mt = _v2_match(consume=1, total=raw)
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"matches": [mt]})   # no top-level total
-    best = core.match_kaisuuken(object(), {"modelId": "m"})
+    pixai.on("/kaisuuken/check", {"matches": [mt]})              # no top-level total
+    best = core.match_kaisuuken(pixai, {"modelId": "m"})
     assert best["total"] == held
 
 
-def test_match_covered_when_held_at_least_need(monkeypatch):
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=3)], "total": 3})
-    best = core.match_kaisuuken(object(), _video_params(15))
+def test_match_covered_when_held_at_least_need(pixai):
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match(consume=3, total=3)], "total": 3})
+    best = core.match_kaisuuken(pixai, _video_params(15))
     assert best["covered"] is True and core.card_covers(best)
 
 
-def test_match_not_covered_when_short(monkeypatch):
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=2)], "total": 2})
-    best = core.match_kaisuuken(object(), _video_params(15))
+def test_match_not_covered_when_short(pixai):
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match(consume=3, total=2)], "total": 2})
+    best = core.match_kaisuuken(pixai, _video_params(15))
     assert best is not None and best["id"] == "tkt-1"      # still named, for the honest note
     assert best["covered"] is False and not core.card_covers(best)
     assert best["consumeAmount"] == 3 and best["total"] == 2
 
 
-def test_match_unknown_balance_covers_single_ticket_only(monkeypatch):
+def test_match_unknown_balance_covers_single_ticket_only(pixai):
     """Balance unknown: a 1-ticket job stays covered (today's behaviour -- not attaching when
     covered loses real credits); a multi-ticket VIDEO fails CLOSED (not covered)."""
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: {"matches": [_v2_match(consume=1, total=None)]})
-    assert core.card_covers(core.match_kaisuuken(object(), {"modelId": "m"}))
-    monkeypatch.setattr(core, "_rest_post",
-                        lambda *a, **k: {"matches": [_v2_match(consume=3, total=None)]})
-    best = core.match_kaisuuken(object(), _video_params(15))
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match(consume=1, total=None)]})
+    assert core.card_covers(core.match_kaisuuken(pixai, {"modelId": "m"}))
+    pixai.on("/kaisuuken/check", {"matches": [_v2_match(consume=3, total=None)]})
+    best = core.match_kaisuuken(pixai, _video_params(15))
     assert best is not None and not core.card_covers(best)
 
 
-def test_match_prefers_covering_template_over_nearer_expiry(monkeypatch):
+def test_match_prefers_covering_template_over_nearer_expiry(pixai):
     """A: 2 held, expires SOONER. B: 5 held, expires later. Need 3 -> B, because coverage
     is decided before nearest-expiry (a short card must never shadow one that covers)."""
-    monkeypatch.setattr(core, "_rest_post", lambda *a, **k: {"matches": [
+    pixai.on("/kaisuuken/check", {"matches": [
         _v2_match(consume=3, total=2, tid="tpl-A", kid="tkt-A", exp="2026-08-20T00:00:00Z"),
         _v2_match(consume=3, total=5, tid="tpl-B", kid="tkt-B", exp="2026-09-20T00:00:00Z"),
     ]})
-    best = core.match_kaisuuken(object(), _video_params(15))
+    best = core.match_kaisuuken(pixai, _video_params(15))
     assert best["id"] == "tkt-B" and best["templateId"] == "tpl-B"
     assert core.card_covers(best)
 
@@ -539,8 +499,7 @@ def test_apply_short_attaches_nothing_and_prints_short_note(monkeypatch, capsys)
 
 # ---- _preview_card_note: the CLI preview must agree with the spend path ----
 
-def test_preview_free_when_covered_names_n_of_h(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_preview_free_when_covered_names_n_of_h(monkeypatch, capsys, pixai):
     seen = {}
     def fake_match(s, p, enrich=False, **k):
         seen["enrich"] = enrich
@@ -555,10 +514,9 @@ def test_preview_free_when_covered_names_n_of_h(monkeypatch, capsys):
     assert "uses 3 of 5 cards" in out and "0 credits" in out and "saves ~1,200 credits" in out
 
 
-def test_preview_not_free_when_short(monkeypatch, capsys):
+def test_preview_not_free_when_short(monkeypatch, capsys, pixai):
     """BLOCKER before #15: any match printed FREE, so a short 15s clip was promised free
     right before --confirm spent the full price."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "match_kaisuuken", lambda s, p, enrich=False, **k: {
         "id": "tkt-1", "expiresAt": "2026-09-01T00:00:00Z", "templateId": "tpl-1",
         "total": 2, "consumeAmount": 3, "covered": False, "name": "V4.0 Lite"})
@@ -571,8 +529,7 @@ def test_preview_not_free_when_short(monkeypatch, capsys):
     assert "FREE:" not in out
 
 
-def test_run_cards_explains_multi_ticket_videos(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_cards_explains_multi_ticket_videos(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_kaisuukens", lambda s: [
         {"name": "V4.0 Preview Lite Only", "count": 2, "category": "Video Card",
          "task_types": ["i2vpro"], "model_version_id": "", "template_code": "v4-lite",
@@ -584,15 +541,13 @@ def test_run_cards_explains_multi_ticket_videos(monkeypatch, capsys):
 
 # ---- 2026-08-16 xhigh review of the #15 branch: the four Python spend-path fixes ----
 
-def test_price_task_fails_soft_on_a_network_error_not_just_pixai_errors(monkeypatch):
+def test_price_task_fails_soft_on_a_network_error_not_just_pixai_errors(pixai):
     """price_task caught only (PixAIError, ValueError); a requests.RequestException from the
     raw session.get escaped -- and it is called from _apply_kaisuuken's SHORT branch, INSIDE
     the spend path, so a transient timeout there aborted a confirmed submit with a traceback."""
     import requests
-    def boom(*a, **k):
-        raise requests.exceptions.ConnectionError("reset")
-    monkeypatch.setattr(core, "_rest_get", boom)
-    assert core.price_task(object(), {"modelId": "m", "width": 512}) is None
+    pixai.fail("/task-price", requests.exceptions.ConnectionError("reset"))
+    assert core.price_task(pixai, {"modelId": "m", "width": 512}) is None
 
 
 def test_apply_short_branch_never_aborts_the_submit_when_the_cost_lookup_raises(monkeypatch, capsys):
@@ -611,7 +566,7 @@ def test_apply_short_branch_never_aborts_the_submit_when_the_cost_lookup_raises(
     assert "you hold 2 of the 3 V4.0 Lite tickets" in out and "full credit price" in out
 
 
-def test_match_never_credits_a_template_with_the_top_level_pool_sum(monkeypatch):
+def test_match_never_credits_a_template_with_the_top_level_pool_sum(pixai):
     """The response's top-level `total` is the SUM across matched templates (_TWO_CARDS: 17+5=22).
     Falling back to it when a match lacks its own `total` credited every template with the whole
     pool: a 5-held template read as covering a 6-ticket job, both landed in covered_pool, and
@@ -622,36 +577,36 @@ def test_match_never_credits_a_template_with_the_top_level_pool_sum(monkeypatch)
     a.pop("total")                                            # per-match total ABSENT
     b = _v2_match(consume=6, total=None, tid="tpl-b", kid="b-tkt", exp="2026-09-09T00:00:00Z")
     b.pop("total")
-    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [a, b], "total": 22})
-    best = core.match_kaisuuken(object(), _video_params(30))   # no enrich -> no summary count
+    pixai.on("/kaisuuken/check", {"matches": [a, b], "total": 22})
+    best = core.match_kaisuuken(pixai, _video_params(30))      # no enrich -> no summary count
     assert best["total"] is None, "the pool sum must NOT become a per-template balance"
     assert best["balance_unknown"] is True
     assert best["covered"] is False, "multi-ticket + unknown balance fails CLOSED, never 'covered by the pool sum'"
 
 
-def test_match_per_match_total_null_does_not_fall_to_the_pool_sum_either(monkeypatch):
+def test_match_per_match_total_null_does_not_fall_to_the_pool_sum_either(pixai):
     """dict.get's default only fires when the key is ABSENT; an explicit null must behave the
     same as absent (unknown), and in neither case borrow the top-level sum."""
     mt = _v2_match(consume=3, total=None)                     # key present, value None
-    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt], "total": 22})
-    best = core.match_kaisuuken(object(), _video_params(15))
+    pixai.on("/kaisuuken/check", {"matches": [mt], "total": 22})
+    best = core.match_kaisuuken(pixai, _video_params(15))
     assert best["total"] is None and best["balance_unknown"] is True and best["covered"] is False
 
 
-def test_unknown_balance_is_the_general_rule_not_a_video_special_case(monkeypatch):
+def test_unknown_balance_is_the_general_rule_not_a_video_special_case(pixai):
     """A multi-ticket NON-video job with an unread balance must fail closed the same way -- the
     old code special-cased video (`is_video and need > 1`), so a future multi-ticket edit/batch
     card would have been marked covered on an unknown balance."""
     mt = _v2_match(consume=2)
     mt.pop("total")
-    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt]})
-    best = core.match_kaisuuken(object(), {"modelId": "m", "chat": {"modelId": "m"}})   # not video
+    pixai.on("/kaisuuken/check", {"matches": [mt]})
+    best = core.match_kaisuuken(pixai, {"modelId": "m", "chat": {"modelId": "m"}})   # not video
     assert best["covered"] is False and best["balance_unknown"] is True
     # ...and a 1-ticket job on an unknown balance is still covered (the v1 world that always worked).
     mt1 = _v2_match(consume=1)
     mt1.pop("total")
-    monkeypatch.setattr(core, "_rest_post", lambda s, path, body, **k: {"matches": [mt1]})
-    assert core.match_kaisuuken(object(), {"modelId": "m"})["covered"] is True
+    pixai.on("/kaisuuken/check", {"matches": [mt1]})
+    assert core.match_kaisuuken(pixai, {"modelId": "m"})["covered"] is True
 
 
 def test_short_note_says_unknown_when_the_balance_was_not_read():

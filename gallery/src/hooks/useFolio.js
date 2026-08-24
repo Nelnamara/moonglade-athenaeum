@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -225,10 +226,11 @@ export default function useFolio() {
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/achievements")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setData(d); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+    apiGet("/api/achievements")
+      .then((d) => {
+        if (dead) return;
+        if (d.error) setErr(d.error); else setData(d);
+      });
     return () => { dead = true; };
   }, []);
 
@@ -385,14 +387,10 @@ export default function useFolio() {
   // refetch /api/achievements so the newly-unblanked roast_nsfw text is
   // actually there to scramble to (mirrors mg-notify.js's poke()->load(true)).
   function pokeNarrator() {
-    fetch("/api/ach-event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event: "narrator" }),
-    })
-      .then((r) => r.json())
+    apiPost("/api/ach-event", { event: "narrator" })
       .then((res) => {
         if (!mountedRef.current) return;
+        if (res.error) return;
         // Same escalating warning toast the classic poke() shows on every
         // single click, byte-for-byte (POKES above) -- the real feedback
         // loop that makes 5 pokes feel earned, not the count alone.
@@ -402,13 +400,10 @@ export default function useFolio() {
         }
         if (res && (res.snapped || (res.pokes || 0) >= 5)) {
           setTriggered(true);
-          fetch("/api/achievements")
-            .then((r2) => (r2.ok ? r2.json() : null))
-            .then((d) => { if (mountedRef.current && d) setData(d); })
-            .catch(() => {});
+          apiGet("/api/achievements")
+            .then((d) => { if (mountedRef.current && !d.error) setData(d); });
         }
-      })
-      .catch(() => {});
+      });
   }
   // Cleanup only -- clears every in-flight scramble, resets reveal/toast,
   // dismisses any still-open celebration. Deliberately does NOT navigate:

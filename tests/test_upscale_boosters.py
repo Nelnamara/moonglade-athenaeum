@@ -6,6 +6,7 @@ network, no spend."""
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -419,12 +420,30 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
 
     There is deliberately no /api/upscale: a second submit path is a second place for the
     read-only guard, the free-card check and the job-tracker registration to be forgotten.
+    That last one is not hypothetical -- this panel proved it. Until 2026-08-23 it POSTed
+    /api/generate with its own fetch, which meant it never called Jobs.track and an upscale
+    was registered nowhere: not the job log, not the Activity tray its own success toast
+    points at, not the server's orphan sweep. Both halves now ride their shared module.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    # The QUOTED form (double quotes in the React source), i.e. an actual fetch target -- the
-    # component's own doc names /api/upscale in prose while explaining why it does not exist.
-    assert '"/api/price"' in src and '"/api/generate"' in src
+    # Both halves are the SHARED module's now, so what pins each is the panel's import plus the
+    # route it hands over -- the fetch literals live in those modules. (The component's own doc
+    # names /api/upscale in prose while explaining why it does not exist, hence the quoted forms.)
+    probe = (root / "gallery" / "src" / "gen" / "usePriceProbe.js").read_text(encoding="utf-8")
+    # Re-anchored 2026-08-23: the POST came out of the hook too. usePriceProbe still owns the
+    # debounce, the sequence guard and the verdict; gen/priceRequest.js owns the request and is
+    # the one /api/price caller under gallery/src (the Loom rides it as well).
+    transport = (root / "gallery" / "src" / "gen" / "priceRequest.js").read_text(encoding="utf-8")
+    road = (root / "gallery" / "src" / "gen" / "submitTask.js").read_text(encoding="utf-8")
+    assert "usePriceProbe" in src
+    assert "requestPrice" in probe and '"/api/price"' in transport
+    assert 'from "../gen/submitTask.js"' in src, "the submit must ride the one road"
+    assert 'submitTask("/api/generate"' in src, "and it must hand the road the generate route"
+    assert "await fetch(route" in road, "which is where the actual POST lives"
+    assert "window.Jobs.track(" in road, (
+        "the road's registration is the whole reason this panel stopped POSTing for itself")
+    assert 'fetch("/api/generate"' not in src, "no bespoke spend fetch may come back"
     assert "'/api/upscale'" not in src and '"/api/upscale"' not in src
     assert "ref_media_id" in src and "ref_strength" in src, "an image-view upscale is i2i"
     # The ceilings come from the server (core.UPSCALE_PIXEL_CEILING via window.MG_UPSCALE),
@@ -436,13 +455,16 @@ def test_the_upscale_panel_reuses_the_generate_routes(tmp_path):
         assert name not in src, name + " is retyped in the component instead of served"
     # CostBadge's real handle is setChecking()/setPrice(). An invented one (.loading()/.show())
     # is silently a no-op -- the panel renders, the price line never updates, nothing reports it.
+    # The panel supplies the badge ref and the probe drives it, so the call sites live there.
     badge = (root / "gallery" / "src" / "components" / "CostBadge.jsx").read_text(encoding="utf-8")
+    assert "<CostBadge" in src and "ref={costRef}" in src, "the panel must own the badge instance"
     for meth in ("setChecking", "setPrice"):
-        assert meth + "(" in src, "the panel must call the badge's " + meth
+        assert meth + "(" in probe, "the probe must call the badge's " + meth
         assert meth + "(" in badge, meth + " is not actually on the badge"
     # Scoped to the badge handle -- Toast.show() is a real, different API on this page.
-    assert "costRef.current.show(" not in src and "costRef.current.loading(" not in src, (
-        "those are not badge methods; calling them fails silently")
+    for f in (src, probe):
+        assert "costRef.current.show(" not in f and "costRef.current.loading(" not in f, (
+            "those are not badge methods; calling them fails silently")
 
 
 def test_lora_weight_spans_pixais_real_range_on_every_surface():
@@ -531,7 +553,6 @@ def test_lora_weight_bounds_follow_the_base_architecture(tmp_path):
     assert "Z_IMAGE_V1_MODEL" not in core.LORA_WEIGHT_RANGES
     assert core.lora_weight_range("SD3_MEDIUM_MODEL") == (-2.0, 2.0)
 
-
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     html = login_client(tmp_path).get("/").get_data(as_text=True)
@@ -614,7 +635,7 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
             "{} maps to {}, which is not on the send whitelist".format(label, token)
 
 
-def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
+def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):
     """An image whose model the catalog never recorded must still be upscalable.
 
     PixAI's own upscale dialog has NO model control -- their submit sets a fixed modelId
@@ -631,7 +652,6 @@ def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path):
                  [_row(media_id="u1", filename="u1.png", source="local",
                        created_at="2026-07-01T00:00:00", width="1959", height="1097")])
     seen = {}
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "submit_generation",
                         lambda _s, params: seen.setdefault("params", params) and "t1" or "t1")
@@ -653,11 +673,20 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
     must be SERVED rather than retyped into the component."""
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    # Go's disabled derives from canSubmit, which accepts the served fallback version -- so a
-    # no-model image stays submittable, never dead-disabled.
+    # Go's disabled derives from goReady, which accepts the served fallback version -- so a
+    # no-model image stays submittable, never dead-disabled. (2026-08-22: goReady is also what
+    # the cost badge prices on -- ONE predicate, so a fallback-only picture is quoted rather
+    # than offered a live button with no price beside it.)
     assert "(src && src.model_id) || fallbackVersion()" in src, \
         "the no-model case must still submit via the fallback, not dead-disable Go"
-    assert "disabled={!canSubmit || busy}" in src
+    assert "const canGo = goReady && probe.canSubmit;" in src, \
+        "Go is the panel's own readiness AND a price settled for THIS payload"
+    # The badge prices whenever Go is possible; when it is NOT, the probe clears the badge to the
+    # REAL reason (idleReason), never the old single "the cost appears once this image has a model"
+    # hint -- an upscale needs no model, so a missing model is never the blocker.
+    assert "idle: goReady ? null : idleReason(src, mode, mx)" in src, \
+        "an unpriceable state must show its real reason, not a static model hint"
+    assert "disabled={!canGo || busy}" in src
     assert core.UPSCALE_FALLBACK_VERSION_ID not in src, \
         "the id must come from window.MG_UPSCALE, not a second copy in the component"
     assert "fallbackVersion()" in src
@@ -665,28 +694,80 @@ def test_upscale_panel_offers_the_fallback_instead_of_blocking():
 
 def test_upscale_sends_the_images_model_as_a_version_id():
     """The catalog's model_id is the task's submitted `modelId`, which IS a model VERSION
-    id -- so an upscale must send it as version_id.
+    id -- so an upscale sends it as version_id, and model_id is ALWAYS empty.
 
     Sent as model_id it entered /api/generate's model->versions lookup, matched nothing,
     and came back "pick a model first" on a picture whose model the panel was displaying
-    on screen. Only a model chosen in the PICKER is a real model id.
+    on screen. There is no picker any more (the panel has no model control at all -- see
+    test_upscale_panel_has_no_model_control), so the only shape is the automatic one: the
+    source's own version id, or the served fallback when the catalog recorded none. The
+    server's model_version_resolver leaves a version_id-only body (model_id empty) untouched,
+    which is exactly PixAI's "fixed model version off the source's task".
     """
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
-    body = src[src.index("const payload = ()"):src.index("const doPrice = ()")]
-    assert 'model_id: s.model_picked ? (s.model_id || "") : ""' in body, \
-        "only a PICKED model may travel as model_id"
-    assert 'version_id: s.model_picked ? "" : (s.model_id || fallbackVersion())' in body, \
-        "the image's own model id is a version id and must travel as version_id"
+    body = src[src.index("const payload = ()"):src.index("const build = useCallback(")]
+    assert 'model_id: ""' in body, \
+        "an upscale never sends a model_id -- it uses the source's own model version"
+    assert "version_id: s.model_id || fallbackVersion()" in body, \
+        "the image's own model id is a version id and must travel as version_id, else the fallback"
+    # The 'picked' mode is gone entirely: no branch of the payload is conditional on a user pick.
+    assert "model_picked" not in body, \
+        "the panel no longer has a 'picked model' mode -- an upscale chooses no model"
 
 
-def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path):
+def _code_only(s):
+    """The UpscalePanel source with comments stripped, mirroring the JS structural tests'
+    codeOnly: the component's own docs legitimately DISCUSS "pick a model" / "Choose a model"
+    while explaining why those affordances were removed, so a raw substring check would trip on
+    the very prose that documents their absence. Block comments (incl. JSX {/* */}) and full-line
+    // comments go; inline URLs/operators on code lines are untouched."""
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    s = re.sub(r"(?m)^\s*//.*$", "", s)
+    return s
+
+
+def test_upscale_panel_has_no_model_control():
+    """The Upscale panel has NO model UI at all -- it always uses the source image's own model
+    version automatically, exactly like PixAI's site (which has no model control in its upscale
+    dialog: DECISIONS 2026-07-27, "An upscale does not choose a model...").
+
+    The panel's earlier "Choose a model" override contradicted that decision and produced the
+    owner's long-standing "upscale asks for a model" complaint. It is removed: no ModelPicker,
+    no picked-mode, and no string that implies the user picks or must supply a model. The price
+    probe's single "the cost appears once this image has a model" hint -- the misdirection the
+    owner hit on at-ceiling images -- is replaced by the real blocker (idleReason).
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    src = (root / "gallery" / "src" / "components" / "UpscalePanel.jsx").read_text(encoding="utf-8")
+    code = _code_only(src)
+    # The picker component and its handler are gone from the code entirely.
+    assert "ModelPicker" not in code, "the ModelPicker override must be removed, import and use"
+    assert "<ModelPicker" not in code
+    assert "model_picked" not in code, "the panel no longer has a picked-model mode"
+    assert "onModelPick" not in code
+    # No CODE string tells the user to pick/supply a model. (These phrases survive only in the
+    # doc comments that explain why the affordance is gone, which _code_only removes.)
+    for phrase in ("Choose a model", "pick a model", "has a model", "picker not loaded"):
+        assert phrase not in code, "a model-choice string survived in the panel code: " + phrase
+    # It always uses the source's own version; model_id is unconditionally empty.
+    assert 'model_id: ""' in src
+    # Go is gated on a real upscale ratio (> 1): a ratio <= 1 is not an upscale, and the server's
+    # _upscale_ratio drops it -- submitting one is a paid same-size no-op. This is the ceiling/clamp
+    # trap the owner's "upscale failed" most likely was.
+    assert "effRatio > 1" in src, "Go must never allow an effective ratio of 1 or below"
+    assert "if (mx > 1 && ratio > mx) setRatio(mx)" in src, \
+        "the clamp must not drag the stored ratio down to 1.0 at the pixel ceiling"
+    # The informational model note stays -- it NAMES the source's model, it does not offer a choice.
+    assert '" · from this image"' in src
+
+
+def test_generate_rejects_a_version_id_sent_as_a_model_id(monkeypatch, tmp_path, pixai):
     """Pins the server behaviour the above exists to avoid, so the reason stays visible:
     a version id in the model_id field resolves to nothing and is refused."""
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="u2", filename="u2.png", created_at="2026-07-01T00:00:00",
                        width="900", height="600")])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "_apply_kaisuuken", lambda *a, **k: None)
     monkeypatch.setattr(core, "list_model_versions", lambda *a, **k: [])   # not a model id
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "nope")

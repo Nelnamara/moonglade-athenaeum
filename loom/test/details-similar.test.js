@@ -145,3 +145,10 @@ test("E: vt-reveal is unique per view -- Details drops the name while the Lightb
     "components/LightboxMobile.jsx"];
   for (const f of others) assert.doesNotMatch(src(f), /vt-reveal/, f + " must not carry vt-reveal");
 });
+
+test("useSimilar consumes apiGet's parsed body directly -- never double-parses (#31 Similar strip)", () => {
+  const hook = src("hooks/useSimilar.js");
+  assert.match(hook, /apiGet\(/, "useSimilar must call apiGet (the one request module), not raw fetch");
+  assert.doesNotMatch(hook, /\.json\(\)/,
+    "apiGet already returns the parsed body; a stray .then(r=>r.json()) throws and blanks the strip");
+});

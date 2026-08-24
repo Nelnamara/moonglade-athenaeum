@@ -59,9 +59,12 @@ def _mock_export_ffmpeg(monkeypatch):
     for its build stamp through this same patched Popen, and writing to argv[-1]
     unconditionally would drop a stray file named HEAD into the repo root."""
     import io as _io
-    import shutil
     import subprocess
-    monkeypatch.setattr(shutil, "which", lambda n: "ffmpeg" if n == "ffmpeg" else None)
+    import moonglade_backup as core
+    # ffmpeg present, ffprobe absent -- the export asks media_tools now, not
+    # shutil.which. "ffmpeg" stays the resolved path so argv[0] keeps reading "ffmpeg".
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "")
     captured = []
 
     class FakeProc:
@@ -189,8 +192,11 @@ def test_an_unreadable_file_among_silent_shots_degrades_instead_of_refusing(tmp_
     the cut is written without an audio track rather than refused. Refusing here would cost
     the owner the whole export to protect a track of silence."""
     captured = _mock_export_ffmpeg(monkeypatch)
-    import shutil
-    monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/" + n)
+    import moonglade_backup as core
+    # ffprobe IS installed here -- that is this test's whole premise. Only ffprobe is
+    # re-pinned; ffmpeg_path stays "ffmpeg" from _mock_export_ffmpeg so the FakeProc
+    # guard and _ffmpeg_call() still recognise the spawned command.
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "/usr/bin/ffprobe")
     monkeypatch.setattr(g, "probe_has_audio", lambda path: False)
     monkeypatch.setattr(g, "probe_duration",
                         lambda path: 4.0 if "v1" in str(path) else None)
@@ -239,7 +245,7 @@ def test_export_still_runs_when_the_duration_is_readable(tmp_path, monkeypatch):
 
 
 def test_export_never_probes_when_every_silent_shot_carries_an_out_point(tmp_path, monkeypatch):
-    """Why ffprobe is NOT gated by the up-front shutil.which("ffmpeg") check: an export
+    """Why ffprobe is NOT gated by the up-front ffmpeg_path() check: an export
     whose silent shots all have explicit out points needs no probe at all and produces a
     correct cut on a machine with no ffprobe. Refusing that up front would reject work
     that was going to succeed."""

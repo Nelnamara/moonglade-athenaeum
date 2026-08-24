@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { apiPost } from "../api.js";
 import useFlavour from "../hooks/useFlavour.js";
 import "../styles/login.css";
 
@@ -139,17 +140,9 @@ export default function LoginPage({ boot }) {
   const csrfRef = useRef(boot.csrf || "");
   const submitLogin = async (payload) => {
     let d;
-    try {
-      const r = await fetch("/api/login", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, csrf: csrfRef.current, next: boot.next || "" }),
-      });
-      d = await r.json();
-    } catch {
-      setPhase("idle");
-      setError("Couldn't reach the server. Check your connection and try again.");
-      return;
-    }
+    // The rotated token rides the SAME body as the refusal, so it is adopted before the
+    // error branch -- a failed sign-in must leave the next attempt with a live token.
+    d = await apiPost("/api/login", { ...payload, csrf: csrfRef.current, next: boot.next || "" });
     if (d.csrf) csrfRef.current = d.csrf;
     if (d.error) {
       setPhase("idle");
@@ -240,11 +233,11 @@ export default function LoginPage({ boot }) {
           {!createMode && !lanFirstRun && (
             <>
               <div className="lgn-lbl">USERNAME</div>
-              <input className="lgn-input" name="username" value={user} autoFocus autoComplete="username"
+              <input aria-label="Username" className="lgn-input" name="username" value={user} autoFocus autoComplete="username"
                 maxLength={64}
                 onChange={(e) => setUser(e.target.value)} onKeyDown={onKey} disabled={busy} />
               <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
-              <input className="lgn-input lgn-pass" name="password" type="password" value={pass}
+              <input aria-label="Password" className="lgn-input lgn-pass" name="password" type="password" value={pass}
                 autoComplete="current-password"
                 onChange={(e) => setPass(e.target.value)} onKeyDown={onKey} disabled={busy} />
               {error ? <div className="lgn-error">{error}</div> : null}
@@ -259,7 +252,7 @@ export default function LoginPage({ boot }) {
           {createMode && (
             <div className="lgn-fieldin">
               <div className="lgn-lbl">USERNAME</div>
-              <input className={"lgn-input" + (createSubmitted && usernameErr ? " err" : "")}
+              <input aria-label="Username" className={"lgn-input" + (createSubmitted && usernameErr ? " err" : "")}
                 name="username" value={createUser} autoFocus autoComplete="username" maxLength={64}
                 onChange={(e) => {
                   setCreateUser(e.target.value);
@@ -269,7 +262,7 @@ export default function LoginPage({ boot }) {
               {createSubmitted && usernameErr ? <div className="lgn-fielderr">{usernameErr}</div> : null}
 
               <div className="lgn-lbl" style={{ paddingTop: 14 }}>PASSWORD</div>
-              <input className="lgn-input lgn-pass" name="new-password" type="password"
+              <input aria-label="Password" className="lgn-input lgn-pass" name="new-password" type="password"
                 value={createPass} autoComplete="new-password"
                 onChange={(e) => {
                   const v = e.target.value;
@@ -285,7 +278,7 @@ export default function LoginPage({ boot }) {
               </div>
 
               <div className="lgn-lbl" style={{ paddingTop: 14 }}>CONFIRM PASSWORD</div>
-              <input className={"lgn-input lgn-pass" + (matchErr ? " err" : "")}
+              <input aria-label="Confirm password" className={"lgn-input lgn-pass" + (matchErr ? " err" : "")}
                 name="confirm-password" type="password" value={createConfirm}
                 autoComplete="new-password"
                 onChange={(e) => {

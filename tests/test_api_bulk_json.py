@@ -215,13 +215,12 @@ def _cloud_batch(tmp_path):
     ], {"m1.png": b"a", "m2.png": b"b", "loc.png": b"c"})
 
 
-def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch):
+def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch, pixai):
     """Selecting one image takes its WHOLE task (cloud + local) and the import is
     purged locally only -- byte-for-byte the /delete-tasks-bulk behavior, because
     both routes run the same _resolve_delete_targets + _start_bulk_delete."""
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
@@ -238,10 +237,9 @@ def test_delete_tasks_by_media_ids_matches_the_page_route(tmp_path, monkeypatch)
     assert load_catalog(db) == []
 
 
-def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch):
+def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch, pixai):
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
@@ -256,13 +254,12 @@ def test_delete_tasks_by_task_ids_directly(tmp_path, monkeypatch):
     assert (tmp_path / "images" / "loc.png").exists()
 
 
-def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monkeypatch):
+def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monkeypatch, pixai):
     """Cloud-only mode (the CLI --delete-task behavior): the task is deleted on
     PixAI, local files and catalog rows stay, and imports -- which have no cloud
     side at all -- are dropped from the job entirely."""
     db = _cloud_batch(tmp_path)
     calls = []
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: calls.append(tid))
 
     cli = login_client(tmp_path)
@@ -355,11 +352,10 @@ def test_stats_serves_the_banner_counts(tmp_path):
     assert d["server_tasks"] is None and d["coverage_pct"] is None
 
 
-def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypatch):
+def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypatch, pixai):
     """Same formula the cover-badge gets from /api/account: distinct local tasks over
     the server's lifetime task count, one decimal, capped at 100."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info",
                         lambda session: {"tasks": {"totalCount": 3}})
     cli = login_client(tmp_path)
@@ -368,11 +364,10 @@ def test_stats_coverage_matches_the_account_badge_computation(tmp_path, monkeypa
     assert d["coverage_pct"] == round(2 / 3 * 100, 1)
 
 
-def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch):
+def test_stats_coverage_never_exceeds_100(tmp_path, monkeypatch, pixai):
     """A server count lagging behind local (sync raced a deletion) must clamp, not
     report 200% backed up -- same min() the account route applies."""
     _stats_catalog(tmp_path)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "account_info",
                         lambda session: {"tasks": {"totalCount": 1}})
     cli = login_client(tmp_path)

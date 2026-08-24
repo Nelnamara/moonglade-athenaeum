@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiUpload } from "../api.js";
 
 /* useImport -- ImportOverlay.jsx's file-staging/upload state and handlers,
    mechanically lifted out (2026-08-03), same precedent as useMyArt.js/
@@ -106,11 +107,10 @@ export default function useImport({ onImported } = {}) {
     files.forEach((f) => fd.append("files", f, f.name));
     if (coll) fd.append("collection", coll);
     try {
-      const r = await fetch("/api/import-local", { method: "POST", body: fd });
-      const d = await r.json();
+      const d = await apiUpload("/api/import-local", fd);
       setBusy(false);
-      if (!r.ok || d.error) {
-        setResult({ ok: false, error: d.error || ("import failed (" + r.status + ")") });
+      if (d.error) {
+        setResult({ ok: false, error: d.error });
         return;
       }
       setResult({ ok: true, imported: d.imported, skipped: d.skipped, collection: d.collection });

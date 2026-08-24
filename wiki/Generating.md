@@ -274,9 +274,7 @@ which is the better answer when it is known — Hires re-renders the picture, so
 made it keeps the style. Two cases where it cannot: your catalog has not captured it yet (run
 `--backfill-full-meta`, and see [Backing up](Backing-Up)), or you imported the file from your
 own computer, in which case PixAI has no record of it and never will. Those upscale anyway,
-on the same model PixAI's own upscale uses — their dialog has no model control either. You
-can still pick one yourself if you want a different look; it is the same picker the Generate
-drawer uses.
+on the same model PixAI's own upscale uses — their dialog has no model control either.
 
 The cost is shown before you commit, and a matching free card is applied automatically, the
 same as any other generation.
@@ -479,6 +477,13 @@ in the header. It is **login-tier, not localhost-only**: any signed-in device �
 elsewhere on your LAN — can open the drawer and spend credits or cards. That's deliberate,
 so a tablet or second device can generate too; see [Trust & Safety](Trust-and-Safety) for
 what *is* restricted to the server's own machine.
+
+Every submit button here — Generate, ✦ Edit, ✦ Fix, and the Upscale panel's — **waits for a
+price that belongs to what it is about to send.** Change a setting and the cost line blanks to
+"Checking cost…" and the button greys out for as long as the check takes, so a quote can never
+be spent against a job it wasn't for. Typing a prompt or an edit instruction doesn't trigger
+that (the wording never changes the price), and if a check fails the badge says so in red and
+the button comes back — the app will tell you it doesn't know rather than leave you stuck.
 
 - **Generate** — pick a base model in the pop-out browser (hover any card for a full preview),
   attach **LoRAs with weights** up to your account's own limit (read live from your PixAI

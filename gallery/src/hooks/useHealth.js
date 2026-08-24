@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* useHealth -- HealthOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useContests.js/
@@ -32,10 +33,11 @@ export default function useHealth() {
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/health")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { _lastHealth = d; if (!dead) setH(d); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+    apiGet("/api/health")
+      .then((d) => {
+        if (d.error) { if (!dead) setErr(d.error); return; }
+        _lastHealth = d; if (!dead) setH(d);
+      });
     return () => { dead = true; };
   }, []);
 

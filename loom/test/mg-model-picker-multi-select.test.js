@@ -40,7 +40,8 @@ test("a picked LoRA resolves version_id/lora_base_type/trigger_words via /api/mo
   // rows[0] -- the full `versions` array is stashed on the dispatched entry so a per-chip
   // selector (the host's job, same split as the base model's #gen-version/.lv-versel) can offer
   // a real choice, mirroring exactly how onBasePick/onLoraPick already do it for base models.
-  assert.match(src, /fetch\("\/api\/model-version\?model_id=" \+ encodeURIComponent\(m\.model_id\) \+ "&all=1"\)/,
+  // Re-anchored 2026-08-23: the read rides api.js's apiGet -- same endpoint, same &all=1.
+  assert.match(src, /apiGet\("\/api\/model-version\?model_id=" \+ encodeURIComponent\(m\.model_id\) \+ "&all=1"\)/,
     "each multi-select pick must resolve real generation metadata AND every published " +
     "version, the same endpoint/param the base-model picker already uses -- without it, " +
     "version_id stays '' and the LoRA can never actually be submitted, and there's no " +

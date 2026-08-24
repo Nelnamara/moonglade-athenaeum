@@ -5,6 +5,17 @@
    client sends the string KEY (`edit_model`), never a model id -- the server
    resolves it via core.edit_model_id(). */
 
+import { PRICE_KEY_SKIP } from "./priceProbeCore.js";
+
+/* The price probe's identity skip list for an EDIT payload. The shared default drops the fields
+   that never price and are typed without repricing -- prompt / negative / seed -- but an edit's
+   free-text field is named `instruction`, so the default would leave it IN the identity and every
+   keystroke would un-settle the verdict: badge blanked, ✦ Edit disabled, /api/price re-POSTed for
+   a job whose price cannot move (PixAI prices an edit off resolution/quality/model, and the text
+   only rides inside the `chat` block). Naming it here, beside the payload builder that produces
+   it, keeps the fact in one home. */
+export const EDIT_PRICE_KEY_SKIP = PRICE_KEY_SKIP.concat(["instruction"]);
+
 export const EDIT_CAPS = {
   "edit-pro": {
     label: "Edit Pro", max_refs: 4,

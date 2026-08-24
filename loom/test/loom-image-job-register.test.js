@@ -207,7 +207,9 @@ describe("the tray labels distinguish the three image paths and name the shot", 
   test("runGen takes the job label as its own parameter (not reusing the confirm text)", () => {
     // `label` is already taken: it's the confirmSpend() question ("Edit the open frame of X?"),
     // which is a prompt, not a tray row. The job label has to be its own argument.
-    assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, priceBody, label, jobLabel\) =>/,
+    // `quoteBody` was named `priceBody` until 2026-08-23, when priceBody became the Loom's one
+    // price call site and a parameter of that name would shadow it. Arity and order unchanged.
+    assert.match(src, /const runGen = async \(setState, cardId, endpoint, body, quoteBody, label, jobLabel\) =>/,
       "runGen should take an explicit jobLabel parameter so genEdit/genRef each supply their own " +
       "tray label, instead of reusing the confirm-dialog question");
     assert.match(runGenBody(), /window\.Jobs\.register\(d\.task_id, jobLabel\)/,

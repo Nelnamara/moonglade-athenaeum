@@ -42,8 +42,10 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
 
   test("doSearch() and loadMore() share ONE url-builder, so a continuation can never silently use different filters", () => {
     assert.match(src, /const searchUrl = useCallback\(\(cursor\) => \{/);
-    assert.match(src, /fetch\(searchUrl\(\)\)/, "doSearch() must call the shared builder with no cursor");
-    assert.match(src, /fetch\(searchUrl\(cursorRef\.current\)\)/, "loadMore() must call the shared builder WITH the current cursor");
+    // Re-anchored 2026-08-23: both reads ride api.js's apiGet. The property under test is
+    // unchanged -- ONE builder feeds both calls, so a continuation cannot drift from its search.
+    assert.match(src, /apiGet\(searchUrl\(\)\)/, "doSearch() must call the shared builder with no cursor");
+    assert.match(src, /apiGet\(searchUrl\(cursorRef\.current\)\)/, "loadMore() must call the shared builder WITH the current cursor");
     assert.match(src, /if \(cursor\) u \+= "&cursor=" \+ encodeURIComponent\(cursor\);/);
   });
 

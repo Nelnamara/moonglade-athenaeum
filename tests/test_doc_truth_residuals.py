@@ -61,10 +61,19 @@ def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc
     """The `is_local: True` hardcode survives in next_gallery()'s boot payload. It is
     only safe because the REAL `_is_local_request()` verdict ships right beside it as
     `is_true_local` (what the Import control gates on), and because /api/import-local
-    re-checks localhost server-side regardless of what any client renders --
+    is LOCALHOST-tier server-side regardless of what any client renders --
     which is also exactly what ImportOverlay.jsx's header comment claims
     ('/api/import-local ... is localhost-only'). Pin all three so the doc claim,
-    the boot payload, and the route can't drift apart."""
+    the boot payload, and the route can't drift apart.
+
+    The route's half of that moved on 2026-08-23: the check used to be a
+    hand-written `if not _is_local_request(): return ..., 403` as the handler's
+    first statement, and is now the route's own `@tier(LOCALHOST)` declaration,
+    enforced for every LOCALHOST route in one place by _enforce_front_door().
+    Same server-side refusal, same 403, same wording (carried on the declaration
+    as `message=`) -- so what this pins is the DECLARATION, not the old
+    statement. tests/test_route_tiers.py proves the enforcement itself against a
+    live authenticated LAN request."""
     src = _read("moonglade_gallery.py")
     start = src.index('"is_local": True')
     window = src[start:start + 200]
@@ -74,9 +83,9 @@ def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc
         "have no way to gate Import correctly")
     route_start = src.index('@app.route("/api/import-local"')
     route_body = src[route_start:route_start + 2500]
-    assert "_is_local_request()" in route_body, (
-        "/api/import-local no longer re-checks _is_local_request() server-side -- "
-        "client-side gating alone is not a tier")
+    assert re.search(r"@tier\(\s*LOCALHOST", route_body), (
+        "/api/import-local no longer declares @tier(LOCALHOST) -- the server-side "
+        "localhost requirement is gone and client-side gating alone is not a tier")
     assert re.search(r"[Ll]ocalhost-only", route_body), (
         "/api/import-local's docstring no longer states its localhost-only tier")
     overlay = _read("gallery/src/components/ImportOverlay.jsx")

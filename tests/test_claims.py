@@ -38,8 +38,7 @@ def _args(**kw):
     return SimpleNamespace(**base)
 
 
-def test_run_claims_list_readonly(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_claims_list_readonly(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
     res = core.run_claims(_args(claims=True))
     out = capsys.readouterr().out
@@ -47,8 +46,7 @@ def test_run_claims_list_readonly(monkeypatch, capsys):
     assert "agent-daily-stamina" in out and "READY" in out
 
 
-def test_run_claims_previews_without_confirm(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_claims_previews_without_confirm(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
     monkeypatch.setattr(core, "claim_reward",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no claim in preview")))
@@ -57,8 +55,7 @@ def test_run_claims_previews_without_confirm(monkeypatch, capsys):
     assert "Would claim" in capsys.readouterr().out
 
 
-def test_run_claims_with_confirm(monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_claims_with_confirm(monkeypatch, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
     calls = []
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: calls.append(cid) or {"id": cid})
@@ -66,8 +63,7 @@ def test_run_claims_with_confirm(monkeypatch):
     assert res == {"claimed": 1} and calls == ["agent-daily-stamina"]
 
 
-def test_run_claims_unclaimable_guard(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_claims_unclaimable_guard(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
     monkeypatch.setattr(core, "claim_reward",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not claim")))
@@ -76,8 +72,7 @@ def test_run_claims_unclaimable_guard(monkeypatch, capsys):
     assert "not claimable yet" in capsys.readouterr().out
 
 
-def test_run_claims_all_claims_only_ready(monkeypatch):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_claims_all_claims_only_ready(monkeypatch, pixai):
     monkeypatch.setattr(core, "list_claims", lambda s: _REWARDS)
     calls = []
     monkeypatch.setattr(core, "claim_reward", lambda s, cid: calls.append(cid) or {})

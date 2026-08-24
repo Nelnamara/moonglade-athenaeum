@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import "../styles/overlays.css";
 import "../styles/publish.css";
 import "../styles/train.css";
@@ -62,20 +63,17 @@ export default function TrainOverlay({ onClose }) {
   const [done, setDone] = useState(null);
 
   useEffect(() => {
-    fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
-    fetch("/api/train/quota").then((r) => r.json())
-      .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0))
-      .catch(() => setQuota(0));
-    fetch("/api/next/library?page=1&page_size=60&media=image&sort=newest")
-      .then((r) => r.json()).then((d) => setPool(d.items || [])).catch(() => {});
-    fetch("/api/train/models")
-      .then((r) => r.json())
+    apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
+    apiGet("/api/train/quota")
+      .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0));
+    apiGet("/api/next/library?page=1&page_size=60&media=image&sort=newest")
+      .then((d) => setPool(d.items || []));
+    apiGet("/api/train/models")
       .then((d) => {
         const gs = d.groups || [];
         setGroups(gs);
         if (gs.length && gs[0].models.length) setBaseModel(gs[0].models[0].version_id);
-      })
-      .catch(() => {});
+      });
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Selecting a Model Type shows that architecture's models and defaults to its first.
@@ -101,11 +99,7 @@ export default function TrainOverlay({ onClose }) {
   const preview = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/train/submit", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body()),
-      });
-      const p = await r.json();
+      const p = await apiPost("/api/train/submit", body());
       if (p.error) { setErr(p.error); return; }
       setAsk(p); setAcceptCost(false);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
@@ -114,12 +108,9 @@ export default function TrainOverlay({ onClose }) {
   const confirm = async () => {
     setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/train/submit", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body(), confirm: true,
-                               ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) }),
-      });
-      const res = await r.json();
+      const res = await apiPost("/api/train/submit",
+        { ...body(), confirm: true,
+          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
       if (res.error) { setErr(res.error); return; }
       setDone(res); setAsk(null);
       if (typeof res.free_trainings_left === "number") setQuota(res.free_trainings_left);

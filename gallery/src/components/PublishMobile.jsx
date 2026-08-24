@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/publish.css";
@@ -60,27 +61,25 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
     if (!mid) return;
     let dead = false;
     setRow(null); setErr("");
-    fetch("/api/next/detail/" + encodeURIComponent(mid))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+    apiGet("/api/next/detail/" + encodeURIComponent(mid))
       .then((d) => {
         if (dead) return;
+        if (d.error) { setErr(d.error); return; }
         const r0 = d.row || {};
         setRow(r0);
         setTitle((r0.title || "").trim() || (r0.prompt_preview || "").trim().slice(0, 80));
         setTags((r0.art_tags || "").split(",").map((s) => s.trim()).filter(Boolean));
-      })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+      });
     setSugs(null);
     return () => { dead = true; };
   }, [mid]);
 
   useEffect(() => {
-    fetch("/api/myart/items").then((r) => r.json()).then((d) => setCsrf(d.csrf || "")).catch(() => {});
-    fetch("/api/contests").then((r) => r.json())
-      .then((d) => setContests((d.contests || []).filter((c) => c && c.title)))
-      .catch(() => {});
-    fetch("/api/next/library?page=1&page_size=18&media=image&sort=newest")
-      .then((r) => r.json()).then((d) => setStrip((d.items || []).slice(0, 18))).catch(() => {});
+    apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
+    apiGet("/api/contests")
+      .then((d) => setContests((d.contests || []).filter((c) => c && c.title)));
+    apiGet("/api/next/library?page=1&page_size=18&media=image&sort=newest")
+      .then((d) => setStrip((d.items || []).slice(0, 18)));
   }, []);
 
   useEffect(() => {
@@ -88,10 +87,8 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
     if (q.length < 2) { setTagOpts([]); return; }
     let dead = false;
     const t = setTimeout(() => {
-      fetch("/api/tag-suggest?q=" + encodeURIComponent(q))
-        .then((r) => r.json())
-        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 6)); })
-        .catch(() => {});
+      apiGet("/api/tag-suggest?q=" + encodeURIComponent(q))
+        .then((d) => { if (!dead) setTagOpts((d.tags || []).slice(0, 6)); });
     }, 220);
     return () => { dead = true; clearTimeout(t); };
   }, [tagDraft]);
@@ -105,20 +102,15 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
   const runSuggest = () => {
     if (!mid || sugs) return;
     setSugs("loading");
-    fetch("/api/suggest-prompt?media_id=" + encodeURIComponent(mid))
-      .then((r) => r.json())
-      .then((d) => { const s = (d.suggestions || []).filter(Boolean); setSugs(s); if (s[0]) setTitle(String(s[0]).slice(0, 140)); })
-      .catch(() => setSugs([]));
+    apiGet("/api/suggest-prompt?media_id=" + encodeURIComponent(mid))
+      .then((d) => { const s = (d.suggestions || []).filter(Boolean); setSugs(s); if (s[0]) setTitle(String(s[0]).slice(0, 140)); });
   };
 
-  const post = (extra) => fetch("/api/myart/publish", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "publish", media_id: mid, csrf,
-      title, description: desc, tags, private: priv, hide_prompts: hidePrompts,
-      ...(contest ? { challenge: contest } : {}), ...extra,
-    }),
-  }).then((r) => r.json());
+  const post = (extra) => apiPost("/api/myart/publish", {
+    action: "publish", media_id: mid, csrf,
+    title, description: desc, tags, private: priv, hide_prompts: hidePrompts,
+    ...(contest ? { challenge: contest } : {}), ...extra,
+  });
 
   const openConfirm = async () => {
     setBusy(true); setErr("");

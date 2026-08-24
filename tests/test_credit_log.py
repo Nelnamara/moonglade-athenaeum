@@ -87,8 +87,7 @@ def test_list_credit_log_fails_soft(monkeypatch):
 
 # ---- run_credit_log display (list_credit_log stubbed) ----
 
-def test_run_credit_log_empty(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_credit_log_empty(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_credit_log", lambda s, **k: {
         "entries": [], "has_more": False, "next_cursor": None})
     res = core.run_credit_log(SimpleNamespace(
@@ -97,8 +96,7 @@ def test_run_credit_log_empty(monkeypatch, capsys):
     assert "No credit log entries" in capsys.readouterr().out
 
 
-def test_run_credit_log_lists_signed_amounts_and_more_hint(monkeypatch, capsys):
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+def test_run_credit_log_lists_signed_amounts_and_more_hint(monkeypatch, capsys, pixai):
     monkeypatch.setattr(core, "list_credit_log", lambda s, **k: {
         "entries": [
             {"ref_id": "r-1", "amount": 30000, "type": "daily", "label": "Daily Claim",

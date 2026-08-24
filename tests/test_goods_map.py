@@ -22,7 +22,7 @@ import moonglade_container as mc
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import login_client, login_test_client
 
 # A real (tiny) PNG so PIL-facing paths get decodable bytes.
 PNG_1PX = bytes.fromhex(
@@ -435,3 +435,59 @@ def test_breadcrumb_falls_back_to_plain_text_without_the_asset(tmp_path):
     g.ensure_branding_discovery_tree()
     readme = g._role_dir("breadcrumb") / "README.txt"
     assert readme.read_text(encoding="utf-8") == g._BRANDING_README
+
+
+# ---- the served-shell tab icon: /branding/favicon.png (fix-favicon) ---------
+# The shells declared <link rel="icon" href="/branding/favicon.ico">, but no
+# favicon.ico bytes ship: the system role carries favicon.png (the "plain file"
+# the branding comment names), so the .ico 404'd on every browser tab -- pre-auth
+# on /login too, before any session exists. Both shells now point rel=icon at
+# favicon.png, which the existing @tier(PUBLIC) /branding route already resolves
+# (system-role, seal 'open'), and carry the modern mobile-web-app-capable meta
+# beside the retained apple one.
+
+def test_favicon_png_link_target_serves_200_image_public(tmp_path):
+    """The shells' tab-icon target returns 200 with an image mimetype through the
+    PUBLIC /branding route WITHOUT a session -- the login page fetches it before
+    sign-in. (The old /branding/favicon.ico had no bytes and 404'd.)"""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    # favicon ships as favicon.png; seed it loose at its coded system rel -- loose
+    # path == container key, so this is exactly what the shipped container answers.
+    _seed(g._role_rel("system", "favicon.png"), PNG_1PX)
+
+    anon = g.create_app(tmp_path).test_client()          # no login -- pre-auth
+    r = anon.get("/branding/favicon.png")
+    assert r.status_code == 200
+    assert r.mimetype.startswith("image/") and r.mimetype == "image/png"
+    assert r.data == PNG_1PX
+    # the old dead target genuinely 404s (no .ico bytes anywhere)
+    assert anon.get("/branding/favicon.ico").status_code == 404
+
+
+def test_both_shells_point_rel_icon_at_png_with_modern_meta(tmp_path):
+    """Served HTML of BOTH shells -- the login shell (PUBLIC, pre-auth) and the app
+    shell (LOGIN) -- points rel=icon at the .png (never the dead .ico) and carries
+    the modern mobile-web-app-capable meta beside the retained apple one."""
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    app = g.create_app(tmp_path)
+    login_html = app.test_client().get("/login").get_data(as_text=True)   # pre-auth
+    app_html = login_test_client(app).get("/").get_data(as_text=True)     # authed
+
+    for html, where in ((login_html, "/login"), (app_html, "/")):
+        assert 'href="/branding/favicon.png"' in html, where
+        assert "/branding/favicon.ico" not in html, where
+        assert 'name="mobile-web-app-capable"' in html, where
+        assert 'name="apple-mobile-web-app-capable"' in html, where      # kept for older iOS
+
+
+def test_loom_shell_also_carries_the_favicon_link():
+    """The third served shell -- the Loom (/loom) -- was the one the favicon fix first
+    missed. It has no apple-/mobile-web-app meta block (and deliberately gains none), but it
+    MUST still point a rel=icon at the .png like the other two, so the Loom browser tab stops
+    404'ing on its icon. _LOOM_SHELL is spliced verbatim into LOOM_PAGE_BUNDLE, so asserting
+    the module string is asserting what /loom serves."""
+    assert 'rel="icon"' in g._LOOM_SHELL
+    assert 'href="/branding/favicon.png"' in g._LOOM_SHELL
+    assert "/branding/favicon.ico" not in g._LOOM_SHELL

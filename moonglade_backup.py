@@ -51,12 +51,21 @@ import sys
 import threading
 import time
 from collections import defaultdict, Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, load_catalog,
+from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, migrate_csv_to_db, export_csv, _db_is_empty,
                             media_id_of, find_files_for_media_id, build_thumbnails,
-                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli)
+                            _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
+                            # The one library scan (see moonglade_gallery.py's
+                            # "LIBRARY SCAN" section) -- imported the same way the
+                            # SQLite catalog helpers above are, because the gallery
+                            # is the shared base module and this file imports it.
+                            scan_library, bucket_of, _VIDEO_EXTS,
+                            GALLERY_DIRNAME, DUPLICATES_DIRNAME,
+                            QUARANTINE_EXCLUDE, QUARANTINE_EXCLUDE_ANYWHERE,
+                            IMPORT_EXCLUDE)
 
 
 def _ensure_db(out):
@@ -75,6 +84,8 @@ def _ensure_db(out):
         else:
             raise PixAIError(
                 "No catalog found in {}. Run a download (or --collect-only) first.".format(out))
+    migrate(db_path)      # the CLI's entry point says the schema upgrade out loud; the
+                          # catalog road's per-process memo makes it free from here on
     return db_path
 
 try:
@@ -1380,7 +1391,8 @@ def _quick_count(session, page_size=500):
         before = None
         total = 0
         while True:
-            conn = find_connection(gql(session, page_variables(page_size, before)))
+            conn = find_connection(gql(session, page_variables(
+                page_size, _client_of(session).user_id, before)))
             if not conn:
                 break
             for edge in conn.get("edges", []):
@@ -1397,60 +1409,318 @@ def _quick_count(session, page_size=500):
         return 0
 
 
+# ===========================================================================
+# pixai_client -- the ONE PixAI transport seam
+# ===========================================================================
+# Every byte this app exchanges with PixAI leaves through a PixAIClient. Before
+# this section existed there was no transport MODULE at all: a bare
+# requests.Session was threaded through seventy-odd functions as a positional
+# argument, and the five primitives that actually spoke to PixAI --
+# gql/gql_adhoc/gql_mutate/_rest_get/_rest_post -- were module functions that
+# each re-derived the rules from that Session. The rules that matter are not
+# stylistic:
+#
+#   * the retry policy, and the ONE place the spend rule lives. `mutate()` has
+#     no `retries` parameter -- not defaulted to 0, ABSENT -- so a spending call
+#     site cannot ask for the unsafe value. `query()`'s `retries=None` is
+#     document-aware (3 for a query, 0 for a mutation) as the backstop for a
+#     call site that reaches past `mutate()`. A lost RESPONSE is
+#     indistinguishable from a lost REQUEST, and re-POSTing createGenerationTask
+#     after PixAI already created and CHARGED for the task pays twice.
+#   * the two roads to PixAI -- the persisted-hash GET (`persisted()`), which is
+#     how the personal-history operations are reached, and the ad-hoc POST
+#     (`query()`/`mutate()`), which is everything the API key can ask for
+#     directly -- plus the oRPC `/v2` REST road (`rest_get()`/`rest_post()`).
+#   * WHICH credential a create rides (`for_create()`): the browser-JWT mirror
+#     session when the Mirror toggle is on, the API key otherwise, and a refusal
+#     rather than a silent fall-back to the key when the mirror is unavailable.
+#
+# There is a second adapter: `tests/fake_pixai.py`'s FakePixAI answers the same
+# interface from registered responses and refuses any operation nobody
+# registered, so "the suite never touches the network" is structural instead of
+# a habit maintained by 300-odd private monkeypatches.
+#
+# TRANSITION SURFACE. `get`/`post`/`headers`/`cookies` on the client delegate
+# straight to the inner requests.Session, because a handful of call sites still
+# reach for the Session themselves rather than through a verb: the persisted
+# GETs that have not moved onto `persisted()` (task_detail_gql,
+# _bookmarks_persisted, model_name_gql, resolve_model_base_id,
+# _resolve_model_preset, artwork_list_gql), delete_task_gql's lone hand-rolled
+# POST, refresh_jwt's mirror POST, resolve_media and download (which are not
+# GraphQL at all -- a media object and a file body), and run_watch reading the
+# Authorization header off to hand to the WebSocket. `.session` is the escape
+# hatch those will eventually stop needing; it exists for the transition, not
+# forever.
+#
+# NOT everything gets a client. A pasted API key is validated by hand-building a
+# Session with that key as the sole credential (moonglade_gallery's
+# /api/setup/save-key) precisely BECAUSE the normal path prefers the cached
+# config -- a garbage key once verified because the real cached key answered.
+# `_client_of()` therefore wraps whatever Session it is handed without reading
+# config, resolving a user id, or touching a credential, so that route keeps its
+# guarantee while still reaching account_info through the same verb.
+# ===========================================================================
+
+
+def _is_mutation_document(query):
+    """True when `query` is a GraphQL MUTATION document rather than a query.
+
+    Deliberately a dumb leading-keyword check: every document in this module is a plain
+    string literal that starts with its operation type. Anything it cannot classify falls
+    back to False (treated as a query), which is the behaviour that existed before it."""
+    return str(query or "").lstrip().lower().startswith("mutation")
+
+
+class PixAIClient:
+    """The transport seam: everything this app asks PixAI, asked here.
+
+    Five verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`), one credential
+    choice (`for_create`), and the underlying requests.Session on `.session` for the call
+    sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
+    resolved account id.
+
+    The class holds no PixAI knowledge that the module does not already own -- endpoints,
+    hashes and the Apollo headers stay module-level -- so a client can be built around ANY
+    session (a hand-built one, a test double) without that session inheriting the config
+    cache."""
+
+    #: Marks an object as a PixAI transport adapter, so `_client_of` hands it straight
+    #: back instead of wrapping it. Checked with `is True` on purpose: a MagicMock answers
+    #: every attribute with a truthy mock, and a mock standing in for a *Session* must
+    #: still be wrapped or its `.post` would never be reached. This is what lets
+    #: tests/fake_pixai.py's FakePixAI be a real second adapter rather than a subclass --
+    #: it satisfies the interface, it does not inherit the implementation.
+    _is_pixai_client = True
+
+    def __init__(self, session, auth_kind="api-key", user_id=None):
+        self._session = session
+        self._auth_kind = auth_kind
+        self._user_id = user_id
+
+    # -- identity ----------------------------------------------------------
+    @property
+    def session(self):
+        """The underlying requests.Session. For the transition only -- prefer a verb."""
+        return self._session
+
+    @property
+    def auth_kind(self):
+        """`"api-key"` (the official credential) or `"web-jwt"` (the website mirror)."""
+        return self._auth_kind
+
+    @property
+    def user_id(self):
+        """The authenticated account's PixAI id."""
+        return self._user_id or USER_ID
+
+    def __repr__(self):
+        return "<PixAIClient {} user={}>".format(self._auth_kind, self.user_id or "?")
+
+    # -- the transition surface: the raw Session, delegated ------------------
+    def get(self, *args, **kwargs):
+        return self._session.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self._session.post(*args, **kwargs)
+
+    @property
+    def headers(self):
+        return self._session.headers
+
+    @property
+    def cookies(self):
+        return self._session.cookies
+
+    # -- ad-hoc GraphQL POST -------------------------------------------------
+    def query(self, document, variables=None, retries=None):
+        """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full document.
+
+        `retries=None` (the default) means "the safe default for THIS document": **3 for a
+        query, 0 for a mutation**. A retry re-POSTs on a RequestException or a 429/5xx, and
+        that is only free when the operation is idempotent. An explicit integer wins, so a
+        caller can still ask for anything on purpose. Returns the `data` dict; raises
+        PixAIError on GraphQL/HTTP error."""
+        if retries is None:
+            retries = 0 if _is_mutation_document(document) else 3
+        return self._graphql_post(document, variables, retries)
+
+    def mutate(self, document, variables=None):
+        """`query()` for a mutation that MUST NOT fire twice: SINGLE ATTEMPT, always.
+
+        It takes **no `retries` argument on purpose** -- there is no correct value above 0
+        for a spending path, so the knob is not offered rather than offered with a safe
+        default a call site can override by accident. Pinned by
+        tests/test_pixai_client.py and tests/test_spend_no_retry.py."""
+        return self._graphql_post(document, variables, 0)
+
+    def _graphql_post(self, document, variables, retries):
+        """The one ad-hoc POST loop. `retries` is already resolved to an integer by the
+        verb that called in -- this function never chooses it, which is what keeps the
+        spend rule readable in exactly two places above."""
+        body = {"query": document, "variables": variables or {}}
+        delay = 2.0
+        for attempt in range(retries + 1):
+            try:
+                r = self._session.post(API_URL, json=body, timeout=120)
+            except requests.exceptions.SSLError:
+                raise PixAIError(_ssl_help())
+            except requests.RequestException:
+                if attempt == retries:
+                    raise
+                time.sleep(delay); delay *= 2; continue
+            if r.status_code == 401:
+                raise PixAIError("401 Unauthorized -- API key missing/expired.")
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == retries:
+                    r.raise_for_status()
+                time.sleep(delay); delay *= 2; continue
+            try:
+                data = r.json()
+            except ValueError:
+                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
+                    r.status_code, r.text[:400]))
+            if data.get("errors"):
+                raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
+            return data.get("data") or {}
+        raise RuntimeError("unreachable")
+
+    # -- persisted-hash GET --------------------------------------------------
+    def persisted(self, op_name, variables=None, sha256=None, retries=4,
+                  client_library=None, headers=None):
+        """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
+        params their frontend sends. `sha256=None` resolves the captured hash for
+        `op_name` (the history feed is the operation that rides this road out of the box);
+        every other captured op rides here by passing its OWN `sha256=`. `client_library`
+        overrides the Apollo `clientLibrary` block for the one op that sends its own
+        (`listArtworks`), and `headers` adds request headers for this single call
+        (`listArtworks`' `x-apollo-operation-name`). Returns the `data` dict; raises
+        PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
+        bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
+        credential or an edge refusal answered in its own JSON)."""
+        sha = sha256 or (PERSISTED_QUERY_HASH if op_name == OPERATION_NAME else "")
+        if not sha:
+            raise PixAIError(
+                "no persisted hash is known for operation {!r} -- pass sha256=... or add "
+                "it to config.json (see RECAPTURE at the bottom of moonglade_backup.py)."
+                .format(op_name))
+        params = {
+            "operation": op_name,
+            "u3t": U3T,
+            "operationName": op_name,
+            "variables": json.dumps(variables or {}, separators=(",", ":")),
+            "extensions": json.dumps(
+                {"clientLibrary": client_library or CLIENT_LIBRARY,
+                 "persistedQuery": {"version": 1, "sha256Hash": sha}},
+                separators=(",", ":")),
+        }
+        delay = 2.0
+        for attempt in range(retries + 1):
+            try:
+                _t = time.monotonic()
+                r = self._session.get(API_URL, params=params, timeout=60, headers=headers)
+            except requests.exceptions.SSLError:
+                raise PixAIError(_ssl_help())
+            except requests.RequestException as e:
+                if attempt == retries:
+                    raise
+                print("  network error ({}); retrying in {:.0f}s".format(e, delay))
+                time.sleep(delay); delay *= 2; continue
+
+            if r.status_code == 401:
+                raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
+            if r.status_code == 429 or r.status_code >= 500:
+                if attempt == retries:
+                    r.raise_for_status()
+                print("  HTTP {}; backing off {:.0f}s".format(r.status_code, delay))
+                time.sleep(delay); delay *= 2; continue
+
+            try:
+                data = r.json()
+            except ValueError:
+                raise PixAIError("HTTP {} non-JSON response:\n{}".format(
+                    r.status_code, r.text[:800]))
+            if data.get("errors"):
+                if "PersistedQueryNotFound" in json.dumps(data["errors"]):
+                    raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
+                                     "(see RECAPTURE at the bottom of this file).")
+                print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
+                print(json.dumps(data["errors"], indent=2)[:3000])
+                raise PixAIError("GraphQL error (see log above).")
+            if r.status_code >= 400:
+                print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
+                raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
+            if not isinstance(data, dict) or "data" not in data:
+                raise PixAIError(
+                    "HTTP {} returned a non-GraphQL body (no 'data' key), so the request "
+                    "failed rather than answering -- a stale/absent credential or an edge "
+                    "refusal is the usual cause:\n{}".format(
+                        r.status_code, (r.text or "")[:300]))
+            vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
+                op_name, r.status_code, len(r.content), time.monotonic() - _t))
+            return data["data"]
+        raise RuntimeError("unreachable")
+
+    # -- the oRPC /v2 REST road ----------------------------------------------
+    def rest_get(self, path, params=None, timeout=30):
+        """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
+
+        Single-attempt by construction, like `rest_post` -- see its note."""
+        r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
+        if not r.ok:
+            raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+        return r.json()
+
+    def rest_post(self, path, body=None, timeout=60):
+        """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+        NO retry loop, deliberately: `submit_fixer` and `claim_reward` ride this, and the
+        session mounts no urllib3 Retry adapter (requests' default HTTPAdapter is
+        max_retries=0), so both are single-attempt. Pinned by
+        tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
+        r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+        return r.json()
+
+    # -- which credential a create rides -------------------------------------
+    def for_create(self):
+        """The client a CREATE must POST through: the browser-JWT mirror when the 'Mirror
+        to PixAI' toggle is on (so the generation lands in the pixai.art web library),
+        this same client otherwise. Refuses (raises) rather than falling back to the API
+        key when the mirror is armed but unavailable. Callers must have already passed
+        `_check_read_only` -- building the mirror session may make a refreshToken call."""
+        chosen = _session_for_create(self)
+        if chosen is self:
+            return self
+        return PixAIClient(chosen, auth_kind="web-jwt")
+
+
+def _client_of(session):
+    """The transport adapter for `session`: itself when it already is one, a thin
+    PixAIClient wrapper around it otherwise.
+
+    "Already is one" is the `_is_pixai_client is True` marker rather than an isinstance
+    check, so a second adapter (tests/fake_pixai.py's FakePixAI) passes through without
+    inheriting this class's implementation.
+
+    Wrapping reads NO config and resolves NO credential -- that is what lets the pasted-
+    API-key validation route hand its own hand-built Session to account_info and still
+    get the guarantee it was built for."""
+    if getattr(session, "_is_pixai_client", False) is True:
+        return session
+    return PixAIClient(session)
+
+
+# --- end pixai_client ------------------------------------------------------
+
+
 # ---------------------------------------------------------------------------
 # Persisted GraphQL GET (with Apollo CSRF headers)
 # ---------------------------------------------------------------------------
 def gql(session, variables, retries=4):
-    params = {
-        "operation": OPERATION_NAME,
-        "u3t": U3T,
-        "operationName": OPERATION_NAME,
-        "variables": json.dumps(variables, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": PERSISTED_QUERY_HASH}},
-            separators=(",", ":")),
-    }
-    delay = 2.0
-    for attempt in range(retries + 1):
-        try:
-            _t = time.monotonic()
-            r = session.get(API_URL, params=params, timeout=60)
-        except requests.exceptions.SSLError:
-            raise PixAIError(_ssl_help())
-        except requests.RequestException as e:
-            if attempt == retries:
-                raise
-            print("  network error ({}); retrying in {:.0f}s".format(e, delay))
-            time.sleep(delay); delay *= 2; continue
-
-        if r.status_code == 401:
-            raise PixAIError("401 Unauthorized -- token missing/expired. Refresh and re-run.")
-        if r.status_code == 429 or r.status_code >= 500:
-            if attempt == retries:
-                r.raise_for_status()
-            print("  HTTP {}; backing off {:.0f}s".format(r.status_code, delay))
-            time.sleep(delay); delay *= 2; continue
-
-        try:
-            data = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON response:\n{}".format(
-                r.status_code, r.text[:800]))
-        if data.get("errors"):
-            if "PersistedQueryNotFound" in json.dumps(data["errors"]):
-                raise PixAIError("Persisted-query hash not recognized. Recapture the hash "
-                                 "(see RECAPTURE at the bottom of this file).")
-            print("\n=== GraphQL error (HTTP {}) ===".format(r.status_code))
-            print(json.dumps(data["errors"], indent=2)[:3000])
-            raise PixAIError("GraphQL error (see log above).")
-        if r.status_code >= 400:
-            print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
-            raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
-        vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
-            OPERATION_NAME, r.status_code, len(r.content), time.monotonic() - _t))
-        return data["data"]
-    raise RuntimeError("unreachable")
+    """Replay the history-feed persisted query. Thin delegate onto
+    `PixAIClient.persisted` -- the road itself lives in the pixai_client section."""
+    return _client_of(session).persisted(OPERATION_NAME, variables, retries=retries)
 
 
 # ---------------------------------------------------------------------------
@@ -2099,8 +2369,15 @@ def download(session, url, stem, retries=3, convert=None,
             return ("fail", None)
 
 
-def page_variables(page_size, before=None):
-    v = {"last": page_size, "userId": USER_ID}
+def page_variables(page_size, user_id, before=None):
+    """History-feed query variables for `listUserTaskSummaries`.
+
+    `user_id` is passed in explicitly -- every call site already holds the session/client
+    this run authenticated as, so it reads `_client_of(session).user_id` and hands it here.
+    This helper no longer reaches for the module-level `USER_ID` global (it had no session
+    parameter, which is what made that global hard to retire): the account id now travels on
+    the client, not in a global the whole module shared."""
+    v = {"last": page_size, "userId": user_id}
     if before:
         v["before"] = before
     return v
@@ -2162,38 +2439,22 @@ def task_detail_gql(session, task_id, retries=3):
             "with a blank value in config.json. Restore it, or capture a current getTaskById "
             "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
             "this file).")
-    params = {
-        "operation": "getTaskById",
-        "u3t": U3T,
-        "operationName": "getTaskById",
-        "variables": json.dumps({"id": str(task_id)}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": TASK_DETAIL_HASH}},
-            separators=(",", ":")),
-    }
-    delay = 2.0
-    why = ""
-    for attempt in range(retries + 1):
-        try:
-            r = session.get(API_URL, params=params, timeout=60)
-            if r.status_code == 200:
-                data = r.json()
-                return (data.get("data") or {}).get("task")
-            why = "HTTP {}".format(r.status_code)
-            # Only 429/5xx are worth a second look; a 401/404 answers the same way forever.
-            if not (r.status_code == 429 or r.status_code >= 500):
-                break
-        except (requests.RequestException, ValueError) as e:
-            why = str(e) or e.__class__.__name__
-        if attempt == retries:
-            break
-        vlog("getTaskById {} failed ({}); retrying in {:.0f}s".format(task_id, why, delay))
-        time.sleep(delay); delay *= 2
-    print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing is "
-          "lost -- this call only READS a task, so the generation and its credits are "
-          "exactly as PixAI left them. Try again in a moment.".format(task_id, why))
-    return None
+    # Rides the one transport seam (PixAIClient.persisted) rather than hand-building the
+    # persisted-GET params: same operationName, same TASK_DETAIL_HASH, same variables JSON,
+    # so the wire PixAI sees is byte-for-byte what it was. The 3-retry count is preserved,
+    # passed straight through -- a blip here is read downstream as a LOST GENERATION.
+    # `_client_of` accepts either a raw Session or a client. Still fails SOFT: this path must
+    # return None and never raise, so a single outage is not reported as "your images are
+    # gone" -- the seam's raise is caught here and turned back into None.
+    try:
+        data = _client_of(session).persisted(
+            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries)
+    except (PixAIError, requests.RequestException) as e:
+        print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
+              "is lost -- this call only READS a task, so the generation and its credits are "
+              "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
+        return None
+    return (data or {}).get("task")
 
 
 _DELETE_BATCH_MEDIA_MUT = """
@@ -2296,15 +2557,6 @@ def delete_task_gql(session, task_id):
     return result
 
 
-def _is_mutation_document(query):
-    """True when `query` is a GraphQL MUTATION document rather than a query.
-
-    Deliberately a dumb leading-keyword check: every document in this module is a plain
-    string literal that starts with its operation type. Anything it cannot classify falls
-    back to False (treated as a query), which is the behaviour that existed before it."""
-    return str(query or "").lstrip().lower().startswith("mutation")
-
-
 def gql_adhoc(session, query, variables=None, retries=None):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has
@@ -2324,34 +2576,14 @@ def gql_adhoc(session, query, variables=None, retries=None):
     a second one. Spending and account-mutating callers should still go through
     `gql_mutate()`, which cannot be handed a retry count at all; this default is the
     backstop for a future call site that reaches for `gql_adhoc` and forgets. An explicit
-    integer always wins, so a caller can still ask for anything on purpose."""
-    if retries is None:
-        retries = 0 if _is_mutation_document(query) else 3
-    body = {"query": query, "variables": variables or {}}
-    delay = 2.0
-    for attempt in range(retries + 1):
-        try:
-            r = session.post(API_URL, json=body, timeout=120)
-        except requests.exceptions.SSLError:
-            raise PixAIError(_ssl_help())
-        except requests.RequestException:
-            if attempt == retries:
-                raise
-            time.sleep(delay); delay *= 2; continue
-        if r.status_code == 401:
-            raise PixAIError("401 Unauthorized -- API key missing/expired.")
-        if r.status_code == 429 or r.status_code >= 500:
-            if attempt == retries:
-                r.raise_for_status()
-            time.sleep(delay); delay *= 2; continue
-        try:
-            data = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON response:\n{}".format(r.status_code, r.text[:400]))
-        if data.get("errors"):
-            raise PixAIError("GraphQL error: " + json.dumps(data["errors"])[:500])
-        return data.get("data") or {}
-    raise RuntimeError("unreachable")
+    integer always wins, so a caller can still ask for anything on purpose.
+
+    THIN DELEGATE onto `PixAIClient.query` -- the POST, the retry loop and the
+    document-aware default all live in the pixai_client section, once. The function
+    survives under this name because seventy-odd callers still hand it a `session`
+    positionally (a raw requests.Session, a PixAIClient, or a test double are all fine)
+    and because the suite patches it here."""
+    return _client_of(session).query(query, variables, retries=retries)
 
 
 def gql_mutate(session, query, variables=None):
@@ -2366,7 +2598,7 @@ def gql_mutate(session, query, variables=None):
     this helper inherits the safe behaviour, and one written against `gql_adhoc` gets it
     anyway from that function's mutation-aware default.
 
-    Why a retry is not free here: `gql_adhoc`'s retry loop re-POSTs on a RequestException
+    Why a retry is not free here: the ad-hoc retry loop re-POSTs on a RequestException
     or a 429/5xx, and a lost RESPONSE looks exactly like a lost REQUEST. A read timeout, a
     dropped connection, or a proxy's 502 after the backend already succeeded all leave
     PixAI holding a created, CHARGED task while the client believes nothing happened -- so
@@ -2376,10 +2608,13 @@ def gql_mutate(session, query, variables=None):
     hand-rolling its own lone `session.post`.
 
     A 429 alone WOULD be safe to re-send (rate-limited means the request was refused, not
-    processed), but 429 and 5xx share one branch in `gql_adhoc` and a 5xx is genuinely
+    processed), but 429 and 5xx share one branch in the retry loop and a 5xx is genuinely
     ambiguous. The trade is deliberate: not retrying costs an error the caller can see and
-    act on; retrying wrongly costs credits they cannot get back."""
-    return gql_adhoc(session, query, variables, retries=0)
+    act on; retrying wrongly costs credits they cannot get back.
+
+    THIN DELEGATE onto `PixAIClient.mutate`, which likewise offers no `retries`
+    parameter -- the rule now has ONE home rather than being re-argued at each helper."""
+    return _client_of(session).mutate(query, variables)
 
 
 def resolve_user_id(session):
@@ -3145,50 +3380,23 @@ def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
         v["modelTypes"] = ["ANY_LORA"]
     if want_lora and lbt in LORA_BASE_MODEL_TYPES:
         v["loraBaseModelTypes"] = [lbt]
-    params = {
-        "operation": BOOKMARKED_MODELS_OP,
-        "u3t": U3T or "",
-        "operationName": BOOKMARKED_MODELS_OP,
-        "variables": json.dumps(v, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": BOOKMARKED_MODELS_HASH}},
-            separators=(",", ":")),
-    }
-    r = session.get(API_URL, params=params, timeout=60)
-    if r.status_code in (401, 403):
-        raise PixAIError(
-            "bookmarks: HTTP {} on the persisted path -- the request was refused, not "
-            "answered with an empty bookmark list. A stale/absent U3T or an expired key is "
-            "the usual cause; refresh the credential and retry.".format(r.status_code))
-    try:
-        body = r.json()
-    except ValueError:
-        raise PixAIError("bookmarks: HTTP {} non-JSON response".format(r.status_code))
-    if isinstance(body, dict) and body.get("errors"):
-        blob = json.dumps(body["errors"])[:400]
-        if "PersistedQueryNotFound" in blob:
-            raise PixAIError(
-                "bookmarks: the persisted hash has rotated. Re-run "
-                "`python tools/harvest_api_surface.py fetch` then `extract` to re-derive it "
-                "-- the hashes are computed from PixAI's own bundle, so this is self-healing.")
-        raise PixAIError("bookmarks: " + blob)
-    # Everything below trusted the body's SHAPE alone: no status check, and only a top-level
-    # "errors" key counted as failure. An auth/gateway refusal that answers with perfectly
-    # valid but non-GraphQL JSON -- a plain {"statusCode":401,"message":"Unauthorized"} from
-    # the edge, say -- has neither, so it fell straight through the `or {}` tail and
-    # model_bookmarks_gql reported {"results": [], "has_more": False}: the user saw an EMPTY
-    # Bookmarks tab, which reads as "you have no bookmarks", for a request that never ran
-    # (M03, 2026-07-27). A real GraphQL reply always carries a "data" key (null or not), so
-    # its absence is the tell, and it catches the 200-with-an-error-body variant that a
-    # status check alone would miss.
-    if not isinstance(body, dict) or "data" not in body:
-        raise PixAIError(
-            "bookmarks: HTTP {} returned a non-GraphQL body -- the request failed rather "
-            "than returning an empty list:\n{}".format(r.status_code, r.text[:300]))
-    if not r.ok:
-        raise PixAIError("bookmarks: HTTP {}:\n{}".format(r.status_code, r.text[:300]))
-    return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
+    # Rides the one transport seam (PixAIClient.persisted) instead of hand-building the
+    # persisted-GET params: same operationName, same BOOKMARKED_MODELS_HASH, same variables
+    # JSON, so the wire is byte-for-byte what it was (U3T is empty by default, where the old
+    # `U3T or ""` and the seam's `U3T` encode identically). Single attempt, as before -- no
+    # retry.
+    #
+    # The M03 guarantee now lives in the seam. It used to live here: a refusal answered with
+    # perfectly valid but non-GraphQL JSON -- a plain {"statusCode":401,...} from the edge,
+    # with no "errors" array -- once fell straight through the `or {}` tail, and the user saw
+    # an EMPTY Bookmarks tab for a request that never ran (M03, 2026-07-27). persisted now
+    # makes that impossible for EVERY persisted GET: it reads `errors` before status (so a
+    # rotated hash still gets its recapture hint), and refuses a body with no "data" key with
+    # a PixAIError rather than laundering it into an empty result. So a refusal RAISES here
+    # too -- it is simply the seam raising now, not this function.
+    data = _client_of(session).persisted(
+        BOOKMARKED_MODELS_OP, v, sha256=BOOKMARKED_MODELS_HASH, retries=0)
+    return ((data or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
 def workflow_catalog(session, first=80):
@@ -3464,43 +3672,25 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
     if not MODEL_DETAIL_HASH:
         _cache[mid] = mid
         return mid
-    params = {
-        "operation": "getGenerationModelByVersionId",
-        "u3t": U3T,
-        "operationName": "getGenerationModelByVersionId",
-        "variables": json.dumps({"id": mid}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-            separators=(",", ":")),
-    }
     try:
-        r = session.get(API_URL, params=params, timeout=60)
-        try:
-            body = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON body: {}".format(
-                r.status_code, (r.text or "")[:200]))
-        # Errors BEFORE status, exactly as gql() reads it: a refused PixAI query is an
-        # ordinary 200 carrying an `errors` array, so checking the status first sees a
-        # perfectly healthy response and reads the empty payload as "this model has no name".
-        if isinstance(body, dict) and body.get("errors"):
-            raise PixAIError("GraphQL error: " + json.dumps(body["errors"])[:300])
-        r.raise_for_status()
-        # The presence of `data` is what tells a GraphQL reply from an edge answering a refusal
-        # in perfectly valid non-GraphQL JSON ({"statusCode":401,...}) -- the same tell
-        # _bookmarks_persisted uses. A `data` that is null rather than an object is caught by
-        # the same check on purpose: the spec pairs a null data with an `errors` array (handled
-        # above), so a bare null answers nothing and must not read as "this model is gone".
-        if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
-            raise PixAIError("no GraphQL data in the reply: {}".format(str(body)[:200]))
-        # `"generationModelVersion": null` IS an answer -- the model is gone, which is what
-        # --relabel-removed is for. The field being ABSENT is not: nothing answered the
-        # question we asked, and treating that silence as "removed" is the whole bug.
-        if "generationModelVersion" not in body["data"]:
+        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 keeps this
+        # SINGLE-ATTEMPT (a name lookup drives no backoff loop, exactly as before). The seam
+        # already enforces the M18 ordering this function was hardened around: it reads the
+        # `errors` array BEFORE trusting the status (a refused PixAI query is a 200 carrying
+        # `errors`), rejects a bad status, and refuses a non-GraphQL body that has no `data`
+        # key -- raising PixAIError for each, which the `except` below records as a FAILURE,
+        # never as a name. What must stay HERE is the one distinction the seam cannot draw for
+        # us: a reply whose `data` is missing the `generationModelVersion` field answered
+        # NOTHING (fail), whereas that field present but null is the genuine "model is gone"
+        # answer that --relabel-removed exists for.
+        data = _client_of(session).persisted(
+            "getGenerationModelByVersionId", {"id": mid},
+            sha256=MODEL_DETAIL_HASH, retries=0)
+        if not isinstance(data, dict) or "generationModelVersion" not in data:
             raise PixAIError("reply carried no generationModelVersion field: {}".format(
-                str(body["data"])[:200]))
-        mv = body["data"]["generationModelVersion"] or {}
+                str(data)[:200]))
+        mv = data["generationModelVersion"] or {}
         title = (mv.get("model") or {}).get("title", "")
         version = mv.get("name", "")
         name = "{} {}".format(title, version).strip() if title else mid
@@ -3544,21 +3734,15 @@ def resolve_model_base_id(session, model_version_id):
     if not model_version_id or not MODEL_DETAIL_HASH:
         return ""
     try:
-        params = {
-            "operation": "getGenerationModelByVersionId",
-            "u3t": U3T,
-            "operationName": "getGenerationModelByVersionId",
-            "variables": json.dumps({"id": str(model_version_id)}, separators=(",", ":")),
-            "extensions": json.dumps(
-                {"clientLibrary": CLIENT_LIBRARY,
-                 "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-                separators=(",", ":")),
-        }
-        r = session.get(API_URL, params=params, timeout=30)
-        body = r.json()
-        if not isinstance(body, dict) or body.get("errors"):
-            return ""
-        mv = ((body.get("data") or {}).get("generationModelVersion")) or {}
+        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (this
+        # one-off reuse-click lookup drove no retry before). Fails SOFT to '' on anything
+        # short of a clean answer: the seam raises PixAIError on a GraphQL error / bad status
+        # / non-GraphQL body, and the `except` below turns every one of those back into ''.
+        data = _client_of(session).persisted(
+            "getGenerationModelByVersionId", {"id": str(model_version_id)},
+            sha256=MODEL_DETAIL_HASH, retries=0)
+        mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
         return str((mv.get("model") or {}).get("id") or "")
     except Exception:                        # noqa: BLE001 -- a soft-fail restore, never fatal
         return ""
@@ -3728,15 +3912,16 @@ def _resolve_model_preset(session, version_id, _cache={}):
     preset = {}
     if MODEL_DETAIL_HASH:
         try:
-            params = {"operation": "getGenerationModelByVersionId", "u3t": U3T,
-                      "operationName": "getGenerationModelByVersionId",
-                      "variables": json.dumps({"id": vid}, separators=(",", ":")),
-                      "extensions": json.dumps(
-                          {"clientLibrary": CLIENT_LIBRARY,
-                           "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-                          separators=(",", ":"))}
-            body = session.get(API_URL, params=params, timeout=60).json()
-            ex = (((body.get("data") or {}).get("generationModelVersion") or {}).get("extra")) or {}
+            # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+            # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (a
+            # single GET, as before). Never raises out: the seam's PixAIError on any refusal
+            # is caught here and the preset stays {} -- an em-dash is the honest answer when a
+            # model genuinely exposes no default for a field.
+            data = _client_of(session).persisted(
+                "getGenerationModelByVersionId", {"id": vid},
+                sha256=MODEL_DETAIL_HASH, retries=0)
+            mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
+            ex = mv.get("extra") or {}
             steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
             preset = {
                 "steps":     ("" if steps is None else str(steps)),
@@ -3892,50 +4077,27 @@ def cmd_convert_existing(args, out):
 _BUCKET_PRIORITY = {"batches": 0, "month": 1, "images": 2, "other": 3}
 
 
-def _bucket_of(rel_path):
-    """Classify a path (relative to out_dir) into a top-level bucket name."""
-    top = str(rel_path).replace("\\", "/").split("/")[0]
-    if top == "images":
-        return "images"
-    if top == "batches":
-        return "batches"
-    if top == "unknown-date":
-        return "month"
-    if len(top) == 7 and top[4] == "-" and top[:4].isdigit():
-        return "month"
-    return "other"
+# The bucket classifier is `moonglade_gallery.bucket_of` -- the LIBRARY SCAN
+# section's one copy. This alias keeps the private name every caller (and
+# tests/test_dedup.py's `core._bucket_of` assertions) already uses.
+_bucket_of = bucket_of
 
 
 def _scan_media_files(out_dir):
     """One walk of the tree. Yields (path, rel, bucket, media_id) for every image
-    file outside gallery/, _duplicates/, and _deleted/. Single source of truth for
-    the audit (and, via verify_quarantine, the dedup-verify pass).
+    file outside gallery/, _duplicates/, and _deleted/. The audit's view (and, via
+    verify_quarantine, the dedup-verify pass) onto the shared scan.
 
     _deleted/ exclusion is B11 (audit 2026-07-21): without it, a locally-purged
     image is a valid audit hit -- reported back as a live Class A duplicate of its
     own quarantined self, and (via verify_quarantine's survivor index) potentially
-    treated as the "surviving keeper" a _duplicates/ copy is compared against."""
-    gallery_dir = out_dir / "gallery"
-    quarantine_dir = out_dir / "_duplicates"
-    deleted_dir = out_dir / DELETED_DIRNAME
-    for p in out_dir.rglob("*"):
-        if p.suffix.lower() not in _IMAGE_EXTS or not p.is_file():
-            continue
-        if p.name.endswith(".part"):
-            continue
-        if (_is_under_dir(p, gallery_dir) or _is_under_dir(p, quarantine_dir)
-                or _is_under_dir(p, deleted_dir)):
-            continue
-        rel = p.relative_to(out_dir)
-        yield p, rel, _bucket_of(rel), media_id_of(p)
+    treated as the "surviving keeper" a _duplicates/ copy is compared against.
 
-
-def _is_under_dir(path, parent):
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
+    Deliberately does NOT drop zero-byte files (named disagreement 3): the audit
+    has to SEE one in order to never choose it as a keeper -- tests/test_dedup.py
+    pins that, and it is why the scan reports `size` rather than deciding."""
+    for e in scan_library(out_dir, kinds=("image",), exclude=QUARANTINE_EXCLUDE):
+        yield e.path, e.rel, e.bucket, e.media_id
 
 
 def audit_collection(out_dir, content=True, progress=None):
@@ -4340,8 +4502,10 @@ def cmd_organize(args, out, img_dir, db_path):
         if mid:
             meta_by_mid[mid] = row
 
-    skip_dirs = (out / "gallery", out / "_duplicates", out / "videos", out / "imported",
-                 out / DELETED_DIRNAME)
+    # This walker's own exclusion (named disagreement 6): the shared quarantine set
+    # plus videos/ and imported/, which organize must leave alone because they are
+    # not PixAI images to normalize.
+    skip_dirs = QUARANTINE_EXCLUDE + ("videos", "imported")
 
     def _target(mid, row, ext):
         month = (row.get("created_at") or "")[:7] or "unknown-date"
@@ -4351,21 +4515,18 @@ def cmd_organize(args, out, img_dir, db_path):
 
     # Sources: every PixAI image on disk (catalog media), wherever it currently is.
     plan, in_place = [], 0
-    for p in out.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS:
-            continue
-        if p.name.endswith(".part") or p.name.startswith("_"):
-            continue
-        if any(_under(p, d) for d in skip_dirs):
-            continue
-        row = meta_by_mid.get(media_id_of(p))
+    for e in scan_library(out, kinds=("image",), exclude=skip_dirs):
+        p = e.path
+        if p.name.startswith("_"):
+            continue                       # organize's own rule, about files not folders
+        row = meta_by_mid.get(e.media_id)
         if not row or (row.get("source") or "") == "local":
             continue                       # unknown file or user import: leave it
-        dst = _target(media_id_of(p), row, p.suffix.lower())
+        dst = _target(e.media_id, row, p.suffix.lower())
         if p.resolve() == dst.resolve():
             in_place += 1
             continue
-        plan.append((p, dst, media_id_of(p), row))
+        plan.append((p, dst, e.media_id, row))
 
     print("Organize plan: {} file(s) -> YYYY-MM/ with descriptive names; "
           "{} already in place.".format(len(plan), in_place))
@@ -4552,9 +4713,18 @@ def cmd_undo_organize(args, out):
 # Callable API (used by the GUI; also called by main() for the CLI)
 # ---------------------------------------------------------------------------
 def _make_session(token_val):
-    """Validate config, load token, return a configured requests.Session.
-    Re-reads config.json at call time so the GUI works even when the module
-    was imported before the working directory was set correctly."""
+    """Validate config, load token, return a configured PixAIClient.
+
+    The app's ONE entry to PixAI: it re-reads config.json at call time (so the GUI works
+    even when the module was imported before the working directory was set correctly),
+    refreshes the persisted-hash globals from it, builds the API-key requests.Session, and
+    resolves USER_ID over the network when it is not pinned.
+
+    It returns a `PixAIClient`, not the bare Session -- the client IS accepted everywhere a
+    `session` is passed today (it delegates `get`/`post`/`headers`/`cookies` to the Session
+    it holds, and every primitive resolves whatever it is handed through `_client_of`), so
+    the ~70 session-taking functions are unchanged. The name stays `_make_session` because
+    thirty-odd call sites and a hundred-odd tests say it."""
     global PERSISTED_QUERY_HASH, U3T, USER_ID, TASK_DETAIL_HASH, MODEL_DETAIL_HASH
     global DELETE_TASK_HASH
     fresh = _load_config()
@@ -4598,7 +4768,10 @@ def _make_session(token_val):
         else:
             raise PixAIError("config.json needs USER_ID (or set PIXAI_API_KEY to "
                              "auto-resolve it).")
-    return session
+    # Hand the resolved account id to the client so `client.user_id` carries it directly.
+    # The module global stays as the config seed / resolution home and the client's own
+    # `or USER_ID` fallback, but business logic now reads the id off the client, not here.
+    return PixAIClient(session, auth_kind="api-key", user_id=USER_ID)
 
 
 # ===========================================================================
@@ -5451,7 +5624,8 @@ def run_probe(args):
     print("SSL trust store via truststore: {}".format(
         "on" if _TRUSTSTORE_ACTIVE else "off (requests default)"))
     print("Fetching newest page...\n")
-    conn = find_connection(gql(session, page_variables(args.page_size)))
+    conn = find_connection(gql(session, page_variables(
+        args.page_size, _client_of(session).user_id)))
     if not conn:
         print("No connection found.")
         return
@@ -5547,7 +5721,8 @@ def run_count(args):
     batched_tasks = 0
     while True:
         page += 1
-        conn = find_connection(gql(session, page_variables(count_size, before)))
+        conn = find_connection(gql(session, page_variables(
+            count_size, _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges", [])
@@ -5593,27 +5768,25 @@ def run_count(args):
 def artwork_list_gql(session, before=None, last=50):
     """GET listArtworks for the owner's own authorId. Returns the Relay
     connection dict (edges + pageInfo) or None on failure."""
-    variables = {"authorId": str(USER_ID), "last": last, "tackLanguage": "en"}
+    variables = {"authorId": str(_client_of(session).user_id), "last": last,
+                 "tackLanguage": "en"}
     if before:
         variables["before"] = before
-    params = {
-        "operation": "listArtworks",
-        "u3t": U3T,
-        "operationName": "listArtworks",
-        "variables": json.dumps(variables, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
-             "persistedQuery": {"version": 1, "sha256Hash": ARTWORK_LIST_HASH}},
-            separators=(",", ":")),
-    }
+    # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+    # ARTWORK_LIST_HASH, same variables JSON -> byte-identical wire. This op is the one that
+    # sends its OWN Apollo clientLibrary block (CLIENT_LIBRARY_ARTWORK) and an
+    # x-apollo-operation-name CSRF header, both threaded through persisted's `client_library=`
+    # / `headers=` so the request PixAI sees is byte-for-byte what it was. retries=0 (a single
+    # GET, as before). Fails SOFT to None on any refusal: the seam raises PixAIError on a bad
+    # status / GraphQL error / non-GraphQL body, all caught here.
     try:
-        r = session.get(API_URL, params=params, timeout=60,
-                        headers={"x-apollo-operation-name": "listArtworks"})
-        if r.status_code != 200:
-            return None
-        return find_connection(r.json().get("data") or {})
-    except (requests.RequestException, ValueError):
+        data = _client_of(session).persisted(
+            "listArtworks", variables, sha256=ARTWORK_LIST_HASH,
+            client_library=CLIENT_LIBRARY_ARTWORK, retries=0,
+            headers={"x-apollo-operation-name": "listArtworks"})
+    except (requests.RequestException, PixAIError, ValueError):
         return None
+    return find_connection(data or {})
 
 
 def extract_artwork_meta(node):
@@ -5669,7 +5842,7 @@ def run_sync_artworks(args):
     # isn't pinned in config.json. (Checking before this was the bug: it hard-failed on a config
     # that never lists USER_ID even though the key can resolve it.)
     session = _make_session(getattr(args, "token", None))
-    if not USER_ID:
+    if not _client_of(session).user_id:
         raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
                          "Add USER_ID to config.json as a fallback.")
 
@@ -5824,7 +5997,8 @@ def run_sync_videos(args):
     i2v_nodes, before, scanned = [], None, 0
     while True:
         conn = find_connection(gql(session, page_variables(
-            getattr(args, "page_size", 250) or 250, before)))
+            getattr(args, "page_size", 250) or 250,
+            _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -5943,7 +6117,10 @@ def run_sync_videos(args):
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
 
 
-_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+# _VIDEO_EXTS is the LIBRARY SCAN section's `"video"` kind, imported at the top of
+# this file with the rest of the shared base -- one spelling of the video extension
+# set instead of the three this file, the gallery's health walk and the loom bundle
+# each used to keep.
 
 
 def _under(path, parent):
@@ -5954,12 +6131,276 @@ def _under(path, parent):
         return False
 
 
-def _ffmpeg_path(_cache=[]):
-    """Return the ffmpeg executable path if available, else '' (cached)."""
-    if not _cache:
+# ===========================================================================
+# media_tools -- the ONE ffmpeg / ffprobe seam
+# ===========================================================================
+# Every ffmpeg and ffprobe invocation in this app enters the OS through this
+# section. Before it existed there were seven call sites across
+# moonglade_backup.py and moonglade_gallery.py, and each one re-typed the same
+# four things: an availability check, `creationflags=_NO_WINDOW`, a timeout, and
+# a blanket `except`. They disagreed on all four. Two of them asked ffprobe the
+# SAME question -- how long is this clip -- through different `-of` flags and
+# answered differently (one rounded to 2dp, one did not), and were called
+# crosswise from both modules. Two invoked the binary by bare name where the
+# others used a which()-resolved path. One cached its which(), one re-ran it per
+# file. video_poster_thumb's own comment had already banked the diagnosis: "two
+# copies of this wheel WILL drift."
+#
+# What lives here, exactly once:
+#
+#   * availability -- ffmpeg_path() / ffprobe_path(), one cached probe each,
+#     asked separately because they are separately installable.
+#   * the flags -- NO_WINDOW, on every spawn.
+#   * the timeouts -- the *_TIMEOUT constants below ARE the policy; a caller
+#     naming its own number is how the old sites drifted 15 apart from 20.
+#   * the failure rule -- a media tool NEVER raises at its caller and never
+#     blocks the work it serves. run_ffmpeg/run_ffprobe answer with a
+#     ToolResult, and every failure they swallow gets a vlog() line so a
+#     degraded run is on record instead of silent.
+#
+# ToolResult.missing is the load-bearing part. "The binary is not installed" used
+# to reach every caller as a FileNotFoundError caught by a blanket `except` that
+# could not tell it apart from a corrupt file, so the difference between "there
+# is no audio" and "I could not look" was lost at the seam. It is now a field.
+# That is the mechanism under the standing rule that a missing ffprobe DEGRADES
+# the Loom export and never blocks it: the export can ask which kind of nothing
+# it got back.
+#
+# A nonzero returncode is deliberately NOT logged here and NOT a `missing`: it is
+# ffmpeg's ordinary way of refusing a file, its meaning is caller-specific (the
+# faststart remux reads its stderr and names the clip; a thumbnail just retries
+# with different flags), and logging it here would double up on the caller's own,
+# better message.
+#
+# The gallery reaches this section as `core.<name>` through a function-body
+# `import moonglade_backup as core` -- module scope would be an import cycle,
+# since this module imports moonglade_gallery at the top.
+
+NO_WINDOW = _NO_WINDOW   # re-exported: no caller of this section reaches for the raw constant
+
+# The timeout policy, in one place. Sized by what the invocation actually does,
+# not by which module happens to be calling.
+PROBE_TIMEOUT = 20         # ffprobe: a metadata read, no decoding
+FRAME_TIMEOUT = 45         # one frame out of one clip
+THUMB_TIMEOUT = 90         # the thumbnail filter scans a batch of opening frames
+THUMB_RETRY_TIMEOUT = 60   # ...and the literal-first-frame retry behind it
+REMUX_TIMEOUT = 300        # faststart: -c copy over the whole file
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    """What one ffmpeg/ffprobe invocation did. Never an exception.
+
+    `ok`          -- the process ran and exited 0.
+    `returncode`  -- its exit code, or None when no process completed at all
+                     (binary absent, timed out, failed to spawn).
+    `stdout`/`stderr` -- text, always captured. ffmpeg reports WHY it refused
+                     something on stderr and nowhere else.
+    `missing`     -- the binary is not installed. The degrade-never-block road:
+                     a caller answers this differently from a real failure.
+    """
+    ok: bool
+    returncode: object
+    stdout: str
+    stderr: str
+    missing: bool
+
+
+_TOOL_PATHS = {}
+
+
+def _tool_path(name):
+    """Resolved path to a media binary, or '' -- asked of the OS once per process.
+
+    Cached because it is asked on per-file hot paths (every clip in a thumbnail
+    sweep, every shot in an export) and a which() is a directory walk. The price is
+    that installing ffmpeg while the app runs needs a restart to be noticed, which
+    is the deal the old `_ffmpeg_path` already made; the gallery's uncached copies
+    paid a which() per file for a refresh nobody was waiting on."""
+    if name not in _TOOL_PATHS:
         import shutil
-        _cache.append(shutil.which("ffmpeg") or "")
-    return _cache[0]
+        _TOOL_PATHS[name] = shutil.which(name) or ""
+    return _TOOL_PATHS[name]
+
+
+def ffmpeg_path():
+    """Path to ffmpeg, or '' when it is not installed (cached -- see _tool_path).
+
+    Public because some callers must gate BEFORE building work: the faststart sweep
+    prints one honest line instead of walking the library, and the Loom export
+    refuses up front rather than assembling a filtergraph nothing can run."""
+    return _tool_path("ffmpeg")
+
+
+def ffprobe_path():
+    """Path to ffprobe, or '' when it is not installed (cached -- see _tool_path).
+
+    Asked SEPARATELY from ffmpeg_path() on purpose. They ship together in a full
+    build but not in every package, and the machine with ffmpeg and no ffprobe is
+    exactly the one the Loom export has to keep serving -- gating the two together
+    would take a working feature away over a binary the wiki never asks for."""
+    return _tool_path("ffprobe")
+
+
+def _reset_tool_cache():
+    """Forget the resolved binary paths. For tests that exercise the caching itself;
+    production has no reason to re-ask."""
+    _TOOL_PATHS.clear()
+
+
+def _as_text(v):
+    """Whatever a completed process handed back, as str. The one decode point."""
+    if v is None:
+        return ""
+    if isinstance(v, bytes):
+        return v.decode("utf-8", "replace")
+    return v
+
+
+def _run_tool(name, path, args, timeout, input=None):
+    """Spawn one media binary and answer with a ToolResult. Never raises.
+
+    The single owner of the missing-binary road, `creationflags=NO_WINDOW`, the
+    timeout, stream capture, decoding, and the vlog() line for every failure that
+    used to disappear into a caller's blanket `except`."""
+    import subprocess
+    if not path:
+        vlog("{} is not installed; skipping: {}".format(
+            name, " ".join(str(a) for a in args[:4])))
+        return ToolResult(ok=False, returncode=None, stdout="",
+                          stderr="{} not found on PATH".format(name), missing=True)
+    argv = [path] + [str(a) for a in args]
+    try:
+        # stdout/stderr are PIPEd explicitly rather than via capture_output=True:
+        # ffmpeg's stderr is the entire diagnostic on a refusal, and with `-v error`
+        # it prints nothing at all on success, so piping costs nothing on the happy
+        # path. Decoding is pinned to utf-8/replace because the alternative -- the
+        # platform locale with strict errors -- can raise out of a call whose whole
+        # contract is that it does not.
+        r = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, encoding="utf-8", errors="replace",
+                           timeout=timeout, input=input, creationflags=NO_WINDOW)
+    except FileNotFoundError as e:
+        # which() said yes and the exec still failed: the binary moved, or a shim
+        # points at nothing. Same road for the caller as never having had it.
+        vlog("{} vanished between which() and exec: {}".format(name, e))
+        return ToolResult(ok=False, returncode=None, stdout="", stderr=str(e), missing=True)
+    except subprocess.TimeoutExpired:
+        vlog("{} timed out after {}s: {}".format(name, timeout, " ".join(argv[1:5])))
+        return ToolResult(ok=False, returncode=None, stdout="",
+                          stderr="timed out after {}s".format(timeout), missing=False)
+    except Exception as e:                       # noqa: BLE001 -- a media tool never raises at its caller
+        vlog("{} failed to run: {}".format(name, e))
+        return ToolResult(ok=False, returncode=None, stdout="", stderr=str(e), missing=False)
+    return ToolResult(ok=(r.returncode == 0), returncode=r.returncode,
+                      stdout=_as_text(r.stdout), stderr=_as_text(r.stderr), missing=False)
+
+
+def run_ffmpeg(args, *, timeout, input=None):
+    """Run ffmpeg with `args` -- everything AFTER the binary, which this supplies.
+    Never raises; see ToolResult. `input` is stdin text for the rare filter that
+    wants it (the streams are text-mode, so bytes are not accepted)."""
+    return _run_tool("ffmpeg", ffmpeg_path(), args, timeout, input=input)
+
+
+def run_ffprobe(args, *, timeout):
+    """Run ffprobe with `args` -- everything AFTER the binary, which this supplies.
+    Never raises; see ToolResult."""
+    return _run_tool("ffprobe", ffprobe_path(), args, timeout)
+
+
+def duration(path, *, timeout=None):
+    """Real length of a clip in seconds, or None when it cannot be read.
+
+    THE one answer to "how long is this file". There used to be two, asking ffprobe
+    the same question through different flags: this module's `probe_video_duration`
+    (`-of default=noprint_wrappers=1:nokey=1`, 20s, rounded to 2dp) and the
+    gallery's `probe_duration` (`-of csv=p=0`, 15s, full precision), each called
+    from both modules. Full precision wins, because rounding is a display choice and
+    a measurement that has already been rounded cannot be un-rounded -- a caller that
+    wants 2dp rounds at its own call site, where the reason it wants them is visible.
+    """
+    r = run_ffprobe(["-v", "error", "-show_entries", "format=duration",
+                     "-of", "csv=p=0", str(path)],
+                    timeout=PROBE_TIMEOUT if timeout is None else timeout)
+    if not r.ok:
+        return None
+    try:
+        return float(r.stdout.strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def has_audio(path, *, timeout=None):
+    """True/False for "does this file carry at least one audio stream", and None
+    when ffprobe could not answer at all.
+
+    The three-way answer is the whole point. "Definitely silent" and "I could not
+    look" are different facts, and collapsing them is how a machine without ffprobe
+    came to read every clip as silent with nothing able to notice. A caller that
+    only needs the safe reading -- treat unknown as silent -- coerces with bool(),
+    in one place, on purpose."""
+    r = run_ffprobe(["-v", "error", "-select_streams", "a", "-show_entries",
+                     "stream=index", "-of", "csv=p=0", str(path)],
+                    timeout=PROBE_TIMEOUT if timeout is None else timeout)
+    if not r.ok:
+        return None
+    return bool(r.stdout.strip())
+
+
+def extract_last_frame(video_path, out_png, at_seconds=None, *, trim_aware=True):
+    """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
+    one shot's last frame becomes the next shot's opening frame, so a sequence reads as
+    one continuous scene.
+
+    `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
+    the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
+    not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
+    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None.
+
+    It is also GENERAL: `at_seconds=0.0` takes the explicit-seek branch and yields the
+    FIRST frame. Nothing in this app should write a second frame extractor; `frame_at`
+    below is this function under the module's argument order, not another copy of it.
+
+    `trim_aware=False` skips the duration measurement and seeks to `at_seconds` as given
+    -- for a caller that already knows its timestamp is inside the clip."""
+    import os
+    if at_seconds is not None and trim_aware:
+        dur = duration(video_path)
+        # a trimOut at/after the real end is just "the last frame" -> use the EOF path
+        if not (dur and at_seconds < dur - 0.05):
+            at_seconds = None
+    try:
+        if at_seconds is None:
+            seek = ["-sseof", "-0.15", "-i", str(video_path)]
+        else:
+            # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
+            # so we land ON the last kept frame, not the first discarded one.
+            seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
+    except (TypeError, ValueError):
+        return None
+    r = run_ffmpeg(["-y"] + seek +
+                   ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
+                   timeout=FRAME_TIMEOUT)
+    if not r.ok:
+        return None
+    try:
+        return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
+    except OSError:
+        return None
+
+
+def frame_at(path, t, out, *, trim_aware=True):
+    """Write the frame at `t` seconds of `path` to `out`; `t=None` means the clip's
+    last frame, `t=0.0` its first. Returns `out` or None.
+
+    The module-interface face of extract_last_frame, which stays THE frame primitive
+    and keeps its name because the rest of the app and the decision record both call
+    it that. This is a signature, not a second implementation."""
+    return extract_last_frame(path, out, at_seconds=t, trim_aware=trim_aware)
+
+
+# --- end media_tools -------------------------------------------------------
 
 
 def video_poster_thumb(video_path, thumb_path):
@@ -5970,9 +6411,9 @@ def video_poster_thumb(video_path, thumb_path):
 
     Thin delegate: the ONE ffmpeg-extract implementation lives in
     moonglade_gallery.make_video_thumbnail (which build_thumbnails' poster-less
-    fallback also uses) -- two copies of this wheel WILL drift. The `_ffmpeg_path`
+    fallback also uses) -- two copies of this wheel WILL drift. The availability
     guard stays here because import-local and sync-videos gate on it."""
-    if not _ffmpeg_path():
+    if not ffmpeg_path():
         return False
     from moonglade_gallery import make_video_thumbnail
     return make_video_thumbnail(video_path, thumb_path)
@@ -6031,39 +6472,37 @@ def _video_faststart_attempt(path):
     p = Path(path)
     if p.suffix.lower() not in (".mp4", ".mov", ".m4v"):
         return FASTSTART_NOT_NEEDED
-    ff = _ffmpeg_path()
+    ff = ffmpeg_path()
     if not ff or not p.exists() or _mp4_is_faststart(p):
         # Deliberately NOT a refusal. This is the branch a concurrent collector's remux (or a
         # Trash purge) lands in when it wins the race with a sweep that had already decided
         # this file needed work; calling it a failure prints "still not iOS-playable" about a
         # file that is now perfectly playable.
         return FASTSTART_NOT_NEEDED
-    import subprocess
     from uuid import uuid4
     # unique per call; the real ext stays LAST so ffmpeg still picks the muxer by extension
     tmp = p.with_name(p.stem + ".__fstmp__" + uuid4().hex[:8] + p.suffix)
     try:
-        # stderr is CAPTURED, not discarded. ffmpeg reports why it refused a remux there and
-        # nowhere else, and with -v error it prints nothing at all on success, so piping it
-        # costs nothing on the happy path and is the entire diagnostic on the unhappy one.
-        r = subprocess.run([ff, "-y", "-v", "error", "-i", str(p),
-                            "-c", "copy", "-movflags", "+faststart", str(tmp)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300,
-                           creationflags=_NO_WINDOW)
-        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+        # Through media_tools: the binary, the no-window flag, the timeout and the "never
+        # raises" rule all come from there. stderr arrives CAPTURED because run_ffmpeg pipes
+        # it always -- ffmpeg reports why it refused a remux there and nowhere else, and with
+        # -v error it prints nothing at all on success.
+        r = run_ffmpeg(["-y", "-v", "error", "-i", str(p),
+                        "-c", "copy", "-movflags", "+faststart", str(tmp)],
+                       timeout=REMUX_TIMEOUT)
+        if r.ok and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(str(tmp), str(p))            # atomic swap
             return FASTSTART_REWROTE
         # A non-zero returncode raises NOTHING -- it is ffmpeg's ordinary way of refusing a
-        # file (a stream anomaly `-c copy` won't carry, say). This branch used to fall
-        # straight through to the cleanup below, so the one genuinely COMMON failure mode was
-        # the one that produced no message even under -v -- flatly contradicting the comment
-        # in the except clause below (M04, 2026-07-27). Report the code and ffmpeg's own
-        # reason, since "it didn't work" without either is not something a user can act on.
-        err = r.stderr or b""
-        if isinstance(err, bytes):
-            err = err.decode("utf-8", "replace")
-        why = " ".join(err.split())[:400] or (
-            "no stderr; wrote no usable temp file" if r.returncode == 0 else "no stderr")
+        # file (a stream anomaly `-c copy` won't carry, say), which is why media_tools hands
+        # it back rather than logging it: the message worth printing is this one, naming the
+        # clip. This branch used to fall straight through to the cleanup below, so the one
+        # genuinely COMMON failure mode was the one that produced no message even under -v --
+        # flatly contradicting the comment in the except clause below (M04, 2026-07-27).
+        # Report the code and ffmpeg's own reason, since "it didn't work" without either is
+        # not something a user can act on.
+        why = " ".join((r.stderr or "").split())[:400] or (
+            "no stderr; wrote no usable temp file" if r.ok else "no stderr")
         vlog("faststart remux failed for {}: ffmpeg exit {} -- {}".format(
             p.name, r.returncode, why))
     except Exception as e:                          # noqa: BLE001 -- remux must never crash a collect
@@ -6135,7 +6574,7 @@ def run_faststart_videos(args):
     vdir = out / "videos"
     vids = sorted(p for p in vdir.rglob("*")
                   if p.is_file() and p.suffix.lower() in (".mp4", ".mov", ".m4v")) if vdir.exists() else []
-    if not _ffmpeg_path():
+    if not ffmpeg_path():
         print("ffmpeg not found on PATH; cannot faststart.")
         return {"fixed": 0, "skipped": 0, "failed": 0, "total": len(vids)}
     print("Faststart pass over {} video(s) in {}...".format(len(vids), vdir), flush=True)
@@ -6180,16 +6619,18 @@ def run_import_local(args):
     db_path = out / "catalog.db"
     init_db(db_path)                  # import can seed a fresh, download-free backup
     thumb_dir = out / "gallery" / "thumbs"
-    media_exts = _IMAGE_EXTS | _VIDEO_EXTS
 
     raw = getattr(args, "import_local", None)
     src = Path(raw) if raw else out
     if not src.exists():
         raise PixAIError("import path not found: {}".format(src))
     try:
-        external = not _under(src.resolve(), out.resolve()) and src.resolve() != out.resolve()
+        _s, _o = src.resolve(), out.resolve()
+        external = not _under(_s, _o) and _s != _o
+        scan_root_is_out = (_s == _o)
     except OSError:
         external = False
+        scan_root_is_out = (src == out)
 
     _prog = getattr(args, "progress", None)
     catalog_rows = load_catalog(db_path)
@@ -6200,40 +6641,36 @@ def run_import_local(args):
     # though its on-disk path no longer equals the stored `filename` string. This
     # is what stops --import-local from re-cataloging the whole backup as 'local'.
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
-    gallery_dir = out / "gallery"
-    quarantine = out / "_duplicates"
-    # Branding moved to the APP root on 2026-07-26, so this no longer names a live
-    # directory -- kept because an install that predates the move still has files here,
-    # and --import-local would otherwise catalogue someone's banner and mascots as
-    # gallery images. Excluding an absent path costs nothing; dropping the exclusion
-    # would silently sweep a legacy folder into the library.
-    branding_dir = out / "branding"   # app chrome (banner/logo/marks) -- never gallery content
-    # B11 (audit 2026-07-21): purge_media_local() clears a purged image's catalog
-    # row when it moves the file to _deleted/, so without this exclusion the scan
-    # below sees an orphaned file with no existing row/media_id match and
-    # resurrects it as a brand-new source='local' row.
-    deleted_dir = out / DELETED_DIRNAME
+
+    # IMPORT_EXCLUDE = the shared quarantine set plus legacy branding/ (named
+    # disagreement 5) -- app chrome that must never be catalogued as gallery
+    # content, and, for _deleted/, B11 (audit 2026-07-21): purge_media_local()
+    # clears a purged image's catalog row when it moves the file there, so without
+    # the exclusion the scan finds an orphaned file with no existing row/media_id
+    # match and resurrects it as a brand-new source='local' row.
+    #
+    # Those names only mean anything relative to the backup root, so they apply
+    # exactly when the scan root IS the backup root. An external source folder --
+    # or a subfolder of the backup handed in explicitly -- excludes nothing, which
+    # is what the old `if not external and _under(p, out / "gallery")` chain
+    # amounted to: it tested paths rooted at `out`, which could not match anything
+    # under a different root.
+    excl = IMPORT_EXCLUDE if scan_root_is_out else ()
 
     print("Scanning {} for media (this can take a moment on a large backup)...".format(src),
           flush=True)
-    candidates, scanned = [], 0
-    for p in src.rglob("*"):
-        scanned += 1
-        if scanned % 5000 == 0:
-            vlog("scanned {} files, {} media so far...".format(scanned, len(candidates)))
-        if p.is_file() and p.suffix.lower() in media_exts and not p.name.endswith(".part"):
-            candidates.append(p)
+    candidates = []
+    for e in scan_library(src, kinds=("image", "video"), exclude=excl):
+        candidates.append(e.path)
+        if len(candidates) % 5000 == 0:
+            vlog("scanned {} media files so far...".format(len(candidates)))
     total = len(candidates)
-    print("Found {} media file(s) among {} scanned; cataloging new ones...".format(
-        total, scanned), flush=True)
+    print("Found {} media file(s); cataloging new ones...".format(total), flush=True)
 
     rows, made, skipped = [], 0, 0
     for idx, p in enumerate(candidates):
         if _prog:
             _prog(idx + 1, total, 0)
-        if not external and (_under(p, gallery_dir) or _under(p, quarantine)
-                             or _under(p, branding_dir) or _under(p, deleted_dir)):
-            continue
         is_vid = p.suffix.lower() in _VIDEO_EXTS
         if external:
             dest_dir = out / ("videos" if is_vid else "imported")
@@ -6632,12 +7069,25 @@ def _gen_parameters(args):
     # Clamping can land on 1.0 for a source already at the output ceiling; that is "no
     # upscale is possible at this size", so the block is dropped rather than submitting a
     # 1.0 ratio that changes the priced shape and produces nothing.
+    # A fired ceiling clamp is RECORDED, not applied in silence -- same contract as the
+    # width/height/steps/cfg/count clamps (see _gen_args_from_web_payload's `adjusted`
+    # receipt). The web namespace carries that list on `.clamped`; the CLI's argparse
+    # Namespace has no such attribute, so the append is guarded by getattr. The clamp
+    # VALUE is unchanged -- only the receipt entry is new.
+    def _note_upscale_clamp(field, asked, used):
+        receipt = getattr(args, "clamped", None)
+        if isinstance(receipt, list):
+            receipt.append({"field": field, "asked": asked, "used": used})
     if enlarge:
-        enlarge = min(enlarge, max_upscale_ratio(params["width"], params["height"],
-                                                 "enlarge"))
+        _ceil = max_upscale_ratio(params["width"], params["height"], "enlarge")
+        if _ceil < enlarge:
+            _note_upscale_clamp("enlarge", enlarge, _ceil)
+        enlarge = min(enlarge, _ceil)
     elif upscale:
-        upscale = min(upscale, max_upscale_ratio(params["width"], params["height"],
-                                                 "upscale"))
+        _ceil = max_upscale_ratio(params["width"], params["height"], "upscale")
+        if _ceil < upscale:
+            _note_upscale_clamp("upscale", upscale, _ceil)
+        upscale = min(upscale, _ceil)
     if enlarge and enlarge > 1.0:
         params["enlarge"] = enlarge
         # An unknown upscaler name would be rejected by PixAI, so fall back to their own
@@ -6957,58 +7407,6 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  model_id=(mid_num or REFVIDEO_MODEL_ID))
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
-
-
-def probe_video_duration(path):
-    """Real duration (seconds, float) of a local clip via ffprobe -- powers the Edit
-    Bay's reel from the ACTUAL generated lengths, not the planned ones. None on any
-    failure (ffprobe missing / unreadable). Pure read."""
-    import subprocess
-    try:
-        out = subprocess.check_output(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            stderr=subprocess.DEVNULL, timeout=20,
-            creationflags=_NO_WINDOW).decode().strip()
-        return round(float(out), 2)
-    except Exception:                                  # noqa: BLE001
-        return None
-
-
-def extract_last_frame(video_path, out_png, at_seconds=None):
-    """Grab a clip's frame to out_png via ffmpeg. This is the frame-handoff primitive:
-    one shot's last frame becomes the next shot's opening frame, so a sequence reads as
-    one continuous scene.
-
-    `at_seconds` makes the handoff TRIM-AWARE: the previous shot's trimOut is the point
-    the cut actually ends on, so the handed-off frame must be the frame AT that out-point,
-    not the untrimmed clip's real final frame. When it's None (no trim) -- or past the
-    clip's real end -- fall back to seeking ~0.15s before EOF. Returns out_png or None."""
-    import os
-    import subprocess
-    if at_seconds is not None:
-        try:
-            dur = probe_video_duration(video_path)
-        except Exception:                              # noqa: BLE001
-            dur = None
-        # a trimOut at/after the real end is just "the last frame" -> use the EOF path
-        if not (dur and at_seconds < dur - 0.05):
-            at_seconds = None
-    try:
-        if at_seconds is None:
-            seek = ["-sseof", "-0.15", "-i", str(video_path)]
-        else:
-            # -ss before -i (fast, keyframe-accurate enough for a still); back off a hair
-            # so we land ON the last kept frame, not the first discarded one.
-            seek = ["-ss", "{:.3f}".format(max(0.0, float(at_seconds) - 0.05)), "-i", str(video_path)]
-        subprocess.run(
-            ["ffmpeg", "-y"] + seek +
-            ["-update", "1", "-frames:v", "1", "-q:v", "2", str(out_png)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=True,
-            creationflags=_NO_WINDOW)
-        return str(out_png) if os.path.exists(out_png) and os.path.getsize(out_png) > 0 else None
-    except Exception:                                  # noqa: BLE001
-        return None
 
 
 def build_panelplugin_parameters(media_id, workflow_id="", *, workflow_name="",
@@ -8267,6 +8665,513 @@ def submit_fixer(session, media_id, boxes):
         raise PixAIError("fixer: no task id returned: " + json.dumps(data)[:200])
     return str(tid)
 
+# =============================================================================
+# ONE PAYLOAD ROAD -- price and submit build the same dict
+# =============================================================================
+# Every create surface used to reach a PixAI `parameters` dict by a road of its
+# own: /api/price through the gallery's `_params_and_nocard`, and each create
+# route through its own builder call, its own `_apply_kaisuuken`, its own
+# mutation. Two roads to one number is how a cost badge comes to quote a job
+# that is not the one about to be paid for -- the hazard already written down at
+# /api/generate ("the badge must quote the shape that will actually submit").
+#
+# The interface is three names, and they sit here, right behind the builders,
+# because that is the only place both a quote and a spend can see the same dict:
+#
+#   build_request(payload, ...) -> GenerationRequest    the ONLY producer
+#   price(session, req)  -> dict                        READ-ONLY, spends nothing
+#   submit(session, req) -> dict                        the ONE spend choke
+#
+# `price` and `submit` both read `req.parameters` and neither ever rebuilds it,
+# so a quote and a spend inside one request describe the same job by
+# construction, not by two pieces of code agreeing. A caller cannot submit a
+# shape that was never quotable, because `build_request` is the only place a
+# shape comes from and the mode dispatch lives there exactly once.
+#
+# It is also the one place READ_ONLY and the free card are decided. Before this,
+# each web route called `_apply_kaisuuken` (a real network call) and only THEN
+# reached `submit_generation`'s READ_ONLY guard -- the same fail-open ordering
+# the four CLI runners were fixed for on 2026-07-21, still live on the web side.
+# `submit` checks first and matches nothing else.
+#
+# The CLI runners (`run_generate`, `run_generate_video`, `run_edit_image`, ...)
+# deliberately keep their own flow for now: they carry preview/--confirm/--dump-
+# params behaviour that is not a web payload's, and folding them in is its own
+# increment.
+
+
+@dataclass
+class GenerationRequest:
+    """One create request: the exact dict PixAI will receive, plus the few
+    route-level facts the payload carries that a submit needs.
+
+    `parameters` is THE object -- price() reads it, submit() sends it, nothing
+    rebuilds it in between. `None` means the payload was not enough to build a
+    shape, and `note` says what is missing in the cost badge's own voice.
+
+    mode              "image" | "edit" | "fix" | "video" | "enhance"
+    parameters        createGenerationTask `parameters`, or None (see `note`)
+    no_card           skip the free-card match (forced True for a Fix)
+    note              why `parameters` is None -- rendered by the badge
+    price_note        set when the shape is REAL but must not be priced: an
+                      enhance/panelplugin task is priced by its workflow id,
+                      which is deliberately not in _PRICE_SCALARS, so pricing
+                      the workflow-less shape that survives the allowlist
+                      returns a confident WRONG number. No number is the honest
+                      answer until that is measured live.
+    media_id / boxes  the Fix's own submit body: POST /v2/task/fixer takes
+                      {mediaId, boxes} and never sees `parameters` (those are
+                      the synthesized chat.fixer shape, built for pricing only).
+    model_version_id  the RESOLVED model version an image gen will submit --
+                      the one fact a route needs to tell "no model picked" from
+                      "the builder refused something".
+    lora_version_ids  the LoRAs actually going out, for the per-account cap and
+                      the LoRA telemetry.
+    adjusted          the clamp receipt: [{field, asked, used}] for every clamp
+                      that FIRED. Clamping is substitution on a paid path, so
+                      the route hands it back in the response rather than
+                      charging for a different generation in silence.
+    """
+    mode: str = "image"
+    parameters: dict = None
+    no_card: bool = False
+    note: str = None
+    price_note: str = None
+    media_id: str = ""
+    boxes: list = field(default_factory=list)
+    model_version_id: str = ""
+    lora_version_ids: list = field(default_factory=list)
+    adjusted: list = field(default_factory=list)
+
+
+@dataclass
+class RequestResolver:
+    """The lookups `build_request` cannot do on its own, supplied by the caller.
+
+    model_version(model_id, client_version_id) -> version id   -- needs a session
+    preset(user, name) -> banked Toolbox preset dict or None   -- per-account store
+    media_id(value)    -> an id PixAI accepts as an INPUT      -- uploads; SUBMIT only
+
+    `media_id` is deliberately absent when pricing. /api/price fires on every
+    keystroke in the drawer, and resolving there would upload the same file once
+    per character; a quote needs the SHAPE, not an upload-kind id.
+    """
+    model_version: object = None
+    preset: object = None
+    media_id: object = None
+
+
+def model_version_resolver(session):
+    """The ONE model_id -> version_id rule, so a quote and a spend can never
+    resolve a picked model differently.
+
+    A client version_id is honored IF it names one of model_id's own real
+    versions (PixAI's model cards offer a version picker and so does ours);
+    otherwise -- absent, stale from a fast model switch, or belonging to a
+    DIFFERENT model entirely -- it falls back to the newest. A raw client
+    version_id is never trusted blind: that is what once landed generations on
+    PixAI as 'Unknown model'. With no model_id at all the client's version_id
+    stands unchanged (back-compat), and a model that resolves to nothing leaves
+    it untouched rather than inventing one.
+
+    /api/price used to run a DIFFERENT, weaker resolve of its own (rows[0] via
+    resolve_version_meta, and only when the payload carried no version_id and no
+    mode at all), which is precisely a badge quoting one model while the submit
+    sent another.
+    """
+    def _resolve(model_id, client_version_id=""):
+        mid = str(model_id or "").strip()
+        vid = str(client_version_id or "").strip()
+        if not mid:
+            return vid
+        versions = list_model_versions(session, mid)
+        chosen = next((v for v in versions if v.get("version_id") == vid),
+                      None) if vid else None
+        if chosen:
+            return chosen["version_id"]
+        if versions:
+            return versions[0]["version_id"]
+        return vid
+    return _resolve
+def _gen_args_from_web_payload(p):
+    """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
+    feeds to _gen_parameters -- so web + CLI build identical params (one source
+    of truth). Clamped to safe ranges, and every clamp that actually fired is listed on
+    the returned namespace as `.clamped` = [{field, asked, used}] so the route can tell
+    the caller its request was rewritten instead of charging for the difference."""
+    from types import SimpleNamespace
+    p = p or {}
+    def num(k, d, cast=int):
+        try:
+            return cast(p.get(k, d))
+        except (TypeError, ValueError):
+            return d
+    # "Clamped to safe ranges" was, until this existed, true of `count` alone: width,
+    # height, steps and cfg went through num() with no ceiling and straight into a real
+    # paid submit, because _gen_parameters only FLOORS width/height to 64 (via
+    # _dim) and caps nothing at all. /api/generate is LOGIN-tier on purpose -- any
+    # signed-in LAN device may spend -- so the drawer's own HTML min/max attributes are
+    # the only bound a well-behaved client honours and a hand-rolled POST honours none:
+    # {"width": 999999999, "steps": 999999} reached PixAI, priced at whatever that
+    # produces. Clamp here, where the docstring promises it.
+    #
+    # The ceilings are read off the drawer's OWN controls, not invented:
+    #   width/height  64..4096  -- #gen-cw / #gen-ch (min=64 max=4096 step=8), and the
+    #                              drawer's d8() already clamps to exactly that before
+    #                              it POSTs, so this is the same number twice
+    #   steps         1..150    -- #gen-steps, and gateField()'s defMin/defMax
+    #   cfg           1..30     -- #gen-cfg, and gateField()'s defMin/defMax
+    # Same idiom _gen_parameters uses for the Hires knobs ("bounds read off the
+    # live dialog's own controls: strength 0.01-0.99, steps 1-50").
+    #
+    # These are NOT provably the widest the UI can emit, and an earlier draft of this
+    # comment claimed they were ("a model publishing tighter `restrictions` narrows the
+    # browser field further"). gateField() REPLACES the field's min/max with whatever
+    # `restrictions` carries rather than clipping them, and `restrictions` is live PixAI
+    # data -- so a model publishing samplingSteps.max = 200 would widen the drawer's own
+    # control and the drawer would legitimately POST 200.
+    #
+    # Which is exactly why a clamp that FIRES is recorded instead of applied in silence.
+    # Clamping is substitution on a paid path: the caller asked for one generation and
+    # is charged for a different one, and doing that without a word is a worse failure
+    # than the absurd value the clamp exists to refuse -- the money is gone either way,
+    # and only the version that says so tells you what it bought. `adjusted` is that
+    # receipt; /api/generate hands it back in the response (see api_generate). No
+    # price/charge split comes of it either way: /api/price builds its params through
+    # this same function, so the badge already quotes the clamped request.
+    adjusted = []
+
+    def clamp(field, v, lo, hi):
+        c = max(lo, min(hi, v))
+        if c != v:
+            adjusted.append({"field": field, "asked": v, "used": c})
+        return c
+    loras = []
+    for lo in (p.get("loras") or []):
+        vid = str((lo or {}).get("version_id") or "").strip()
+        if vid:
+            loras.append((vid, (lo or {}).get("weight", 0.7)))
+    seed_raw = str(p.get("seed") or "").strip()
+    hp = p.get("high_priority") in (True, "1", "true", "on")
+    return SimpleNamespace(
+        params_json="", prompt=(p.get("prompt") or "").strip(),
+        negative=(p.get("negative") or "").strip(),
+        model=(p.get("version_id") or "").strip(),
+        width=clamp("width", num("width", 512), 64, 4096),
+        height=clamp("height", num("height", 512), 64, 4096),
+        steps=clamp("steps", num("steps", 25), 1, 150),
+        cfg=clamp("cfg", num("cfg", 7, float), 1.0, 30.0),
+        count=clamp("count", num("count", 1), 1, 4),
+        # Ticked = High (1000, costs extra). Unticked = Turbo (500, free but
+        # members-only); core's submit downgrades that to Low on its own if PixAI
+        # says this account isn't entitled, so an expired membership no longer
+        # breaks every generate/edit/upscale at once.
+        priority=(PRIORITY_HIGH if hp else PRIORITY_TURBO),
+        mode=(p.get("mode") or "auto"),
+        seed=(int(seed_raw) if seed_raw.lstrip("-").isdigit() else None),
+        lora=loras,
+        # .lower() matters: a JSON `false` arrives as Python False, and
+        # str(False) is "False" -- which did NOT match the lowercase tuple, so
+        # every explicitly-disabled prompt helper was submitted as ENABLED.
+        # Found 2026-07-29 reviewing the pilot's port; it bit the classic
+        # drawer's unchecked box identically.
+        prompt_helper=(str(p.get("prompt_helper", "1")).lower()
+                       not in ("0", "false", "off", "none")),
+        ref_media_id=str(p.get("ref_media_id") or "").strip(),
+        ref_strength=num("ref_strength", 0.55, float),
+        # Upscale + boosters. num() returns its default for a missing/blank value, so
+        # None here means "the drawer's Upscale control is Off" and the builder omits
+        # every one of these keys -- an absent control must not change the submit.
+        enlarge=num("enlarge", None, float),
+        enlarge_model=str(p.get("enlarge_model") or "").strip(),
+        upscale=num("upscale", None, float),
+        upscale_denoising_strength=num("upscale_denoise", None, float),
+        upscale_denoising_steps=num("upscale_denoise_steps", None, int),
+        face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
+        quality_tag=str(p.get("quality_tag") or "").strip(),
+        kaisuuken_id="", no_card=bool(p.get("no_card")),
+        # _gen_parameters reads named attributes only, so carrying the receipt on
+        # the namespace costs the submit shape nothing and keeps it beside the values it
+        # describes -- a caller cannot pick up the args and lose the record of what was
+        # changed to make them.
+        clamped=adjusted)
+
+
+def _edit_parameters_from_payload(p, user, resolve):
+    """Build the instruct-edit `chat` params from the Edit tab's JSON. Source is a
+    catalog media_id (the image being edited). A `preset` name swaps in a locally
+    banked Toolbox preset (canned prompt + sceneId + its modelId), looked up from
+    `user`'s own per-account presets through the caller's `resolve.preset`.
+    Returns None if no source (or a preset name that isn't banked).
+
+    `resolve.media_id` is present on a real submit and deliberately absent when
+    pricing. With it, every source id is run through the caller's resolver -- a
+    catalog id is a generation OUTPUT and PixAI refuses it as an input. Without
+    it, ids are left alone: /api/price only needs the SHAPE to compute a cost,
+    and uploading on every cost check would upload the same file repeatedly
+    while the user types."""
+    p = p or {}
+    src = str(p.get("source") or "").strip()
+    if not src:
+        return None
+    instruction = (p.get("instruction") or "").strip()
+    scene_id, model_id = "", ""
+    preset_name = str(p.get("preset") or "").strip()
+    if preset_name:
+        pre = resolve.preset(user, preset_name) if resolve.preset else None
+        if not pre:
+            return None
+        instruction = pre.get("prompt") or instruction
+        scene_id = pre.get("scene_id") or ""
+        model_id = pre.get("model_id") or ""
+    # A preset pins its own model; otherwise resolve from the Edit-card model picker.
+    if not model_id:
+        model_id = edit_model_id(p.get("edit_model") or "") or EDIT_PRO_MODEL_ID
+    # quality: omitted (passed "") for models with no quality option (Reference Pro);
+    # default medium only when the client sent no quality key at all.
+    q = p.get("quality")
+    if q is None:
+        q = "medium"
+    res, q, asp = clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
+                                    (p.get("aspect") or "3:4"))   # never send an invalid knob
+    kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
+                  model_id=model_id)
+    # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
+    # capped to the model's reference limit (Edit Pro 4 / Reference Pro 10).
+    media = p.get("sources")
+    media = [str(m).strip() for m in media if str(m).strip()] if isinstance(media, list) else []
+    if not media:
+        media = [src]
+    spec = edit_model_by_id(model_id)
+    if spec:
+        media = media[:spec["max_refs"]] or [src]
+    if resolve.media_id is not None:       # real submit -- see the docstring
+        media = [resolve.media_id(m) for m in media]
+    return build_chat_edit_parameters(instruction, media, **kwargs)
+
+
+# An enhance/panelplugin task is priced by its workflow id, which is deliberately NOT in
+# _PRICE_SCALARS: pricing the workflow-less shape that survives the allowlist returns a
+# confident WRONG number, so no number is the honest answer until it is measured live.
+_ENHANCE_PRICE_NOTE = "couldn't verify the cost of an AI preset yet"
+
+# The READ_ONLY refusal wording per road -- the same sentences submit_generation and
+# submit_fixer raise, so moving the guard earlier did not change what a user reads.
+_SUBMIT_ACTIONS = {"fix": "submit a hand/face fix (spends credits)"}
+_SUBMIT_ACTION_DEFAULT = "submit a generation (spends credits)"
+
+
+def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None):
+    """Turn a web payload into the ONE GenerationRequest that both /api/price and the
+    create routes ride. The mode dispatch lives here and nowhere else.
+
+    `mode` pins the road when the CALLER knows it -- a create route is single-purpose,
+    and /api/generate must build an image gen whatever the payload says. It matters on a
+    spend path: `mode` is overloaded in the payload itself (the image road reads it as
+    the inferenceProfile quality setting, "auto"/"lite"/"pro"/...), so an unpinned
+    {"mode": "I2V"} POSTed at /api/generate would otherwise build and pay for a VIDEO.
+    Omit it and the road is read off the payload -- that is /api/price, the one caller
+    that legitimately serves every road.
+
+    `is_member` is the same entitlement the submit applies, so a badge cannot quote a
+    price for a members-only option that will be stripped before it is sent. `resolve`
+    carries the lookups this cannot do itself (see RequestResolver).
+
+    Raises PixAIError when a BUILDER refuses (asking for both upscale methods at once, an
+    unknown video mode): that is a real refusal with a real message, and each caller
+    already renders one -- the badge as its note, a create route as its logged failure.
+    A payload that is merely INCOMPLETE is not an error: it comes back with `note` set and
+    `parameters` None."""
+    p = payload or {}
+    rs = resolve if resolve is not None else RequestResolver()
+    road = str(mode or p.get("mode") or "").strip()
+    no_card = bool(p.get("no_card"))
+
+    if road == "edit":
+        params = _edit_parameters_from_payload(p, user, rs)
+        return GenerationRequest(mode="edit", parameters=params, no_card=no_card,
+                                 note=None if params else "pick an image to edit")
+
+    if road == "fix":
+        # A hand/face Fix is submitted over POST /v2/task/fixer, whose {mediaId, boxes}
+        # body /v2/task-price cannot read -- but the taskKind=chat task PixAI builds from
+        # it IS priceable, so build_fixer_price_parameters synthesizes that chat.fixer
+        # shape (see its docstring for the measurement). `parameters` is therefore the
+        # PRICE shape only; `media_id` + `boxes` are what actually go out, which is why
+        # submit() reads those, and a shape this could not synthesize never blocks a
+        # submit -- submit_fixer runs the same clean_fix_boxes and is the real guard.
+        src = str(p.get("source") or "").strip()
+        if src and rs.media_id is not None:
+            src = str(rs.media_id(src) or src)
+        boxes = list(p.get("boxes") or [])
+        # no_card is forced True here and is NOT read off the payload: /v2/task/fixer
+        # takes only mediaId + boxes, with no kaisuukenId field anywhere on it, so a free
+        # card can never be spent on a Fix however well /v2/kaisuuken/check matches the
+        # synthesized params. Letting the card check run would paint the badge emerald
+        # "FREE -- a card covers this" over an action about to charge full credits.
+        if not src:
+            return GenerationRequest(mode="fix", no_card=True, boxes=boxes,
+                                     note="pick an image to fix")
+        try:
+            params = build_fixer_price_parameters(src, boxes)
+        except PixAIError:
+            return GenerationRequest(mode="fix", no_card=True, media_id=src, boxes=boxes,
+                                     note="drag a box over a hand or face")
+        return GenerationRequest(mode="fix", parameters=params, no_card=True,
+                                 media_id=src, boxes=boxes)
+
+    if road == "video" or road in ("I2V", "FLF", "R2V"):
+        shot = str(p.get("mode") or "").strip().upper()
+        if shot not in ("I2V", "FLF", "R2V"):
+            shot = "R2V"                   # the Loom's own default for an unnamed shot
+        imgs = [str(i) for i in (p.get("images") or []) if str(i).strip()]
+        # .isdigit() on the video/audio refs is the SUBMIT's filter, and pricing uses it
+        # too now: a non-numeric ref was priced and then dropped before the mutation,
+        # which is a quote for a different job than the spend.
+        vids = [str(v) for v in (p.get("video_refs") or []) if str(v).strip().isdigit()]
+        auds = [str(a) for a in (p.get("audio_refs") or []) if str(a).strip().isdigit()]
+        # I2V/FLF are image-anchored (source frame / start+end frame); R2V accepts
+        # ANY reference kind alone (e.g. a video-only Multi-ref) -- gating all three
+        # modes on `imgs` alone silently mispriced a video/audio-only R2V request as
+        # "pick a source image", found 2026-07-18 while wiring the ref-slot expansion.
+        has_ref = imgs or (shot == "R2V" and (vids or auds))
+        if not has_ref:
+            return GenerationRequest(mode="video", no_card=no_card,
+                                     note="pick a source image")
+        params = build_shot_video_params(
+            shot, (p.get("prompt") or "").strip(), image_ids=imgs,
+            video_ids=vids, audio_ids=auds,
+            duration=p.get("duration") or 5,
+            generate_audio=bool(p.get("generate_audio") or p.get("audio")),
+            model=(p.get("video_model") or ""),
+            camera_movement=(p.get("camera_movement") or ""),
+            quality=(p.get("quality") or "professional"),
+            audio_language=(p.get("audio_language") or "english"),
+            negative=(p.get("negative") or "").strip(),
+            is_private=bool(p.get("is_private")),
+            use_prompt_helper=bool(p.get("prompt_helper")))
+        return GenerationRequest(mode="video", parameters=params, no_card=no_card)
+
+    if road == "enhance":
+        src = str(p.get("source") or "").strip()
+        if src and rs.media_id is not None:
+            src = str(rs.media_id(src) or src)
+        wid = str(p.get("workflow_id") or "").strip()
+        wname = str(p.get("workflow_name") or "").strip()
+        if not src:
+            return GenerationRequest(mode="enhance", no_card=no_card,
+                                     note="pick an image first",
+                                     price_note=_ENHANCE_PRICE_NOTE)
+        if not (wid or wname):
+            return GenerationRequest(mode="enhance", no_card=no_card, media_id=src,
+                                     note="pick an AI preset",
+                                     price_note=_ENHANCE_PRICE_NOTE)
+        # workflow_name wins inside the builder when both are set; a preset is pinned to
+        # exactly one of the two (numeric id OR author/workflow name) in the caller.
+        # Change Emotion carries a control: pass the picked expression, and ONLY for that
+        # preset (an unknown input on the others would be a stray arg on a spend submit).
+        # The picker sends the option KEY (filename stem); emotionlab's `prompt` arg wants
+        # the danbooru TAG STRING, so translate key->tag here (unknown key falls back to
+        # itself).
+        emotion_key = str(p.get("emotion") or "").strip()
+        emotion_tag = ENHANCE_EMOTION_PROMPTS.get(emotion_key, emotion_key)
+        extra = ({ENHANCE_EMOTION_ARG: emotion_tag}
+                 if emotion_tag and wname == ENHANCE_EMOTION_WORKFLOW else None)
+        params = build_panelplugin_parameters(src, wid, workflow_name=wname,
+                                              extra_inputs=extra)
+        return GenerationRequest(mode="enhance", parameters=params, no_card=no_card,
+                                 media_id=src, price_note=_ENHANCE_PRICE_NOTE)
+
+    # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
+    args = _gen_args_from_web_payload(p)
+    if rs.model_version is not None:
+        args.model = rs.model_version(p.get("model_id") or "", args.model)
+    lora_ids = [vid for vid, _w in (args.lora or [])]
+    if not args.model:
+        return GenerationRequest(mode="image", no_card=args.no_card, note="pick a model",
+                                 lora_version_ids=lora_ids, adjusted=args.clamped)
+    # Same entitlement the submit applies, so the badge cannot quote a price for a
+    # members-only option that will be stripped before it is sent.
+    args.is_member = is_member
+    return GenerationRequest(mode="image", parameters=_gen_parameters(args),
+                             no_card=args.no_card, model_version_id=args.model,
+                             lora_version_ids=lora_ids, adjusted=args.clamped)
+
+
+def price(session, req):
+    """The live cost + free-card verdict for a request. READ-ONLY -- it creates nothing
+    and spends nothing, and the object it prices is the very `req.parameters` a submit
+    would send, which is the whole point of this road.
+
+    Fails CLOSED in both directions: an unbuildable payload is `cost: None` with the note,
+    never a `free` a caller could act on; and `free` is card_covers(best), NOT bool(best)
+    -- a multi-ticket video can MATCH a card the account holds too few tickets of (issue
+    #15), and that case is paid at the full price because the site attaches nothing. One
+    predicate shared with the CLI preview and _apply_kaisuuken, so this can never say FREE
+    while the submit charges.
+
+    `cards` is the HELD count (kept under its old name for the badge's "(N left)"); the
+    job's ticket cost is `cards_needed`, and `card_short` is the honest flag the badge
+    renders as "not enough -- costs the full price"."""
+    if req.parameters is None:
+        return {"cost": None, "free": False, "note": req.note}
+    if req.price_note:
+        return {"cost": None, "free": False, "note": req.price_note}
+    cost = price_task(session, req.parameters)
+    best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
+    covered = card_covers(best)
+    return {"cost": cost, "free": covered,
+            "cards": (best or {}).get("total"),
+            "cards_held": (best or {}).get("total"),
+            "cards_needed": (best or {}).get("consumeAmount"),
+            "card_short": bool(best) and not covered,
+            "card_name": (best or {}).get("name"),
+            # The Loom's batch tally keys its per-template ticket pool on this (falls
+            # back to card_name when absent) -- see loom-core.js tallyPricesDetailed.
+            "card_template": (best or {}).get("templateId"),
+            "card_expires": (best or {}).get("expiresAt")}
+
+
+def submit(session, req, *, no_card=None):
+    """Spend: READ_ONLY guard -> free card -> the one mutation this road's mode uses.
+    Returns {"task_id": ...}.
+
+    The READ_ONLY check is FIRST, ahead of the card match, and that ordering is the point
+    of putting it here. `_apply_kaisuuken` calls /v2/kaisuuken/check -- a real network
+    call on the account -- and every web create route used to make it before reaching
+    submit_generation's own guard, so a READ_ONLY install still talked to PixAI before
+    refusing. That is the identical fail-open the four CLI runners were fixed for on
+    2026-07-21; the web side kept it until this became one choke.
+
+    `no_card` overrides the request's own flag for a caller with a reason to (the
+    request's flag is what the payload asked for). A Fix ignores both: POST /v2/task/fixer
+    has no kaisuukenId field at all, so no card can ever cover one, and this never runs
+    the check that would tell a user otherwise."""
+    _check_read_only(_SUBMIT_ACTIONS.get(req.mode, _SUBMIT_ACTION_DEFAULT))
+    if req.mode == "fix":
+        # A Fix's `parameters` are the PRICE shape and may legitimately be None while the
+        # submit is still good (a box clean_fix_boxes would drop is not this function's
+        # call to make -- submit_fixer runs the same cleaner and is the real guard). What
+        # it cannot do without is the two fields /v2/task/fixer actually takes.
+        if not req.media_id or not req.boxes:
+            raise PixAIError(req.note or "nothing to submit")
+        return {"task_id": submit_fixer(session, req.media_id, req.boxes)}
+    if req.parameters is None:
+        raise PixAIError(req.note or "nothing to submit")
+    from types import SimpleNamespace
+    skip = req.no_card if no_card is None else bool(no_card)
+    # Passing the flag through rather than branching around the call keeps
+    # _apply_kaisuuken's own precedence (explicit id > no_card > auto-match) and its
+    # spend log ("--no-card: this WILL spend credits") the single source of both.
+    _apply_kaisuuken(session, req.parameters,
+                     SimpleNamespace(kaisuuken_id="", no_card=skip))
+    return {"task_id": submit_generation(session, req.parameters)}
+
+
+# =============================================================================
+# end of the one payload road
+# =============================================================================
+
 
 _GEN_DONE = ("completed", "success", "succeeded", "done", "finished")
 _GEN_FAIL = ("failed", "error", "cancelled", "canceled", "rejected")
@@ -8381,7 +9286,11 @@ def collect_generation(session, task_id, out_dir, *, name_length=60, name_sep="_
         saved = _download_video_task(session, result, task_id, out, a,
                                      result.get("parameters") or {})
         mids = [str(o["video_media_id"]) for o in vouts if o.get("video_media_id")]
-        dur = probe_video_duration(saved[0]) if saved else None   # real clip length for the reel
+        # Real clip length for the reel. media_tools.duration answers at full precision;
+        # the 2dp are this call site's own display choice (the catalog's video_duration
+        # column is read back as a label, not re-measured).
+        _dur = duration(saved[0]) if saved else None
+        dur = round(_dur, 2) if _dur is not None else None
         return {"media_ids": mids, "saved": len(saved), "is_video": True, "duration": dur}
     fm = extract_full_meta(result)
     _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
@@ -9370,7 +10279,7 @@ def run_account_info(args):
         credits = "{:,}".format(int(me.get("quotaAmount") or 0))
     except (TypeError, ValueError):
         credits = str(me.get("quotaAmount"))
-    print("Account ID       : {}".format(me.get("id") or USER_ID))
+    print("Account ID       : {}".format(me.get("id") or _client_of(session).user_id))
     print("Credits (balance): {}".format(credits))
     balance = credit_balance(session)
     if balance["free"] is not None or balance["paid"] is not None:
@@ -9712,19 +10621,21 @@ def run_contests(args):
 
 
 def _rest_get(session, path, params=None, timeout=30):
-    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx."""
-    r = session.get(REST_API_BASE + path, params=params, timeout=timeout)
-    if not r.ok:
-        raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
-    return r.json()
+    """GET a /v2 oRPC REST route. Returns parsed JSON. Raises PixAIError on non-2xx.
+
+    THIN DELEGATE onto `PixAIClient.rest_get` -- the route road lives in the pixai_client
+    section. Kept under this name because a dozen call sites hand it a `session`
+    positionally and the suite patches it here (tests/conftest.py's `_no_live_card_network`
+    is what makes the /v2 API offline by default)."""
+    return _client_of(session).rest_get(path, params=params, timeout=timeout)
 
 
 def _rest_post(session, path, body, timeout=60):
-    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx."""
-    r = session.post(REST_API_BASE + path, json=body, timeout=timeout)
-    if not r.ok:
-        raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
-    return r.json()
+    """POST JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+    THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
+    keeps `submit_fixer` and `claim_reward` single-attempt."""
+    return _client_of(session).rest_post(path, body, timeout=timeout)
 
 
 def _normalize_kaisuuken(raw):
@@ -10741,7 +11652,8 @@ def run_reconcile_deleted(args):
     live, before, page = set(), None, 0
     while True:
         conn = find_connection(gql(session, page_variables(
-            getattr(args, "page_size", 250) or 250, before)))
+            getattr(args, "page_size", 250) or 250,
+            _client_of(session).user_id, before)))
         if not conn:
             break
         edges = conn.get("edges") or []
@@ -10821,28 +11733,27 @@ def _count_backup_images(out):
     reported SEPARATELY rather than dropped, so the total still accounts for the whole
     folder."""
     out = Path(out)
-    gallery_dir = out / "gallery"
-    deleted_dir = out / DELETED_DIRNAME
-    skip = (gallery_dir, out / "_duplicates", deleted_dir)
+    # The one walker that does NOT want the quarantine trees pruned -- it counts
+    # them into separate columns instead of dropping them, so it asks for
+    # `exclude=()` and splits on the entry's own top-level folder against the
+    # shared dirnames. Case-normalized because the old `dir in p.parents` test was
+    # (Path comparison is case-insensitive on Windows).
+    _norm = os.path.normcase
+    _gallery, _deleted, _dupes = (_norm(GALLERY_DIRNAME), _norm(DELETED_DIRNAME),
+                                  _norm(DUPLICATES_DIRNAME))
     n = b = thumbs = trashed = trashed_bytes = 0
-    for p in out.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in _IMAGE_EXTS or p.name.endswith(".part"):
-            continue
-        if any(s in p.parents for s in skip):
-            if gallery_dir in p.parents:
-                thumbs += 1
-            elif deleted_dir in p.parents:
-                trashed += 1
-                try:
-                    trashed_bytes += p.stat().st_size
-                except OSError:
-                    pass
-            continue
-        n += 1
-        try:
-            b += p.stat().st_size
-        except OSError:
-            pass
+    for e in scan_library(out, kinds=("image",), exclude=()):
+        top = _norm(e.rel.parts[0]) if len(e.rel.parts) > 1 else ""
+        if top == _gallery:
+            thumbs += 1
+        elif top == _deleted:
+            trashed += 1
+            trashed_bytes += e.size or 0
+        elif top == _dupes:
+            pass                       # quarantined duplicates: neither live nor trash
+        else:
+            n += 1
+            b += e.size or 0
     return DiskCounts(n, b, thumbs, trashed, trashed_bytes)
 
 
@@ -11667,42 +12578,27 @@ def run_download(args, progress=None):
 
     img_dir.mkdir(parents=True, exist_ok=True)
 
-    # ONE fast tree walk at startup (os.scandir, ~free stat() on Windows): seed
-    # the progress count AND build the on-disk media_id index. Resume is then an
+    # ONE fast tree walk at startup (the shared scan_library: os.scandir, ~free
+    # stat() on Windows, excluded subtrees pruned before descending): seed the
+    # progress count AND build the on-disk media_id index. Resume is then an
     # O(1) dict lookup instead of an O(whole-tree) rglob per media_id -- the
-    # latter made follow-up runs scale quadratically with collection size.
-    # Prunes gallery/ thumbnails, _duplicates/ quarantine, and _deleted/ quarantine
-    # (B11, audit 2026-07-21: without this a locally-purged media_id is still
-    # indexed as "already done", so resume/--update never re-downloads it).
+    # latter made follow-up runs scale quadratically with collection size. This
+    # walk happens BEFORE any network call and is the whole of INVARIANT 2's base
+    # case, so it stays one walk and one dict.
+    # QUARANTINE_EXCLUDE_ANYWHERE prunes gallery/ thumbnails, _duplicates/ and
+    # _deleted/ by NAME at any depth -- this walker's own reading of the exclusion
+    # set (named disagreement 2), not the top-level-subtree one the rglob walkers
+    # use. B11 (audit 2026-07-21): without the _deleted/ prune a locally-purged
+    # media_id is still indexed as "already done", so resume/--update never
+    # re-downloads it.
     already_done = 0
     disk_bytes = 0
     on_disk_by_mid = {}   # media_id -> Path of an existing full-res image
 
-    def _iter_image_entries(root):
-        skip_dirs = {"gallery", "_duplicates", DELETED_DIRNAME}
-        stack = [str(root)]
-        while stack:
-            try:
-                with os.scandir(stack.pop()) as it:
-                    for e in it:
-                        if e.is_dir(follow_symlinks=False):
-                            if e.name not in skip_dirs:
-                                stack.append(e.path)
-                        elif e.is_file(follow_symlinks=False):
-                            yield e
-            except OSError:
-                continue
-
     if out.exists():
         _t_scan = time.monotonic()
-        for e in _iter_image_entries(out):
-            name = e.name
-            if name.endswith(".part") or os.path.splitext(name)[1].lower() not in _IMAGE_EXTS:
-                continue
-            try:
-                size = e.stat().st_size
-            except OSError:
-                size = None
+        for e in scan_library(out, kinds=("image",),
+                              exclude=QUARANTINE_EXCLUDE_ANYWHERE):
             # A zero-byte file (an interrupted download that got far enough to create
             # the file but not to write it) must NOT count as "already done" here --
             # indexing it means it is skipped FOREVER: no --update/--sync ever
@@ -11712,12 +12608,14 @@ def run_download(args, progress=None):
             # file with no signal to the user. A stat() race (size is None) is treated
             # as fine, matching prior behaviour -- we can't tell either way, and this
             # index has always erred toward "already done" on an unreadable stat.
-            if size == 0:
+            # This is INVARIANT 3 living at the caller, which is why scan_library
+            # reports `size` instead of applying a zero-byte rule of its own.
+            if e.size == 0:
                 continue
             already_done += 1
-            if size is not None:
-                disk_bytes += size
-            on_disk_by_mid.setdefault(media_id_of(name), Path(e.path))
+            if e.size is not None:
+                disk_bytes += e.size
+            on_disk_by_mid.setdefault(e.media_id, e.path)
         vlog("startup disk scan: {} image files ({}) indexed in {:.2f}s".format(
             already_done, _format_size(disk_bytes), time.monotonic() - _t_scan))
     # Progress counts items as the walk visits them (skips included), starting at
@@ -11820,7 +12718,8 @@ def run_download(args, progress=None):
     try:
         while True:
             page += 1
-            conn = find_connection(gql(session, page_variables(args.page_size, before)))
+            conn = find_connection(gql(session, page_variables(
+                args.page_size, _client_of(session).user_id, before)))
             if not conn:
                 print("No connection; stopping.")
                 break
@@ -12898,6 +13797,26 @@ def main():
             _cli_job_finish(out, _job, error=e)
             raise
         _cli_job_finish(out, _job, warn=(dl or {}).get("fail", 0))
+        # Build any missing preview thumbnails so a plain --update (or full backup) leaves
+        # batch tiles renderable immediately. run_download writes image files + catalog rows
+        # but NO thumbs, and the /thumbs/<mid>.jpg route serves straight from the cache with
+        # no on-the-fly fallback -- so without this, freshly pulled images (esp. multi-image
+        # batches) have no thumbnail until the next --sync or a gallery-server start. Mirrors
+        # --sync's thumbnail tail; this is ONLY on the plain-download path (the --sync branch
+        # above runs its own build and returns, so it never double-runs). build_thumbnails
+        # skips thumbs already on disk, so a no-op update costs almost nothing -- and NOT
+        # force=True, which would rebuild every thumbnail. Fail-soft on purpose: a thumbnail
+        # hiccup must never crash a backup that already succeeded (the gallery server also
+        # rebuilds missing thumbs on its next start).
+        try:
+            thumb_dir = out / "gallery" / "thumbs"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            print("Building any missing preview thumbnails...")
+            _prog = getattr(args, "progress", None)
+            build_thumbnails(load_catalog(db_path), out, thumb_dir,
+                             progress_cb=((lambda d, t, _pct: _prog(d, t)) if _prog else None))
+        except Exception as e:                           # noqa: BLE001 -- additive, never fatal
+            vlog("thumbnail backfill after update skipped: {}".format(e))
     except PixAIError as e:
         sys.exit(str(e))
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "../styles/account-detail.css";
+import { apiGet } from "../api.js";
 
 /* PixAI account detail — cards · coupons · credit ledger. The web UI for the
    card-coupon-ledger branch's backend, built to Control Panel.dc.html's account-detail
@@ -45,20 +46,18 @@ export default function AccountSubOverlay({ onClose }) {
 
   const [err, setErr] = useState("");
 
-  const getJSON = (url) => fetch(url).then((r) => r.json()).catch((e) => ({ error: String(e.message || e) }));
-
   // Balance strip + on-hand cards + coupon count (for the strip) load on open.
   useEffect(() => {
-    getJSON("/api/account").then((d) => { if (d && !d.error) setAcct(d); });
-    getJSON("/api/account/coupons").then((d) => { if (d && !d.error) setCoupCount((d.coupons || []).length); });
+    apiGet("/api/account").then((d) => { if (d && !d.error) setAcct(d); });
+    apiGet("/api/account/coupons").then((d) => { if (d && !d.error) setCoupCount((d.coupons || []).length); });
   }, []);
 
   // Cards tab: roster (?all=1) + first page of usage log — lazy on first visit.
   useEffect(() => {
     if (tab !== "cards" || cardsLoaded) return;
     setCardsLoaded(true);
-    getJSON("/api/account/card-history?all=1").then((d) => { if (d && !d.error) setRoster(d); });
-    getJSON("/api/account/card-history?count=8").then((d) => {
+    apiGet("/api/account/card-history?all=1").then((d) => { if (d && !d.error) setRoster(d); });
+    apiGet("/api/account/card-history?count=8").then((d) => {
       if (d && !d.error) { setLog(d.logs || []); setLogMore(!!d.has_next); setLogCursor(d.end_cursor || null); }
     });
   }, [tab, cardsLoaded]);
@@ -66,7 +65,7 @@ export default function AccountSubOverlay({ onClose }) {
   // Coupons tab: reload whenever the on-hand/history toggle flips.
   useEffect(() => {
     if (tab !== "coupons") return;
-    getJSON("/api/account/coupons" + (coupHist ? "?history=1" : "")).then((d) => {
+    apiGet("/api/account/coupons" + (coupHist ? "?history=1" : "")).then((d) => {
       if (d && d.error) { setErr(d.error); return; }
       setCoupons((d && d.coupons) || []);
     });
@@ -76,19 +75,19 @@ export default function AccountSubOverlay({ onClose }) {
   useEffect(() => {
     if (tab !== "ledger" || ledgerLoaded) return;
     setLedgerLoaded(true);
-    getJSON("/api/account/credit-log?count=12").then((d) => {
+    apiGet("/api/account/credit-log?count=12").then((d) => {
       if (d && !d.error) { setLedger(d.entries || []); setLedgerMore(!!d.has_more); setLedgerCursor(d.next_cursor || null); }
     });
   }, [tab, ledgerLoaded]);
 
   const loadMoreLog = async () => {
     if (!logCursor) return;
-    const d = await getJSON("/api/account/card-history?count=8&after=" + encodeURIComponent(logCursor));
+    const d = await apiGet("/api/account/card-history?count=8&after=" + encodeURIComponent(logCursor));
     if (d && !d.error) { setLog((cur) => cur.concat(d.logs || [])); setLogMore(!!d.has_next); setLogCursor(d.end_cursor || null); }
   };
   const loadOlderLedger = async () => {
     if (!ledgerCursor) return;
-    const d = await getJSON("/api/account/credit-log?count=12&before=" + encodeURIComponent(ledgerCursor));
+    const d = await apiGet("/api/account/credit-log?count=12&before=" + encodeURIComponent(ledgerCursor));
     if (d && !d.error) { setLedger((cur) => cur.concat(d.entries || [])); setLedgerMore(!!d.has_more); setLedgerCursor(d.next_cursor || null); }
   };
 

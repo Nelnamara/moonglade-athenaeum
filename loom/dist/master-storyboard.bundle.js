@@ -1257,6 +1257,48 @@ ${"=".repeat(48)}
   var Component = React2.Component;
   var PureComponent = React2.PureComponent;
 
+  // ../gallery/src/api.js
+  function withParams(path, params) {
+    if (!params) return path;
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== void 0 && v !== null && v !== "") qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    return s ? path + (path.includes("?") ? "&" : "?") + s : path;
+  }
+  async function request(path, init) {
+    let r;
+    try {
+      r = await fetch(path, init);
+    } catch (e) {
+      return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
+    }
+    let d = null;
+    try {
+      d = await r.json();
+    } catch {
+      d = null;
+    }
+    if (d && d.error) return r.ok ? d : { ...d, http_status: r.status };
+    if (!r.ok) return { error: r.status + " " + (r.statusText || "request failed"), http_status: r.status };
+    return d === null ? {} : d;
+  }
+  function apiGet(path, params, opts) {
+    return request(withParams(path, params), opts);
+  }
+  function apiPost(path, body, opts) {
+    return request(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+      ...opts || {}
+    });
+  }
+  function apiUpload(path, formData) {
+    return request(path, { method: "POST", body: formData });
+  }
+
   // ../gallery/src/picker/pickerCore.js
   var PickerCore = (function() {
     "use strict";
@@ -1288,12 +1330,13 @@ ${"=".repeat(48)}
         return endpoint + "?limit=" + pageSize + "&page=" + p + "&q=" + enc(filters.q || "") + "&collection=" + enc(filters.collection || "") + "&source=" + enc(filters.source || "") + "&type=" + enc(filters.type || "") + "&rating_min=" + enc(filters.rating_min || 0) + "&sort=" + enc(filters.sort || "newest");
       }
       function fetchCollections() {
-        fetch(collectionsEndpoint).then(function(r) {
-          return r.json();
-        }).then(function(d) {
-          if (!destroyed) onCollections(d.collections || []);
-        }).catch(function(e) {
-          onError(e);
+        apiGet(collectionsEndpoint).then(function(d) {
+          if (destroyed) return;
+          if (d.error) {
+            onError(new Error(d.error));
+            return;
+          }
+          onCollections(d.collections || []);
         });
       }
       function load2(append) {
@@ -1301,19 +1344,17 @@ ${"=".repeat(48)}
         loading = true;
         var atPage = page;
         var mine = ++loadSeq;
-        fetch(qs(atPage)).then(function(r) {
-          return r.json();
-        }).then(function(d) {
+        apiGet(qs(atPage)).then(function(d) {
           if (mine !== loadSeq) return;
           loading = false;
+          if (d.error) {
+            onError(new Error(d.error));
+            return;
+          }
           if (destroyed) return;
           var imgs = d.images || [];
           hasMore = (d.page || atPage) * (d.limit || pageSize) < (d.total || 0);
           onResults(imgs, { total: d.total || 0, append: !!append, hasMore, page: atPage });
-        }).catch(function(e) {
-          if (mine !== loadSeq) return;
-          loading = false;
-          onError(e);
         });
       }
       function reload() {
@@ -1519,7 +1560,7 @@ ${"=".repeat(48)}
       setUploadMsg("Uploading " + f.name + "\u2026");
       const fd = new FormData();
       fd.append("file", f);
-      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+      apiUpload("/api/upload", fd).then((d) => {
         if (fileRef.current) fileRef.current.value = "";
         if (d.error || !d.media_id) {
           setUploadMsg("\u26A0 Upload failed: " + (d.error || "no media id"));
@@ -1527,9 +1568,6 @@ ${"=".repeat(48)}
         }
         setUploadMsg(null);
         pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
-      }).catch(() => {
-        if (fileRef.current) fileRef.current.value = "";
-        setUploadMsg("\u26A0 Upload failed (network).");
       });
     };
     const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "");
@@ -1773,7 +1811,7 @@ ${"=".repeat(48)}
       cursorRef.current = "";
       hasMoreRef.current = false;
       setDim(true);
-      fetch(searchUrl()).then((r) => r.json()).then((d) => {
+      apiGet(searchUrl()).then((d) => {
         if (mine !== seqRef.current) return;
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
@@ -1792,7 +1830,7 @@ ${"=".repeat(48)}
       const mine = seqRef.current;
       loadingMoreRef.current = true;
       setLoadingMore(true);
-      fetch(searchUrl(cursorRef.current)).then((r) => r.json()).then((d) => {
+      apiGet(searchUrl(cursorRef.current)).then((d) => {
         loadingMoreRef.current = false;
         setLoadingMore(false);
         if (mine !== seqRef.current) return;
@@ -1839,7 +1877,7 @@ ${"=".repeat(48)}
         failed: false
       };
       onToggle && onToggle(entry, true);
-      fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
+      apiGet("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((d) => {
         if (!selectedRef.current.some((e) => e.model_id === m.model_id)) return;
         const versions = d && d.versions || [], v = versions[0] || {};
         onToggle && onToggle({
@@ -2223,6 +2261,36 @@ ${"=".repeat(48)}
   var unmountComponentAtNode = ReactDOM.unmountComponentAtNode;
   var findDOMNode = ReactDOM.findDOMNode;
 
+  // ../gallery/src/gen/priceProbeCore.js
+  var PRICE_KEY_SKIP = ["prompt", "negative", "seed"];
+  function priceKey(payload, skipKeys = PRICE_KEY_SKIP) {
+    if (!payload || typeof payload !== "object") return "";
+    const skip = skipKeys || [];
+    const keys = Object.keys(payload).filter((k) => skip.indexOf(k) === -1).sort();
+    return JSON.stringify(keys.map((k) => [k, payload[k]]));
+  }
+  function initialVerdict() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function scheduled() {
+    return { settled: false, pricedKey: null, pendingTimer: true };
+  }
+  function fired() {
+    return { settled: false, pricedKey: null, pendingTimer: false };
+  }
+  function settledFor(key) {
+    return { settled: true, pricedKey: key, pendingTimer: false };
+  }
+  function canSubmit(verdict, payload, skipKeys = PRICE_KEY_SKIP) {
+    return !!(verdict && verdict.settled && !verdict.pendingTimer && verdict.pricedKey != null && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  function shouldShortCircuit(verdict, payload, force, skipKeys = PRICE_KEY_SKIP) {
+    if (force) return false;
+    return !!(verdict && verdict.settled && verdict.pricedKey != null && !verdict.pendingTimer && verdict.pricedKey === priceKey(payload, skipKeys));
+  }
+  var PRICE_DEBOUNCE_MS = 250;
+  var PRICE_FETCH_TIMEOUT_MS = 25e3;
+
   // ../gallery/src/gen/videoDrawerCore.js
   var MODELS = [
     { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
@@ -2411,16 +2479,6 @@ ${"=".repeat(48)}
   function hasAnyRef(p) {
     return !!(p.images.length || p.video_refs.length || p.audio_refs.length);
   }
-  var PRICE_KEY_SKIP = ["prompt", "negative"];
-  function priceKey(payload) {
-    if (!payload || typeof payload !== "object") return "";
-    const keys = Object.keys(payload).filter((k) => PRICE_KEY_SKIP.indexOf(k) === -1).sort();
-    return JSON.stringify(keys.map((k) => [k, payload[k]]));
-  }
-  function canSubmit(price, payload) {
-    return !!(price && price.settled && !price.pendingTimer && price.pricedKey != null && price.pricedKey === priceKey(payload));
-  }
-  var PRICE_FETCH_TIMEOUT_MS = 25e3;
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
@@ -2440,6 +2498,236 @@ ${"=".repeat(48)}
       hint = "That quality setting isn't available for this model \u2014 try a different Mode.";
     }
     return hint ? hint + " (PixAI said: " + s.slice(0, 160) + ")" : s;
+  }
+
+  // ../gallery/src/gen/priceRequest.js
+  async function requestPrice(payload, { timeoutMs = PRICE_FETCH_TIMEOUT_MS, signal } = {}) {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer2 = ctrl && timeoutMs > 0 ? setTimeout(() => ctrl.abort(), timeoutMs) : 0;
+    let unlink = null;
+    if (ctrl && signal) {
+      if (signal.aborted) ctrl.abort();
+      else {
+        const onAbort = () => ctrl.abort();
+        signal.addEventListener("abort", onAbort);
+        unlink = () => signal.removeEventListener("abort", onAbort);
+      }
+    }
+    try {
+      const r = await fetch("/api/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: ctrl ? ctrl.signal : void 0
+      });
+      return { response: await r.json() };
+    } catch {
+      return { failed: true };
+    } finally {
+      if (timer2) clearTimeout(timer2);
+      if (unlink) unlink();
+    }
+  }
+
+  // ../gallery/src/gen/usePriceProbe.js
+  function usePriceProbe({ build: build2, costRef, enabled = true, skipKeys = PRICE_KEY_SKIP }) {
+    const [verdict, setVerdict] = useState(initialVerdict);
+    const [response, setResponse] = useState(null);
+    const live = useRef(verdict);
+    const buildRef = useRef(build2);
+    const skipRef = useRef(skipKeys);
+    const enabledRef = useRef(enabled);
+    buildRef.current = build2;
+    skipRef.current = skipKeys;
+    enabledRef.current = enabled;
+    const seq2 = useRef(0);
+    const timer2 = useRef(0);
+    const ctrl = useRef(null);
+    const put = useCallback((v) => {
+      live.current = v;
+      setVerdict(v);
+    }, []);
+    const stop = useCallback(() => {
+      clearTimeout(timer2.current);
+      timer2.current = 0;
+      seq2.current++;
+      if (ctrl.current) {
+        try {
+          ctrl.current.abort();
+        } catch {
+        }
+        ctrl.current = null;
+      }
+    }, []);
+    const fire = useCallback(() => {
+      put(fired());
+      const badge = costRef.current;
+      if (!badge) return;
+      const built2 = buildRef.current() || {};
+      const p = built2.payload;
+      const skip = skipRef.current;
+      const key = priceKey(p, skip);
+      if (built2.idle) {
+        if (built2.idle === true) badge.clear();
+        else badge.clear(String(built2.idle));
+        setResponse(null);
+        put(settledFor(key));
+        return;
+      }
+      badge.setChecking();
+      const mine = ++seq2.current;
+      const c = typeof AbortController !== "undefined" ? new AbortController() : null;
+      ctrl.current = c;
+      requestPrice(p, { signal: c ? c.signal : void 0 }).then(({ response: response2, failed }) => {
+        if (mine !== seq2.current || !costRef.current) return;
+        ctrl.current = null;
+        if (failed) {
+          costRef.current.setPrice(null);
+          setResponse(null);
+          put(settledFor(key));
+          return;
+        }
+        const d = response2;
+        costRef.current.setPrice(d);
+        setResponse(d);
+        put(settledFor(key));
+      });
+    }, [costRef, put]);
+    const refresh2 = useCallback((opts) => {
+      if (!enabledRef.current) return;
+      const force = !!(opts && opts.force);
+      const built2 = buildRef.current() || {};
+      if (shouldShortCircuit(live.current, built2.payload, force, skipRef.current)) return;
+      const badge = costRef.current;
+      if (badge && badge.setChecking) badge.setChecking();
+      put(scheduled());
+      seq2.current++;
+      clearTimeout(timer2.current);
+      timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
+    }, [costRef, fire, put]);
+    useEffect(() => {
+      if (!enabled) {
+        stop();
+        return;
+      }
+      refresh2({ force: true });
+    }, [enabled, refresh2, stop]);
+    useEffect(() => stop, [stop]);
+    const built = build2 ? build2() || {} : {};
+    return {
+      refresh: refresh2,
+      verdict,
+      canSubmit: canSubmit(verdict, built.payload, skipKeys),
+      response
+    };
+  }
+
+  // ../gallery/src/gen/genCore.js
+  var ASPECTS = [
+    ["1:1", 1],
+    ["3:4", 3 / 4],
+    ["4:3", 4 / 3],
+    ["2:3", 2 / 3],
+    ["3:2", 3 / 2],
+    ["9:16", 9 / 16],
+    ["16:9", 16 / 9],
+    ["3:1", 3]
+  ];
+  function friendlyGenErr3(raw) {
+    const e = String(raw || "");
+    const add = (hint) => e + " \u2014 " + hint;
+    if (/insufficient|40300010|balance/i.test(e))
+      return add("your credit balance can't cover this one. Claim your daily credits or lower the size/count.");
+    if (/maxLength|too long/i.test(e))
+      return add("the prompt is over PixAI's length limit \u2014 trim it and try again.");
+    if (/NSFW_DETECTED|40300032/i.test(e))
+      return add("PixAI's moderation flagged the source image, not your prompt.");
+    if (/moderation|blocked|violat/i.test(e))
+      return add("PixAI's moderation rejected this one.");
+    if (/inferenceProfile|quality mode|profile/i.test(e))
+      return add("that quality mode isn't available for this model \u2014 try Auto.");
+    if (/LORA_NUM_EXCEEDED|40300027/i.test(e))
+      return add("too many LoRAs for your membership tier.");
+    return e;
+  }
+
+  // ../gallery/src/gen/submitTask.js
+  async function submitTask(route, payload, { label, emit: emit3, count, onPhase }) {
+    let d;
+    try {
+      const r = await fetch(route, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      d = await r.json();
+    } catch {
+      emit3({
+        kind: "err",
+        text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
+      });
+      return null;
+    }
+    if (d.error || !d.task_id) {
+      emit3({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
+      return null;
+    }
+    const adj = (d.adjusted || []).map((a) => a.field + " " + a.asked + "\u2192" + a.used).join(", ");
+    if (adj && window.Toast) {
+      window.Toast.show({
+        kind: "err",
+        title: "Settings were adjusted before submitting",
+        msg: adj
+      });
+    }
+    emit3({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    if (!window.Jobs) {
+      emit3({
+        kind: "ok",
+        text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
+      });
+      return d.task_id;
+    }
+    window.Jobs.track(d.task_id, label, (phase, st) => {
+      const data2 = st || {};
+      if (phase === "done") {
+        const paid = data2.paid_credit;
+        emit3({
+          kind: "ok",
+          text: paid === 0 ? "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
+          media: data2.media_ids || []
+        });
+        window.dispatchEvent(new CustomEvent("mg-gen-done"));
+        if (window.Ach) window.Ach.check();
+      } else if (phase === "failed") {
+        emit3({
+          kind: "err",
+          text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
+        });
+      } else if (phase === "stalled") {
+        emit3({
+          kind: "err",
+          text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
+        });
+      }
+      if (onPhase) onPhase(phase, data2);
+    }, count == null ? payload.count : count);
+    return d.task_id;
+  }
+
+  // ../gallery/src/notify/pollCadence.js
+  var POLL_MS = 3e3;
+  var SLOW_AT_MS = 20 * 60 * 1e3;
+  var SLOW_MS = 20 * 1e3;
+  var STALE_AT_MS = 90 * 60 * 1e3;
+  var STALE_MS = 3 * 60 * 1e3;
+  var CEILING_MS = 6 * 60 * 60 * 1e3;
+  function cadenceFor(elapsedMs) {
+    const e = Number(elapsedMs) || 0;
+    if (e >= CEILING_MS) return { ms: 0, tier: "stalled" };
+    if (e >= STALE_AT_MS) return { ms: STALE_MS, tier: "stale" };
+    if (e >= SLOW_AT_MS) return { ms: SLOW_MS, tier: "slow" };
+    return { ms: POLL_MS, tier: "normal" };
   }
 
   // ../gallery/src/components/VideoDrawer.jsx
@@ -2469,21 +2757,15 @@ ${"=".repeat(48)}
       negative: "",
       modeNote: "",
       rendering: false,
-      hostBusy: false,
-      // The price verdict's IDENTITY (videoDrawerCore.canSubmit reads exactly this shape): settled
-      // = the badge shows the verdict for pricedKey; pricedKey = priceKey() of the payload that was
-      // priced; pendingTimer = a debCost re-price is scheduled and not yet fired. Go is disabled
-      // unless the payload it would submit has this same key -- state alone can't say that.
-      // Seeded once below: the badge's initial idle hint IS the verdict for the initial empty form.
-      price: null
+      hostBusy: false
+      // The price VERDICT no longer lives here: it is the shared probe's React state
+      // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
+      // rerender() that used to sit beside each verdict write by hand.
     });
-    if (!st.current.price) st.current.price = { settled: true, pricedKey: priceKey(buildPayload(st.current, "")), pendingTimer: false };
     const [, force] = useState(0);
     const rerender = useCallback(() => force((n) => n + 1), []);
     const [results, setResults] = useState([]);
-    const [warn, setWarnState] = useState("");
     const [reuse, setReuseChip] = useState(null);
-    const setWarn = useCallback((w) => setWarnState(w), []);
     const ceRef = useRef(null);
     const previewRef = useRef(null);
     const audFileRef = useRef(null);
@@ -2494,24 +2776,16 @@ ${"=".repeat(48)}
       rootRef.current = n;
       if (n) liveNode.current = n;
     }, []);
-    const costSeq = useRef(0);
-    const costTimer = useRef(0);
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const pollTimers = useRef([]);
-    const connected = useRef(true);
     const emit3 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
     useEffect(() => () => {
-      connected.current = false;
-      clearTimeout(costTimer.current);
       clearTimeout(chipTimer.current);
       clearTimeout(previewTimer.current);
-      pollTimers.current.forEach((t) => clearTimeout(t));
-      pollTimers.current = [];
     }, []);
     const primary = () => primaryBank(st.current);
     const setPrimary = (arr) => setPrimaryBank(st.current, arr);
@@ -2522,7 +2796,7 @@ ${"=".repeat(48)}
       applyMode(st.current, m, userDriven);
       syncPlaceholder();
       rerender();
-      debCost();
+      reprice();
     };
     const userSetMode = (m) => {
       setMode(m, true);
@@ -2625,7 +2899,7 @@ ${"=".repeat(48)}
         ceRef.current.textContent = v || "";
         chipify(true);
       }
-      debCost();
+      reprice();
       dirty.current = false;
     };
     const emitCommitIfDirty = () => {
@@ -2639,7 +2913,7 @@ ${"=".repeat(48)}
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify(false);
-        debCost();
+        reprice();
         emitCommitIfDirty();
       }, 300);
     }, []);
@@ -2701,7 +2975,7 @@ ${"=".repeat(48)}
             setPrimary(arr);
           }
           rerender();
-          debCost();
+          reprice();
         }
       });
     };
@@ -2714,7 +2988,7 @@ ${"=".repeat(48)}
       rerender();
       const fd = new FormData();
       fd.append("file", file);
-      fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json()).then((d) => {
+      apiUpload("/api/upload", fd).then((d) => {
         if (d.error || !d.media_id) {
           renderError(d.error || "audio upload failed");
           st.current.audSlot = null;
@@ -2723,81 +2997,36 @@ ${"=".repeat(48)}
         }
         st.current.audSlot = { media_id: String(d.media_id), filename: file.name };
         rerender();
-        debCost();
-      }).catch(() => {
-        renderError("audio upload failed (network)");
-        st.current.audSlot = null;
-        rerender();
+        reprice();
       });
     };
     const pickVideoModel = (v) => {
       st.current.model = v;
       applyModelGating2(true);
-      debCost();
+      reprice();
     };
     const payload = () => buildPayload(st.current, promptText());
     const flfMissingStart2 = () => flfMissingStart(st.current);
-    const debCost = (force2) => {
-      const pr = st.current.price;
-      if (!force2 && pr && pr.settled && pr.pricedKey != null && !pr.pendingTimer && pr.pricedKey === priceKey(buildPayload(st.current, ""))) {
-        return;
-      }
-      const cost = costRef.current;
-      if (cost && cost.setChecking) cost.setChecking();
-      st.current.price = { settled: false, pricedKey: null, pendingTimer: true };
-      costSeq.current++;
-      clearTimeout(costTimer.current);
-      costTimer.current = setTimeout(costNow, 250);
-      rerender();
-    };
-    const costNow = () => {
-      st.current.price = { settled: false, pricedKey: null, pendingTimer: false };
-      const cost = costRef.current;
-      if (!cost) return;
-      const s2 = st.current, p = payload();
-      const settle = (key) => {
-        st.current.price = { settled: true, pricedKey: key, pendingTimer: false };
-        rerender();
-      };
-      const idleHint = s2.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost.";
+    const build2 = useCallback(() => {
+      const p = payload();
       if (!hasAnyRef(p)) {
-        setWarn("");
-        cost.clear(idleHint);
-        settle(priceKey(p));
-        return;
+        return { payload: p, idle: st.current.mode === "r2v" ? "Pick at least one reference to see the cost." : "Pick a source image to see the cost." };
       }
       if (flfMissingStart2()) {
-        setWarn("");
-        cost.clear("Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last.");
-        settle(priceKey(p));
-        return;
+        return { payload: p, idle: "Pick a Start Frame \u2014 the End Frame alone can\u2019t drive First & Last." };
       }
-      setWarn(p.video_model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "");
-      cost.setChecking();
-      const mine = ++costSeq.current;
-      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), PRICE_FETCH_TIMEOUT_MS) : 0;
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p), signal: ctrl ? ctrl.signal : void 0 }).then((r) => r.json()).then((d) => {
-        clearTimeout(abortTimer);
-        if (mine === costSeq.current && costRef.current) {
-          costRef.current.setPrice(d);
-          settle(priceKey(p));
-        }
-      }).catch(() => {
-        clearTimeout(abortTimer);
-        if (mine === costSeq.current && costRef.current) {
-          costRef.current.setPrice(null);
-          settle(priceKey(p));
-        }
-      });
-    };
+      return { payload: p };
+    }, []);
+    const probe = usePriceProbe({ build: build2, costRef });
+    const reprice = probe.refresh;
     const pushLine = (line) => {
       const id = ++lineSeq;
       setResults((rs) => rs.concat([{ id, ...line }]));
       return id;
     };
     const updateLine = (id, patch2) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch2 } : l));
-    const doGenerate = () => {
+    const elapsedLabel2 = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
+    const doGenerate = async () => {
       const s2 = st.current, p = payload();
       if (!hasAnyRef(p)) {
         pushLine({ kind: "error", text: s2.mode === "r2v" ? "Pick at least one reference first." : "Pick a source image first." });
@@ -2807,11 +3036,11 @@ ${"=".repeat(48)}
         pushLine({ kind: "error", text: "Pick a Start Frame first \u2014 the End Frame alone can\u2019t drive First & Last." });
         return;
       }
-      if (!canSubmit(s2.price, p)) {
+      if (!probe.canSubmit) {
         pushLine({ kind: "error", text: "Re-checking the cost\u2026 try again when the badge settles." });
-        const pr = s2.price || {};
+        const pr = probe.verdict || {};
         const checkInFlight = !!pr.pendingTimer || !pr.settled && pr.pricedKey == null;
-        if (!checkInFlight) debCost();
+        if (!checkInFlight) reprice();
         return;
       }
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
@@ -2822,81 +3051,56 @@ ${"=".repeat(48)}
         st.current.rendering = false;
         rerender();
       };
-      fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) }).then((r) => r.json()).then((d) => {
-        unlock();
-        if (d.error || !d.task_id) {
-          const msg = friendlyGenErr2(d.error || "submit failed");
-          updateLine(id, { kind: "error", text: msg, moon: false });
-          emit3("mg-error", { error: msg });
+      const startedAt = Date.now();
+      let taskId = null;
+      let tier = "normal";
+      let lastErr = "";
+      const short = () => String(taskId || "").slice(-6);
+      const emitLine = (patch2) => {
+        if (patch2.kind === "err") {
+          lastErr = patch2.text;
+          updateLine(id, { kind: "error", text: patch2.text, moon: false });
           return;
         }
-        emit3("mg-submit", { task_id: d.task_id, payload: p });
-        updateLine(id, { kind: "status", moon: true, text: "Queued \u2014 running\u2026" });
-        debCost(true);
-        poll2(d.task_id, id);
-      }).catch(() => {
-        unlock();
-        updateLine(id, { kind: "error", text: "network error", moon: false });
-        emit3("mg-error", { error: "network error" });
-      });
-    };
-    const poll2 = (taskId, lineId) => {
-      const startedAt = Date.now();
-      const SLOW_AT = 20 * 60 * 1e3, SLOW_MS = 20 * 1e3;
-      const STALE_AT = 90 * 60 * 1e3, STALE_MS = 3 * 60 * 1e3;
-      const CEILING = 6 * 60 * 60 * 1e3;
-      let timer2 = null;
-      const schedule2 = (fn, ms) => {
-        const i = pollTimers.current.indexOf(timer2);
-        if (i >= 0) pollTimers.current.splice(i, 1);
-        timer2 = setTimeout(fn, ms);
-        pollTimers.current.push(timer2);
+        if (patch2.kind === "ok") {
+          updateLine(id, { kind: "plain", text: patch2.text, moon: false });
+          return;
+        }
+        updateLine(id, { kind: "status", moon: true, text: patch2.text });
       };
-      const label = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
-      const short = String(taskId).slice(-6);
-      const pause = () => {
-        updateLine(lineId, {
-          kind: "plain",
-          text: "Paused auto-checking after " + label(CEILING) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short + ")"
-        });
-        emit3("mg-paused", { task_id: taskId });
+      const tierLine = (t, elapsed) => t === "stale" ? { kind: "status", moon: true, amber: true, text: "Still going after " + elapsedLabel2(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short() + ")" } : { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + elapsedLabel2(elapsed) + ", task " + short() + ")" };
+      const onPhase = (phase, d) => {
+        const elapsed = Date.now() - startedAt;
+        if (phase === "done") {
+          updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
+          emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+        } else if (phase === "failed") {
+          const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
+          updateLine(id, { kind: "error", text: msg, moon: false });
+          emit3("mg-error", { error: msg });
+        } else if (phase === "stalled") {
+          updateLine(id, {
+            kind: "plain",
+            text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
+          });
+          emit3("mg-paused", { task_id: taskId });
+        } else if (phase === "slow" || phase === "stale") {
+          tier = phase;
+          updateLine(id, tierLine(phase, elapsed));
+          emit3("mg-slow", { tier: phase, elapsed, task_id: taskId });
+        } else {
+          updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
+        }
       };
-      const tick = () => {
-        fetch("/api/task-status?task_id=" + encodeURIComponent(taskId)).then((r) => r.json()).then((d) => {
-          if (!connected.current) return;
-          const elapsed = Date.now() - startedAt;
-          if (d.phase === "done") {
-            updateLine(lineId, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-            emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
-          } else if (d.phase === "failed") {
-            const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
-            updateLine(lineId, { kind: "error", text: msg, moon: false });
-            emit3("mg-error", { error: msg });
-          } else if (elapsed > CEILING) {
-            pause();
-          } else if (elapsed > STALE_AT) {
-            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Still going after " + label(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short + ")" });
-            emit3("mg-slow", { tier: "stale", elapsed, task_id: taskId });
-            schedule2(tick, STALE_MS);
-          } else if (elapsed > SLOW_AT) {
-            updateLine(lineId, { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + label(elapsed) + ", task " + short + ")" });
-            emit3("mg-slow", { tier: "slow", elapsed, task_id: taskId });
-            schedule2(tick, SLOW_MS);
-          } else {
-            updateLine(lineId, { kind: "status", moon: true, text: "Rendering under the eclipse\u2026 (task " + short + ")" });
-            schedule2(tick, 2e3);
-          }
-        }).catch(() => {
-          if (!connected.current) return;
-          const elapsed = Date.now() - startedAt;
-          if (elapsed > CEILING) {
-            pause();
-            return;
-          }
-          schedule2(tick, elapsed > STALE_AT ? STALE_MS : elapsed > SLOW_AT ? SLOW_MS : 2e3);
-        });
-      };
-      schedule2(tick, 2e3);
+      const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
+      unlock();
+      if (!tid) {
+        emit3("mg-error", { error: lastErr || "submit failed" });
+        return;
+      }
+      taskId = tid;
+      emit3("mg-submit", { task_id: tid, payload: p });
+      reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
@@ -2906,14 +3110,14 @@ ${"=".repeat(48)}
       applySetRefs(st.current, refs);
       syncPlaceholder();
       rerender();
-      debCost();
+      reprice();
     };
     const prefill = (o) => {
       const r = applyPrefill(st.current, o);
       syncPlaceholder();
       if (r.setPrompt != null) promptSet(r.setPrompt);
       rerender();
-      debCost();
+      reprice();
     };
     const flushPromptEdit = () => {
       clearTimeout(chipTimer.current);
@@ -2953,7 +3157,8 @@ ${"=".repeat(48)}
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     const chosenModel = MODELS.find((m) => m.value === s.model);
     const isR2v = s.mode === "r2v";
-    const canGo = !s.hostBusy && !s.rendering && canSubmit(s.price, buildPayload(s, ""));
+    const canGo = !s.hostBusy && !s.rendering && probe.canSubmit;
+    const warn = s.model === "v4.0" ? "V4.0 full \u2014 ~2.5\xD7 Lite" : "";
     const shotModes = ["i2v", "flf", "r2v"].map((v) => {
       const ok = allowedModes.indexOf(v) >= 0;
       return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
@@ -2970,7 +3175,7 @@ ${"=".repeat(48)}
         cur.imgSlots = arr;
       } else cur.slots[i] = null;
       rerender();
-      debCost();
+      reprice();
     };
     const slotBox = ({ key, item, bank, index, caption, badge, title }) => /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
@@ -3048,7 +3253,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.negative = e.target.value;
           rerender();
-          debCost();
+          reprice();
         }
       }
     );
@@ -3112,7 +3317,7 @@ ${"=".repeat(48)}
         onClick: () => {
           st.current.audSlot = null;
           rerender();
-          debCost();
+          reprice();
         }
       },
       /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, "\u266A"),
@@ -3134,7 +3339,7 @@ ${"=".repeat(48)}
     ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
-      debCost();
+      reprice();
     } }, CAMERA_OPTS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "60ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enghd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "ENGINE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-engcur" }, chosenModel ? chosenModel.label : s.model)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-enggrid", role: "radiogroup", "aria-label": "Video engine" }, MODELS.map((m) => {
       const sel = m.value === s.model;
       const modes = (MODEL_VMODES[m.value] || ["i2v", "flf", "r2v"]).map((x) => SHOT_LABEL[x]).join(" / ");
@@ -3155,12 +3360,12 @@ ${"=".repeat(48)}
       if (st.current.quality === v) return;
       st.current.quality = v;
       rerender();
-      debCost();
+      reprice();
     } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
       if (st.current.channel === v) return;
       st.current.channel = v;
       rerender();
-      debCost();
+      reprice();
     } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-chancap" }, CHANNEL_CAP[s.channel]), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Spoken lines in the prompt become voiceover" }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
@@ -3170,7 +3375,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.audioGen = e.target.checked;
           rerender();
-          debCost();
+          reprice();
           emit3("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
@@ -3183,7 +3388,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.videoHelper = e.target.checked;
           rerender();
-          debCost();
+          reprice();
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Video prompt helper")), s.audioGen ? /* @__PURE__ */ react_global_shim_default.createElement(
@@ -3195,7 +3400,7 @@ ${"=".repeat(48)}
         onChange: (e) => {
           st.current.audioLanguage = e.target.value;
           rerender();
-          debCost();
+          reprice();
           emit3("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
@@ -3216,7 +3421,7 @@ ${"=".repeat(48)}
             if (!ok || d === st.current.duration) return;
             st.current.duration = d;
             rerender();
-            debCost();
+            reprice();
             emit3("mg-duration-commit", { duration: d });
           }
         },
@@ -3369,7 +3574,7 @@ ${"=".repeat(48)}
     seeded = true;
   }
   function refresh() {
-    return fetch("/api/jobs").then((r) => r.json()).then((d) => {
+    return apiGet("/api/jobs").then((d) => {
       const rows = d && d.jobs || [];
       toastTransitions(rows);
       jobs = rows;
@@ -3389,23 +3594,13 @@ ${"=".repeat(48)}
     }, busy ? 2500 : 7e3);
   }
   function dismiss2(id) {
-    fetch("/api/jobs/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: id })
-    }).then(() => {
+    apiPost("/api/jobs/dismiss", { job_id: id }).then(() => {
       delete last[id];
       refresh();
-    }).catch(() => {
     });
   }
   function clearFinished() {
-    fetch("/api/jobs/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ finished: true })
-    }).then(refresh).catch(() => {
-    });
+    apiPost("/api/jobs/dismiss", { finished: true }).then(refresh);
   }
   function start() {
     if (started) return;
@@ -3420,12 +3615,7 @@ ${"=".repeat(48)}
   function register(id, label, count) {
     if (!id || seen[id]) return;
     seen[id] = true;
-    fetch("/api/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: id, type: "generate", label: label || "Generation", status: "running", count })
-    }).catch(() => {
-    });
+    apiPost("/api/jobs", { job_id: id, type: "generate", label: label || "Generation", status: "running", count });
     refresh();
   }
   function track(id, label, cb, count) {
@@ -3433,11 +3623,12 @@ ${"=".repeat(48)}
     register(id, label, count);
     poll(id, cb);
   }
-  var POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
-  function poll(id, cb, startedAt) {
+  function poll(id, cb, startedAt, tier) {
     const t0 = startedAt || Date.now();
-    function again(ms) {
-      if (Date.now() - t0 > POLL_CEILING_MS) {
+    const from = tier || "normal";
+    function again(d, floorMs) {
+      const c = cadenceFor(Date.now() - t0);
+      if (c.tier === "stalled") {
         if (cb) cb("stalled", {
           phase: "stalled",
           error: "Stopped checking after 6h \u2014 the task may still be running. Reload to resume watching, or check it on pixai.art."
@@ -3445,7 +3636,8 @@ ${"=".repeat(48)}
         refresh();
         return;
       }
-      setTimeout(() => poll(id, cb, t0), ms);
+      if (cb && c.tier !== from && (c.tier === "slow" || c.tier === "stale")) cb(c.tier, d || {});
+      setTimeout(() => poll(id, cb, t0, c.tier), floorMs ? Math.max(c.ms, floorMs) : c.ms);
     }
     fetch("/api/task-status?task_id=" + encodeURIComponent(id)).then((r) => r.json()).then((d) => {
       if (d.phase === "done") {
@@ -3456,9 +3648,9 @@ ${"=".repeat(48)}
         refresh();
       } else {
         if (cb) cb("running", d);
-        again(3e3);
+        again(d, 0);
       }
-    }).catch(() => again(4e3));
+    }).catch(() => again(null, 4e3));
   }
 
   // ../gallery/src/notify/ach.js
@@ -3492,11 +3684,11 @@ ${"=".repeat(48)}
     if (srv !== cur) applySkin(srv);
   }
   function load(mark) {
-    fetch("/api/achievements" + (mark ? "?mark=1" : "")).then((r) => r.json()).then((d) => {
+    apiGet("/api/achievements" + (mark ? "?mark=1" : "")).then((d) => {
+      if (d.error) return;
       data = d;
       if (mark) toastNew(d);
       syncSkin(d);
-    }).catch(() => {
     });
   }
   function toastNew(d) {
@@ -4153,6 +4345,10 @@ ${"=".repeat(48)}
   // master-storyboard.jsx
   var { useState: useState2, useEffect: useEffect2, useRef: useRef2, useCallback: useCallback2, useMemo: useMemo2 } = React;
   installNotify();
+  var priceBody = async (body) => {
+    const { response, failed } = await requestPrice(body);
+    return failed ? null : response;
+  };
   var LV_TINTS = [
     "linear-gradient(150deg, #33236d 0%, #1b1733 100%)",
     "linear-gradient(150deg, #3a3460 0%, #17142b 100%)",
@@ -5454,10 +5650,8 @@ ${"=".repeat(48)}
       const badge = ref.current;
       if (!badge) return;
       badge.setChecking();
-      fetch("/api/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).then((d) => {
+      priceBody(body).then((d) => {
         if (ref.current === badge) badge.setPrice(d);
-      }).catch(() => {
-        if (ref.current === badge) badge.setPrice(null);
       });
     };
     const activeRef = useRef2(null);
@@ -5703,14 +5897,8 @@ ${"=".repeat(48)}
       setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -7853,14 +8041,8 @@ ${"=".repeat(48)}
       setImgPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt))
-        }).then((r) => r.json()).then((pr) => {
+        priceBody(buildImgGenBody(imgModel, imgLoras, imgAdv, prompt)).then((pr) => {
           if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setImgPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -7879,14 +8061,8 @@ ${"=".repeat(48)}
       setEditPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "edit", source: editSrcMid, instruction, edit_model: "edit-pro" }).then((pr) => {
           if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setEditPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -7905,14 +8081,8 @@ ${"=".repeat(48)}
       setRefPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "edit", source: refMids[0], sources: refMids, instruction: prompt, edit_model: "reference-pro" }).then((pr) => {
           if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setRefPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -8029,14 +8199,8 @@ ${"=".repeat(48)}
       setGenFixPrice((s) => ({ ...s, [id]: { ...s[id] || {}, loading: true } }));
       let live = true;
       const t = setTimeout(() => {
-        fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) })
-        }).then((r) => r.json()).then((pr) => {
+        priceBody({ mode: "fix", source: src, boxes: scaleFixBoxes(fixBoxes, fixImgRef.current) }).then((pr) => {
           if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr } }));
-        }).catch(() => {
-          if (live) setGenFixPrice((s) => ({ ...s, [id]: { loading: false, pr: null } }));
         });
       }, 250);
       return () => {
@@ -9564,30 +9728,9 @@ Your currently-open board is left untouched.`)) return;
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
     const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
-    const priceShot = async (entry) => {
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(shotPayload2(entry))
-        });
-        return await r.json();
-      } catch {
-        return null;
-      }
-    };
-    const confirmSpend = async (priceBody, label) => {
-      let pr = null;
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(priceBody)
-        });
-        pr = await r.json();
-      } catch {
-        pr = null;
-      }
+    const priceShot = (entry) => priceBody(shotPayload2(entry));
+    const confirmSpend = async (quoteBody, label) => {
+      const pr = await priceBody(quoteBody);
       if (pr && pr.free) return true;
       if (pr && !pr.free && pr.cost != null) {
         const line = priceIsShort(pr) ? shortSpendLine(pr, "this") : `No free card covers it \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
@@ -9661,14 +9804,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const POLL_SLOW_MS = 20 * 1e3;
     const POLL_STALE_AT_MS = 90 * 60 * 1e3;
     const POLL_STALE_MS = 3 * 60 * 1e3;
-    const POLL_CEILING_MS2 = 6 * 60 * 60 * 1e3;
+    const POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
     const pollShot = (cardId, tid, existingStartedAt) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
       const startedAt = existingStartedAt || Date.now();
       const pause = () => {
         setGenState((s) => ({ ...s, [cardId]: {
           phase: "paused",
-          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS2) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
+          msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
         } }));
         setBatchOutcome(cardId, "stale");
       };
@@ -9685,7 +9828,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
           setBatchOutcome(cardId, "failed");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
-        } else if (elapsed > POLL_CEILING_MS2) {
+        } else if (elapsed > POLL_CEILING_MS) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
           setGenState((s) => ({ ...s, [cardId]: {
@@ -9702,7 +9845,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else setTimeout(tick, 4e3);
       }).catch(() => {
         const elapsed = Date.now() - startedAt;
-        if (elapsed > POLL_CEILING_MS2) {
+        if (elapsed > POLL_CEILING_MS) {
           pause();
           return;
         }
@@ -9747,10 +9890,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         } else again(4e3);
       }).catch(() => again(5e3));
       const again = (ms) => {
-        if (Date.now() - startedAt > POLL_CEILING_MS2) {
+        if (Date.now() - startedAt > POLL_CEILING_MS) {
           setState((s) => ({ ...s, [cardId]: {
             phase: "error",
-            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS2) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
+            msg: "Stopped checking after " + elapsedLabel(POLL_CEILING_MS) + " \u2014 the task may still be running; check it on pixai.art (task " + String(tid).slice(-6) + ")"
           } }));
           return;
         }
@@ -9806,8 +9949,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       else if (target === "cast") setAssets((a) => [...a, { id: uid(), name: c.title || "", kind: "image", tag: nextTag(a, "@image"), thumbId: "", source: "", mediaId: mid, lock: false }]);
       setGenImgState((s) => ({ ...s, [sid]: { ...s[sid], routed: target } }));
     };
-    const runGen = async (setState, cardId, endpoint, body, priceBody, label, jobLabel) => {
-      if (priceBody && !await confirmSpend(priceBody, label)) return;
+    const runGen = async (setState, cardId, endpoint, body, quoteBody, label, jobLabel) => {
+      if (quoteBody && !await confirmSpend(quoteBody, label)) return;
       setState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
       const poll2 = (tid) => pollTaskWithCeiling(tid, setState, cardId);
       try {
@@ -9894,17 +10037,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setGenFixState((s) => ({ ...s, [c.id]: { phase: "error", msg: "drag a box over a hand or face first" } }));
         return;
       }
-      let pr = null;
-      try {
-        const r = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "fix", source: src, boxes: scaledBoxes })
-        });
-        pr = await r.json();
-      } catch {
-        pr = null;
-      }
+      const pr = await priceBody({ mode: "fix", source: src, boxes: scaledBoxes });
       const priced = pr && typeof pr.cost === "number" ? pr.cost : null;
       const quote = priced == null ? "The price could not be verified, and a Fix ALWAYS spends credits (no free card can ever cover it)." : "This will spend " + Number(priced).toLocaleString() + " credits \u2014 a Fix is never covered by a free card.";
       if (!window.confirm(
@@ -9956,7 +10089,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       setBatching(false);
     };
-    const PRICE_DEBOUNCE_MS = 600;
+    const PRICE_DEBOUNCE_MS2 = 600;
     const [priceCache, setPriceCache] = useState2({});
     const priceInFlightRef = useRef2({});
     const ensurePriced = useCallback2((entry, force) => {
@@ -9987,7 +10120,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const priceDebounceRef = useRef2(null);
     useEffect2(() => {
       clearTimeout(priceDebounceRef.current);
-      priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS);
+      priceDebounceRef.current = setTimeout(() => notDone.forEach((e) => ensurePriced(e)), PRICE_DEBOUNCE_MS2);
       return () => clearTimeout(priceDebounceRef.current);
     }, [notDoneFp]);
     const refreshEstimate = useCallback2(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);

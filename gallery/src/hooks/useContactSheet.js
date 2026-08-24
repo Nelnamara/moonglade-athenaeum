@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
 
 /* useContactSheet -- ContactSheetOverlay.jsx's fetch/state logic, mechanically
    lifted out (2026-08-03), same precedent as useFolio.js/useHealth.js/
@@ -47,10 +48,11 @@ export default function useContactSheet({ ids, collectionName }) {
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/contact-sheet" + (qs ? "?" + qs : ""))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setData(d); })
-      .catch((e) => { if (!dead) setErr(String(e.message || e)); });
+    apiGet("/api/contact-sheet" + (qs ? "?" + qs : ""))
+      .then((d) => {
+        if (dead) return;
+        if (d.error) setErr(d.error); else setData(d);
+      });
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids, collectionName]);

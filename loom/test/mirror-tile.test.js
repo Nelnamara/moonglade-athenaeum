@@ -20,7 +20,8 @@ test("the tile drives off the SERVER's real status, never a fabricated object", 
   // A single refresh() helper re-reads /api/mirror/status and setSt()s the real answer.
   assert.match(src, /const refresh = async \(\) => \{/,
     "MirrorTile must have a refresh() helper");
-  assert.match(src, /fetch\("\/api\/mirror\/status"\)/,
+  // Re-anchored 2026-08-23: the read rides api.js's apiGet. Same endpoint, same "server truth".
+  assert.match(src, /apiGet\("\/api\/mirror\/status"\)/,
     "refresh() must re-read the real status endpoint");
   // The old bug fabricated {...(s||{}), connected:true, days_left:d.days_left} -- a status with
   // no `enabled` key that drove the toggle from `undefined`. It must be gone.

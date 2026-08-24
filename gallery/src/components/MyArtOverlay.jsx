@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { apiGet, apiPost } from "../api.js";
 import useMyArt, { fmt } from "../hooks/useMyArt.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
@@ -111,23 +112,28 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   useEffect(() => {
     if (tab !== "loras" || loras !== null) return;
     let dead = false;
-    fetch("/api/model-search?src=mine&kind=lora&size=48")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((d) => { if (!dead) setLoras(d.results || []); })
-      .catch((e) => { if (!dead) setLorasErr(String(e.message || e)); });
+    apiGet("/api/model-search?src=mine&kind=lora&size=48")
+      .then((d) => {
+        if (dead) return;
+        if (d.error) setLorasErr(d.error); else setLoras(d.results || []);
+      });
     return () => { dead = true; };
   }, [tab, loras]);
 
-  const load = () => fetch("/api/myart/items")
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-    .then((j) => { setRows(j.items || []); setCsrf(j.csrf || ""); });
+  const load = () => apiGet("/api/myart/items")
+    .then((j) => {
+      if (j.error) throw new Error(j.error);
+      setRows(j.items || []); setCsrf(j.csrf || "");
+    });
 
   useEffect(() => {
     let dead = false;
-    fetch("/api/myart/items")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { if (!dead) { setRows(j.items || []); setCsrf(j.csrf || ""); } })
-      .catch((e) => { if (!dead) setRowsErr(String(e.message || e)); });
+    apiGet("/api/myart/items")
+      .then((j) => {
+        if (dead) return;
+        if (j.error) setRowsErr(j.error);
+        else { setRows(j.items || []); setCsrf(j.csrf || ""); }
+      });
     return () => { dead = true; };
   }, []);
 
@@ -135,11 +141,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   const preview = async (action, item, extra) => {
     setActErr(""); setBusy(true);
     try {
-      const r = await fetch("/api/myart/publish", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, media_id: item.media_id, csrf, ...extra }),
-      });
-      const p = await r.json();
+      const p = await apiPost("/api/myart/publish", { action, media_id: item.media_id, csrf, ...extra });
       if (p.error) { setActErr(p.error); return; }
       setAsk({ action, item, extra: extra || {}, preview: p });
     } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
@@ -150,12 +152,8 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     if (!ask) return;
     setBusy(true); setActErr("");
     try {
-      const r = await fetch("/api/myart/publish", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: ask.action, media_id: ask.item.media_id,
-                               csrf, confirm: true, ...ask.extra }),
-      });
-      const res = await r.json();
+      const res = await apiPost("/api/myart/publish",
+        { action: ask.action, media_id: ask.item.media_id, csrf, confirm: true, ...ask.extra });
       if (res.error) { setActErr(res.error); return; }
       setAsk(null); setEditing(null);
       await load();
@@ -184,12 +182,8 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     let ok = 0, fail = 0;
     for (const mid of selected) {
       try {
-        const r = await fetch("/api/myart/publish", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: bulkAsk.action, media_id: mid, csrf,
-                                 confirm: true, ...bulkAsk.extra }),
-        });
-        const res = await r.json();
+        const res = await apiPost("/api/myart/publish",
+          { action: bulkAsk.action, media_id: mid, csrf, confirm: true, ...bulkAsk.extra });
         if (res.error) fail++; else ok++;
       } catch (e) { fail++; }
     }
