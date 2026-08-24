@@ -3,8 +3,9 @@ import React from "react";
 /* The 3-icon bottom tab bar (design spec: Moonglade Mobile.dc.html navStyle/
    navTabs, lines 275-283 & 1080-1086) -- Gallery/Create/Control, real glyphs
    and order from the DC. This IS the navigation skeleton this increment's
-   brief asks for: Create/Control render honest placeholders (AppMobile.jsx)
-   until their own increments build real content -- this bar itself is fully
+   brief asks for: Create/Control now render their real components (CreateMobile/
+   ControlMobile, via AppMobile.jsx); only Edit's Fixer sub-tab stays a disclosed
+   placeholder -- this bar itself is fully
    real (a real setTab, a real active state, a real underline dot). */
 
 const TABS = [

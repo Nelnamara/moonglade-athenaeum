@@ -7069,12 +7069,25 @@ def _gen_parameters(args):
     # Clamping can land on 1.0 for a source already at the output ceiling; that is "no
     # upscale is possible at this size", so the block is dropped rather than submitting a
     # 1.0 ratio that changes the priced shape and produces nothing.
+    # A fired ceiling clamp is RECORDED, not applied in silence -- same contract as the
+    # width/height/steps/cfg/count clamps (see _gen_args_from_web_payload's `adjusted`
+    # receipt). The web namespace carries that list on `.clamped`; the CLI's argparse
+    # Namespace has no such attribute, so the append is guarded by getattr. The clamp
+    # VALUE is unchanged -- only the receipt entry is new.
+    def _note_upscale_clamp(field, asked, used):
+        receipt = getattr(args, "clamped", None)
+        if isinstance(receipt, list):
+            receipt.append({"field": field, "asked": asked, "used": used})
     if enlarge:
-        enlarge = min(enlarge, max_upscale_ratio(params["width"], params["height"],
-                                                 "enlarge"))
+        _ceil = max_upscale_ratio(params["width"], params["height"], "enlarge")
+        if _ceil < enlarge:
+            _note_upscale_clamp("enlarge", enlarge, _ceil)
+        enlarge = min(enlarge, _ceil)
     elif upscale:
-        upscale = min(upscale, max_upscale_ratio(params["width"], params["height"],
-                                                 "upscale"))
+        _ceil = max_upscale_ratio(params["width"], params["height"], "upscale")
+        if _ceil < upscale:
+            _note_upscale_clamp("upscale", upscale, _ceil)
+        upscale = min(upscale, _ceil)
     if enlarge and enlarge > 1.0:
         params["enlarge"] = enlarge
         # An unknown upscaler name would be rejected by PixAI, so fall back to their own

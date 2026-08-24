@@ -480,3 +480,14 @@ def test_both_shells_point_rel_icon_at_png_with_modern_meta(tmp_path):
         assert "/branding/favicon.ico" not in html, where
         assert 'name="mobile-web-app-capable"' in html, where
         assert 'name="apple-mobile-web-app-capable"' in html, where      # kept for older iOS
+
+
+def test_loom_shell_also_carries_the_favicon_link():
+    """The third served shell -- the Loom (/loom) -- was the one the favicon fix first
+    missed. It has no apple-/mobile-web-app meta block (and deliberately gains none), but it
+    MUST still point a rel=icon at the .png like the other two, so the Loom browser tab stops
+    404'ing on its icon. _LOOM_SHELL is spliced verbatim into LOOM_PAGE_BUNDLE, so asserting
+    the module string is asserting what /loom serves."""
+    assert 'rel="icon"' in g._LOOM_SHELL
+    assert 'href="/branding/favicon.png"' in g._LOOM_SHELL
+    assert "/branding/favicon.ico" not in g._LOOM_SHELL

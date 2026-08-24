@@ -50,7 +50,7 @@ const SCENES = [
   ["VTuber", "vtuber", "text", true, "name + lang"],
 ];
 
-const TIERS = [["all", "All 28"], ["free", "Free"], ["tier1", "Tier 1"]];
+const TIERS = [["all", "All " + SCENES.length], ["free", "Free"], ["tier1", "Tier 1"]];
 
 export default function AiToolsModal({ open, onClose, onPick }) {
   const [q, setQ] = useState("");

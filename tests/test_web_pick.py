@@ -1083,6 +1083,10 @@ def test_error_responses_redact_host_paths_even_with_a_space_in_the_directory_na
     assert str(out_dir) not in body
     assert "John Smith" not in body
     assert "<host-path>" in body
+    # the outer error exit shares the badge's shape: cost:None AND free:False, so the cost
+    # badge (which reads `free`) renders nothing spendable rather than an undefined field.
+    d = r.get_json()
+    assert d["cost"] is None and d["free"] is False
 
 
 def test_redaction_covers_a_second_independent_call_site(tmp_path, monkeypatch, pixai):
