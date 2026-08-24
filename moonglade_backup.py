@@ -2120,6 +2120,11 @@ _FULL_META_FIELDS = (
     "inference_profile", "quality_tag", "prompt_helper", "control_nets", "lora_parameters",
     "priority", "render_seconds", "backend", "started_at", "ended_at", "updated_at",
     "retry_count", "moderation", "video_mode", "video_model",
+    # Batch identity (issue #33): PixAI's own 0-based output number + batch size from
+    # getTaskById outputs.batch. Per-ROW, unlike everything else here -- extract_full_meta
+    # leaves both blank at task level (fm is cached once per task) and each row resolves
+    # its own via _with_batch_position before _merge_full / the backfill apply carry them.
+    "batch_index", "batch_size",
 )
 
 
@@ -3658,7 +3663,51 @@ def extract_full_meta(task):
         "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
         "video_mode":        str(i2v.get("mode") or ""),
         "video_model":       str(i2v.get("model") or ""),
+        # BATCH IDENTITY (issue #33): blank at TASK level on purpose -- outputs.batch is an
+        # ordered array with one entry per output, so the index is a per-ROW fact. The raw
+        # list is parked under _batch (private, never persisted: _merge_full and the backfill
+        # apply iterate _FULL_META_FIELDS only) and each row resolves its own index/size via
+        # _with_batch_position. A task with no batch array (edit/upscale/video/chat) parks
+        # None and every row of it stays blank -- "not a batch output", never inferred.
+        "batch_index": "",
+        "batch_size":  "",
+        "_batch":      outputs.get("batch") if isinstance(outputs.get("batch"), list) else None,
     }
+
+
+def batch_position(batch, media_id):
+    """PixAI's own output number for one media of a task (issue #33): the position of
+    `media_id` in the task's ORDERED outputs.batch array -- the same <n> the site's own
+    download names use (from-PixAI-<taskId>-<n>, verified against real downloads).
+    Returns ('<index>', '<size>') as 0-based catalog strings, or ('', '') when there is
+    no batch array (edits, upscales, videos, imports) or the media id is not in it --
+    blank means "not a batch output", NEVER a guess from media_id order (which can swap
+    outputs; probe 2026-08-23). The index is PixAI's permanent fact: a sibling deleted
+    later keeps its gap, nothing is ever renumbered."""
+    if not isinstance(batch, list) or not batch:
+        return "", ""
+    mid = str(media_id or "")
+    if not mid:
+        return "", ""
+    for i, entry in enumerate(batch):
+        if isinstance(entry, dict) and str(entry.get("mediaId") or "") == mid:
+            return str(i), str(len(batch))
+    return "", ""
+
+
+def _with_batch_position(fm, media_id):
+    """Per-ROW view of a task-level full-meta dict (issue #33): fm is fetched and cached
+    once per task, but batch_index/batch_size differ per output, so each row resolves its
+    own from the raw outputs.batch list extract_full_meta parked under fm['_batch'].
+    Returns fm itself when there is nothing to resolve (no batch array, or the media id
+    is not one of its outputs -- both fields stay ''), else a shallow copy with both set,
+    leaving the shared cached dict untouched."""
+    bi, bs = batch_position((fm or {}).get("_batch"), media_id)
+    if not bi:
+        return fm
+    fm = dict(fm)
+    fm["batch_index"], fm["batch_size"] = bi, bs
+    return fm
 
 
 def _resolve_model_preset(session, version_id, _cache={}):
@@ -11310,9 +11359,12 @@ def run_backfill_full_meta(args):
         changed = []
         for row in rows_by_task.get(str(tid), ()):
             hit = False
+            # fm is per-TASK; batch_index/batch_size are per-ROW (issue #33) -- resolve
+            # this row's own from the outputs.batch list fm parked under _batch.
+            fmr = _with_batch_position(fm, row.get("media_id"))
             for f in _FULL_META_FIELDS:
-                if not row.get(f) and fm.get(f):
-                    row[f] = fm[f]; hit = True
+                if not row.get(f) and fmr.get(f):
+                    row[f] = fmr[f]; hit = True
             # Backfill url/width/height from task media as bonus
             if not row.get("url") and fm.get("_media_url"):
                 row["url"] = fm["_media_url"]; hit = True
@@ -11761,7 +11813,8 @@ def run_download(args, progress=None):
             "filename": filename, "url": url, "width": w, "height": h,
             "prompt_preview": meta["prompt_preview"],
             "status": meta["status"], "created_at": meta["created_at"],
-            **_merge_full(full_meta, known.get(mid, {})),
+            # full_meta is per-TASK; batch_index/batch_size are per-ROW (issue #33)
+            **_merge_full(_with_batch_position(full_meta, mid), known.get(mid, {})),
         }
 
     try:
@@ -11930,7 +11983,7 @@ def run_download(args, progress=None):
                             "prompt_preview": k.get("prompt_preview") or meta["prompt_preview"],
                             "status":         k.get("status") or meta["status"],
                             "created_at":     k.get("created_at") or meta["created_at"],
-                            **_merge_full(full_meta, k),
+                            **_merge_full(_with_batch_position(full_meta, mid), k),
                         })
                         written.add(mid)
                         _tick()
@@ -11949,7 +12002,7 @@ def run_download(args, progress=None):
                             "filename": "", "url": "", "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
                             "status": meta["status"], "created_at": meta["created_at"],
-                            **_merge_full(full_meta, known.get(mid, {})),
+                            **_merge_full(_with_batch_position(full_meta, mid), known.get(mid, {})),
                         })
                         written.add(mid)
                         _tick()
@@ -11960,7 +12013,7 @@ def run_download(args, progress=None):
                             "filename": "", "url": url, "width": w, "height": h,
                             "prompt_preview": meta["prompt_preview"],
                             "status": meta["status"], "created_at": meta["created_at"],
-                            **_merge_full(full_meta, known.get(mid, {})),
+                            **_merge_full(_with_batch_position(full_meta, mid), known.get(mid, {})),
                         })
                         written.add(mid)
                         _tick()
@@ -11979,7 +12032,7 @@ def run_download(args, progress=None):
                         "url": url, "width": w, "height": h,
                         "prompt_preview": meta["prompt_preview"],
                         "status": meta["status"], "created_at": meta["created_at"],
-                        **_merge_full(full_meta, known.get(mid, {})),
+                        **_merge_full(_with_batch_position(full_meta, mid), known.get(mid, {})),
                     })
                     written.add(mid)
                     if path and status in ("ok", "skip"):

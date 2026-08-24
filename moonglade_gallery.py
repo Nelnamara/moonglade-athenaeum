@@ -118,6 +118,15 @@ CATALOG_FIELDS = [
     "moderation",          # moderationAction.promptsModerationAction (PASS / ...)
     "video_mode",          # parameters.i2vPro.mode (video tasks)
     "video_model",         # parameters.i2vPro.model (video tasks)
+    # BATCH IDENTITY (2026-08-23, issue #33): PixAI's own output number for this row
+    # within its task's batch. getTaskById returns outputs.batch -- an ORDERED array of
+    # {mediaId, seed, extra}, one per output -- and batch[i].mediaId == this media_id
+    # gives batch_index=str(i) (0-based, the same <n> the site's own download names
+    # from-PixAI-<taskId>-<n> use) and batch_size=str(len(batch)). The index is PixAI's
+    # PERMANENT fact: captured once, NEVER renumbered when a sibling is deleted (a gap
+    # is true) and NEVER inferred from media_id order (which can swap outputs). Blank
+    # means "not a batch output" (edits, upscales, videos, imports) -- not "unknown".
+    "batch_index", "batch_size",
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -185,7 +194,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     retry_count       TEXT DEFAULT '',
     moderation        TEXT DEFAULT '',
     video_mode        TEXT DEFAULT '',
-    video_model       TEXT DEFAULT ''
+    video_model       TEXT DEFAULT '',
+    batch_index       TEXT DEFAULT '',
+    batch_size        TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -278,6 +289,11 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN moderation TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN video_mode TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN video_model TEXT DEFAULT ''",
+    # BATCH IDENTITY (2026-08-23, issue #33) -- PixAI's own 0-based output number and the
+    # task's batch size, from getTaskById outputs.batch. Never renumbered on deletion,
+    # never inferred from media_id order; blank = "not a batch output", not "unknown".
+    "ALTER TABLE catalog ADD COLUMN batch_index TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN batch_size TEXT DEFAULT ''",
 ]
 
 def _connect(db_path):
@@ -9348,9 +9364,15 @@ def create_app(out_dir: Path):
         output of each requested task, in ONE query. The per-card /api/lineage fetch
         cost ~4.3s per 100-card page; this costs ~85ms (probe 2026-08-22).
         Body {"task_ids": [...]} (cap 200; blanks and non-strings dropped). Returns
-        {"by_task": {task_id: [{media_id, is_video, thumb}, ...]}} ordered by
-        media_id, INCLUDING self (the client lights self by media_id); a task with
+        {"by_task": {task_id: [{media_id, is_video, thumb, batch_index}, ...]}},
+        INCLUDING self (the client lights self by media_id); a task with
         fewer than 2 members is omitted -- a single output has no strip.
+        ORDER (issue #33): when EVERY member of a task carries a batch_index --
+        PixAI's own permanent output number, captured from getTaskById
+        outputs.batch -- members come back in that order (media_id order can swap
+        outputs); otherwise media_id order, as before. batch_index is an int, or
+        null on a row that has none. Indexes are never renumbered or inferred: a
+        deleted sibling leaves a true gap.
         An empty task_id is NEVER queried: every import shares '' and would
         otherwise become one giant pseudo-batch. Pure catalog read, no network."""
         body = request.get_json(silent=True)
@@ -9378,7 +9400,7 @@ def create_app(out_dir: Path):
             con = _connect(db_path)
             try:
                 rows = con.execute(
-                    "SELECT task_id, media_id, is_video FROM catalog"
+                    "SELECT task_id, media_id, is_video, batch_index FROM catalog"
                     " WHERE task_id IN (%s) AND task_id != ''"
                     " ORDER BY task_id, media_id" % ",".join("?" * len(ids)),
                     ids).fetchall()
@@ -9388,12 +9410,27 @@ def create_app(out_dir: Path):
                 mid = str(r["media_id"] or "")
                 if not mid:
                     continue
+                # PixAI's own output number (issue #33): int in the payload, null when
+                # the row has none. A non-integer value counts as absent -- the index is
+                # only ever the site's own captured fact, never guessed.
+                try:
+                    bi = int(str(r["batch_index"] or "").strip())
+                except ValueError:
+                    bi = None
                 by_task.setdefault(str(r["task_id"]), []).append({
                     "media_id": mid,
                     "is_video": str(r["is_video"] or "") == "1",
                     "thumb": "/thumbs/{}.jpg?s=32".format(mid),
+                    "batch_index": bi,
                 })
             by_task = {t: m for t, m in by_task.items() if len(m) >= 2}
+            # Order by PixAI's own batch_index only when EVERY member of the task has
+            # one (issue #33: media_id order can swap outputs). Any member without an
+            # index means the batch order is not fully known -- keep media_id order
+            # rather than half-sorting; indexes are never renumbered or inferred.
+            for members in by_task.values():
+                if all(m["batch_index"] is not None for m in members):
+                    members.sort(key=lambda m: m["batch_index"])
         return jsonify({"by_task": by_task})
 
     @app.route("/api/train/recent-tasks")
