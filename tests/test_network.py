@@ -689,6 +689,32 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
     assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
 
 
+def test_sync_artworks_tags_the_animation_video_row(tmp_path, mocker, pixai):
+    """#20: an animation's catalog row is keyed by its MP4's media_id (is_video='1'), while the
+    artwork node carries the still as `mediaId` and the mp4 as `videoMediaId`. The sync must tag
+    the video row via videoMediaId, or the Animations tab (WHERE artwork_id!='') stays empty."""
+    from types import SimpleNamespace
+    from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
+    db = tmp_path / "catalog.db"
+    # the ONLY local row is the video (the mp4); no separate poster row was downloaded
+    save_catalog(db, [{f: "" for f in CATALOG_FIELDS} |
+                      {"media_id": "vid1", "filename": "x_vid1.mp4", "is_video": "1"}])
+    mocker.patch.object(core, "USER_ID", "u1")
+    conn = {"edges": [{"node": {"id": "aw9", "mediaId": "poster1", "videoMediaId": "vid1",
+                                "title": "My Animation", "visibility": "PUBLIC",
+                                "isNsfw": False, "likedCount": 4, "commentCount": 0,
+                                "aesScore": 6.0, "tacks": []}}],
+            "pageInfo": {"hasPreviousPage": False}}
+    mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    assert res["matched"] == 1                        # the video row matched via videoMediaId
+    row = {r["media_id"]: r for r in load_catalog(db)}["vid1"]
+    assert row["artwork_id"] == "aw9"                 # tagged -> now visible in Animations
+    assert row["title"] == "My Animation" and row["is_video"] == "1"   # own media_id/flag kept
+
+
 def test_sync_artworks_resolves_userid_via_session(tmp_path, mocker):
     """A config with NO USER_ID must NOT hard-fail: _make_session auto-resolves it from the API
     key, so run_sync_artworks builds the session FIRST, then proceeds. Regression for the web
