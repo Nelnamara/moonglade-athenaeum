@@ -13,6 +13,21 @@ pytest.importorskip("pixeltable")  # optional heavy dep, not in requirements.txt
 import moonglade_similar as S
 
 
+def test_pgserver_start_timeout_is_widened(monkeypatch):
+    """#5: pixeltable_pgserver hardcodes pg_ctl(timeout=10); a post-crash fsync recovery
+    (~36s) then raises TimeoutExpired before Postgres finishes coming up. Importing
+    moonglade_similar (the sole pixeltable gateway) monkeypatches pg_ctl to raise any sub-90
+    ceiling to 90s, BEFORE Env init ever calls get_server()."""
+    import pixeltable_pgserver.postgres_server as pgs
+    assert pgs.pg_ctl.__name__ == "_pgctl_widened", "the #5 timeout wrapper is not installed"
+    calls = []
+    monkeypatch.setattr(S, "_pgctl_orig", lambda *a, **kw: calls.append(kw.get("timeout")))
+    pgs.pg_ctl("pgdata", timeout=10)     # a sub-90 timeout is raised to 90...
+    pgs.pg_ctl("pgdata", timeout=120)    # ...a larger one is left alone...
+    pgs.pg_ctl("pgdata")                 # ...and no-timeout passes straight through
+    assert calls == [90, 120, None]
+
+
 # --- fakes ---------------------------------------------------------------------
 
 class FakeTable:
