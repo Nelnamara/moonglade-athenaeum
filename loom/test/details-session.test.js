@@ -95,7 +95,7 @@ describe("fetchSeries: one stale-guarded effect, never per-render (DetailsView.j
   const api = src("gallery/src/api.js");
 
   test("(e) fetchSeries is imported and called ONCE from an effect, stale-guarded on a seq ref", () => {
-    assert.match(dv, /import \{ rebuildPoster, fetchSeries \} from "\.\.\/api\.js";/);
+    assert.match(dv, /import \{[^}]*\bfetchSeries\b[^}]*\} from "\.\.\/api\.js";/);
     // exactly one call site, and it is inside a useEffect (not the render body)
     assert.equal((dv.match(/fetchSeries\(/g) || []).length, 1, "exactly one fetchSeries call site");
     const i = dv.indexOf("fetchSeries(seriesTaskId)");
@@ -114,8 +114,8 @@ describe("fetchSeries: one stale-guarded effect, never per-render (DetailsView.j
 
   test("api.fetchSeries: membership POST then the series GET, both fail-soft to null", () => {
     assert.match(api, /export async function fetchSeries\(taskId\) \{/);
-    // membership: POST the one task_id to /api/series via postJSON
-    assert.match(api, /postJSON\("\/api\/series", \{ task_ids: \[taskId\] \}\)/);
+    // membership: POST the one task_id to /api/series via apiPost (the one request module)
+    assert.match(api, /apiPost\("\/api\/series", \{ task_ids: \[taskId\] \}\)/);
     // only a task that IS in a multi-task series continues (singletons -> null)
     assert.match(api, /if \(!hit \|\| !hit\.sid\) return null;/);
     // the series itself: GET /api/series/<sid>, null on any miss
