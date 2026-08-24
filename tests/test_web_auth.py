@@ -785,6 +785,32 @@ def test_previously_ungated_html_post_route_now_redirects_to_login(tmp_path, pat
     assert r.headers["Location"].startswith("/login")
 
 
+def test_login_redirect_preserves_the_query_string(tmp_path):
+    """#32: a logged-out hit to a DEEP LINK (?page=N / ?image=) must come back THERE after
+    login, not to page 1. The front-door redirect carries request.full_path now, not the
+    bare path, so the query rides along in `next`."""
+    from urllib.parse import urlparse, parse_qs
+    cli = _client(tmp_path).test_client()
+    r = cli.get("/?page=5&image=abc123", environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    loc = r.headers["Location"]
+    assert loc.startswith("/login")
+    nxt = parse_qs(urlparse(loc).query).get("next", [""])[0]
+    assert "page=5" in nxt and "image=abc123" in nxt, \
+        "login redirect dropped the query -- next={!r}".format(nxt)
+
+
+def test_login_redirect_query_less_path_has_no_trailing_question_mark(tmp_path):
+    """A plain gated path (no query) must still produce next=/loom, not next=/loom? --
+    request.full_path always appends '?', so the query-less branch uses request.path."""
+    from urllib.parse import urlparse, parse_qs
+    cli = _client(tmp_path).test_client()
+    r = cli.get("/loom", environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    nxt = parse_qs(urlparse(r.headers["Location"]).query).get("next", [""])[0]
+    assert nxt == "/loom", "query-less next should be the bare path, got {!r}".format(nxt)
+
+
 @pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)
 def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, path):
     """The loopback bypass is retired entirely -- localhost is

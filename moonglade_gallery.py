@@ -7074,7 +7074,14 @@ def create_app(out_dir: Path):
         if not _is_authorized_request():
             if request.path.startswith(_JSON_GATE_PREFIXES):
                 return jsonify({"error": "authentication required"}), 401
-            return redirect(url_for("login", next=_safe_next(request.path) or ""))
+            # Keep the query too (?page=, ?image=) so a logged-out hit to a deep link lands
+            # THERE after login, not on page 1 (#32). request.path is path-only; full_path
+            # keeps the query -- mirrors the client-side guard (location.pathname+search).
+            # _safe_next still screens it: a same-site single-'/' path, and the query is
+            # percent-encoded so no raw control chars slip through. full_path appends a bare
+            # '?' when there's no query, so fall back to path then to avoid the ugly "/?".
+            _next = request.full_path if request.query_string else request.path
+            return redirect(url_for("login", next=_safe_next(_next) or ""))
         if level == LOCALHOST and not _is_local_request():
             return jsonify({"error": route_tier_message(view)}), 403
         return None
