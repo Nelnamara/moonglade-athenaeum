@@ -79,6 +79,9 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
   font-weight: 700; padding: 3px 8px; border-radius: 999px; backdrop-filter: blur(4px);
   background: rgba(8,6,20,.72); }
 .mgma2-vis.pub { border: 1px solid rgba(79,201,154,.4); color: var(--emerald); }
+/* #20: the sensitive flag sits in the OPPOSITE corner (top-right) from the visibility
+   badge, an amber content-caution distinct from the emerald/gold Public/Private. */
+.mgma2-vis.sens { left: auto; right: 8px; border: 1px solid rgba(230,150,70,.5); color: #e69646; }
 /* DC:2340-2341 -- the bulk-select checkbox, same slot the visibility badge sits in. */
 .mgma2-checkbox { position: absolute; top: 8px; left: 8px; z-index: 3; width: 22px;
   height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px;

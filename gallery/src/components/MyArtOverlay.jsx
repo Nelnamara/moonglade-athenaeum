@@ -373,9 +373,16 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         {manageOn ? (
                           <span className={"mgma2-checkbox" + (isSel ? " on" : "")}>{isSel ? "✓" : ""}</span>
                         ) : (
-                          <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
-                            {it.public ? "◉ Public" : "🔒 Private"}
-                          </span>
+                          <>
+                            <span className={"mgma2-vis" + (it.public ? " pub" : " priv")}>
+                              {it.public ? "◉ Public" : "🔒 Private"}
+                            </span>
+                            {/* #20: PixAI's own sensitive flag (isSensitive), distinct from
+                                nsfw -- shown only when set, alongside the visibility badge. */}
+                            {it.sensitive ? (
+                              <span className="mgma2-vis sens" title="PixAI flagged this as sensitive">⚠ Sensitive</span>
+                            ) : null}
+                          </>
                         )}
                         {/* DC:698-702 hover actions, REAL -- hidden during manage mode so a
                             single-item action can't fire mid-selection. */}
