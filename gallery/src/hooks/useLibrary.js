@@ -19,6 +19,10 @@ export const ADV_DEFAULTS = {
   dateFrom: "", dateTo: "", source: "", tag: "", publishedOnly: false,
   // Not a flyout field -- set only via the Details view's "View batch" link.
   batch: "",
+  // #34 direction B: the "open a stack" drill-down. Not a flyout field either --
+  // set only when a SERIES stack is opened (filterBySeries), the mirror of batch.
+  // Resolves server-side to the series' member task_ids (?series=<sid>).
+  series: "",
 };
 
 /* Serialize the CURRENT applied view (q + media + shelf + adv) into a query string.
@@ -51,6 +55,9 @@ export function filterQueryString({ applied, media, shelf, adv, perPage }, dateS
   // to a stale batch id would load the wrong/empty set, or leave a stale batch active. It
   // IS a real current filter worth exporting, though. (Found by the 2026-08-07 port review.)
   if (a.batch && dateStyle === "export") add("batch", a.batch);
+  // series mirrors batch: a transient "open a stack" drill-down, worth exporting
+  // (the CSV should match what the grid shows) but never persisted to a saved view.
+  if (a.series && dateStyle === "export") add("series", a.series);
   // per_page is a VIEW setting, not a filter: parsePresetQuery restores it, but the CSV
   // export ignores it (it dumps every matching row), so it only rides the library style.
   if (perPage && dateStyle !== "export") add("per_page", perPage);
@@ -71,7 +78,7 @@ export function filterQueryString({ applied, media, shelf, adv, perPage }, dateS
 /* initialPage: the page the FIRST load lands on (App reads it from ?page=, via
    gen/urlState.js -- #31 "Where the Refit Broke" #7). Every later filter change
    still restarts from page 1, exactly as before. */
-export default function useLibrary({ initialPage = 1 } = {}) {
+export default function useLibrary({ initialPage = 1, group = "" } = {}) {
   // filters
   const [media, setMedia] = useState("");
   const [shelf, setShelf] = useState("");
@@ -105,6 +112,14 @@ export default function useLibrary({ initialPage = 1 } = {}) {
           source: adv.source, tag: adv.tag,
           published: adv.publishedOnly ? "1" : "",
           batch: adv.batch,
+          // #34 direction B: the series drill-down (?series=<sid>) always rides;
+          // grouping (?group=series) rides ONLY when the toggle is on AND no
+          // drill-down is active -- opening a stack (series OR batch) is exactly
+          // the ungrouped members view, so a live drill-down suppresses the fold
+          // (the backend ignores ?series while grouping anyway) and the "Stack
+          // sessions" toggle can stay lit, ready to snap back when the filter clears.
+          series: adv.series,
+          group: (group === "series" && !adv.series && !adv.batch) ? "series" : "",
         });
         if (seq !== reqSeq.current) return; // a newer request superseded this one
         setItems((old) => (replace ? data.items : old.concat(data.items)));
@@ -116,7 +131,10 @@ export default function useLibrary({ initialPage = 1 } = {}) {
         if (seq === reqSeq.current) setLoading(false);
       }
     },
-    [applied, media, shelf, perPage, adv]
+    // group joins the filter deps: flipping "Stack sessions" changes load's
+    // identity, and the mount effect below re-fires on that -> a page-1 refetch,
+    // exactly like changing media/sort/rating (the toggle re-groups from the top).
+    [applied, media, shelf, perPage, adv, group]
   );
 
   // The flyout commits a patch: advanced fields always; q/media/shelf/perPage

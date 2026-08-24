@@ -87,7 +87,7 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, layout, setLayout }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, layout, setLayout, group, setGroup }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
   const shelfOpts = [""].concat(collections || []);
@@ -121,6 +121,15 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
   return (
     <div className={"mgl-tray" + (closing ? " closing" : "")}>
       {setLayout ? <LayoutPicker layout={layout} setLayout={setLayout} /> : null}
+      {/* #34 direction B: fold every session (a multi-task dial-in series, or a
+          lone batch's siblings) into ONE cover card. Sits beside the layout picker
+          -- it changes what the grid SHOWS, like layout changes how it lays out.
+          Reuses the tray Chip vocabulary; `active` lights the metal like any filter. */}
+      {setGroup ? (
+        <Chip label="Stack sessions" active={group === "series"}
+          title="Fold each session -- dial-in series and batches -- into one cover card you can open"
+          onClick={() => setGroup(group !== "series")} />
+      ) : null}
       <span ref={modelBtn}>
         <Chip label={"Model · " + modelLabel} active={!!adv.model}
           title="Filter by the model that made it"
@@ -176,6 +185,7 @@ export function LibraryBar({
   lib, boot, actions, collections,
   layout, setLayout,
   onSendVideo, onMutated,
+  group, setGroup,
 }) {
   const {
     media, perPage, shelf,
@@ -250,6 +260,7 @@ export function LibraryBar({
           models={boot.models || []}
           commit={applyAdvanced}
           layout={layout} setLayout={setLayout}
+          group={group} setGroup={setGroup}
         />
       )}
       <div className="mgl-bar">

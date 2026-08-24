@@ -68,6 +68,13 @@ const trueRatio = (it) => {
   const w = parseFloat(it.w), h = parseFloat(it.h);
   return w > 0 && h > 0 ? h / w : 1;   // dimensionless rows (old imports): square
 };
+
+/* #34 direction B: a grouped UNIT that STACKS -- either a multi-task dial-in
+   series (it.series) or a folded batch of one task's siblings (it.batch). Returns
+   "series" | "batch" | null; null is a plain singleton that renders exactly as an
+   ungrouped card. The whole stack grammar (layered look, badge, open-navigation,
+   no-select) keys off this one classifier. */
+const stackKind = (it) => (it.series ? "series" : it.batch ? "batch" : null);
 const clampR = (r, hi) => Math.max(R_MIN, Math.min(hi, r));
 const spanFor = (width, r) => Math.max(4, Math.round((width * r + GAP) / ROW_STEP));
 // Fixed pixel height → row span on the same 8px/11gap grain (Grid/Hero/Timeline
@@ -104,6 +111,10 @@ export default function Grid({
   blur, thumb, layout = "masonry",
   selectMode, selected, toggleSelected, openLightbox, onRate,
   onOpenDetails, onContextMenu,
+  // #34 direction B: opening a stacked card NAVIGATES (never the lightbox) --
+  // a series to its members (onOpenSeries(sid) -> the ?series filter), a batch to
+  // its outputs (onOpenBatch(task_id) -> the existing View-batch ?batch filter).
+  onOpenSeries, onOpenBatch,
   // App says whether the grid is the top layer (no lightbox/details/overlay/dock):
   // the arrow-key handler below stays silent otherwise.
   keysEnabled = true,
@@ -112,6 +123,16 @@ export default function Grid({
     if (p < 1 || p > pages || p === page) return;
     goToPage(p);
     window.scrollTo({ top: 0, behavior: "instant" in document.documentElement.style ? "instant" : "auto" });
+  };
+
+  /* Open a stacked card's view (#34 direction B). A series navigates to its
+     members via the ?series filter; a batch reuses the existing View-batch path.
+     Shared by the cover click, the caption "Open" chip, and Enter on a focused
+     stack -- so every "open" affordance on a stack goes to the same place. */
+  const openStackFor = (it) => {
+    const kind = stackKind(it);
+    if (kind === "series" && onOpenSeries) onOpenSeries(it.series.sid);
+    else if (kind === "batch" && onOpenBatch) onOpenBatch(it.batch.task_id);
   };
 
   /* ---- select grammar (ported near-verbatim from the DC class) ---- */
@@ -168,11 +189,13 @@ export default function Grid({
         const offset = ((page % 3) + 2) % FEAT_CADENCE;
         for (let p = 0; p < arr.length; p++) {
           if (p % FEAT_CADENCE !== offset) continue;
-          // squarest (min |r-1|) non-video image in the next lookahead window
+          // squarest (min |r-1|) non-video image in the next lookahead window.
+          // A stack cover is excluded here for the same reason hero excludes it
+          // (#34 B): a stacked cover is a proxy for many, not a single showcase.
           let best = -1, bestScore = Infinity;
           const end = Math.min(p + FEAT_LOOKAHEAD, arr.length);
           for (let k = p; k < end; k++) {
-            if (arr[k].is_video) continue;
+            if (arr[k].is_video || stackKind(arr[k])) continue;
             const s = Math.abs(trueRatio(arr[k]) - 1);
             if (s < bestScore) { bestScore = s; best = k; }
           }
@@ -216,7 +239,10 @@ export default function Grid({
       const cellH = colW * GRID_ASPECT;
       const gridSpan = spanForH(cellH);
       const out = items.map((it, i) => {
-        const hero = (i % HERO_EVERY === 0) && !it.is_video;
+        // a video never takes a hero slot (drift §46) -- and neither does a STACK
+        // (#34 direction B): a stacked cover is a proxy for many, not a single
+        // showcase image, so it falls back to a normal cell just like a video.
+        const hero = (i % HERO_EVERY === 0) && !it.is_video && !stackKind(it);
         const wide = trueRatio(it) <= WIDE_TR;
         if (hero) {
           const wpx = colW * 2 + GAP;             // hero spans 2 cols
@@ -323,8 +349,9 @@ export default function Grid({
     const lo = Math.min(from, i), hi = Math.max(from, i);
     for (let k = lo; k <= hi; k++) {
       const it = cells[k] && cells[k].it;
-      // add-only across the range, like the DC's Set union
-      if (it && !selectedRef.current.has(it.media_id)) toggleSelected(it.media_id);
+      // add-only across the range, like the DC's Set union; a STACK in the range
+      // is skipped (#34 direction B: stacks are not selectable units in v1).
+      if (it && !stackKind(it) && !selectedRef.current.has(it.media_id)) toggleSelected(it.media_id);
     }
     lastPickRef.current = i;
   };
@@ -358,7 +385,7 @@ export default function Grid({
         const b = el.getBoundingClientRect();
         if (b.right > r.x && b.left < r.x + r.w && b.bottom > r.y && b.top < r.y + r.h) {
           const it = cells[idx] && cells[idx].it;
-          if (it) hits.add(it.media_id);
+          if (it && !stackKind(it)) hits.add(it.media_id);   // stacks aren't selectable (#34 B)
         }
       });
       setMarquee(r);
@@ -375,9 +402,12 @@ export default function Grid({
           window.removeEventListener("click", eat, true);
         };
         window.addEventListener("click", eat, true);
-        // Commit: the marquee replaces the selection within this page.
+        // Commit: the marquee replaces the selection within this page. Stacks are
+        // never members (#34 B) -- they were kept out of `hits`, and skipping them
+        // here too means a stack already in no selection is left untouched.
         const cur = selectedRef.current;
         cells.forEach(({ it }) => {
+          if (stackKind(it)) return;
           if (hits.has(it.media_id) !== cur.has(it.media_id)) toggleSelected(it.media_id);
         });
       }
@@ -483,7 +513,10 @@ export default function Grid({
         // only the card ITSELF: a chip/checkbox/star inside it keeps its own Enter
         if (cur < 0 || t !== card) return;
         e.preventDefault();
-        openLightbox(origIndexByMid.get(cells[cur].it.media_id));
+        const itCur = cells[cur].it;
+        // a stack opens its view (never the lightbox), matching a cover click (#34 B)
+        if (stackKind(itCur)) openStackFor(itCur);
+        else openLightbox(origIndexByMid.get(itCur.media_id));
         return;
       }
       let next = null;
@@ -512,7 +545,7 @@ export default function Grid({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keysEnabled, cells, loading, page, pages, origIndexByMid, openLightbox]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [keysEnabled, cells, loading, page, pages, origIndexByMid, openLightbox, onOpenSeries, onOpenBatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- Timeline jump rail: sticky vertical band list; click scrolls the tiles
      pane to that band. The pane is an internal scroll context (grid.css) so the
@@ -555,10 +588,27 @@ export default function Grid({
     // otherwise the App-owned Set paints.
     const isSel = marqueeHits ? marqueeHits.has(it.media_id) : selected.has(it.media_id);
     const badge = it.is_video ? "VIDEO" : (it.source ? String(it.source).toUpperCase() : "");
+    // #34 direction B: is this a STACKED unit, and if so which kind + its badge.
+    const stack = stackKind(it);                       // "series" | "batch" | null
+    // The stamp prefers the SERIES title (the dial's name) when this is a series
+    // stack; otherwise the piece's own title, exactly as before -- a batch or a
+    // plain singleton keeps it.title (usually empty), so nothing changes for them.
+    const stampTitle = (stack === "series" && it.series.title) ? it.series.title : it.title;
+    // The always-on top-left badge for a stack (identity, not a hover affordance --
+    // the layered shadows already say "stack"). A video-cover series shows SERIES
+    // only; the VIDEO glyph keeps its own corner (review item 5).
+    const stackBadge = stack === "series"
+      ? (it.is_video ? "SERIES" : "SERIES · " + it.series.count_tasks + "v · " + it.series.count_images)
+      : stack === "batch" ? "BATCH · " + it.batch.count
+      : null;
     // Sibling Strip (#30, direction E): the task's outputs, self lit, the rest dimmed.
     // Only when the task has >= 2 members (the API already omits the rest). More than
     // four -> four and a "+N"; self always sits among the four shown.
-    const sibs = it.task_id ? siblings[it.task_id] : null;
+    // Badge-only on a stack (#34 B, ultrareview finding 2): a stacked cover shows its
+    // SERIES/BATCH badge, never the sibling strip -- the strip is redundant on a batch
+    // and misleading on a series (it lists only the cover task's versions, implying the
+    // stack holds just those). Plain cards are unchanged.
+    const sibs = (it.task_id && !stack) ? siblings[it.task_id] : null;
     let strip = null;
     // Owner call (a), 2026-08-22: below STRIP_MIN_THUMB the fixed-height grid/hero cell
     // can no longer hold the slab + a strip (it clips the stamp at the card top), and at
@@ -601,7 +651,8 @@ export default function Grid({
           "mgg-card" +
           (it.is_nsfw ? " nsfw" : "") +
           (isSel ? " sel" : "") +
-          (cell.feat ? " feat" : "")
+          (cell.feat ? " feat" : "") +
+          (stack ? " mgg-stack" : "")
         }
         /* shift held at press = range coming: stop the native text
            selection before it starts */
@@ -613,38 +664,65 @@ export default function Grid({
           ev.preventDefault();
           onContextMenu(it.media_id, it.thumb, ev.clientX, ev.clientY, !!it.is_video);
         }}
-        /* plain click → Lightbox; shift = range, ctrl/⌘ = toggle (both
+        /* a STACK opens its view and ignores the select grammar entirely (#34 B:
+           not a selectable unit, and it navigates instead of opening the lightbox).
+           Otherwise: plain click → Lightbox; shift = range, ctrl/⌘ = toggle (both
            with Select OFF); Select ON = every click selects */
         onClick={(ev) => {
+          if (stack) { openStackFor(it); return; }
           if (ev.shiftKey) { rangePick(i); return; }
           if (ev.ctrlKey || ev.metaKey) { togglePick(i); return; }
           if (selectMode) { togglePick(i); return; }
           openLightbox(origIndexByMid.get(it.media_id));
         }}
       >
+        {/* #34 direction B: the layered "deck" behind a stacked cover -- two offset
+            shadow layers, DOM BEFORE the art so they paint behind it, inset by
+            grid.css so they peek only at the top-right. The card box clips
+            (overflow:hidden), so the deck is contained inside the cell -- it can
+            never spill onto a neighbour whatever the layout. */}
+        {stack ? (
+          <>
+            <span className="mgg-stack-layer back" aria-hidden="true" />
+            <span className="mgg-stack-layer mid" aria-hidden="true" />
+          </>
+        ) : null}
         {/* Only cropped cells anchor high: masonry's out-of-clamp panoramas /
             ultra-talls, and every uniform Grid/Hero cell (cover-filled to 4:3 /
             3:2). Top-center, because faces in this library's portrait art sit
             top-of-frame (grid-algorithm-spec §1; drift §46 crop v1). */}
         <img className="mgg-art" loading="lazy" draggable={false} src={it.thumb} alt=""
           style={cell.crop ? { objectPosition: "50% 12%" } : undefined} />
-        <span className="mgg-top">
-          {/* the checkbox always single-toggles — no mode needed */}
-          <button
-            type="button"
-            className="mgg-check"
-            title="Select this one"
-            aria-pressed={isSel}
-            onClick={(ev) => { ev.stopPropagation(); togglePick(i); }}
+        {stack ? (
+          /* A stack's badge takes the top-left slot -- always on (identity). No
+             checkbox (not a selectable unit, review item 5) and no source pill. */
+          <span
+            className={"mgg-" + stack + "-badge"}
+            title={stack === "series"
+              ? "Dial-in series · " + it.series.count_tasks + " versions · " + it.series.count_images + " images — click to open"
+              : "Batch · " + it.batch.count + " images — click to open"}
           >
-            {isSel ? "✓" : ""}
-          </button>
-          {badge ? (
-            <span className={"mgg-pill" + pillClass} title={"source: " + (it.is_video ? "video" : it.source)}>
-              {badge}
-            </span>
-          ) : null}
-        </span>
+            {stackBadge}
+          </span>
+        ) : (
+          <span className="mgg-top">
+            {/* the checkbox always single-toggles — no mode needed */}
+            <button
+              type="button"
+              className="mgg-check"
+              title="Select this one"
+              aria-pressed={isSel}
+              onClick={(ev) => { ev.stopPropagation(); togglePick(i); }}
+            >
+              {isSel ? "✓" : ""}
+            </button>
+            {badge ? (
+              <span className={"mgg-pill" + pillClass} title={"source: " + (it.is_video ? "video" : it.source)}>
+                {badge}
+              </span>
+            ) : null}
+          </span>
+        )}
         {it.is_video ? <span className="mgg-vglyph">▶</span> : null}
         <figcaption className="mgg-cap">
           {/* Accession Stamp (#30, direction A; pixel source: the owner's locked
@@ -653,15 +731,20 @@ export default function Grid({
               anything machine-derived (the review's hard condition). Line 1 is the
               local day · time, line 2 the model (uppercased by CSS), flagged
               "not grouped" when the row has no task to belong to. */}
-          {it.title ? <span className="mgg-title">{it.title}</span> : null}
+          {stampTitle ? <span className="mgg-title">{stampTitle}</span> : null}
           <span className="mgg-stamp lead">{localDayTime(it.created_at) || it.date || ""}</span>
-          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped") + seriesSuffix(it, seriesByTask)}</span>
+          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped") + (stack ? "" : seriesSuffix(it, seriesByTask))}</span>
           {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
             <button
-              type="button" className="mgg-chip open" title="Open the lightbox"
-              onClick={(ev) => { ev.stopPropagation(); openLightbox(origIndexByMid.get(it.media_id)); }}
+              type="button" className="mgg-chip open"
+              title={stack ? "Open this session" : "Open the lightbox"}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                if (stack) openStackFor(it);
+                else openLightbox(origIndexByMid.get(it.media_id));
+              }}
             >
               Open
             </button>

@@ -135,6 +135,57 @@
   font-size: 9px; color: rgba(214, 210, 226, .9); pointer-events: none;
 }
 
+/* ---- #34 direction B: the stacked card (a grouped SESSION unit) ----------------
+   A series or batch cover renders as a "deck": two offset layers BEHIND the cover
+   image, plus an always-on identity badge top-left. The cover is inset from the
+   top and right so the deck peeks through there. Everything lives inside .mgg-card,
+   which clips (overflow:hidden) -- so the deck is CONTAINED in the grid cell in
+   every layout and can never overlap a neighbour. Only the art is inset WITHIN the
+   card; the cell size and row span are untouched, so masonry/grid/hero/timeline
+   geometry is unchanged (a stack is one cell like any card). */
+.mgg-card.mgg-stack .mgg-art {
+  /* shift the cover down-and-left, freeing a ~9px sliver at top + right for the
+     deck; it still meets the bottom edge so the caption overlays it as usual.
+     .mgg-art is an <img> (object-fit:cover) -- a REPLACED element -- so the base
+     width:100%/height:100% must be overridden explicitly: left/right/width all
+     non-auto over-constrains and the browser drops `right` (LTR), painting the
+     cover full-width with 9px clipped off the bottom (the deck then peeks only at
+     the top). width:auto is NOT the fix -- on an abs-pos replaced box it resolves
+     to the image's INTRINSIC size, not the gap. Size the box from the inset. */
+  inset: 9px 9px 0 0; width: calc(100% - 9px); height: calc(100% - 9px);
+  border-radius: 9px; z-index: 1;
+}
+.mgg-stack-layer {
+  position: absolute; z-index: 0; pointer-events: none; border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .5);
+}
+/* deepest layer: the full card box, so it shows in the OUTERMOST top/right sliver */
+.mgg-stack-layer.back {
+  inset: 0 0 10px 10px;
+  background: color-mix(in oklab, var(--base, #0e0b18) 82%, var(--accent) 18%);
+}
+/* middle layer: 4px in, shows between the back layer and the cover */
+.mgg-stack-layer.mid {
+  inset: 4px 4px 6px 6px;
+  background: color-mix(in oklab, var(--surface1, #1b1630) 78%, var(--accent) 22%);
+}
+/* the always-on identity badge (top-left), mono like the stamp, pill geometry like
+   .mgg-pill but darker + never reveal-gated: the deck says "stack", the badge says
+   which kind + the counts. z-index 3 keeps it above the deck, cover and caption.
+   SERIES wears the lavender edge, BATCH the accent edge (the two are distinct at a
+   glance). NSFW blur still applies to the cover thumb, like any card. */
+.mgg-series-badge, .mgg-batch-badge {
+  position: absolute; top: 7px; left: 7px; z-index: 3;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: .09em; white-space: nowrap;
+  padding: 3px 8px; border-radius: 999px;
+  color: #eae6f6; background: rgba(5, 4, 13, .74);
+  border: 1px solid color-mix(in srgb, var(--lavender, var(--accent)) 55%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .5); pointer-events: none;
+}
+.mgg-batch-badge { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+
 /* ---- caption slab: reveals on hover / picked / Select mode ------------------- */
 .mgg-cap {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; margin: 0;

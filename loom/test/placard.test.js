@@ -23,15 +23,18 @@ describe("Accession Stamp replaces the filename line (Grid.jsx)", () => {
     assert.doesNotMatch(grid, /shortName/);
     assert.doesNotMatch(cap, /it\.filename/);
   });
-  test("(b) the title renders ONLY under an it.title truthiness check -- never filename-derived", () => {
-    assert.match(cap, /\{it\.title \? <span className="mgg-title">\{it\.title\}<\/span> : null\}/);
+  test("(b) the title renders ONLY under a truthiness check -- never filename-derived", () => {
+    // #34 direction B: the gated variable is now `stampTitle` (the series title when
+    // this is a series stack, else it.title exactly as before) -- still ONE render,
+    // still never filename-derived. See stackKind/stampTitle in Grid.jsx.
+    assert.match(cap, /\{stampTitle \? <span className="mgg-title">\{stampTitle\}<\/span> : null\}/);
     // exactly one .mgg-title render, and it is the gated one
     assert.equal((cap.match(/mgg-title/g) || []).length, 1);
   });
   test("the stamp: local day · time lead line, then the model with the not-grouped flag", () => {
     assert.match(cap, /<span className="mgg-stamp lead">\{localDayTime\(it\.created_at\) \|\| it\.date \|\| ""\}<\/span>/);
     // #34: the model stamp now appends the dial-in suffix (· v3 · 2/4) via the shared helper.
-    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\) \+ seriesSuffix\(it, seriesByTask\)\}<\/span>/);
+    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\) \+ \(stack \? "" : seriesSuffix\(it, seriesByTask\)\)\}<\/span>/);
     assert.match(grid, /import \{ localDay, localDayTime \} from "\.\.\/gen\/dates\.js";/);
     // the stars/Open/Details row is untouched, below the stamp and strip
     assert.ok(cap.indexOf('className="mgg-stamp"') < cap.indexOf("{strip}"));
