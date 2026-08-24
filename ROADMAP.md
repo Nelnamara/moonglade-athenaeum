@@ -32,19 +32,21 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
-- **Per-image naming — NOT DECIDED; constraints captured, brainstorm open** *(owner, 2026-08-23)*
-  The problem: four siblings share one prompt, so any prompt-derived title is identical ×4 (card stamp,
-  Details headline). **Constraints the owner has set:** filenames are NOT touched (separate workshop below);
-  the goal is to *tell siblings apart* more than to describe each (explore as a POC, not a commitment);
-  LOCAL only — no third-party cost, ever, for any user. **Facts established:** the prompt is batch-level
-  (84% collide; cleaning makes it worse); only the picture or the batch position can distinguish siblings;
-  the batch index IS recoverable ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33) —
-  `outputs.batch[]` is the site's own order). **Options on the table, none chosen:** a batch-index suffix
-  (`· 3 of 4`, free); a local-VLM 3-word *discriminator*; structured *flags* (subject · orientation ·
-  palette · has-text); AI-suggest-then-human-promote as the UI contract; the strip alone. Claude's
-  recommendation was the discriminator + flags in one call with the index as the free floor — the owner
-  has not picked. Next step is the brainstorm/workshop, not a build; a local bake-off (the "Naming 35,815
-  Images" artifact's Next) is the cheapest test of whichever direction he picks.
+- **Naming the dial-in — DECIDED: B + C, prompt-only D** *(owner pick off the "Naming the Dial-In"
+  workshop board, 2026-08-23)*
+  **B** — the dial-in series is first-class in the grid: a session stacks into one card
+  (`SERIES · 4v · 17`) that opens into its versions; absorbs the older per-batch stacking idea.
+  **C** — Details gains a SESSION strip under LINEAGE: the series task-by-task with the delta as each
+  caption ("start · Mio" → "reroll" → "character → Nelnamara"), current lit.
+  **D, prompt-only** — character/trait names and tags extracted from prompt data itself (character:
+  tokens, LoRA names, artist tags; no Mio-file ingest required — quality compounds with prompt
+  history; the MD dumps can enrich later). E (facet chips) not chosen; D's extractor enables it later.
+  **Constraints stand:** filenames untouched · local only, $0 third-party · free floor for every user ·
+  VLM = optional Provider Deck module, rerolls only. **Riskiest assumption — series clustering
+  quality** (a wrong cluster is visibly wrong in B): validate FIRST with a read-only clustering probe
+  over the real library + a review board of sample clusters for the owner's thumbs-up, then scope →
+  adversarial review → build. Data layer: series clustering + delta differ + batch index
+  ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33)) + the trait extractor.
 
 - **The filename convention — workshop** *(owner, 2026-08-23)*
   `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
@@ -52,7 +54,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   CDN URL), the site synthesizes one client-side. Workshop what ours should be — the batch index is now a
   known fact — before anything touches 43k files (`--organize` makes any rename reversible).
 
-- **Per-batch / per-task grid stacking** *(standalone — kept, owner 2026-08-19)*
+- **Per-batch / per-task grid stacking** *(absorbed into "Naming the dial-in" direction B, 2026-08-23 — a batch stack is the degenerate one-task series)*
   Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
   stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
   item after the layout follow-ons (including Group-by, which would have generalized it) were cut.
