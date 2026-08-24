@@ -3612,15 +3612,12 @@ def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="new
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, task_id, created_at, is_video FROM catalog "
             "WHERE {} ORDER BY {}".format(where, order), params
         ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        con.close()
 
 
 def unique_models(db_path):
