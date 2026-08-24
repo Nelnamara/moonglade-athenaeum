@@ -210,7 +210,7 @@ Organizing never breaks the gallery — file lookup is by `media_id`, so images 
 live in any subfolder. (This is also why [Collections](Collections) survive
 Organize.)
 
-`--organize-adv` is a back-compat alias for `--organize`; `--undo-organize` reverts the last run either way.
+`--undo-organize` reverts the last `--organize` run.
 
 ## Duplicate audit & dedup
 

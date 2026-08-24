@@ -309,7 +309,7 @@ python moonglade_backup.py --backfill-full-meta       # fill existing rows
 python moonglade_backup.py --sync                     # ONE-SHOT refresh: pull+full-meta → backfill → fix-models → thumbnails → reconcile-deleted (idempotent; videos are --sync-videos)
 python moonglade_backup.py --backfill-full-meta --with-surface --workers 8   # give older rows the full generation surface (issue #18); checkpoints as it runs, resumable
 python moonglade_backup.py --organize --dry-run       # preview month-folder normalize
-python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible; --organize-adv is an alias)
+python moonglade_backup.py --organize                 # normalize into YYYY-MM/ (reversible)
 python moonglade_backup.py --catalog-stats            # summarize catalog.db
 python moonglade_backup.py --export-csv               # export catalog.db → CSV
 python moonglade_backup.py --sync-artworks            # merge published-artwork metadata (title/likes/tags) by media_id
