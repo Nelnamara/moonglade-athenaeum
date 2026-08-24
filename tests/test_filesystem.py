@@ -1,5 +1,4 @@
 """Tests for filesystem-dependent functions (already_downloaded, catalog, load_token)."""
-import csv
 import json
 import os
 from pathlib import Path
