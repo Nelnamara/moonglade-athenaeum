@@ -62,7 +62,7 @@ CATALOG_FIELDS = [
     "prompt_full", "natural_prompt", "seed", "steps",
     "sampler", "cfg_scale", "model_id", "model_name", "rating",
     # Published-artwork metadata, populated by --sync-artworks (blank otherwise)
-    "artwork_id", "title", "is_published", "is_nsfw",
+    "artwork_id", "title", "is_published", "is_nsfw", "is_sensitive",
     "liked_count", "comment_count", "aes_score", "art_tags",
     # LoRAs used, populated by --full-meta / --backfill-full-meta ("Name:0.7, …")
     "loras",
@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS catalog (
     title           TEXT DEFAULT '',
     is_published    TEXT DEFAULT '',
     is_nsfw         TEXT DEFAULT '',
+    is_sensitive    TEXT DEFAULT '',
     liked_count     TEXT DEFAULT '',
     comment_count   TEXT DEFAULT '',
     aes_score       TEXT DEFAULT '',
@@ -295,6 +296,10 @@ _MIGRATIONS = [
     # never inferred from media_id order; blank = "not a batch output", not "unknown".
     "ALTER TABLE catalog ADD COLUMN batch_index TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN batch_size TEXT DEFAULT ''",
+    # ARTWORK SENSITIVITY (2026-08-24, issue #20) -- PixAI's own moderation flag from the
+    # listArtworks node, distinct from the binary is_nsfw (a work can be sensitive but not
+    # nsfw). Already on the wire; the app just never read it. Blank until a --sync-artworks.
+    "ALTER TABLE catalog ADD COLUMN is_sensitive TEXT DEFAULT ''",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1153,7 +1158,7 @@ def myart_items(db_path):
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
-            " created_at, art_tags, is_published,"
+            " is_sensitive, created_at, art_tags, is_published,"
             " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
             " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
             " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
@@ -10278,6 +10283,7 @@ def create_app(out_dir: Path):
                 "created_at": created or "",
                 "tags": [t.strip() for t in (tags or "").split(",") if t.strip()][:4],
                 "public": r["is_published"] == "1",
+                "sensitive": r["is_sensitive"] == "1",
                 "likes": r["likes"], "comments": r["comments"],
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token

@@ -645,7 +645,7 @@ def test_update_and_workers_compose(tmp_path, mocker):
 
 def test_extract_artwork_meta():
     node = {"id": "aw1", "mediaId": "m1", "title": "Lollipop Elf",
-            "visibility": "PUBLIC", "isNsfw": True, "likedCount": 5,
+            "visibility": "PUBLIC", "isNsfw": True, "isSensitive": True, "likedCount": 5,
             "commentCount": 2, "aesScore": 7.5,
             "tacks": [{"codeName": "contest_x", "displayName": "ContestX"},
                       {"displayName": "tag2"}],
@@ -654,7 +654,7 @@ def test_extract_artwork_meta():
     m = core.extract_artwork_meta(node)
     assert m["media_id"] == "m1" and m["artwork_id"] == "aw1"
     assert m["title"] == "Lollipop Elf"
-    assert m["is_published"] == "1" and m["is_nsfw"] == "1"
+    assert m["is_published"] == "1" and m["is_nsfw"] == "1" and m["is_sensitive"] == "1"
     assert m["liked_count"] == "5" and m["comment_count"] == "2"
     assert m["art_tags"] == "ContestX, tag2"
     # from the free `extra` block: blurhash placeholder + rounded per-category NSFW scores
@@ -665,7 +665,7 @@ def test_extract_artwork_meta():
 def test_extract_artwork_meta_no_extra():
     # a node without an `extra` block leaves the new fields blank (never raises)
     m = core.extract_artwork_meta({"id": "a", "mediaId": "m", "visibility": "PRIVATE"})
-    assert m["blurhash"] == "" and m["nsfw_scores"] == "" and m["is_published"] == "0"
+    assert m["blurhash"] == "" and m["nsfw_scores"] == "" and m["is_published"] == "0" and m["is_sensitive"] == "0"
 
 
 def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):

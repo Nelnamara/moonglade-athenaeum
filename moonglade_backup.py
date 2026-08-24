@@ -5821,6 +5821,10 @@ def extract_artwork_meta(node):
         "art_tags":      ", ".join(tags),
         "blurhash":      str(extra.get("imageBlurHash") or ""),
         "nsfw_scores":   nsfw_scores,
+        # PixAI's own moderation flag, distinct from the binary is_nsfw (a work can be
+        # sensitive without being nsfw) -- already in the listArtworks response, the app just
+        # never read it (#20). Powers the "Sensitive" badge in My Art.
+        "is_sensitive":  "1" if node.get("isSensitive") else "0",
     }
 
 
