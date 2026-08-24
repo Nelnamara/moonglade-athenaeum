@@ -29,6 +29,23 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True   # salvage partially-truncated downloads
 import pixeltable as pxt
 from pixeltable.func import Batch
 
+# Issue #5: pixeltable_pgserver hardcodes pg_ctl(timeout=10) in ensure_postgres_running().
+# After an unclean shutdown, Postgres crash-recovery (fsync of the data dir) takes ~36s > 10s,
+# so the client raises subprocess.TimeoutExpired even though the server DOES come up (it's
+# spawned detached) -- only a second attempt succeeds. There is no config knob for this
+# timeout (verified: not in pgserver.get_server, pixeltable env.py, nor PGCTLTIMEOUT -- the
+# binding limit is the Python subprocess.run(timeout=10) that kills pg_ctl first), so widen it
+# here. This module is the repo's SOLE pixeltable gateway, so patching at import runs before
+# the first catalog op (Env init -> get_server()). Pinned to pgserver's private pg_ctl symbol
+# -- re-check on a pixeltable_pgserver upgrade. Guarded by tests/test_similar.py.
+import pixeltable_pgserver.postgres_server as _pgs
+_pgctl_orig = _pgs.pg_ctl
+def _pgctl_widened(*a, **kw):
+    if kw.get("timeout") is not None and kw["timeout"] < 90:
+        kw["timeout"] = 90      # comfortably above the observed ~36s crash-recovery start
+    return _pgctl_orig(*a, **kw)
+_pgs.pg_ctl = _pgctl_widened
+
 MODEL = "openai/clip-vit-base-patch32"
 _DIR = "moonglade"
 _TBL = f"{_DIR}.images"
