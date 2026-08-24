@@ -6,6 +6,7 @@ import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
+import { seriesSuffix } from "../gen/seriesName.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -480,6 +481,12 @@ export default function DetailsView({
           <div className="p-head">
             <p className="p-kicker">
               {(row.model_name || row.model_id || "—").toUpperCase()}
+              {/* #34: · v3 · 2/4 -- dial-in version (from the loaded series steps) + batch
+                  output (#33 row fields). Same pure helper as the card stamp. */}
+              <span className="p-kicker-series">{seriesSuffix(row, (() => {
+                const st = series && series.steps ? series.steps.find((s) => s.task_id === row.task_id) : null;
+                return st ? { [row.task_id]: { v: st.v } } : {};
+              })())}</span>
               {row.model_name ? <button className="gd-mini" onClick={() => onFilterByModel(row.model_name)}>find more</button> : null}
             </p>
             <h2 className="p-title">{headline}</h2>

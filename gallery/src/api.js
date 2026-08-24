@@ -45,6 +45,12 @@ export async function fetchSiblings(taskIds) {
 // (singletons -- ~85% of the library -- come back absent => null, no second call). Then
 // GET /api/series/<sid> for the ordered steps. Returns the series struct
 // {sid,title,model,count_tasks,count_images,span,steps} or null.
+// #34: the page-batched series lookup for the grid stamp -- one POST for the whole page,
+// by_task holds only tasks in a multi-task series (singletons absent, cost nothing).
+export async function fetchSeriesBatch(taskIds) {
+  return postJSON("/api/series", { task_ids: taskIds });
+}
+
 export async function fetchSeries(taskId) {
   if (!taskId) return null;
   const m = await postJSON("/api/series", { task_ids: [taskId] });

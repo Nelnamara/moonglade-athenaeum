@@ -11845,6 +11845,8 @@ __DESIGN_TOKENS__
                 # client batches task_ids into one POST /api/siblings per page.
                 "task_id": str(r.get("task_id") or ""),
                 "title": str(r.get("title") or "").strip(),
+                "batch_index": str(r.get("batch_index") or ""),   # #33: PixAI's own output number
+                "batch_size": str(r.get("batch_size") or ""),
             })
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})

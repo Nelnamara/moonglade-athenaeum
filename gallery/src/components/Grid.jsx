@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { localDay, localDayTime } from "../gen/dates.js";
 import { buildUrl } from "../gen/urlState.js";
-import { fetchSiblings } from "../api.js";
+import { fetchSiblings, fetchSeriesBatch } from "../api.js";
+import { seriesSuffix } from "../gen/seriesName.js";
 import Stars from "./Stars.jsx";
 import "../styles/grid.css";
 
@@ -283,6 +284,7 @@ export default function Grid({
      wholesale, so the previous page's strips can never paint over this one.
      Failure -> no strips, no toast: the strip is decoration. */
   const [siblings, setSiblings] = useState({});
+  const [seriesByTask, setSeriesByTask] = useState({});   // #34: sid/v/of per task on this page
   const siblingsSeq = useRef(0);
   useEffect(() => {
     const my = ++siblingsSeq.current;
@@ -297,6 +299,12 @@ export default function Grid({
     fetchSiblings(taskIds).then((d) => {
       if (siblingsSeq.current !== my) return;   // superseded -- a newer page won
       setSiblings((d && d.by_task) || {});
+    });
+    // #34: the dial-in version/output suffix for the stamp -- one more batched call,
+    // same taskIds, same stale guard; by_task holds ONLY tasks in a multi-task series.
+    fetchSeriesBatch(taskIds).then((d) => {
+      if (siblingsSeq.current !== my) return;
+      setSeriesByTask((d && d.by_task) || {});
     });
   }, [items]);
 
@@ -647,7 +655,7 @@ export default function Grid({
               "not grouped" when the row has no task to belong to. */}
           {it.title ? <span className="mgg-title">{it.title}</span> : null}
           <span className="mgg-stamp lead">{localDayTime(it.created_at) || it.date || ""}</span>
-          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped")}</span>
+          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped") + seriesSuffix(it, seriesByTask)}</span>
           {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />
