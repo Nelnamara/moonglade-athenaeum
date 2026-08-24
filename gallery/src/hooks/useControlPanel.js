@@ -312,7 +312,7 @@ export default function useControlPanel() {
     setTaskState("running");
     const d = await apiPost("/api/import-task", { task_id: id });
     if (d.error) { setTaskState({ error: d.error }); return; }
-    setTaskState({ done: true, saved: d.saved });
+    setTaskState({ done: true, saved: d.saved, already: !!d.already, media_ids: d.media_ids });
     fetchSummary();
   };
 

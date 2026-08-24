@@ -1473,6 +1473,25 @@ def test_css_cascade_resolver_can_actually_fail(tmp_path):
                    element(id="d", classes={"x"}), "width", PHONE).value == "1px"
 
 
+def test_mobile_video_overlay_scroller_is_the_touchable_host_not_the_ghost_wrap():
+    """FIX (2026-08-23): mobile Create > Video was stuck -- the overlay .cm-videowrap is
+    pointer-events:none (so a tap in its reserved seg-control gap falls through to the real
+    control beneath), which ALSO makes it un-hit-testable, so a touch-drag on it could never
+    start a scroll. The scroller has to be the pointer-events:auto content host instead.
+    Resolve the real cascade (create-mobile.css) and require that .cm-videohost -- NOT the
+    ghost wrap -- is what declares overflow-y:auto, so a future edit that moves the scroll
+    back onto the untouchable wrap fails here instead of silently freezing Video mode again."""
+    css = "<style>" + (Path(__file__).resolve().parents[1] / "gallery" / "src"
+                       / "styles" / "create-mobile.css").read_text(encoding="utf-8") + "</style>"
+    rules = css_rules(css)
+    host = element(classes={"cm-videohost"}, ancestors=[dict(classes={"cm-videowrap"})])
+    win = winning(rules, host, "overflow-y", PHONE)
+    assert win is not None and win.value == "auto", "the touchable .cm-videohost must be the scroller"
+    # ...and the untouchable tap-through wrap must NOT itself be an overflow-y scroller.
+    assert winning(rules, element(classes={"cm-videowrap"}), "overflow-y", PHONE) is None, \
+        "the pointer-events:none wrap must not be the scroller"
+
+
 def test_video_v40_full_cost_warning():
     """The Video form hard-warns when the pricier v4.0 full model is picked (14k/s vs Lite's
     5.5k -- a 15s clip is 210k credits), so it's never a silent surprise. Since the no-vanilla

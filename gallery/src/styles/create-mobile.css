@@ -44,8 +44,8 @@
    position:relative (gallery-mobile.css) and already sized by the flex
    layout to exactly the space between the fixed-height hero and the tab bar,
    so inset:0 here reuses that existing sizing instead of reintroducing new
-   header/tab-bar height constants of its own. overflow-y matches .glm-body's
-   own scroll behavior for the same reason.
+   header/tab-bar height constants of its own. The wrap itself is overflow:
+   hidden and is NOT the scroller -- see the pointer-events note below.
 
    .cm-videospacer is an invisible (visibility:hidden, so it paints nothing
    and never obscures what's beneath it) copy of .cm-seg3, built from the
@@ -58,11 +58,17 @@
    pointer-events: none on the wrap (so a tap in the reserved gap falls
    through to the REAL, still-interactive segmented control painted beneath
    it) with pointer-events: auto restored on the video host itself (so its
-   own form fields and Generate button stay tappable). ---- */
-.cm-videowrap { position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  pointer-events: none; }
-.cm-videowrap .cm-videospacer { visibility: hidden; }
-.cm-videowrap .cm-videohost { pointer-events: auto; }
+   own form fields and Generate button stay tappable). That restored host is
+   therefore ALSO the scroller: a pointer-events:none box is not hit-testable,
+   so a touch-drag on the wrap starts no scroll -- the .cm-pad flex column
+   below hands the scroll to the touchable .cm-videohost instead. Without
+   this, Video mode was stuck: its only scroller was the untouchable wrap.
+   ---- */
+.cm-videowrap { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.cm-videowrap .cm-pad { height: 100%; display: flex; flex-direction: column; }
+.cm-videowrap .cm-videospacer { visibility: hidden; flex: none; }
+.cm-videowrap .cm-videohost { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; pointer-events: auto; }
 
 /* ---- field label + prompt textarea (DC fieldLbl / taStyle) ---- */
 .cm-lbl { font-size: 9.5px; color: var(--overlay0); margin: 12px 0 5px; }
@@ -210,3 +216,11 @@
 @media (prefers-reduced-motion: reduce) {
   .cm-modelwrap .mfly { animation: none; }
 }
+
+/* The sheet's active picker pane (ModelFlyout's non-head child -- styles.css's
+   `.mfly > div:not(.mfly-head)`, already flex:1 1 auto; overflow-y:auto) is the
+   touch scroller for a long model/LoRA list. On mobile it also needs iOS
+   momentum + a guaranteed shrink so the grid scrolls INSIDE the 78vh sheet
+   rather than overflowing past the bottom of the viewport. */
+.cm-modelwrap .mfly > div:not(.mfly-head) {
+  min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
