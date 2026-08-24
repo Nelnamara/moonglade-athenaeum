@@ -274,9 +274,7 @@ which is the better answer when it is known — Hires re-renders the picture, so
 made it keeps the style. Two cases where it cannot: your catalog has not captured it yet (run
 `--backfill-full-meta`, and see [Backing up](Backing-Up)), or you imported the file from your
 own computer, in which case PixAI has no record of it and never will. Those upscale anyway,
-on the same model PixAI's own upscale uses — their dialog has no model control either. You
-can still pick one yourself if you want a different look; it is the same picker the Generate
-drawer uses.
+on the same model PixAI's own upscale uses — their dialog has no model control either.
 
 The cost is shown before you commit, and a matching free card is applied automatically, the
 same as any other generation.

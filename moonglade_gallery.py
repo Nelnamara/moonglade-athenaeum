@@ -5122,6 +5122,7 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
+<link rel="icon" type="image/png" href="/branding/favicon.png">
 <script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
    header writes, so switching skin there re-colors the Loom too */
 try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
@@ -11150,7 +11151,7 @@ def create_app(out_dir: Path):
                                 "note": _redact_host_paths(str(e))[:140]})
             return jsonify(core.price(gsession, req))
         except Exception as e:
-            return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None}), 200
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "cost": None, "free": False}), 200
 
     @app.route("/api/generate", methods=["POST"])
     @tier(LOGIN)
