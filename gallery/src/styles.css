@@ -721,6 +721,7 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .p-head { display: flex; flex-direction: column; gap: 8px; }
 .p-kicker { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
   color: var(--lavender, var(--accent)); opacity: 0; display: flex; align-items: center; gap: 8px; }
+.p-kicker-series { font-family: ui-monospace, Menlo, monospace; color: var(--overlay0); letter-spacing: .04em; }
 /* The field is a quoted PROMPT EXCERPT (~40 chars, gen/headline.js); the 3-line clamp is a
    ceiling only, so a hand-typed title can never blow the layout out. */
 .p-title { margin: 0; font: italic 400 30px/1.2 var(--serif); letter-spacing: -.01em;
@@ -821,6 +822,42 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   text-align: center; color: rgba(226,222,238,.72); background: rgba(5,4,13,.78); }
 .p-lin-chip.this .cap { color: var(--text); }
 .p-lin-arrow { flex: none; color: var(--overlay0); font-size: 12px; }
+
+/* SESSION (#34, direction C) -- the dial-in series this image is a step in, LINEAGE's
+   sibling directly beneath it: the SAME card chrome (13px 15px, radius 13, the faint
+   border on the deep wash), a baseline header (⟲ SESSION · the series title · a muted
+   task/image count), then a strip with its OWN overflow-x -- the record column stays the
+   only vertical scroller, exactly as LINEAGE and SIMILAR inner-scroll. Each step is a
+   LINEAGE-sized 74x74 thumb with a v-tag corner and the dial-in delta beneath it
+   (truncated, full text on hover); the step for THIS image's task is lit with the sibling
+   strip's lavender ring. Consecutive seed-only rerolls collapse to a "…N rerolls…" chip.
+   NOT wired into playReveal, for the same reason LINEAGE isn't -- the data arrives async,
+   so it just renders. */
+.p-session { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, .08); background: rgba(9, 7, 22, .6); }
+.p-session-head { display: flex; align-items: baseline; gap: 9px; }
+.p-session-head .k { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--overlay0); }
+.p-session-head .t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 12px; color: rgba(214, 210, 226, .85); }
+.p-session-head .s { flex: none; font-size: 10.5px; color: rgba(214, 210, 226, .5); white-space: nowrap; }
+.p-session-strip { display: flex; align-items: flex-start; gap: 10px; overflow-x: auto; padding: 2px; }
+.p-session-strip .p-lin-arrow { height: 74px; display: flex; align-items: center; }
+.p-ses-step { flex: none; width: 74px; padding: 0; background: none; border: 0; cursor: pointer;
+  display: flex; flex-direction: column; gap: 5px; }
+.p-ses-step .thumb { position: relative; width: 74px; height: 74px; border-radius: 10px; overflow: hidden;
+  background: var(--surface0); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 6px 16px rgba(0, 0, 0, .4); }
+.p-ses-step .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.p-ses-step .v { position: absolute; top: 0; left: 0; padding: 2px 5px; font-size: 8px; font-weight: 700;
+  letter-spacing: .06em; color: rgba(226, 222, 238, .82); background: rgba(5, 4, 13, .78);
+  border-bottom-right-radius: 7px; }
+.p-ses-step .lab { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 8.5px; letter-spacing: .02em; text-align: center; color: rgba(214, 210, 226, .55); }
+.p-ses-step.this .thumb { border-color: var(--lavender, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lavender, var(--accent)) 70%, transparent), 0 8px 20px rgba(0, 0, 0, .5); }
+.p-ses-step.this .lab { color: var(--text); }
+.p-ses-rerolls { flex: none; height: 74px; display: inline-flex; align-items: center; padding: 0 6px;
+  font-size: 9.5px; font-style: italic; letter-spacing: .03em; white-space: nowrap; color: var(--overlay0); }
 
 /* ACTIONS -- Image Details.dc.html:318-324 btn() (plain / metal / danger faces) in
    the DC's two groups: fileActions (:56-60, under the hero: flex, centred, gap 7) and

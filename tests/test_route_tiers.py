@@ -182,6 +182,8 @@ ROUTE_TIERS = {
     ("edit_prompt", "POST"): LOGIN,
     ("rebuild_poster", "POST"): LOGIN,          # rewrites one regenerable local thumb; no cloud/config
     ("api_siblings", "POST"): LOGIN,            # page-batched Sibling Strip read (#30); pure catalog, no network
+    ("api_series", "POST"): LOGIN,              # page-batched dial-in series read (#34); pure catalog, no network
+    ("api_series_detail", "GET"): LOGIN,        # one series' ordered steps (#34); pure catalog, no network
     # JSON twins of the redirect-page bulk actions above (the React gallery's
     # fetch() versions). Each takes the SAME tier as the page route it mirrors:
     # local quarantine, collection labels and prompt find/replace are reversible

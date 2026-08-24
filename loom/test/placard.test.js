@@ -30,7 +30,8 @@ describe("Accession Stamp replaces the filename line (Grid.jsx)", () => {
   });
   test("the stamp: local day · time lead line, then the model with the not-grouped flag", () => {
     assert.match(cap, /<span className="mgg-stamp lead">\{localDayTime\(it\.created_at\) \|\| it\.date \|\| ""\}<\/span>/);
-    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\)\}<\/span>/);
+    // #34: the model stamp now appends the dial-in suffix (· v3 · 2/4) via the shared helper.
+    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\) \+ seriesSuffix\(it, seriesByTask\)\}<\/span>/);
     assert.match(grid, /import \{ localDay, localDayTime \} from "\.\.\/gen\/dates\.js";/);
     // the stars/Open/Details row is untouched, below the stamp and strip
     assert.ok(cap.indexOf('className="mgg-stamp"') < cap.indexOf("{strip}"));
@@ -59,7 +60,7 @@ describe("Sibling Strip: one batched fetch per page, never per card", () => {
     const effect = grid.slice(effectStart, effectEnd);
     assert.match(effect, /const my = \+\+siblingsSeq\.current;/);
     assert.match(effect, /if \(siblingsSeq\.current !== my\) return;/);
-    assert.match(grid, /import \{ fetchSiblings \} from "\.\.\/api\.js";/);
+    assert.match(grid, /import \{ fetchSiblings, fetchSeriesBatch \} from "\.\.\/api\.js";/);
   });
   test("api.fetchSiblings posts {task_ids} to /api/siblings through postJSON, fail-soft", () => {
     assert.match(api, /export async function fetchSiblings\(taskIds\) \{\s*const d = await postJSON\("\/api\/siblings", \{ task_ids: taskIds \}\);/);

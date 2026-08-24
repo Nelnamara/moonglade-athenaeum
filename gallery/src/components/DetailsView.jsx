@@ -4,8 +4,9 @@ import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
-import { rebuildPoster } from "../api.js";
+import { rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
+import { seriesSuffix } from "../gen/seriesName.js";
 
 /* Motion: the reveal choreography locked 2026-07-30 (docs/DECISIONS.md, artifact
    477b4655 "The Reveal -- Motion Detail"). The headline LEADS on its own, sliding
@@ -129,6 +130,37 @@ function LedgerRow({ label, value, mono, dim, warm, copyKey, quiet, copied, copy
 
 const MORE_KEY = "mg_details_more";
 
+/* Reroll-run collapse for the SESSION strip (#34, review item 6). A dial-in
+   marathon is mostly seed-only rerolls; drawn one-tile-per-task the frost-queen's
+   173-task run would be 173 tiles. So a run of 2+ CONSECUTIVE reroll steps collapses
+   into a single "…N rerolls…" chip and the strip renders ~a dozen items. Two steps
+   are never swallowed: the CURRENT (lit) step -- if this very image's task is a reroll
+   it still shows expanded -- and the LAST step (the series' latest state always reads
+   as a real tile). A lone reroll (run of 1) shows normally too. Returns a flat list of
+   {kind:"step", step} | {kind:"rerolls", count, from, to}, in order. */
+function groupSeriesSteps(steps, currentTaskId) {
+  const list = Array.isArray(steps) ? steps : [];
+  const lastIdx = list.length - 1;
+  const pinned = (i) => i === lastIdx || list[i].task_id === currentTaskId;
+  const out = [];
+  let i = 0;
+  while (i < list.length) {
+    if (list[i].reroll && !pinned(i)) {
+      const run = [];
+      while (i < list.length && list[i].reroll && !pinned(i)) { run.push(list[i]); i++; }
+      if (run.length >= 2) {
+        out.push({ kind: "rerolls", count: run.length, from: run[0].v, to: run[run.length - 1].v });
+      } else {
+        out.push({ kind: "step", step: run[0] });
+      }
+    } else {
+      out.push({ kind: "step", step: list[i] });
+      i++;
+    }
+  }
+  return out;
+}
+
 /* The Details view -- "the layer deeper" (owner, 2026-07-30). Classic's
    /image/<media_id> page, ported: the full metadata, the whole action bar,
    edit-prompt, both delete paths, focus mode. A real view (App.jsx gives it a
@@ -186,6 +218,10 @@ export default function DetailsView({
   // what came from it -- GET /api/lineage/<mid>, a pure catalog read (batch siblings via
   // task_id, derivation chain via source_media_id). Real data, fetched per image.
   const [lineage, setLineage] = useState(null);
+  // SESSION (#34, direction C): the dial-in series this image's task is a step in.
+  // null for a singleton (~85%) or any fetch miss -- the panel then renders nothing.
+  const [series, setSeries] = useState(null);
+  const seriesSeq = useRef(0);
   const recordRef = useRef(null);
 
   const {
@@ -223,6 +259,19 @@ export default function DetailsView({
       .catch(() => { if (!dead) setLineage(null); });
     return () => { dead = true; };
   }, [mediaId]);
+
+  // SESSION membership + steps (#34): fetchSeries POSTs the one task_id to /api/series
+  // and, only if it's in a multi-task series, GETs /api/series/<sid>. Keyed on the TASK
+  // id -- siblings of one generation share it, and so share the series, so navigating
+  // between them costs no refetch -- and stale-guarded with the Similar path's seq ref,
+  // since a fresh async pair fires while the previous one may still be in flight.
+  const seriesTaskId = row ? row.task_id : "";
+  useEffect(() => {
+    if (!seriesTaskId) { setSeries(null); return; }
+    const mine = ++seriesSeq.current;
+    setSeries(null);
+    fetchSeries(seriesTaskId).then((d) => { if (mine === seriesSeq.current) setSeries(d); });
+  }, [seriesTaskId]);
 
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
@@ -432,6 +481,12 @@ export default function DetailsView({
           <div className="p-head">
             <p className="p-kicker">
               {(row.model_name || row.model_id || "—").toUpperCase()}
+              {/* #34: · v3 · 2/4 -- dial-in version (from the loaded series steps) + batch
+                  output (#33 row fields). Same pure helper as the card stamp. */}
+              <span className="p-kicker-series">{seriesSuffix(row, (() => {
+                const st = series && series.steps ? series.steps.find((s) => s.task_id === row.task_id) : null;
+                return st ? { [row.task_id]: { v: st.v } } : {};
+              })())}</span>
               {row.model_name ? <button className="gd-mini" onClick={() => onFilterByModel(row.model_name)}>find more</button> : null}
             </p>
             <h2 className="p-title">{headline}</h2>
@@ -589,6 +644,51 @@ export default function DetailsView({
                     </button>
                   </React.Fragment>
                 ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* SESSION (#34, direction C) -- the dial-in series this image belongs to,
+              task by task, drawn directly UNDER lineage as its sibling: LINEAGE is where
+              this one image came from; SESSION is the whole sitting it's a step in. Only
+              renders when the task is in a multi-task series (fetchSeries returns null for
+              a singleton -- ~85% of the library -- so the panel, header included, never
+              shows empty). The step whose task is THIS image's is lit with the sibling
+              strip's lavender ring; consecutive seed-only rerolls collapse (groupSeriesSteps)
+              so a 173-task marathon reads as ~a dozen tiles. Its own overflow-x scroller --
+              the record column is the only thing that scrolls vertically. */}
+          {series && series.steps && series.steps.length ? (
+            <div className="p-session">
+              <div className="p-session-head">
+                <span className="k">⟲ SESSION</span>
+                {series.title ? <span className="t" title={series.title}>{series.title}</span> : null}
+                <span className="s">{series.count_tasks} tasks · {series.count_images} images</span>
+              </div>
+              <div className="p-session-strip">
+                {groupSeriesSteps(series.steps, row.task_id).map((g, gi) => {
+                  const key = g.kind === "rerolls" ? "r" + g.from + "-" + g.to : g.step.task_id;
+                  return (
+                    <React.Fragment key={key}>
+                      {gi > 0 ? <span className="p-lin-arrow">→</span> : null}
+                      {g.kind === "rerolls" ? (
+                        <span className="p-ses-rerolls" title={g.count + " seed-only rerolls (v" + g.from + "–v" + g.to + ")"}>
+                          …{g.count} rerolls…
+                        </span>
+                      ) : (
+                        <button type="button"
+                          className={"p-ses-step" + (g.step.task_id === row.task_id ? " this" : "")}
+                          title={g.step.label}
+                          onClick={() => onNavigate(g.step.first_media_id)}>
+                          <span className="thumb">
+                            <img src={"/thumbs/" + encodeURIComponent(g.step.first_media_id) + ".jpg"} alt="" loading="lazy" decoding="async" />
+                            <span className="v">v{g.step.v}</span>
+                          </span>
+                          <span className="lab">{g.step.label}</span>
+                        </button>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
             </div>
           ) : null}

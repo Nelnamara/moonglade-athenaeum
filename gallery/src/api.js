@@ -37,6 +37,35 @@ export async function fetchSiblings(taskIds) {
   return d && d.by_task && typeof d.by_task === "object" ? d : { by_task: {} };
 }
 
+// SESSION strip in Image Details (#34, direction C): is THIS image's task a step in a
+// multi-task dial-in series, and if so, the whole series to draw task-by-task. Two
+// reads, both fail-soft to null (the strip is decoration -- a failure, or a singleton,
+// means no panel, never an error surface). First the membership POST: one task_id to
+// /api/series, which answers by_task ONLY for a task that's in a multi-task series
+// (singletons -- ~85% of the library -- come back absent => null, no second call). Then
+// GET /api/series/<sid> for the ordered steps. Returns the series struct
+// {sid,title,model,count_tasks,count_images,span,steps} or null.
+// #34: the page-batched series lookup for the grid stamp -- one POST for the whole page,
+// by_task holds only tasks in a multi-task series (singletons absent, cost nothing).
+export async function fetchSeriesBatch(taskIds) {
+  return postJSON("/api/series", { task_ids: taskIds });
+}
+
+export async function fetchSeries(taskId) {
+  if (!taskId) return null;
+  const m = await postJSON("/api/series", { task_ids: [taskId] });
+  const hit = m && m.by_task && typeof m.by_task === "object" ? m.by_task[taskId] : null;
+  if (!hit || !hit.sid) return null;
+  try {
+    const r = await fetch("/api/series/" + encodeURIComponent(hit.sid));
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d && Array.isArray(d.steps) && d.steps.length ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 // ZIP download goes through a real form submit so the browser owns the download.
 export function downloadZipForm(idList) {
   const f = document.createElement("form");
