@@ -885,8 +885,16 @@ def remove_from_collection(db_path, media_ids, name):
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
-                  collection=""):
+                  collection="", series=""):
     """Return (rows, total) with filtering, sorting and pagination done in SQL.
+
+    `series` constrains the result to one dial-in series' members (#34 direction
+    B, the ?series=<sid> "open a stack" view): the sid resolves through the series
+    cache to its member task_ids and the WHERE gains a parameterized
+    `task_id IN (...)` over exactly that (naturally size-capped) list. An UNKNOWN
+    sid resolves to no members, which becomes an always-false clause -- an empty
+    result, never an error, and never a bare `IN ()` (a SQL syntax error). The ids
+    are bound as placeholders, like /api/siblings, so a sid can't inject SQL.
 
     `page_size=None` means UNPAGINATED: one statement returns every matching row and
     `total` is simply how many came back. That is not a convenience shorthand for "a very
@@ -902,6 +910,13 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
+    if series:
+        member_ids = _series_member_task_ids(db_path, series)
+        if member_ids:
+            where += " AND task_id IN ({})".format(",".join("?" * len(member_ids)))
+            params = list(params) + member_ids
+        else:
+            where += " AND 1=0"   # unknown sid -> empty result, not an error
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
     with catalog(db_path) as con:
         if page_size is None:
@@ -921,6 +936,25 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
+
+
+def _series_member_task_ids(db_path, sid):
+    """Sanitized member task_ids for a dial-in series id, or [] for an unknown sid
+    (#34 direction B, the ?series= filter). Resolved through the series cache; the
+    list is exactly the series' own tasks -- so it is naturally capped at the
+    series' real size -- each coerced to a non-empty, de-duplicated string, ready
+    for safe parameterized IN-clause binding (query_catalog does the binding)."""
+    _, by_sid = series_index(db_path)
+    s = by_sid.get(str(sid or "").strip())
+    if not s:
+        return []
+    out, seen = [], set()
+    for step in s.get("steps", []):
+        tid = str(step.get("task_id") or "").strip()
+        if tid and tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return out
 
 
 def _filters_from_args(args):
@@ -1614,6 +1648,68 @@ def series_index(db_path):
             return by_task, by_sid
     except sqlite3.Error:
         return {}, {}
+
+
+# --- direction B: the grouped listing (series-as-units) --------------------------------
+# Folding a filtered, sorted row set into dial-in series UNITS for /api/next/library
+# ?group=series. Kept as module-level pure functions so the fold + cover choice are
+# unit-testable without a request (tests/test_series_grouping.py). The route supplies
+# the rows (list_group_rows) and the series index (series_index); these decide only
+# unit membership, order, and which surviving member is the cover.
+
+def _series_cover_row(member_rows):
+    """The cover among a series unit's SURVIVING members (#34 direction B review
+    item 4): the newest by created_at, PREFERRING an image over a video poster --
+    the newest image when the unit has any image at all, else the newest member
+    overall. Deterministic on ties (created_at, then media_id)."""
+    images = [m for m in member_rows if str(m.get("is_video") or "") != "1"]
+    pool = images or member_rows
+    return max(pool, key=lambda m: (_series_ts(m.get("created_at")) or float("-inf"),
+                                    str(m.get("media_id") or "")))
+
+
+def fold_series_units(rows_min, by_task):
+    """Fold a filtered, sorted row list into grid UNITS for the grouped listing
+    (#34 direction B). `rows_min` is the FULL filtered set in the active sort order
+    (list_group_rows shape: dicts with media_id/task_id/created_at/is_video);
+    `by_task` is series_index()[0] -- task_id -> (sid, v) for members of MULTI-task
+    series only.
+
+    A UNIT is a generation event shown as ONE card, keyed:
+      * ("series", sid)   -- a MULTI-task dial-in series: every image of every task
+                             in it folds into this one unit (up to 801 images);
+      * ("task", task_id) -- any other task: its sibling images (a batch) collapse
+                             to one unit -- one generation, one card, exactly the
+                             count the grouped grid pages over (a lone image is just
+                             a one-member task unit);
+      * ("row", media_id) -- a row with a BLANK task_id: its own per-row unit, since
+                             imports all share task_id '' and must never weld into
+                             one giant unit (the series-engine / siblings rule).
+
+    Returns (unit_order, members):
+      * unit_order -- the unit KEYS in first-appearance order. A unit takes the
+        POSITION of its FIRST matching member (first occurrence in the sorted set);
+        every later member folds in rather than opening a new unit.
+      * members -- {key: [surviving member rows]}, for cover selection and a cheap
+        surviving-member count.
+
+    The whole point is server-side grouping: a series can span many pages, so the
+    fold must see the entire filtered set, not one page. `total` = len(unit_order)."""
+    unit_order, members, seen = [], {}, set()
+    for r in rows_min:
+        tid = str(r.get("task_id") or "")
+        hit = by_task.get(tid) if tid else None
+        if hit:
+            key = ("series", hit[0])
+        elif tid:
+            key = ("task", tid)
+        else:
+            key = ("row", str(r.get("media_id") or ""))
+        members.setdefault(key, []).append(r)
+        if key not in seen:
+            seen.add(key)
+            unit_order.append(key)
+    return unit_order, members
 
 
 # ---------------------------------------------------------------------------
@@ -3489,6 +3585,37 @@ def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newe
             "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
         ).fetchall()
         return [r[0] for r in rows]
+
+
+def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="newest",
+                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
+                    media_type="", source="", collection=""):
+    """The minimal per-row columns needed to fold a filtered result set into dial-in
+    series UNITS (#34 direction B's grouped listing): (media_id, task_id, created_at,
+    is_video) for EVERY matching row in the active sort order, WITHOUT a page LIMIT.
+
+    Same WHERE + ORDER as query_catalog / list_media_ids -- the grouped listing has
+    to see the whole filtered set, because a series spans many rows across pages (up
+    to 801 images) and a client-side collapse of one page would only ever group the
+    fraction that landed on it. It needs just these four columns, though: task_id to
+    map a row to its series, created_at + is_video to pick each unit's cover (newest
+    surviving image), and media_id to fetch that one cover's full row afterwards.
+    Bounded work -- ids-only over the catalog (~36k rows max); measured in
+    tests/test_series_grouping.py. No `series=` param here on purpose: grouping is
+    the alternative to a single-series view, never combined with it."""
+    where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
+                                 published_only, art_tag, lora, media_type, source,
+                                 collection)
+    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT media_id, task_id, created_at, is_video FROM catalog "
+            "WHERE {} ORDER BY {}".format(where, order), params
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        con.close()
 
 
 def unique_models(db_path):
@@ -12185,7 +12312,19 @@ __DESIGN_TOKENS__
     def api_next_library():
         """The new gallery's own listing surface -- full filter set, clean field
         names, one purpose. Reads the same catalog engine (query_catalog) as
-        everything else; nothing here is borrowed from the picker routes."""
+        everything else; nothing here is borrowed from the picker routes.
+
+        Two dial-in-series modes ride on top (#34 direction B), both no-ops unless
+        the client opts in, so the default payload is exactly what it was before:
+          * ?group=series -- fold the FULL filtered set into series UNITS: a
+            multi-task series becomes ONE card (its cover row + a `series` key with
+            the sid/counts/title), every other row stays its own card, and paging
+            counts units, not rows. Grouping is server-side because a series spans
+            many pages (up to 801 images) -- a client can't collapse what it never
+            sees on one page.
+          * ?series=<sid> -- the complement: the ungrouped listing constrained to
+            one series' members (B's 'open a stack' navigation), resolved in SQL by
+            query_catalog. Ignored while group=series (grouping supersedes it)."""
         q = (request.args.get("q") or "").strip()
         try:
             page = max(1, int(request.args.get("page") or 1))
@@ -12196,9 +12335,13 @@ __DESIGN_TOKENS__
         media = (request.args.get("media") or "").strip().lower()
         media = media if media in ("image", "video") else ""
         sort = (request.args.get("sort") or "newest").strip()
-        rows, total = query_catalog(
-            db_path, q=q, sort=sort, page=page, page_size=page_size,
-            rating_min=rating_min, media_type=media,
+        group = (request.args.get("group") or "").strip()
+        series = (request.args.get("series") or "").strip()
+        # One filter set, keyed by query_catalog()/list_group_rows()'s own param
+        # names, so the paged row query and the whole-set grouping query see an
+        # IDENTICAL WHERE + ORDER.
+        filters = dict(
+            q=q, sort=sort, rating_min=rating_min, media_type=media,
             collection=(request.args.get("collection") or "").strip(),
             source=(request.args.get("source") or "").strip(),
             # The Advanced flyout's fields -- same engine params the classic
@@ -12212,12 +12355,14 @@ __DESIGN_TOKENS__
             # link (same engine param the classic gallery's own link sets).
             batch=(request.args.get("batch") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
-        items = []
-        for r in rows:
+
+        def _card(r):
+            """One grid card dict for a catalog row -- the SINGLE definition both the
+            plain row listing and a grouped unit's cover build, so a series cover is
+            byte-identical to that same media as an ordinary card (only the extra
+            `series` key ever differs)."""
             mid = r.get("media_id")
-            if not mid:
-                continue
-            items.append({
+            return {
                 "media_id": str(mid),
                 "thumb": "/thumbs/{}.jpg".format(mid),
                 "is_video": str(r.get("is_video") or "") == "1",
@@ -12240,7 +12385,49 @@ __DESIGN_TOKENS__
                 "title": str(r.get("title") or "").strip(),
                 "batch_index": str(r.get("batch_index") or ""),   # #33: PixAI's own output number
                 "batch_size": str(r.get("batch_size") or ""),
-            })
+            }
+
+        if group == "series":
+            by_task, by_sid = series_index(db_path)
+            # The whole filtered set, ids + the four grouping columns only, in sort
+            # order. Bounded (measured in tests/test_series_grouping.py).
+            unit_order, members = fold_series_units(
+                list_group_rows(db_path, **filters), by_task)
+            total = len(unit_order)
+            start = (page - 1) * page_size
+            page_keys = unit_order[start:start + page_size]
+            # Resolve this page's units to ONE cover media_id each (the newest
+            # surviving image of the unit), then fetch just those full rows -- one
+            # query, at most page_size rows.
+            cover_ids = [str(_series_cover_row(members[k]).get("media_id") or "")
+                         for k in page_keys]
+            full = {str(r.get("media_id")): r
+                    for r in rows_for_media_ids(db_path, cover_ids)}
+            items = []
+            for k, mid in zip(page_keys, cover_ids):
+                r = full.get(mid)
+                if r is None:
+                    continue
+                card = _card(r)
+                if k[0] == "series":
+                    s = by_sid.get(k[1]) or {}
+                    card["series"] = {
+                        "sid": k[1],
+                        # count_tasks is the series' FULL task (version) count from
+                        # by_sid -- the dial's step count, a property of the series
+                        # itself, not of the current filter. count_images is the
+                        # SURVIVING member count (cheap -- we already hold them), so a
+                        # filtered stack's image tally matches what the filter left
+                        # visible rather than overcounting hidden members.
+                        "count_tasks": s.get("count_tasks", 0),
+                        "count_images": len(members[k]),
+                        "title": s.get("title", ""),
+                    }
+                items.append(card)
+        else:
+            rows, total = query_catalog(
+                db_path, page=page, page_size=page_size, series=series, **filters)
+            items = [_card(r) for r in rows if r.get("media_id")]
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
 
