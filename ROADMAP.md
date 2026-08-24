@@ -33,8 +33,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   built from the refit review's findings; which sections bite decides which answer.
 
 - **The dial-in series — facet chips (E) + optional local-VLM naming** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
-  The series engine, the **Session** strip in Image Details, and **prompt-derived series names** all
-  shipped this cycle (see `CHANGELOG.md` under *Unreleased*); the clustering rule (same model · ≤8h gap ·
+  The series engine, **first-class grid stacking (B)**, the **Session** strip in Image Details, and
+  **prompt-derived series names** all shipped this cycle (see `CHANGELOG.md` under *Unreleased*); the
+  clustering rule (same model · ≤8h gap ·
   clause-similarity ≥ 0.5) was **owner-validated on the Series Review Board** — 10/10 sample series accurate,
   near-misses rightly apart — and is now the live foundation. What is left is the two parts #34 itself
   scoped as follow-ons, not the base build: **E's facet chips** over a series, and the **optional
@@ -47,12 +48,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   PixAI's own download names are `from-PixAI-<task>-<index>`; the API sends no filename (a media object +
   CDN URL), the site synthesizes one client-side. Workshop what ours should be — the batch index is now a
   known fact — before anything touches 43k files (`--organize` makes any rename reversible).
-
-- **Per-batch / per-task grid stacking** *(absorbed into "Naming the dial-in" direction B, 2026-08-23 — a batch stack is the degenerate one-task series)*
-  Collapse the gallery wall so a multi-image generation (a batch of, say, 4) shows as **one
-  stack/card** instead of N flat tiles — de-cluttering the grid for batch gens. Kept as its own
-  item after the layout follow-ons (including Group-by, which would have generalized it) were cut.
-  Design-first (user-visible surface); the stack render + expand-to-see-the-batch interaction are the build.
 
 - **Gallery layout switcher — mobile pass only (maybe)** *(desktop base shipped 2026-08-19)*
   The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`; the owner
