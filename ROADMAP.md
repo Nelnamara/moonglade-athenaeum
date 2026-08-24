@@ -32,13 +32,15 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
-- **The dial-in series — B + C + prompt-derived names** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
-  Owner pick off the "Naming the Dial-In" board (2026-08-23); the clustering rule (same model · ≤8h gap ·
-  clause-similarity ≥ 0.5) **owner-validated on the Series Review Board** — 10/10 sample series accurate,
-  near-misses rightly apart. Full scope, order, and constraints live on #34 (design sources: the two
-  workshop artifacts + the LINEAGE pattern; batch index #33 lands first). Design-level adversarial
-  review before build. E's facet chips and the optional local-VLM module (Provider Deck, rerolls only)
-  are natural follow-ons, not in scope.
+- **The dial-in series — facet chips (E) + optional local-VLM naming** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
+  The series engine, the **Session** strip in Image Details, and **prompt-derived series names** all
+  shipped this cycle (see `CHANGELOG.md` under *Unreleased*); the clustering rule (same model · ≤8h gap ·
+  clause-similarity ≥ 0.5) was **owner-validated on the Series Review Board** — 10/10 sample series accurate,
+  near-misses rightly apart — and is now the live foundation. What is left is the two parts #34 itself
+  scoped as follow-ons, not the base build: **E's facet chips** over a series, and the **optional
+  local-VLM module** (Provider Deck, rerolls only) that would name a series from the *image* rather than
+  the prompt. Design-level adversarial review before build; design sources are the two workshop artifacts
+  + the LINEAGE pattern on #34.
 
 - **The filename convention — workshop** *(owner, 2026-08-23)*
   `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
@@ -159,7 +161,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   lifetime stats, contest catalog). Much has since shipped in some form; audit what's left
   worth surfacing before building anything.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
-  left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?).
+  left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
+  overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
+  it removed real cruft in passing — the `_connect` catalog shim and the front-end `postJSON` helper are
+  gone, `LibraryBar` shed thirteen dead props, and dozens of hand-rolled call sites collapsed onto single
+  seams (the request module, the price transport, the library scan, `media_tools`). The item still stands
+  as a deliberate sweep — the job is to hunt what's *left* (deprecated-in-place flags, orphaned
+  classic-era code), not to bank the refactor's incidental cleanup as the sweep.
 
 ## Open questions — need a call before they can be scoped
 
@@ -204,8 +212,14 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   repo's two largest, highest-complexity, most-churned modules — the top regression-risk / hotspot
   / refactor targets (Flare tracks the live scores). Split into cohesive modules to cut the risk.
   This is SPEND-PATH code, so it's **its own project with a design + adversarial review, NOT a side
-  effect of the naming/tidy pass** — naming is a moving axis, this is a splitting axis. The smaller
-  god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,
+  effect of the naming/tidy pass** — naming is a moving axis, this is a splitting axis. **The premise
+  shifted (2026-08-24):** the architecture refactor did **not** split either file, so the item stands — but
+  it carved named internal seams *within* both that a future split can lift out cleanly. In
+  `moonglade_backup.py`: the `pixai_client` (PixAIClient) and `media_tools` sections and the
+  `build_request`/`GenerationRequest` payload road; in `moonglade_gallery.py`: the `LIBRARY SCAN`,
+  `CATALOG VERBS`, and catalog-road (`catalog()` / `migrate()`) sections. The seams are the hard part of a
+  split, so the work is more tractable than it was — but still unbuilt, and still its own reviewed effort.
+  The smaller god-files (`loom-core.js`, `loom-mutations.js`, `CostBadge.jsx`, `UpscalePanel.jsx`,
   `videoDrawerCore.js`) can ride a structural pass instead; these two are banked as their own effort.
 
 ---
