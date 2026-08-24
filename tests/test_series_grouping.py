@@ -339,3 +339,15 @@ def test_fold_skips_blank_media_id_rows_like_the_ungrouped_path():
     unit_order, members = G.fold_series_units(rows, {})
     assert unit_order == [("task", "Z")]          # only the real row; no ('row','') unit
     assert ("row", "") not in members
+
+
+def test_export_csv_filter_extraction_carries_series():
+    """#34 B (ultrareview finding 1): /export-csv reads its filters through
+    _filters_from_args, which must extract ?series= the way it already extracts ?batch=.
+    Without it, exporting an OPEN series stack silently drops the constraint and dumps the
+    whole filtered library instead of the stack's members. Regression pin for the wiring."""
+    assert G._filters_from_args({"series": "S1"}).get("series") == "S1"     # present -> carried
+    assert "series" not in G._filters_from_args({})                        # absent -> dropped
+    assert "series" not in G._filters_from_args({"series": ""})            # empty  -> dropped (falsy)
+    both = G._filters_from_args({"series": "S1", "batch": "B2"})           # rides beside batch
+    assert both.get("series") == "S1" and both.get("batch") == "B2"

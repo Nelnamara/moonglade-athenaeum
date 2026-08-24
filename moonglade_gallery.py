@@ -989,6 +989,10 @@ def _filters_from_args(args):
         "media_type":     media_type if media_type in ("image", "video") else "",
         "source":         source if source in ("online", "api", "local", "deleted") else "",
         "collection":     args.get("collection", ""),
+        # #34 direction B: a ?series= drill-down is a real filter query_catalog honours
+        # (like batch above), so /export-csv must carry it too -- otherwise exporting an
+        # open series stack drops the constraint and dumps the whole filtered library.
+        "series":         args.get("series", ""),
     }
     # Every default here is falsy (""/0/False), so dropping falsy values is exactly
     # "drop the filters the user didn't set".

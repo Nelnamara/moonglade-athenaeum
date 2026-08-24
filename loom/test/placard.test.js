@@ -34,7 +34,7 @@ describe("Accession Stamp replaces the filename line (Grid.jsx)", () => {
   test("the stamp: local day · time lead line, then the model with the not-grouped flag", () => {
     assert.match(cap, /<span className="mgg-stamp lead">\{localDayTime\(it\.created_at\) \|\| it\.date \|\| ""\}<\/span>/);
     // #34: the model stamp now appends the dial-in suffix (· v3 · 2/4) via the shared helper.
-    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\) \+ seriesSuffix\(it, seriesByTask\)\}<\/span>/);
+    assert.match(cap, /<span className="mgg-stamp">\{\(it\.model \|\| "no model"\) \+ \(it\.task_id \? "" : " · not grouped"\) \+ \(stack \? "" : seriesSuffix\(it, seriesByTask\)\)\}<\/span>/);
     assert.match(grid, /import \{ localDay, localDayTime \} from "\.\.\/gen\/dates\.js";/);
     // the stars/Open/Details row is untouched, below the stamp and strip
     assert.ok(cap.indexOf('className="mgg-stamp"') < cap.indexOf("{strip}"));

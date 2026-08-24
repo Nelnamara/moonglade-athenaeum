@@ -604,7 +604,11 @@ export default function Grid({
     // Sibling Strip (#30, direction E): the task's outputs, self lit, the rest dimmed.
     // Only when the task has >= 2 members (the API already omits the rest). More than
     // four -> four and a "+N"; self always sits among the four shown.
-    const sibs = it.task_id ? siblings[it.task_id] : null;
+    // Badge-only on a stack (#34 B, ultrareview finding 2): a stacked cover shows its
+    // SERIES/BATCH badge, never the sibling strip -- the strip is redundant on a batch
+    // and misleading on a series (it lists only the cover task's versions, implying the
+    // stack holds just those). Plain cards are unchanged.
+    const sibs = (it.task_id && !stack) ? siblings[it.task_id] : null;
     let strip = null;
     // Owner call (a), 2026-08-22: below STRIP_MIN_THUMB the fixed-height grid/hero cell
     // can no longer hold the slab + a strip (it clips the stamp at the card top), and at
@@ -729,7 +733,7 @@ export default function Grid({
               "not grouped" when the row has no task to belong to. */}
           {stampTitle ? <span className="mgg-title">{stampTitle}</span> : null}
           <span className="mgg-stamp lead">{localDayTime(it.created_at) || it.date || ""}</span>
-          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped") + seriesSuffix(it, seriesByTask)}</span>
+          <span className="mgg-stamp">{(it.model || "no model") + (it.task_id ? "" : " · not grouped") + (stack ? "" : seriesSuffix(it, seriesByTask))}</span>
           {strip}
           <span className="mgg-caprow">
             <Stars mediaId={it.media_id} rating={it.rating} onRate={onRate} />

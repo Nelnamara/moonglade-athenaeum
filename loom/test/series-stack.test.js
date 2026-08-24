@@ -68,6 +68,13 @@ describe("(b) a series||batch unit renders the stack markup + the right badge (G
       'const stampTitle = (stack === "series" && it.series.title) ? it.series.title : it.title;'));
     assert.ok(grid.includes("{stampTitle ? <span className=\"mgg-title\">{stampTitle}</span> : null}"));
   });
+  test("badge-only on a stack (finding 2): no sibling strip, no ·vN suffix on a stacked face", () => {
+    // the strip is redundant on a batch and misleading on a series (it lists only the
+    // cover task's versions) -- so it's gated OFF for stacks; the badge is the only signal.
+    assert.ok(grid.includes("const sibs = (it.task_id && !stack) ? siblings[it.task_id] : null;"));
+    // the dial-in suffix likewise steps aside on a stack cover (the badge carries counts).
+    assert.ok(grid.includes('(stack ? "" : seriesSuffix(it, seriesByTask))'));
+  });
 });
 
 describe("(c) opening a stack NAVIGATES: series -> series filter, batch -> View-batch", () => {
