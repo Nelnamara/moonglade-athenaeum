@@ -392,78 +392,51 @@ def catalog(db_path):
         con.close()
 
 
-def _connect(db_path):
-    """Thin alias over the catalog road for the helpers below, which predate it and
-    hold the connection themselves (`con = _connect(...)` / `finally: con.close()`).
-    Same guarantees as catalog(): migrated once per process, Row factory, no
-    per-call DDL. New code -- and every catalog verb -- uses `catalog()`; nothing
-    outside this module's own helper set should call this."""
-    migrate(db_path)
-    con = sqlite3.connect(str(db_path))
-    con.row_factory = sqlite3.Row
-    return con
-
-
 def load_catalog(db_path):
     """Return all rows as a list of plain dicts, oldest-first."""
     db_path = Path(db_path)
     if not db_path.exists():
         return []
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute("SELECT * FROM catalog").fetchall()
         return [dict(r) for r in rows]
-    finally:
-        con.close()
 
 
 def save_catalog(db_path, rows):
     """Upsert a list of dicts into the catalog (replaces the old full-rewrite)."""
     db_path = Path(db_path)
     init_db(db_path)
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         con.executemany(
             _UPSERT,
             [tuple(r.get(f, "") or "" for f in CATALOG_FIELDS) for r in rows],
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def update_rating(db_path, media_id, value):
     """Update a single row's rating without touching the rest of the catalog."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         con.execute(
             "UPDATE catalog SET rating=? WHERE media_id=?",
             (str(value) if value else "", media_id),
         )
         con.commit()
-    finally:
-        con.close()
 
 
 def delete_from_catalog(db_path, media_id):
     """Remove a single row by media_id."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         con.execute("DELETE FROM catalog WHERE media_id=?", (media_id,))
         con.commit()
-    finally:
-        con.close()
 
 
 def update_prompt_full(db_path, media_id, text):
     """Overwrite a single row's prompt_full (manual annotation/correction)."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         con.execute("UPDATE catalog SET prompt_full=? WHERE media_id=?",
                     (text or "", media_id))
         con.commit()
-    finally:
-        con.close()
 
 
 def bulk_replace_prompt(db_path, media_ids, find, replace):
@@ -471,9 +444,8 @@ def bulk_replace_prompt(db_path, media_ids, find, replace):
     Returns the number of rows actually changed."""
     if not find:
         return 0
-    con = _connect(db_path)
     changed = 0
-    try:
+    with catalog(db_path) as con:
         for mid in media_ids:
             row = con.execute("SELECT prompt_full FROM catalog WHERE media_id=?",
                               (mid,)).fetchone()
@@ -485,8 +457,6 @@ def bulk_replace_prompt(db_path, media_ids, find, replace):
                 con.execute("UPDATE catalog SET prompt_full=? WHERE media_id=?", (new, mid))
                 changed += 1
         con.commit()
-    finally:
-        con.close()
     return changed
 
 
@@ -829,12 +799,9 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
 
 def get_row(db_path, media_id):
     """Return a single catalog row dict by media_id, or None."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         row = con.execute("SELECT * FROM catalog WHERE media_id=?", (media_id,)).fetchone()
         return dict(row) if row else None
-    finally:
-        con.close()
 
 
 def get_row_by_task(db_path, task_id):
@@ -842,13 +809,10 @@ def get_row_by_task(db_path, task_id):
     /api/task-params: a task id this library never downloaded from is refused
     there, so the route can't be used to probe arbitrary task ids under the
     owner's credentials (adversarial review 2026-08-13, finding 4.3)."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         row = con.execute("SELECT * FROM catalog WHERE task_id=? LIMIT 1",
                           (task_id,)).fetchone()
         return dict(row) if row else None
-    finally:
-        con.close()
 
 
 def _split_collections(s):
@@ -857,14 +821,11 @@ def _split_collections(s):
 
 def unique_collections(db_path):
     """Distinct collection names across the catalog, case-insensitive sorted."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         names = set()
         for (s,) in con.execute("SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
             names.update(_split_collections(s))
         return sorted(names, key=str.lower)
-    finally:
-        con.close()
 
 
 # Both collection edits below are a read-modify-write of ONE comma-joined column, so
@@ -883,9 +844,8 @@ def add_to_collection(db_path, media_ids, name):
     name = (name or "").strip().replace(",", " ").strip()
     if not name or not media_ids:
         return 0
-    con = _connect(db_path)
     changed = 0
-    try:
+    with catalog(db_path) as con:
         with _COLLECTIONS_LOCK:
             for mid in media_ids:
                 row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
@@ -898,8 +858,6 @@ def add_to_collection(db_path, media_ids, name):
                                 (",".join(cols), mid))
                     changed += 1
             con.commit()
-    finally:
-        con.close()
     return changed
 
 
@@ -908,9 +866,8 @@ def remove_from_collection(db_path, media_ids, name):
     name = (name or "").strip()
     if not name or not media_ids:
         return 0
-    con = _connect(db_path)
     changed = 0
-    try:
+    with catalog(db_path) as con:
         with _COLLECTIONS_LOCK:
             for mid in media_ids:
                 row = con.execute("SELECT collections FROM catalog WHERE media_id=?", (mid,)).fetchone()
@@ -922,8 +879,6 @@ def remove_from_collection(db_path, media_ids, name):
                                 (",".join(c for c in cols if c != name), mid))
                     changed += 1
             con.commit()
-    finally:
-        con.close()
     return changed
 
 
@@ -948,8 +903,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         if page_size is None:
             rows = con.execute(
                 "SELECT * FROM catalog WHERE {} ORDER BY {}".format(where, order),
@@ -967,8 +921,6 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
-    finally:
-        con.close()
 
 
 def _filters_from_args(args):
@@ -1012,22 +964,20 @@ def _filters_from_args(args):
 def catalog_counts(db_path):
     """At-a-glance header stats: image count, video count, distinct collections.
     Cheap COUNTs over the catalog. Fails soft to zeros."""
-    con = _connect(db_path)
-    try:
-        images = con.execute(
-            "SELECT COUNT(*) FROM catalog WHERE filename != '' "
-            "AND COALESCE(is_video,'') != '1'").fetchone()[0]
-        videos = con.execute(
-            "SELECT COUNT(*) FROM catalog WHERE is_video = '1'").fetchone()[0]
-        names = set()
-        for (s,) in con.execute(
-                "SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
-            names.update(_split_collections(s))
-        return {"images": images, "videos": videos, "collections": len(names)}
-    except sqlite3.Error:
-        return {"images": 0, "videos": 0, "collections": 0}
-    finally:
-        con.close()
+    with catalog(db_path) as con:
+        try:
+            images = con.execute(
+                "SELECT COUNT(*) FROM catalog WHERE filename != '' "
+                "AND COALESCE(is_video,'') != '1'").fetchone()[0]
+            videos = con.execute(
+                "SELECT COUNT(*) FROM catalog WHERE is_video = '1'").fetchone()[0]
+            names = set()
+            for (s,) in con.execute(
+                    "SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
+                names.update(_split_collections(s))
+            return {"images": images, "videos": videos, "collections": len(names)}
+        except sqlite3.Error:
+            return {"images": 0, "videos": 0, "collections": 0}
 
 
 
@@ -1530,14 +1480,11 @@ def compute_series(db_path):
         deleted -- honest (they describe what exists), explicitly UNLIKE #33's
         batch index (PixAI's permanent fact, never renumbered).
     """
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT task_id, model_id, model_name, created_at, prompt_full,"
             " prompt_preview, media_id, batch_index FROM catalog"
             " WHERE task_id != '' ORDER BY task_id, media_id").fetchall()
-    finally:
-        con.close()
 
     # Aggregate rows into tasks (first row's text/model/timestamp; every row a
     # member). batch_index rides along purely for the #33 member ordering.
@@ -1649,12 +1596,9 @@ def series_index(db_path):
     parallel recomputes. Fails soft to empty indexes (no cache write) on a
     missing/broken catalog, like catalog_counts does."""
     try:
-        con = _connect(db_path)
-        try:
+        with catalog(db_path) as con:
             cheap = tuple(con.execute(
                 "SELECT COUNT(*), MAX(media_id) FROM catalog").fetchone())
-        finally:
-            con.close()
         now = time.time()
         with _SERIES_CACHE_LOCK:
             ent = _SERIES_CACHE.get(str(db_path))
@@ -2973,40 +2917,38 @@ def achievement_metrics(db_path):
     """The metric bundle every achievement threshold is measured against. Cheap
     COUNTs over the local catalog -- read-only, no network, no spend. Fails soft."""
     m = catalog_counts(db_path)   # images, videos, collections
-    con = _connect(db_path)
-    try:
-        def _scalar(sql):
-            return int(con.execute(sql).fetchone()[0] or 0)
-        m["models"] = _scalar(
-            "SELECT COUNT(DISTINCT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''))) "
-            "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
-        m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
-        m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
-        # The Moonforge: gens made IN the app -- same set as the gallery's
-        # "made locally" filter (source api OR local), NOT just api.
-        m["local_gens"] = _scalar(
-            "SELECT COUNT(*) FROM catalog WHERE source IN ('api','local')")
-        # Marathon: the busiest single calendar day of in-app conjuring.
-        m["gens_in_a_day"] = _scalar(
-            "SELECT COALESCE(MAX(c), 0) FROM (SELECT COUNT(*) AS c FROM catalog "
-            "WHERE source IN ('api','local') AND COALESCE(created_at,'') != '' "
-            "GROUP BY substr(created_at, 1, 10))")
-        # The Lexicon: distinct keywords across every tagged piece (art_tags is
-        # a comma list; the split has to happen Python-side).
-        kw = set()
-        for (tags,) in con.execute(
-                "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''"):
-            for t in (tags or "").split(","):
-                t = t.strip().lower()
-                if t:
-                    kw.add(t)
-        m["distinct_keywords"] = len(kw)
-    except sqlite3.Error:
-        for k in ("models", "published", "tagged", "local_gens",
-                  "gens_in_a_day", "distinct_keywords"):
-            m.setdefault(k, 0)
-    finally:
-        con.close()
+    with catalog(db_path) as con:
+        try:
+            def _scalar(sql):
+                return int(con.execute(sql).fetchone()[0] or 0)
+            m["models"] = _scalar(
+                "SELECT COUNT(DISTINCT COALESCE(NULLIF(model_name,''), NULLIF(model_id,''))) "
+                "FROM catalog WHERE COALESCE(model_name,'') != '' OR COALESCE(model_id,'') != ''")
+            m["published"] = _scalar("SELECT COUNT(*) FROM catalog WHERE is_published = '1'")
+            m["tagged"] = _scalar("SELECT COUNT(*) FROM catalog WHERE COALESCE(art_tags,'') != ''")
+            # The Moonforge: gens made IN the app -- same set as the gallery's
+            # "made locally" filter (source api OR local), NOT just api.
+            m["local_gens"] = _scalar(
+                "SELECT COUNT(*) FROM catalog WHERE source IN ('api','local')")
+            # Marathon: the busiest single calendar day of in-app conjuring.
+            m["gens_in_a_day"] = _scalar(
+                "SELECT COALESCE(MAX(c), 0) FROM (SELECT COUNT(*) AS c FROM catalog "
+                "WHERE source IN ('api','local') AND COALESCE(created_at,'') != '' "
+                "GROUP BY substr(created_at, 1, 10))")
+            # The Lexicon: distinct keywords across every tagged piece (art_tags is
+            # a comma list; the split has to happen Python-side).
+            kw = set()
+            for (tags,) in con.execute(
+                    "SELECT art_tags FROM catalog WHERE COALESCE(art_tags,'') != ''"):
+                for t in (tags or "").split(","):
+                    t = t.strip().lower()
+                    if t:
+                        kw.add(t)
+            m["distinct_keywords"] = len(kw)
+        except sqlite3.Error:
+            for k in ("models", "published", "tagged", "local_gens",
+                      "gens_in_a_day", "distinct_keywords"):
+                m.setdefault(k, 0)
     return m
 
 
@@ -3476,50 +3418,44 @@ def sweep_telemetry(out_dir):
 def top_published_rows(db_path, limit=12):
     """The owner's top published artworks by likes -> rows with artwork_id + engagement.
     Feeds the 'Your Art' panel (live views are fetched per artwork_id on top of this)."""
-    con = _connect(db_path)
-    try:
-        rows = con.execute(
-            "SELECT media_id, artwork_id, title, prompt_preview, aes_score, "
-            "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
-            "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments "
-            "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
-            "ORDER BY likes DESC, comments DESC LIMIT ?", (int(limit),)).fetchall()
-        return [dict(r) for r in rows]
-    except sqlite3.Error:
-        return []
-    finally:
-        con.close()
+    with catalog(db_path) as con:
+        try:
+            rows = con.execute(
+                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, "
+                "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
+                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments "
+                "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
+                "ORDER BY likes DESC, comments DESC LIMIT ?", (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
 
 
 def published_totals(db_path):
     """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks)."""
-    con = _connect(db_path)
-    try:
-        r = con.execute(
-            "SELECT COUNT(*) AS c, "
-            "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
-            "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments "
-            "FROM catalog WHERE is_published = '1'").fetchone()
-        return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0)}
-    except sqlite3.Error:
-        return {"count": 0, "likes": 0, "comments": 0}
-    finally:
-        con.close()
+    with catalog(db_path) as con:
+        try:
+            r = con.execute(
+                "SELECT COUNT(*) AS c, "
+                "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
+                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments "
+                "FROM catalog WHERE is_published = '1'").fetchone()
+            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0)}
+        except sqlite3.Error:
+            return {"count": 0, "likes": 0, "comments": 0}
 
 
 def distinct_task_count(db_path):
     """How many distinct generation TASKS the local catalog holds. This is the apples-to-apples
     counterpart to the server's `me.tasks.totalCount` (also tasks, not images) -> backup coverage
     = local/server. Counts distinct non-empty task_id. Fails soft to 0."""
-    con = _connect(db_path)
-    try:
-        return int(con.execute(
-            "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE COALESCE(task_id,'') != ''"
-        ).fetchone()[0] or 0)
-    except sqlite3.Error:
-        return 0
-    finally:
-        con.close()
+    with catalog(db_path) as con:
+        try:
+            return int(con.execute(
+                "SELECT COUNT(DISTINCT task_id) FROM catalog WHERE COALESCE(task_id,'') != ''"
+            ).fetchone()[0] or 0)
+        except sqlite3.Error:
+            return 0
 
 
 def rows_for_media_ids(db_path, ids):
@@ -3528,8 +3464,7 @@ def rows_for_media_ids(db_path, ids):
     ids = [str(i) for i in (ids or []) if str(i).strip()]
     if not ids:
         return []
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         found = {}
         for i in range(0, len(ids), 400):
             chunk = ids[i:i + 400]
@@ -3539,8 +3474,6 @@ def rows_for_media_ids(db_path, ids):
             ).fetchall():
                 found[str(r["media_id"])] = dict(r)
         return [found[i] for i in ids if i in found]
-    finally:
-        con.close()
 
 
 def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newest",
@@ -3551,26 +3484,20 @@ def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newe
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
     order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
         ).fetchall()
         return [r[0] for r in rows]
-    finally:
-        con.close()
 
 
 def unique_models(db_path):
     """Return sorted list of distinct non-empty model names in the catalog."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT DISTINCT model_name FROM catalog WHERE model_name != '' ORDER BY model_name"
         ).fetchall()
         return [r[0] for r in rows]
-    finally:
-        con.close()
 
 
 def catalog_model_options(db_path):
@@ -3578,16 +3505,13 @@ def catalog_model_options(db_path):
     first. model_id is the version id used in real generations, so it's a valid,
     guaranteed-working value for --generate's --model -- the basis of the model
     picker dropdown."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT COALESCE(NULLIF(model_name,''), model_id) AS nm, model_id, COUNT(*) c "
             "FROM catalog WHERE COALESCE(model_id,'') != '' AND model_id GLOB '[0-9]*' "
             "GROUP BY model_id ORDER BY c DESC"
         ).fetchall()
         return [(r[0], r[1]) for r in rows]
-    finally:
-        con.close()
 
 
 def backfill_batches(out_dir, db_path):
@@ -3608,8 +3532,7 @@ def backfill_batches(out_dir, db_path):
         updates[e.media_id] = e.rel.parts[1]
     if not updates:
         return 0
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         updated = 0
         for mid, batch_name in updates.items():
             cur = con.execute(
@@ -3619,22 +3542,17 @@ def backfill_batches(out_dir, db_path):
             updated += cur.rowcount
         con.commit()
         return updated
-    finally:
-        con.close()
 
 
 def catalog_years(db_path):
     """Descending list of years (ints) present in catalog created_at, for the
     date-filter dropdowns. Empty if the catalog has no dated rows."""
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT DISTINCT SUBSTR(created_at,1,4) AS y FROM catalog "
             "WHERE created_at != '' AND y != '' ORDER BY y DESC"
         ).fetchall()
         return [int(r[0]) for r in rows if str(r[0]).isdigit()]
-    finally:
-        con.close()
 
 
 def _fmt_size(n):
@@ -3692,8 +3610,7 @@ def collection_health(out_dir, db_path):
             sizes = sorted(mid_sizes[mid])
             dup_bytes += sum(sizes[:-1])  # all but the largest counted as reclaimable
 
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         def _scalar(sql):
             return con.execute(sql).fetchone()[0]
         total_rows   = _scalar("SELECT COUNT(*) FROM catalog")
@@ -3738,8 +3655,6 @@ def collection_health(out_dir, db_path):
         # health count and what --import-local/Import would actually do stay in sync
         catalog_ids = {mid for (mid,) in con.execute(
             "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
-    finally:
-        con.close()
 
     tag_counter = Counter()
     for (tags,) in tag_rows:
@@ -3845,8 +3760,7 @@ def same_seed_groups(db_path, limit=1000):
     of the grouped prompt_full (NOT the seed's own identity) so callers get a stable,
     compact per-group key without echoing the full prompt text into an id string."""
     import hashlib
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT seed, prompt_full, GROUP_CONCAT(media_id) AS ids, COUNT(*) AS n "
             "FROM catalog "
@@ -3863,8 +3777,6 @@ def same_seed_groups(db_path, limit=1000):
             out.append({"seed": r["seed"], "prompt_hash": phash,
                         "media_ids": [m for m in (r["ids"] or "").split(",") if m]})
         return out
-    finally:
-        con.close()
 
 
 # Hamming distance threshold (out of 64 bits) below which two dHashes count as a
@@ -3910,14 +3822,11 @@ def near_duplicate_groups(db_path, threshold=NEAR_DUP_HAMMING_THRESHOLD, hash_si
     hash" -- a conservative, real number derived from the actual bits, never a fabricated
     confidence score."""
     from collections import defaultdict
-    con = _connect(db_path)
-    try:
+    with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, phash FROM catalog "
             "WHERE COALESCE(phash,'') != '' AND COALESCE(is_video,'') != '1'"
         ).fetchall()
-    finally:
-        con.close()
 
     total_bits = hash_size * hash_size
     n_bands = 4
