@@ -32,21 +32,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
-- **Naming the dial-in — DECIDED: B + C, prompt-only D** *(owner pick off the "Naming the Dial-In"
-  workshop board, 2026-08-23)*
-  **B** — the dial-in series is first-class in the grid: a session stacks into one card
-  (`SERIES · 4v · 17`) that opens into its versions; absorbs the older per-batch stacking idea.
-  **C** — Details gains a SESSION strip under LINEAGE: the series task-by-task with the delta as each
-  caption ("start · Mio" → "reroll" → "character → Nelnamara"), current lit.
-  **D, prompt-only** — character/trait names and tags extracted from prompt data itself (character:
-  tokens, LoRA names, artist tags; no Mio-file ingest required — quality compounds with prompt
-  history; the MD dumps can enrich later). E (facet chips) not chosen; D's extractor enables it later.
-  **Constraints stand:** filenames untouched · local only, $0 third-party · free floor for every user ·
-  VLM = optional Provider Deck module, rerolls only. **Riskiest assumption — series clustering
-  quality** (a wrong cluster is visibly wrong in B): validate FIRST with a read-only clustering probe
-  over the real library + a review board of sample clusters for the owner's thumbs-up, then scope →
-  adversarial review → build. Data layer: series clustering + delta differ + batch index
-  ([#33](https://github.com/Nelnamara/moonglade-athenaeum/issues/33)) + the trait extractor.
+- **The dial-in series — B + C + prompt-derived names** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
+  Owner pick off the "Naming the Dial-In" board (2026-08-23); the clustering rule (same model · ≤8h gap ·
+  clause-similarity ≥ 0.5) **owner-validated on the Series Review Board** — 10/10 sample series accurate,
+  near-misses rightly apart. Full scope, order, and constraints live on #34 (design sources: the two
+  workshop artifacts + the LINEAGE pattern; batch index #33 lands first). Design-level adversarial
+  review before build. E's facet chips and the optional local-VLM module (Provider Deck, rerolls only)
+  are natural follow-ons, not in scope.
 
 - **The filename convention — workshop** *(owner, 2026-08-23)*
   `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
