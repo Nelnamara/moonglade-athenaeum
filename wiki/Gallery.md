@@ -24,7 +24,9 @@ A row of frosted glow-pill buttons, one hue per destination:
 - **🏆** — [The Folio of Honors](Folio-of-Honors): achievements, points, and earnable
   skins. It opens as a maximized overlay over the gallery, not a separate page (`Esc`
   closes it).
-- **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing.
+- **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
+  piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
+  flagged it, so a moderated work is no longer shown as a plain "Public".
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.

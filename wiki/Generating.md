@@ -523,8 +523,8 @@ the button comes back — the app will tell you it doesn't know rather than leav
 - **Tag Suggestions** — Danbooru-style autocomplete in the **Generate** prompt, the **Generate**
   negative, and the **Edit** instruction (not the Video tab's prompt); **TAB** accepts.
 - **Bridges from the gallery**: right-click any thumbnail (Edit / Send to Video / Remix / Copy
-  media id), the same Edit/Video buttons in the lightbox, **↺ Remix** in Image Details, and
-  multi-select → **Send to Video** in the bulk bar.
+  media id — and **Rebuild poster** on a video), the same Edit/Video buttons in the lightbox,
+  **↺ Remix** in Image Details, and multi-select → **Send to Video** in the bulk bar.
 - **↺ Remix** loads a picture's *full recipe* into the Generate tab — prompt, negative, size,
   steps/CFG/seed, the model at the exact version it rendered with, and its LoRAs at their real
   weights (recovered from the task itself, never guessed by name). It only fills the composer;
