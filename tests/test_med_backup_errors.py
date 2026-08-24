@@ -206,7 +206,10 @@ class TestM03BookmarksStatus:
 
     def test_persisted_query_rotation_still_gets_its_own_message(self, mock_session, mocker):
         """An APQ miss answers {"errors":[...]} with NO 'data' key at all, so the errors
-        branch has to be tested before the shape guard or the self-healing hint is lost."""
+        branch has to be tested before the shape guard or the self-healing hint is lost. That
+        ordering now lives in the seam (PixAIClient.persisted reads `errors` -- and the
+        PersistedQueryNotFound special case -- before the missing-`data` guard), so the
+        recapture hint the seam raises ('Recapture the hash') is what surfaces here."""
         resp = mocker.MagicMock()
         resp.status_code = 200
         resp.ok = True
@@ -214,7 +217,7 @@ class TestM03BookmarksStatus:
         resp.json.return_value = {"errors": [{"message": "PersistedQueryNotFound"}]}
         mock_session.get.return_value = resp
 
-        with pytest.raises(core.PixAIError, match="hash has rotated"):
+        with pytest.raises(core.PixAIError, match="Recapture"):
             core._bookmarks_persisted(mock_session, **_persisted_args())
 
 
@@ -567,11 +570,11 @@ class TestM18ModelLookupFailure:
                                                "model_id": vid, "model_name": vid},
         ])
         monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
-        resp = mocker.MagicMock()
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"data": {"generationModelVersion": None}}
+        # A faithful PixAI 200 (via _reply) carrying generationModelVersion: null -- the seam
+        # (PixAIClient.persisted) now inspects the HTTP status, so the response has to model a
+        # real one, not a bare MagicMock whose status_code compares truthy against >= 500.
         session = mocker.MagicMock()
-        session.get.return_value = resp
+        session.get.return_value = _reply(mocker, {"data": {"generationModelVersion": None}})
         mocker.patch.object(core, "_make_session", return_value=session)
 
         res = core.run_fix_models(SimpleNamespace(

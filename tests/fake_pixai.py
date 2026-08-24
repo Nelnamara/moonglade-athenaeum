@@ -135,7 +135,7 @@ class FakePixAI:
 
     def _record(self, **kw):
         fields = dict(verb=None, op="", document=None, variables=None, retries=0,
-                      path=None, params=None, body=None)
+                      path=None, params=None, body=None, client_library=None, headers=None)
         fields.update(kw)
         call = SimpleNamespace(**fields)
         self.calls.append(call)
@@ -157,9 +157,15 @@ class FakePixAI:
                             retries=retries)
         return self._resolve(op, "GraphQL operation", call)
 
-    def persisted(self, op_name, variables=None, sha256=None, retries=4):
+    def persisted(self, op_name, variables=None, sha256=None, retries=4,
+                  client_library=None, headers=None):
+        """Keyed by `op_name`, the whole point of the seam-level road: a test registers a
+        canned answer with `fake.on(op_name, ...)` and it is returned here, or refuses by name
+        if nobody did. `client_library` and `headers` mirror the real client's signature (the
+        listArtworks GET passes both) and are recorded on the call so a test can assert the
+        `x-apollo-operation-name` header rode along, exactly as it does on the wire."""
         call = self._record(verb="persisted", op=op_name, variables=variables,
-                            retries=retries)
+                            retries=retries, client_library=client_library, headers=headers)
         return self._resolve(op_name, "persisted operation", call)
 
     def rest_get(self, path, params=None, timeout=30):
@@ -183,9 +189,11 @@ class FakePixAI:
         raise UnregisteredOperation(
             "FakePixAI has no requests.Session -- that is the point. A path that reaches "
             "for `.session` (or calls `.get`/`.post` on the client) is one of the call "
-            "sites still speaking HTTP itself: resolve_media, download, the persisted "
-            "GETs that have not moved onto persisted(), delete_task_gql, refresh_jwt. "
-            "Stub that call directly instead of routing it through the fake.")
+            "sites still speaking HTTP itself: resolve_media, download, delete_task_gql, "
+            "refresh_jwt. (The six persisted GETs -- task_detail_gql, _bookmarks_persisted, "
+            "model_name_gql, resolve_model_base_id, _resolve_model_preset, artwork_list_gql "
+            "-- ride persisted() now, so register them with fake.on(<operationName>, ...).) "
+            "Stub the HTTP call directly instead of routing it through the fake.")
 
     def get(self, url, **kwargs):
         raise UnregisteredOperation(

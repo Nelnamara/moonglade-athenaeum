@@ -236,9 +236,11 @@ class TestThePrimitivesAreThinDelegates:
 
 
 class TestTheTransitionSurface:
-    """resolve_media, download, delete_task_gql, refresh_jwt, run_watch and the six
-    persisted GETs that have not moved onto `persisted()` still reach for the Session
-    themselves. Those calls have to keep working when what they hold is a client."""
+    """resolve_media, download, delete_task_gql, refresh_jwt and run_watch still reach for
+    the Session themselves (delete_task_gql POSTs a persisted mutation, which Apollo blocks
+    over GET, so it does not ride `persisted()`). Those calls have to keep working when what
+    they hold is a client. The six persisted GETs no longer belong on this list -- they ride
+    `persisted()` now; see TestTheSixPersistedGetsRideTheClient below."""
     def test_get_post_headers_cookies_delegate_to_the_session(self):
         s = RecordingSession(FakeResponse({"ok": 1}))
         s.headers["Authorization"] = "Bearer k"
@@ -250,14 +252,113 @@ class TestTheTransitionSurface:
         c.post("https://example/y", json={"a": 1})          # delete_task_gql / refresh_jwt
         assert [v for v, _u, _k in s.calls] == ["GET", "POST"]
 
-    def test_a_persisted_get_that_has_not_moved_still_works_through_a_client(self,
-                                                                            monkeypatch):
-        """task_detail_gql builds its own params and calls `session.get` directly. It is
-        handed a client in production now, so this is the shape that must not break."""
-        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "deadbeef")
-        s = RecordingSession(FakeResponse({"data": {"task": {"id": "T7"}}}))
-        assert core.task_detail_gql(core.PixAIClient(s), "T7") == {"id": "T7"}
-        assert s.calls[0][0] == "GET"
+
+class TestTheSixPersistedGetsRideTheClient:
+    """The last six hand-rolled persisted GETs now ride `PixAIClient.persisted()` like every
+    other PixAI call. Two things are pinned: they no longer build params or call the Session
+    themselves (they delegate through `_client_of`), and the wire they put on the socket is
+    BYTE-IDENTICAL to what they sent before -- same operationName, same captured
+    `sha256Hash`, same `variables` JSON -- which is the whole safety case for the change.
+    The hashes asserted here are the module constants, and those are unchanged from
+    origin/master, so matching them is matching master's wire."""
+
+    SIX = ["task_detail_gql", "_bookmarks_persisted", "model_name_gql",
+           "resolve_model_base_id", "_resolve_model_preset", "artwork_list_gql"]
+
+    @pytest.mark.parametrize("name", SIX)
+    def test_it_delegates_through_the_client_and_speaks_no_http_itself(self, name):
+        src = inspect.getsource(getattr(core, name))
+        assert "_client_of(" in src, "{} no longer routes through the client".format(name)
+        assert ".persisted(" in src, "{} does not ride persisted()".format(name)
+        assert "session.get(" not in src and "session.post(" not in src, \
+            "{} speaks HTTP itself again -- it must delegate".format(name)
+
+    # -- the wire each one puts on the socket is byte-identical to master -----------------
+    def _get(self, driver, data):
+        """Drive `driver(client)` against a RecordingSession answering `{"data": data}`,
+        and return (params, headers) of the single GET it made."""
+        s = RecordingSession(FakeResponse({"data": data}))
+        driver(core.PixAIClient(s))
+        (verb, url, kwargs) = s.calls[0]
+        assert verb == "GET" and url == core.API_URL
+        return kwargs["params"], kwargs.get("headers")
+
+    def test_task_detail_gql_wire(self):
+        p, _ = self._get(lambda c: core.task_detail_gql(c, "T7"), {"task": {"id": "T7"}})
+        assert p["operationName"] == "getTaskById"
+        assert json.loads(p["variables"]) == {"id": "T7"}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"] == {"version": 1, "sha256Hash": core.TASK_DETAIL_HASH}
+
+    def test_bookmarks_persisted_wire(self):
+        p, _ = self._get(
+            lambda c: core._bookmarks_persisted(c, {}, False, "", "", "", 24),
+            {"me": {"bookmarkedGenerationModels": {}}})
+        assert p["operationName"] == core.BOOKMARKED_MODELS_OP == "listMyBookmarkedGenerationModels"
+        assert json.loads(p["variables"]) == {"first": 24}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"]["sha256Hash"] == core.BOOKMARKED_MODELS_HASH
+
+    def test_model_name_gql_wire(self):
+        p, _ = self._get(
+            lambda c: core.model_name_gql(c, "wire-model-id-0001"),
+            {"generationModelVersion": {"name": "v1", "model": {"title": "T"}}})
+        assert p["operationName"] == "getGenerationModelByVersionId"
+        assert json.loads(p["variables"]) == {"id": "wire-model-id-0001"}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
+
+    def test_resolve_model_base_id_wire(self):
+        p, _ = self._get(
+            lambda c: core.resolve_model_base_id(c, "V-wire-1"),
+            {"generationModelVersion": {"model": {"id": "B1"}}})
+        assert p["operationName"] == "getGenerationModelByVersionId"
+        assert json.loads(p["variables"]) == {"id": "V-wire-1"}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
+
+    def test_resolve_model_preset_wire(self):
+        p, _ = self._get(
+            lambda c: core._resolve_model_preset(c, "V-preset-wire-1"),
+            {"generationModelVersion": {"extra": {}}})
+        assert p["operationName"] == "getGenerationModelByVersionId"
+        assert json.loads(p["variables"]) == {"id": "V-preset-wire-1"}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"]["sha256Hash"] == core.MODEL_DETAIL_HASH
+
+    def test_artwork_list_gql_wire(self):
+        """The one outlier: it sends its OWN clientLibrary block and an x-apollo-operation-name
+        CSRF header. Both must survive the move onto the shared seam byte-for-byte."""
+        p, headers = self._get(lambda c: core.artwork_list_gql(c, last=50),
+                               {"artworks": {"edges": [], "pageInfo": {}}})
+        assert p["operationName"] == "listArtworks"
+        assert json.loads(p["variables"]) == {"authorId": str(core.USER_ID), "last": 50,
+                                              "tackLanguage": "en"}
+        ext = json.loads(p["extensions"])
+        assert ext["persistedQuery"]["sha256Hash"] == core.ARTWORK_LIST_HASH
+        assert ext["clientLibrary"] == core.CLIENT_LIBRARY_ARTWORK
+        assert headers == {"x-apollo-operation-name": "listArtworks"}
+
+    # -- FakePixAI is the second adapter on this same road -------------------------------
+    def test_fake_pixai_answers_a_registered_persisted_op(self):
+        fake = FakePixAI().on("getTaskById", {"task": {"id": "T9"}})
+        assert core.task_detail_gql(fake, "T9") == {"id": "T9"}
+        assert fake.calls_for("getTaskById")[0].variables == {"id": "T9"}
+
+    def test_fake_pixai_refuses_an_unregistered_persisted_op(self):
+        """Offline-by-default: an op nobody registered is refused BY NAME, and the refusal is
+        an AssertionError -- not a PixAIError -- so task_detail_gql's fail-soft catch cannot
+        quietly swallow it into a None."""
+        fake = FakePixAI()
+        with pytest.raises(UnregisteredOperation, match="getTaskById"):
+            core.task_detail_gql(fake, "T9")
+
+    def test_fake_pixai_records_the_artwork_client_library_and_header(self):
+        fake = FakePixAI().on("listArtworks", {"artworks": {"edges": [], "pageInfo": {}}})
+        core.artwork_list_gql(fake, last=50)
+        call = fake.calls_for("listArtworks")[0]
+        assert call.headers == {"x-apollo-operation-name": "listArtworks"}
+        assert call.client_library == core.CLIENT_LIBRARY_ARTWORK
 
 
 # ---------------------------------------------------------------------------

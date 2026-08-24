@@ -1584,11 +1584,18 @@ class PixAIClient:
         raise RuntimeError("unreachable")
 
     # -- persisted-hash GET --------------------------------------------------
-    def persisted(self, op_name, variables=None, sha256=None, retries=4):
+    def persisted(self, op_name, variables=None, sha256=None, retries=4,
+                  client_library=None, headers=None):
         """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
         params their frontend sends. `sha256=None` resolves the captured hash for
-        `op_name`; the history feed is the operation that rides this road today. Returns
-        the `data` dict; raises PixAIError with a recapture hint if the hash went stale."""
+        `op_name` (the history feed is the operation that rides this road out of the box);
+        every other captured op rides here by passing its OWN `sha256=`. `client_library`
+        overrides the Apollo `clientLibrary` block for the one op that sends its own
+        (`listArtworks`), and `headers` adds request headers for this single call
+        (`listArtworks`' `x-apollo-operation-name`). Returns the `data` dict; raises
+        PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
+        bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
+        credential or an edge refusal answered in its own JSON)."""
         sha = sha256 or (PERSISTED_QUERY_HASH if op_name == OPERATION_NAME else "")
         if not sha:
             raise PixAIError(
@@ -1601,7 +1608,7 @@ class PixAIClient:
             "operationName": op_name,
             "variables": json.dumps(variables or {}, separators=(",", ":")),
             "extensions": json.dumps(
-                {"clientLibrary": CLIENT_LIBRARY,
+                {"clientLibrary": client_library or CLIENT_LIBRARY,
                  "persistedQuery": {"version": 1, "sha256Hash": sha}},
                 separators=(",", ":")),
         }
@@ -1609,7 +1616,7 @@ class PixAIClient:
         for attempt in range(retries + 1):
             try:
                 _t = time.monotonic()
-                r = self._session.get(API_URL, params=params, timeout=60)
+                r = self._session.get(API_URL, params=params, timeout=60, headers=headers)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException as e:
@@ -1641,6 +1648,12 @@ class PixAIClient:
             if r.status_code >= 400:
                 print("\nHTTP {}:\n{}".format(r.status_code, json.dumps(data, indent=2)[:1500]))
                 raise PixAIError("HTTP {} error (see log above).".format(r.status_code))
+            if not isinstance(data, dict) or "data" not in data:
+                raise PixAIError(
+                    "HTTP {} returned a non-GraphQL body (no 'data' key), so the request "
+                    "failed rather than answering -- a stale/absent credential or an edge "
+                    "refusal is the usual cause:\n{}".format(
+                        r.status_code, (r.text or "")[:300]))
             vlog("{} page -> HTTP {} ({:,} bytes) in {:.2f}s".format(
                 op_name, r.status_code, len(r.content), time.monotonic() - _t))
             return data["data"]
@@ -2413,38 +2426,22 @@ def task_detail_gql(session, task_id, retries=3):
             "with a blank value in config.json. Restore it, or capture a current getTaskById "
             "sha256Hash from DevTools if the hash rotated (see RECAPTURE at the bottom of "
             "this file).")
-    params = {
-        "operation": "getTaskById",
-        "u3t": U3T,
-        "operationName": "getTaskById",
-        "variables": json.dumps({"id": str(task_id)}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": TASK_DETAIL_HASH}},
-            separators=(",", ":")),
-    }
-    delay = 2.0
-    why = ""
-    for attempt in range(retries + 1):
-        try:
-            r = session.get(API_URL, params=params, timeout=60)
-            if r.status_code == 200:
-                data = r.json()
-                return (data.get("data") or {}).get("task")
-            why = "HTTP {}".format(r.status_code)
-            # Only 429/5xx are worth a second look; a 401/404 answers the same way forever.
-            if not (r.status_code == 429 or r.status_code >= 500):
-                break
-        except (requests.RequestException, ValueError) as e:
-            why = str(e) or e.__class__.__name__
-        if attempt == retries:
-            break
-        vlog("getTaskById {} failed ({}); retrying in {:.0f}s".format(task_id, why, delay))
-        time.sleep(delay); delay *= 2
-    print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing is "
-          "lost -- this call only READS a task, so the generation and its credits are "
-          "exactly as PixAI left them. Try again in a moment.".format(task_id, why))
-    return None
+    # Rides the one transport seam (PixAIClient.persisted) rather than hand-building the
+    # persisted-GET params: same operationName, same TASK_DETAIL_HASH, same variables JSON,
+    # so the wire PixAI sees is byte-for-byte what it was. The 3-retry count is preserved,
+    # passed straight through -- a blip here is read downstream as a LOST GENERATION.
+    # `_client_of` accepts either a raw Session or a client. Still fails SOFT: this path must
+    # return None and never raise, so a single outage is not reported as "your images are
+    # gone" -- the seam's raise is caught here and turned back into None.
+    try:
+        data = _client_of(session).persisted(
+            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries)
+    except (PixAIError, requests.RequestException) as e:
+        print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
+              "is lost -- this call only READS a task, so the generation and its credits are "
+              "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
+        return None
+    return (data or {}).get("task")
 
 
 _DELETE_BATCH_MEDIA_MUT = """
@@ -3370,50 +3367,23 @@ def _bookmarks_persisted(session, variables, want_lora, lbt, kw, after, limit):
         v["modelTypes"] = ["ANY_LORA"]
     if want_lora and lbt in LORA_BASE_MODEL_TYPES:
         v["loraBaseModelTypes"] = [lbt]
-    params = {
-        "operation": BOOKMARKED_MODELS_OP,
-        "u3t": U3T or "",
-        "operationName": BOOKMARKED_MODELS_OP,
-        "variables": json.dumps(v, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": BOOKMARKED_MODELS_HASH}},
-            separators=(",", ":")),
-    }
-    r = session.get(API_URL, params=params, timeout=60)
-    if r.status_code in (401, 403):
-        raise PixAIError(
-            "bookmarks: HTTP {} on the persisted path -- the request was refused, not "
-            "answered with an empty bookmark list. A stale/absent U3T or an expired key is "
-            "the usual cause; refresh the credential and retry.".format(r.status_code))
-    try:
-        body = r.json()
-    except ValueError:
-        raise PixAIError("bookmarks: HTTP {} non-JSON response".format(r.status_code))
-    if isinstance(body, dict) and body.get("errors"):
-        blob = json.dumps(body["errors"])[:400]
-        if "PersistedQueryNotFound" in blob:
-            raise PixAIError(
-                "bookmarks: the persisted hash has rotated. Re-run "
-                "`python tools/harvest_api_surface.py fetch` then `extract` to re-derive it "
-                "-- the hashes are computed from PixAI's own bundle, so this is self-healing.")
-        raise PixAIError("bookmarks: " + blob)
-    # Everything below trusted the body's SHAPE alone: no status check, and only a top-level
-    # "errors" key counted as failure. An auth/gateway refusal that answers with perfectly
-    # valid but non-GraphQL JSON -- a plain {"statusCode":401,"message":"Unauthorized"} from
-    # the edge, say -- has neither, so it fell straight through the `or {}` tail and
-    # model_bookmarks_gql reported {"results": [], "has_more": False}: the user saw an EMPTY
-    # Bookmarks tab, which reads as "you have no bookmarks", for a request that never ran
-    # (M03, 2026-07-27). A real GraphQL reply always carries a "data" key (null or not), so
-    # its absence is the tell, and it catches the 200-with-an-error-body variant that a
-    # status check alone would miss.
-    if not isinstance(body, dict) or "data" not in body:
-        raise PixAIError(
-            "bookmarks: HTTP {} returned a non-GraphQL body -- the request failed rather "
-            "than returning an empty list:\n{}".format(r.status_code, r.text[:300]))
-    if not r.ok:
-        raise PixAIError("bookmarks: HTTP {}:\n{}".format(r.status_code, r.text[:300]))
-    return ((body.get("data") or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
+    # Rides the one transport seam (PixAIClient.persisted) instead of hand-building the
+    # persisted-GET params: same operationName, same BOOKMARKED_MODELS_HASH, same variables
+    # JSON, so the wire is byte-for-byte what it was (U3T is empty by default, where the old
+    # `U3T or ""` and the seam's `U3T` encode identically). Single attempt, as before -- no
+    # retry.
+    #
+    # The M03 guarantee now lives in the seam. It used to live here: a refusal answered with
+    # perfectly valid but non-GraphQL JSON -- a plain {"statusCode":401,...} from the edge,
+    # with no "errors" array -- once fell straight through the `or {}` tail, and the user saw
+    # an EMPTY Bookmarks tab for a request that never ran (M03, 2026-07-27). persisted now
+    # makes that impossible for EVERY persisted GET: it reads `errors` before status (so a
+    # rotated hash still gets its recapture hint), and refuses a body with no "data" key with
+    # a PixAIError rather than laundering it into an empty result. So a refusal RAISES here
+    # too -- it is simply the seam raising now, not this function.
+    data = _client_of(session).persisted(
+        BOOKMARKED_MODELS_OP, v, sha256=BOOKMARKED_MODELS_HASH, retries=0)
+    return ((data or {}).get("me") or {}).get("bookmarkedGenerationModels") or {}
 
 
 def workflow_catalog(session, first=80):
@@ -3689,43 +3659,25 @@ def model_name_gql(session, model_version_id, _cache={}, strict=False):
     if not MODEL_DETAIL_HASH:
         _cache[mid] = mid
         return mid
-    params = {
-        "operation": "getGenerationModelByVersionId",
-        "u3t": U3T,
-        "operationName": "getGenerationModelByVersionId",
-        "variables": json.dumps({"id": mid}, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY,
-             "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-            separators=(",", ":")),
-    }
     try:
-        r = session.get(API_URL, params=params, timeout=60)
-        try:
-            body = r.json()
-        except ValueError:
-            raise PixAIError("HTTP {} non-JSON body: {}".format(
-                r.status_code, (r.text or "")[:200]))
-        # Errors BEFORE status, exactly as gql() reads it: a refused PixAI query is an
-        # ordinary 200 carrying an `errors` array, so checking the status first sees a
-        # perfectly healthy response and reads the empty payload as "this model has no name".
-        if isinstance(body, dict) and body.get("errors"):
-            raise PixAIError("GraphQL error: " + json.dumps(body["errors"])[:300])
-        r.raise_for_status()
-        # The presence of `data` is what tells a GraphQL reply from an edge answering a refusal
-        # in perfectly valid non-GraphQL JSON ({"statusCode":401,...}) -- the same tell
-        # _bookmarks_persisted uses. A `data` that is null rather than an object is caught by
-        # the same check on purpose: the spec pairs a null data with an `errors` array (handled
-        # above), so a bare null answers nothing and must not read as "this model is gone".
-        if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
-            raise PixAIError("no GraphQL data in the reply: {}".format(str(body)[:200]))
-        # `"generationModelVersion": null` IS an answer -- the model is gone, which is what
-        # --relabel-removed is for. The field being ABSENT is not: nothing answered the
-        # question we asked, and treating that silence as "removed" is the whole bug.
-        if "generationModelVersion" not in body["data"]:
+        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 keeps this
+        # SINGLE-ATTEMPT (a name lookup drives no backoff loop, exactly as before). The seam
+        # already enforces the M18 ordering this function was hardened around: it reads the
+        # `errors` array BEFORE trusting the status (a refused PixAI query is a 200 carrying
+        # `errors`), rejects a bad status, and refuses a non-GraphQL body that has no `data`
+        # key -- raising PixAIError for each, which the `except` below records as a FAILURE,
+        # never as a name. What must stay HERE is the one distinction the seam cannot draw for
+        # us: a reply whose `data` is missing the `generationModelVersion` field answered
+        # NOTHING (fail), whereas that field present but null is the genuine "model is gone"
+        # answer that --relabel-removed exists for.
+        data = _client_of(session).persisted(
+            "getGenerationModelByVersionId", {"id": mid},
+            sha256=MODEL_DETAIL_HASH, retries=0)
+        if not isinstance(data, dict) or "generationModelVersion" not in data:
             raise PixAIError("reply carried no generationModelVersion field: {}".format(
-                str(body["data"])[:200]))
-        mv = body["data"]["generationModelVersion"] or {}
+                str(data)[:200]))
+        mv = data["generationModelVersion"] or {}
         title = (mv.get("model") or {}).get("title", "")
         version = mv.get("name", "")
         name = "{} {}".format(title, version).strip() if title else mid
@@ -3769,21 +3721,15 @@ def resolve_model_base_id(session, model_version_id):
     if not model_version_id or not MODEL_DETAIL_HASH:
         return ""
     try:
-        params = {
-            "operation": "getGenerationModelByVersionId",
-            "u3t": U3T,
-            "operationName": "getGenerationModelByVersionId",
-            "variables": json.dumps({"id": str(model_version_id)}, separators=(",", ":")),
-            "extensions": json.dumps(
-                {"clientLibrary": CLIENT_LIBRARY,
-                 "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-                separators=(",", ":")),
-        }
-        r = session.get(API_URL, params=params, timeout=30)
-        body = r.json()
-        if not isinstance(body, dict) or body.get("errors"):
-            return ""
-        mv = ((body.get("data") or {}).get("generationModelVersion")) or {}
+        # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+        # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (this
+        # one-off reuse-click lookup drove no retry before). Fails SOFT to '' on anything
+        # short of a clean answer: the seam raises PixAIError on a GraphQL error / bad status
+        # / non-GraphQL body, and the `except` below turns every one of those back into ''.
+        data = _client_of(session).persisted(
+            "getGenerationModelByVersionId", {"id": str(model_version_id)},
+            sha256=MODEL_DETAIL_HASH, retries=0)
+        mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
         return str((mv.get("model") or {}).get("id") or "")
     except Exception:                        # noqa: BLE001 -- a soft-fail restore, never fatal
         return ""
@@ -3909,15 +3855,16 @@ def _resolve_model_preset(session, version_id, _cache={}):
     preset = {}
     if MODEL_DETAIL_HASH:
         try:
-            params = {"operation": "getGenerationModelByVersionId", "u3t": U3T,
-                      "operationName": "getGenerationModelByVersionId",
-                      "variables": json.dumps({"id": vid}, separators=(",", ":")),
-                      "extensions": json.dumps(
-                          {"clientLibrary": CLIENT_LIBRARY,
-                           "persistedQuery": {"version": 1, "sha256Hash": MODEL_DETAIL_HASH}},
-                          separators=(",", ":"))}
-            body = session.get(API_URL, params=params, timeout=60).json()
-            ex = (((body.get("data") or {}).get("generationModelVersion") or {}).get("extra")) or {}
+            # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+            # MODEL_DETAIL_HASH, same variables JSON -> byte-identical wire. retries=0 (a
+            # single GET, as before). Never raises out: the seam's PixAIError on any refusal
+            # is caught here and the preset stays {} -- an em-dash is the honest answer when a
+            # model genuinely exposes no default for a field.
+            data = _client_of(session).persisted(
+                "getGenerationModelByVersionId", {"id": vid},
+                sha256=MODEL_DETAIL_HASH, retries=0)
+            mv = (data.get("generationModelVersion") if isinstance(data, dict) else None) or {}
+            ex = mv.get("extra") or {}
             steps, sampler, cfg = ex.get("samplingSteps"), ex.get("samplingMethod"), ex.get("cfgScale")
             preset = {
                 "steps":     ("" if steps is None else str(steps)),
@@ -5762,24 +5709,21 @@ def artwork_list_gql(session, before=None, last=50):
     variables = {"authorId": str(USER_ID), "last": last, "tackLanguage": "en"}
     if before:
         variables["before"] = before
-    params = {
-        "operation": "listArtworks",
-        "u3t": U3T,
-        "operationName": "listArtworks",
-        "variables": json.dumps(variables, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"clientLibrary": CLIENT_LIBRARY_ARTWORK,
-             "persistedQuery": {"version": 1, "sha256Hash": ARTWORK_LIST_HASH}},
-            separators=(",", ":")),
-    }
+    # Rides the one transport seam (PixAIClient.persisted): same operationName, same
+    # ARTWORK_LIST_HASH, same variables JSON -> byte-identical wire. This op is the one that
+    # sends its OWN Apollo clientLibrary block (CLIENT_LIBRARY_ARTWORK) and an
+    # x-apollo-operation-name CSRF header, both threaded through persisted's `client_library=`
+    # / `headers=` so the request PixAI sees is byte-for-byte what it was. retries=0 (a single
+    # GET, as before). Fails SOFT to None on any refusal: the seam raises PixAIError on a bad
+    # status / GraphQL error / non-GraphQL body, all caught here.
     try:
-        r = session.get(API_URL, params=params, timeout=60,
-                        headers={"x-apollo-operation-name": "listArtworks"})
-        if r.status_code != 200:
-            return None
-        return find_connection(r.json().get("data") or {})
-    except (requests.RequestException, ValueError):
+        data = _client_of(session).persisted(
+            "listArtworks", variables, sha256=ARTWORK_LIST_HASH,
+            client_library=CLIENT_LIBRARY_ARTWORK, retries=0,
+            headers={"x-apollo-operation-name": "listArtworks"})
+    except (requests.RequestException, PixAIError, ValueError):
         return None
+    return find_connection(data or {})
 
 
 def extract_artwork_meta(node):

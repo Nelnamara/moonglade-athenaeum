@@ -1,8 +1,10 @@
 """Tests for network-layer functions with mocked requests.Session."""
 import json
 import pytest
+import requests
 
 import moonglade_backup as core
+from tests.fake_pixai import FakePixAI
 
 
 def _make_response(mocker, status_code=200, json_body=None, text="", raises=None):
@@ -162,139 +164,82 @@ def test_variant_detection_cluster_is_gone():
 # ---------------------------------------------------------------------------
 
 class TestTaskDetailGql:
-    def test_returns_task_on_success(self, mock_session, mocker):
+    """task_detail_gql now rides the transport seam (PixAIClient.persisted). It is exercised
+    against a FakePixAI, the second adapter behind that seam: a registered `getTaskById`
+    answer is returned; a `fail` stands in for a read that raised at the seam."""
+    def test_returns_task_on_success(self, monkeypatch):
+        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "fakehash")
         task = {"id": "t1", "parameters": {"prompts": "full prompt"}, "outputs": {}}
-        resp = mocker.MagicMock()
-        resp.status_code = 200
-        resp.json.return_value = {"data": {"task": task}}
-        mock_session.get.return_value = resp
-        # Inject hash so the function doesn't raise
-        import moonglade_backup as c
-        orig = c.TASK_DETAIL_HASH
-        c.TASK_DETAIL_HASH = "fakehash"
-        try:
-            result = c.task_detail_gql(mock_session, "t1")
-        finally:
-            c.TASK_DETAIL_HASH = orig
-        assert result["id"] == "t1"
+        fake = FakePixAI().on("getTaskById", {"task": task})
+        assert core.task_detail_gql(fake, "t1")["id"] == "t1"
 
-    def test_returns_none_on_non_200(self, mock_session, mocker):
-        import moonglade_backup as c
-        resp = mocker.MagicMock()
-        resp.status_code = 500
-        mock_session.get.return_value = resp
-        orig = c.TASK_DETAIL_HASH
-        c.TASK_DETAIL_HASH = "fakehash"
-        try:
-            result = c.task_detail_gql(mock_session, "t1")
-        finally:
-            c.TASK_DETAIL_HASH = orig
-        assert result is None
+    def test_returns_none_on_server_failure(self, monkeypatch):
+        """A read that fails at the seam (a 500 surfaces there as an HTTPError; a 401/GraphQL
+        error as a PixAIError) must come back as None, never raise -- a blip here is read
+        downstream as a LOST GENERATION, and this path exists so an outage is not reported as
+        'your images are gone'."""
+        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "fakehash")
+        fake = FakePixAI().fail("getTaskById", requests.HTTPError("HTTP 500"))
+        assert core.task_detail_gql(fake, "t1") is None
 
-    def test_raises_when_hash_missing(self, mock_session):
-        import moonglade_backup as c
-        orig = c.TASK_DETAIL_HASH
-        c.TASK_DETAIL_HASH = ""
-        try:
-            with pytest.raises(c.PixAIError, match="TASK_DETAIL_HASH"):
-                c.task_detail_gql(mock_session, "t1")
-        finally:
-            c.TASK_DETAIL_HASH = orig
+    def test_raises_when_hash_missing(self, monkeypatch):
+        monkeypatch.setattr(core, "TASK_DETAIL_HASH", "")
+        with pytest.raises(core.PixAIError, match="TASK_DETAIL_HASH"):
+            core.task_detail_gql(FakePixAI(), "t1")
 
 
 class TestModelNameGql:
-    def test_returns_model_title_and_version(self, mock_session, mocker):
-        import moonglade_backup as c
+    def test_returns_model_title_and_version(self, monkeypatch):
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
         mv = {"name": "v1", "model": {"title": "Tsubaki.2"}}
-        resp = mocker.MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"data": {"generationModelVersion": mv}}
-        mock_session.get.return_value = resp
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = "fakehash"
-        # Clear module-level cache before test
-        c.model_name_gql.__defaults__  # ensure it's the right function
-        # Use a fresh call with a unique ID not in cache
-        try:
-            result = c.model_name_gql(mock_session, "unique_model_id_test_123")
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
-        assert result == "Tsubaki.2 v1"
+        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": mv})
+        # A unique id keeps the module-level lookup cache from answering with a prior test's.
+        assert core.model_name_gql(fake, "unique_model_id_test_123") == "Tsubaki.2 v1"
 
-    def test_returns_empty_for_empty_id(self, mock_session):
-        import moonglade_backup as c
-        assert c.model_name_gql(mock_session, "") == ""
-        assert c.model_name_gql(mock_session, None) == ""
+    def test_returns_empty_for_empty_id(self):
+        assert core.model_name_gql(FakePixAI(), "") == ""
+        assert core.model_name_gql(FakePixAI(), None) == ""
 
 
 class TestResolveModelBaseId:
     """The reuse-prefill's version->base-model reverse lookup (2026-08-02), fixing a real
     bug found live: the catalog's model_id is a VERSION id, and feeding that straight into
-    applyModelRow's base-model version listing returns nothing every time."""
-    def test_returns_the_base_models_own_id(self, mock_session, mocker):
-        import moonglade_backup as c
+    applyModelRow's base-model version listing returns nothing every time. Now rides the
+    transport seam; exercised against the FakePixAI adapter."""
+    def test_returns_the_base_models_own_id(self, monkeypatch):
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
         mv = {"name": "v1", "model": {"id": "1982880136609467518", "title": "Tsubaki.2"}}
-        resp = mocker.MagicMock()
-        resp.json.return_value = {"data": {"generationModelVersion": mv}}
-        mock_session.get.return_value = resp
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = "fakehash"
-        try:
-            result = c.resolve_model_base_id(mock_session, "1983308862240288769")
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
-        assert result == "1982880136609467518"
+        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": mv})
+        assert core.resolve_model_base_id(fake, "1983308862240288769") == "1982880136609467518"
 
-    def test_empty_id_short_circuits(self, mock_session):
-        import moonglade_backup as c
-        assert c.resolve_model_base_id(mock_session, "") == ""
-        assert c.resolve_model_base_id(mock_session, None) == ""
+    def test_empty_id_short_circuits(self):
+        assert core.resolve_model_base_id(FakePixAI(), "") == ""
+        assert core.resolve_model_base_id(FakePixAI(), None) == ""
 
-    def test_no_hash_configured_fails_soft(self, mock_session):
-        import moonglade_backup as c
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = ""
-        try:
-            assert c.resolve_model_base_id(mock_session, "V1") == ""
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
+    def test_no_hash_configured_fails_soft(self, monkeypatch):
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "")
+        assert core.resolve_model_base_id(FakePixAI(), "V1") == ""
 
-    def test_graphql_error_fails_soft_not_raises(self, mock_session, mocker):
-        import moonglade_backup as c
-        resp = mocker.MagicMock()
-        resp.json.return_value = {"errors": [{"message": "nope"}]}
-        mock_session.get.return_value = resp
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = "fakehash"
-        try:
-            assert c.resolve_model_base_id(mock_session, "V1") == ""
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
+    def test_graphql_error_fails_soft_not_raises(self, monkeypatch):
+        """A GraphQL error is raised at the seam (persisted turns an `errors` array into a
+        PixAIError); this soft-restore path swallows it and returns '' rather than surfacing a
+        wrong-id toast for a case that is not the user's mistake."""
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
+        fake = FakePixAI().fail("getGenerationModelByVersionId",
+                                core.PixAIError("GraphQL error: nope"))
+        assert core.resolve_model_base_id(fake, "V1") == ""
 
-    def test_removed_model_fails_soft(self, mock_session, mocker):
+    def test_removed_model_fails_soft(self, monkeypatch):
         """generationModelVersion: null (the model/version is gone) -- same '' answer as
         any other unresolvable case, never a crash."""
-        import moonglade_backup as c
-        resp = mocker.MagicMock()
-        resp.json.return_value = {"data": {"generationModelVersion": None}}
-        mock_session.get.return_value = resp
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = "fakehash"
-        try:
-            assert c.resolve_model_base_id(mock_session, "V1") == ""
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
+        fake = FakePixAI().on("getGenerationModelByVersionId", {"generationModelVersion": None})
+        assert core.resolve_model_base_id(fake, "V1") == ""
 
-    def test_network_exception_fails_soft(self, mock_session, mocker):
-        import moonglade_backup as c
-        mock_session.get.side_effect = RuntimeError("boom")
-        orig_hash = c.MODEL_DETAIL_HASH
-        c.MODEL_DETAIL_HASH = "fakehash"
-        try:
-            assert c.resolve_model_base_id(mock_session, "V1") == ""
-        finally:
-            c.MODEL_DETAIL_HASH = orig_hash
+    def test_network_exception_fails_soft(self, monkeypatch):
+        monkeypatch.setattr(core, "MODEL_DETAIL_HASH", "fakehash")
+        fake = FakePixAI().fail("getGenerationModelByVersionId", RuntimeError("boom"))
+        assert core.resolve_model_base_id(fake, "V1") == ""
 
 
 class TestQuickCount:
