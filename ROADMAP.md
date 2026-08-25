@@ -183,6 +183,14 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   only when a real second provider actually lands (so two concrete cases shape it). Low priority.
 - **Themed progress bar art.** A moon-phase gauge (near-finished art already banked) for
   generation/render/job progress. Decided in principle, unbuilt.
+- **UPnP / SSDP (or WS-Discovery) LAN presence — show up in Windows Explorer's "Network".**
+  Bonjour/mDNS (shipped) makes the server discoverable to phones/tablets and resolvable at
+  `moonglade.local`, but Windows Explorer's Network folder browses UPnP/SSDP + WS-Discovery, NOT
+  mDNS — so Moonglade never appears there (confirmed live 2026-08-25: the `.local` URL works from
+  Windows, but nothing lists in Explorer). A separate advertiser — an SSDP/UPnP `rootdevice`, or
+  the Windows-native WS-Discovery — would surface it as a device/link in Explorer's Network.
+  Different protocol from Bonjour, its own dependency; cosmetic/convenience, not reachability. Low
+  priority.
 - **Give the asset pack a real file type.** In Explorer `moonglade.dat` shows a blank Type column and
   a generic icon (owner nitpick, 2026-08-22). `.dat` is too generic to claim system-wide, so the clean
   fix is an app-specific extension (`.mgpack` or similar) plus a ProgID the app registers for the
