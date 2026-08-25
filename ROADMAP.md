@@ -17,7 +17,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Recently shipped is not listed here** — the achievement sealing (definitions + art in the
   sealed pack, public source holds only opaque ids) landed in 3.5.0; this session's toast polish and
-  video-Remix fix are in `CHANGELOG.md` under *Unreleased*, per the rule at the top of this file.
+  video-Remix fix are in `CHANGELOG.md` (the 3.6.0 release), per the rule at the top of this file.
 
 ---
 
@@ -34,7 +34,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **The dial-in series — facet chips (E) + optional local-VLM naming** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
   The series engine, **first-class grid stacking (B)**, the **Session** strip in Image Details, and
-  **prompt-derived series names** all shipped this cycle (see `CHANGELOG.md` under *Unreleased*); the
+  **prompt-derived series names** all shipped this cycle (see `CHANGELOG.md`, the 3.6.0 release); the
   clustering rule (same model · ≤8h gap ·
   clause-similarity ≥ 0.5) was **owner-validated on the Series Review Board** — 10/10 sample series accurate,
   near-misses rightly apart — and is now the live foundation. What is left is the two parts #34 itself
@@ -75,7 +75,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one
   (the card shows the header mark instead), and the designed welcome hold was removed for a test
   expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
-  call first (`Login.dc.html` has no banner element). Separate from the bundle-v2 merge.
+  call first (`Login.dc.html` has no banner element).
 
 - **Let LAN clients trigger the asset-pack download** ([adversarial review, 2026-08-22]) *(fast-follow, own branch)*
   The default-art pack (`moonglade.dat`) auto-downloads on the **server** machine's first launch after an
@@ -88,7 +88,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   table to edit and no hand-written guard in the handler any more — change the decorator to `@tier(LOGIN)`
   and regenerate `TIER_SNAPSHOT` in `tests/test_route_tiers.py`), the
   wizard calling it on a non-local device, and a confirm that repeat 685 MB fetches can't be weaponised
-  (single-flight already blocks concurrency). Not bolted onto the bundle-v2 merge.
+  (single-flight already blocks concurrency).
 
 - **Claimable-reward notice in the activity tracker + gift icon on promo cards** *(the icon half of
   [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26) shipped 2026-08-22; this is the
@@ -259,7 +259,7 @@ above, tagged "Scope":
 - **Loom:** cast a collection as an ordered shot-sequence scaffold · manual ordering within a
   collection · a cross-storyboard (series) cast library · find-in-storyboard search · a continuity
   ribbon (each shot's close frame beside the next shot's open frame).
-- **Mobile:** the layout switcher on phone (column density + per-device memory) · pull-to-refresh +
+- **Mobile:** pull-to-refresh +
   optional infinite scroll · a single-column full-bleed reading feed · a data-saver mode
   (medium-first, full-res on tap) · proper landscape handling · a "new since last visit" marker +
   jump-to-newest · an opt-in "remember this device" longer LAN session (still authenticated) ·
