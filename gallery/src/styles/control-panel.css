@@ -521,3 +521,26 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 @media (prefers-reduced-motion: reduce) {
   .mgbr-tile.armed .mgbr-halo, .mgbr-tile.armed .mgbr-dot { animation: none; }
 }
+
+/* --- Bonjour / LAN-discovery chip (BonjourCard.jsx) --- */
+.mgcp-bonjour { margin-top: 14px; display: flex; flex-direction: column; gap: 7px; }
+.mgcp-bjstatus { display: flex; align-items: center; gap: 7px; font-size: 11.5px; line-height: 1.4; color: var(--text); }
+.mgcp-bjstatus .off { color: var(--overlay0); }
+.mgcp-bjstatus code { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--subtext); }
+.mgcp-bjdot { width: 8px; height: 8px; border-radius: 50%; background: var(--surface1); flex: none; }
+.mgcp-bjdot.on { background: var(--emerald); box-shadow: 0 0 7px var(--emerald); }
+.mgcp-bjurls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mgcp-bjurl { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.mgcp-bjqr { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.mgcp-bjqr img { border-radius: 8px; background: #fff; padding: 6px; }
+.mgcp-bjform { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.mgcp-bjrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text); }
+.mgcp-bjrow > span:first-child { width: 56px; color: var(--overlay0); font-size: 10.5px; flex: none; }
+.mgcp-bjtoggle { background: var(--surface0); border: 1px solid var(--surface1); color: var(--overlay0); border-radius: 999px; padding: 2px 13px; font-size: 10.5px; cursor: pointer; }
+.mgcp-bjtoggle.on { border-color: var(--emerald); color: var(--emerald); }
+.mgcp-bjtoggle:disabled { opacity: .5; cursor: default; }
+.mgcp-bjseg { display: inline-flex; border: 1px solid var(--surface1); border-radius: 7px; overflow: hidden; }
+.mgcp-bjseg button { background: var(--surface0); border: 0; color: var(--overlay0); padding: 3px 11px; font-size: 10.5px; cursor: pointer; }
+.mgcp-bjseg button.on { background: var(--accent); color: var(--base); }
+.mgcp-bjport { width: 74px; background: var(--surface0); border: 1px solid var(--surface1); color: var(--text); border-radius: 6px; padding: 3px 7px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+.mgcp-bjname { background: var(--surface0); border: 1px solid var(--surface1); color: var(--text); border-radius: 6px; padding: 3px 7px; font-size: 11px; }

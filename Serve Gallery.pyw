@@ -15,7 +15,8 @@ The child is told it's supervised via MOONGLADE_SUPERVISED=1 (so it enables Rest
 Background maintenance (the Control Panel scheduler + job runner) runs inside the server,
 so you don't need the desktop app to keep the archive current.
 
-Tweak SERVE_ARGS / PORT below to change the folder or port, or add "--host", "0.0.0.0" for LAN.
+The bind host + port + LAN discovery are normally set from the Control Panel's Bonjour chip
+(stored in config.json). serve.txt still overrides per machine (e.g. "--port 5757"); see below.
 Make a shortcut: right-click -> Send to -> Desktop (create shortcut); set moonglade.ico if you like.
 """
 import os
@@ -54,6 +55,18 @@ if "--port" in SERVE_ARGS:
     try:
         PORT = int(SERVE_ARGS[SERVE_ARGS.index("--port") + 1])
     except (ValueError, IndexError):
+        pass
+else:
+    # Mirror the server's own resolve_server_settings precedence: with no explicit --port in
+    # serve.txt, take the port from config.json (where the Control Panel's Bonjour chip writes it).
+    # Without this the chip could move the server's port while the browser still opened :5000 --
+    # the same class of bug the "no --out here" note above fixed for the library folder.
+    try:
+        import moonglade_backup as _core
+        _cfg_port = (_core._load_config() or {}).get("PORT")
+        if _cfg_port:
+            PORT = int(_cfg_port)
+    except Exception:
         pass
 
 # Single instance: if a Moonglade server is ALREADY answering on this port, don't start a second

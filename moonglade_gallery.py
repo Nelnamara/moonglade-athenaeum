@@ -5634,20 +5634,94 @@ def resolve_library_dir(explicit=None):
     return stored or DEFAULT_LIBRARY_DIR
 
 
+# Server binding + Bonjour discovery settings live in config.json (edited from the Control
+# Panel's Bonjour chip), so host/port need not be buried in the launcher's serve.txt. Same
+# precedence + fresh-read discipline as resolve_library_dir above.
+HOST_KEY = "HOST"
+PORT_KEY = "PORT"
+BONJOUR_ENABLED_KEY = "BONJOUR_ENABLED"
+BONJOUR_NAME_KEY = "BONJOUR_NAME"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 5000
+DEFAULT_BONJOUR_NAME = "Moonglade"
+
+
+def resolve_server_settings(host_arg=None, port_arg=None):
+    """Bind host/port + Bonjour discovery settings. An explicit CLI --host/--port wins (a one-off
+    launch or a second install must neither be overridden by, nor rewrite, the shared config),
+    else config.json's HOST/PORT/BONJOUR_*, else the defaults. Bonjour defaults OFF -- broadcast
+    is opt-in, flipped on from the chip. Read FRESH from disk (not core's _cfg cache) for the same
+    reason resolve_library_dir is: the Panel writes config then restarts."""
+    cfg = {}
+    try:
+        import moonglade_backup as _core
+        cfg = _core._load_config() or {}
+    except Exception:                                   # noqa: BLE001
+        cfg = {}
+    if host_arg is not None:
+        host = host_arg                              # an explicit --host is trusted as typed
+    else:
+        host = str(cfg.get(HOST_KEY) or "").strip() or DEFAULT_HOST
+        if host not in ("127.0.0.1", "0.0.0.0", "localhost", "::", "::1"):
+            # A hand-edited / legacy / non-bindable config HOST must not crash make_server at
+            # startup (the bind is OUTSIDE serve_forever's try). Accept only a real IP literal;
+            # anything else (a hostname, "5000", junk) falls back to the default.
+            import ipaddress
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                host = DEFAULT_HOST
+    try:
+        port = int(port_arg) if port_arg is not None else int(cfg.get(PORT_KEY) or DEFAULT_PORT)
+    except (TypeError, ValueError):
+        port = DEFAULT_PORT
+    name = str(cfg.get(BONJOUR_NAME_KEY) or "").strip() or DEFAULT_BONJOUR_NAME
+    return {"host": host, "port": port,
+            "bonjour_enabled": bool(cfg.get(BONJOUR_ENABLED_KEY, False)),
+            "bonjour_name": name}
+
+
 def _supervised():
     """True when the server was started by the managed launcher (Serve Gallery), which sets
     MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
     return os.environ.get("MOONGLADE_SUPERVISED") == "1"
 
 
+# The running werkzeug server, so a web Stop/Restart handler can shut it down GRACEFULLY instead
+# of hard-killing the process. main() stashes the server here right before it blocks in
+# serve_forever(); _schedule_server_exit() records the intended exit code and asks the server to
+# stop. main()'s `finally` then runs real cleanup (the IPv6 companion, and -- once it lands --
+# the mDNS goodbye) and returns `code` to `sys.exit(main())`, which the supervisor reads
+# (0 = stop, 42 = relaunch). This replaces the old os._exit() hard kill, which skipped every
+# cleanup hook; os._exit() survives only as the fallback for the impossible "no server stashed"
+# case so Stop/Restart can never go inert.
+_SERVER_CONTROL = {"srv": None, "companion": None, "exit_code": 0}
+_EXIT_LOCK = threading.Lock()
+
+
 def _schedule_server_exit(code):
-    """Let the current HTTP response flush, then exit the process with `code`
-    (0 = stop; 42 = the supervisor's 'relaunch me' signal). Factored out so tests can assert
-    the intended exit code without actually killing the test process."""
+    """Ask the running server to stop with `code` (0 = stop; 42 = the supervisor's 'relaunch
+    me' signal), letting the current HTTP response flush first. Factored out so tests can assert
+    the intended exit code without actually killing the test process. First-wins: once a stop is
+    scheduled, a second control click within the flush window is ignored, so two near-simultaneous
+    clicks (Stop then Restart) can't race the exit code non-deterministically."""
+    with _EXIT_LOCK:
+        if _SERVER_CONTROL.get("exit_scheduled"):
+            return
+        _SERVER_CONTROL["exit_scheduled"] = True
+        _SERVER_CONTROL["exit_code"] = code
+
     def _die():
         import time
+        # Let THIS response finish writing on its own (daemon) request thread before the process
+        # exits -- shutdown() stops ACCEPTING, but the exit that follows still kills daemon
+        # threads, so the flush window is still wanted even with graceful shutdown.
         time.sleep(0.4)
-        os._exit(code)
+        srv = _SERVER_CONTROL.get("srv")
+        if srv is not None:
+            srv.shutdown()                    # unblocks main()'s serve_forever() -> cleanup + return code
+        else:
+            os._exit(code)                    # fallback: server was never stashed (shouldn't happen)
     threading.Thread(target=_die, daemon=True).start()
 
 
@@ -7449,6 +7523,98 @@ def create_app(out_dir: Path):
                                      "(the server can't restart while it works).".format(busy)}), 409
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
+
+    @app.route("/api/bonjour/status")
+    @tier(LOGIN)
+    def api_bonjour_status():
+        """Live Bonjour/mDNS state for the Control Panel chip: is it broadcasting, under what
+        name, at which reachable URLs, and is zeroconf even installed. Login required (local or
+        LAN) -- reading the broadcast state is safe for a LAN device; only WRITING the settings
+        (below) is localhost-only."""
+        import moonglade_backup as _core
+        import moonglade_bonjour
+        cfg = _core._load_config() or {}
+        serving = _SERVER_CONTROL.get("serving") or {}
+        adv = _SERVER_CONTROL.get("bonjour")
+        host = str(serving.get("host") or cfg.get(HOST_KEY) or DEFAULT_HOST)
+        try:
+            port = int(serving.get("port") or cfg.get(PORT_KEY) or DEFAULT_PORT)
+        except (TypeError, ValueError):
+            port = DEFAULT_PORT
+        scheme = str(serving.get("scheme") or "http")
+        enabled = bool(cfg.get(BONJOUR_ENABLED_KEY, False))
+        name = str(cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)
+        broadcasting = bool(adv is not None and adv.active)
+        hostname = adv.hostname if broadcasting else moonglade_bonjour.hostname_label(name) + ".local"
+        lan_bind = moonglade_bonjour.is_lan_bind(host)
+        ip = adv.ip if broadcasting else moonglade_bonjour.lan_ip()
+        urls = []
+        if lan_bind and ip:
+            urls = ["{}://{}:{}/".format(scheme, hostname, port),
+                    "{}://{}:{}/".format(scheme, ip, port)]
+        return jsonify({
+            "enabled": enabled, "broadcasting": broadcasting, "name": name,
+            "host": host, "port": port, "scheme": scheme, "hostname": hostname,
+            "lan_bind": lan_bind, "lan_ip": ip, "reachable_urls": urls,
+            "zeroconf_available": moonglade_bonjour.zeroconf_available(),
+            "supervised": _supervised(),
+        })
+
+    @app.route("/api/bonjour/settings", methods=["POST"])
+    @tier(LOGIN, POST=LOCALHOST)
+    def api_bonjour_settings():
+        """Write the Bonjour/mDNS settings (config.json) and apply what can change live. Broadcast
+        on/off and the name apply immediately (re-register); the bind host/port are launch-time,
+        so those return restart_needed. LOCALHOST-only on write: a LAN device may SEE the state
+        but only the server box may change how the server is exposed. config.json holds auth
+        state, so this rides _accounts_lock like every other writer of it."""
+        import moonglade_backup as _core
+        import moonglade_bonjour
+        body = request.get_json(silent=True) or {}
+        cfg = _core._load_config() or {}
+        enabled = bool(body["enabled"]) if "enabled" in body else bool(cfg.get(BONJOUR_ENABLED_KEY, False))
+        name = str(body.get("name") if body.get("name") is not None
+                   else (cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)).strip()
+        new_host = str(body.get("host") if body.get("host") is not None
+                       else (cfg.get(HOST_KEY) or DEFAULT_HOST)).strip()
+        raw_port = body.get("port", cfg.get(PORT_KEY, DEFAULT_PORT))
+        if not name:
+            return jsonify({"error": "A name is required."}), 200
+        if new_host not in ("127.0.0.1", "0.0.0.0"):
+            return jsonify({"error": "Host must be 127.0.0.1 (this machine only) or 0.0.0.0 (LAN)."}), 200
+        try:
+            new_port = int(raw_port)
+            if not (1 <= new_port <= 65535):
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "Port must be a whole number between 1 and 65535."}), 200
+        try:
+            with _core._accounts_lock:
+                cfg = _core._load_config() or {}
+                cfg[BONJOUR_ENABLED_KEY] = enabled
+                cfg[BONJOUR_NAME_KEY] = name
+                cfg[HOST_KEY] = new_host
+                cfg[PORT_KEY] = new_port
+                _core._save_config(cfg)
+        except OSError as e:
+            return jsonify({"error": "Couldn't save the setting: {}".format(
+                _redact_host_paths(str(e)))[:160]}), 200
+        # Apply live what needs no rebind: stop, then (re)start if it should be on, using the
+        # CURRENTLY-serving host/port -- a host/port CHANGE only takes effect on the next restart.
+        serving = _SERVER_CONTROL.get("serving") or {}
+        cur_host = str(serving.get("host") or new_host)
+        cur_port = int(serving.get("port") or new_port)
+        adv = _SERVER_CONTROL.get("bonjour")
+        broadcasting = False
+        if adv is not None:
+            adv.stop()
+            if enabled and moonglade_bonjour.is_lan_bind(cur_host):
+                broadcasting = adv.start(name, cur_port, str(serving.get("scheme") or "http"))
+        restart_needed = (new_host != cur_host) or (new_port != cur_port)
+        hostname = adv.hostname if (adv is not None and adv.active) else moonglade_bonjour.hostname_label(name) + ".local"
+        return jsonify({"ok": True, "enabled": enabled, "name": name, "host": new_host,
+                        "port": new_port, "broadcasting": broadcasting, "hostname": hostname,
+                        "restart_needed": restart_needed, "supervised": _supervised()})
 
     @app.route("/export-csv")
     @tier(LOGIN)
@@ -14060,9 +14226,11 @@ def main():
                     help="backup folder containing the catalog. Defaults to LIBRARY_DIR in "
                          "config.json (set it in the Control Panel), or pixai_backup if that "
                          "is unset. An explicit --out here always wins.")
-    ap.add_argument("--port", type=int, default=5000)
-    ap.add_argument("--host", default="127.0.0.1",
-                    help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
+    ap.add_argument("--port", type=int, default=None,
+                    help="bind port (default 5000, or PORT in config.json / the Bonjour chip)")
+    ap.add_argument("--host", default=None,
+                    help="bind address (default 127.0.0.1, or HOST in config.json / the Bonjour "
+                         "chip; use 0.0.0.0 for LAN). An explicit --host always wins.")
     ap.add_argument("--allow-port-reuse", action="store_true",
                     help="start even if something is already listening on --port. Off by "
                          "default because Windows lets a SECOND server bind an actively "
@@ -14086,6 +14254,11 @@ def main():
                          "console too -- the log FILE under out_dir/logs/ always captures them "
                          "regardless of this flag")
     args = ap.parse_args()
+    # config.json is the source of truth for host/port + Bonjour (the Control Panel's chip writes
+    # it); an explicit --host/--port still overrides. Fill args in place so the rest of main() --
+    # port_owner, the companion gate, make_server, the cookie name -- is unchanged.
+    _srv = resolve_server_settings(args.host, args.port)
+    args.host, args.port = _srv["host"], _srv["port"]
 
     out_dir = Path(resolve_library_dir(args.out))
     import moonglade_logging
@@ -14189,11 +14362,59 @@ def main():
             from werkzeug.serving import make_server as _make_server6
             _srv6 = _make_server6("::1", args.port, app, threaded=True,
                                   ssl_context=ssl_context)
+            _SERVER_CONTROL["companion"] = _srv6
             _threading.Thread(target=_srv6.serve_forever, daemon=True,
                               name="moonglade-ipv6-loopback").start()
         except Exception:
             pass                     # IPv6 unavailable -- IPv4-only, as ever
-    app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
+    # Graceful serving: hold the server object (not app.run()'s fire-and-forget) so a web
+    # Stop/Restart can srv.shutdown() it and let the `finally` below run real cleanup -- the same
+    # make_server the [::1] companion above already uses. serve_forever() blocks until shutdown()
+    # (web Stop/Restart) or Ctrl+C; the pending exit code then rides `sys.exit(main())` to the
+    # supervisor (0 = stop, 42 = relaunch).
+    from werkzeug.serving import make_server as _make_server
+    srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    _SERVER_CONTROL["srv"] = srv
+    _SERVER_CONTROL["exit_code"] = 0
+    # mDNS / Bonjour LAN advertising (opt-in, fail-soft). Register after make_server has bound
+    # the socket, so the advertised service is immediately reachable; the goodbye fires in the
+    # finally below -- which now actually runs, thanks to step 1's graceful shutdown. The
+    # advertiser (and the running host/port/scheme with it) is stashed so the Control Panel's
+    # Bonjour chip can toggle or re-point it live, no restart.
+    import moonglade_bonjour
+    _bonjour = moonglade_bonjour.BonjourAdvertiser()
+    _SERVER_CONTROL["bonjour"] = _bonjour
+    _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": scheme}
+    try:
+        if _srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host):
+            if _bonjour.start(_srv["bonjour_name"], args.port, scheme):
+                print("Bonjour: broadcasting as {}  ({}://{}:{}/)".format(
+                    _bonjour.hostname, scheme, _bonjour.hostname, args.port))
+    except Exception:                    # noqa: BLE001 -- advertising must never stop the server
+        pass
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass                         # Ctrl+C on a terminal launch -> clean stop (exit 0)
+    finally:
+        b = _SERVER_CONTROL.get("bonjour")
+        if b is not None:
+            b.stop()                 # mDNS goodbye -- devices drop moonglade.local promptly
+        companion = _SERVER_CONTROL.get("companion")
+        if companion is not None:
+            try:
+                companion.shutdown()
+            except Exception:
+                pass
+            try:
+                companion.server_close()
+            except Exception:
+                pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+    return _SERVER_CONTROL.get("exit_code", 0)
 
 
 if __name__ == "__main__":

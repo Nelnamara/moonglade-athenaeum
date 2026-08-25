@@ -125,6 +125,8 @@ TIER_SNAPSHOT = [
     "/api/artwork-views [GET] LOGIN",
     "/api/assets/fetch [POST] LOCALHOST",
     "/api/assets/status [GET] LOGIN",
+    "/api/bonjour/settings [POST] LOCALHOST",
+    "/api/bonjour/status [GET] LOGIN",
     "/api/branding [GET] LOGIN",
     "/api/branding [POST] LOGIN",
     "/api/branding/banner/earned [POST] LOGIN",
