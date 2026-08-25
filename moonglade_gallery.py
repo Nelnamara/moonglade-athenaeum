@@ -5658,7 +5658,19 @@ def resolve_server_settings(host_arg=None, port_arg=None):
         cfg = _core._load_config() or {}
     except Exception:                                   # noqa: BLE001
         cfg = {}
-    host = host_arg if host_arg is not None else (str(cfg.get(HOST_KEY) or "").strip() or DEFAULT_HOST)
+    if host_arg is not None:
+        host = host_arg                              # an explicit --host is trusted as typed
+    else:
+        host = str(cfg.get(HOST_KEY) or "").strip() or DEFAULT_HOST
+        if host not in ("127.0.0.1", "0.0.0.0", "localhost", "::", "::1"):
+            # A hand-edited / legacy / non-bindable config HOST must not crash make_server at
+            # startup (the bind is OUTSIDE serve_forever's try). Accept only a real IP literal;
+            # anything else (a hostname, "5000", junk) falls back to the default.
+            import ipaddress
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                host = DEFAULT_HOST
     try:
         port = int(port_arg) if port_arg is not None else int(cfg.get(PORT_KEY) or DEFAULT_PORT)
     except (TypeError, ValueError):
@@ -5684,19 +5696,27 @@ def _supervised():
 # cleanup hook; os._exit() survives only as the fallback for the impossible "no server stashed"
 # case so Stop/Restart can never go inert.
 _SERVER_CONTROL = {"srv": None, "companion": None, "exit_code": 0}
+_EXIT_LOCK = threading.Lock()
 
 
 def _schedule_server_exit(code):
     """Ask the running server to stop with `code` (0 = stop; 42 = the supervisor's 'relaunch
     me' signal), letting the current HTTP response flush first. Factored out so tests can assert
-    the intended exit code without actually killing the test process."""
+    the intended exit code without actually killing the test process. First-wins: once a stop is
+    scheduled, a second control click within the flush window is ignored, so two near-simultaneous
+    clicks (Stop then Restart) can't race the exit code non-deterministically."""
+    with _EXIT_LOCK:
+        if _SERVER_CONTROL.get("exit_scheduled"):
+            return
+        _SERVER_CONTROL["exit_scheduled"] = True
+        _SERVER_CONTROL["exit_code"] = code
+
     def _die():
         import time
         # Let THIS response finish writing on its own (daemon) request thread before the process
         # exits -- shutdown() stops ACCEPTING, but the exit that follows still kills daemon
         # threads, so the flush window is still wanted even with graceful shutdown.
         time.sleep(0.4)
-        _SERVER_CONTROL["exit_code"] = code
         srv = _SERVER_CONTROL.get("srv")
         if srv is not None:
             srv.shutdown()                    # unblocks main()'s serve_forever() -> cleanup + return code
@@ -7511,12 +7531,16 @@ def create_app(out_dir: Path):
         name, at which reachable URLs, and is zeroconf even installed. Login required (local or
         LAN) -- reading the broadcast state is safe for a LAN device; only WRITING the settings
         (below) is localhost-only."""
+        import moonglade_backup as _core
         import moonglade_bonjour
         cfg = _core._load_config() or {}
         serving = _SERVER_CONTROL.get("serving") or {}
         adv = _SERVER_CONTROL.get("bonjour")
         host = str(serving.get("host") or cfg.get(HOST_KEY) or DEFAULT_HOST)
-        port = int(serving.get("port") or cfg.get(PORT_KEY) or DEFAULT_PORT)
+        try:
+            port = int(serving.get("port") or cfg.get(PORT_KEY) or DEFAULT_PORT)
+        except (TypeError, ValueError):
+            port = DEFAULT_PORT
         scheme = str(serving.get("scheme") or "http")
         enabled = bool(cfg.get(BONJOUR_ENABLED_KEY, False))
         name = str(cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)
@@ -7544,6 +7568,7 @@ def create_app(out_dir: Path):
         so those return restart_needed. LOCALHOST-only on write: a LAN device may SEE the state
         but only the server box may change how the server is exposed. config.json holds auth
         state, so this rides _accounts_lock like every other writer of it."""
+        import moonglade_backup as _core
         import moonglade_bonjour
         body = request.get_json(silent=True) or {}
         cfg = _core._load_config() or {}
@@ -14360,10 +14385,13 @@ def main():
     _bonjour = moonglade_bonjour.BonjourAdvertiser()
     _SERVER_CONTROL["bonjour"] = _bonjour
     _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": scheme}
-    if _srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host):
-        if _bonjour.start(_srv["bonjour_name"], args.port, scheme):
-            print("Bonjour: broadcasting as {}  ({}://{}:{}/)".format(
-                _bonjour.hostname, scheme, _bonjour.hostname, args.port))
+    try:
+        if _srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host):
+            if _bonjour.start(_srv["bonjour_name"], args.port, scheme):
+                print("Bonjour: broadcasting as {}  ({}://{}:{}/)".format(
+                    _bonjour.hostname, scheme, _bonjour.hostname, args.port))
+    except Exception:                    # noqa: BLE001 -- advertising must never stop the server
+        pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -14376,6 +14404,10 @@ def main():
         if companion is not None:
             try:
                 companion.shutdown()
+            except Exception:
+                pass
+            try:
+                companion.server_close()
             except Exception:
                 pass
         try:

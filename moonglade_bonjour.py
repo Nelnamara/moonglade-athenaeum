@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import socket
+import threading
 
 try:
     from zeroconf import ServiceInfo, Zeroconf
@@ -40,15 +41,18 @@ def lan_ip():
     The UDP-connect trick: opening a datagram socket toward a public address makes the OS pick
     the default-route interface and bind a local address to it -- but no packet is ever sent and
     nothing has to be reachable, so it works offline and costs nothing. A loopback result
-    (127.x, no real route) is treated as 'no LAN'."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    (127.x, no real route) is treated as 'no LAN'. Never raises -- the socket creation itself is
+    inside the try, so a machine with no IPv4 stack returns None rather than propagating."""
+    s = None
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:                   # noqa: BLE001
         return None
     finally:
-        s.close()
+        if s is not None:
+            s.close()
     return ip if ip and not ip.startswith("127.") else None
 
 
@@ -73,9 +77,13 @@ def hostname_label(name):
 class BonjourAdvertiser:
     """Holds one live mDNS registration so it can be torn down (goodbye packet) on shutdown or
     re-pointed live when the name changes. One per server process. Every method is fail-soft and
-    idempotent; none raises."""
+    idempotent; none raises. start() and stop() are serialized by `self._lock`, so concurrent
+    callers -- a double-clicked Save, two localhost tabs, or a Save racing shutdown -- can never
+    register two Zeroconf instances and leak one (sockets + a background thread) without a
+    goodbye."""
 
     def __init__(self):
+        self._lock = threading.Lock()
         self._zc = None
         self._info = None
         self.active = False
@@ -88,42 +96,49 @@ class BonjourAdvertiser:
         `<label>.local` host record pointing at this machine's LAN IPv4. Returns True on success,
         False (a no-op) if already active, zeroconf is missing, or there is no LAN address.
         Never raises."""
-        if self.active or not _HAVE_ZEROCONF:
-            return False
-        ip = lan_ip()
-        if not ip:
-            return False
-        try:
-            label = hostname_label(name)
-            server = label + ".local."
-            stype = "_https._tcp.local." if scheme == "https" else "_http._tcp.local."
-            instance = (str(name).strip() or label)
-            info = ServiceInfo(
-                stype,
-                "{}.{}".format(instance, stype),
-                addresses=[socket.inet_aton(ip)],
-                port=int(port),
-                # Minimal TXT, mirroring the fixed `X-Moonglade: 1` header's disclosure
-                # philosophy (moonglade_gallery.py): identity + the entry path only, never the
-                # version or the library path -- this is a public-repo app on a shared LAN.
-                properties={"app": "moonglade", "path": "/"},
-                server=server,
-            )
-            zc = Zeroconf()
-            zc.register_service(info)
-            self._zc, self._info = zc, info
-            self.active = True
-            self.hostname = label + ".local"
-            self.ip = ip
-            self.name = instance
-            return True
-        except Exception:               # noqa: BLE001 -- advertising must never break serving
-            self.stop()
-            return False
+        with self._lock:
+            if self.active or not _HAVE_ZEROCONF:
+                return False
+            try:
+                ip = lan_ip()
+                if not ip:
+                    return False
+                label = hostname_label(name)
+                server = label + ".local."
+                stype = "_https._tcp.local." if scheme == "https" else "_http._tcp.local."
+                instance = (str(name).strip() or label)
+                info = ServiceInfo(
+                    stype,
+                    "{}.{}".format(instance, stype),
+                    addresses=[socket.inet_aton(ip)],
+                    port=int(port),
+                    # Minimal TXT, mirroring the fixed `X-Moonglade: 1` header's disclosure
+                    # philosophy (moonglade_gallery.py): identity + the entry path only, never the
+                    # version or the library path -- this is a public-repo app on a shared LAN.
+                    properties={"app": "moonglade", "path": "/"},
+                    server=server,
+                )
+                zc = Zeroconf()
+                zc.register_service(info)
+                self._zc, self._info = zc, info
+                self.active = True
+                self.hostname = label + ".local"
+                self.ip = ip
+                self.name = instance
+                return True
+            except Exception:           # noqa: BLE001 -- advertising must never break serving
+                self._teardown()
+                return False
 
     def stop(self):
         """Unregister the service (sends the mDNS goodbye so devices drop it promptly) and close
-        the Zeroconf socket. Idempotent; never raises."""
+        the Zeroconf socket. Idempotent; never raises. Serialized with start() by self._lock."""
+        with self._lock:
+            self._teardown()
+
+    def _teardown(self):
+        """The unregister + close itself, WITHOUT the lock -- every caller (stop(), and start()'s
+        own failure path) already holds self._lock. Idempotent."""
         zc, info = self._zc, self._info
         self._zc = self._info = None
         self.active = False

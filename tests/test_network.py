@@ -1423,7 +1423,7 @@ def test_gallery_serves_gracefully_not_via_os_exit():
     assert "srv.serve_forever()" in src
     assert "app.run(host=args.host, port=args.port" not in src,         "app.run() fire-and-forget must be gone -- it cannot be shut down or cleaned up after"
     i = src.index("def _schedule_server_exit(code):")
-    body = src[i:i + 1100]
+    body = src[i:i + 1800]
     assert "srv.shutdown()" in body, "Stop/Restart must call srv.shutdown()"
     assert "os._exit(code)" in body, "os._exit must survive as the no-server fallback"
     assert body.index("srv.shutdown()") < body.index("os._exit(code)"),         "shutdown() is the primary path; os._exit is the fallback below it"
@@ -1448,6 +1448,7 @@ def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
     saved = dict(g._SERVER_CONTROL)
     g._SERVER_CONTROL["srv"] = srv
     g._SERVER_CONTROL["exit_code"] = 0
+    g._SERVER_CONTROL["exit_scheduled"] = False
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     try:
@@ -1493,3 +1494,12 @@ def test_resolve_server_settings_precedence_and_bonjour_defaults(monkeypatch):
     # a junk PORT in config falls back to the default, never crashes
     monkeypatch.setattr(core, "_load_config", lambda: {"PORT": "nope"})
     assert g.resolve_server_settings(None, None)["port"] == 5000
+
+    # a non-bindable HOST in config falls back to the default (must not crash make_server)
+    monkeypatch.setattr(core, "_load_config", lambda: {"HOST": "not-a-host"})
+    assert g.resolve_server_settings(None, None)["host"] == "127.0.0.1"
+    # but a real IP literal in config is honored (a deliberate hand-edit to a specific NIC)
+    monkeypatch.setattr(core, "_load_config", lambda: {"HOST": "192.168.1.9"})
+    assert g.resolve_server_settings(None, None)["host"] == "192.168.1.9"
+    # an explicit --host is trusted as typed, even a hostname
+    assert g.resolve_server_settings("myhost.lan", None)["host"] == "myhost.lan"
