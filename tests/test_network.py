@@ -1375,8 +1375,8 @@ def test_gallery_starts_an_ipv6_loopback_companion():
     assert 'if args.host in ("127.0.0.1", "0.0.0.0", "localhost"):' in src
     assert '_make_server6("::1", args.port, app' in src
     assert src.index('_make_server6("::1"') < src.index(
-        "app.run(host=args.host, port=args.port"), \
-        "the companion must be up BEFORE app.run() blocks"
+        "srv.serve_forever()"), \
+        "the companion must be up BEFORE the main serve loop blocks"
 
 
 def test_ipv6_loopback_actually_serves_a_wsgi_app():
@@ -1407,3 +1407,64 @@ def test_ipv6_loopback_actually_serves_a_wsgi_app():
     finally:
         srv.shutdown()
         t.join(timeout=5)
+
+
+def test_gallery_serves_gracefully_not_via_os_exit():
+    """The web Stop/Restart path shuts the server down GRACEFULLY, not by hard-killing the
+    process. Source-level guard on main()'s serve path and the exit funnel:
+      - the main server is a held make_server()/serve_forever(), not app.run() fire-and-forget,
+        so a request handler can stop it and cleanup can run;
+      - _schedule_server_exit records the code and calls srv.shutdown() (os._exit survives only
+        as the no-server-stashed fallback);
+      - main() returns the pending exit code (0 stop / 42 restart) for `sys.exit(main())`."""
+    import pathlib
+    src = pathlib.Path("moonglade_gallery.py").read_text(encoding="utf-8")
+    assert "srv = _make_server(args.host, args.port, app" in src
+    assert "srv.serve_forever()" in src
+    assert "app.run(host=args.host, port=args.port" not in src,         "app.run() fire-and-forget must be gone -- it cannot be shut down or cleaned up after"
+    i = src.index("def _schedule_server_exit(code):")
+    body = src[i:i + 1100]
+    assert "srv.shutdown()" in body, "Stop/Restart must call srv.shutdown()"
+    assert "os._exit(code)" in body, "os._exit must survive as the no-server fallback"
+    assert body.index("srv.shutdown()") < body.index("os._exit(code)"),         "shutdown() is the primary path; os._exit is the fallback below it"
+    assert 'return _SERVER_CONTROL.get("exit_code", 0)' in src
+
+
+def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
+    """Functional proof of the graceful path: the REAL exit funnel (_schedule_server_exit)
+    stops a real make_server()/serve_forever() and records the intended code -- exactly what a
+    web Stop(0)/Restart(42) does, minus the process exit. No app.run(), no os._exit()."""
+    import threading
+    import urllib.request
+
+    import moonglade_gallery as g
+    from werkzeug.serving import make_server
+
+    def app(environ, start_response):
+        start_response("200 OK", [("Content-Type", "text/plain")])
+        return [b"ok"]
+
+    srv = make_server("127.0.0.1", 0, app, threaded=True)
+    saved = dict(g._SERVER_CONTROL)
+    g._SERVER_CONTROL["srv"] = srv
+    g._SERVER_CONTROL["exit_code"] = 0
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        port = srv.server_port
+        assert urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=5).read() == b"ok"
+        g._schedule_server_exit(42)              # the real funnel: Restart
+        t.join(timeout=5)
+        assert not t.is_alive(), "serve_forever did not stop -- graceful shutdown failed"
+        assert g._SERVER_CONTROL["exit_code"] == 42
+    finally:
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        g._SERVER_CONTROL.clear()
+        g._SERVER_CONTROL.update(saved)

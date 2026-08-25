@@ -5640,14 +5640,33 @@ def _supervised():
     return os.environ.get("MOONGLADE_SUPERVISED") == "1"
 
 
+# The running werkzeug server, so a web Stop/Restart handler can shut it down GRACEFULLY instead
+# of hard-killing the process. main() stashes the server here right before it blocks in
+# serve_forever(); _schedule_server_exit() records the intended exit code and asks the server to
+# stop. main()'s `finally` then runs real cleanup (the IPv6 companion, and -- once it lands --
+# the mDNS goodbye) and returns `code` to `sys.exit(main())`, which the supervisor reads
+# (0 = stop, 42 = relaunch). This replaces the old os._exit() hard kill, which skipped every
+# cleanup hook; os._exit() survives only as the fallback for the impossible "no server stashed"
+# case so Stop/Restart can never go inert.
+_SERVER_CONTROL = {"srv": None, "companion": None, "exit_code": 0}
+
+
 def _schedule_server_exit(code):
-    """Let the current HTTP response flush, then exit the process with `code`
-    (0 = stop; 42 = the supervisor's 'relaunch me' signal). Factored out so tests can assert
+    """Ask the running server to stop with `code` (0 = stop; 42 = the supervisor's 'relaunch
+    me' signal), letting the current HTTP response flush first. Factored out so tests can assert
     the intended exit code without actually killing the test process."""
     def _die():
         import time
+        # Let THIS response finish writing on its own (daemon) request thread before the process
+        # exits -- shutdown() stops ACCEPTING, but the exit that follows still kills daemon
+        # threads, so the flush window is still wanted even with graceful shutdown.
         time.sleep(0.4)
-        os._exit(code)
+        _SERVER_CONTROL["exit_code"] = code
+        srv = _SERVER_CONTROL.get("srv")
+        if srv is not None:
+            srv.shutdown()                    # unblocks main()'s serve_forever() -> cleanup + return code
+        else:
+            os._exit(code)                    # fallback: server was never stashed (shouldn't happen)
     threading.Thread(target=_die, daemon=True).start()
 
 
@@ -14189,11 +14208,36 @@ def main():
             from werkzeug.serving import make_server as _make_server6
             _srv6 = _make_server6("::1", args.port, app, threaded=True,
                                   ssl_context=ssl_context)
+            _SERVER_CONTROL["companion"] = _srv6
             _threading.Thread(target=_srv6.serve_forever, daemon=True,
                               name="moonglade-ipv6-loopback").start()
         except Exception:
             pass                     # IPv6 unavailable -- IPv4-only, as ever
-    app.run(host=args.host, port=args.port, debug=False, threaded=True, ssl_context=ssl_context)
+    # Graceful serving: hold the server object (not app.run()'s fire-and-forget) so a web
+    # Stop/Restart can srv.shutdown() it and let the `finally` below run real cleanup -- the same
+    # make_server the [::1] companion above already uses. serve_forever() blocks until shutdown()
+    # (web Stop/Restart) or Ctrl+C; the pending exit code then rides `sys.exit(main())` to the
+    # supervisor (0 = stop, 42 = relaunch).
+    from werkzeug.serving import make_server as _make_server
+    srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
+    _SERVER_CONTROL["srv"] = srv
+    _SERVER_CONTROL["exit_code"] = 0
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass                         # Ctrl+C on a terminal launch -> clean stop (exit 0)
+    finally:
+        companion = _SERVER_CONTROL.get("companion")
+        if companion is not None:
+            try:
+                companion.shutdown()
+            except Exception:
+                pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+    return _SERVER_CONTROL.get("exit_code", 0)
 
 
 if __name__ == "__main__":
