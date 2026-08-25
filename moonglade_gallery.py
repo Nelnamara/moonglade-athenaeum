@@ -5634,6 +5634,41 @@ def resolve_library_dir(explicit=None):
     return stored or DEFAULT_LIBRARY_DIR
 
 
+# Server binding + Bonjour discovery settings live in config.json (edited from the Control
+# Panel's Bonjour chip), so host/port need not be buried in the launcher's serve.txt. Same
+# precedence + fresh-read discipline as resolve_library_dir above.
+HOST_KEY = "HOST"
+PORT_KEY = "PORT"
+BONJOUR_ENABLED_KEY = "BONJOUR_ENABLED"
+BONJOUR_NAME_KEY = "BONJOUR_NAME"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 5000
+DEFAULT_BONJOUR_NAME = "Moonglade"
+
+
+def resolve_server_settings(host_arg=None, port_arg=None):
+    """Bind host/port + Bonjour discovery settings. An explicit CLI --host/--port wins (a one-off
+    launch or a second install must neither be overridden by, nor rewrite, the shared config),
+    else config.json's HOST/PORT/BONJOUR_*, else the defaults. Bonjour defaults OFF -- broadcast
+    is opt-in, flipped on from the chip. Read FRESH from disk (not core's _cfg cache) for the same
+    reason resolve_library_dir is: the Panel writes config then restarts."""
+    cfg = {}
+    try:
+        import moonglade_backup as _core
+        cfg = _core._load_config() or {}
+    except Exception:                                   # noqa: BLE001
+        cfg = {}
+    host = host_arg if host_arg is not None else (str(cfg.get(HOST_KEY) or "").strip() or DEFAULT_HOST)
+    try:
+        port = int(port_arg) if port_arg is not None else int(cfg.get(PORT_KEY) or DEFAULT_PORT)
+    except (TypeError, ValueError):
+        port = DEFAULT_PORT
+    name = str(cfg.get(BONJOUR_NAME_KEY) or "").strip() or DEFAULT_BONJOUR_NAME
+    return {"host": host, "port": port,
+            "bonjour_enabled": bool(cfg.get(BONJOUR_ENABLED_KEY, False)),
+            "bonjour_name": name}
+
+
 def _supervised():
     """True when the server was started by the managed launcher (Serve Gallery), which sets
     MOONGLADE_SUPERVISED=1 and relaunches on exit code 42. Restart is only offered when True."""
@@ -14079,9 +14114,11 @@ def main():
                     help="backup folder containing the catalog. Defaults to LIBRARY_DIR in "
                          "config.json (set it in the Control Panel), or pixai_backup if that "
                          "is unset. An explicit --out here always wins.")
-    ap.add_argument("--port", type=int, default=5000)
-    ap.add_argument("--host", default="127.0.0.1",
-                    help="bind address (default 127.0.0.1; use 0.0.0.0 for LAN)")
+    ap.add_argument("--port", type=int, default=None,
+                    help="bind port (default 5000, or PORT in config.json / the Bonjour chip)")
+    ap.add_argument("--host", default=None,
+                    help="bind address (default 127.0.0.1, or HOST in config.json / the Bonjour "
+                         "chip; use 0.0.0.0 for LAN). An explicit --host always wins.")
     ap.add_argument("--allow-port-reuse", action="store_true",
                     help="start even if something is already listening on --port. Off by "
                          "default because Windows lets a SECOND server bind an actively "
@@ -14105,6 +14142,11 @@ def main():
                          "console too -- the log FILE under out_dir/logs/ always captures them "
                          "regardless of this flag")
     args = ap.parse_args()
+    # config.json is the source of truth for host/port + Bonjour (the Control Panel's chip writes
+    # it); an explicit --host/--port still overrides. Fill args in place so the rest of main() --
+    # port_owner, the companion gate, make_server, the cookie name -- is unchanged.
+    _srv = resolve_server_settings(args.host, args.port)
+    args.host, args.port = _srv["host"], _srv["port"]
 
     out_dir = Path(resolve_library_dir(args.out))
     import moonglade_logging

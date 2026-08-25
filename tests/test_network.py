@@ -1468,3 +1468,28 @@ def test_schedule_server_exit_stops_a_real_serve_forever_with_the_code():
             pass
         g._SERVER_CONTROL.clear()
         g._SERVER_CONTROL.update(saved)
+
+
+def test_resolve_server_settings_precedence_and_bonjour_defaults(monkeypatch):
+    """config.json fills host/port/Bonjour when the CLI did not; an explicit --host/--port wins;
+    Bonjour defaults OFF (broadcast is opt-in, flipped on from the chip)."""
+    import moonglade_gallery as g
+    import moonglade_backup as core
+
+    monkeypatch.setattr(core, "_load_config", lambda: {})
+    assert g.resolve_server_settings(None, None) == {
+        "host": "127.0.0.1", "port": 5000, "bonjour_enabled": False, "bonjour_name": "Moonglade"}
+
+    monkeypatch.setattr(core, "_load_config", lambda: {
+        "HOST": "0.0.0.0", "PORT": 5757, "BONJOUR_ENABLED": True, "BONJOUR_NAME": "The Library"})
+    s = g.resolve_server_settings(None, None)
+    assert (s["host"], s["port"], s["bonjour_enabled"], s["bonjour_name"]) == (
+        "0.0.0.0", 5757, True, "The Library")
+
+    # explicit CLI wins over config for host/port (a one-off launch must not be overridden)
+    s = g.resolve_server_settings("127.0.0.1", 9000)
+    assert s["host"] == "127.0.0.1" and s["port"] == 9000
+
+    # a junk PORT in config falls back to the default, never crashes
+    monkeypatch.setattr(core, "_load_config", lambda: {"PORT": "nope"})
+    assert g.resolve_server_settings(None, None)["port"] == 5000
