@@ -14264,11 +14264,27 @@ def main():
     srv = _make_server(args.host, args.port, app, threaded=True, ssl_context=ssl_context)
     _SERVER_CONTROL["srv"] = srv
     _SERVER_CONTROL["exit_code"] = 0
+    # mDNS / Bonjour LAN advertising (opt-in, fail-soft). Register after make_server has bound
+    # the socket, so the advertised service is immediately reachable; the goodbye fires in the
+    # finally below -- which now actually runs, thanks to step 1's graceful shutdown. The
+    # advertiser (and the running host/port/scheme with it) is stashed so the Control Panel's
+    # Bonjour chip can toggle or re-point it live, no restart.
+    import moonglade_bonjour
+    _bonjour = moonglade_bonjour.BonjourAdvertiser()
+    _SERVER_CONTROL["bonjour"] = _bonjour
+    _SERVER_CONTROL["serving"] = {"host": args.host, "port": args.port, "scheme": scheme}
+    if _srv["bonjour_enabled"] and moonglade_bonjour.is_lan_bind(args.host):
+        if _bonjour.start(_srv["bonjour_name"], args.port, scheme):
+            print("Bonjour: broadcasting as {}  ({}://{}:{}/)".format(
+                _bonjour.hostname, scheme, _bonjour.hostname, args.port))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass                         # Ctrl+C on a terminal launch -> clean stop (exit 0)
     finally:
+        b = _SERVER_CONTROL.get("bonjour")
+        if b is not None:
+            b.stop()                 # mDNS goodbye -- devices drop moonglade.local promptly
         companion = _SERVER_CONTROL.get("companion")
         if companion is not None:
             try:

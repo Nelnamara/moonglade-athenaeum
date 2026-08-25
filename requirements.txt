@@ -12,3 +12,6 @@ flask
 pytest
 pytest-mock
 pytest-cov   # coverage: python -m pytest --cov=moonglade_gallery --cov=moonglade_backup
+
+# Optional: mDNS/Bonjour LAN discovery (the Control Panel Bonjour chip). Absent = no broadcast, app unaffected.
+zeroconf>=0.130
