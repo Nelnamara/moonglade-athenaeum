@@ -26,7 +26,9 @@ try:
     from zeroconf import ServiceInfo, Zeroconf
     _HAVE_ZEROCONF = True
 except Exception:                       # noqa: BLE001 -- optional dependency, guarded on purpose
-    _HAVE_ZEROCONF = False
+    ServiceInfo = None                  # keep the names BOUND (as None) when zeroconf is absent, so
+    Zeroconf = None                     # the module has stable, patchable attributes -- a test that
+    _HAVE_ZEROCONF = False              # monkeypatches mb.ServiceInfo works with or without the dep
 
 
 def zeroconf_available():
