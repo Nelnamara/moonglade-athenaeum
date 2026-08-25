@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Fixed: a finished generation could **land late in the Activity tracker** when you switched away from Moonglade to another tab while it was still running — for instance, flipping to pixai.art to watch the render finish there. A backgrounded browser tab throttles its own timers, so the completion poll effectively slept until you returned, and the spinner cleared only when that throttled timer next fired (it usually lands the instant the task finishes). Refocusing the tab now **immediately re-checks every in-flight task**, so completion lands as soon as you come back. The refocus check is a read of task status, never a resubmit, and cannot fork the completion poll (it clears the pending timer before re-firing the single loop); the same pass also closes a latent double-completion that a generation's own completion callback could trigger if it threw. (2026-08-25)
+
 ## [3.6.0] - 2026-08-24 — The Dial-In: series-aware browsing, on internals rebuilt to one road each
 
 - **The dial-in, named.** When you chase a detail across a run of near-identical generations, the app now sees the *session*: each card and Image Details shows which version of the run it is and which output of its batch (`· v3 · 2/4`), and Image Details gains a **Session** strip — the whole dial-in laid out task by task, what changed at each step, with long reroll runs folded away and the one you're viewing lit. Series get a real name pulled from your own prompts (your character, not the filename). Same convention PixAI uses for its own downloads.
