@@ -6,6 +6,7 @@ import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
+import BonjourCard from "./BonjourCard.jsx";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -407,6 +408,8 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                   <div className="mgcp-tilenote">Restart needs the managed launcher (Serve Gallery). Stop still works.</div>
                 )}
               </div>
+
+              <BonjourCard isLocal={isLocal} />
 
               {/* Control Panel.dc.html:77 -- a version/date footer, margin-top:auto to sit
                   at the sidebar's bottom. boot.build_stamp (git short SHA + version) is the
