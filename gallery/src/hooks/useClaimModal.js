@@ -1,44 +1,48 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../api.js";
 
 /* Daily-claim popup's own state/handlers -- extracted so App.jsx (desktop) and
-   AppMobile.jsx (mobile) can each mount <ClaimModal> off the SAME logic
-   against their own independently-tracked `account` state (they already keep
-   two separate copies -- see useControlPanel.js's header comment for why that
-   split is correct rather than a smell), instead of two drifting copies of
-   the open/dismiss/claim machinery.
+   AppMobile.jsx (mobile) can each mount <ClaimModal> off the SAME logic against
+   their own independently-tracked `account` state (they already keep two separate
+   copies -- see useControlPanel.js's header comment for why that split is correct
+   rather than a smell), instead of two drifting copies of the open/dismiss/claim
+   machinery.
 
-   Classic's own #acct-claim pill (Acct.claim() in moonglade_gallery.py) is
-   the only claim UI that ever shipped to the browser before this. Ported as
-   an ADDITION, not a replacement: the small always-visible pill also shipped
-   this same pass (SeparatorBar.jsx's .mgx-claim / AppMobile.jsx's
-   .glm-hero-claim -- both call this hook's own `claim`, so the pill and the
-   modal share one action, not two), and this modal is the once-a-session,
-   harder-to-miss nudge on top of it. Never built for /next before now --
-   there was no locked design surface for it (grepped every .dc.html; none
-   exist), so it was missed rather than deliberately cut.
+   Classic's own #acct-claim pill (Acct.claim() in moonglade_gallery.py) is the
+   only claim UI that ever shipped to the browser before this. Ported as an
+   ADDITION, not a replacement: the small always-visible pill also shipped this
+   same pass (SeparatorBar.jsx's .mgx-claim / AppMobile.jsx's .glm-hero-claim --
+   both call this hook's own `claim`, so the pill and the modal share one action,
+   not two), and this modal is the harder-to-miss nudge on top of it.
 
-   CADENCE, owner-specified 2026-08-05: PixAI's own claim popup fires on
-   every page load, which the owner explicitly called out as "annoying at
-   times" -- deliberately NOT copying that. Fires at most ONCE per real
-   session (a sessionStorage flag, not localStorage: a fresh tab/session
-   gets asked again if still unclaimed, but nothing in the SPA -- switching
-   Gallery/Health/Control Panel -- re-triggers it). Dismissing counts the
-   same as claiming for this flag: the point is to ask once, not to punish a
-   "not now" by asking again a minute later. The header pill is intentionally
-   NOT gated by this flag -- it just reflects claim_credits > 0 directly, so
-   dismissing the modal never makes the reward invisible, only de-escalates
-   it from an interruption to a quiet, always-there reminder. */
+   CADENCE, settled 2026-08-24 (REPLACES the 2026-08-05 "sessionStorage, once per
+   tab-lifetime" rule -- do NOT restore that; it stranded rewards):
+     The modal re-arms on a FRESH PAGE LOAD (initial load, reload, Ctrl-Shift-R,
+     and moving between the separate Gallery / Loom / login shells -- each is its
+     own document) and on RETURNING TO THE TAB (the visibilitychange handler
+     below). It deliberately does NOT re-arm on in-app modal/panel navigation
+     within one page load -- the app is almost all modal, and re-popping on every
+     panel open would be exactly the PixAI-popup-on-every-click annoyance we are
+     avoiding (owner, 2026-08-24).
 
-const SEEN_KEY = "mg_claim_seen";
+     The gate is the in-memory `_armed` flag: true at load, flipped false the
+     moment the modal opens, flipped back true ONLY by a fresh load (module
+     re-init) or a tab return. Dismissing neither re-arms nor persists -- so a
+     reward is never stranded behind a toast closed once, but you also aren't
+     nagged mid-visit. Claiming (claim_credits -> 0) is what ends it for good.
+
+     Why in-memory and not sessionStorage: a reload CLEARS an in-memory flag (the
+     toast returns), whereas the old sessionStorage flag SURVIVED reloads (so it
+     never did -- "shows once or not at all and never comes back", owner). Only one
+     of App.jsx / AppMobile.jsx is mounted at a time, so the single shared flag has
+     exactly one owner. */
+
 const EXIT_MS = 480; // must match claim-modal.css's mgclaimCoinJump duration
 
-function markSeen() {
-  try { sessionStorage.setItem(SEEN_KEY, "1"); } catch { /* private browsing, etc. */ }
-}
-function alreadySeen() {
-  try { return sessionStorage.getItem(SEEN_KEY) === "1"; } catch { return false; }
-}
+// See the cadence note: true at page load, false once the modal opens, true again
+// only on a fresh load or a tab return. This is what keeps in-app panel opens from
+// re-popping the toast, without persisting across reloads the way the old flag did.
+let _armed = true;
 
 export default function useClaimModal(account, refreshAccount) {
   const [open, setOpen] = useState(false);
@@ -46,17 +50,43 @@ export default function useClaimModal(account, refreshAccount) {
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState("");
 
+  // Open when armed and there's an unclaimed reward. `_armed` is what keeps this
+  // from re-popping on every in-app account refetch: it's true only just after a
+  // fresh load or a tab-return, and we flip it false the instant we open. So a
+  // reload / shell-nav / tab-return shows the toast, but opening Health or Control
+  // Panel mid-visit does not. Claiming (claim_credits -> 0) finally quiets it.
   useEffect(() => {
     if (open || exiting) return; // never re-arm mid-cycle
-    if (account && account.claim_credits && !alreadySeen()) setOpen(true);
+    if (_armed && account && account.claim_credits) {
+      setOpen(true);
+      _armed = false; // shown once for this arming; a reload or tab-return re-arms it
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account]);
 
-  // Shared exit path for both claim and dismiss: play the coin-jump, THEN
-  // actually unmount -- same 220ms-style closing-transition shape
-  // ControlMobile.jsx's openBrand/closeBrand pair already established, just
-  // a longer window since the coin animation itself is the point here, not
-  // an incidental slide.
+  // Coming back to the tab is the one re-arm that happens within a live page (a
+  // reload / shell-nav re-arm for free by re-initialising the module). Re-arm, then
+  // re-read the account -- `account` carries claim_credits and nothing else re-reads
+  // it, so a tab left open across the daily reset otherwise never learns the reward
+  // went claimable. refreshAccount is held in a ref so we subscribe once instead of
+  // re-subscribing every render (App.jsx passes a fresh closure each render); the
+  // re-fetch installs a new `account` object, which the open-effect above turns into
+  // an open modal if it's still unclaimed.
+  const refreshRef = useRef(refreshAccount);
+  refreshRef.current = refreshAccount;
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      _armed = true;                                 // returning re-arms the nudge...
+      if (refreshRef.current) refreshRef.current();  // ...and re-reads so a reward that landed while away shows
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  // Shared exit path for both claim and dismiss: play the coin-jump, THEN actually
+  // unmount -- same closing-transition shape ControlMobile.jsx's openBrand/closeBrand
+  // pair established, just a longer window since the coin animation is the point.
   const _exit = () => {
     setExiting(true);
     setTimeout(() => {
@@ -67,11 +97,8 @@ export default function useClaimModal(account, refreshAccount) {
     }, EXIT_MS);
   };
 
-  // Unlike Power modal (deliberately NOT Escape-closable while a real restart
-  // is mid-flight -- ControlPanelOverlay.jsx's own Escape handler explicitly
-  // defers while `power` is set), a missed free reward has nothing to
-  // protect against an accidental close, so Escape works here like every
-  // other casually-dismissible overlay in the app.
+  // A missed free reward has nothing to protect against an accidental close, so
+  // Escape dismisses like any other casually-dismissible overlay.
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") dismiss(); };
@@ -80,9 +107,11 @@ export default function useClaimModal(account, refreshAccount) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Just close it for now. Deliberately does NOT re-arm and does NOT persist: a
+  // reload or a return to the tab re-opens it while the reward is still unclaimed,
+  // but an in-app panel open mid-visit will not.
   const dismiss = () => {
     if (exiting) return;
-    markSeen();
     _exit();
   };
 
@@ -103,7 +132,8 @@ export default function useClaimModal(account, refreshAccount) {
           title: "Claimed +" + Number((d && d.credits) || 0).toLocaleString() + " credits",
         });
       }
-      markSeen();
+      // Refresh so claim_credits drops to 0 -- THIS is what stops the nudge coming
+      // back on the next load/return. (No "mark seen" needed.)
       if (refreshAccount) refreshAccount();
       _exit();
     } catch {
