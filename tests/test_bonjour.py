@@ -141,3 +141,33 @@ def test_main_wires_bonjour_gated_on_lan_bind_with_a_goodbye():
     assert 'b = _SERVER_CONTROL.get("bonjour")' in src and "b.stop()" in src
     assert src.index("_bonjour.start(") < src.index("srv.serve_forever()"),         "register must happen before the serve loop blocks"
     assert src.index("srv = _make_server(args.host") < src.index("_bonjour = moonglade_bonjour"),         "register must happen after make_server has bound the socket"
+
+
+def test_bonjour_status_and_settings_routes(tmp_path, monkeypatch):
+    """Functional: the chip's two routes. GET status returns the live state; POST settings
+    validates + writes config.json. (Tier enforcement -- status LOGIN, settings LOCALHOST -- is
+    pinned by test_route_tiers' generated snapshot, not re-tested here.)"""
+    from tests.conftest import login_client
+    import moonglade_backup as core
+    import moonglade_gallery as g
+    # no live server in a unit test -> keep the route off the real zeroconf path
+    monkeypatch.setitem(g._SERVER_CONTROL, "bonjour", None)
+    monkeypatch.setitem(g._SERVER_CONTROL, "serving", None)
+    cli = login_client(tmp_path)
+
+    st = cli.get("/api/bonjour/status").get_json()
+    assert st["enabled"] is False and st["broadcasting"] is False
+    assert st["name"] == "Moonglade"
+    assert isinstance(st["zeroconf_available"], bool)
+    assert isinstance(st["reachable_urls"], list)
+
+    r = cli.post("/api/bonjour/settings",
+                 json={"enabled": True, "name": "The Library", "host": "0.0.0.0", "port": 5757}).get_json()
+    assert r["ok"] is True and r["enabled"] is True and r["name"] == "The Library"
+    assert r["host"] == "0.0.0.0" and r["port"] == 5757
+    cfg = core._load_config() or {}
+    assert cfg["BONJOUR_ENABLED"] is True and cfg["BONJOUR_NAME"] == "The Library"
+    assert cfg["HOST"] == "0.0.0.0" and cfg["PORT"] == 5757
+
+    for bad in ({"host": "8.8.8.8"}, {"port": 0}, {"port": 70000}, {"port": "nope"}, {"name": "   "}):
+        assert "error" in cli.post("/api/bonjour/settings", json=bad).get_json(), bad

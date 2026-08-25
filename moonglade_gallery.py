@@ -7504,6 +7504,93 @@ def create_app(out_dir: Path):
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
 
+    @app.route("/api/bonjour/status")
+    @tier(LOGIN)
+    def api_bonjour_status():
+        """Live Bonjour/mDNS state for the Control Panel chip: is it broadcasting, under what
+        name, at which reachable URLs, and is zeroconf even installed. Login required (local or
+        LAN) -- reading the broadcast state is safe for a LAN device; only WRITING the settings
+        (below) is localhost-only."""
+        import moonglade_bonjour
+        cfg = _core._load_config() or {}
+        serving = _SERVER_CONTROL.get("serving") or {}
+        adv = _SERVER_CONTROL.get("bonjour")
+        host = str(serving.get("host") or cfg.get(HOST_KEY) or DEFAULT_HOST)
+        port = int(serving.get("port") or cfg.get(PORT_KEY) or DEFAULT_PORT)
+        scheme = str(serving.get("scheme") or "http")
+        enabled = bool(cfg.get(BONJOUR_ENABLED_KEY, False))
+        name = str(cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)
+        broadcasting = bool(adv is not None and adv.active)
+        hostname = adv.hostname if broadcasting else moonglade_bonjour.hostname_label(name) + ".local"
+        lan_bind = moonglade_bonjour.is_lan_bind(host)
+        ip = adv.ip if broadcasting else moonglade_bonjour.lan_ip()
+        urls = []
+        if lan_bind and ip:
+            urls = ["{}://{}:{}/".format(scheme, hostname, port),
+                    "{}://{}:{}/".format(scheme, ip, port)]
+        return jsonify({
+            "enabled": enabled, "broadcasting": broadcasting, "name": name,
+            "host": host, "port": port, "scheme": scheme, "hostname": hostname,
+            "lan_bind": lan_bind, "lan_ip": ip, "reachable_urls": urls,
+            "zeroconf_available": moonglade_bonjour.zeroconf_available(),
+            "supervised": _supervised(),
+        })
+
+    @app.route("/api/bonjour/settings", methods=["POST"])
+    @tier(LOGIN, POST=LOCALHOST)
+    def api_bonjour_settings():
+        """Write the Bonjour/mDNS settings (config.json) and apply what can change live. Broadcast
+        on/off and the name apply immediately (re-register); the bind host/port are launch-time,
+        so those return restart_needed. LOCALHOST-only on write: a LAN device may SEE the state
+        but only the server box may change how the server is exposed. config.json holds auth
+        state, so this rides _accounts_lock like every other writer of it."""
+        import moonglade_bonjour
+        body = request.get_json(silent=True) or {}
+        cfg = _core._load_config() or {}
+        enabled = bool(body["enabled"]) if "enabled" in body else bool(cfg.get(BONJOUR_ENABLED_KEY, False))
+        name = str(body.get("name") if body.get("name") is not None
+                   else (cfg.get(BONJOUR_NAME_KEY) or DEFAULT_BONJOUR_NAME)).strip()
+        new_host = str(body.get("host") if body.get("host") is not None
+                       else (cfg.get(HOST_KEY) or DEFAULT_HOST)).strip()
+        raw_port = body.get("port", cfg.get(PORT_KEY, DEFAULT_PORT))
+        if not name:
+            return jsonify({"error": "A name is required."}), 200
+        if new_host not in ("127.0.0.1", "0.0.0.0"):
+            return jsonify({"error": "Host must be 127.0.0.1 (this machine only) or 0.0.0.0 (LAN)."}), 200
+        try:
+            new_port = int(raw_port)
+            if not (1 <= new_port <= 65535):
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "Port must be a whole number between 1 and 65535."}), 200
+        try:
+            with _core._accounts_lock:
+                cfg = _core._load_config() or {}
+                cfg[BONJOUR_ENABLED_KEY] = enabled
+                cfg[BONJOUR_NAME_KEY] = name
+                cfg[HOST_KEY] = new_host
+                cfg[PORT_KEY] = new_port
+                _core._save_config(cfg)
+        except OSError as e:
+            return jsonify({"error": "Couldn't save the setting: {}".format(
+                _redact_host_paths(str(e)))[:160]}), 200
+        # Apply live what needs no rebind: stop, then (re)start if it should be on, using the
+        # CURRENTLY-serving host/port -- a host/port CHANGE only takes effect on the next restart.
+        serving = _SERVER_CONTROL.get("serving") or {}
+        cur_host = str(serving.get("host") or new_host)
+        cur_port = int(serving.get("port") or new_port)
+        adv = _SERVER_CONTROL.get("bonjour")
+        broadcasting = False
+        if adv is not None:
+            adv.stop()
+            if enabled and moonglade_bonjour.is_lan_bind(cur_host):
+                broadcasting = adv.start(name, cur_port, str(serving.get("scheme") or "http"))
+        restart_needed = (new_host != cur_host) or (new_port != cur_port)
+        hostname = adv.hostname if (adv is not None and adv.active) else moonglade_bonjour.hostname_label(name) + ".local"
+        return jsonify({"ok": True, "enabled": enabled, "name": name, "host": new_host,
+                        "port": new_port, "broadcasting": broadcasting, "hostname": hostname,
+                        "restart_needed": restart_needed, "supervised": _supervised()})
+
     @app.route("/export-csv")
     @tier(LOGIN)
     def export_csv_download():
