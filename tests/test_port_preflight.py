@@ -151,3 +151,16 @@ def test_wildcard_bind_addresses_probe_loopback(host, tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_launcher_reads_port_from_config_when_serve_txt_is_silent():
+    """The launcher opens the browser + runs its single-instance probe at PORT, so PORT must come
+    from config.json (where the Bonjour chip writes it) when serve.txt gives no explicit --port --
+    otherwise moving the port in the chip binds the server there but still opens the browser at
+    :5000. Source-level guard: the .pyw runs on import, so it can't be imported."""
+    import pathlib
+    src = pathlib.Path("Serve Gallery.pyw").read_text(encoding="utf-8")
+    assert '"--port" in SERVE_ARGS' in src, "an explicit --port in serve.txt must still win"
+    i = src.index('"--port" in SERVE_ARGS')
+    tail = src[i:i + 800]
+    assert "else:" in tail and "_load_config()" in tail and '.get("PORT")' in tail,         "with no explicit --port, PORT must fall back to config.json's PORT"
