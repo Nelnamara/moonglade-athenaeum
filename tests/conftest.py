@@ -151,6 +151,18 @@ def _no_live_watch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _clear_gate_meta_cache():
+    """_model_profiles memoizes each version's inference-profile set in core._gate_meta_cache
+    (keyed by (id(session), versionId)) so the submit/price gate avoids N+1 GETs. It is a
+    within-run convenience, so clear it around every test -- otherwise a session object id
+    reused across tests could serve one test's profiles to another. Same isolation contract as
+    the gallery cache resets above."""
+    core._gate_meta_cache.clear()
+    yield
+    core._gate_meta_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->

@@ -95,7 +95,7 @@ def test_hires_emits_the_whole_denoising_block():
     p = core._gen_parameters(_gen_args(upscale=1.4, width=1400, height=784))
     assert p["upscale"] == 1.4
     assert p["upscaleDenoisingStrength"] == 0.6
-    assert p["upscaleDenoisingSteps"] == 26
+    assert p["upscaleDenoisingSteps"] == 20        # live Hires default (was 26; probe 2026-08-25)
     assert p["upscaleSampler"] == ""
     assert "enlarge" not in p and "enlargeModel" not in p   # no upscaler dropdown in Hires
 
@@ -168,7 +168,7 @@ def test_the_priced_upscale_params_reach_task_price(monkeypatch):
         _gen_args(width=1400, height=784, upscale=1.4, face_fix=True)))
     q = seen["params"]
     assert q["upscale"] == 1.4 and q["upscaleDenoisingStrength"] == 0.6
-    assert q["upscaleDenoisingSteps"] == 26 and q["enableADetailer"] is True
+    assert q["upscaleDenoisingSteps"] == 20 and q["enableADetailer"] is True
 
     seen.clear()
     core.price_task(object(), core._gen_parameters(

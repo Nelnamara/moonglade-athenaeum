@@ -6883,7 +6883,9 @@ DEFAULT_QUALITY_TAG = "Masterpiece"                 # their "Quality Tag" booste
 UPSCALE_FALLBACK_VERSION_ID = "1861558740588989558"
 # Captured from a completed Hires job; their dialog hints strength works best 0.4-0.6.
 DEFAULT_UPSCALE_DENOISING_STRENGTH = 0.6
-DEFAULT_UPSCALE_DENOISING_STEPS = 26
+# The live Hires dialog's default Denoising Steps is 20 (was 26 in our code; re-verified
+# against the new-gen platform, probe 2026-08-25 / scope 2026-08-26).
+DEFAULT_UPSCALE_DENOISING_STEPS = 20
 UPSCALE_RATIO_STEP = 0.1                            # both sliders step in tenths
 # A ratio slider's MAXIMUM is not a constant -- it moves with the source dimensions,
 # because what is actually capped is the OUTPUT pixel count. Measured maxima: a 1400x784
@@ -7246,6 +7248,11 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     params = {
         "priority": 1000,
         "i2vPro": i2v,
+        # The new platform (2026-08-25) moved the visibility switch to a top-level string
+        # enum `channel: "normal"|"private"`, replacing the old boolean `isPrivate`. Send
+        # BOTH: the server honors whichever it reads, so emitting the legacy field too can't
+        # regress privacy while the new field carries the switch forward.
+        "channel": "private" if is_private else "normal",
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
@@ -7293,6 +7300,9 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
     params = {
         "priority": int(priority),
         "referenceVideo": rv,
+        # New platform: top-level `channel` string replaces the boolean `isPrivate`; send
+        # both (server honors whichever) so privacy can't regress. Same switch as i2vPro.
+        "channel": "private" if is_private else "normal",
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
@@ -8551,6 +8561,103 @@ def _bump_card_use(params):
             pass
 
 
+# Per-version inference-profile memo for the submit/price gate below. Keyed
+# (id(session), versionId); the profile set is architecture-stable, read-only data, so
+# caching it inside one run only dedupes GETs (the Loom batch tally prices N templates on
+# ONE model -> N lookups without this). A within-run convenience, never a source of truth;
+# conftest clears it between tests so no model's profiles leak across them.
+_gate_meta_cache = {}
+
+
+def _model_profiles(session, version_id):
+    """The inference-profile set for a model VERSION, via the VERSION-keyed endpoint
+    GET /v2/generation-model/<version_id>/inference-profiles.
+
+    This is the ONLY endpoint the gate consults, and the ONLY one that answers on a submit's
+    `modelId` (which is a VERSION id): the model-keyed /versions route 404s on a version id,
+    which is why an earlier resolve_version_meta-based gate was inert (adversarial review /
+    live GETs, 2026-08-26). The real body is `{"profiles": [...]}` (NOT `data`).
+
+    Returns the list on HTTP 200 -- which may be `[]` (SDXL answers `{"profiles": []}`). This
+    distinguishes 'SDXL, definitively no profiles' from 'could not determine': ANY failure
+    (exception / non-2xx / a body that is not a dict with a `profiles` list) returns None so
+    the gate can fail soft and leave the submit exactly as it is today. Read-only. Successful
+    results are memoized per (session, versionId); None is NOT cached, so a transient failure
+    re-attempts rather than sticking."""
+    key = (id(session), str(version_id))
+    if key in _gate_meta_cache:
+        return _gate_meta_cache[key]
+    try:
+        data = _rest_get(session, "/generation-model/" + str(version_id) + "/inference-profiles")
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    profiles = data.get("profiles")
+    if not isinstance(profiles, list):
+        return None
+    _gate_meta_cache[key] = profiles
+    return profiles
+
+
+def _gate_params_for_model(session, params):
+    """Gate a plain-image createGenerationTask's field set on the model's ARCHITECTURE, so
+    the shape we PRICE and the shape we SUBMIT agree with what the model actually honors
+    (PixAI new-gen platform, 2026-08-25). Called from BOTH submit_generation and price_task
+    with the IDENTICAL helper, so the cost badge cannot diverge from the real charge.
+
+    The architecture signal is the VERSION-keyed inference-profile set (_model_profiles):
+    - NON-EMPTY -> DiT (MMDIT26A/B). The site sends `inferenceProfile` and omits
+      `samplingSteps`/`cfgScale`/`samplingMethod`/`clipSkip`. So: ensure a profile is present
+      (fill the model's DEFAULT-flagged profile when the user left it on auto -- and if NO row
+      is flagged default, leave it ABSENT so the SERVER picks its own default: omitting keeps
+      quote == charge, whereas synthesizing a possibly-invalid profile would reintroduce the
+      divergence) and drop the four ignored/rejected fields.
+    - EMPTY `[]` -> SDXL (a definitive 200). Keep `samplingSteps`/`cfgScale`; ensure
+      `inferenceProfile` is NOT present (SDXL rejects pro/ultra -- the drop-and-retry in
+      submit_generation was papering over exactly this).
+
+    BEST-EFFORT + FAIL-SOFT: no `modelId`, a non-image submit (video/edit/enhance flow through
+    submit_generation too and must pass untouched), or a profile set that cannot be determined
+    (None) all return the params UNCHANGED -- a failed lookup never breaks a submit or changes
+    its spend outcome versus today. Non-mutating: returns the ORIGINAL object on every no-op
+    path (so submit_generation's own in-place inferenceProfile drop-and-retry still mutates the
+    caller's dict), and a shallow COPY only when it actually gates. The profile GET is the only
+    new network call, and it is read-only."""
+    if not params or not params.get("modelId"):
+        return params
+    # Video (i2vPro/referenceVideo) is the only non-image submit carrying a TOP-LEVEL
+    # modelId; instruct-edit (chat.modelId) and enhance (workflowName) have none, so the
+    # modelId guard already skips them. Skip video explicitly.
+    if "i2vPro" in params or "referenceVideo" in params:
+        return params
+    try:
+        profiles = _model_profiles(session, params["modelId"])
+    except Exception:
+        return params
+    if profiles is None:
+        return params                       # couldn't determine -> today's behavior, unchanged
+    if profiles:                            # non-empty -> DiT (profile-driven)
+        p = dict(params)
+        if not p.get("inferenceProfile"):
+            default = ""
+            for r in profiles:
+                if isinstance(r, dict) and r.get("profileFlag") == "default":
+                    default = str(r.get("profileName") or "").strip()
+                    break
+            # A default was flagged -> send it. NONE flagged -> leave inferenceProfile ABSENT
+            # so the server applies its own default (quote == charge); never synthesize one.
+            if default:
+                p["inferenceProfile"] = default
+        for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
+            p.pop(k, None)
+        return p
+    # profiles == [] -> SDXL: steps/cfg drive cost; strip a profile the model would reject.
+    p = dict(params)
+    p.pop("inferenceProfile", None)
+    return p
+
+
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id.
@@ -8578,6 +8685,11 @@ def submit_generation(session, params):
     # rebinding the whole session here is safe; the CALLER keeps its API-key session for
     # download (F6).
     session = _session_for_create(session)
+    # Gate the field set on the model's architecture (DiT profile vs SDXL steps/cfg) BEFORE
+    # the mutation, with the SAME helper price_task uses, so the submitted shape equals the
+    # priced shape. Fail-soft: an undetermined profile set returns params unchanged (today's
+    # behavior).
+    params = _gate_params_for_model(session, params)
     params = priority_for_submit(params)   # already known to be turbo-refused? use Low
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
@@ -11131,6 +11243,10 @@ def price_task(session, params):
     Returns actualPrice (int credits) or None. READ-ONLY -- spends nothing, fails soft."""
     if not params:
         return None
+    # Same architecture gate the submit applies, so the badge prices the shape that will be
+    # sent (quote == charge for DiT/SDXL). Local reassignment only -- the caller's params
+    # object (which price() also hands to match_kaisuuken) is left untouched.
+    params = _gate_params_for_model(session, params)
     q = {}
     for k, v in params.items():
         if v is None:
