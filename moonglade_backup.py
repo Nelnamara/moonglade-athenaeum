@@ -8561,12 +8561,17 @@ def _bump_card_use(params):
             pass
 
 
-# Per-version inference-profile memo for the submit/price gate below. Keyed
-# (id(session), versionId); the profile set is architecture-stable, read-only data, so
-# caching it inside one run only dedupes GETs (the Loom batch tally prices N templates on
-# ONE model -> N lookups without this). A within-run convenience, never a source of truth;
-# conftest clears it between tests so no model's profiles leak across them.
-_gate_meta_cache = {}
+# Per-VERSION inference-profile cache for the submit/price gate below. Keyed by version_id
+# ALONE (not the session): /api/price builds a FRESH session per keystroke (gallery
+# _gen_session -> _make_session(None)), so an id(session) memo never hit across price calls and
+# every keystroke re-fetched /inference-profiles over the network -- the drawer's "price
+# reloading" lag (2026-08-26). The profile set is per-VERSION architecture data, identical
+# across accounts/sessions, so version-keyed caching is correct and turns the per-keystroke GET
+# into one-per-model-per-TTL. Entries carry a monotonic timestamp; the TTL bounds staleness so a
+# model whose profiles PixAI later changes is picked up within the hour (a restart clears it
+# too). conftest clears it between tests so no model's profiles leak across them.
+_PROFILE_CACHE_TTL = 3600.0                  # seconds; inference profiles change very rarely
+_profile_cache = {}                          # version_id -> (fetched_at_monotonic, profiles_list)
 
 
 def _model_profiles(session, version_id):
@@ -8581,14 +8586,19 @@ def _model_profiles(session, version_id):
     Returns the list on HTTP 200 -- which may be `[]` (SDXL answers `{"profiles": []}`). This
     distinguishes 'SDXL, definitively no profiles' from 'could not determine': ANY failure
     (exception / non-2xx / a body that is not a dict with a `profiles` list) returns None so
-    the gate can fail soft and leave the submit exactly as it is today. Read-only. Successful
-    results are memoized per (session, versionId); None is NOT cached, so a transient failure
-    re-attempts rather than sticking."""
-    key = (id(session), str(version_id))
-    if key in _gate_meta_cache:
-        return _gate_meta_cache[key]
+    the gate can fail soft and leave the submit exactly as it is today. Read-only.
+
+    CACHED per version_id across ALL sessions (see _profile_cache) with a TTL, because
+    /api/price runs this on every keystroke on a FRESH session (gallery _gen_session) -- a
+    session-keyed memo re-hit the network each time. Only a SUCCESSFUL result is cached (None
+    is not, so a transient failure re-attempts rather than sticking)."""
+    vid = str(version_id)
+    now = time.monotonic()
+    hit = _profile_cache.get(vid)
+    if hit is not None and (now - hit[0]) < _PROFILE_CACHE_TTL:
+        return hit[1]
     try:
-        data = _rest_get(session, "/generation-model/" + str(version_id) + "/inference-profiles")
+        data = _rest_get(session, "/generation-model/" + vid + "/inference-profiles")
     except Exception:
         return None
     if not isinstance(data, dict):
@@ -8596,7 +8606,7 @@ def _model_profiles(session, version_id):
     profiles = data.get("profiles")
     if not isinstance(profiles, list):
         return None
-    _gate_meta_cache[key] = profiles
+    _profile_cache[vid] = (now, profiles)
     return profiles
 
 

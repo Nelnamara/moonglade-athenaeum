@@ -151,15 +151,14 @@ def _no_live_watch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _clear_gate_meta_cache():
-    """_model_profiles memoizes each version's inference-profile set in core._gate_meta_cache
-    (keyed by (id(session), versionId)) so the submit/price gate avoids N+1 GETs. It is a
-    within-run convenience, so clear it around every test -- otherwise a session object id
-    reused across tests could serve one test's profiles to another. Same isolation contract as
-    the gallery cache resets above."""
-    core._gate_meta_cache.clear()
+def _clear_profile_cache():
+    """_model_profiles caches each version's inference-profile set in core._profile_cache
+    (keyed by version_id, with a TTL) so the submit/price gate avoids a network GET on every
+    /api/price keystroke. Clear it around every test so one test's profiles can't leak into
+    another. Same isolation contract as the gallery cache resets above."""
+    core._profile_cache.clear()
     yield
-    core._gate_meta_cache.clear()
+    core._profile_cache.clear()
 
 
 @pytest.fixture(autouse=True)

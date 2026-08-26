@@ -184,14 +184,17 @@ def test_model_profiles_none_on_failure(monkeypatch):
     assert core._model_profiles(object(), "V2") is None
 
 
-def test_model_profiles_memoizes_per_session_and_version(monkeypatch):
+def test_model_profiles_caches_by_version_across_sessions(monkeypatch):
+    # The cache is keyed by version_id ALONE, not the session -- because /api/price builds a
+    # FRESH session per keystroke (gallery _gen_session). Two DIFFERENT sessions asking for the
+    # same version must hit the network only ONCE: this is the fix for the drawer's per-keystroke
+    # price-reload lag (a session-keyed memo re-fetched every call).
     n = {"gets": 0}
 
     def fake_rest_get(session, path, params=None, **k):
         n["gets"] += 1
         return {"profiles": [{"profileName": "lite", "profileFlag": "default"}]}
     monkeypatch.setattr(core, "_rest_get", fake_rest_get)
-    s = object()
-    a = core._model_profiles(s, "V1")
-    b = core._model_profiles(s, "V1")
-    assert a == b and n["gets"] == 1                   # second call served from the memo
+    a = core._model_profiles(object(), "V1")           # session A
+    b = core._model_profiles(object(), "V1")           # session B -- a DIFFERENT object
+    assert a == b and n["gets"] == 1                   # cached across sessions -> one GET
