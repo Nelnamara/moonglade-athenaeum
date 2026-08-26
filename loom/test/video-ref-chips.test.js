@@ -64,3 +64,27 @@ describe("ref chips: no nesting, self-healing, preview out of the transformed an
     assert.doesNotMatch(css, /\.gen-drawer \.mgd-preview/);
   });
 });
+
+// Appended after the owner's second QA pass: the first cut of this fix shipped dist/app.js but
+// NOT dist/app.css. The portaled preview div then ran against the old `.gen-drawer .mgd-preview`
+// selector, matched nothing, and rendered as an unstyled static div at the end of <body> -- the
+// reported "no thumbnails at all / sometimes behind the prompt text". dist is a committed
+// artifact in this repo, so pin the BUILT stylesheet too.
+test("the BUILT stylesheets ship the unscoped preview rule -- both dists actually deploy the fix", () => {
+  // Two committed build artifacts serve this component: vite's gallery/dist (minified) and
+  // esbuild's loom/dist (unminified -- `.mgd-preview {` with a space), because the Loom bundles
+  // its OWN copy of VideoDrawer (loom/master-storyboard.jsx imports it). The first cut shipped
+  // neither artifact's CSS and the second nearly missed the Loom's, so pin both, format-tolerant.
+  for (const rel of ["../../gallery/dist/app.css", "../../loom/dist/master-storyboard.bundle.css"]) {
+    const dist = readFileSync(path.join(__dirname, rel), "utf8");
+    assert.match(dist, /\.mgd-preview\s*\{\s*position:\s*fixed/, rel + " must carry the unscoped rule");
+    assert.doesNotMatch(dist, /\.gen-drawer\s+\.mgd-preview/, rel + " must not keep the old scoped selector");
+  }
+});
+
+test("the BUILT loom bundle carries the module fix, not the old inline chipify", () => {
+  const js = readFileSync(path.join(__dirname, "../../loom/dist/master-storyboard.bundle.js"), "utf8");
+  assert.ok(!js.includes("const chipify = (final) => {"), "the old inline chipify must be gone from the loom bundle");
+  assert.ok(js.includes('closest(".mgd-chip")'), "the nesting guard must be IN the loom bundle");
+});
+

@@ -2451,13 +2451,13 @@ ${"=".repeat(48)}
     applyModelGating(s);
     return { setPrompt: o.prompt != null ? o.prompt : null };
   }
-  function buildPayload(s, promptText) {
+  function buildPayload(s, promptText2) {
     const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
     const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id) : [];
     const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
     return {
       mode: s.mode.toUpperCase(),
-      prompt: promptText || "",
+      prompt: promptText2 || "",
       negative: (s.negative || "").trim(),
       images,
       video_refs,
@@ -2730,6 +2730,87 @@ ${"=".repeat(48)}
     return { ms: POLL_MS, tier: "normal" };
   }
 
+  // ../gallery/src/gen/refChips.js
+  var REF_RE = /@(?:image|video|audio)\d+/g;
+  var escHtml = (s) => (s == null ? "" : String(s)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  var chipLead = (info) => info && info.thumb ? '<img src="' + escHtml(info.thumb) + '" alt="">' : info && info.kind === "audio" ? "\u266A " : "";
+  function makeChip(tag, info, hooks) {
+    const c = document.createElement("span");
+    c.className = "mgd-chip";
+    c.contentEditable = "false";
+    c.setAttribute("data-ref", tag);
+    c.innerHTML = chipLead(info) + tag;
+    if (info && info.mid && info.kind !== "audio" && hooks) {
+      c.onmouseenter = () => hooks.enter(info.mid, c);
+      c.onmouseleave = () => hooks.leave();
+    }
+    return c;
+  }
+  function chipify(ce, map, final, hooks) {
+    if (!ce) return;
+    ce.querySelectorAll(".mgd-chip .mgd-chip").forEach((inner) => {
+      let outer = inner;
+      while (outer.parentElement && outer.parentElement.closest(".mgd-chip")) outer = outer.parentElement.closest(".mgd-chip");
+      if (outer && outer.querySelector(".mgd-chip")) {
+        const tag = outer.getAttribute("data-ref") || "";
+        if (!/^@(?:image|video|audio)\d+$/.test(tag)) {
+          outer.remove();
+          return;
+        }
+        outer.innerHTML = chipLead(map[tag]) + tag;
+      }
+    });
+    const sel = window.getSelection();
+    const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
+    let tn;
+    while (tn = walker.nextNode()) {
+      if (tn.parentElement && tn.parentElement.closest(".mgd-chip")) continue;
+      nodes.push(tn);
+    }
+    nodes.forEach((node) => {
+      const t = node.nodeValue, found = [];
+      let m;
+      REF_RE.lastIndex = 0;
+      while ((m = REF_RE.exec(t)) !== null) {
+        if (!map[m[0]]) continue;
+        if (!final && m.index + m[0].length === t.length) continue;
+        found.push({ i: m.index, tag: m[0] });
+      }
+      if (!found.length) return;
+      const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
+      const frag = document.createDocumentFragment();
+      let pos = 0;
+      found.forEach((f) => {
+        if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
+        frag.appendChild(makeChip(f.tag, map[f.tag], hooks));
+        pos = f.i + f.tag.length;
+      });
+      const tail = document.createTextNode(t.slice(pos));
+      frag.appendChild(tail);
+      node.parentNode.replaceChild(frag, node);
+      if (caretHere) {
+        const r = document.createRange();
+        r.setStart(tail, tail.length);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    });
+  }
+  function promptText(ce) {
+    if (!ce) return "";
+    let out = "";
+    (function walk(n) {
+      n.childNodes.forEach((c) => {
+        if (c.nodeType === 3) out += c.nodeValue;
+        else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
+        else if (c.nodeName === "BR") out += "\n";
+        else walk(c);
+      });
+    })(ce);
+    return out.replace(/ /g, " ").trim();
+  }
+
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
@@ -2829,75 +2910,13 @@ ${"=".repeat(48)}
       return map;
     };
     const esc2 = (s2) => (s2 == null ? "" : String(s2)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-    const makeChip = (tag, info) => {
-      const c = document.createElement("span");
-      c.className = "mgd-chip";
-      c.contentEditable = "false";
-      c.setAttribute("data-ref", tag);
-      const lead = info && info.thumb ? '<img src="' + esc2(info.thumb) + '" alt="">' : info && info.kind === "audio" ? "\u266A " : "";
-      c.innerHTML = lead + tag;
-      if (info && info.mid && info.kind !== "audio") {
-        c.onmouseenter = () => showPreview(info.mid, c);
-        c.onmouseleave = () => hidePreview();
-      }
-      return c;
-    };
-    const chipify = (final) => {
-      const ce = ceRef.current;
-      if (!ce) return;
-      const map = refMap(), sel = window.getSelection();
-      const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
-      let tn;
-      while (tn = walker.nextNode()) nodes.push(tn);
-      const re = /@(?:image|video|audio)\d+/g;
-      nodes.forEach((node) => {
-        const t = node.nodeValue, found = [];
-        let m;
-        re.lastIndex = 0;
-        while ((m = re.exec(t)) !== null) {
-          if (!map[m[0]]) continue;
-          if (!final && m.index + m[0].length === t.length) continue;
-          found.push({ i: m.index, tag: m[0] });
-        }
-        if (!found.length) return;
-        const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
-        const frag = document.createDocumentFragment();
-        let pos = 0;
-        found.forEach((f) => {
-          if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
-          frag.appendChild(makeChip(f.tag, map[f.tag]));
-          pos = f.i + f.tag.length;
-        });
-        const tail = document.createTextNode(t.slice(pos));
-        frag.appendChild(tail);
-        node.parentNode.replaceChild(frag, node);
-        if (caretHere) {
-          const r = document.createRange();
-          r.setStart(tail, tail.length);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-        }
-      });
-    };
-    const promptText = () => {
-      const ce = ceRef.current;
-      if (!ce) return "";
-      let out = "";
-      (function walk(n) {
-        n.childNodes.forEach((c) => {
-          if (c.nodeType === 3) out += c.nodeValue;
-          else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
-          else if (c.nodeName === "BR") out += "\n";
-          else walk(c);
-        });
-      })(ce);
-      return out.replace(/ /g, " ").trim();
-    };
+    const chipHooks = { enter: (mid, el) => showPreview(mid, el), leave: () => hidePreview() };
+    const chipify2 = (final) => chipify(ceRef.current, refMap(), final, chipHooks);
+    const promptText2 = () => promptText(ceRef.current);
     const promptSet = (v) => {
       if (ceRef.current) {
         ceRef.current.textContent = v || "";
-        chipify(true);
+        chipify2(true);
       }
       reprice();
       dirty.current = false;
@@ -2905,21 +2924,21 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit3("mg-prompt-commit", { text: promptText() });
+      emit3("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
       emit3("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
-        chipify(false);
+        chipify2(false);
         reprice();
         emitCommitIfDirty();
       }, 300);
     }, []);
     const onCeBlur = useCallback(
       () => {
-        chipify(true);
+        chipify2(true);
         emitCommitIfDirty();
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3005,7 +3024,7 @@ ${"=".repeat(48)}
       applyModelGating2(true);
       reprice();
     };
-    const payload = () => buildPayload(st.current, promptText());
+    const payload = () => buildPayload(st.current, promptText2());
     const flfMissingStart2 = () => flfMissingStart(st.current);
     const build2 = useCallback(() => {
       const p = payload();
@@ -3121,10 +3140,10 @@ ${"=".repeat(48)}
     };
     const flushPromptEdit = () => {
       clearTimeout(chipTimer.current);
-      chipify(true);
+      chipify2(true);
       if (!dirty.current) return null;
       dirty.current = false;
-      return promptText();
+      return promptText2();
     };
     const setBusy = (isBusy) => {
       if (st.current.rendering) return;
@@ -3132,7 +3151,7 @@ ${"=".repeat(48)}
       rerender();
     };
     const insertText = (t) => {
-      const cur = promptText();
+      const cur = promptText2();
       promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
     };
     const setReuse = (info) => setReuseChip(info || null);
@@ -3146,7 +3165,7 @@ ${"=".repeat(48)}
         node.setBusy = setBusy;
         node.payload = payload;
         node.insertText = insertText;
-        node.promptText = promptText;
+        node.promptText = promptText2;
         node.setReuse = setReuse;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
@@ -3442,7 +3461,7 @@ ${"=".repeat(48)}
         },
         /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
       ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text))));
-    })(), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
+    })(), createPortal(/* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }), document.body));
   });
   var VideoDrawer_default = VideoDrawer;
 
