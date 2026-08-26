@@ -1457,7 +1457,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
     transform: translateX(102%);
   }
 }
-.gen-drawer .mgd-preview {
+.mgd-preview {
   position: fixed;
   z-index: 600;
   width: 300px;
@@ -1472,14 +1472,14 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   transform: translateY(4px);
   transition: opacity .18s cubic-bezier(.2, .9, .24, 1), transform .18s cubic-bezier(.2, .9, .24, 1);
 }
-.gen-drawer .mgd-preview.open {
+.mgd-preview.open {
   display: block;
 }
-.gen-drawer .mgd-preview.open.in {
+.mgd-preview.open.in {
   opacity: 1;
   transform: none;
 }
-.gen-drawer .mgd-preview img {
+.mgd-preview img {
   width: 100%;
   max-height: 300px;
   object-fit: cover;

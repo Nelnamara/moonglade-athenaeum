@@ -148,10 +148,10 @@
 .gen-drawer .mgd-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--mantle,#131024);animation:mgd-eclipse 2.6s ease-in-out infinite;}
 @keyframes mgd-eclipse{0%{transform:translateX(-102%);}50%{transform:translateX(0);}100%{transform:translateX(102%);}}
 /* the floating ref preview -- fixed so a host transform:scale() can't distort it. */
-.gen-drawer .mgd-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;display:none;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}
-.gen-drawer .mgd-preview.open{display:block;}
-.gen-drawer .mgd-preview.open.in{opacity:1;transform:none;}
-.gen-drawer .mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}
+.mgd-preview{position:fixed;z-index:600;width:300px;background:var(--mantle,#131024);border:1px solid var(--surface1,#3a3460);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.6);overflow:hidden;display:none;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .18s cubic-bezier(.2,.9,.24,1),transform .18s cubic-bezier(.2,.9,.24,1);}
+.mgd-preview.open{display:block;}
+.mgd-preview.open.in{opacity:1;transform:none;}
+.mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}
 /* Reference-slot thumbnails follow the host page's privacy blur (audit 2026-07-21 S5). */
 body.privacy-blur .gen-drawer .mgd-slot img{filter:blur(16px);transition:filter .12s;}
 body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img{filter:blur(28px);}

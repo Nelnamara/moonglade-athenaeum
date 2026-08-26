@@ -17,6 +17,7 @@ import {
 import usePriceProbe from "../gen/usePriceProbe.js";
 import { submitTask } from "../gen/submitTask.js";
 import { CEILING_MS } from "../notify/pollCadence.js";
+import { chipify as refChipify, promptText as refPromptText } from "../gen/refChips.js";
 import "../styles/gen-drawer.css";
 
 /* VideoDrawer -- the React port of static/mg-generate-drawer.js's <mg-generate-drawer> (no-vanilla
@@ -201,67 +202,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     return map;
   };
   const esc = (s2) => (s2 == null ? "" : String(s2)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const makeChip = (tag, info) => {
-    const c = document.createElement("span");
-    c.className = "mgd-chip"; c.contentEditable = "false"; c.setAttribute("data-ref", tag);
-    const lead = info && info.thumb ? '<img src="' + esc(info.thumb) + '" alt="">' : (info && info.kind === "audio" ? "♪ " : "");
-    c.innerHTML = lead + tag;
-    if (info && info.mid && info.kind !== "audio") {
-      c.onmouseenter = () => showPreview(info.mid, c);
-      c.onmouseleave = () => hidePreview();
-    }
-    return c;
-  };
-  const chipify = (final) => {
-    const ce = ceRef.current;
-    if (!ce) return;
-    const map = refMap(), sel = window.getSelection();
-    const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
-    let tn;
-    while ((tn = walker.nextNode())) nodes.push(tn);
-    const re = /@(?:image|video|audio)\d+/g;
-    nodes.forEach((node) => {
-      const t = node.nodeValue, found = [];
-      let m;
-      re.lastIndex = 0;
-      while ((m = re.exec(t)) !== null) {
-        if (!map[m[0]]) continue;
-        if (!final && m.index + m[0].length === t.length) continue;   // still typing at the end
-        found.push({ i: m.index, tag: m[0] });
-      }
-      if (!found.length) return;
-      const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
-      const frag = document.createDocumentFragment();
-      let pos = 0;
-      found.forEach((f) => {
-        if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
-        frag.appendChild(makeChip(f.tag, map[f.tag]));
-        pos = f.i + f.tag.length;
-      });
-      const tail = document.createTextNode(t.slice(pos));
-      frag.appendChild(tail);
-      node.parentNode.replaceChild(frag, node);
-      if (caretHere) {
-        const r = document.createRange();
-        r.setStart(tail, tail.length); r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r);
-      }
-    });
-  };
-  const promptText = () => {
-    const ce = ceRef.current;
-    if (!ce) return "";
-    let out = "";
-    (function walk(n) {
-      n.childNodes.forEach((c) => {
-        if (c.nodeType === 3) out += c.nodeValue;
-        else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
-        else if (c.nodeName === "BR") out += "\n";
-        else walk(c);
-      });
-    })(ce);
-    return out.replace(/ /g, " ").trim();
-  };
+  // The chip DOM algorithm lives in gen/refChips.js (lifted 2026-08-25 -- the QA-caught nesting
+  // bug is fixed THERE, once, and unit-testable). These wrappers keep every call site unchanged;
+  // the hooks wire chip hover to this component's portaled floating preview.
+  const chipHooks = { enter: (mid, el) => showPreview(mid, el), leave: () => hidePreview() };
+  const chipify = (final) => refChipify(ceRef.current, refMap(), final, chipHooks);
+  const promptText = () => refPromptText(ceRef.current);
   const promptSet = (v) => {
     if (ceRef.current) { ceRef.current.textContent = v || ""; chipify(true); }
     reprice();
@@ -924,7 +870,11 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
         );
       })()}
 
-      <div ref={previewRef} className="mgd-preview" aria-hidden="true" />
+      {/* Portaled to <body>: the drawer (and in dock mode, the dock) sits under ancestors with
+          transforms/backdrop-filters, which hijack position:fixed and re-anchor it to themselves --
+          the QA-caught "preview pops all over the place / off-screen". On body, fixed means the
+          viewport again, in both drawer and dock modes. */}
+      {createPortal(<div ref={previewRef} className="mgd-preview" aria-hidden="true" />, document.body)}
     </div>
   );
 });

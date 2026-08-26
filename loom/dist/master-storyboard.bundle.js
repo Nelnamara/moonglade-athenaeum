@@ -262,17 +262,17 @@ var LoomBundle = (() => {
     const { free, paid, credits, unknown } = tallyPricesDetailed(prices);
     return { free, paid, credits, unknown };
   };
-  var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => {
+  var formatCostEstimate = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => {
     const settledNone = free === 0 && paid === 0 && unknown === 0;
-    const trail = pending > 0 ? " \u27F3" : "";
-    if (settledNone && pending > 0) return "\u2026";
+    const trail = pending2 > 0 ? " \u27F3" : "";
+    if (settledNone && pending2 > 0) return "\u2026";
     if (credits > 0) return `\u2248${credits.toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}${trail}`;
     if (unknown > 0) return `${unknown} unpriced${trail}`;
     if (free > 0) return `\u{1F3AB} free${trail}`;
     if (paid > 0) return `0 cr${trail}`;
     return "\u2026" + trail;
   };
-  var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
+  var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending2 ? `, ${pending2} still estimating` : ""}.`;
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -2451,13 +2451,13 @@ ${"=".repeat(48)}
     applyModelGating(s);
     return { setPrompt: o.prompt != null ? o.prompt : null };
   }
-  function buildPayload(s, promptText) {
+  function buildPayload(s, promptText2) {
     const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
     const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id) : [];
     const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
     return {
       mode: s.mode.toUpperCase(),
-      prompt: promptText || "",
+      prompt: promptText2 || "",
       negative: (s.negative || "").trim(),
       images,
       video_refs,
@@ -2730,6 +2730,87 @@ ${"=".repeat(48)}
     return { ms: POLL_MS, tier: "normal" };
   }
 
+  // ../gallery/src/gen/refChips.js
+  var REF_RE = /@(?:image|video|audio)\d+/g;
+  var escHtml = (s) => (s == null ? "" : String(s)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  var chipLead = (info) => info && info.thumb ? '<img src="' + escHtml(info.thumb) + '" alt="">' : info && info.kind === "audio" ? "\u266A " : "";
+  function makeChip(tag, info, hooks) {
+    const c = document.createElement("span");
+    c.className = "mgd-chip";
+    c.contentEditable = "false";
+    c.setAttribute("data-ref", tag);
+    c.innerHTML = chipLead(info) + tag;
+    if (info && info.mid && info.kind !== "audio" && hooks) {
+      c.onmouseenter = () => hooks.enter(info.mid, c);
+      c.onmouseleave = () => hooks.leave();
+    }
+    return c;
+  }
+  function chipify(ce, map, final, hooks) {
+    if (!ce) return;
+    ce.querySelectorAll(".mgd-chip .mgd-chip").forEach((inner) => {
+      let outer = inner;
+      while (outer.parentElement && outer.parentElement.closest(".mgd-chip")) outer = outer.parentElement.closest(".mgd-chip");
+      if (outer && outer.querySelector(".mgd-chip")) {
+        const tag = outer.getAttribute("data-ref") || "";
+        if (!/^@(?:image|video|audio)\d+$/.test(tag)) {
+          outer.remove();
+          return;
+        }
+        outer.innerHTML = chipLead(map[tag]) + tag;
+      }
+    });
+    const sel = window.getSelection();
+    const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
+    let tn;
+    while (tn = walker.nextNode()) {
+      if (tn.parentElement && tn.parentElement.closest(".mgd-chip")) continue;
+      nodes.push(tn);
+    }
+    nodes.forEach((node) => {
+      const t = node.nodeValue, found = [];
+      let m;
+      REF_RE.lastIndex = 0;
+      while ((m = REF_RE.exec(t)) !== null) {
+        if (!map[m[0]]) continue;
+        if (!final && m.index + m[0].length === t.length) continue;
+        found.push({ i: m.index, tag: m[0] });
+      }
+      if (!found.length) return;
+      const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
+      const frag = document.createDocumentFragment();
+      let pos = 0;
+      found.forEach((f) => {
+        if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
+        frag.appendChild(makeChip(f.tag, map[f.tag], hooks));
+        pos = f.i + f.tag.length;
+      });
+      const tail = document.createTextNode(t.slice(pos));
+      frag.appendChild(tail);
+      node.parentNode.replaceChild(frag, node);
+      if (caretHere) {
+        const r = document.createRange();
+        r.setStart(tail, tail.length);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    });
+  }
+  function promptText(ce) {
+    if (!ce) return "";
+    let out = "";
+    (function walk(n) {
+      n.childNodes.forEach((c) => {
+        if (c.nodeType === 3) out += c.nodeValue;
+        else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
+        else if (c.nodeName === "BR") out += "\n";
+        else walk(c);
+      });
+    })(ce);
+    return out.replace(/ /g, " ").trim();
+  }
+
   // ../gallery/src/components/VideoDrawer.jsx
   var lineSeq = 0;
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
@@ -2829,75 +2910,13 @@ ${"=".repeat(48)}
       return map;
     };
     const esc2 = (s2) => (s2 == null ? "" : String(s2)).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-    const makeChip = (tag, info) => {
-      const c = document.createElement("span");
-      c.className = "mgd-chip";
-      c.contentEditable = "false";
-      c.setAttribute("data-ref", tag);
-      const lead = info && info.thumb ? '<img src="' + esc2(info.thumb) + '" alt="">' : info && info.kind === "audio" ? "\u266A " : "";
-      c.innerHTML = lead + tag;
-      if (info && info.mid && info.kind !== "audio") {
-        c.onmouseenter = () => showPreview(info.mid, c);
-        c.onmouseleave = () => hidePreview();
-      }
-      return c;
-    };
-    const chipify = (final) => {
-      const ce = ceRef.current;
-      if (!ce) return;
-      const map = refMap(), sel = window.getSelection();
-      const walker = document.createTreeWalker(ce, NodeFilter.SHOW_TEXT), nodes = [];
-      let tn;
-      while (tn = walker.nextNode()) nodes.push(tn);
-      const re = /@(?:image|video|audio)\d+/g;
-      nodes.forEach((node) => {
-        const t = node.nodeValue, found = [];
-        let m;
-        re.lastIndex = 0;
-        while ((m = re.exec(t)) !== null) {
-          if (!map[m[0]]) continue;
-          if (!final && m.index + m[0].length === t.length) continue;
-          found.push({ i: m.index, tag: m[0] });
-        }
-        if (!found.length) return;
-        const caretHere = sel.rangeCount && sel.getRangeAt(0).startContainer === node;
-        const frag = document.createDocumentFragment();
-        let pos = 0;
-        found.forEach((f) => {
-          if (f.i > pos) frag.appendChild(document.createTextNode(t.slice(pos, f.i)));
-          frag.appendChild(makeChip(f.tag, map[f.tag]));
-          pos = f.i + f.tag.length;
-        });
-        const tail = document.createTextNode(t.slice(pos));
-        frag.appendChild(tail);
-        node.parentNode.replaceChild(frag, node);
-        if (caretHere) {
-          const r = document.createRange();
-          r.setStart(tail, tail.length);
-          r.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(r);
-        }
-      });
-    };
-    const promptText = () => {
-      const ce = ceRef.current;
-      if (!ce) return "";
-      let out = "";
-      (function walk(n) {
-        n.childNodes.forEach((c) => {
-          if (c.nodeType === 3) out += c.nodeValue;
-          else if (c.classList && c.classList.contains("mgd-chip")) out += c.getAttribute("data-ref");
-          else if (c.nodeName === "BR") out += "\n";
-          else walk(c);
-        });
-      })(ce);
-      return out.replace(/ /g, " ").trim();
-    };
+    const chipHooks = { enter: (mid, el) => showPreview(mid, el), leave: () => hidePreview() };
+    const chipify2 = (final) => chipify(ceRef.current, refMap(), final, chipHooks);
+    const promptText2 = () => promptText(ceRef.current);
     const promptSet = (v) => {
       if (ceRef.current) {
         ceRef.current.textContent = v || "";
-        chipify(true);
+        chipify2(true);
       }
       reprice();
       dirty.current = false;
@@ -2905,21 +2924,21 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit3("mg-prompt-commit", { text: promptText() });
+      emit3("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
       emit3("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
-        chipify(false);
+        chipify2(false);
         reprice();
         emitCommitIfDirty();
       }, 300);
     }, []);
     const onCeBlur = useCallback(
       () => {
-        chipify(true);
+        chipify2(true);
         emitCommitIfDirty();
       },
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3005,7 +3024,7 @@ ${"=".repeat(48)}
       applyModelGating2(true);
       reprice();
     };
-    const payload = () => buildPayload(st.current, promptText());
+    const payload = () => buildPayload(st.current, promptText2());
     const flfMissingStart2 = () => flfMissingStart(st.current);
     const build2 = useCallback(() => {
       const p = payload();
@@ -3121,10 +3140,10 @@ ${"=".repeat(48)}
     };
     const flushPromptEdit = () => {
       clearTimeout(chipTimer.current);
-      chipify(true);
+      chipify2(true);
       if (!dirty.current) return null;
       dirty.current = false;
-      return promptText();
+      return promptText2();
     };
     const setBusy = (isBusy) => {
       if (st.current.rendering) return;
@@ -3132,7 +3151,7 @@ ${"=".repeat(48)}
       rerender();
     };
     const insertText = (t) => {
-      const cur = promptText();
+      const cur = promptText2();
       promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
     };
     const setReuse = (info) => setReuseChip(info || null);
@@ -3146,7 +3165,7 @@ ${"=".repeat(48)}
         node.setBusy = setBusy;
         node.payload = payload;
         node.insertText = insertText;
-        node.promptText = promptText;
+        node.promptText = promptText2;
         node.setReuse = setReuse;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
@@ -3442,7 +3461,7 @@ ${"=".repeat(48)}
         },
         /* @__PURE__ */ react_global_shim_default.createElement("img", { src: "/thumbs/" + encodeURIComponent(mid) + ".jpg", alt: "result", loading: "lazy" })
       ))) : l.kind === "error" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--red,#f38ba8)", fontSize: 12 } }, l.text) : l.kind === "plain" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: "var(--subtext,#9a93ab)", fontSize: 12 } }, l.text) : /* @__PURE__ */ react_global_shim_default.createElement("span", { style: { color: l.amber ? "var(--amber,#f9d38c)" : "var(--subtext,#9a93ab)", fontSize: 12 } }, l.moon ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-moon" }) : null, l.text))));
-    })(), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }));
+    })(), createPortal(/* @__PURE__ */ react_global_shim_default.createElement("div", { ref: previewRef, className: "mgd-preview", "aria-hidden": "true" }), document.body));
   });
   var VideoDrawer_default = VideoDrawer;
 
@@ -3612,6 +3631,12 @@ ${"=".repeat(48)}
 
   // ../gallery/src/notify/jobs.js
   var seen = {};
+  var pending = {};
+  function clearPending(id) {
+    const p = pending[id];
+    if (p && p.timer) clearTimeout(p.timer);
+    delete pending[id];
+  }
   function register(id, label, count) {
     if (!id || seen[id]) return;
     seen[id] = true;
@@ -3624,8 +3649,15 @@ ${"=".repeat(48)}
     poll(id, cb);
   }
   function poll(id, cb, startedAt, tier) {
+    const existing = pending[id];
+    if (existing && existing.inflight) return;
     const t0 = startedAt || Date.now();
     const from = tier || "normal";
+    const p = pending[id] || (pending[id] = {});
+    p.cb = cb;
+    p.t0 = t0;
+    p.timer = null;
+    p.inflight = true;
     function again(d, floorMs) {
       const c = cadenceFor(Date.now() - t0);
       if (c.tier === "stalled") {
@@ -3634,23 +3666,52 @@ ${"=".repeat(48)}
           error: "Stopped checking after 6h \u2014 the task may still be running. Reload to resume watching, or check it on pixai.art."
         });
         refresh();
+        clearPending(id);
         return;
       }
       if (cb && c.tier !== from && (c.tier === "slow" || c.tier === "stale")) cb(c.tier, d || {});
-      setTimeout(() => poll(id, cb, t0, c.tier), floorMs ? Math.max(c.ms, floorMs) : c.ms);
+      if (pending[id]) {
+        pending[id].nextTier = c.tier;
+        pending[id].timer = setTimeout(() => poll(id, cb, t0, c.tier), floorMs ? Math.max(c.ms, floorMs) : c.ms);
+      }
     }
     fetch("/api/task-status?task_id=" + encodeURIComponent(id)).then((r) => r.json()).then((d) => {
+      if (pending[id]) pending[id].inflight = false;
       if (d.phase === "done") {
-        if (cb) cb("done", d);
+        try {
+          if (cb) cb("done", d);
+        } catch {
+        }
+        clearPending(id);
         refresh();
       } else if (d.phase === "failed") {
-        if (cb) cb("failed", d);
+        try {
+          if (cb) cb("failed", d);
+        } catch {
+        }
+        clearPending(id);
         refresh();
       } else {
         if (cb) cb("running", d);
         again(d, 0);
       }
-    }).catch(() => again(null, 4e3));
+    }).catch(() => {
+      if (pending[id]) pending[id].inflight = false;
+      again(null, 4e3);
+    });
+  }
+  function wakePending() {
+    if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") return;
+    for (const id in pending) {
+      const p = pending[id];
+      if (!p || p.inflight || !p.timer) continue;
+      clearTimeout(p.timer);
+      p.timer = null;
+      poll(id, p.cb, p.t0, p.nextTier);
+    }
+  }
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", wakePending);
   }
 
   // ../gallery/src/notify/ach.js
@@ -6001,15 +6062,15 @@ ${"=".repeat(48)}
       if (!el || tab !== "Video") return;
       if (lastActiveIdRef.current !== active.c.id) {
         if (lastActiveIdRef.current) {
-          const pending = el.flushPromptEdit();
-          if (pending != null) {
+          const pending2 = el.flushPromptEdit();
+          if (pending2 != null) {
             const outId = lastActiveIdRef.current, isDraft = outId === "__draft__";
             const outEntry = isDraft ? { a: { id: "__draft__" }, c: draftCard, code: "Draft" } : entries.find((e) => e.c.id === outId);
             if (outEntry) {
               const already = !!outEntry.c.promptOverride;
               const composed = already ? null : shotText(outEntry, project, imgSrc);
-              if (already || pending !== composed) {
-                const apply = (c) => setPromptOverride(c, pending);
+              if (already || pending2 !== composed) {
+                const apply = (c) => setPromptOverride(c, pending2);
                 isDraft ? setDraftCard(apply) : setCard(outEntry.a.id, outId, apply);
               }
             }
@@ -6874,14 +6935,14 @@ ${"=".repeat(48)}
       {
         className: "lv-genall",
         onClick: () => {
-          const pending = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
+          const pending2 = genDrawerRef.current && genDrawerRef.current.flushPromptEdit ? genDrawerRef.current.flushPromptEdit() : null;
           let liveEntries = entries;
-          if (pending != null && activeRef.current) {
+          if (pending2 != null && activeRef.current) {
             const a = activeRef.current;
             const already = !!a.c.promptOverride;
             const composed = already ? null : shotText(a, project, imgSrc);
-            if (already || pending !== composed) {
-              const patchedCard = setPromptOverride(a.c, pending);
+            if (already || pending2 !== composed) {
+              const patchedCard = setPromptOverride(a.c, pending2);
               liveEntries = entries.map((e) => e.c.id === a.c.id ? { ...e, c: patchedCard } : e);
               a.c.id === "__draft__" ? setDraftCard(() => patchedCard) : setCard(a.a.id, a.c.id, () => patchedCard);
             }
@@ -10124,7 +10185,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       return () => clearTimeout(priceDebounceRef.current);
     }, [notDoneFp]);
     const refreshEstimate = useCallback2(() => notDone.forEach((e) => ensurePriced(e, true)), [notDone, ensurePriced]);
-    const pending = notDone.filter((e) => {
+    const pending2 = notDone.filter((e) => {
       const r = priceCache[e.c.id];
       return !r || r.loading;
     }).length;
@@ -10132,7 +10193,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const r = priceCache[e.c.id];
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
-    const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
+    const costEstimate = { ...tallyPrices(settled), pending: pending2, notDoneCount: notDone.length };
     return {
       genState,
       setGenState,
