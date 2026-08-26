@@ -314,7 +314,25 @@ def test_assets_status_route_reflects_a_real_isolated_manifest(tmp_path):
     assert d["needs"] is True
 
 
-def test_assets_fetch_route_is_localhost_gated(tmp_path):
+def test_assets_fetch_route_admits_a_signed_in_lan_session(tmp_path):
+    """LOGIN tier since 2026-08-26 (was LOCALHOST). A signed-in LAN device must
+    reach this route: the Setup Wizard on a LAN device is where a first run hits
+    it, and the localhost gate made that phase unreachable from the only machine
+    that needed it. This asserts the GATE lets the request through, not that the
+    fetch succeeds -- there is no manifest in this tmp_path, so the handler
+    answers its own 200 {"error": "no asset manifest present"} and no download
+    is ever started."""
     client = login_client(tmp_path)
     r = client.post("/api/assets/fetch", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
-    assert r.status_code == 403
+    assert r.status_code != 403, "the LAN gate should be gone"
+    assert r.get_json().get("error") == "no asset manifest present"
+
+
+def test_assets_fetch_route_still_refuses_an_anonymous_lan_caller(tmp_path):
+    """LOGIN is not PUBLIC: dropping the localhost half must not drop the
+    session half with it."""
+    from moonglade_gallery import create_app
+    client = create_app(tmp_path).test_client()
+    r = client.post("/api/assets/fetch", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    assert r.status_code == 401
+    assert r.get_json() == {"error": "authentication required"}

@@ -10247,12 +10247,33 @@ def create_app(out_dir: Path):
         })
 
     @app.route("/api/assets/fetch", methods=["POST"])
-    @tier(LOCALHOST)
+    @tier(LOGIN)
     def api_assets_fetch():
-        """Start the asset container fetch. LOCALHOST-ONLY, same trust class as
-        /api/setup/save-key just above -- it writes a real file into the app
-        root. Single-flight: a second call while one is already running is a
-        409, matching /api/panel/run's own busy shape, not a second job."""
+        """Start the asset container fetch. LOGIN tier (was LOCALHOST until
+        2026-08-26): a signed-in LAN device may start it, because the Setup
+        Wizard on a LAN device is exactly where a first run hits this -- it
+        drives the checking -> downloading phases off /api/assets/status and
+        this POST, and a localhost gate made that whole phase unreachable from
+        the only machine that needed it.
+
+        WHY IT DOESN'T BELONG WITH /api/setup/save-key. That neighbour writes a
+        CALLER-SUPPLIED value into config.json (the file holding PIXAI_API_KEY /
+        AUTH_SECRET_KEY / AUTH_USERS) -- the caller chooses what lands. This
+        route chooses nothing: it pulls ONE fixed asset, pinned in
+        moonglade_manifest.json to a single Release URL, verified against that
+        manifest's sha256 cold before the swap, into one known path
+        (_container_path()). No argument reaches it -- request body ignored --
+        so a LAN caller cannot aim it at a different source, a different file,
+        or a different destination. It is a fetch of a constant, not a write of
+        an input.
+
+        WHY REPEAT 685MB FETCHES AREN'T A LAN BANDWIDTH LEVER. AssetFetchJob's
+        single-flight guard already blocks concurrency: start() takes self._lock
+        and returns False while _state["status"] == "running", so a second call
+        never launches a second thread -- it is the 409 below, matching
+        /api/panel/run's own busy shape. One job at a time is the ceiling, and
+        it was the ceiling before this tier change too; the gate was never what
+        bounded the traffic."""
         started = _asset_job.start()
         if not started:
             st = _asset_job.status()
@@ -11026,11 +11047,36 @@ def create_app(out_dir: Path):
         return jsonify({"skin": skin})
 
     @app.route("/api/ach-event", methods=["POST"])
-    @tier(LOGIN)
+    @tier(LOCALHOST)
     def api_ach_event():
         """Feat-event beacon from the front-end: the Starfall konami egg, the
         in-app manual, and narrator pokes. Whitelisted event names only; each is
-        a cosmetic local counter (no spend), same trust level as /api/skin."""
+        a cosmetic local counter (no spend).
+
+        LOCALHOST since 2026-08-26 (was LOGIN). The beacon is the ONLY thing
+        standing between a feat and being earned -- there is no server-side
+        re-check that the gesture actually happened, so any signed-in session
+        could POST {"event": "konami"} straight from a console and arm the feat
+        without ever entering the code. Narrowing to loopback means a feat can
+        only be armed at the server's own keyboard, which is the one place the
+        gesture can be witnessed.
+
+        WHAT A LAN DEVICE LOSES, AND WHY THAT'S THE POINT. These events
+        ANNOUNCE; they never gate capability. A LAN session that loses them
+        keeps every route, every image, every credit-spending path it had --
+        it just can't arm a cosmetic counter it didn't earn. Losing that on LAN
+        is the intended outcome, not collateral.
+
+        The clients treat a refusal as a no-op by design: api.js never throws
+        (a 403 comes back as an {error} body), App.jsx's konami handler is
+        explicitly fail-soft (the stars and toast still play), useFolio.js's
+        pokeNarrator() early-returns on res.error before any Toast, and the
+        in-app manual's beacon is a bare fire-and-forget fetch with no handler
+        attached. A LAN device sees the egg and hears nothing about the gate.
+
+        NOT DONE HERE, deliberately: the per-render nonce / rate-limit /
+        debounce that would let a LAN device earn these HONESTLY. That is a
+        design remainder, tracked internally, not a gap in this gate."""
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
         if ev == "konami":
