@@ -80,7 +80,6 @@ export default function Banner({
           </div>
           <div className="mgx-mark">
             <div className="mgx-mark-tilt">
-              <span aria-hidden="true">M</span>
               <img src={boot.mark_url || "/branding/logo.png"} alt=""
                 onError={(e) => e.currentTarget.remove()} />
               <div className="mgx-mark-sheenclip" aria-hidden="true">
