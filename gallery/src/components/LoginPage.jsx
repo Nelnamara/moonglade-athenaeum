@@ -32,14 +32,17 @@ import "../styles/login.css";
    everything regardless.
 
    THREE other deliberate departures from the DC, all disclosed:
-   - Timing: the DC's signIn()/createAccount() are demos -- busy at 2200ms then
-     navigate at 5600ms of hardcoded setTimeouts. The busy phase here lasts
-     exactly as long as the real fetch takes; the welcome phase then holds
-     WELCOME_HOLD_MS (the DC's 2200->5600 = ~3.4s) so login_nel finishes its
-     peek and the "library waking" line is actually seen before we leave
-     (issue #25 pt 2). Safe now that the render harness ties its wait to the
-     ACTUAL navigation (expect_navigation), not a fixed post-click wait -- an
-     earlier hold was removed back when the harness still used the latter.
+   - Timing: the DC's signIn()/createAccount() are demos -- busy->welcome at
+     2200ms, navigate at 5600ms, hardcoded. We keep the DC's TWO beats but drive
+     them off the REAL fetch: busy holds until the mascot pop is actually seen
+     (BUSY_MIN_MS, the DC's 2200ms floor) even when the fetch returns instantly,
+     THEN welcome holds WELCOME_HOLD_MS (~3.4s) for the spin-up line, THEN we
+     hard-navigate -- 2200 + 3400 = the DC's 5600ms mark. A FAILED login waits
+     for neither beat; it drops straight back to idle with the error. Safe
+     because the render harness ties its wait to the ACTUAL navigation
+     (expect_navigation), not a fixed post-click wait -- an earlier,
+     fetch-independent hold was removed back when the harness still used the
+     latter (issue #25 pt 2).
    - Sign-in error state: the DC has none for it ("it always succeeds").
      Reuses Setup Wizard.dc.html's already-designed inline error-note
      treatment (login.css's .lgn-error) rather than inventing a new one.
@@ -109,6 +112,13 @@ function onMascotError(e) {
   }
 }
 
+// The busy beat: hold the "Signing in…" / mascot-pop phase at least this long so the peek is
+// actually SEEN, even though a real login fetch returns almost instantly. Matches the DC's
+// busy->welcome mark (Login.dc.html switches at 2200ms). The pop transition is .6s and the bob
+// starts at .65s, so the mascot reads well before this elapses -- it's the "seen", not a drag.
+// Paired with WELCOME_HOLD_MS: 2200 + 3400 = the DC's 5600ms navigate mark. Errors bypass it.
+const BUSY_MIN_MS = 2200;
+
 // How long the welcome phase holds before we hard-navigate. The DC (Login.dc.html) switches
 // to welcome at 2200ms and navigates at 5600ms, so its welcome line holds ~3.4s -- long
 // enough for login_nel's peek and the "library waking" line to land (issue #25 pt 2).
@@ -146,21 +156,31 @@ export default function LoginPage({ boot }) {
   // would die with "session expired".
   const csrfRef = useRef(boot.csrf || "");
   const submitLogin = async (payload) => {
+    // Busy started ~now -- the caller flips phase to "busy" immediately before calling us, so
+    // this stamps the start of the mascot-pop beat for the BUSY_MIN_MS floor below.
+    const startedAt = Date.now();
     let d;
     // The rotated token rides the SAME body as the refusal, so it is adopted before the
     // error branch -- a failed sign-in must leave the next attempt with a live token.
     d = await apiPost("/api/login", { ...payload, csrf: csrfRef.current, next: boot.next || "" });
     if (d.csrf) csrfRef.current = d.csrf;
     if (d.error) {
+      // Errors wait for no beat -- straight back to idle so the message is seen at once.
       setPhase("idle");
       setError(d.error);
       return;
     }
-    setPhase("welcome");
-    // Hold on the welcome phase (issue #25 pt 2) so the mascot peek + "library waking" line
-    // are seen, then hard-navigate to the server-sanitized `next`. The render harness's
-    // _login() waits on the ACTUAL navigation (expect_navigation), so the delay is fine there.
-    setTimeout(() => { window.location.href = d.next || "/"; }, WELCOME_HOLD_MS);
+    // Two-beat close matching the DC (Login.dc.html:189-196): a real login returns almost
+    // instantly, so first hold "busy" until the mascot pop has actually been seen (the
+    // BUSY_MIN_MS floor), THEN switch to "welcome" and hold WELCOME_HOLD_MS for the spin-up
+    // line, THEN hard-navigate to the server-sanitized `next`. Without the floor the peek is
+    // guillotined the moment the fetch resolves (issue #25 pt 2). The render harness's _login()
+    // waits on the ACTUAL navigation (expect_navigation), so both delays are fine there.
+    const popRemainder = Math.max(0, BUSY_MIN_MS - (Date.now() - startedAt));
+    setTimeout(() => {
+      setPhase("welcome");
+      setTimeout(() => { window.location.href = d.next || "/"; }, WELCOME_HOLD_MS);
+    }, popRemainder);
   };
 
   const signIn = () => {
