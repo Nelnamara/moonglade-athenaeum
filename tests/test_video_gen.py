@@ -12,7 +12,8 @@ import moonglade_backup as core
 def test_build_video_parameters_matches_real_submit():
     # EXACT structure of a real CARD-COVERED submit (verified 2026-07-06 via --dump-params):
     # top-level modelId (REQUIRED -- resolved from the .model name) + i2vPro block + privacy
-    # flags. No `channel`. Omitting modelId was the "video card won't tap" bug.
+    # flags. Omitting modelId was the "video card won't tap" bug. The new-gen platform
+    # (2026-08-25) added a top-level `channel` string alongside `isPrivate` -- both are sent.
     p = core.build_video_parameters(
         "", media_id="738340964113285867", model="v4.0.1",
         tail_media_id="738340489931639723", duration=5, mode="professional",
@@ -31,6 +32,7 @@ def test_build_video_parameters_matches_real_submit():
             "audioLanguage": "english",
             "tailMediaId": "738340489931639723",
         },
+        "channel": "normal",                # new-gen visibility switch (is_private=False)
         "isPrivate": False,
         "enablePreview": True,
         "hidePrompts": False,
@@ -41,7 +43,7 @@ def test_build_video_parameters_matches_real_submit():
 def test_single_source_image_omits_tail():
     p = core.build_video_parameters("motion", media_id="100")
     i2v = p["i2vPro"]
-    assert "channel" not in p and p["isPrivate"] is False
+    assert p["channel"] == "normal" and p["isPrivate"] is False   # new-gen switch + legacy
     assert i2v["mediaId"] == "100"
     assert "tailMediaId" not in i2v                 # no tail => single-source i2v
     assert i2v["model"] == core.DEFAULT_VIDEO_MODEL
@@ -114,11 +116,14 @@ def test_camera_movement_omitted_by_default_and_on_unset():
 
 def test_isprivate_default_and_modelid_required():
     p = core.build_video_parameters("p", media_id="1")
-    assert "channel" not in p and p["isPrivate"] is False   # channel retired; isPrivate now
+    # New-gen platform (2026-08-25): visibility is now the top-level `channel` string, sent
+    # ALONGSIDE the legacy `isPrivate` boolean (server honors whichever -> no privacy regress).
+    assert p["channel"] == "normal" and p["isPrivate"] is False
     assert p["enablePreview"] is True and p["hidePrompts"] is False
     # the REQUIRED top-level modelId resolves from the .model name (the video-card fix)
     assert p["modelId"] == core.video_model_id(core.DEFAULT_VIDEO_MODEL) == "2003969750675682808"
-    assert core.build_video_parameters("p", media_id="1", is_private=True)["isPrivate"] is True
+    priv = core.build_video_parameters("p", media_id="1", is_private=True)
+    assert priv["channel"] == "private" and priv["isPrivate"] is True
 
 
 def test_shot_params_carry_correct_modelid():
@@ -231,7 +236,8 @@ def test_build_reference_video_matches_real_submit():
     assert rv["referenceImageMediaIds"] == ["10", "20"]
     assert rv["duration"] == 15                       # INT, not "15"
     assert rv["referenceVideoMediaIds"] == [] and rv["referenceAudioMediaIds"] == []
-    assert p["isPrivate"] is False and p["enablePreview"] is True
+    # New-gen platform: top-level `channel` string alongside legacy `isPrivate` (both sent).
+    assert p["channel"] == "normal" and p["isPrivate"] is False and p["enablePreview"] is True
     assert p["modelId"] == core.REFVIDEO_MODEL_ID
     assert "referenceVideo" in p and "i2vPro" not in p   # distinct from i2v
 
@@ -242,7 +248,8 @@ def test_reference_video_refs_private_and_card():
         is_private=True, kaisuuken_id="card9")
     rv = p["referenceVideo"]
     assert rv["referenceVideoMediaIds"] == ["v1"] and rv["referenceAudioMediaIds"] == ["a1"]
-    assert p["isPrivate"] is True and p["kaisuukenId"] == "card9"
+    # is_private=True -> channel "private" AND legacy isPrivate True (both emitted).
+    assert p["channel"] == "private" and p["isPrivate"] is True and p["kaisuukenId"] == "card9"
 
 
 def _refvid_args(tmp_path, **kw):
@@ -369,18 +376,19 @@ def test_build_shot_video_params_negative_and_channel():
     p = core.build_shot_video_params("I2V", "x", image_ids=["1"], negative="blurry, watermark",
                                      is_private=True)
     assert p["i2vPro"]["negativePrompts"] == "blurry, watermark"
-    assert p["isPrivate"] is True
+    # is_private threads through the adapter to BOTH the new channel string and legacy bool.
+    assert p["channel"] == "private" and p["isPrivate"] is True
     f = core.build_shot_video_params("FLF", "x", image_ids=["1", "2"], negative="extra fingers")
     assert f["i2vPro"]["negativePrompts"] == "extra fingers"
     # default is_private stays False (today's de-facto Normal-channel behavior, unchanged)
     default = core.build_shot_video_params("I2V", "x", image_ids=["1"])
-    assert default["isPrivate"] is False
+    assert default["channel"] == "normal" and default["isPrivate"] is False
 
 
 def test_build_shot_video_params_r2v_channel_but_no_negative_field():
-    # referenceVideo DOES carry isPrivate...
+    # referenceVideo DOES carry the channel string + legacy isPrivate...
     r = core.build_shot_video_params("R2V", "@image1", image_ids=["1"], is_private=True)
-    assert r["isPrivate"] is True
+    assert r["channel"] == "private" and r["isPrivate"] is True
     # ...but has no negativePrompts field at all -- a genuine PixAI API gap (the captured
     # referenceVideo submit shape has never had one), not a bug: negative is silently
     # dropped for R2V rather than invented into a field PixAI doesn't accept.
