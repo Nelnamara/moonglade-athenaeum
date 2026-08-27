@@ -38,7 +38,7 @@ import "../styles/setup-wizard.css";
    boot.needs_assets is false: already dressed, or an old checkout with no manifest. One
    disclosed departure, same class as the sync-phase one above: the DC's Interrupted copy
    assumes every failure is a dropped connection; the real engine can fail for reasons that
-   aren't (a checksum mismatch, no release published yet, the localhost gate), so
+   aren't (a checksum mismatch, no release published yet), so
    dlErrorText() composes the DC's own shape and reassurance clause around the REAL reason. */
 
 const SLIDES = [
@@ -108,7 +108,7 @@ export default function SetupWizard({ boot }) {
   // (see this file's header comment): the design's dlErrText assumes every
   // failure is a dropped connection. The real engine (moonglade_assets.
   // AssetFetchJob) can fail for reasons that aren't a connection drop at all --
-  // a checksum mismatch, no release published yet, the localhost-only gate --
+  // a checksum mismatch, no release published yet --
   // so this composes the same shape and the same true reassurance clause around
   // the REAL reason instead of a canned one that would be false most of the
   // time it actually fires.
@@ -157,7 +157,7 @@ export default function SetupWizard({ boot }) {
     const d = await apiPost("/api/assets/fetch");
     // "already running" means someone/something else's fetch is genuinely in
     // flight -- that's not a failure to report, just start polling its real
-    // progress. Any OTHER error (no manifest, no urls yet, localhost-only) means
+    // progress. Any OTHER error (no manifest, no urls yet) means
     // the job never started at all, so there's nothing to poll.
     if (d.error && !/already running/i.test(d.error)) {
       setDlError(dlErrorText(d.error));

@@ -91,7 +91,7 @@ export default function useSetupWizard(boot) {
   // is a dropped connection ("The connection dropped at N of M MB..."). The real
   // engine (moonglade_assets.AssetFetchJob) can fail for reasons that aren't a
   // connection drop at all -- a checksum mismatch, no release published yet ("no
-  // download source configured"), or the localhost-only gate -- so this composes
+  // download source configured") -- so this composes
   // the same shape and the same true reassurance clause around the REAL reason
   // instead of a canned one that would be false most of the time it actually fires.
   const dlErrorText = (reason) => {
@@ -139,7 +139,7 @@ export default function useSetupWizard(boot) {
     const d = await apiPost("/api/assets/fetch");
     // "already running" means someone/something else's fetch is genuinely in
     // flight -- that's not a failure to report, just start polling its real
-    // progress. Any OTHER error (no manifest, no urls yet, localhost-only) means
+    // progress. Any OTHER error (no manifest, no urls yet) means
     // the job never started at all, so there's nothing to poll.
     if (d.error && !/already running/i.test(d.error)) {
       setDlError(dlErrorText(d.error));
