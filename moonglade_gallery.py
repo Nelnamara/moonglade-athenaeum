@@ -220,18 +220,15 @@ ON CONFLICT(media_id) DO UPDATE SET
 
 
 def init_db(db_path):
-    """Create the catalog table and indexes if they don't exist yet."""
+    """Create the catalog table if it doesn't exist yet. Schema UPGRADES -- the batch
+    column + its index (issue #19 item 1), and every later column/index -- are migrate()'s
+    job via _MIGRATIONS; the first catalog() for this path runs it lazily, and every init_db
+    caller opens a catalog() (or migrates explicitly) right after, so init_db only creates a
+    fresh table here."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(db_path))
     con.executescript(_CREATE_TABLE)
-    # Add batch column to pre-existing databases that lack it, then index it
-    try:
-        con.execute("ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''")
-        con.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    con.execute("CREATE INDEX IF NOT EXISTS idx_batch ON catalog(batch)")
     con.commit()
     con.close()
 
@@ -269,6 +266,11 @@ _MIGRATIONS = [
     # task_id is the sibling key (/api/siblings IN-query, the View Batch filter) and had
     # no index: both were full scans of the table (adversarial review, 2026-08-22).
     "CREATE INDEX IF NOT EXISTS idx_task_id ON catalog(task_id)",
+    # idx_batch moved here from init_db (issue #19 item 1): the `batch` column is both a
+    # _CREATE_TABLE column and _MIGRATIONS[0]'s ALTER, so its index belongs on the SAME single
+    # migrate() path rather than a duplicate ALTER + index inside init_db. It runs after the
+    # batch ALTER above, so the column always exists by the time this CREATE INDEX fires.
+    "CREATE INDEX IF NOT EXISTS idx_batch ON catalog(batch)",
     # A real txt2img original legitimately has an EMPTY source_media_id forever, which
     # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
     # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
