@@ -32,12 +32,14 @@ import "../styles/login.css";
    everything regardless.
 
    THREE other deliberate departures from the DC, all disclosed:
-   - Timing: the DC's signIn()/createAccount() are demos -- 2200ms then
-     5600ms of hardcoded setTimeouts before "succeeding" and hard-navigating.
-     The busy phase here lasts exactly as long as the real fetch takes, and
-     the welcome phase navigates the INSTANT it's set -- no artificial hold
-     (an earlier pass added one; removed after it broke a real
-     login-then-navigate test expectation -- see git history).
+   - Timing: the DC's signIn()/createAccount() are demos -- busy at 2200ms then
+     navigate at 5600ms of hardcoded setTimeouts. The busy phase here lasts
+     exactly as long as the real fetch takes; the welcome phase then holds
+     WELCOME_HOLD_MS (the DC's 2200->5600 = ~3.4s) so login_nel finishes its
+     peek and the "library waking" line is actually seen before we leave
+     (issue #25 pt 2). Safe now that the render harness ties its wait to the
+     ACTUAL navigation (expect_navigation), not a fixed post-click wait -- an
+     earlier hold was removed back when the harness still used the latter.
    - Sign-in error state: the DC has none for it ("it always succeeds").
      Reuses Setup Wizard.dc.html's already-designed inline error-note
      treatment (login.css's .lgn-error) rather than inventing a new one.
@@ -107,6 +109,11 @@ function onMascotError(e) {
   }
 }
 
+// How long the welcome phase holds before we hard-navigate. The DC (Login.dc.html) switches
+// to welcome at 2200ms and navigates at 5600ms, so its welcome line holds ~3.4s -- long
+// enough for login_nel's peek and the "library waking" line to land (issue #25 pt 2).
+const WELCOME_HOLD_MS = 3400;
+
 export default function LoginPage({ boot }) {
   // Three states, decided server-side and read from boot:
   //  - signin: an account exists.
@@ -150,7 +157,10 @@ export default function LoginPage({ boot }) {
       return;
     }
     setPhase("welcome");
-    window.location.href = d.next || "/";
+    // Hold on the welcome phase (issue #25 pt 2) so the mascot peek + "library waking" line
+    // are seen, then hard-navigate to the server-sanitized `next`. The render harness's
+    // _login() waits on the ACTUAL navigation (expect_navigation), so the delay is fine there.
+    setTimeout(() => { window.location.href = d.next || "/"; }, WELCOME_HOLD_MS);
   };
 
   const signIn = () => {
