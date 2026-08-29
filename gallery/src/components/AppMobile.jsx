@@ -319,10 +319,15 @@ export default function AppMobile({ boot }) {
   const openPublish = (mid) => { setPublishFor(mid || ""); openScreenKey("publish"); };
 
   // Lightbox Mobile (2026-08-03) -- mutually exclusive with detailsFor, see
-  // header comment. openLightbox is only ever called from Details (its own
-  // ⛶ button), so `mid` is always present in the currently-loaded lib.items;
-  // if it somehow isn't (a filter reloaded out from under an open Details
-  // screen), this stays an honest toast rather than opening on a wrong index.
+  // header comment. Since #35 (2026-08-29) openLightbox has TWO callers with
+  // different miss semantics: the PRIMARY grid tap (GalleryMobile's tapView --
+  // every plain tap rides the findIndex gate now, so a mid-tap page replace is
+  // a reachable state, not a rare race) falls back to opening Details by id,
+  // which never depends on array membership -- a tap always opens SOMETHING;
+  // Details' own ⛶ button passes no fallback and keeps the honest toast
+  // (Details is already open there -- falling "back" to it would be a no-op
+  // dressed as success). An earlier revision of this comment claimed Details
+  // was the only caller; the adversarial review caught it going stale.
   const [lbIndex, setLbIndex] = useState(null);
 
   // Folio Mobile (2026-08-03) -- lifted HERE for the identical reason
@@ -341,9 +346,10 @@ export default function AppMobile({ boot }) {
     setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
   };
   const closeContactSheet = () => setContactSheetTarget(null);
-  const openLightbox = (mid) => {
+  const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
+      if (typeof onMiss === "function") { onMiss(mid); return; }
       if (window.Toast) {
         window.Toast.show({
           title: "Full-screen viewer",
@@ -355,6 +361,9 @@ export default function AppMobile({ boot }) {
     setDetailsFor(null);
     setLbIndex(idx);
   };
+  // the grid-tap flavor (#35): a tap must always open SOMETHING -- on an index
+  // miss (page replaced mid-tap) it opens Details by id instead of toasting.
+  const openLightboxFromGrid = (mid) => openLightbox(mid, openDetails);
   const closeLightbox = () => setLbIndex(null);
   const openDetailsFromLightbox = (mid) => {
     setLbIndex(null);
@@ -542,7 +551,7 @@ export default function AppMobile({ boot }) {
       <div className="glm-body">
         {tab === "gallery" && (
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
-            onOpenDetails={openDetails} onOpenLightbox={openLightbox} onOpenContactSheet={openContactSheet} />
+            onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
