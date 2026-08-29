@@ -47,24 +47,31 @@ const LAYOUTS = [
 ];
 
 function LayoutPicker({ layout, setLayout }) {
+  /* #41 second pass -- to the COMP this time (Frontend Gallery.dc.html:3518-3524):
+     28x26 GLYPH-ONLY chips in the chip language of the tray, label carried by
+     title/aria, inline with the filter chips behind a hairline divider. The
+     shipped glyph-over-label tiles were drift -- the DC never stacked a label
+     under the glyph, which is why the picker read as "forced into the spot"
+     (owner, 2026-08-29) at any width. Timeline is post-DC; same treatment. */
   return (
     <div className="mgl-layoutrow">
       <span className="mgl-laylabel">LAYOUT</span>
-      <div className="mgl-laypick">
+      <div className="mgl-laypick" role="group" aria-label="Gallery layout">
         {LAYOUTS.map(([key, label, glyph, title]) => (
           <button
             key={key}
             type="button"
             className={"mgl-laybtn" + (layout === key ? " on" : "")}
             title={title}
+            aria-label={label}
             aria-pressed={layout === key}
             onClick={() => setLayout(key)}
           >
-            <span className="mgl-layglyph" aria-hidden="true">{glyph}</span>
-            <span className="mgl-laylbl">{label}</span>
+            <span aria-hidden="true">{glyph}</span>
           </button>
         ))}
       </div>
+      <span className="mgl-laydiv" aria-hidden="true" />
     </div>
   );
 }
