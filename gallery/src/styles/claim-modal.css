@@ -19,12 +19,12 @@
   100% { transform: translate(-50%, -128px) scale(.35) rotate(360deg); opacity: 0; }
 }
 
-.mgclaim-scrim { position: fixed; inset: 0; z-index: 360; background: rgba(5,4,13,.7);
+.mgclaim-scrim { position: fixed; inset: 0; z-index: 440; /* opens OVER Contests/MyArt (mgv 411) -- overlays.css ladder */ background: rgba(5,4,13,.7);
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
   animation: mgclaimFadeOut .2s ease reverse both; cursor: pointer; }
 .mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both; }
 
-.mgclaim-host { position: fixed; inset: 0; z-index: 361; display: grid; place-items: center;
+.mgclaim-host { position: fixed; inset: 0; z-index: 441; /* above its own scrim (440) -- the pair moves together, overlays.css ladder */ display: grid; place-items: center;
   padding: 24px; pointer-events: none; }
 
 .mgclaim-card { pointer-events: auto; width: min(360px, calc(100vw - 48px)); box-sizing: border-box;
