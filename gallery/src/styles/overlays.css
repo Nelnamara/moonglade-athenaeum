@@ -16,9 +16,9 @@
    Details) — so the whole overlay band must CLEAR 400 or it paints invisibly behind the
    picture (the walk caught Publish "doing nothing"; Similar and Upscale had the same trap).
    Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
-     .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .similar 414/415 < .upscale-panel 420
-     < .mgcp-sub 422/423 < .mgcp-pwr 430/431 < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440
-     < .model-picker .mg-preview 600 */
+     .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .similar 414/415
+     < .upscale-panel 420 < .mgcp-sub 422/423 < .mgcp-pwr 430/431
+     < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441 < .model-picker .mg-preview 600 */
 .mgv-scrim { position: fixed; inset: 0; z-index: 410; background: rgba(5,4,13,.62);
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
   animation: mgvFade .3s ease both; }

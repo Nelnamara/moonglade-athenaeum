@@ -24,7 +24,7 @@
   animation: mgclaimFadeOut .2s ease reverse both; cursor: pointer; }
 .mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both; }
 
-.mgclaim-host { position: fixed; inset: 0; z-index: 361; display: grid; place-items: center;
+.mgclaim-host { position: fixed; inset: 0; z-index: 441; /* above its own scrim (440) -- the pair moves together, overlays.css ladder */ display: grid; place-items: center;
   padding: 24px; pointer-events: none; }
 
 .mgclaim-card { pointer-events: auto; width: min(360px, calc(100vw - 48px)); box-sizing: border-box;

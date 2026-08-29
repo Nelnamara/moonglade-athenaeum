@@ -141,6 +141,11 @@ export default function ActionsMenu({
   const count = ids.length;
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  // bumped on EVERY opening toggle -- the clamp effect keys on this, not `open`,
+  // because a fast reopen inside closeMenu()'s 200ms fade window leaves `open`
+  // true the whole time (adversarial review, 2026-08-29: keying on [open] skipped
+  // the clamp exactly then, re-landing the unclamped rect.bottom+8 guess).
+  const [openNonce, setOpenNonce] = useState(0);
   const [pos, setPos] = useState({ x: 22, y: 260 });
   const [preview, setPreview] = useState(null); // {data, ids}
   const btnRef = useRef(null);
@@ -167,6 +172,7 @@ export default function ActionsMenu({
     });
     setOpen(true);
     setClosing(false);
+    setOpenNonce((n) => n + 1);
   };
 
   // #40: a trigger anchored inside a bottom sheet (mobile Gallery Actions) puts
@@ -188,7 +194,7 @@ export default function ActionsMenu({
       y = above >= 10 ? above : Math.max(10, window.innerHeight - mh - 10);
     }
     if (y !== pos.y) setPos((p) => ({ ...p, y }));
-  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps -- re-measure only on open
+  }, [open, openNonce]);   // eslint-disable-line react-hooks/exhaustive-deps -- re-measure on every opening toggle
 
   // Esc closes the menu first (capture beats the drawer's own Esc ladder)
   useEffect(() => {

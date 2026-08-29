@@ -52,6 +52,8 @@ def z():
         "mgl_scrim":     _z("styles/librarybar.css", ".mgl-scrim"),
         "mgl_menu":      _z("styles/librarybar.css", ".mgl-menu"),
         "claim":         _z("styles/claim-modal.css", ".mgclaim-scrim"),
+        "claim_host":    _z("styles/claim-modal.css", ".mgclaim-host"),
+        "mgai":          _z("styles/ai-tools.css", ".mgai-scrim"),
     }
 
 
@@ -72,6 +74,10 @@ def test_each_scrim_sits_under_its_own_content(z):
     # click was intercepted. The pair moves together or not at all.
     assert z["cp_sub_host"] > z["cp_sub"]
     assert z["cp_pwr_host"] > z["cp_pwr"]
+    # ...and the SECOND recurrence, caught by adversarial review after the first fix:
+    # the claim modal's scrim went to 440 while its host sat at 361 -- a full-screen
+    # click-eating scrim OVER the Claim button. Every scrim/host pair is listed now.
+    assert z["claim_host"] > z["claim"]
 
 
 def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
@@ -82,6 +88,9 @@ def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
     assert z["cp_pwr"] > z["cp_sub_host"]
     assert z["claim"] > z["mgv_host"]
     assert z["mgl_scrim"] > z["mgv_host"]
+    # .mgai-scrim TIED .lbx at 400 and survived only on accidental DOM order --
+    # now a deliberate rung above the lightbox.
+    assert z["mgai"] > z["lbx"]
 
 
 def test_actions_menu_can_never_outgrow_the_viewport():
