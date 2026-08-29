@@ -48,23 +48,22 @@
    tray, above the cycle-chips. "icons not a menu" -- four glyph buttons that
    re-lay the same cards. flex:1 1 100% forces the wrap onto its own line since
    .mgl-tray is flex-wrap. ---- */
-/* #41, to the comp (Frontend Gallery.dc.html:3524, values verbatim): 28x26 glyph-only
-   chips inline with the filter chips, hairline divider after -- NOT a row of stacked
-   glyph+label tiles (that was drift; the first fix only shrank the drift). */
-.mgl-layoutrow { flex: none; display: flex; align-items: center; gap: 4px; }
-.mgl-laylabel { font-size: 9px; font-weight: 800; letter-spacing: .1em;
-  color: var(--overlay0); margin-right: 2px; flex: none; }
-.mgl-laypick { display: flex; gap: 4px; flex: none; }
-.mgl-laybtn { display: grid; place-items: center; width: 28px; height: 26px;
-  border-radius: 7px; font-size: 13px; cursor: pointer; padding: 0;
+.mgl-layoutrow { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; }
+.mgl-laylabel { font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
+  color: rgba(214, 210, 226, .5); flex: none; }
+.mgl-laypick { display: flex; gap: 6px; flex: 1 1 auto; }
+.mgl-laybtn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding: 7px 4px; border-radius: 9px; cursor: pointer;
   font-family: inherit; user-select: none;
   border: 1px solid var(--surface1); background: rgba(12, 10, 28, .5);
-  color: var(--subtext);
+  color: rgba(214, 210, 226, .78);
   transition: border-color .15s, background .15s, color .15s, filter .15s; }
-.mgl-laybtn:hover { filter: brightness(1.25); }
-.mgl-laybtn.on { border-color: var(--accent); background: rgba(182, 146, 230, .18);
+.mgl-laybtn:hover { filter: brightness(1.2); }
+.mgl-laybtn.on { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, rgba(12, 10, 28, .5));
   color: var(--text); }
-.mgl-laydiv { width: 1px; height: 20px; background: var(--surface1); margin: 0 4px; flex: none; }
+.mgl-layglyph { font-size: 17px; line-height: 1; }
+.mgl-laylbl { font-size: 9px; font-weight: 700; }
 
 /* ---- the bar row: NEVER wraps (drift §10) ---- */
 .mgl-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
