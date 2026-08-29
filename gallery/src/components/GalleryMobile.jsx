@@ -21,13 +21,13 @@ import "../styles/gallery-mobile.css";
    the sheet auto-closes if a mutation empties the selection out from under it).
 
    ENTRY POINT (2026-08-03): a plain tap on a tile OUTSIDE select mode now
-   opens the real Image Details Mobile screen (ImageDetailsMobile.jsx, wired
-   by AppMobile.jsx via the onOpenDetails prop) instead of the disclosed
-   "coming next" toast this used to show. Lightbox Mobile.dc.html (a separate
-   mobile design file) is now ALSO real, as its own dedicated build
-   (LightboxMobile.jsx) -- reached from Details' own "⛶ open lightbox" glyph,
-   not from a plain grid tap (that stays real Details, per this file's own
-   established gesture layer below). See AppMobile.jsx's own header comment
+   opens the real full-screen viewer (LightboxMobile.jsx, wired by
+   AppMobile.jsx via the onOpenLightbox prop) -- per Moonglade Mobile.dc.html's
+   own tap(i) handler and issue #35; an earlier revision of this comment
+   claimed tap->Details was the design and the owner corrected it. Image
+   Details Mobile (ImageDetailsMobile.jsx) stays one tap away via the
+   lightbox's "Details ›" pill (and select-mode taps still toggle selection,
+   per the gesture layer below). See AppMobile.jsx's own header comment
    for the lbIndex/detailsFor wiring.
 
    CONTACT SHEET ENTRY POINT (2026-08-03): ActionsMenu's "▤ Print sheet" item
@@ -57,7 +57,7 @@ export default function GalleryMobile({
   adv, applyAdvanced,
   items, total, page, pages, loading, load,
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
-  onOpenDetails, onOpenContactSheet,
+  onOpenDetails, onOpenLightbox, onOpenContactSheet,
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
@@ -112,7 +112,11 @@ export default function GalleryMobile({
     setSelected((old) => { const s = new Set(old); s.add(mid); return s; });
     if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* unsupported/blocked */ } }
   };
-  const tapView = (mid) => onOpenDetails(mid);
+  // #35 (owner: "That was NOT the design"): a plain tap opens the LIGHTBOX, matching
+  // Moonglade Mobile.dc.html:988-990's own tap(i) -> Lightbox Mobile. Details stays one
+  // tap away via the lightbox's "Details ›" pill (openDetailsFromLightbox). The
+  // earlier tap->Details wiring was drift, not design.
+  const tapView = (mid) => (onOpenLightbox || onOpenDetails)(mid);
 
   return (
     <div className="glm-tab glm-tab-gallery">

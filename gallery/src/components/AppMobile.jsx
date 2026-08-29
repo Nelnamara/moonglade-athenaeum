@@ -542,7 +542,7 @@ export default function AppMobile({ boot }) {
       <div className="glm-body">
         {tab === "gallery" && (
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
-            onOpenDetails={openDetails} onOpenContactSheet={openContactSheet} />
+            onOpenDetails={openDetails} onOpenLightbox={openLightbox} onOpenContactSheet={openContactSheet} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
