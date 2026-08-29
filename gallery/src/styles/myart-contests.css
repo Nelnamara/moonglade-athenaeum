@@ -184,7 +184,10 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
 .gmob-artmeta { font-size: 10px; color: var(--overlay0); }
 
 /* ---- Contests ---- */
-.mgct-slab { width: min(820px, calc(100vw - 48px)); }
+/* #46: 820px starved the fixed 2-col cards (~380px each) -- big official pool chips and the
+   community prize+vote pair crowded out. The shared mgv slab width (980) gives each card
+   ~470px, which seats both chips beside the dates. */
+.mgct-slab { width: min(980px, calc(100vw - 48px)); }
 .mgct-summary { font-size: 11.5px; color: var(--subtext); padding: 3px 0 14px; }
 .mgct-summary b { color: var(--text); }
 .mgct-h { font-size: 11px; font-weight: 700; padding-bottom: 8px; }
