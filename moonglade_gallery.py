@@ -2140,7 +2140,8 @@ def _earned_achievement_ids(out_dir, db_path, need=None):
     metrics = achievement_metrics(db_path)
     metrics.update(telemetry_metrics(out_dir))
     result = compute_achievements(metrics, (),
-                                  sets=load_telemetry(out_dir).get("sets", {}))
+                                  sets=load_telemetry(out_dir).get("sets", {}),
+                                  earned_at=load_ach_state(out_dir).get("earned_at"))
     ids = frozenset(a["id"] for a in result["achievements"] if a["earned"])
     with _earned_ids_lock:
         _earned_ids_cache.update(t=now, ids=ids)
@@ -2431,7 +2432,8 @@ def _mark_earned(out_dir, db_path, ach_id):
     metrics.update(telemetry_metrics(out_dir))
     state = load_ach_state(out_dir)
     result = compute_achievements(metrics, state.get("seen"),
-                                   sets=load_telemetry(out_dir).get("sets", {}))
+                                   sets=load_telemetry(out_dir).get("sets", {}),
+                                   earned_at=state.get("earned_at"))
     return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
 
 
@@ -3095,17 +3097,28 @@ def achievement_criteria(sets):
     return out
 
 
-def compute_achievements(metrics, seen=(), sets=None):
+def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
     """Pure: given the metric bundle + the set of already-seen achievement ids,
     return {achievements, skins, newly}. An achievement is *earned* when its metric
     reaches the threshold; a skin is *earned* if it's free or any earned achievement
     unlocks it. `newly` = earned-but-not-yet-seen (drives the one-shot unlock toast).
+
+    PIN-ONCE (#37, owner: "a Failure -- Colossal"): `earned_at` is the stamped
+    id->date record from achievements.json, and any id present in it stays earned
+    even when its live metric has since dropped below the threshold. Catalog-count
+    metrics are snapshots, not counters -- the web Duplicate Review's last-copy
+    delete (quarantine_duplicate_file -> delete_from_catalog) and every real bulk
+    delete shrink them, and before this pin an earned badge visibly un-earned in
+    the Folio after a prune. The record is append-only or it isn't a record.
+    Callers that render or GATE on earned-ness must pass it; omitting it (pure
+    metric tests) keeps the old live-threshold behavior.
 
     Two metrics are self-referential and resolved in post-passes here (they cannot
     be a metrics.get() lookup): skins_unlocked (Skin Changer) counts the skins this
     very computation unlocked, and all_non_feat_earned (Completionist) requires
     every non-feat, non-banner achievement to be earned."""
     seen = set(seen or [])
+    pinned = set(earned_at or ())
     metrics = dict(metrics or {})
     # per-criterion checklists for the closed-universe set achievements (only when the
     # caller supplies the raw telemetry sets; tests that pass metrics-only skip it)
@@ -3114,7 +3127,7 @@ def compute_achievements(metrics, seen=(), sets=None):
     achs = []
     for a in _roster():
         cur = int(metrics.get(a["metric"], 0) or 0)
-        earned = cur >= a["threshold"]
+        earned = cur >= a["threshold"] or a["id"] in pinned
         if earned and a.get("skin"):
             earned_skins.add(a["skin"])
         entry = {
@@ -3138,14 +3151,14 @@ def compute_achievements(metrics, seen=(), sets=None):
     if sc:
         n = sum(1 for s in _skins() if s.get("free") or s["id"] in earned_skins)
         sc["current"] = n
-        sc["earned"] = n >= sc["threshold"]
+        sc["earned"] = n >= sc["threshold"] or sc["id"] in pinned
     # post-pass: Completionist = every non-feat, non-banner achievement earned
     comp = by_id.get("completionist")
     if comp:
         pool = [x for x in achs if x["tier"] != "feat" and not x["banner_reward"]]
         done = sum(1 for x in pool if x["earned"])
         comp["current"] = 1 if done == len(pool) else 0
-        comp["earned"] = done == len(pool)
+        comp["earned"] = done == len(pool) or comp["id"] in pinned
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins,
               "unlock": _skin_unlock().get(s["id"])}
@@ -10948,7 +10961,8 @@ def create_app(out_dir: Path):
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
-                                          sets=load_telemetry(out_dir).get("sets", {}))
+                                          sets=load_telemetry(out_dir).get("sets", {}),
+                                          earned_at=state.get("earned_at"))
             newly = result["newly"]
             if not fsd:
                 result["newly"] = []   # first sync still running -- withhold celebrations and
@@ -11028,7 +11042,16 @@ def create_app(out_dir: Path):
         skin = str(body.get("skin") or "").strip()
         if skin not in _skin_ids():
             return jsonify({"error": "unknown skin"}), 400
-        result = compute_achievements(achievement_metrics(db_path))
+        # #38: this gate used to compute from achievement_metrics() ALONE -- no
+        # telemetry merge, no earned_at -- so any telemetry-backed or pinned skin
+        # unlock showed earned in the Folio yet 403'd here. It now runs the exact
+        # recipe /api/achievements and _mark_earned() use (guarded by
+        # tests/test_achievements.py's gate-parity tests).
+        _m = achievement_metrics(db_path)
+        _m.update(telemetry_metrics(out_dir))
+        result = compute_achievements(_m,
+                                      sets=load_telemetry(out_dir).get("sets", {}),
+                                      earned_at=load_ach_state(out_dir).get("earned_at"))
         earned = {s["id"] for s in result["skins"] if s["earned"]}
         if skin not in earned:
             return jsonify({"error": "skin locked", "skin": load_ach_state(out_dir)["skin"]}), 403
