@@ -294,3 +294,69 @@ def test_malformed_sealed_roster_degrades_not_500(tmp_path):
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_client(tmp_path)
     assert cli.get("/api/achievements").status_code == 200
+
+
+# ---- pin-once (#37) + the skin-gate parity (#38) ----------------------------
+
+@needs_donor
+def test_pinned_achievement_stays_earned_when_the_metric_drops():
+    """#37 (owner: "a Failure -- Colossal"): catalog-count metrics are snapshots, so
+    the web Duplicate Review's last-copy delete (or any real bulk delete) could drop
+    `images` back below an already-celebrated threshold and visibly UN-earn the badge.
+    An id stamped in earned_at now stays earned regardless of the live metric."""
+    out = g.compute_achievements({"images": 0}, earned_at={"first-light": "2026-01-01"})
+    fl = next(a for a in out["achievements"] if a["id"] == "first-light")
+    assert fl["earned"], "a stamped achievement un-earned when its metric dropped"
+    # and the same input WITHOUT the stamp keeps the live-threshold behavior
+    out2 = g.compute_achievements({"images": 0})
+    assert not next(a for a in out2["achievements"] if a["id"] == "first-light")["earned"]
+
+
+@needs_donor
+def test_pinned_achievements_keep_their_skin_unlocked():
+    """The pin flows through to skins: a stamped skin-granting achievement keeps its
+    palette unlocked even after the backing count shrinks (menagerie -> verdant)."""
+    out = g.compute_achievements({"models": 0}, earned_at={"menagerie": "2026-01-01"})
+    skins = {s["id"]: s["earned"] for s in out["skins"]}
+    assert skins.get("verdant") is True
+
+
+@needs_donor
+def test_skin_gate_honors_a_pinned_unlock(tmp_path):
+    """#37 x #38: /api/skin used to compute from achievement_metrics() ALONE -- no
+    telemetry merge, no earned_at -- its own private, weaker notion of "earned".
+    With an empty catalog and menagerie stamped in earned_at, the Folio shows the
+    verdant palette unlocked; equipping it must succeed too (403 before the fix)."""
+    client = login_client(tmp_path)
+    g.save_ach_state(tmp_path, {"seen": ["menagerie"], "skin": "moonglade",
+                                "earned_at": {"menagerie": "2026-01-01"}})
+    r = client.post("/api/skin", json={"skin": "verdant"})
+    assert r.status_code == 200, r.get_json()
+    assert g.load_ach_state(tmp_path)["skin"] == "verdant"
+
+
+@needs_donor
+def test_skin_gate_reads_telemetry_metrics_like_every_other_gate(tmp_path):
+    """#38's telemetry half, proven end-to-end with a synthetic roster: an
+    achievement whose metric lives in telemetry.json (not the catalog) grants a
+    skin; the equip gate must see it. Before the fix the gate merged no telemetry,
+    so this exact flow showed earned in the Folio and 403'd on equip. No current
+    sealed skin-achievement is telemetry-backed -- which is precisely why the
+    latent bug survived every review -- so the roster is patched for the test."""
+    client = login_client(tmp_path)
+    fake = [dict(a) for a in g._roster()]
+    for a in fake:
+        if a["id"] == "menagerie":
+            a["metric"], a["threshold"] = "edits", 1   # telemetry counter, not catalog
+    g.telem_bump("edits", out_dir=tmp_path)
+    with mock.patch.object(g, "_roster", return_value=fake):
+        r = client.post("/api/skin", json={"skin": "verdant"})
+    assert r.status_code == 200, r.get_json()
+
+
+@needs_donor
+def test_locked_skin_is_still_refused(tmp_path):
+    """The gate stayed a gate: nothing pinned, nothing earned -> verdant still 403s."""
+    client = login_client(tmp_path)
+    r = client.post("/api/skin", json={"skin": "verdant"})
+    assert r.status_code == 403
