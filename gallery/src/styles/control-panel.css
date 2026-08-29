@@ -353,7 +353,7 @@ button.mgcp-slotcard-thumb.on { border-color: var(--gold); }
    DC's own z-index intent (siblings at 40/41 to the whole page, here nested one z-band
    higher than the Panel's own scrim/host so they visibly stack). ---- */
 .mgcp-sub-scrim { position: fixed; inset: 0; z-index: 422; /* above its mgv-hosted panel (411) -- overlays.css ladder */ background: rgba(5,4,13,.6); backdrop-filter: blur(6px); }
-.mgcp-sub-host { position: fixed; inset: 0; z-index: 321; display: grid; place-items: center; padding: 20px; }
+.mgcp-sub-host { position: fixed; inset: 0; z-index: 423; /* above its own scrim (422) */ display: grid; place-items: center; padding: 20px; }
 .mgcp-sub-slab { width: min(560px, calc(100vw - 40px)); max-height: 84vh; overflow-y: auto; border-radius: 16px;
   border: 1px solid var(--surface1); background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 30px 90px rgba(0,0,0,.75); padding: 20px 24px; animation: cpModalIn .28s cubic-bezier(.2,.9,.24,1) both; }
@@ -398,7 +398,7 @@ button.mgcp-useraction { margin-left: auto; color: var(--accent); font-size: 11p
 /* ---- Power (Stop/Restart) sub-modal: real ping-poll reconnect, ported from classic's
    _watchServer() (moonglade_gallery.py) instead of the DC's fake staged animation. ---- */
 .mgcp-pwr-scrim { position: fixed; inset: 0; z-index: 430; /* above sub-scrim 422 -- overlays.css ladder */ background: rgba(5,4,13,.7); backdrop-filter: blur(7px); }
-.mgcp-pwr-host { position: fixed; inset: 0; z-index: 341; display: grid; place-items: center; padding: 24px; }
+.mgcp-pwr-host { position: fixed; inset: 0; z-index: 431; /* above its own scrim (430) */ display: grid; place-items: center; padding: 24px; }
 .mgcp-pwr-card { width: min(420px, calc(100vw - 48px)); box-sizing: border-box; text-align: center;
   padding: 28px 26px 22px; border-radius: 16px; border: 1px solid rgba(182,146,230,.32);
   background: linear-gradient(120deg, rgba(24,18,54,.96) 0%, rgba(14,11,32,.98) 100%);

@@ -46,7 +46,9 @@ def z():
         "similar_modal": _z("styles.css", ".similar-modal"),
         "upscale":       _z("styles/upscale-panel.css", ".upscale-panel:not(.inline) "),
         "cp_sub":        _z("styles/control-panel.css", ".mgcp-sub-scrim"),
+        "cp_sub_host":   _z("styles/control-panel.css", ".mgcp-sub-host"),
         "cp_pwr":        _z("styles/control-panel.css", ".mgcp-pwr-scrim"),
+        "cp_pwr_host":   _z("styles/control-panel.css", ".mgcp-pwr-host"),
         "mgl_scrim":     _z("styles/librarybar.css", ".mgl-scrim"),
         "mgl_menu":      _z("styles/librarybar.css", ".mgl-menu"),
         "claim":         _z("styles/claim-modal.css", ".mgclaim-scrim"),
@@ -65,6 +67,11 @@ def test_each_scrim_sits_under_its_own_content(z):
     assert z["mgv_host"] > z["mgv_scrim"]
     assert z["similar_modal"] > z["similar_scrim"]
     assert z["mgl_menu"] > z["mgl_scrim"]
+    # the first cut of #39 raised these two SCRIMS and left their hosts at 321/341 --
+    # the scrim painted over its own sub-overlay and the render harness's Trash-close
+    # click was intercepted. The pair moves together or not at all.
+    assert z["cp_sub_host"] > z["cp_sub"]
+    assert z["cp_pwr_host"] > z["cp_pwr"]
 
 
 def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
@@ -72,7 +79,7 @@ def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
     modal, the Claim modal over Contests/MyArt) — flipping any of them under 411 hides a
     modal the user just asked for."""
     assert z["cp_sub"] > z["mgv_host"]
-    assert z["cp_pwr"] > z["cp_sub"]
+    assert z["cp_pwr"] > z["cp_sub_host"]
     assert z["claim"] > z["mgv_host"]
     assert z["mgl_scrim"] > z["mgv_host"]
 
