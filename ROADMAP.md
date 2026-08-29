@@ -41,7 +41,20 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   scoped as follow-ons, not the base build: **E's facet chips** over a series, and the **optional
   local-VLM module** (Provider Deck, rerolls only) that would name a series from the *image* rather than
   the prompt. Design-level adversarial review before build; design sources are the two workshop artifacts
-  + the LINEAGE pattern on #34.
+  + the LINEAGE pattern on #34. **Walk input (2026-08-29):** the owner wants series stacks to open
+  in a MODAL (esc straight back to the gallery) instead of the current custom-search takeover that
+  needs a manual "clear" — fold into the same workshop.
+
+- **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
+  batched here per triage protocol (S4 = never issues):
+  - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
+  - Login version reveal: reads "NEXT · BUILD v…" — deliberate (the `/next` internal codename is
+    live in the reveal string, useFlavour.js), but the owner double-took; recopy is a one-word
+    call whenever wanted.
+  - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
+    auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
+  - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
+    candidate to drop at the next Loom pass.
 
 - **The filename convention — workshop** *(owner, 2026-08-23)*
   `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
