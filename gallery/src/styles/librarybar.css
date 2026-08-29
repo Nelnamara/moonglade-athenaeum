@@ -51,8 +51,10 @@
 .mgl-layoutrow { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; }
 .mgl-laylabel { font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
   color: rgba(214, 210, 226, .5); flex: none; }
-.mgl-laypick { display: flex; gap: 6px; flex: 1 1 auto; }
-.mgl-laybtn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+.mgl-laypick { display: flex; gap: 6px; flex: 0 1 auto; }  /* #41: no fill-the-tray stretch */
+/* #41 "still GIANT": flex:1 1 0 stretched four glyph buttons across the whole tray width.
+   The buttons were never the problem -- the stretch was. Content-sized + a small floor. */
+.mgl-laybtn { flex: 0 0 auto; min-width: 62px; display: flex; flex-direction: column; align-items: center;
   gap: 3px; padding: 7px 4px; border-radius: 9px; cursor: pointer;
   font-family: inherit; user-select: none;
   border: 1px solid var(--surface1); background: rgba(12, 10, 28, .5);

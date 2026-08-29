@@ -73,9 +73,13 @@
      live activity dropdown anyway. */
   #mg-toasts { display: none !important; }
   .mgv-host { position: static !important; display: block !important; }
+  /* #47 "margins are non existent": padding:0 left @page as the ONLY margin source, and
+     the @page rule sat NESTED inside this media block (historically ignored by some
+     engines, and overridable by a print dialog's margins:None). Belt + suspenders: the
+     print area carries its own 8mm padding, and @page moved to top level below. */
   .mgv-slab { position: static !important; width: auto !important; max-height: none !important;
     overflow: visible !important; box-shadow: none !important; border: none !important;
-    background: none !important; padding: 0 !important; }
+    background: none !important; padding: 8mm !important; }
   .mgcs-grid { gap: 10px 8px; }
   .mgcs-img { border-color: #ccc; }
   /* Contact Sheet.dc.html's own print palette (lines 22/23/25/42/43/45) --
@@ -89,5 +93,7 @@
   .mgcs-label, .mgcs-sub { color: #746c8a !important; }
   .mgcs-meta, .mgcs-cap-sub, .mgcs-empty { color: #8a8398 !important; }
   .mgcs-no { color: #2a8f86 !important; }
-  @page { margin: 12mm; }
 }
+
+/* @page is print-only by definition -- top level so every engine honors it (#47). */
+@page { margin: 12mm; }
