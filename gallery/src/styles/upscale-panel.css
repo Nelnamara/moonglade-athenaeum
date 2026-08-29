@@ -6,11 +6,11 @@
 .upscale-panel { display: none; }
 .upscale-panel.open { display: block; }
 /* The DC's centered modal (Image Details.dc.html:143-146): a fixed full-viewport layer whose
-   ::before is the blurred scrim, card grid-centered. z-index must clear the lightbox's own 300,
+   ::before is the blurred scrim, card grid-centered. z-index must clear the lightbox's own 400 (see overlays.css ladder, #39),
    or the modal opens BEHIND the picture it is about to upscale. */
 .upscale-panel:not(.inline).open { display: grid; }
 .upscale-panel:not(.inline) {
-  position: fixed; inset: 0; z-index: 320;
+  position: fixed; inset: 0; z-index: 420;
   place-items: center; padding: 20px; box-sizing: border-box;
 }
 .upscale-panel:not(.inline)::before {

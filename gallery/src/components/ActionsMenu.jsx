@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
 import "../styles/librarybar.css";
@@ -144,6 +144,8 @@ export default function ActionsMenu({
   const [pos, setPos] = useState({ x: 22, y: 260 });
   const [preview, setPreview] = useState(null); // {data, ids}
   const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const trigRectRef = useRef(null);
   const timer = useRef(null);
   const busyRef = useRef(false);
 
@@ -158,6 +160,7 @@ export default function ActionsMenu({
     if (open && !closing) { closeMenu(); return; }
     clearTimeout(timer.current);
     const r = btnRef.current ? btnRef.current.getBoundingClientRect() : null;
+    trigRectRef.current = r;
     setPos({
       x: r ? Math.max(10, Math.min(r.left, window.innerWidth - 252)) : 22,
       y: r ? r.bottom + 8 : 260,
@@ -165,6 +168,27 @@ export default function ActionsMenu({
     setOpen(true);
     setClosing(false);
   };
+
+  // #40: a trigger anchored inside a bottom sheet (mobile Gallery Actions) puts
+  // `rect.bottom + 8` low enough that the portalled fixed menu ran past
+  // window.innerHeight with no way to scroll it — the tail items (the delete
+  // pair, deliberately LAST) were simply unreachable. After the menu mounts,
+  // measure its REAL height and keep it on-screen: flip above the trigger when
+  // it would overflow the bottom, and as a last resort pin it inside the
+  // viewport (the .mgl-menu max-height + overflow-y in librarybar.css
+  // guarantees that final clamp always fits, scrolling internally).
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return;
+    const mh = menuRef.current.offsetHeight;
+    const r = trigRectRef.current;
+    const below = r ? r.bottom + 8 : pos.y;
+    let y = below;
+    if (below + mh > window.innerHeight - 10) {
+      const above = r ? r.top - 8 - mh : window.innerHeight - mh - 10;
+      y = above >= 10 ? above : Math.max(10, window.innerHeight - mh - 10);
+    }
+    if (y !== pos.y) setPos((p) => ({ ...p, y }));
+  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps -- re-measure only on open
 
   // Esc closes the menu first (capture beats the drawer's own Esc ladder)
   useEffect(() => {
@@ -330,6 +354,7 @@ export default function ActionsMenu({
               is swallowed, exactly the DC's scrim behavior */}
           <div className="mgl-scrim" onMouseDown={closeMenu} aria-hidden="true" />
           <div
+            ref={menuRef}
             className={"mgl-menu" + (closing ? " closing" : "")}
             role="menu"
             style={{ left: pos.x, top: pos.y }}

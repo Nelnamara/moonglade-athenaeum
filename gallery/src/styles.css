@@ -602,10 +602,10 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   color: var(--subtext); line-height: 1.6; }
 
 /* ---- similar-images modal (classic's #similar-scrim/#similar-modal, class-based) ---- */
-.similar-scrim { position: fixed; inset: 0; z-index: 316; background: rgba(6, 4, 16, .6); }
+.similar-scrim { position: fixed; inset: 0; z-index: 414; /* above .lbx 400 -- see overlays.css ladder (#39) */ background: rgba(6, 4, 16, .6); }
 .similar-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 900px; max-width: 94vw; height: 84vh; max-height: 84vh; background: var(--mantle);
-  border: 1px solid var(--surface1); border-radius: 12px; z-index: 317; display: flex;
+  border: 1px solid var(--surface1); border-radius: 12px; z-index: 415; display: flex;
   flex-direction: column; padding: 14px; }
 .pick-head { display: flex; align-items: center; margin-bottom: 10px; }
 .pick-head .t { font-size: 15px; font-weight: 600; color: var(--text); }

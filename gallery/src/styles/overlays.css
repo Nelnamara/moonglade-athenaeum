@@ -4,16 +4,25 @@
    five nav overlays are the same slab with different innards, so they land in
    this file as they port. DC literal rgba()/hex values are the spec's own;
    everything else rides the skin tokens. Z: the DC prototyped 40/41 — here they
-   sit in the app's real overlay band per drift §3 (300/301, like the power
-   modal), under the celebration band. */
+   sit in the app's real overlay band per drift §3 (410/411 since #39 — the band
+   must clear the lightbox's 400, see THE OVERLAY LADDER below), under the
+   celebration band. */
 
 @keyframes mgvSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
 @keyframes mgvFade { from { opacity: 0; } to { opacity: 1; } }
 
-.mgv-scrim { position: fixed; inset: 0; z-index: 300; background: rgba(5,4,13,.62);
+/* THE OVERLAY LADDER (issue #39). The lightbox (.lbx, lightbox.css) sits at 400, and several
+   of these overlays open FROM inside it (Publish via its chip, Similar via ✧, Upscale from
+   Details) — so the whole overlay band must CLEAR 400 or it paints invisibly behind the
+   picture (the walk caught Publish "doing nothing"; Similar and Upscale had the same trap).
+   Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
+     .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .similar 414/415 < .upscale-panel 420
+     < .mgcp-sub 422 < .mgcp-pwr 430 < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440
+     < .model-picker .mg-preview 600 */
+.mgv-scrim { position: fixed; inset: 0; z-index: 410; background: rgba(5,4,13,.62);
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
   animation: mgvFade .3s ease both; }
-.mgv-host { position: fixed; inset: 0; z-index: 301; display: grid; place-items: center;
+.mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
   width: min(980px, calc(100vw - 48px)); max-height: 90vh; overflow-y: auto;
