@@ -16,6 +16,7 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Fixed: **tapping a picture on the phone opens the full-screen viewer again**, the way the mobile design always drew it — a regression had routed taps to the Details page instead. Details stays one tap away inside the viewer, and if the gallery shifts underneath a tap mid-reload, the tap opens Details rather than doing nothing. (2026-08-29)
 - Fixed: **Publish, Similar, and Upscale no longer open invisibly behind the lightbox.** The full-screen viewer had quietly outgrown the layer the overlays live on, so opening any of them from inside it looked like nothing happened — the panel was there, painted underneath the picture. The whole overlay layer now sits above the viewer (with every stacked modal moved in step), and a test guards the layer order so this class of bug can't silently return. (2026-08-29)
 - Fixed: the **Contests window fits its prize chips again** — big official pools and the community prize-plus-vote pairs were crowding out of the cards; the window returned to the shared overlay width, giving each card room. (2026-08-29)
 - Fixed: **printed contact sheets have real margins** — the art was bleeding to the paper's edge; the print area now carries its own margin as well as the page rule, so every engine and print dialog honors it. (2026-08-29)

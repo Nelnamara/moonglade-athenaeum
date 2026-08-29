@@ -20,10 +20,12 @@ import React, { useRef, useState } from "react";
    long-press (480ms, cancelled by >10px of movement so a scroll is never
    mistaken for a hold) arms select mode AND selects the pressed tile; a plain
    tap toggles selection while already in select mode; a plain tap while NOT in
-   select mode always opens Details (GalleryMobile.jsx's onTapView), never the
-   Lightbox directly -- Lightbox Mobile is real now too (LightboxMobile.jsx),
-   but it's only ever reached from Details' own "⛶" glyph, not from a grid tap,
-   so this component doesn't need to know it exists. Built on Pointer Events
+   select mode opens the LIGHTBOX (GalleryMobile.jsx's onTapView -> LightboxMobile),
+   per Moonglade Mobile.dc.html:988-990's own tap(i) and issue #35 -- an earlier
+   revision of this very comment claimed tap->Details was the design and the owner
+   corrected it ("That was NOT the design"). Details is one tap away via the
+   lightbox's "Details ›" pill; this component still doesn't need to know which
+   viewer opens -- it just calls onTapView. Built on Pointer Events
    (not touch-only) so it also works with a
    real mouse on a narrow desktop browser window, which is how this surface gets
    exercised by both a human and Playwright. */
