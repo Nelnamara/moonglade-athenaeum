@@ -540,7 +540,7 @@ export default function AppMobile({ boot }) {
           target="_blank" rel="noopener noreferrer">
           ✦ {credits}
         </a>
-        {account && account.claim_credits ? (
+        {account && Number(account.claim_credits) > 0 ? (
           <button type="button" className="glm-hero-claim" onClick={claimModal.claim}
             disabled={claimModal.claiming}>
             <i className="glm-claimribbon" aria-hidden="true" /> {claimModal.claiming ? "claiming…" : "+" + Number(account.claim_credits).toLocaleString() + " claim"}
