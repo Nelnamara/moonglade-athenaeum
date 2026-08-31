@@ -65,7 +65,7 @@ export default function SeparatorBar({
   const cardsBy = (account && account.cards_by ? account.cards_by : []).filter((c) => c.count > 0);
   const cardExpiry = account && account.card_expiry;
 
-  const claimCredits = account && account.claim_credits;
+  const claimCredits = account && Number(account.claim_credits) > 0 ? account.claim_credits : 0;
 
   // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
   // replaces the old floating #jobs-fab/#jobs-tray with this bar's own ambient activity

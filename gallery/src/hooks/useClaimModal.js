@@ -57,9 +57,26 @@ export default function useClaimModal(account, refreshAccount) {
   // Panel mid-visit does not. Claiming (claim_credits -> 0) finally quiets it.
   useEffect(() => {
     if (open || exiting) return; // never re-arm mid-cycle
-    if (_armed && account && account.claim_credits) {
+    // Number(): claim_credits must be a real positive amount -- a stringy "0" is
+    // truthy and would pop a modal for nothing (belt for the vanished-reward close below).
+    if (_armed && account && Number(account.claim_credits) > 0) {
       setOpen(true);
       _armed = false; // shown once for this arming; a reload or tab-return re-arms it
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
+
+  // The reward can vanish OUT FROM UNDER an open modal: claimed in another window /
+  // device, then this tab's return-refetch installs claim_credits=0 -- and the modal
+  // sat there reading "+0, Ready to claim", inviting a claim of nothing (owner-found,
+  // 2026-08-29; reproduced live). Close QUIETLY -- no coin-jump: the coin celebrates a
+  // claim, and nothing was claimed here.
+  useEffect(() => {
+    if (!open || exiting) return;
+    if (account && !(Number(account.claim_credits) > 0)) {
+      setOpen(false);
+      setClaiming(false);
+      setError("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account]);
