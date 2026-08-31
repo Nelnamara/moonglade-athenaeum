@@ -3003,6 +3003,32 @@ def make_launcher_shortcut(out_dir, mark_id):
     return str(lnk)
 
 
+# Prompt word-cloud vocabulary, shared by the /health word cloud and the Watchword
+# achievement so both count the identical set of meaningful prompt words. Hoisted from
+# collection_health()'s own inline block (kept byte-identical) so top_word_uses can never
+# drift from what the dashboard shows.
+_PROMPT_STOPWORDS = frozenset({
+    "the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
+    "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
+    "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
+    "solo", "looking", "viewer"})
+
+
+def _prompt_word_counter(rows):
+    """Counter of meaningful prompt words across prompt_preview values. `rows` is an
+    iterable of 1-tuples (the SELECT prompt_preview shape) or bare strings. Pure; drops the
+    shared stopwords. Sealing note: the word itself is only ever surfaced as a COUNT by
+    callers (Watchword takes most_common(1)[0][1]) -- the word never leaves this layer."""
+    from collections import Counter
+    c = Counter()
+    for r in rows:
+        pp = r if isinstance(r, str) else r[0]   # a 1-tuple / sqlite3.Row / list -> its first col
+        for w in re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
+            if w not in _PROMPT_STOPWORDS:
+                c[w] += 1
+    return c
+
+
 def achievement_metrics(db_path):
     """The metric bundle every achievement threshold is measured against. Cheap
     COUNTs over the local catalog -- read-only, no network, no spend. Fails soft."""
@@ -3035,9 +3061,42 @@ def achievement_metrics(db_path):
                     if t:
                         kw.add(t)
             m["distinct_keywords"] = len(kw)
+            # --- Folio expansion catalog metrics (all COUNT-only integers; no rating value,
+            # LoRA name, seed value, or prompt word ever leaves this function) ---
+            # The Bench (rated): health-panel-identical -- a non-empty, non-zero rating.
+            m["rated"] = _scalar(
+                "SELECT COUNT(*) FROM catalog "
+                "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
+            # The Atelier (loras_distinct): distinct LoRA NAME-keys across the per-row `loras`
+            # CSV (drop ':weight'), parsed exactly like collection_health's top-LoRAs block.
+            # DISTINCT from telemetry's `lora_distinct` (Polyglot, a runtime set) -> a count only.
+            lk = set()
+            for (loras,) in con.execute(
+                    "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''"):
+                for part in (loras or "").split(","):
+                    name = part.strip().rsplit(":", 1)[0].strip()   # drop ":weight"
+                    if name:
+                        lk.add(name)
+            m["loras_distinct"] = len(lk)
+            # Mirror Seed (palindrome_seeds): distinct numeric-palindrome seeds of >=5 digits.
+            # COUNT ONLY -- no seed value is ever emitted.
+            pal = set()
+            for (seed,) in con.execute(
+                    "SELECT DISTINCT seed FROM catalog WHERE COALESCE(seed,'') != ''"):
+                s = str(seed or "").lstrip("-")
+                if len(s) >= 5 and s.isdigit() and s == s[::-1]:
+                    pal.add(s)                              # dedupe '12321' vs '-12321'
+            m["palindrome_seeds"] = len(pal)
+            # Watchword (top_word_uses): uses of the single most-common prompt word, via the
+            # shared /health word cloud. COUNT ONLY -- the word itself never leaves.
+            _wc = _prompt_word_counter(con.execute(
+                "SELECT prompt_preview FROM catalog "
+                "WHERE COALESCE(prompt_preview,'') != ''"))
+            m["top_word_uses"] = _wc.most_common(1)[0][1] if _wc else 0
         except sqlite3.Error:
             for k in ("models", "published", "tagged", "local_gens",
-                      "gens_in_a_day", "distinct_keywords"):
+                      "gens_in_a_day", "distinct_keywords",
+                      "rated", "loras_distinct", "palindrome_seeds", "top_word_uses"):
                 m.setdefault(k, 0)
     return m
 
@@ -3159,6 +3218,25 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
         done = sum(1 for x in pool if x["earned"])
         comp["current"] = 1 if done == len(pool) else 0
         comp["earned"] = done == len(pool) or comp["id"] in pinned
+    # Generic `requires` meta-loop (Glories of the Curator/Forgewright + The Way Is Shut):
+    # an achievement carrying a `requires` prereq list earns when every prereq id is earned
+    # (or it is pin-once). Iterates the SEALED roster -- which carries `requires` -- rather
+    # than the built entries, which deliberately never copy it, so no prereq list ever
+    # reaches the payload/client. `current` reflects how many prereqs are met (for a masked
+    # feat this stays cloaked until earned anyway).
+    earned_ids = {x["id"] for x in achs if x["earned"]}
+    for a in _roster():
+        req = a.get("requires")
+        if not req:
+            continue
+        e = by_id.get(a["id"])
+        if e is None:
+            continue
+        met = sum(1 for r in req if r in earned_ids)
+        e["current"] = met
+        e["earned"] = (met == len(req)) or e["id"] in pinned
+        if e["earned"] and a.get("skin"):
+            earned_skins.add(a["skin"])
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins,
               "unlock": _skin_unlock().get(s["id"])}
@@ -3295,7 +3373,8 @@ def set_telemetry_out(out_dir):
     _TELEM_OUT = out_dir
 
 
-_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": []}
+_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
+                "day_lists": {}}
 
 
 def load_telemetry(out_dir):
@@ -3409,15 +3488,58 @@ def telem_flag(key, out_dir=None):
     _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
 
 
-def telem_mark_day(out_dir=None):
-    """Record today in the distinct-days-used ledger (The Vigil)."""
+def telem_mark_day(out_dir=None, keys=None):
+    """Record today (idempotent) in the distinct-days ledger. `keys=None` marks the legacy
+    flat `days` list -- byte-identical to before (The Vigil / days_used). Otherwise mark today
+    under each named per-key list in `day_lists` (e.g. gen_days / curation_days / active_days),
+    for the streak + long-watch metrics. A given key records a day at most once."""
     import datetime as _dt
     today = _dt.date.today().isoformat()
 
     def _mark(d):
-        if today not in d["days"]:
-            d["days"].append(today)
+        if keys is None:
+            if today not in d["days"]:
+                d["days"].append(today)
+            return
+        dl = d.setdefault("day_lists", {})
+        if not isinstance(dl, dict):
+            dl = {}
+            d["day_lists"] = dl
+        for k in keys:
+            lst = dl.get(k)
+            if not isinstance(lst, list):
+                lst = []
+            if today not in lst:
+                lst.append(today)
+            dl[k] = lst
     _telem_mutate(out_dir, _mark)
+
+
+def _best_day_streak(days):
+    """Best-ever run of consecutive calendar days in an ISO-date list. A later gap never
+    un-earns an already-reached streak (the metric is a high-water mark, like the maxima).
+    A malformed/empty list -> 0; unparseable dates are skipped."""
+    import datetime as _dt
+    dates = set()
+    for s in (days or []):
+        try:
+            dates.add(_dt.date.fromisoformat(str(s)))
+        except (TypeError, ValueError):
+            continue
+    if not dates:
+        return 0
+    one = _dt.timedelta(days=1)
+    best = 0
+    for d in dates:
+        if (d - one) in dates:
+            continue                       # not a run start
+        run, cur = 1, d
+        while (cur + one) in dates:
+            cur += one
+            run += 1
+        if run > best:
+            best = run
+    return best
 
 
 def telemetry_metrics(out_dir):
@@ -3440,9 +3562,23 @@ def telemetry_metrics(out_dir):
     m["tools_used"] = _card("tools")
     m["lora_distinct"] = _card("loras")
     m["enhance_workflows_distinct"] = _card("enhance_workflows")
+    # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
+    # names never leave the store).
+    m["scenes_used"] = _card("scenes")                        # Doorwarden
+    m["bridge_enhance_distinct"] = _card("bridge_enhance")    # Bridge-Enhance I/II/III
     for k, v in d["flags"].items():
         m[k] = 1 if v else 0
     m["days_used"] = len(d["days"])
+    # Keyed day-lists -> the streak + long-watch metrics. Each per-key list is validated
+    # here (a hostile file could store a non-list) before it is measured.
+    dl = d.get("day_lists") if isinstance(d.get("day_lists"), dict) else {}
+
+    def _days(key):
+        v = dl.get(key)
+        return v if isinstance(v, list) else []
+    m["gen_streak"] = _best_day_streak(_days("gen_days"))              # Seven Candles
+    m["curation_streak"] = _best_day_streak(_days("curation_days"))    # Lamplighter
+    m["distinct_active_days"] = len(set(_days("active_days")))         # Long Vigil / Unbroken Watch
     return m
 
 
@@ -3801,17 +3937,9 @@ def collection_health(out_dir, db_path):
                 lora_counter[name] += 1
     top_loras = lora_counter.most_common(10)
 
-    # Prompt word-cloud: most common meaningful words across prompt previews.
-    import re as _re
-    stop = {"the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
-            "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
-            "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
-            "solo", "looking", "viewer"}
-    word_counter = Counter()
-    for (pp,) in prompt_rows:
-        for w in _re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
-            if w not in stop:
-                word_counter[w] += 1
+    # Prompt word-cloud: most common meaningful words across prompt previews. Shared with the
+    # Watchword achievement via _prompt_word_counter() so the two can never drift.
+    word_counter = _prompt_word_counter(prompt_rows)
     top_words = word_counter.most_common(40)
 
     # A row is "missing" only if NEITHER its media id is on disk (the PixAI
@@ -6072,6 +6200,22 @@ def create_app(out_dir: Path):
     _enhance_pending = {}
     _enhance_pending_lock = threading.Lock()
 
+    # Scene (AI-Tools) telemetry is DEFERRED to terminal success exactly like enhance above
+    # (a scene task on the API key is accepted-charged-then-reaped), so /api/scene records
+    # {task_id -> scene_id} here and the poll's done-branch fires _fire_scene_telemetry once
+    # and drops the entry. Process-lifetime, tiny, bounded by in-flight scene tasks.
+    _scene_pending = {}
+    _scene_pending_lock = threading.Lock()
+
+    # The 6-preset Bridge-Enhance universe, computed once at app-creation (core is imported
+    # per-handler, not module-wide, so alias it locally here). bridge_enhance (the I/II/III
+    # distinct set) and bridge_gens (Speak, Friend) are gated on this and fired at TERMINAL
+    # success in _fire_enhance_telemetry -- never at submit, so a reaped/failed enhance never counts.
+    import moonglade_backup as _mb_bridge
+    _BRIDGE_PRESET_NAMES = frozenset(
+        n for n in (str(pp.get("workflow_name") or "").strip()
+                    for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ())) if n)
+
     # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
     # asset container, re-scoped from scratch"). A real streamed-download job,
     # not a subprocess like PANEL_ACTIONS below -- one instance per server
@@ -6481,6 +6625,13 @@ def create_app(out_dir: Path):
                         return got
                 got = core.collect_generation(session, tid, str(out_dir))
                 ent["done"] = True
+                # Seven Candles (gen_streak) + The Long Vigil (active_days): a gen collected
+                # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
+                # telemetry must never break a collect.
+                try:
+                    telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
+                except Exception:
+                    pass
                 return got
         finally:
             with _collect_mu:
@@ -8313,6 +8464,12 @@ def create_app(out_dir: Path):
         except (TypeError, ValueError):
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
         update_rating(db_path, media_id, value)
+        # Lamplighter (curation_streak) + The Long Vigil (active_days): rating a piece --
+        # including clearing it to 0 -- is curation. Keyed day-lists, idempotent, silent-soft.
+        try:
+            telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+        except Exception:
+            pass
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/rebuild-poster/<media_id>", methods=["POST"])
@@ -10592,6 +10749,12 @@ def create_app(out_dir: Path):
             if tags is not None:
                 changed["art_tags"] = ", ".join(
                     str(t).lstrip("#").strip() for t in tags)
+                # Lamplighter (curation_streak) + The Long Vigil: tagging is curation.
+                # Keyed day-lists, idempotent, silent-soft.
+                try:
+                    telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                except Exception:
+                    pass
             if title is not None:
                 changed["title"] = title
             publish_state(db_path, mid, **changed)
@@ -10914,6 +11077,12 @@ def create_app(out_dir: Path):
                                         category)
         except Exception as e:
             return jsonify({"error": str(e)}), 502
+        # The Academy (loras_trained): a LoRA training this server actually submitted.
+        # Silent-soft -- a telemetry blip must not fail a submit that already happened.
+        try:
+            telem_bump("loras_trained", out_dir=out_dir)
+        except Exception:
+            pass
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
                         "free_trainings_left": max(0, free_left - 1) if is_free else 0})
 
@@ -12072,6 +12241,9 @@ def create_app(out_dir: Path):
             with _enhance_pending_lock:
                 _enhance_pending[str(task_id)] = (str(p.get("workflow_name") or "").strip()
                                                   or str(p.get("workflow_id") or "").strip())
+            # Bridge-Enhance (I/II/III) + Speak-Friend (bridge_gens) are DEFERRED to terminal
+            # success in _fire_enhance_telemetry, gated on the bridge-preset identity -- see there.
+            # A submit that is later reaped/failed must NOT count (parity with enhance_workflows).
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -12195,6 +12367,11 @@ def create_app(out_dir: Path):
                 core.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
+            # Doorwarden telemetry is DEFERRED to terminal success (see _fire_scene_telemetry),
+            # mirroring the enhance path: record the submitted scene id keyed by task id. The
+            # scene id is stored only to be counted (scenes_used = len) -- it never leaves.
+            with _scene_pending_lock:
+                _scene_pending[str(task_id)] = scene_id
             return jsonify({"task_id": task_id})
         except Exception as e:
             # Pass the submit SHAPE as a dict (not the bare scene_id str) so _log_gen_failure
@@ -13949,6 +14126,16 @@ __DESIGN_TOKENS__
                 if _gen_phase_seen.get(tid) != started:
                     return
         _log_job(tid, **fields)
+        # Chaotic Creationist (jobs_concurrent): the high-water count of LIVE (non-terminal) jobs,
+        # read from the authoritative job log so a task that later logs done/failed self-heals out
+        # of the count -- abandoned polls and done-but-empty terminals never inflate the peak (the
+        # in-memory _gen_phase_seen set leaks on both). telem_max keeps the peak. Silent-soft.
+        try:
+            _live = sum(1 for j in core.read_jobs(out_dir)
+                        if j.get("status") not in core._JOBS_TERMINAL)
+            telem_max("jobs_concurrent", _live, out_dir=out_dir)
+        except Exception:
+            pass
 
     def _forget_gen_phase(tid):
         with _gen_phase_lock:
@@ -13973,6 +14160,9 @@ __DESIGN_TOKENS__
             telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
             telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
             telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
+            if identity in _BRIDGE_PRESET_NAMES:                           # bridge-only, terminal-gated
+                telem_set_add("bridge_enhance", identity, out_dir=out_dir)  # Bridge-Enhance I/II/III
+                telem_bump("bridge_gens", out_dir=out_dir)                  # Speak, Friend: a real bridge gen
         except Exception:                                                  # noqa: BLE001
             pass
 
@@ -13982,6 +14172,28 @@ __DESIGN_TOKENS__
         never bumps a counter."""
         with _enhance_pending_lock:
             _enhance_pending.pop(str(tid), None)
+
+    def _fire_scene_telemetry(tid):
+        """Fire the AI-Tools scene producer once, on TERMINAL SUCCESS of a scene task THIS
+        server submitted. Deferred from /api/scene (which sees only createChatEditingSceneTask
+        ACCEPTANCE), so a scene that is accepted, charged, then reaped (or fails) never counts.
+        Records the scene id into the `scenes` set (Doorwarden); scenes_used exposes only its
+        length -- the scene id never leaves the store. A no-op for any non-scene task. Swallows
+        EVERY failure (by the time this runs the credit is spent + result collected)."""
+        with _scene_pending_lock:
+            scene_id = _scene_pending.pop(str(tid), None)
+        if not scene_id:
+            return
+        try:
+            telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    def _drop_scene_pending(tid):
+        """Forget a pending scene without firing -- for a terminal FAILURE (reaped, cancelled,
+        done-but-empty). Keeps the map from leaking and guarantees a failed run never counts."""
+        with _scene_pending_lock:
+            _scene_pending.pop(str(tid), None)
 
     @app.route("/api/task-status")
     @tier(LOGIN)
@@ -14018,6 +14230,7 @@ __DESIGN_TOKENS__
                 # (deferred from /api/enhance's submit-acceptance). No-op for non-enhance tasks;
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
                 _fire_enhance_telemetry(tid)
+                _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
@@ -14025,6 +14238,7 @@ __DESIGN_TOKENS__
             if st["phase"] == "failed":
                 _forget_gen_phase(tid)
                 _drop_enhance_pending(tid)   # a reaped/cancelled enhance must NOT count
+                _drop_scene_pending(tid)     # nor a reaped/cancelled scene
                 # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
                 # both the job log and the response. This branch already fired correctly
                 # for the owner's five reaped enhances -- it just logged the bare status,
@@ -14053,6 +14267,7 @@ __DESIGN_TOKENS__
             # forever. (Observed: an enhance submitted with an unusable input media id
             # sat at 'running' indefinitely while PixAI considered it long finished.)
             _drop_enhance_pending(tid)   # done-but-empty is a failure: it must NOT count
+            _drop_scene_pending(tid)     # nor a done-but-empty scene
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:

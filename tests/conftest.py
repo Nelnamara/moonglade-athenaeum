@@ -14,7 +14,7 @@ import moonglade_gallery as gallery
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
 # lives in source, so roster tests need a container built from this.
 _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
-                 / "moonglade-internal" / "achievements_sealed_donor.json")
+                 / "moonglade-internal" / "achievements_folio_donor.json")
 
 
 @pytest.fixture(autouse=True)

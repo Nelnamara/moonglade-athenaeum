@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt } from "../hooks/useFolio.js";
+import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
@@ -112,7 +112,7 @@ const SKIN_SW = {
 // the mock's fabricated ones.
 function subFor(a, earnedAt) {
   if (!a) return "";
-  if (a.bucket === "feat") return a.earned ? (earnedAt[a.id] || "") : "";
+  if (displayBucket(a) === "feat") return a.earned ? (earnedAt[a.id] || "") : "";
   if (a.earned) return earnedAt[a.id] || "";
   if (a.bucket === "ladder") return "not yet — " + fmt(a.threshold);
   return "not yet";
@@ -124,7 +124,7 @@ function subFor(a, earnedAt) {
    this ever sees it) -- everything else stays clickable whether earned or
    locked, matching mkTierRow/mkFlatRow's own onClick (fires either way). */
 function Row({ a, ladderName, onOpen }) {
-  const isFeat = a.bucket === "feat";
+  const isFeat = displayBucket(a) === "feat";   // meta folds into feats; streak into masteries
   if (isFeat && !a.earned) {
     return (
       <div className="fm-row fm-row-featlocked">
@@ -229,7 +229,7 @@ export default function FolioMobile({ onClose }) {
   }
 
   const sheetAch = sheetId && vm ? vm.achievements.find((x) => x.id === sheetId) : null;
-  const sheetIsFeat = sheetAch ? sheetAch.bucket === "feat" : false;
+  const sheetIsFeat = sheetAch ? displayBucket(sheetAch) === "feat" : false;
   const sheetPts = sheetAch ? (sheetAch.points ? "+" + sheetAch.points + " pts" : (sheetIsFeat ? "for the glory" : "")) : "";
 
   const ladderTiers = activeLadder ? activeLadder.tiers : [];

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import "../styles/overlays.css";
 import "../styles/folio-overlay.css";
-import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt } from "../hooks/useFolio.js";
+import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
 import useHealth from "../hooks/useHealth.js";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -74,7 +74,7 @@ function Bar({ pct, variant, tier }) {
    contract and wiki/Folio-of-Honors.md, not a DC omission to second-guess. */
 function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
   const masked = !a.earned && a.hidden;
-  const isFeat = a.bucket === "feat";
+  const isFeat = displayBucket(a) === "feat";   // meta folds into feats (no points, "for the glory")
   const tierClass = "mgfo-t-" + (a.tier || "common");
   const badgeSrc = masked
     ? "/branding/mystery/secret_feat.png"
