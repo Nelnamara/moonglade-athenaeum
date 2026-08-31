@@ -469,36 +469,63 @@ def _arm_mirror_bridge(monkeypatch, core):
     monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-9")
 
 
-def test_bridge_enhance_defers_to_terminal_and_counts_only_presets(tmp_path, monkeypatch):
-    """Step 6b (corrected): a bridge-preset enhance joins the `bridge_enhance` set and bumps
-    bridge_gens ONLY at terminal success -- parity with enhance_workflows, so a submit that is
-    later reaped/failed never counts. Nothing is recorded at submit. A non-preset enhance never
-    touches the bridge set even at terminal. bridge_enhance_distinct = len(the set)."""
+def test_enhance_tools_complete(tmp_path, monkeypatch):
+    """Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
+    The five non-emotion presets each count the moment they are used once (-> 5); Change Emotion
+    tips it to 6 ONLY once every emotion in the universe has been used -- a partial emotion set
+    leaves it at 5. Everything counts at TERMINAL success (deferred), so a reaped/failed enhance
+    never counts. The retired bridge_enhance_distinct metric is gone."""
     import moonglade_backup as core
     _arm_mirror_bridge(monkeypatch, core)
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    preset = core.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
-    r = cli.post("/api/enhance", json={"source": "srcABC", "workflow_name": preset})
-    assert r.status_code == 200
-    tid = r.get_json()["task_id"]
-    assert g.telemetry_metrics(tmp_path)["bridge_enhance_distinct"] == 0   # DEFERRED: nothing at submit
-    # drive terminal success -> _fire_enhance_telemetry fires the bridge-gated set-add + bump
     monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
     monkeypatch.setattr(core, "collect_generation",
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
-    cli.get("/api/task-status", query_string={"task_id": tid})
-    assert g.telemetry_metrics(tmp_path)["bridge_enhance_distinct"] == 1
-    assert g.load_telemetry(tmp_path)["sets"]["bridge_enhance"] == [preset]
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1        # Speak, Friend: bridge-only
-    # a second poll of the finished task must not double-count
-    cli.get("/api/task-status", query_string={"task_id": tid})
-    assert g.telemetry_metrics(tmp_path)["bridge_enhance_distinct"] == 1
-    # a NON-preset enhance, even at terminal, never joins the bridge set (distinct task id)
-    monkeypatch.setattr(core, "submit_generation", lambda *a, **k: "T-ENH-OTHER")
-    r2 = cli.post("/api/enhance", json={"source": "srcDEF", "workflow_id": "1793447160259872021"})
-    cli.get("/api/task-status", query_string={"task_id": r2.get_json()["task_id"]})
-    assert g.telemetry_metrics(tmp_path)["bridge_enhance_distinct"] == 1   # unchanged (non-preset)
+    # unique task id per submit so each terminal poll fires its own deferred record
+    _seq = {"n": 0}
+
+    def _submit(*a, **k):
+        _seq["n"] += 1
+        return f"T-ENH-{_seq['n']}"
+    monkeypatch.setattr(core, "submit_generation", _submit)
+
+    def _run_enhance(**payload):
+        r = cli.post("/api/enhance", json=payload)
+        assert r.status_code == 200
+        cli.get("/api/task-status", query_string={"task_id": r.get_json()["task_id"]})
+
+    presets = {p["key"]: p["workflow_name"] for p in core.BRIDGE_ENHANCE_PRESETS}
+    non_emotion = [k for k in presets if k != "emotion"]
+    assert len(non_emotion) == 5                                   # the roster's "SIX tools" minus emotion
+
+    # nothing recorded at submit-acceptance
+    r0 = cli.post("/api/enhance", json={"source": "src0", "workflow_name": presets[non_emotion[0]]})
+    assert r0.status_code == 200
+    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 0
+    cli.get("/api/task-status", query_string={"task_id": r0.get_json()["task_id"]})
+    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 1   # first tool at terminal
+
+    # the remaining four non-emotion tools -> 5
+    for k in non_emotion[1:]:
+        _run_enhance(source="src-" + k, workflow_name=presets[k])
+    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
+
+    # the emotion tool with a PARTIAL emotion set stays at 5 (emotion incomplete)
+    emo_wf = core.ENHANCE_EMOTION_WORKFLOW
+    emo_keys = list(core.ENHANCE_EMOTION_PROMPTS.keys())
+    for ek in emo_keys[:-1]:
+        _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=ek)
+    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 5
+
+    # the LAST emotion completes the universe -> tips to 6
+    _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=emo_keys[-1])
+    assert g.telemetry_metrics(tmp_path)["enhance_tools_complete"] == 6
+    # a repeat emotion never pushes past 6, and the retired metric is gone
+    _run_enhance(source="src-emo", workflow_name=emo_wf, emotion=emo_keys[0])
+    m = g.telemetry_metrics(tmp_path)
+    assert m["enhance_tools_complete"] == 6
+    assert "bridge_enhance_distinct" not in m
 
 
 def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypatch):
@@ -522,11 +549,36 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
     assert g.telemetry_metrics(tmp_path)["scenes_used"] == 1
     assert g.load_telemetry(tmp_path)["sets"]["scenes"] == ["the-sun"]
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # a scene is a bridge gen (Speak, Friend)
     tel = g.load_telemetry(tmp_path)                                   # collect choke marked today
     assert tel["day_lists"]["gen_days"] and tel["day_lists"]["active_days"]
-    # a second poll of the same finished task must not double-count
+    # a second poll of the same finished task must not double-count -- scenes_used is a set, and
+    # bridge_gens is now a distinct-task set too (regression guard: the counter form inflated on re-poll)
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
     assert g.telemetry_metrics(tmp_path)["scenes_used"] == 1
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must NOT inflate Speak-Friend
+
+
+def test_regular_gen_counts_bridge_gens_only_when_mirror_on(tmp_path, monkeypatch):
+    """Speak, Friend, and Enter (bridge_gens): a REGULAR gen that lands on PixAI -- collected while
+    the 'Mirror to PixAI' toggle is on (so _session_for_create used the browser JWT) -- counts. With
+    the mirror off it is a plain API-key gen and does NOT count. (Enhance/scene are covered by their
+    own terminals; this is the third under-the-bridge path.)"""
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
+    save_catalog(tmp_path / "catalog.db", [])
+    cli = login_client(tmp_path)
+    # mirror OFF -> a plain API-key gen is not under the bridge
+    monkeypatch.setattr(core, "mirror_enabled", lambda: False)
+    cli.get("/api/task-status", query_string={"task_id": "T-GEN-OFF"})
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0
+    # mirror ON -> the gen lands on PixAI, so it counts
+    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
+    cli.get("/api/task-status", query_string={"task_id": "T-GEN-ON"})
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
 
 
 def test_train_submit_hook_bumps_loras_trained(tmp_path, monkeypatch):

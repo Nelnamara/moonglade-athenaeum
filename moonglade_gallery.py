@@ -3565,7 +3565,26 @@ def telemetry_metrics(out_dir):
     # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
     # names never leave the store).
     m["scenes_used"] = _card("scenes")                        # Doorwarden
-    m["bridge_enhance_distinct"] = _card("bridge_enhance")    # Bridge-Enhance I/II/III
+    m["bridge_gens"] = _card("bridge_gen_tasks")              # Speak, Friend: distinct bridge tasks (re-poll-safe)
+    # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
+    # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
+    # emotion in the universe has been used. The preset keys and the emotion-universe size come
+    # from core -- never hardcoded -- and ONLY the computed count is exposed (the underlying tool
+    # keys and emotion keys never leave the store). Silent-soft: an absent/bad core resolves to 0.
+    try:
+        import moonglade_backup as _core
+        _non_emotion = set()
+        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
+            _k = str(pp.get("key") or "").strip()
+            if _k and _k != "emotion":
+                _non_emotion.add(_k)
+        _tools = sets.get("enhance_tools")
+        _tools = set(_tools) if isinstance(_tools, list) else set()
+        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
+        _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
+        m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
+    except Exception:
+        m["enhance_tools_complete"] = 0
     for k, v in d["flags"].items():
         m[k] = 1 if v else 0
     m["days_used"] = len(d["days"])
@@ -6207,14 +6226,17 @@ def create_app(out_dir: Path):
     _scene_pending = {}
     _scene_pending_lock = threading.Lock()
 
-    # The 6-preset Bridge-Enhance universe, computed once at app-creation (core is imported
-    # per-handler, not module-wide, so alias it locally here). bridge_enhance (the I/II/III
-    # distinct set) and bridge_gens (Speak, Friend) are gated on this and fired at TERMINAL
-    # success in _fire_enhance_telemetry -- never at submit, so a reaped/failed enhance never counts.
+    # The 6 Bridge-Enhance presets, mapped workflow_name -> preset key, computed once at
+    # app-creation (core is imported per-handler, not module-wide, so alias it locally here).
+    # _fire_enhance_telemetry uses this at TERMINAL success to record WHICH enhance tool was
+    # exercised (enhance_tools) -- never at submit, so a reaped/failed enhance never counts. Only
+    # the six known presets map; a non-preset enhance resolves to nothing and records no tool.
     import moonglade_backup as _mb_bridge
-    _BRIDGE_PRESET_NAMES = frozenset(
-        n for n in (str(pp.get("workflow_name") or "").strip()
-                    for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ())) if n)
+    _BRIDGE_PRESET_KEY_BY_NAME = {
+        n: k for n, k in (
+            (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
+            for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ()))
+        if n and k}
 
     # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
     # asset container, re-scoped from scratch"). A real streamed-download job,
@@ -6630,6 +6652,16 @@ def create_app(out_dir: Path):
                 # telemetry must never break a collect.
                 try:
                     telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
+                except Exception:
+                    pass
+                # Speak, Friend, and Enter (bridge_gens): a gen that LANDS ON PIXAI -- created via
+                # the mirror ('Mirror to PixAI' on, so _session_for_create used the browser JWT).
+                # Recorded as a DISTINCT task id, not a counter, so a re-poll or a second collector
+                # never inflates it. Enhance/scene tasks also pass through here and record the SAME
+                # tid at their own terminals -- the set dedupes, so no skip-check is needed. Silent-soft.
+                try:
+                    if core.mirror_enabled():
+                        telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)
                 except Exception:
                     pass
                 return got
@@ -12236,14 +12268,23 @@ def create_app(out_dir: Path):
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
             # name preset, else the numeric id) so telem_set_add -- which skips falsy values --
-            # counts a workflowName preset too. The three producers fire from /api/task-status's
-            # terminal-success branch via _fire_enhance_telemetry.
+            # counts a workflowName preset too. When THIS submit is the Change-Emotion workflow,
+            # also carry the picked emotion key (the client's `emotion` field, the option stem --
+            # the same value build_request translates to the danbooru tag) so the terminal can
+            # record which of the emotion universe was used; gated on the emotion workflow exactly
+            # as build_request gates the arg, so a stray `emotion` on another preset carries nothing.
+            # The producers fire from /api/task-status's terminal-success branch via
+            # _fire_enhance_telemetry.
+            _wname = str(p.get("workflow_name") or "").strip()
+            _identity = _wname or str(p.get("workflow_id") or "").strip()
+            _emo = str(p.get("emotion") or "").strip()
+            _emo_key = _emo if (_emo and _wname == core.ENHANCE_EMOTION_WORKFLOW) else None
             with _enhance_pending_lock:
-                _enhance_pending[str(task_id)] = (str(p.get("workflow_name") or "").strip()
-                                                  or str(p.get("workflow_id") or "").strip())
-            # Bridge-Enhance (I/II/III) + Speak-Friend (bridge_gens) are DEFERRED to terminal
-            # success in _fire_enhance_telemetry, gated on the bridge-preset identity -- see there.
-            # A submit that is later reaped/failed must NOT count (parity with enhance_workflows).
+                _enhance_pending[str(task_id)] = (_identity, _emo_key)
+            # enhance_tools (Blades of Gondolin) + Speak-Friend (bridge_gens) are DEFERRED to
+            # terminal success in _fire_enhance_telemetry, gated on the bridge-preset identity --
+            # see there. A submit that is later reaped/failed must NOT count (parity with
+            # enhance_workflows).
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -14153,16 +14194,20 @@ __DESIGN_TOKENS__
         handler -- that would report a false 'failed'/'running' and, worse, prompt a re-poll
         that re-collects. Mirrors api_generate's LoRA-telemetry try/except."""
         with _enhance_pending_lock:
-            identity = _enhance_pending.pop(str(tid), None)
-        if identity is None:
+            pend = _enhance_pending.pop(str(tid), None)
+        if pend is None:
             return
+        identity, emotion_key = pend
         try:
             telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
             telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
             telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
-            if identity in _BRIDGE_PRESET_NAMES:                           # bridge-only, terminal-gated
-                telem_set_add("bridge_enhance", identity, out_dir=out_dir)  # Bridge-Enhance I/II/III
-                telem_bump("bridge_gens", out_dir=out_dir)                  # Speak, Friend: a real bridge gen
+            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
+            key = _BRIDGE_PRESET_KEY_BY_NAME.get(identity)                 # only the six known presets map; a non-preset enhance -> nothing
+            if key:
+                telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
+            if emotion_key:                                                # Change-Emotion carried the picked expression
+                telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
         except Exception:                                                  # noqa: BLE001
             pass
 
@@ -14186,6 +14231,7 @@ __DESIGN_TOKENS__
             return
         try:
             telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
+            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
         except Exception:                                        # noqa: BLE001
             pass
 
