@@ -10734,6 +10734,82 @@ def run_contests(args):
     print("(Read-only. Enter a contest from the PixAI website.)")
 
 
+def _contest_rows(payload):
+    """Flatten one contest-artwork payload into a list of plain dicts.
+
+    Two shapes are accepted on purpose. The sibling `/contest/list` answers with a
+    `{data:[...]}` envelope, while the per-user / winners routes are documented as bare
+    JSON arrays and only the array form was seen live -- so guessing one shape would put
+    an unverified assumption between the caller and the data. A dict payload yields its
+    `data` list, a list payload is itself, anything else yields nothing.
+
+    Each row is reduced to its SCALAR fields: the four the app actually uses (`id`,
+    `authorId`, `mediaId`, `title`) plus whatever else came flat -- a winner's rank field,
+    whose upstream name is unverified, therefore rides along untouched rather than being
+    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped."""
+    if isinstance(payload, dict):
+        rows = payload.get("data") or []
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        out.append({str(k): v for k, v in r.items()
+                    if v is None or isinstance(v, (str, int, float, bool))})
+    return out
+
+
+def contest_my_entries(session, slug, user_id):
+    """One account's OWN entries in one contest, as plain dicts.
+
+    `GET /v2/contest/{slug}/artwork/{userId}` -- the "have I entered, and how many times"
+    read, without paging the contest's whole entry list. Read-only: browsing entries never
+    spends and never changes the account, so no `_check_read_only` here.
+
+    Raises PixAIError upward on a non-2xx (and ValueError on a malformed 200 body); every
+    caller of this is a poll that fails soft at its own layer, which keeps the failure
+    handling where the "what should a poll do about it" decision actually lives."""
+    return _contest_rows(_rest_get(
+        session, "/contest/%s/artwork/%s" % (slug, user_id)))
+
+
+def contest_winners(session, slug):
+    """The winners of one contest, as plain dicts. `GET /v2/contest/{slug}/winners`.
+
+    Verified live: a still-running contest answers with an EMPTY JSON array rather than an
+    error, and the list populates at the contest's `resultAt` -- so an empty result means
+    "not decided yet", never "call failed". `authorId` identifies each winner; any rank
+    field upstream sends is preserved as-is (see _contest_rows). Read-only, no spend."""
+    return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
+
+
+def contest_enter(session, slug, artwork_id):
+    """Enter one ALREADY-PUBLISHED artwork into a contest. **ACCOUNT-MUTATING.**
+
+    This is account-visible in the strongest sense: it puts the artwork into a PUBLIC
+    contest under the owner's name, where everyone can see it, and the contract exposes no
+    un-enter route. So it is gated by `_check_read_only` before the network call fires,
+    exactly like submit_generation / submit_fixer / delete_task_gql / claim_reward, and it
+    rides the single-attempt `_rest_post` with NO retry loop of its own -- a re-POST after
+    a lost response would submit a second entry.
+
+    `POST /v2/contest/{slug}/artwork` with `{"artworkId": ...}` -> the parsed response
+    dict (`{"success": true}` upstream). Upstream refusals arrive as a PixAIError carrying
+    the status and body: NOT_ELIGIBLE (e.g. the artwork was published before the contest
+    opened), UNAUTHORIZED, INVALID_INPUT.
+
+    THE ENTRY FEE IS UNMEASURED. The contract also declares an INSUFFICIENT_CREDITS error,
+    so entering MAY cost credits -- but no entry has ever been submitted from here to find
+    out, and the capture scope deliberately stopped short of firing one. Callers must
+    present the cost as UNKNOWN; do not tell a user this is free."""
+    _check_read_only("enter a PixAI contest")
+    return _rest_post(session, "/contest/%s/artwork" % slug,
+                      {"artworkId": str(artwork_id)})
+
+
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------
 # PixAI grants free-generation tickets ("kaisuuken", model-locked) via membership/events.
 # These live on the oRPC /v2 REST API, NOT GraphQL (verified 2026-07-03 from the app's
