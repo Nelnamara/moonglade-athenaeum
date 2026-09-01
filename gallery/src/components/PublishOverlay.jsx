@@ -4,6 +4,9 @@ import "../styles/overlays.css";
 import "../styles/publish.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 import GalleryPicker from "./GalleryPicker.jsx";
+import ContestChooser from "./ContestChooser.jsx";
+import { countdown, dayOf, isRunning } from "../hooks/useContests.js";
+import "../styles/myart-contests.css";
 
 /* Publish panel — Frontend Gallery.dc.html's ovPublish (markup 294-390, values
    2890-2937), built on the real publish pipeline (POST /api/myart/publish).
@@ -80,6 +83,8 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   // Tag dropdown backed by PixAI's live tag search (free).
   const [tagOpts, setTagOpts] = useState([]);
   const [tagOpen, setTagOpen] = useState(false);
+  // F1's contest row: the ⌄ list of running contests.
+  const [ctOpen, setCtOpen] = useState(false);
 
   // Prefill from the real catalog row -- title, tags and prompt are already there.
   useEffect(() => {
@@ -170,6 +175,12 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
       if (onPublished) onPublished(mid);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
   };
+
+  // F1's row state: only RUNNING contests can be entered, and the picked one is looked
+  // up by the id the row stores (unchanged -- `challenge` has always carried the id).
+  const runningContests = contests.filter(isRunning);
+  const picked = contests.find((c) => String(c.id) === String(contest)) || null;
+  const ctLeft = picked ? countdown(picked.end_at) : null;
 
   const already = row && (row.artwork_id || "").trim();
   const dims = row && row.width && row.height ? row.width + "×" + row.height : "";
@@ -287,15 +298,53 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                 before the upload, not dropped quietly.
               </div>
 
+              {/* F1 (Contest Surface v2.dc.html) -- the bare select graduates into the
+                  DC's contest ROW: banner thumb, title, live deadline, and the track
+                  hint. Same value as before (the contest id, which is what `challenge`
+                  carries), same one-line free entry -- a picked contest rides the publish
+                  mutation itself, which is why its cost line reads Free below. */}
               {contests.length > 0 && (
                 <>
-                  <label className="mgpub-lab">Contest</label>
-                  <select className="mgpub-in" value={contest} onChange={(e) => setContest(e.target.value)}>
-                    <option value="">Not entering a contest</option>
-                    {contests.map((c) => (
-                      <option key={c.id} value={c.id}>{c.title}</option>
-                    ))}
-                  </select>
+                  <div className="mgpub-ctrow">
+                    <span className="k">CONTEST</span>
+                    <span className="opt">optional</span>
+                  </div>
+                  {picked ? (
+                    <div className="mgpub-ctpicked">
+                      {picked.cover_url ? <img src={picked.cover_url} alt="" /> : <span />}
+                      <div className="mgctch-col">
+                        <div className="t" title={picked.title}>{picked.title}</div>
+                        <div className="s">
+                          closes {dayOf(picked.end_at) || "—"}
+                          {ctLeft && !ctLeft.over ? " · " + ctLeft.text : ""}
+                        </div>
+                      </div>
+                      <span className="mgpub-cttrack">★ counts toward The Arena</span>
+                      <button type="button" className="mgpub-ctclear" title="Not entering a contest"
+                        onClick={() => setContest("")}>×</button>
+                    </div>
+                  ) : (
+                    <div className="mgpub-ctmenu">
+                      <button type="button" className="mgpub-ctempty"
+                        onClick={() => setCtOpen(!ctOpen)}>
+                        <span className="glyph">🏅</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span className="t">Not entering a contest</span>
+                          <span className="s" style={{ display: "block" }}>
+                            pick a running contest — entering at publish is free
+                          </span>
+                        </span>
+                        <span className="chev">⌄</span>
+                      </button>
+                      {ctOpen && (
+                        <div className="mgpub-ctlist">
+                          <ContestChooser contests={runningContests}
+                            onPick={(c) => { setContest(c.id); setCtOpen(false); }}
+                            empty="No contests are running right now." />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
 
@@ -330,6 +379,33 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                     {priv && <> · private</>}
                     <div className="n">No credits are spent by publishing.</div>
                   </div>
+                  {/* D1 -- when a contest is picked, the publish confirm gains the entry
+                      block and its cost line. This path really IS free: the entry rides
+                      the publish mutation, no separate charge exists to be unsure about
+                      (unlike a direct entry, whose fee is unmeasured). */}
+                  {picked && (
+                    <>
+                      <div className={"mgctc-ct" + ((picked.type || "") === "official" ? " official" : "")}>
+                        {picked.cover_url
+                          ? <img className="mgctc-ctbanner" src={picked.cover_url} alt="" />
+                          : <span className="mgctc-ctbanner" />}
+                        <div className="mgctch-col">
+                          <div className="mgctc-ctname" title={picked.title}>{picked.title}</div>
+                          <div className="mgctc-ctsub">
+                            closes {dayOf(picked.end_at) || "—"}
+                            {ctLeft && !ctLeft.over ? " · " + ctLeft.text : ""}
+                          </div>
+                        </div>
+                        <span className={"mgct-badge " + ((picked.type || "") === "official" ? "official" : "community")}>
+                          {(picked.type || "") === "official" ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
+                        </span>
+                      </div>
+                      <div className="mgctc-cost">
+                        <div className="k">Entry cost</div>
+                        <div className="v">Free — entered with publish</div>
+                      </div>
+                    </>
+                  )}
                   <div className="a">
                     <button type="button" className="mgpub-ghost" onClick={() => setAsk(null)} disabled={busy}>Back</button>
                     <button type="button" className="mgpub-go" onClick={confirm} disabled={busy}>
