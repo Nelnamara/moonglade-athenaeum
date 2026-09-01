@@ -316,6 +316,58 @@ export default function useControlPanel() {
     fetchSummary();
   };
 
+  /* ---- the auto-updater (P4) --------------------------------------------------
+     ON DEMAND, once per Panel open (owner ruling, 2026-09-01: no background tick
+     anywhere). The server caches for its own TTL, so opening the Panel repeatedly
+     costs GitHub nothing. A failed check answers behind:false with a reason and is
+     simply not shown -- an offline machine gets a Panel, not an error. */
+  const [update, setUpdate] = useState(null);      // the check payload
+  const [updOpen, setUpdOpen] = useState(false);   // the confirm modal
+  const [updPhase, setUpdPhase] = useState("");    // "" | applying | failed
+  const [updErr, setUpdErr] = useState("");
+  const updPollRef = useRef(null);
+  useEffect(() => {
+    let dead = false;
+    apiGet("/api/update/check").then((d) => { if (!dead && d && !d.error) setUpdate(d); });
+    return () => {
+      dead = true;
+      if (updPollRef.current) clearInterval(updPollRef.current);
+      if (pingRef.current) clearInterval(pingRef.current);
+    };
+  }, []);
+
+  /* Apply: one POST behind the modal's explicit yes, then WATCH. The server does the
+     work off the panel-job slot and reports its phase; when it reaches `restarting` we
+     hand over to the exact ping-watch the Restart chip uses -- the server is about to
+     stop answering, so the update's own status route cannot be what tells us it worked.
+     A failure keeps the tool's verbatim words: that text is the fix. */
+  const applyUpdate = async () => {
+    setUpdPhase("applying"); setUpdErr("");
+    const d = await apiPost("/api/update/apply",
+                            { confirm: true, csrf: summary?.csrf || "" }).catch(() => null);
+    if (!d || d.error) {
+      setUpdPhase("failed");
+      setUpdErr((d && d.error) || "Network error — try again.");
+      return;
+    }
+    updPollRef.current = setInterval(() => {
+      apiGet("/api/update/status", null, { cache: "no-store" }).then((st) => {
+        if (!st || st.error) return;                       // a blip: keep watching
+        if (st.phase === "failed") {
+          clearInterval(updPollRef.current);
+          setUpdPhase("failed"); setUpdErr(st.error || "The update failed.");
+        } else if (st.phase === "restarting") {
+          clearInterval(updPollRef.current);
+          _watch(true);                                    // ...and this reloads the tab
+        }
+      });
+    }, 1500);
+  };
+  const closeUpdate = () => {
+    if (updPollRef.current) clearInterval(updPollRef.current);
+    setUpdOpen(false); setUpdPhase(""); setUpdErr("");
+  };
+
   // Sidebar chips arm on the first click ("Confirm -- Restart?") and only actually fire
   // on the second -- classic gates the same actions behind window.confirm(); this is the
   // same inline-confirm language ActionChip already uses for destructive Maintenance
@@ -399,5 +451,6 @@ export default function useControlPanel() {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
+    update, updOpen, setUpdOpen, updPhase, updErr, applyUpdate, closeUpdate,
   };
 }

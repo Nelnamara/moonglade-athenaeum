@@ -5740,6 +5740,188 @@ def _schedule_server_exit(code):
     threading.Thread(target=_die, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------
+# The auto-updater (P4, owner-approved 2026-08-09; scope recovered 2026-09-01).
+# Notify + one-click apply, NEVER silent. Git-based, because that is what this
+# app already is on every machine that runs it: a checkout, with dist committed,
+# so a code update is a pull and a restart -- no build step, no installer.
+#
+# Why the release LIST and not /releases/latest: the asset packs ship as their
+# own full releases (assets-*), and GitHub's "latest" is whichever release is
+# newest, not whichever is a version. Asking for `latest` would have offered an
+# asset pack as an app update. The list is filtered to real vX.Y.Z tags instead.
+#
+# Versions compare as NUMERIC TUPLES, never as strings: "3.10.0" < "3.9.0" is
+# true alphabetically and catastrophic here -- it would tell a 3.9 user they are
+# current forever, and a 3.10 user they are behind forever.
+# ---------------------------------------------------------------------------
+GITHUB_RELEASES_URL = ("https://api.github.com/repos/Nelnamara/moonglade-athenaeum"
+                       "/releases?per_page=15")
+UPDATE_CHECK_TTL = 1800          # 30 min: GitHub's unauthenticated budget is 60/hr and the
+                                 # check is on-demand (Panel open), so this is generous
+_VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+_update_cache = {"at": 0.0, "payload": None}
+_update_state = {"phase": "idle", "error": "", "at": 0.0}
+_update_lock = threading.Lock()
+
+
+def version_tuple(text):
+    """(major, minor, patch) for a `vX.Y.Z` tag or a bare `X.Y.Z` version, else None.
+    The ONE parser both sides of the comparison go through, so a tag and a __version__
+    can never be measured differently."""
+    s = str(text or "").strip()
+    m = _VERSION_TAG_RE.match(s if s.startswith("v") else "v" + s)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def pick_latest_release(releases):
+    """The newest real app release from GitHub's newest-first list, or None.
+
+    Skips anything whose tag is not exactly vX.Y.Z -- which is what keeps the asset
+    packs (assets-2026-08-21 and friends) out of the answer. They are full releases and
+    can easily be the newest thing in the repo, so this filter is the whole correctness
+    of the check, not a tidy-up."""
+    for r in releases or []:
+        if not isinstance(r, dict):
+            continue
+        if r.get("draft"):
+            continue
+        tag = str(r.get("tag_name") or "")
+        if version_tuple(tag) and _VERSION_TAG_RE.match(tag):
+            return r
+    return None
+
+
+def fetch_releases(opener=None, url=GITHUB_RELEASES_URL, timeout=8):
+    """The release list from GitHub, unauthenticated. `opener` is the seam every test
+    substitutes -- nothing in the suite touches the network."""
+    import json as _json
+    import urllib.request
+    opener = opener or urllib.request.urlopen
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "moonglade-athenaeum-updater",
+    })
+    with opener(req, timeout=timeout) as resp:
+        return _json.loads(resp.read().decode("utf-8"))
+
+
+def check_for_update(current, opener=None, now=None, force=False):
+    """Is a newer release out? Returns the check payload, cached for UPDATE_CHECK_TTL.
+
+    A network failure is NOT an error state here: it answers `behind: False` with the
+    reason attached, because the Control Panel opening while the machine is offline must
+    show a Panel, not a stack trace. The failure is deliberately NOT cached -- a blip
+    would otherwise hide a real update for half an hour."""
+    now = time.time() if now is None else now
+    cached = _update_cache.get("payload")
+    if (not force and cached and (now - _update_cache.get("at", 0)) < UPDATE_CHECK_TTL):
+        return cached
+    payload = {"current": current, "latest": "", "behind": False,
+               "title": "", "notes_url": "", "checked_at": now}
+    try:
+        rel = pick_latest_release(fetch_releases(opener=opener))
+    except Exception as e:                       # noqa: BLE001 -- offline is not a failure here
+        payload["error"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+        return payload
+    if not rel:
+        payload["error"] = "no versioned release found"
+        return payload
+    cur_v, new_v = version_tuple(current), version_tuple(rel.get("tag_name"))
+    payload.update({
+        "latest": str(rel.get("tag_name") or ""),
+        "behind": bool(cur_v and new_v and new_v > cur_v),
+        "title": str(rel.get("name") or "")[:200],
+        "notes_url": str(rel.get("html_url") or ""),
+    })
+    _update_cache.update(at=now, payload=payload)
+    return payload
+
+
+def _git(args, timeout=180):
+    """Run one git command in THIS checkout (the app's own directory, never a cwd the
+    request could influence). Returns (returncode, combined output). Never raises: a
+    missing git is a refusal with a reason, not a 500."""
+    import subprocess
+    try:
+        p = subprocess.run(["git"] + list(args), cwd=str(Path(__file__).resolve().parent),
+                           capture_output=True, text=True, timeout=timeout,
+                           creationflags=_NO_WINDOW)
+        return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
+    except Exception as e:                       # noqa: BLE001
+        return 1, "%s: %s" % (type(e).__name__, str(e)[:200])
+
+
+def update_state():
+    """The apply phase, as the modal polls it."""
+    with _update_lock:
+        return dict(_update_state)
+
+
+def _set_update_state(phase, error=""):
+    with _update_lock:
+        _update_state.update(phase=phase, error=error, at=time.time())
+
+
+def _requirements_changed(old_head, new_head):
+    """Did requirements.txt move between these two commits? The pip step is skipped
+    otherwise -- a dependency install is slow, and running one on every code update
+    would make the common case (no dep change at all) the expensive one."""
+    if not old_head or old_head == new_head:
+        return False
+    rc, out = _git(["diff", "--name-only", old_head, new_head])
+    if rc != 0:
+        return True          # can't tell -> install, because guessing "no" can break the app
+    return any(line.strip() == "requirements.txt" for line in out.splitlines())
+
+
+def run_update(restart_fn, pip_fn=None):
+    """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
+    panel-job slot, so the restart it asks for is not refused by the job it is itself.
+
+    Every failure stops the sequence and records the tool's own words verbatim -- a git
+    or pip failure is the one thing the person watching actually needs to read, and
+    paraphrasing it would cost them the fix. A failed pull changes nothing: --ff-only
+    either fast-forwards or refuses."""
+    rc, head_out = _git(["rev-parse", "HEAD"])
+    old_head = head_out.strip() if rc == 0 else ""
+    _set_update_state("pulling")
+    rc, out = _git(["pull", "--ff-only"])
+    if rc != 0:
+        _set_update_state("failed", "git pull failed:\n" + out[:600])
+        return False
+    rc, head_out = _git(["rev-parse", "HEAD"])
+    new_head = head_out.strip() if rc == 0 else ""
+    if _requirements_changed(old_head, new_head):
+        _set_update_state("deps")
+        rc, out = (pip_fn or _pip_install)()
+        if rc != 0:
+            _set_update_state("failed", "dependency install failed:\n" + out[:600])
+            return False
+    _set_update_state("restarting")
+    try:
+        restart_fn()
+    except Exception as e:                       # noqa: BLE001
+        _set_update_state("failed", "restart failed: %s" % str(e)[:200])
+        return False
+    return True
+
+
+def _pip_install():
+    """pip install -r requirements.txt against THIS interpreter (sys.executable -- never a
+    bare `pip`, which on Windows can easily be a different environment's)."""
+    import subprocess
+    root = Path(__file__).resolve().parent
+    try:
+        p = subprocess.run([sys.executable, "-m", "pip", "install", "-r",
+                            str(root / "requirements.txt")],
+                           cwd=str(root), capture_output=True, text=True, timeout=900,
+                           creationflags=_NO_WINDOW)
+        return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
+    except Exception as e:                       # noqa: BLE001
+        return 1, "%s: %s" % (type(e).__name__, str(e)[:200])
+
+
 def _account_key(username):
     """Filesystem-safe, case-COLLISION-safe key for `username` -- the ONE shared
     helper every per-account store (saved views, prompt snippets, Loom storyboards,
@@ -6087,6 +6269,11 @@ def create_app(out_dir: Path):
     _panel_job = {"status": "idle", "action": "", "label": "", "lines": [],
                   "rc": None, "started_at": None, "progress": None,
                   "proc": None, "cancelled": False, "warn_count": 0}
+    # Test seam, same rationale as app.extensions["mg_watch_catchup"] below: the job slot
+    # is a closure, so every refusal that depends on it -- Restart's, and now the
+    # updater's -- has no other way to be driven end to end. Exposes the STATE, not a
+    # setter: a test occupies the slot exactly as _panel_run does, by marking it running.
+    app.extensions["mg_panel_job"] = _panel_job
     _PROG_PREFIX = "~=MGPROG=~"        # matches PANEL_PROGRESS_PREFIX in moonglade_backup.py
     _WARN_PREFIX = "~=MGWARN=~"        # matches PANEL_WARN_PREFIX in moonglade_backup.py (D-4)
     # The Loom's ffmpeg export job (trim + concat finished shots -> one mp4).
@@ -7538,6 +7725,103 @@ def create_app(out_dir: Path):
                                      "(the server can't restart while it works).".format(busy)}), 409
         _schedule_server_exit(42)
         return jsonify({"ok": True, "action": "restart"})
+
+    @app.route("/api/update/check")
+    @tier(LOGIN)
+    def api_update_check():
+        """Is a newer release out? Fired ON DEMAND when the Control Panel opens (owner
+        ruling, 2026-09-01: no background tick anywhere) and cached server-side for
+        UPDATE_CHECK_TTL, so opening the Panel ten times costs GitHub one request.
+
+        Never fails the Panel: an offline machine gets behind:false with the reason
+        attached, at 200. See check_for_update for why the failure is not cached."""
+        import moonglade_backup as core
+        return jsonify(check_for_update(core.__version__))
+
+    @app.route("/api/update/status")
+    @tier(LOGIN)
+    def api_update_status():
+        """The phase the apply is in, for the modal to poll:
+        idle | pulling | deps | restarting | failed (with the tool's verbatim error)."""
+        return jsonify(update_state())
+
+    @app.route("/api/update/apply", methods=["POST"])
+    @tier(LOGIN)
+    def api_update_apply():
+        """Pull the new release and restart into it. NEVER SILENT: the modal's explicit
+        confirm is required, and this is the CSRF explicit-token class -- a real system
+        mutation off one web click, the same class as publish and the user-admin routes.
+
+        Every refusal names its own reason, because "no" without a why is the thing that
+        makes a person start deleting files. The gates:
+          * confirm + CSRF          -- it was actually asked for, by this session
+          * READ_ONLY               -- belt. Not a PixAI spend, but the owner's flag says
+                                       "don't change my install", and this changes the
+                                       install more than anything else here does
+          * supervised              -- without the managed launcher, exit 42 stops the
+                                       server instead of relaunching it: an update would
+                                       be indistinguishable from "the app vanished"
+          * no running panel job    -- same rule Restart uses; a pull under a running job
+                                       swaps the code out from under it
+          * on master               -- the recovered scope's own out-of-scope rule: a
+                                       feature branch is somebody mid-work, not a stale
+                                       install
+          * clean tree              -- --ff-only would refuse anyway; refusing here says
+                                       WHICH files are in the way instead of a git error
+        The work itself runs off the panel-job slot on its own single-flight thread, so
+        the restart it asks for cannot be refused by the job it is itself."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        if not body.get("confirm"):
+            return jsonify({"error": "confirm required — the update is never applied silently"}), 400
+        import moonglade_backup as core
+        if core.READ_ONLY or core._read_only_now():
+            return jsonify({"error": "READ_ONLY is set in config.json — refusing to update "
+                                     "this install. Remove it (or set it to false) to allow "
+                                     "this."}), 409
+        if not _supervised():
+            return jsonify({"error": "Updating needs the managed launcher — start via "
+                                     "'Serve Gallery'. (Without it the server would stop "
+                                     "instead of restarting into the new version.)"}), 409
+        busy = _job_busy()
+        if busy:
+            return jsonify({"error": "\"{}\" is still running — stop that job first "
+                                     "(the code can't change while it works).".format(busy)}), 409
+        rc, branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+        branch = (branch or "").strip()
+        if rc != 0:
+            return jsonify({"error": "couldn't read this checkout's branch: " + branch[:200]}), 409
+        if branch != "master":
+            return jsonify({"error": "this checkout is on '%s', not master — updating a "
+                                     "feature branch is out of scope. Switch to master "
+                                     "first." % branch[:60]}), 409
+        rc, dirty = _git(["status", "--porcelain"])
+        if rc != 0:
+            return jsonify({"error": "couldn't read this checkout's state: " + dirty[:200]}), 409
+        if dirty.strip():
+            names = [ln[3:].strip() for ln in dirty.splitlines() if ln.strip()][:6]
+            return jsonify({"error": "this checkout has uncommitted changes — the update "
+                                     "would overwrite them. In the way: "
+                                     + ", ".join(names)}), 409
+        with _update_lock:
+            if _update_state["phase"] not in ("idle", "failed"):
+                return jsonify({"error": "an update is already running"}), 409
+            _update_state.update(phase="pulling", error="", at=time.time())
+
+        def _restart():
+            # The SAME gates the restart route applies, re-checked at the moment it
+            # actually happens rather than trusted from a minute ago -- then the same
+            # one call it makes. Not a second restart mechanism.
+            if not _supervised():
+                raise RuntimeError("the managed launcher is gone")
+            still = _job_busy()
+            if still:
+                raise RuntimeError('"%s" started while updating' % still)
+            _schedule_server_exit(42)
+
+        threading.Thread(target=run_update, args=(_restart,), daemon=True).start()
+        return jsonify({"ok": True, "phase": "pulling"})
 
     @app.route("/api/bonjour/status")
     @tier(LOGIN)

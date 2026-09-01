@@ -11,8 +11,9 @@ expect.
 A built-in identifier went stale after a PixAI frontend update. These ship with the
 app and are shared by everyone, so when one breaks it breaks for all users.
 
-- **First, update to the latest release** (`git pull`) — refreshed defaults usually land
-  there quickly.
+- **First, update to the latest release** — open the **Control Panel** and click the gold
+  version stamp in its sidebar footer if one is offered (`git pull` by hand otherwise).
+  Refreshed defaults usually land there quickly.
 - If it's still broken on the latest version, **open an issue** so the default can be
   updated for everyone.
 
@@ -73,9 +74,18 @@ server the paragraph appears on the console the first time and not again, so rea
 there rather than waiting for it to repeat.
 
 ## The gallery shows old behavior after I updated
-After `git pull`, **restart the gallery server** so it loads the new code — Stop/Restart
-from the browser, or relaunch **`Serve Gallery.pyw`**. Then **hard-refresh the browser
-(Ctrl+F5)** to clear the cached front-end (or the service worker).
+The Control Panel's one-click update restarts the server and reloads the tab for you. If you
+updated **by hand** with `git pull`, **restart the gallery server** so it loads the new code
+— Stop/Restart from the browser, or relaunch **`Serve Gallery.pyw`**. Either way, if a page
+still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
+the service worker).
+
+## The Control Panel won't offer the update
+It names the reason in the refusal. The usual ones: the server was not started through
+**`Serve Gallery.pyw`** (without the launcher a restart would just stop it); a Control Panel
+job is still running; the checkout is on a branch other than `master`; or it has uncommitted
+local changes, which an update would overwrite. Each of those is fixable, and `git pull` by
+hand stays available regardless.
 
 ## Videos won't show a poster
 Posters need `ffmpeg` on your PATH. Without it, videos still back up and play; they

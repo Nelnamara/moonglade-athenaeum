@@ -101,8 +101,20 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 [Collections](Collections) are catalog-based and survive Organize too.
 
 **How do I update?**
-`git pull`, then **restart the gallery server** so it loads the new code (Stop/Restart, or
-relaunch `Serve Gallery.pyw`) and hard-refresh the browser — see [Troubleshooting](Troubleshooting).
+**Open the Control Panel.** It checks for a new release when it opens, and if one is out the
+version stamp at the bottom of its sidebar turns gold: *"v3.7.0 available — view"*. Click it
+and the confirm tells you what will happen — the update is pulled atomically, dependencies
+install only if they changed, the server restarts (~10 seconds), and the tab reloads itself.
+Nothing is applied until you press **Update now**; there is no silent update, ever.
+
+The one-click path needs the managed launcher (**`Serve Gallery.pyw`**) — without it the
+server would stop instead of restarting into the new version — and a clean checkout on
+`master`. If yours is a working copy with local edits, or on a branch, the Panel says so
+rather than touching it.
+
+**By hand**, always available: `git pull`, then **restart the gallery server** so it loads
+the new code (Stop/Restart, or relaunch `Serve Gallery.pyw`) and hard-refresh the browser —
+see [Troubleshooting](Troubleshooting).
 
 **Something broke after a PixAI change.**
 See [Troubleshooting](Troubleshooting): update to the latest release first, or open an
