@@ -10786,6 +10786,31 @@ def contest_winners(session, slug):
     return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
 
 
+def contest_artworks(session, slug, page=1):
+    """One page of a contest's PUBLIC entries -- everyone's, not just this account's.
+    `GET /v2/contest/{slug}/artwork` with `{"page": N, "sort": "newest"}` (page size is
+    the server's, ~20). Read-only; feeds the detail view's entries preview, where the
+    full browse is a link-out to pixai.art rather than a paging UI here.
+
+    Returns the envelope shape `{data, totalCount, page, totalPage}` with `data`
+    normalized by _contest_rows. A bare-array answer is tolerated the same way the
+    per-user route's is (only the sibling /contest/list envelope was verified live): the
+    rows are the array and the counts fall back to what was actually returned, so a
+    caller never reads an invented total. Raises PixAIError upward on a non-2xx."""
+    d = _rest_get(session, "/contest/%s/artwork" % slug,
+                  params={"page": int(page or 1), "sort": "newest"})
+    rows = _contest_rows(d)
+    env = d if isinstance(d, dict) else {}
+
+    def _int(key, fallback):
+        try:
+            return int(env.get(key) or fallback)
+        except (TypeError, ValueError):
+            return fallback
+    return {"data": rows, "totalCount": _int("totalCount", len(rows)),
+            "page": _int("page", int(page or 1)), "totalPage": _int("totalPage", 1)}
+
+
 def contest_enter(session, slug, artwork_id):
     """Enter one ALREADY-PUBLISHED artwork into a contest. **ACCOUNT-MUTATING.**
 

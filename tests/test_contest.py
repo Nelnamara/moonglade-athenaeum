@@ -16,6 +16,7 @@ appears anywhere below. `contest_entries` / `contest_wins` are metric names -- s
 convention, not roster content -- and the only thing asserted about them is arithmetic.
 """
 import datetime as _dt
+import json
 import threading
 
 import pytest
@@ -101,6 +102,23 @@ class TestContestRestVerbs:
             core.contest_winners(pixai, "s1")
         with pytest.raises(core.PixAIError):
             core.contest_my_entries(pixai, "s1", "u-test")
+
+    def test_artworks_pages_newest_first_and_keeps_the_envelope(self, pixai):
+        pixai.on("/contest/s1/artwork", lambda call: {
+            "data": [{"id": "a1", "authorName": "@someone", "mediaId": "m1",
+                      "contest": {"id": "c1"}}],
+            "page": call.params["page"], "totalPage": 4, "totalCount": 77})
+        env = core.contest_artworks(pixai, "s1", page=2)
+        assert env["data"] == [{"id": "a1", "authorName": "@someone", "mediaId": "m1"}]
+        assert (env["page"], env["totalPage"], env["totalCount"]) == (2, 4, 77)
+        assert pixai.calls_for("/contest/s1/artwork")[0].params == {"page": 2, "sort": "newest"}
+
+    def test_artworks_tolerates_a_bare_array(self, pixai):
+        """No invented totals: an array answer counts what actually came back."""
+        pixai.on("/contest/s2/artwork", [{"id": "a1"}, {"id": "a2"}])
+        env = core.contest_artworks(pixai, "s2")
+        assert env["data"] == [{"id": "a1"}, {"id": "a2"}]
+        assert (env["totalCount"], env["page"], env["totalPage"]) == (2, 1, 1)
 
 
 class TestContestEnterIsGuarded:
@@ -520,6 +538,102 @@ def test_sync_kick_skips_when_a_sweep_is_already_running(tmp_path, monkeypatch):
         assert g._contest_sync_kick(tmp_path) is False
     finally:
         g._contest_sync_lock.release()
+
+
+# ---- GET /api/contest/<slug>/artworks ---------------------------------------
+
+def test_artworks_route_previews_a_page(tmp_path, pixai):
+    pixai.on("/contest/s1/artwork", lambda call: {
+        "data": [{"id": "a1", "authorName": "@someone", "mediaId": "M1"},
+                 {"id": "a2", "authorName": "", "mediaId": ""}],
+        "page": call.params["page"], "totalPage": 3, "totalCount": 51})
+    cli = _client(tmp_path)
+    d = cli.get("/api/contest/s1/artworks", query_string={"page": "2"}).get_json()
+    assert (d["total_count"], d["total_page"]) == (51, 3)
+    assert d["entries"][0] == {"id": "a1", "author_name": "@someone",
+                               "thumb": "https://api.pixai.art/v1/media/M1/thumbnail"}
+    assert d["entries"][1]["thumb"] == ""          # no media -> no invented URL
+    assert pixai.calls_for("/contest/s1/artwork")[0].params["page"] == 2
+    # a nonsense page is floored, not a 500
+    cli.get("/api/contest/s1/artworks", query_string={"page": "banana"})
+    assert pixai.calls_for("/contest/s1/artwork")[1].params["page"] == 1
+
+
+def test_artworks_route_soft_fails_as_200(tmp_path, pixai):
+    """A contest-board hiccup must not turn a detail view into an error page."""
+    pixai.fail("/contest/s1/artwork", core.PixAIError("REST GET /contest -> 503"))
+    cli = _client(tmp_path)
+    r = cli.get("/api/contest/s1/artworks")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["entries"] == [] and d["error"]
+
+
+# ---- GET /api/contest/mine ---------------------------------------------------
+
+def _seed_entries(tmp_path, keys, wins=()):
+    for k in keys:
+        g.telem_set_add("contest_entry_keys", k, out_dir=tmp_path)
+    for w in wins:
+        g.telem_set_add("contest_win_keys", w, out_dir=tmp_path)
+
+
+def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pixai):
+    """The entry record is already local, so this tab costs exactly ONE upstream call --
+    a page of the board, for titles and dates. Re-polling PixAI per contest is the
+    detection sweep's job; a tab that did it would fire N calls on open."""
+    seen = []
+    monkeypatch.setattr(core, "list_contests",
+                        lambda s, **k: seen.append(k) or [
+                            {"id": "c1", "slug": "s1", "title": "First", "type": "official",
+                             "end_at": "2026-08-18", "result_at": "2026-09-08",
+                             "active": True, "url": "https://pixai.art/en/contest/s1"}])
+    for name in ("contest_my_entries", "contest_winners"):
+        monkeypatch.setattr(core, name, lambda *a, **k: pytest.fail(
+            "the My-entries tab must not poll PixAI per contest"))
+    _seed_entries(tmp_path, ["c1:aw1", "c1:aw2", "c2:aw9"], wins=["c2"])
+    cli = _client(tmp_path, [_row(media_id="m1", artwork_id="aw1", filename="a_m1.png",
+                                  created_at="2026-08-06T00:00:00")])
+    d = cli.get("/api/contest/mine").get_json()
+    assert len(seen) == 1 and seen[0].get("max_pages") == 1
+    rows = {r["contest_id"]: r for r in d["contests"]}
+    assert d["total_entries"] == 3
+    assert rows["c1"]["title"] == "First" and rows["c1"]["active"] is True
+    assert rows["c1"]["entry_artwork_ids"] == ["aw1", "aw2"]
+    assert rows["c1"]["won"] is False and rows["c2"]["won"] is True
+    # thumbs: the catalog knows aw1 (same row as its media_id), not aw2
+    by_art = {e["artwork_id"]: e for e in rows["c1"]["entries"]}
+    assert by_art["aw1"]["thumb"] == "/thumbs/m1.jpg"
+    assert by_art["aw2"]["thumb"] == ""
+    # the seal: the metric name never appears in the payload, at any depth
+    assert "contest_wins" not in json.dumps(d)
+
+
+def test_mine_soft_fails_to_key_only_rows(tmp_path, monkeypatch, pixai):
+    """Knowing you have entries somewhere beats an error page."""
+    def _boom(*a, **k):
+        raise core.PixAIError("the board is unreachable")
+    monkeypatch.setattr(core, "list_contests", _boom)
+    _seed_entries(tmp_path, ["c1:aw1"])
+    cli = _client(tmp_path)
+    d = cli.get("/api/contest/mine").get_json()
+    assert d["contests"][0]["contest_id"] == "c1"
+    assert d["contests"][0]["title"] == "" and d["contests"][0]["entry_artwork_ids"] == ["aw1"]
+
+
+def test_mine_is_empty_before_any_entry(tmp_path, monkeypatch, pixai):
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
+    cli = _client(tmp_path)
+    assert cli.get("/api/contest/mine").get_json() == {"contests": [], "total_entries": 0}
+
+
+def test_artwork_media_ids_maps_only_what_the_catalog_holds(tmp_path):
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="m1", artwork_id="aw1", filename="a_m1.png"),
+        _row(media_id="m2", artwork_id="", filename="b_m2.png")])
+    got = g.artwork_media_ids(tmp_path / "catalog.db", ["aw1", "aw-unknown", "", None])
+    assert got == {"aw1": "m1"}
+    assert g.artwork_media_ids(tmp_path / "catalog.db", []) == {}
 
 
 # ---- the metrics ------------------------------------------------------------

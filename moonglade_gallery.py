@@ -1144,6 +1144,32 @@ def myart_items(db_path):
         return [dict(r) for r in rows]
 
 
+def artwork_media_ids(db_path, artwork_ids):
+    """{artwork_id: media_id} for the ids the catalog knows, skipping the ones it does
+    not. Cheap by construction: --sync-artworks writes artwork_id onto the SAME row as
+    the media_id it belongs to, so this is an indexed lookup rather than any kind of
+    join. It is what lets an entries listing show real thumbnails (/thumbs/<media_id>)
+    for artworks the local library already holds -- an entry made from another device
+    simply has no local media and gets no thumb, which is the honest answer.
+
+    Chunked because SQLite caps the number of bound parameters in one statement."""
+    ids = [str(a).strip() for a in (artwork_ids or []) if str(a or "").strip()]
+    if not ids:
+        return {}
+    out = {}
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            rows = con.execute(
+                "SELECT artwork_id, media_id FROM catalog WHERE artwork_id IN (%s)"
+                % ",".join("?" * len(chunk)), chunk).fetchall()
+            for r in rows:
+                aid, mid = str(r["artwork_id"] or ""), str(r["media_id"] or "")
+                if aid and mid:
+                    out[aid] = mid
+    return out
+
+
 def artwork_row(db_path, media_id):
     """The publish-relevant catalog row behind one media_id (artwork_id / task_id /
     title / art_tags / is_published), or None. What every My Art card action resolves
@@ -10743,6 +10769,111 @@ def create_app(out_dir: Path):
                             "community": sum(1 for c in contests if c["type"] != "official")})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
+
+    @app.route("/api/contest/<slug>/artworks")
+    @tier(LOGIN)
+    def api_contest_artworks(slug):
+        """One page of a contest's public entries -> the detail view's preview grid.
+
+        `?page=N` (default 1). Thumbnails are built from each row's mediaId with the same
+        `/v1/media/{id}/thumbnail` pattern list_contests already uses for cover art -- the
+        entries are other people's artworks, so there is nothing local to serve. Only what
+        the preview renders comes back (id, author name, thumb): the raw upstream rows
+        carry more, and none of it is needed to draw eight squares.
+
+        Soft-error-as-200 with an empty list, matching /api/contests: a contest board
+        hiccup must not turn a detail view into an error page."""
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            core, session = _gen_session()
+            env = core.contest_artworks(session, slug, page=page)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200],
+                            "entries": [], "total_count": 0, "total_page": 0}), 200
+        entries = []
+        for r in env.get("data") or []:
+            mid = str(r.get("mediaId") or "")
+            entries.append({
+                "id": str(r.get("id") or ""),
+                "author_name": str(r.get("authorName") or ""),
+                "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+            })
+        return jsonify({"entries": entries,
+                        "total_count": int(env.get("totalCount") or 0),
+                        "total_page": int(env.get("totalPage") or 0)})
+
+    @app.route("/api/contest/mine")
+    @tier(LOGIN)
+    def api_contest_mine():
+        """This account's own contest entries, grouped by contest -> the My entries tab.
+
+        TELEMETRY-DERIVED AND INSTANT. The entry record already lives locally (the same
+        dedupe sets every entry path writes), so this route performs exactly ONE upstream
+        call -- a single page of the contest board, purely to put titles and dates on the
+        rows. It deliberately does not re-poll PixAI per contest: that is the detection
+        sweep's job, on its own schedule, and a tab that fired N network calls on open
+        would be unusable with twenty contests in flight.
+
+        A failed board read is soft: the rows still come back, keyed by contest id with
+        empty titles, because knowing you have entries somewhere beats an error page.
+
+        Thumbs come from the local catalog by artwork_id (see artwork_media_ids); an
+        artwork the library does not hold gets no thumb rather than a broken image.
+
+        `won` is contest FACT and belongs on this surface -- the DC's results rows show
+        it. No metric name and no ladder language appears in this payload."""
+        d = load_telemetry(out_dir)
+        sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
+        raw_keys = sets.get("contest_entry_keys")
+        raw_wins = sets.get("contest_win_keys")
+        won_ids = {str(w) for w in raw_wins} if isinstance(raw_wins, list) else set()
+        by_contest, order = {}, []
+        for k in (raw_keys if isinstance(raw_keys, list) else []):
+            cid, _, aid = str(k).partition(":")
+            if not cid or not aid:
+                continue
+            if cid not in by_contest:
+                by_contest[cid] = []
+                order.append(cid)
+            if aid not in by_contest[cid]:
+                by_contest[cid].append(aid)
+        board = {}
+        try:
+            core, session = _gen_session()
+            for c in core.list_contests(session, active_only=False, max_pages=1) or []:
+                if isinstance(c, dict) and c.get("id"):
+                    board[str(c["id"])] = c
+        except Exception:                       # soft: key-only rows beat an error page
+            board = {}
+        thumbs = {}
+        try:
+            thumbs = artwork_media_ids(db_path, [a for cid in order for a in by_contest[cid]])
+        except Exception:
+            thumbs = {}
+        rows = []
+        for cid in order:
+            c = board.get(cid) or {}
+            aids = by_contest[cid]
+            rows.append({
+                "contest_id": cid,
+                "slug": str(c.get("slug") or ""),
+                "title": str(c.get("title") or ""),
+                "type": str(c.get("type") or ""),
+                "end_at": str(c.get("end_at") or ""),
+                "result_at": str(c.get("result_at") or ""),
+                "active": bool(c.get("active")),
+                "url": str(c.get("url") or ""),
+                "entry_artwork_ids": aids,
+                "entries": [{"artwork_id": a, "media_id": thumbs.get(a, ""),
+                             "thumb": ("/thumbs/%s.jpg" % thumbs[a]) if thumbs.get(a) else ""}
+                            for a in aids],
+                "won": cid in won_ids,
+            })
+        return jsonify({"contests": rows,
+                        "total_entries": sum(len(by_contest[cid]) for cid in order)})
 
     @app.route("/api/contest/enter", methods=["POST"])
     @tier(LOGIN)
