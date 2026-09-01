@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import useLogin, { onMascotError } from "../hooks/useLogin.js";
 import "../styles/login-mobile.css";
 
@@ -49,6 +49,8 @@ export default function LoginPageMobile({ boot }) {
     onCreateUserChange, onCreatePassChange, onCreateConfirmChange,
     lenOk, guessOk,
   } = useLogin(boot);
+  // The login banner's one failure state -> fall back to the mark (see the render).
+  const [bannerFailed, setBannerFailed] = useState(false);
 
   return (
     <div className="lgnm-stage">
@@ -64,9 +66,19 @@ export default function LoginPageMobile({ boot }) {
           </div>
         </div>
         <div className="lgnm-card">
-          <div className="lgnm-mark">
-            {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
-          </div>
+          {/* #25's banner half, same call as desktop (owner, 2026-08-31): the login
+              slot's art as a full-width strip across the card top, with the same
+              onError fallback to the mark that used to render here. */}
+          {bannerFailed ? (
+            <div className="lgnm-mark">
+              {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
+            </div>
+          ) : (
+            <div className="lgnm-banner">
+              <img src="/branding/login-banner.png" alt=""
+                onError={() => setBannerFailed(true)} />
+            </div>
+          )}
           <div className="lgnm-titlewrap">
             <div className="lgnm-title">Moonglade Athenaeum</div>
             {createMode ? (

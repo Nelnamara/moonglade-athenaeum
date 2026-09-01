@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **The sign-in page wears your Banner art.** The Branding tab's login slot has been croppable for a while but never actually showed up anywhere — the login card wore the small mark instead. Now the login banner runs full-width across the top of the card, above the title, exactly as the slot's 1920×480 crop is cut. A fresh install is dressed too: with nothing cropped yet, the shipped default art serves. (#25) (2026-08-31)
+
 - Fixed: **a reward claimed in another window no longer strands its dialog.** The claim modal used to sit open offering "+0" after the reward had already been claimed elsewhere (or otherwise vanished upstream); it now closes itself, and a zero-value claim can never be offered in the first place. (#52) (2026-08-30)
 - Fixed: **an earned achievement stays earned.** Badges measured against your library's live counts could quietly un-earn themselves after a cleanup pass shrank a number back under its threshold — the honor record is now append-only: once recognized, always yours. Also fixed alongside: the skin picker's unlock check now agrees with the Folio about what's earned (a latent mismatch that would have refused future unlocks the Folio showed as won). (2026-08-29)
 - Fixed: **tapping a picture on the phone opens the full-screen viewer again**, the way the mobile design always drew it — a regression had routed taps to the Details page instead. Details stays one tap away inside the viewer, and if the gallery shifts underneath a tap mid-reload, the tap opens Details rather than doing nothing. (2026-08-29)

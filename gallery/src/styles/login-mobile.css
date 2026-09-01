@@ -46,6 +46,16 @@
   box-shadow: 0 24px 70px rgba(0, 0, 0, .65), 0 0 70px rgba(100, 58, 172, .14);
   padding: 22px 22px 24px; animation: lgnmRise .5s cubic-bezier(.2, .9, .24, 1) both; }
 
+/* #25's banner half, mobile twin of .lgn-banner -- same call, this card's own numbers:
+   the negative margins are its 22px padding, and 15px is its 16px radius less the 1px
+   border. See login.css for the full reasoning. */
+.lgnm-banner { position: relative; margin: -22px -22px 0; aspect-ratio: 4 / 1;
+  border-radius: 15px 15px 0 0; overflow: hidden;
+  background: radial-gradient(120% 140% at 18% 0%,
+    color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
+.lgnm-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* The mark treatment stays: it is what the banner's onError falls back to. */
 .lgnm-mark { position: relative; height: 66px; border-radius: 11px; overflow: hidden;
   box-shadow: 0 0 34px rgba(146, 109, 222, .3);
   background: radial-gradient(120% 140% at 18% 0%,
