@@ -3687,9 +3687,11 @@ def sweep_telemetry(out_dir):
 # paths write, which is what makes the sweep safe to run as often as it likes: re-seeing an
 # entry adds nothing, and an entry the app made itself is the same key the poll finds.
 #
-# Bounded on purpose: two pages of the board, at most _CONTEST_SYNC_MAX contests, and only
-# ones still running or finished inside the recent window. The historical board is long and
-# its old rows cannot change, so sweeping all of it would be a request storm for nothing.
+# Bounded on purpose: two pages of the board, every RUNNING contest, and at most
+# _CONTEST_SYNC_MAX ended ones from inside the recent window. The historical board is long
+# and its old rows cannot change, so sweeping all of it would be a request storm for
+# nothing -- but a running contest is where entries actually happen, so the cap must never
+# be what drops one.
 _CONTEST_SYNC_MAX = 40
 _CONTEST_SYNC_RECENT_DAYS = 45
 _CONTEST_SYNC_PAUSE = 0.35          # paced: be polite to their servers
@@ -3715,8 +3717,9 @@ def _contest_sync_is_recent(contest, now=None):
     return False
 
 
-def _contest_detection_sync(out_dir):
+def _contest_detection_sync(out_dir, force=False):
     """Read this account's contest entries and wins back from PixAI into telemetry.
+    Returns True when the sweep ran, False when it gave up.
 
     Per kept contest: the owner's own entries (`/contest/{slug}/artwork/{userId}`) become
     contest_entry_keys, and -- only once the contest's result date has actually passed --
@@ -3724,32 +3727,41 @@ def _contest_detection_sync(out_dir):
     contest_win_key. Winners are not polled before `result_at` because the endpoint answers
     an empty array until then; asking early is a request that cannot inform anything.
 
-    FAIL-SOFT TOP TO BOTTOM, and that is the point rather than an afterthought: this runs
-    on a background thread and from a route, and a poll that can raise is a poll that can
-    break the very thing it exists to observe. A per-contest failure skips that contest and
-    the sweep continues; anything else ends the sweep quietly. An unresolved account id
-    logs and returns -- there is nothing to look up without one.
+    `force` drops the recent-window filter (every row the board returns is kept, ended ones
+    still capped). The publish kick uses it: the app has just been TOLD an entry was made,
+    and the point of that sweep is to confirm it against PixAI rather than take the client's
+    word -- so a contest the window would have skipped must not be what hides it.
 
-    Sealing: only counts ever leave the telemetry store. The keys written here (contest
-    ids, artwork ids) stay in the store and are never returned, logged, or echoed."""
+    FAIL-SOFT TOP TO BOTTOM, and that is the point rather than an afterthought: this runs on
+    a background thread and from a route, and a poll that can raise is a poll that can break
+    the very thing it exists to observe. A per-contest failure skips that contest and the
+    sweep continues; anything else ends the sweep. Both are LOGGED, not swallowed silently:
+    a detection sweep that quietly stops working looks exactly like an account that stopped
+    entering contests, and nothing else in the app would ever say otherwise.
+
+    Sealing: only counts ever leave the telemetry store, and nothing written to the store is
+    ever logged -- the log lines carry an exception type and a redacted message, no keys."""
+    import logging as _logging
+    log = _logging.getLogger(__name__)
     try:
-        import logging as _logging
         import moonglade_backup as core
         session = core._make_session(None)
         uid = str(core._client_of(session).user_id or "")
         if not uid:
-            _logging.getLogger(__name__).info(
-                "contest sweep: no account id resolved -- nothing to poll")
-            return
-        kept = []
+            log.info("contest sweep: no account id resolved -- nothing to poll")
+            return False
+        active, ended = [], []
         for c in core.list_contests(session, active_only=False, max_pages=2) or []:
             if not isinstance(c, dict):
                 continue
-            if c.get("active") or _contest_sync_is_recent(c):
-                kept.append(c)
-            if len(kept) >= _CONTEST_SYNC_MAX:
-                break
-        for i, c in enumerate(kept):
+            # A RUNNING contest is never capped out: it is the only kind an entry can still
+            # be made into, so dropping one to a cap would blind the sweep to live activity.
+            # The cap exists for the ended tail, which is long and cannot change.
+            if c.get("active"):
+                active.append(c)
+            elif (force or _contest_sync_is_recent(c)) and len(ended) < _CONTEST_SYNC_MAX:
+                ended.append(c)
+        for i, c in enumerate(active + ended):
             if i:
                 time.sleep(_CONTEST_SYNC_PAUSE)
             try:
@@ -3758,7 +3770,12 @@ def _contest_detection_sync(out_dir):
                 if not cid or not slug:
                     continue
                 for row in core.contest_my_entries(session, slug, uid) or []:
-                    rid = str((row or {}).get("id") or "")
+                    # The by-user row's shape is UNVERIFIED against a real entry (the probe
+                    # that mapped this endpoint found no owner entries to compare), so the
+                    # explicit artwork field is preferred and the row id is only the
+                    # fallback -- they may or may not be the same value.
+                    row = row or {}
+                    rid = str(row.get("artworkId") or row.get("id") or "")
                     if rid:
                         telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
                                       out_dir=out_dir)
@@ -3769,10 +3786,29 @@ def _contest_detection_sync(out_dir):
                     if str((w or {}).get("authorId") or "") == uid:
                         telem_set_add("contest_win_keys", cid, out_dir=out_dir)
                         break
-            except Exception:                                # one bad contest, not the sweep
+            except Exception as e:                           # one bad contest, not the sweep
+                log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
+                            _redact_host_paths_cli(out_dir, str(e))[:200])
                 continue
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        log.warning("contest sweep: gave up: %s: %s", type(e).__name__,
+                    _redact_host_paths_cli(out_dir, str(e))[:200])
+        return False
+
+
+def _contest_sync_kick(out_dir, force=False):
+    """Run one sweep under the single-flight lock, or skip if one is already running.
+
+    The lock is the whole contract: the startup sweep, the publish kick and the manual route
+    all reach the same work, and a caller that loses the race has nothing to do -- the sweep
+    already in flight reads the same account from the same board. Returns whether it ran."""
+    if not _contest_sync_lock.acquire(False):
+        return False
+    try:
+        return _contest_detection_sync(out_dir, force=force)
+    finally:
+        _contest_sync_lock.release()
 
 
 def top_published_rows(db_path, limit=12):
@@ -7128,17 +7164,12 @@ def create_app(out_dir: Path):
         """One contest detection sweep shortly after boot. Entries made on pixai.art, and
         any win decided while the app was closed, are invisible to this process until
         something reads them back -- and startup is the only moment guaranteed to follow
-        such a gap. Sleeps first so it never competes with the app's own boot work, and
-        takes the same single-flight lock /api/contest/sync does, so a manual sync and this
-        one can never overlap (whichever loses simply skips -- the other is already doing
-        exactly this work)."""
+        such a gap. Sleeps first so it never competes with the app's own boot work, and goes
+        through the same single-flight wrapper every other trigger uses, so a manual sync
+        and this one can never overlap. No `force`: at boot there is no specific entry to
+        confirm, so the recent window is exactly the right bound."""
         time.sleep(_CONTEST_SYNC_STARTUP_DELAY)
-        if not _contest_sync_lock.acquire(False):
-            return
-        try:
-            _contest_detection_sync(out_dir)
-        finally:
-            _contest_sync_lock.release()
+        _contest_sync_kick(out_dir)
 
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
     # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
@@ -10730,6 +10761,12 @@ def create_app(out_dir: Path):
         be a promise the code cannot keep, on a screen a user reads before an irreversible
         action.
 
+        THE CONTEST ID IS RESOLVED SERVER-SIDE, from the live board by slug -- a `contest_id`
+        in the body is accepted and ignored. The id is what the ladder dedupes on, and the
+        set it lands in is grow-only: a client that sent a wrong, stale or invented one would
+        write a key nothing can ever correct. The board read is also what makes an unknown
+        slug a 400 here rather than an upstream refusal later.
+
         LOGIN tier, not LOCALHOST: this is the owner managing their OWN account, the same
         class as publishing and claiming. CSRF: explicit-token class, matching
         /api/myart/publish -- a real account mutation triggered by one web click.
@@ -10738,13 +10775,11 @@ def create_app(out_dir: Path):
         if not _check_csrf(body):
             return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         slug = str(body.get("slug") or "").strip()
-        contest_id = str(body.get("contest_id") or "").strip()
         artwork_id = str(body.get("artwork_id") or "").strip()
-        if not (slug and contest_id and artwork_id):
-            return jsonify({"error": "slug, contest_id and artwork_id are all required"}), 400
+        if not (slug and artwork_id):
+            return jsonify({"error": "slug and artwork_id are both required"}), 400
         if not body.get("confirm"):
-            return jsonify({"preview": True, "slug": slug, "contest_id": contest_id,
-                            "artwork_id": artwork_id,
+            return jsonify({"preview": True, "slug": slug, "artwork_id": artwork_id,
                             "spends_credits": None, "irreversible": True})
         try:
             core, session = _gen_session()
@@ -10752,13 +10787,26 @@ def create_app(out_dir: Path):
             return jsonify({"error": "PixAI session unavailable: %s"
                                      % _redact_host_paths(str(e))[:160]}), 502
         try:
-            core.contest_enter(session, slug, artwork_id)
+            board = core.list_contests(session, active_only=False, max_pages=1)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
+        contest_id = next((str(c.get("id") or "") for c in board or []
+                           if isinstance(c, dict) and str(c.get("slug") or "") == slug), "")
+        if not contest_id:
+            return jsonify({"error": "unknown contest"}), 400
+        try:
+            resp = core.contest_enter(session, slug, artwork_id)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
+        # A 2xx that says success:false is a refusal wearing a success code. Default True
+        # for any other shape -- the response body is documented as {success} but only the
+        # error paths were ever seen live, so absence must not read as failure.
+        if isinstance(resp, dict) and not resp.get("success", True):
+            return jsonify({"error": "the contest refused the entry"}), 502
         # OUTSIDE the try, silent-soft: the entry is already live and irreversible by the
         # time we get here, so a telemetry hiccup must never be reported as a failed entry.
-        # Same key shape the publish hook and the detection sweep write -- one dedupe set,
-        # so entering the same artwork twice still counts once.
+        # Same key shape the detection sweep writes -- one dedupe set, so entering the same
+        # artwork twice still counts once.
         try:
             telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
                           out_dir=out_dir)
@@ -10781,17 +10829,21 @@ def create_app(out_dir: Path):
         the same busy shape /api/panel/run and /api/assets/fetch use. The sweep is paced,
         so overlapping runs would only stack paced traffic on PixAI.
 
-        Returns COUNTS, as plain ints. What the sets contain never leaves the store."""
+        `synced` is whether the sweep actually ran, not a constant: a poll that fails must
+        not answer like one that worked.
+
+        ONE count comes back, and only one. contest_wins is deliberately absent -- it is a
+        hidden-only metric, and even a zero here would tell a reader that a win is something
+        this app counts. What the sets contain never leaves the store either."""
         if not _contest_sync_lock.acquire(False):
             return jsonify({"error": "a sync is already running"}), 409
         try:
-            _contest_detection_sync(out_dir)
+            ok = _contest_detection_sync(out_dir)
         finally:
             _contest_sync_lock.release()
         m = telemetry_metrics(out_dir)
-        return jsonify({"synced": True,
-                        "contest_entries": int(m.get("contest_entries", 0) or 0),
-                        "contest_wins": int(m.get("contest_wins", 0) or 0)})
+        return jsonify({"synced": bool(ok),
+                        "contest_entries": int(m.get("contest_entries", 0) or 0)})
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -10981,21 +11033,21 @@ def create_app(out_dir: Path):
                 changed["artwork_id"] = result.get("artwork_id") or ""
                 changed["published"] = not private
                 # Publishing WITH a challenge attached IS a contest entry -- the one entry
-                # path that already shipped. Hooked here, outside the try above, on
-                # purpose: inside it a telemetry error would be caught by the publish
-                # except and reported as a 502, i.e. a successful, irreversible publish
-                # would read as a failure. This is also the single server-side choke point
-                # every client funnels through, so no client needs to know about it.
-                # Same "{contest_id}:{artwork_id}" key the enter route and the detection
-                # sweep write -- one dedupe set, so the same art in the same contest
-                # counts once however it was seen.
+                # path that already shipped. It does NOT write the key itself: the
+                # challenge value is the CLIENT's claim, unvalidated, and the set it would
+                # land in is grow-only, so a bogus or ended contest id would inflate the
+                # ladder permanently with nothing able to correct it. Instead it kicks the
+                # detection sweep, which reads the truth back from PixAI -- a real entry
+                # made seconds ago is there to be found, an imaginary one is not.
+                #
+                # Off-thread and outside the try above, on purpose: the publish already
+                # succeeded and is irreversible, so nothing the sweep does may delay this
+                # response or turn it into a 502.
                 if body.get("challenge"):
                     try:
-                        aid = result.get("artwork_id") or ""
-                        if aid:
-                            telem_set_add("contest_entry_keys",
-                                          "%s:%s" % (body.get("challenge"), aid),
-                                          out_dir=out_dir)
+                        threading.Thread(target=_contest_sync_kick,
+                                         args=(out_dir,), kwargs={"force": True},
+                                         daemon=True).start()
                     except Exception:
                         pass
             if private is not None:

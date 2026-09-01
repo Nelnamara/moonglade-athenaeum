@@ -16,6 +16,7 @@ appears anywhere below. `contest_entries` / `contest_wins` are metric names -- s
 convention, not roster content -- and the only thing asserted about them is arithmetic.
 """
 import datetime as _dt
+import threading
 
 import pytest
 
@@ -126,50 +127,67 @@ class TestContestEnterIsGuarded:
 
 # ---- POST /api/contest/enter ------------------------------------------------
 
+def _board(monkeypatch, rows=None):
+    """The live board the route resolves the contest id against, and the session it reads
+    it with. Default: one running contest, slug s1, id c1."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_contests",
+                        lambda s, **k: [{"id": "c1", "slug": "s1", "active": True}]
+                        if rows is None else rows)
+
+
 def test_enter_route_requires_csrf(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(core, "contest_enter",
                         lambda *a, **k: calls.append(a) or {"success": True})
+    _board(monkeypatch)
     cli = _client(tmp_path)
-    r = cli.post("/api/contest/enter", json={"slug": "s1", "contest_id": "c1",
-                                             "artwork_id": "a1", "confirm": True})
+    r = cli.post("/api/contest/enter", json={"slug": "s1", "artwork_id": "a1",
+                                             "confirm": True})
     assert r.status_code == 400
     assert not calls and not _entry_keys(tmp_path)
 
 
 def test_enter_route_previews_without_touching_the_network(tmp_path, monkeypatch):
-    """Always-confirm: without `confirm` the route does NO network at all. `spends_credits`
-    is None -- the entry fee is unmeasured, and False on a screen read before an
-    irreversible action would be a promise the code cannot keep."""
+    """Always-confirm: without `confirm` the route does NO network at all -- not even the
+    board read. `spends_credits` is None: the entry fee is unmeasured, and False on a screen
+    read before an irreversible action would be a promise the code cannot keep."""
     calls = []
     monkeypatch.setattr(core, "contest_enter",
-                        lambda *a, **k: calls.append(a) or {"success": True})
+                        lambda *a, **k: calls.append(("enter",)) or {"success": True})
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_contests",
+                        lambda s, **k: calls.append(("board",)) or [])
     cli = _client(tmp_path)
-    d = cli.post("/api/contest/enter", json={"slug": "s1", "contest_id": "c1",
-                                             "artwork_id": "a1",
+    d = cli.post("/api/contest/enter", json={"slug": "s1", "artwork_id": "a1",
                                              "csrf": _csrf(cli)}).get_json()
     assert d["preview"] is True and d["irreversible"] is True
     assert "spends_credits" in d and d["spends_credits"] is None
-    assert not calls, "a preview must not enter anything"
+    assert not calls, "a preview must not read the board or enter anything"
     assert not _entry_keys(tmp_path)
     # a missing target is refused at the door, confirmed or not
     assert cli.post("/api/contest/enter",
-                    json={"slug": "s1", "contest_id": "c1", "confirm": True,
+                    json={"slug": "s1", "confirm": True,
                           "csrf": _csrf(cli)}).status_code == 400
     assert not calls
 
 
 def test_enter_route_confirm_enters_once_then_dedupes(tmp_path, monkeypatch):
+    """The key is built from the BOARD's id, never the body's: the body here carries a
+    deliberately wrong contest_id, and the recorded key must ignore it. The set is grow-only,
+    so a client-supplied id could otherwise inflate the count with nothing able to correct
+    it."""
     calls = []
     monkeypatch.setattr(core, "contest_enter",
                         lambda s, slug, aid: calls.append((slug, aid)) or {"success": True})
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _board(monkeypatch)
     cli = _client(tmp_path)
-    body = {"slug": "s1", "contest_id": "c1", "artwork_id": "a1", "confirm": True}
+    body = {"slug": "s1", "contest_id": "not-the-real-id", "artwork_id": "a1",
+            "confirm": True}
     d = cli.post("/api/contest/enter", json=dict(body, csrf=_csrf(cli))).get_json()
     assert d["entered"] is True and d["artwork_id"] == "a1"
     assert calls == [("s1", "a1")]
+    assert _entry_keys(tmp_path) == ["c1:a1"]
     assert _entries(tmp_path) == 1
     # the same artwork into the same contest again: PixAI stays the authority on whether a
     # repeat submit is allowed (the call fires), but the ladder does not move.
@@ -178,17 +196,44 @@ def test_enter_route_confirm_enters_once_then_dedupes(tmp_path, monkeypatch):
     assert _entries(tmp_path) == 1
 
 
+def test_enter_route_refuses_a_slug_that_is_not_on_the_board(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(core, "contest_enter",
+                        lambda *a, **k: calls.append(a) or {"success": True})
+    _board(monkeypatch)
+    cli = _client(tmp_path)
+    r = cli.post("/api/contest/enter",
+                 json={"slug": "no-such-contest", "artwork_id": "a1", "confirm": True,
+                       "csrf": _csrf(cli)})
+    assert r.status_code == 400
+    assert not calls, "an unresolvable contest is refused before the account is touched"
+    assert not _entry_keys(tmp_path)
+
+
 def test_enter_route_core_failure_is_502_and_records_nothing(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise core.PixAIError("NOT_ELIGIBLE")
     monkeypatch.setattr(core, "contest_enter", _boom)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    _board(monkeypatch)
     cli = _client(tmp_path)
     r = cli.post("/api/contest/enter",
-                 json={"slug": "s1", "contest_id": "c1", "artwork_id": "a1",
-                       "confirm": True, "csrf": _csrf(cli)})
+                 json={"slug": "s1", "artwork_id": "a1", "confirm": True,
+                       "csrf": _csrf(cli)})
     assert r.status_code == 502 and r.get_json()["error"]
     assert not _entry_keys(tmp_path) and _entries(tmp_path) == 0
+
+
+def test_enter_route_treats_an_unsuccessful_response_as_a_refusal(tmp_path, monkeypatch):
+    """A 2xx carrying success:false is a refusal wearing a success code -- it must not
+    record an entry that never happened."""
+    monkeypatch.setattr(core, "contest_enter", lambda *a, **k: {"success": False})
+    _board(monkeypatch)
+    cli = _client(tmp_path)
+    r = cli.post("/api/contest/enter",
+                 json={"slug": "s1", "artwork_id": "a1", "confirm": True,
+                       "csrf": _csrf(cli)})
+    assert r.status_code == 502 and r.get_json()["error"]
+    assert not _entry_keys(tmp_path)
 
 
 # ---- the publish-time hook --------------------------------------------------
@@ -214,29 +259,49 @@ def _publish(cli, **extra):
                                "csrf": _csrf(cli)}, **extra))
 
 
-def test_publish_with_a_challenge_records_the_entry(tmp_path, monkeypatch):
-    """Publishing WITH a contest attached is the entry path that already shipped, so the
-    hook lives server-side where every client funnels through. The key pairs the contest
-    with the artwork id the mutation actually returned."""
+def _kick_recorder(monkeypatch):
+    """Stand in for the sweep so the route's off-thread kick can be AWAITED rather than
+    raced. Records the `force` flag of every call and fires an event on the first."""
+    seen = {"calls": [], "fired": threading.Event()}
+
+    def _fake(out_dir, force=False):
+        seen["calls"].append(force)
+        seen["fired"].set()
+        return True
+    monkeypatch.setattr(g, "_contest_detection_sync", _fake)
+    return seen
+
+
+def test_publish_with_a_challenge_kicks_the_sweep(tmp_path, monkeypatch):
+    """The publish route does NOT write the key from the client's `challenge` -- that value
+    is an unvalidated claim, and the set is grow-only, so a bogus contest id would inflate
+    the ladder forever. It kicks the detection sweep instead, which reads the truth back
+    from PixAI; `force` is on, so a contest outside the recent window still gets looked at."""
+    seen = _kick_recorder(monkeypatch)
     cli = _publish_client(tmp_path, monkeypatch)
     d = _publish(cli, challenge="c7").get_json()
     assert d["published"] is True
-    assert _entry_keys(tmp_path) == ["c7:newart1"]
-    assert _entries(tmp_path) == 1
+    assert seen["fired"].wait(5), "a confirmed publish with a contest must kick the sweep"
+    assert seen["calls"] == [True]
+    assert not _entry_keys(tmp_path), "the route itself writes no key -- the sweep does"
 
 
-def test_publish_without_a_challenge_records_nothing(tmp_path, monkeypatch):
+def test_publish_without_a_challenge_kicks_nothing(tmp_path, monkeypatch):
+    seen = _kick_recorder(monkeypatch)
     cli = _publish_client(tmp_path, monkeypatch)
     assert _publish(cli).get_json()["published"] is True
-    assert _entries(tmp_path) == 0
+    assert not seen["fired"].wait(0.3)
+    assert seen["calls"] == [] and _entries(tmp_path) == 0
 
 
-def test_failed_publish_records_nothing(tmp_path, monkeypatch):
-    """A publish that raised entered no contest -- and the hook sits outside that try, so
-    it is never reached AND could never turn a real publish into a 502 either."""
+def test_failed_publish_kicks_nothing(tmp_path, monkeypatch):
+    """A publish that raised entered no contest -- and the kick sits outside that try, so it
+    is never reached AND could never turn a real publish into a 502 either."""
+    seen = _kick_recorder(monkeypatch)
     cli = _publish_client(tmp_path, monkeypatch, fail=True)
     assert _publish(cli, challenge="c7").status_code == 502
-    assert _entries(tmp_path) == 0
+    assert not seen["fired"].wait(0.3)
+    assert seen["calls"] == [] and _entries(tmp_path) == 0
 
 
 # ---- the detection sweep ----------------------------------------------------
@@ -268,7 +333,7 @@ def test_sweep_records_entries_and_only_decided_wins(tmp_path, monkeypatch, pixa
     monkeypatch.setattr(core, "contest_winners",
                         lambda s, slug: seen.append(("winners", slug))
                         or [{"authorId": pixai.user_id, "rank": 1}])
-    g._contest_detection_sync(tmp_path)
+    assert g._contest_detection_sync(tmp_path) is True
     m = g.telemetry_metrics(tmp_path)
     assert m["contest_entries"] == 2
     assert m["contest_wins"] == 1
@@ -327,14 +392,67 @@ def test_sweep_survives_one_bad_contest(tmp_path, monkeypatch, pixai):
     assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2   # the sweep carried on
 
 
-def test_sweep_never_raises(tmp_path, monkeypatch, pixai):
-    """A background poll that can raise is a poll that can break the thing it observes."""
+def test_sweep_prefers_the_explicit_artwork_field(tmp_path, monkeypatch, pixai):
+    """The by-user row's shape is unverified against a real entry, so the explicit artwork
+    field wins and the row id is only the fallback -- keying on the wrong one would count a
+    different thing under the same name."""
+    _no_pause(monkeypatch)
+    monkeypatch.setattr(core, "list_contests",
+                        lambda s, **k: [_contest("c1", "s1", active=True)])
+    monkeypatch.setattr(core, "contest_my_entries", lambda s, slug, uid: [
+        {"id": "row-1", "artworkId": "art-1"},      # both present -> the artwork one
+        {"id": "row-2"},                            # only the row id -> the fallback
+        {"artworkId": ""},                          # nothing usable -> skipped
+    ])
+    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    g._contest_detection_sync(tmp_path)
+    assert sorted(_entry_keys(tmp_path)) == ["c1:art-1", "c1:row-2"]
+
+
+def test_sweep_force_ignores_the_recent_window(tmp_path, monkeypatch, pixai):
+    """The publish kick's `force`: the app was just told an entry happened, so a contest the
+    window would have skipped must not be what hides it."""
+    seen = []
+    _no_pause(monkeypatch)
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+        _contest("c1", "s1", result_at=_iso(g._CONTEST_SYNC_RECENT_DAYS + 10))])
+    monkeypatch.setattr(core, "contest_my_entries",
+                        lambda s, slug, uid: seen.append(slug) or [{"artworkId": "a1"}])
+    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    g._contest_detection_sync(tmp_path)                       # windowed: not looked at
+    assert seen == []
+    g._contest_detection_sync(tmp_path, force=True)           # forced: looked at
+    assert seen == ["s1"]
+    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+
+
+def test_sweep_cap_never_drops_a_running_contest(tmp_path, monkeypatch, pixai):
+    """The cap bounds the ended tail, which is long and cannot change. A running contest is
+    the only kind an entry can still land in, so it is exempt."""
+    seen = []
+    _no_pause(monkeypatch)
+    monkeypatch.setattr(g, "_CONTEST_SYNC_MAX", 1)
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: (
+        [_contest("a%d" % i, "run%d" % i, active=True) for i in range(4)]
+        + [_contest("e%d" % i, "end%d" % i, end_at=_iso(1)) for i in range(3)]))
+    monkeypatch.setattr(core, "contest_my_entries",
+                        lambda s, slug, uid: seen.append(slug) or [])
+    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    g._contest_detection_sync(tmp_path)
+    assert [s for s in seen if s.startswith("run")] == ["run0", "run1", "run2", "run3"]
+    assert len([s for s in seen if s.startswith("end")]) == 1
+
+
+def test_sweep_never_raises_and_reports_it_gave_up(tmp_path, monkeypatch, pixai):
+    """A background poll that can raise is a poll that can break the thing it observes -- but
+    a poll that fails silently looks exactly like an account that entered nothing, so the
+    return value (and the log) has to say which happened."""
     _no_pause(monkeypatch)
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
-    g._contest_detection_sync(tmp_path)                # no exception escapes
+    assert g._contest_detection_sync(tmp_path) is False       # no exception escapes
     assert g.telemetry_metrics(tmp_path)["contest_entries"] == 0
 
 
@@ -350,17 +468,35 @@ def test_sweep_without_an_account_id_does_nothing(tmp_path, monkeypatch, pixai):
 
 # ---- POST /api/contest/sync -------------------------------------------------
 
-def test_sync_route_reports_counts_only(tmp_path, monkeypatch, pixai):
-    """Ints, never contents: which contest and which artwork stay in the store."""
+def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, pixai):
+    """Ints, never contents -- and never contest_wins. That metric is hidden-only, so even a
+    zero in this response would tell a reader that winning is something the app counts."""
     _no_pause(monkeypatch)
     monkeypatch.setattr(core, "list_contests",
-                        lambda s, **k: [_contest("c1", "s1", active=True)])
+                        lambda s, **k: [_contest("c1", "s1", result_at=_iso(1))])
     monkeypatch.setattr(core, "contest_my_entries",
-                        lambda s, slug, uid: [{"id": "e1"}, {"id": "e2"}])
-    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+                        lambda s, slug, uid: [{"artworkId": "e1"}, {"artworkId": "e2"}])
+    monkeypatch.setattr(core, "contest_winners",
+                        lambda s, slug: [{"authorId": pixai.user_id}])
     cli = _client(tmp_path)
     d = cli.post("/api/contest/sync").get_json()
-    assert d == {"synced": True, "contest_entries": 2, "contest_wins": 0}
+    assert d == {"synced": True, "contest_entries": 2}
+    assert "contest_wins" not in d                      # the seal, not an oversight
+    # ... and the win really was recorded; it just never appears in the response
+    assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+
+
+def test_sync_route_says_so_when_the_sweep_gave_up(tmp_path, monkeypatch, pixai):
+    """`synced` is what happened, not a constant: a poll that failed must not answer like
+    one that worked."""
+    _no_pause(monkeypatch)
+
+    def _boom(*a, **k):
+        raise core.PixAIError("the board is unreachable")
+    monkeypatch.setattr(core, "list_contests", _boom)
+    cli = _client(tmp_path)
+    assert cli.post("/api/contest/sync").get_json() == {"synced": False,
+                                                        "contest_entries": 0}
 
 
 def test_sync_route_refuses_a_concurrent_sweep(tmp_path):
@@ -370,6 +506,18 @@ def test_sync_route_refuses_a_concurrent_sweep(tmp_path):
     try:
         r = cli.post("/api/contest/sync")
         assert r.status_code == 409 and r.get_json()["error"]
+    finally:
+        g._contest_sync_lock.release()
+
+
+def test_sync_kick_skips_when_a_sweep_is_already_running(tmp_path, monkeypatch):
+    """Every background trigger goes through the one wrapper: the loser of the race has
+    nothing to do, because the sweep in flight reads the same account off the same board."""
+    monkeypatch.setattr(g, "_contest_detection_sync", lambda out_dir, force=False: True)
+    assert g._contest_sync_kick(tmp_path) is True
+    assert g._contest_sync_lock.acquire(False)
+    try:
+        assert g._contest_sync_kick(tmp_path) is False
     finally:
         g._contest_sync_lock.release()
 

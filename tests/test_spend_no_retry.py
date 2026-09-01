@@ -313,11 +313,11 @@ class TestNoSpendPathReachesPastTheHelper:
 
 
 class TestRestSpendPathsAreSingleAttempt:
-    """The two spending paths that are NOT GraphQL. Both ride `_rest_post`, which is one
-    bare `session.post` with no retry loop, and the session mounts no urllib3 Retry adapter
-    (requests' default HTTPAdapter is max_retries=0) -- so they are single-attempt by
-    construction. Pinned rather than assumed: a retry loop added to `_rest_post` later
-    would silently make a Fix submit and a claim double-fire."""
+    """The account-mutating paths that are NOT GraphQL. They all ride `_rest_post`, which is
+    one bare `session.post` with no retry loop, and the session mounts no urllib3 Retry
+    adapter (requests' default HTTPAdapter is max_retries=0) -- so they are single-attempt
+    by construction. Pinned rather than assumed: a retry loop added to `_rest_post` later
+    would silently make a Fix submit, a claim, and a contest entry double-fire."""
 
     def test_submit_fixer_posts_once(self, mock_session, monkeypatch):
         posts = []
@@ -326,6 +326,18 @@ class TestRestSpendPathsAreSingleAttempt:
         boxes = [{"x": 0, "y": 0, "width": 10, "height": 10, "tag": "hand"}]
         assert core.submit_fixer(mock_session, "mid1", boxes) == "T1"
         assert posts == ["/task/fixer"]
+
+    def test_contest_enter_posts_once(self, mock_session, monkeypatch):
+        """Entering a contest is irreversible on PixAI -- there is no un-enter route -- so a
+        re-POST after a lost response would leave a second entry standing with nothing able
+        to take it back. The guard is stubbed here (its own placement is pinned in
+        tests/test_read_only.py and tests/test_contest.py); what this asserts is the count."""
+        posts = []
+        monkeypatch.setattr(core, "_check_read_only", lambda *a, **k: None)
+        monkeypatch.setattr(core, "_rest_post",
+                            lambda s, p, b, **k: posts.append((p, b)) or {"success": True})
+        assert core.contest_enter(mock_session, "slug1", "art1") == {"success": True}
+        assert posts == [("/contest/slug1/artwork", {"artworkId": "art1"})]
 
     def test_rest_post_has_no_retry_loop(self):
         """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line
