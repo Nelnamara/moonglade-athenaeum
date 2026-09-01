@@ -210,7 +210,7 @@ Notes:
 | `--camera-movement` | unset | `horizontal`/`pan`/`roll`/`tilt`/`vertical-pan`/`zoom`; unset omits it (camera direction can also just go in the prompt) |
 | `--audio` / `--audio-language` | off / `english` | generate audio with the clip; the language only matters with `--audio` |
 | `--video-prompt-helper` | off | let PixAI expand your video prompt (off by default — the **opposite** of image gen, where the helper is on unless `--no-prompt-helper`) |
-| `--video-channel` | `private` | `private` = the site's "Enhanced" channel (Plus/Premium); `normal` otherwise |
+| `--video-channel` | `private` | `private` = the site's "Private" channel — your generated works cannot be published; `normal` otherwise |
 
 ## Edit an image with words (`--edit-image`)
 

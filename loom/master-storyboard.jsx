@@ -5484,19 +5484,21 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
               </div>
 
               {/* Channel -- Loom Mobile.dc.html:412-414's rowGroup, restored 2026-08-06 after
-                  an owner correction: this is the REAL Normal/Enhanced channel the desktop
+                  an owner correction: this is the REAL Normal/Private channel the desktop
                   drawer has always had (mg-generate-drawer's own select, submitting
                   is_private), NOT a design invention -- the earlier audit's "no channel
                   field exists" claim was wrong. Same control shape as the drawer, same
-                  mapping (enhanced -> is_private), stored per-shot so shotPayload carries
-                  it into both the price preview and the real submit. */}
+                  mapping (the "enhanced" option value -> is_private), stored per-shot so
+                  shotPayload carries it into both the price preview and the real submit.
+                  PixAI renamed the channel Enhanced -> Private on 2026-08-18; the label
+                  followed, the option VALUE deliberately did not. */}
               <div className="lm-row2">
                 <div className="lm-col">
                   <span className="lm-microlab">Channel</span>
                   <select className="lm-gensel" value={c.isPrivate ? "enhanced" : "normal"}
                     onChange={(ev) => dfPatch((cc) => ({ ...cc, isPrivate: ev.target.value === "enhanced" }))}>
                     <option value="normal">Normal</option>
-                    <option value="enhanced">👑 Enhanced</option>
+                    <option value="enhanced">👑 Private</option>
                   </select>
                 </div>
                 <div className="lm-col">

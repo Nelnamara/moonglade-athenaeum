@@ -521,7 +521,7 @@ export const shotPayload = (entry, project, imgSrc) => {
   return { mode: c.mode, prompt: shotText(entry, project, imgSrc), images: imgs.map((x) => x.d),
            video_refs: vids, duration: c.duration, quality: project.draft ? "basic" : "professional",
            generate_audio: !!c.audioGen, audio_language: c.audioLanguage || "english",
-           // The Channel (Normal/Enhanced) -- the SAME real field mg-generate-drawer's own
+           // The Channel (Normal/Private) -- the SAME real field mg-generate-drawer's own
            // channel select has always submitted (is_private: enhanced), and the server's
            // shared build_shot_video_params has accepted on this route all along; the Loom
            // client just never sent it (2026-08-06, owner correction -- an earlier audit

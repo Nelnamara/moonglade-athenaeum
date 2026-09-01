@@ -7178,7 +7178,7 @@ def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
     return (VIDEO_MODELS.get((name or "").strip()) or {}).get("model_id", "")
-VIDEO_CHANNELS = ("private", "normal")                                     # private = "Enhanced" (Plus/Premium)
+VIDEO_CHANNELS = ("private", "normal")   # private = the site's "Private" channel (was "Enhanced" until 2026-08-18)
 
 
 def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
@@ -13554,7 +13554,8 @@ def main():
                           "(default unset = omit; camera direction can also go in the prompt)")
     gen.add_argument("--video-channel", dest="vchannel", default="private",
                      choices=list(VIDEO_CHANNELS),
-                     help="video channel: private = 'Enhanced' (Plus/Premium) | normal")
+                     help="video channel: private = the site's 'Private' channel (works "
+                          "can't be published) | normal")
     gen.add_argument("--dump-params", action="store_true",
                      help="with --generate/--generate-video/--edit-image (esp. --task-id "
                           "recovery), print the task's full submit parameters -- bank any "

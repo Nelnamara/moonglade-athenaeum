@@ -748,8 +748,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           </div>
         </div>
 
-        {/* MODE & CHANNEL (DC 1416-1441): Basic|Professional seg -> Normal|Enhanced seg ->
-            plain caption -> the two pill switches -> (audio on) the bare language select. */}
+        {/* MODE & CHANNEL (DC 1416-1441): Basic|Professional seg -> Normal|Private seg ->
+            plain caption -> the two pill switches -> (audio on) the bare language select.
+            The second channel reads Private since PixAI renamed it (2026-08-18); the value
+            behind it is still "enhanced" and still submits is_private -- display only. */}
         <div className="mgd-slab" style={{ animationDelay: "120ms" }}>
           <div className="mgd-sec">MODE &amp; CHANNEL</div>
           <div className="mgd-seg mgd-quality-wrap" role="radiogroup" aria-label="Mode">
@@ -758,7 +760,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
             ))}
           </div>
           <div className="mgd-seg" role="radiogroup" aria-label="Channel">
-            {[["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => (
+            {[["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => (
               <button key={v} type="button" role="radio" aria-checked={s.channel === v} className={"mgd-channel" + (s.channel === v ? " on" : "")} onClick={() => { if (st.current.channel === v) return; st.current.channel = v; rerender(); reprice(); }}>{l}</button>
             ))}
           </div>
