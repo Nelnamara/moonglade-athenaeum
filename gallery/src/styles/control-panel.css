@@ -189,13 +189,13 @@ button.mgcp-brandnav.on { background: rgba(182,146,230,.14); color: var(--text);
 .mgcp-brandh { font-family: Georgia, serif; font-style: italic; font-weight: 400; font-size: 22px;
   margin: 0; color: var(--text); }
 
-/* Marks section: the 168px live preview (DC:396) hosting the REAL header mark scaled
-   up from its 56px chrome size. */
+/* Marks section: the 168px live preview (DC:396) hosting the REAL header mark. It used
+   to scale a 56px chrome copy up by 1.714; since the marks build it mounts the actual
+   header component at its ruled 96px, so there is nothing left to scale. */
 .mgcp-markprevrow { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
 .mgcp-markprevbox { width: 168px; height: 168px; border-radius: 20px; background: rgba(12,10,28,.55);
   border: 1px solid var(--surface1); display: grid; place-items: center; perspective: 500px;
   overflow: hidden; flex: none; }
-.mgcp-markprevscale { transform: scale(1.714); transform-style: preserve-3d; }
 .mgcp-markprevside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .mgcp-markprevcap { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); }
 .mgcp-marksbig { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -544,3 +544,13 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 .mgcp-bjseg button.on { background: var(--accent); color: var(--base); }
 .mgcp-bjport { width: 74px; background: var(--surface0); border: 1px solid var(--surface1); color: var(--text); border-radius: 6px; padding: 3px 7px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
 .mgcp-bjname { background: var(--surface0); border: 1px solid var(--surface1); color: var(--text); border-radius: 6px; padding: 3px 7px; font-size: 11px; }
+
+/* The animation tuning controls (2026-08-31 marks build). The two sliders reuse
+   .mgcp-sliderbox/.mgcp-sliderrow above verbatim -- same grammar as the banner crop --
+   so only the colour input is new here. */
+.mgcp-glowcolor { width: 100%; height: 28px; padding: 0; border-radius: 8px; cursor: pointer;
+  background: rgba(12,10,28,.55); border: 1px solid var(--surface1); }
+.mgcp-glowcolor:disabled { opacity: .55; cursor: not-allowed; }
+/* The 168px preview hosts the real 96px header mark now, so it centres rather than
+   scaling a 56px chrome copy up. */
+.mgcp-markprevbox > .mgx-mark { margin: 0 auto; }

@@ -4,6 +4,7 @@ import "../styles/control-panel.css";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import { apiGet, apiPost, apiUpload } from "../api.js";
 import GalleryPicker from "./GalleryPicker.jsx";
+import MarkAnimated from "./MarkAnimated.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
@@ -330,7 +331,9 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
       <div className="mgv-host">
         <div className="mgv-slab mgcp-slab" role="dialog" aria-label="Control Panel">
           <div className="mgcp-head">
-            {boot?.mark_url ? <img src={boot.mark_url} alt="" style={{ width: 34, height: 34, borderRadius: 9 }} /> : null}
+            {/* 56px: the slim size from the 2026-08-31 marks ruling (was 34) -- this
+                chip is the panel's own slim mark, so it moves with the header's. */}
+            {boot?.mark_url ? <img src={boot.mark_url} alt="" style={{ width: 56, height: 56, borderRadius: 14 }} /> : null}
             <div>
               <div className="mgcp-title">Moonglade Athenaeum</div>
               <div className="mgcp-titlesub">Control Panel</div>
@@ -926,12 +929,45 @@ const SKIN_VARS = {
 
 function MarksSection({
   summary, busy, msg, pickMark, pickAnim, setShortcut, isLocal,
-  greatLibrary, uploadCustomMark, removeCustomMark,
+  greatLibrary, uploadCustomMark, removeCustomMark, saveTuning,
 }) {
   const marks = summary.branding.marks || [];
   const anims = summary.branding.anims || [];
   const cur = marks.find((m) => m.id === summary.branding.mark) || null;
   const anim = summary.branding.anim || "classic";
+  // The four animation settings (the workshop's "there should be a speed and size
+  // slider" ask, plus glow's own colour/direction pair). `local` mirrors the server
+  // ONLY while a control is being dragged -- the same read-through the banner-crop
+  // sliders use, for the same reason: the preview has to track the thumb with no
+  // network in the loop, and the commit happens on release.
+  const [local, setLocal] = useState(null);
+  const saved = {
+    anim_speed: Number(summary.branding.anim_speed ?? 1),
+    anim_scale: Number(summary.branding.anim_scale ?? 1),
+    glow_color: summary.branding.glow_color || "#94e2d5",
+    glow_angle: Number(summary.branding.glow_angle ?? 0),
+  };
+  const tune = local || saved;
+  useEffect(() => { setLocal(null); }, [
+    summary.branding.anim_speed, summary.branding.anim_scale,
+    summary.branding.glow_color, summary.branding.glow_angle]);
+  const commit = (patch) => { setLocal(null); saveTuning(patch); };
+  const tuneSlider = (label, key, min, max, step, fmt) => (
+    <div className="mgcp-sliderrow">
+      <div className="mgcp-sliderhead">
+        <span>{label}</span>
+        <span className="mgcp-sliderval">{fmt(tune[key])}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={tune[key]} disabled={busy}
+        onChange={(e) => setLocal({ ...tune, [key]: +e.target.value })}
+        onPointerUp={() => local && commit({ [key]: tune[key] })}
+        onKeyUp={(e) => {
+          if (local && (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")) {
+            commit({ [key]: tune[key] });
+          }
+        }} />
+    </div>
+  );
   // handoff-2026-08-09-branding-integration.md's 6th tile: locked pre-unlock,
   // an upload tile once earned, then the uploaded mark itself (already present
   // in `marks` -- list_marks() has no separate "custom" concept, it's just
@@ -942,19 +978,19 @@ function MarksSection({
     <div className="mgcp-brandsec">
       <h3 className="mgcp-brandh">Icons, marks &amp; animation</h3>
       <div className="mgcp-markprevrow">
-        {/* DC:396 -- the 168px live preview. The inner element is the REAL header mark
-            (Strip.jsx:74's exact .mk markup, real anim-<name> classes from styles.css),
-            scaled up from its 56px chrome size -- so what animates here is literally
-            what the header will do, not a re-implementation of it. */}
+        {/* DC:396 -- the 168px live preview, now rendering the REAL header component
+            (MarkAnimated) rather than a second copy of the mark's markup. It used to
+            claim it was "Strip.jsx:74's exact markup"; Strip has been gone for a
+            while and the header had moved on, so the preview was quietly showing a
+            different thing from the header it previewed. One component, one truth --
+            and it is what lets moondust (a canvas) preview at all.
+            It renders the LIVE panel values, so dragging a slider below animates
+            here immediately, before anything is saved. */}
         <div className="mgcp-markprevbox">
-          <div className="mgcp-markprevscale">
-            <span className={"mk anim-" + anim + (cur && cur.kind === "tile" ? " mk-tile" : "")}
-              style={{ "--mark-url": "url('" + ((cur && cur.png) || "/branding/logo.png") + "')" }}>
-              <span className="mark-m">M</span>
-              <img src={(cur && cur.png) || "/branding/logo.png"} alt=""
-                onError={(e) => e.currentTarget.remove()} />
-            </span>
-          </div>
+          <MarkAnimated size={96} anim={anim}
+            url={(cur && cur.png) || "/branding/logo.png"}
+            speed={tune.anim_speed} scale={tune.anim_scale}
+            glowColor={tune.glow_color} glowAngle={tune.glow_angle} />
         </div>
         <div className="mgcp-markprevside">
           <div className="mgcp-markprevcap">Shown at 44px · animated live</div>
@@ -1020,6 +1056,36 @@ function MarksSection({
           </button>
         ))}
       </div>
+      {/* The workshop's structural ask, made real: one speed multiplier and one size
+          multiplier over the whole roster (every treatment's durations and offsets are
+          written against them), plus glow's own colour and direction. Same grammar as
+          the banner-crop sliders below -- live while dragging, saved on release. */}
+      <div className="mgcp-sliderbox">
+        {tuneSlider("Animation speed", "anim_speed", 0.25, 3, 0.05,
+          (v) => Number(v).toFixed(2) + "×")}
+        {tuneSlider("Animation size", "anim_scale", 0.5, 2, 0.05,
+          (v) => Number(v).toFixed(2) + "×")}
+      </div>
+      {/* Colour + direction belong to GLOW alone (the owner's round-2 note on it), so
+          they appear only while glow is the pick rather than sitting inert beside every
+          other treatment. Direction 0 is a centred bloom; any angle pushes its origin
+          out along that bearing. */}
+      {anim === "glow" && (
+        <div className="mgcp-sliderbox">
+          <div className="mgcp-sliderrow">
+            <div className="mgcp-sliderhead">
+              <span>Glow colour</span>
+              <span className="mgcp-sliderval">{tune.glow_color}</span>
+            </div>
+            <input type="color" className="mgcp-glowcolor" value={tune.glow_color}
+              disabled={busy}
+              onChange={(e) => setLocal({ ...tune, glow_color: e.target.value })}
+              onBlur={() => local && commit({ glow_color: tune.glow_color })} />
+          </div>
+          {tuneSlider("Glow direction", "glow_angle", 0, 360, 5,
+            (v) => (Number(v) ? Number(v) + "°" : "centred"))}
+        </div>
+      )}
       {isLocal && (
         <>
           <div className="mgcp-tilesmall" style={{ marginTop: 4 }}>
@@ -1283,6 +1349,17 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
     if (d.error) { setMsg("⚠ " + d.error); return; }
     onSaved();
   };
+  // The animation tuning (speed/size/glow colour/glow direction). Same partial-patch
+  // POST every other branding control uses -- one key or two, never the whole record --
+  // and the same read-after-write: the server clamps, and the refetch is what tells the
+  // sliders where they actually landed.
+  const saveTuning = async (patch) => {
+    setBusy(true); setMsg("");
+    const d = await apiPost("/api/branding", patch);
+    setBusy(false);
+    if (d.error) { setMsg("⚠ " + d.error); return; }
+    onSaved();
+  };
   const setShortcut = async () => {
     setBusy(true); setMsg("");
     const d = await apiPost("/api/branding/shortcut", {});
@@ -1327,6 +1404,7 @@ export function BrandingTab({ summary, onSaved, isLocal, skins, activeSkin, onPi
       <div className="mgcp-brandmain">
         {section === "marks" && (
           <MarksSection summary={summary} busy={busy} msg={msg} isLocal={isLocal}
+            saveTuning={saveTuning}
             pickMark={pickMark} pickAnim={pickAnim} setShortcut={setShortcut}
             greatLibrary={greatLibrary} uploadCustomMark={uploadCustomMark} removeCustomMark={removeCustomMark} />
         )}

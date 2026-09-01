@@ -166,27 +166,21 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   background: linear-gradient(90deg, rgba(255,255,255,0), #fff);
   box-shadow: 0 0 7px 1px rgba(207,232,255,.9); z-index: 7;
   animation: mk-shoot 2.7s ease-in-out infinite !important; }
-.mk.anim-halo::before { inset: -12%; border-radius: 50%; z-index: 6;
-  background: conic-gradient(from 0deg, transparent 0 68%, rgba(148,226,213,.9) 84%, transparent 100%) !important;
-  -webkit-mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important;
-  mask: radial-gradient(circle, transparent 58%, #000 62%, #000 74%, transparent 78%) !important;
-  animation: mk-orbit 3.2s linear infinite !important; }
 .mk.anim-eclipse::before { inset: 4%; border-radius: 50%; z-index: 6; opacity: .92;
   background: radial-gradient(circle at 50% 46%, #10101a 60%, rgba(16,16,26,0) 70%) !important;
   box-shadow: 0 0 10px 2px rgba(120,90,200,.45);
   animation: mk-ecl 4s ease-in-out infinite !important; }
-.mk.anim-ripple::before { inset: 10%; border-radius: 50%; z-index: 6;
-  border: 1.5px solid rgba(148,226,213,.85); box-shadow: 0 0 8px rgba(148,226,213,.5);
-  animation: mk-ripple 2s ease-out infinite !important; }
 .mk.anim-mist::before { inset: -20%; filter: blur(3px); mix-blend-mode: screen; z-index: 3;
   background: radial-gradient(circle at 32% 38%, rgba(90,230,180,.5), transparent 46%),
               radial-gradient(circle at 68% 62%, rgba(150,110,240,.5), transparent 46%) !important;
   animation: mk-mist 6s ease-in-out infinite !important; }
 .mk.anim-prism img { animation: mk-prism 6s linear infinite !important; }
-.mk.anim-breathe img { animation: mk-breathe 2.8s ease-in-out infinite !important; }
-.mk.anim-tilt img { animation: mk-tilt 4.2s ease-in-out infinite !important; }
-.mk.anim-float img { animation: mk-float 3s ease-in-out infinite !important; }
-.mk.anim-orbit img { animation: mk-orbit 9s linear infinite !important; }
+/* halo / ripple / breathe / tilt / float / orbit were RETIRED by the 2026-08-31 marks
+   workshop (six killed across its two rounds). Their rules and keyframes are gone with
+   them; a stored pick of one now renders as classic (load_branding validates against
+   MARK_ANIMS, which no longer lists them). The survivors' rules below stay: this
+   stylesheet is the classic-chrome treatment, distinct from the React header engine in
+   styles/mark-anims.css. */
 @keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
 @keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
 @keyframes logo-glow { 0%,100% { filter: drop-shadow(0 0 7px rgba(182,146,230,.65)); } 50% { filter: drop-shadow(0 0 2px rgba(182,146,230,.18)); } }
@@ -203,13 +197,8 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   45% { opacity: 0; transform: translate(calc(46px * var(--mk-scale)), calc(26px * var(--mk-scale))) rotate(28deg); }
   100% { opacity: 0; } }
 @keyframes mk-ecl { 0% { transform: translateX(-92%); } 50% { transform: translateX(0); } 100% { transform: translateX(92%); } }
-@keyframes mk-ripple { 0% { opacity: .85; transform: scale(.35); } 100% { opacity: 0; transform: scale(1.5); } }
 @keyframes mk-mist { 0%,100% { transform: translate(-6%,2%); } 50% { transform: translate(6%,-4%); } }
 @keyframes mk-prism { to { filter: hue-rotate(360deg); } }
-@keyframes mk-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.07); } }
-@keyframes mk-tilt { 0%,100% { transform: perspective(300px) rotateY(-10deg); } 50% { transform: perspective(300px) rotateY(10deg); } }
-@keyframes mk-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-@keyframes mk-orbit { to { transform: rotate(360deg); } }
 
 .bn { font-family: var(--serif); font-size: 24px; font-weight: 700; white-space: nowrap;
   border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1;

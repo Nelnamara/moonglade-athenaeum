@@ -69,7 +69,12 @@ def test_branding_save_and_render(tmp_path):
     assert {m["id"] for m in d["marks"]} == {"mark_4", "mark_7"}
     assert d["mark"] == "mark_4"          # default mark once assets exist
     r = cli.post("/api/branding", json={"mark": "mark_7", "anim": "eclipse"})
-    assert r.get_json() == {"mark": "mark_7", "anim": "eclipse"}
+    # The echo carries the animation TUNING alongside the pick since the 2026-08-31
+    # marks build (speed/scale/glow), so this asserts the two fields it is about
+    # rather than the whole payload -- the tuning's own round-trip is pinned in
+    # tests/test_marks_build.py.
+    saved = r.get_json()
+    assert (saved["mark"], saved["anim"]) == ("mark_7", "eclipse")
     assert json.loads((tmp_path / "branding.json").read_text())["anim"] == "eclipse"
     # the saved choice reads back through the same API the React header consumes
     # (the classic BASE_HTML mark-span render died in the 2026-08-08 classic cut)
