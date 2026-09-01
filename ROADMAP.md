@@ -224,8 +224,7 @@ From the **2026-08-17 persona sweep** (7 archetypes; full ranked brief + rationa
 `../moonglade-internal/PERSONA_SWEEP_2026-08-17.md` §2), the net-new asks not already covered
 above, tagged "Scope":
 
-- **Power / workflow:** a keyboard + `Ctrl/Cmd-K` command-palette layer with a one-click "↻ Again —
-  new seed" re-roll · wildcards / prompt-variable expansion (`{a|b|c}`, `__lists__`) · a saved
+- **Power / workflow:** wildcards / prompt-variable expansion (`{a|b|c}`, `__lists__`) · a saved
   **default negative prompt** · composer-recipe persistence (restore-last + named "Styles" presets) ·
   a quick-pick chip row for recent/favourite models & LoRAs · an in-UI raw-recipe inspector (copy
   JSON / copy-as-CLI). **Spend constraint (from the red-team):** any fan-out submit — matrix,

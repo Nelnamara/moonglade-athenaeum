@@ -354,7 +354,10 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
       // footer. prefillRun routes by the row's kind. It is deliberately NOT in the
       // dep array: its identity changes every render (it closes over `g`), and
       // [request] alone is the one-shot-nonce contract above.
-      if (request.mid) prefillRun("", request.mid);
+      // request.newSeed is the command palette's "↻ Again — new seed" (owner ruling,
+      // 2026-08-31: Again SENDS TO REMIX, it never submits) -- the identical recipe road,
+      // with the seed re-rolled on the way through so the next Generate is a fresh draw.
+      if (request.mid) prefillRun("", request.mid, { newSeed: !!request.newSeed });
     }
   }, [request]);
 
@@ -448,7 +451,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      newly-picked model's own preset (negative/steps/cfg) as a side effect, and
      the run's own real values must win over that preset, not be clobbered by
      it. */
-  const prefillFromRun = useCallback(async (jobId, mediaId) => {
+  const prefillFromRun = useCallback(async (jobId, mediaId, opts) => {
     if (!mediaId) return;
     const my = ++prefillSeq.current;
     const live = () => prefillSeq.current === my;   // stale flows stop applying, wholesale
@@ -495,7 +498,13 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
         customH: row.height ? String(row.height) : "",
         steps: row.steps || "",
         cfg: row.cfg_scale || "",
-        seed: row.seed || "",
+        // "↻ Again — new seed" re-rolls exactly this one field and changes nothing else.
+        // A visible number rather than a cleared box: blank would also produce a fresh
+        // seed (genCore sends null and the server rolls one), but then the composer would
+        // show nothing where the recipe's own seed had been, and the owner could not read
+        // back -- or keep -- the draw he is about to pay for. Range is the 32-bit space
+        // every backend in this road accepts; the field itself takes any digit string.
+        seed: opts && opts.newSeed ? String(Math.floor(Math.random() * 2147483647)) : (row.seed || ""),
         loras: [],          // the recipe REPLACES composer LoRA state on every path below
       });
       const hadLoras = !!(row.loras || "").trim();   // catalog display string: "did the task use any?"
@@ -611,7 +620,7 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
      path with its own is_video guard (RunsReel.jsx); this is what actively routes the three
      surfaces that DO offer video remix. A detail read failure falls through to the image
      path, which re-fetches and surfaces its own error. */
-  const prefillRun = useCallback(async (idHint, mediaId) => {
+  const prefillRun = useCallback(async (idHint, mediaId, opts) => {
     if (!mediaId) return;
     // Join the prefill epoch (#27): this routing fetch used to sit OUTSIDE prefillSeq, so
     // two fast tile clicks could resolve out of order and land the OLDER recipe. Bump here
@@ -621,9 +630,11 @@ export default function GenerateDrawer({ open, onClose, account, request }) {
     const d = await apiGet("/api/next/detail/" + encodeURIComponent(mediaId));
     if (prefillSeq.current !== my) return undefined;   // superseded -- a newer click won
     if (d && d.row && String(d.row.is_video) === "1") {
+      // A video recipe has no seed field at all (videoRemixFromRow maps none), so a
+      // new-seed request on a video is simply the ordinary video remix.
       return prefillVideoFromRun(idHint || (d.row && d.row.task_id) || "", mediaId);
     }
-    return prefillFromRun(idHint, mediaId);
+    return prefillFromRun(idHint, mediaId, opts);
   }, [prefillFromRun, prefillVideoFromRun]);
 
   /* multi picker contract: (model, selected). The picker owns its own highlight

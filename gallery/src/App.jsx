@@ -23,6 +23,9 @@ import GenerateDrawer from "./components/GenerateDrawer.jsx";
 import PickerHost, { isPickerOpen } from "./components/PickerHost.jsx";
 import ClaimModal from "./components/ClaimModal.jsx";
 import useClaimModal from "./hooks/useClaimModal.js";
+import { CommandPalette, ShortcutSheet, GPendingChip } from "./components/CommandPalette.jsx";
+import useCommandPalette from "./hooks/useCommandPalette.js";
+import { shortId } from "./palette/paletteCore.js";
 import "./styles/shell.css";
 import {
   fetchAccount, fetchCollections,
@@ -211,11 +214,13 @@ export default function App({ boot }) {
   // lives in the web component's connectedCallback). Capture-closing over those
   // nuked the whole layer stack and made their handlers dead code. Found by the
   // 2026-08-07 branch review.
+  const paletteUpRef = useRef(false);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== "Escape" || !overlayRef.current) return;
       if (overlayRef.current === "panel") return;   // panel runs its own ladder
       if (isPickerOpen()) return;                   // picker dismisses itself
+      if (paletteUpRef.current) return;             // the palette/cheat-sheet close FIRST
       e.stopPropagation();
       setOverlay(null);
     };
@@ -657,6 +662,17 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "remix", mid, nonce: Math.random() });
   };
+  /* "↻ Again — new seed" (the palette's R / its On-this-image row). Owner ruling,
+     2026-08-31: SEND TO REMIX, NO INSTANT SPEND. This is the SAME shipped Remix path
+     above -- the picture's full recipe prefilled into the composer -- with one field
+     changed, a freshly rolled seed, so the next Generate is a different draw of the same
+     idea. It opens the dock and stops there; the human presses Generate. Nothing in the
+     palette ever submits a generation. */
+  const requestAgain = (mid) => {
+    setLbIndex(null);
+    openDock();
+    setGenRequest({ tab: "remix", mid, newSeed: true, nonce: Math.random() });
+  };
   /* Bridge §5: a scene picked in the "✦ AI Tools" nav modal -- close the modal, open the dock,
      and hand the drawer the picked scene so it lands on its scene generator. Same one-shot
      genRequest shape as the Edit/Video/Remix hand-offs (a fresh nonce re-fires for the same
@@ -700,11 +716,213 @@ export default function App({ boot }) {
 
   const dockActive = dockOpen && !dockClosing;
 
+  /* ======================= THE COMMAND PALETTE (Ctrl/⌘ K) =====================
+     Locked source: ../moonglade-internal/design/command-palette/ -- BRIEF.md (taxonomy),
+     Command Palette.dc.html frames A-H (pixels), NOTES.md (the 2026-08-31 rulings).
+
+     THE ONE RULE that shapes everything below (DC frame H): a command calls the SAME app
+     function the mouse UI calls. Every `run` here is a reference to a verb this file
+     already owns -- openOverlay, setLayout, setGroup, openDock, applyAdvanced, the
+     ctxActions table, openPublish, claimModal.claim, requestAgain. There is no second
+     code path for anything, so the palette can never drift from what the buttons do.
+     The corollary is the absent-never-disabled rule: a row that cannot act is simply not
+     built (no focused image -> no On-this-image group and no R; nothing claimable -> no
+     Claim row; no collections -> no collection rows). ------------------------------- */
+
+  /* Which picture the contextual group acts on, in precedence order: the Details record
+     that is open, the Lightbox page being viewed, else the last grid card the keyboard or
+     a click put focus on. The grid's own focus is DOM focus (Grid.jsx focuses the <figure>
+     itself), and it is lost the moment the palette's input takes over -- so the card
+     reports its media_id up here on focus and this remembers it, which is also what keeps
+     the accent ring meaningful under the scrim in frame D. Cleared when the row leaves the
+     page, so a filter change can't leave the palette acting on something invisible. */
+  const [gridFocus, setGridFocus] = useState(null);
+  useEffect(() => {
+    if (gridFocus && !items.some((it) => it.media_id === gridFocus)) setGridFocus(null);
+  }, [items, gridFocus]);
+  const focusItem = useMemo(() => {
+    const find = (mid) => items.find((it) => it.media_id === mid) || null;
+    // Details can outlive the page its row was on (a bookmarked ?image= opens straight
+    // into it), so fall back to a minimal stand-in rather than losing the whole group.
+    if (detailsFor) return find(detailsFor) || { media_id: detailsFor, filename: "", is_video: false, thumb: "" };
+    if (lbIndex != null && items[lbIndex]) return items[lbIndex];
+    if (gridFocus) return find(gridFocus);
+    return null;
+  }, [detailsFor, lbIndex, items, gridFocus]);
+
+  /* "Go to → Library": back to the plain grid. Closes whatever is stacked on top of it and
+     nothing else -- it is a navigation, not a Clear (the filters and the page it was on are
+     exactly where the owner left them). */
+  const goLibrary = useCallback(() => {
+    setOverlay(null);
+    setLbIndex(null);
+    setSimilarFor(null);
+    if (dockStateRef.current.open) closeDock();
+    setUrl({ image: null });
+    setDetailsFor(null);
+  }, [closeDock, setUrl]);
+
+  /* "Jump to Search" (/). The library bar's field lives two components down inside the
+     banner's hero band -- and that band is DISPLAY:NONE in slim mode, so a bare focus()
+     would silently do nothing there. Un-slim first, then focus on the commit that renders
+     it: the nonce+effect pair is what guarantees the field exists by the time we reach for
+     it, rather than a guessed rAF. The cross-tree query is the same reach GenerateDrawer
+     already makes for .mgx-hdr / .mgx-sep -- there is no programmatic focus seam on the
+     LibraryBar today, and adding a ref chain through Banner for one keystroke would be a
+     wider change than the keystroke is worth. */
+  const [focusSearchAt, setFocusSearchAt] = useState(0);
+  useEffect(() => {
+    if (!focusSearchAt) return;
+    const el = document.querySelector(".mgl-search input");
+    if (el) { el.focus(); el.select(); }
+  }, [focusSearchAt]);
+  const jumpToSearch = useCallback(() => {
+    goLibrary();
+    setSlim(false);
+    setFocusSearchAt((n) => n + 1);
+  }, [goLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* "Sync now" -- the Control Panel's own ↻ Sync now button, same route, same body
+     (useControlPanel.runAction's sync case). Ruling, NOTES §2.2: while a job is already
+     running the row STAYS and the refusal shows as the busy toast, in the server's own
+     words (POST /api/panel/run answers 409 {"error": "a job is already running"}). */
+  const syncNow = useCallback(async () => {
+    const d = await apiPost("/api/panel/run", { action: "sync" });
+    if (!window.Toast) return;
+    if (d && d.error) {
+      window.Toast.show({
+        kind: d.http_status === 409 ? "" : "err",
+        title: d.http_status === 409 ? "Already busy" : "Couldn't start the sync",
+        msg: d.error,
+      });
+    } else {
+      window.Toast.show({ kind: "ok", title: "Sync started", msg: "Progress rides the Control Panel's job console." });
+    }
+  }, []);
+
+  /* THE TAXONOMY (BRIEF §2 + the NOTES §1 adds the owner cleared for the build). Group
+     order is FIXED and never re-ranks (§8.4): Go to · Layout · Do · On this image · Help,
+     with Recent folded in above by the hook when there is one. Glyphs are the app's own
+     (§8.2, no new icon set); shortcut chips render only where a real global key exists
+     (§8.3). Every id is stable, because Recent stores ids. */
+  const claimable = account && Number(account.claim_credits) > 0 ? Number(account.claim_credits) : 0;
+  // The Help row opens the sheet the hook owns, and the hook takes this very list -- so the
+  // row reaches it through a ref rather than a circular dependency (the same render-time
+  // ref hand-off useClaimModal.js uses for refreshAccount).
+  const paletteRef = useRef(null);
+  const commands = useMemo(() => {
+    const list = [];
+    const go = (id, icon, label, run, keys, hotkey) =>
+      list.push({ id, group: "Go to", icon, label, run, keys: keys || [], hotkey });
+
+    go("goto.library", "⌂", "Library", goLibrary, ["G", "L"], "g l");
+    go("goto.loom", "▮", "Storyboard (the Loom)", () => { window.location.href = "/loom"; }, ["G", "S"], "g s");
+    go("goto.panel", "⛭", "Control Panel", () => openOverlay("panel"), ["G", "C"], "g c");
+    // The four nav destinations NOTES §1 flagged as missing, cleared to ship 2026-08-31 --
+    // each trivially removable at branch review. Glyphs are the app's own destination
+    // marks (AppMobile's MENU_ITEMS table; Folio's is the banner's).
+    go("goto.contests", "🏅", "Contests", () => openOverlay("contests"));
+    go("goto.myart", "📈", "My Art", () => openOverlay("myart"));
+    go("goto.health", "♡", "Health", () => openOverlay("health"));
+    go("goto.folio", "🏆", "Folio", () => openOverlay("folio"));
+    // One row per collection from the LIVE list (already A-Z, case-insensitive, from
+    // /api/collections via unique_collections). "Collection:" is matchable text like any
+    // other label. No count sub: no route in this app reports a per-collection image
+    // count, and inventing 40 count queries for a palette row is not a trade worth making.
+    for (const name of collections || []) {
+      list.push({
+        id: "collection:" + name,
+        group: "Go to",
+        icon: "❖",
+        label: "Collection: " + name,
+        run: () => { goLibrary(); applyAdvanced({ shelf: name }); },
+        keys: [],
+      });
+    }
+
+    // The layout picker's own four modes and its own exact glyphs (FiltersPanel's LAYOUTS),
+    // active one marked with the emerald ✓. The DC board drew three rows and paired ▧ with
+    // Timeline; the shipped picker pairs ▧ with Hero and ≣ with Timeline, and §8.2's ruling
+    // is "the layout picker's exact glyphs" -- so the glyphs win and Hero gets its row
+    // rather than being the one layout the palette cannot reach.
+    for (const [key, label, glyph] of [
+      ["masonry", "Masonry", "▦"], ["grid", "Grid", "▤"],
+      ["hero", "Hero", "▧"], ["timeline", "Timeline", "≣"],
+    ]) {
+      list.push({
+        id: "layout." + key, group: "Layout", icon: glyph, label,
+        right: layout === key ? "✓" : "", keys: [],
+        run: () => { goLibrary(); setLayout(key); },
+      });
+    }
+    list.push({
+      id: "layout.stack", group: "Layout", icon: "⧉", label: "Toggle Stack sessions",
+      right: group === "series" ? "On" : "", rightKind: "pill", keys: [],
+      run: () => { goLibrary(); setGroup(group !== "series"); },
+    });
+
+    list.push({
+      id: "do.generate", group: "Do", icon: "✦", label: "New generation",
+      sub: "Generate dock", keys: ["N"], hotkey: "n", run: openDock,
+    });
+    list.push({
+      id: "do.search", group: "Do", icon: "⌕", label: "Jump to Search",
+      keys: ["/"], hotkey: "/", run: jumpToSearch,
+    });
+    list.push({ id: "do.sync", group: "Do", icon: "⟳", label: "Sync now", keys: [], run: syncNow });
+    // Claimable credits: present ONLY while there are some, running the exact claim the
+    // header pill runs (useClaimModal.claim -- POST /api/claim, then the account refetch
+    // that drops claim_credits to 0 and takes this row away again).
+    if (claimable) {
+      list.push({
+        id: "do.claim", group: "Do", icon: "◉",
+        label: "Claim +" + claimable.toLocaleString() + " credits",
+        keys: [], run: claimModal.claim,
+      });
+    }
+
+    /* The contextual group -- present only while a picture is focused or open, absent
+       otherwise (frame A is the absent case, D the present one). The header names its
+       target in mono. The actions ARE the right-click set, reached through the same
+       ctxActions table the menu itself calls, plus ☁ Publish (NOTES §1) through the same
+       openPublish the Lightbox and Details chips use. */
+    if (focusItem) {
+      const mid = focusItem.media_id;
+      const extra = focusItem.filename || shortId(mid);
+      const img = (id, icon, label, run, extras) =>
+        list.push({ id: "img." + id, group: "On this image", groupExtra: extra, icon, label, run, keys: [], ...(extras || {}) });
+      img("again", "↻", "Again — new seed", () => requestAgain(mid), { keys: ["R"], hotkey: "r" });
+      img("remix", "✱", "Remix", () => ctxActions.onRemix(mid));
+      img("video", "▶", "Send to Video", () => ctxActions.onVideo(mid, focusItem.thumb));
+      img("similar", "≈", "Find similar", () => showSimilar(mid));
+      img("edit", "✎", "Edit", () => ctxActions.onEdit(mid));
+      img("details", "ⓘ", "Open details", () => ctxActions.onDetails(mid));
+      img("copyid", "⎘", "Copy id", () => ctxActions.onCopyId(mid), { sub: shortId(mid) });
+      img("publish", "☁", "Publish", () => openPublish(mid));
+    }
+
+    list.push({
+      id: "help.keys", group: "Help", icon: "?", label: "Show keyboard shortcuts",
+      keys: ["?"], run: () => paletteRef.current && paletteRef.current.openSheet(),
+    });
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collections, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
+      openDock, openOverlay, applyAdvanced, openPublish]);
+
+  const palette = useCommandPalette(commands);
+  paletteRef.current = palette;
+  // The Escape ladder guard App's own overlay closer reads (see that listener above).
+  useEffect(() => { paletteUpRef.current = palette.open || palette.sheetOpen; });
+
   /* Grid arrow-key navigation (#31, Refit #7) only while the grid is the top
      layer: no lightbox, no Details, no nav overlay, no dock, no context menu or
-     Similar modal -- each of those owns (or must not lose) the arrow keys. */
+     Similar modal, no palette -- each of those owns (or must not lose) the arrow
+     keys. Arrows drive the PALETTE while it is open and the GRID while it is
+     closed (BRIEF §6); the palette's own input would already swallow them, this
+     is the explicit half of the same rule. */
   const gridKeys = lbIndex == null && !detailsFor && !overlay && !ctxMenu
-    && !similarFor && !dockActive && !claimModal.open;
+    && !similarFor && !dockActive && !claimModal.open && !palette.active && !palette.sheetActive;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
      DetailsView's own JSX call site. A fresh object every render meant a
@@ -800,6 +1018,7 @@ export default function App({ boot }) {
             openLightbox={setLbIndex}
             onRate={rate}
             onContextMenu={openContextMenu}
+            onFocusCard={setGridFocus}
             onOpenSeries={filterBySeries}
             onOpenBatch={filterByBatch}
           />
@@ -917,6 +1136,15 @@ export default function App({ boot }) {
           claiming={claimModal.claiming} error={claimModal.error}
           onClaim={claimModal.claim} onDismiss={claimModal.dismiss} />
       )}
+
+      {/* The palette band, above everything the app can stack under it (z 460/461, the
+          cheat-sheet's own scrim 470/471, the G… chip 462 — see command-palette.css and
+          the ladder comment in overlays.css). Each surface is its own deferred-exit
+          mount, exactly like the dock host and the toasts. */}
+      <CommandPalette palette={palette} />
+      <ShortcutSheet open={palette.sheetOpen} closing={palette.sheetClosing}
+        onClose={palette.closeSheet} />
+      <GPendingChip open={palette.pending} />
     </div>
   );
 }

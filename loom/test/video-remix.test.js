@@ -312,13 +312,32 @@ describe("host wiring source guards (no React harness in this suite)", () => {
   test("the reel, History and the remix request all funnel through the kind-routing dispatcher", () => {
     assert.match(dock, /<HistoryStrip onPrefill=\{prefillRun\}/);
     assert.match(dock, /<RunsReel [^>]*onPrefill=\{prefillRun\}/);
-    assert.match(dock, /if \(request\.mid\) prefillRun\("", request\.mid\);/);
+    assert.match(dock, /if \(request\.mid\) prefillRun\("", request\.mid, \{ newSeed: !!request\.newSeed \}\);/);
     // the dispatcher routes by the row's kind
     const i = dock.indexOf("const prefillRun = useCallback(");
     const body = dock.slice(i, dock.indexOf("}, [prefillFromRun, prefillVideoFromRun]);", i));
     assert.match(body, /String\(d\.row\.is_video\) === "1"/);
     assert.match(body, /return prefillVideoFromRun\(/);
-    assert.match(body, /return prefillFromRun\(idHint, mediaId\);/);
+    assert.match(body, /return prefillFromRun\(idHint, mediaId, opts\);/);
+  });
+
+  // The command palette's "↻ Again — new seed" (R, and its On-this-image row). Owner
+  // ruling 2026-08-31: Again SENDS TO REMIX and never submits -- so it must be the SAME
+  // road as Remix with one field re-rolled, not a second prefill path that could drift
+  // away from the recipe contract above. Both halves are pinned: the option rides the
+  // dispatcher, and the ONLY thing it changes is the seed.
+  test("↻ Again rides the shipped Remix road, re-rolling the seed and nothing else", () => {
+    const app = src("gallery/src/App.jsx");
+    assert.match(app, /setGenRequest\(\{ tab: "remix", mid, newSeed: true, nonce: Math\.random\(\) \}\)/);
+    // no separate submit anywhere on the Again path -- prefill only, the human presses Generate
+    assert.doesNotMatch(app, /requestAgain[\s\S]{0,400}?apiPost\(/);
+    const i = dock.indexOf("const prefillFromRun = useCallback(");
+    const body = dock.slice(i, dock.indexOf("}, [g]);", i));
+    assert.match(body, /seed: opts && opts\.newSeed \? String\(Math\.floor\(Math\.random\(\)/);
+    assert.match(body, /: \(row\.seed \|\| ""\)/, "without the option the row's own seed still wins");
+    // prompt/negative/frame/steps/cfg are still the recipe's, untouched by the re-roll
+    for (const f of [/prompt: row\.prompt_full/, /negative: row\.negative_prompt/,
+                     /steps: row\.steps/, /cfg: row\.cfg_scale/]) assert.match(body, f);
   });
 
   test("prefillVideoFromRun mirrors the image path's epoch/busy discipline and lands on the Video tab", () => {
