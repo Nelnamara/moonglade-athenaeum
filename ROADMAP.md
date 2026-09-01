@@ -207,6 +207,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Backlog — needs scoping
 
+- **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
+  internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
+  contest verbs, the `/v2` REST growth, the React front door). Scope: audit `--help` + the wiki
+  command pages against what actually ships, then finish the code map's missing chapters (PixAI
+  layer · achievements engine · server routes · React+Loom · sidecars — ranked gaps already listed
+  at the map's EOF). Docs-only, no behavior changes.
+
 From the 2026-07-16 persona sweep, tagged "Scope": wanted, but each needs a real definition before
 it's actionable. Listed so they aren't lost, not because they're ready.
 
