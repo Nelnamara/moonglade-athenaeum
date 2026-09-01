@@ -48,23 +48,17 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
   - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
-  - Login version reveal: reads "NEXT · BUILD v…" — deliberate (the `/next` internal codename is
-    live in the reveal string, useFlavour.js), but the owner double-took; recopy is a one-word
-    call whenever wanted.
+  - Login version reveal recopy: tracked as [#51](https://github.com/Nelnamara/moonglade-athenaeum/issues/51) (retire `/next`) — the issue is the home, not this list.
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
     candidate to drop at the next Loom pass.
 
-- **The filename convention — workshop** *(owner, 2026-08-23)*
-  `build_stem_name` (`<prompt-slug>_<task>_<media>`) dates from the backup-tool era and was never revisited.
-  PixAI's own download names are `from-PixAI-<task>-<index>`; the API sends no filename (a media object +
-  CDN URL), the site synthesizes one client-side. Workshop what ours should be — the batch index is now a
-  known fact — before anything touches 43k files (`--organize` makes any rename reversible).
-
-- **Gallery layout switcher — mobile pass only (maybe)** *(desktop base shipped 2026-08-19)*
-  The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`; the owner
-  has minor visual fixes queued on top. The persona-sweep follow-on layouts (Group-by, Justified,
+- **Gallery layout switcher — better layout option + location** *(owner, 2026-08-31; desktop base shipped 2026-08-19)*
+  The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`. Two
+  visual passes on the switcher surface were built and backed out (#41 — no design context); owner's
+  current framing: partially fixed, needs **a better layout option and a better location** — that is
+  the design step's question. The persona-sweep follow-on layouts (Group-by, Justified,
   Filmstrip, density/proof, data-table) are **CUT** — not worth the payoff (owner, 2026-08-19). What
   *may* remain is a **mobile** switcher (column density + per-device memory), but the owner is
   skeptical these layouts are even viable on a phone — so this is a maybe pending a look, not a
@@ -79,35 +73,33 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
   is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
   marks appear — don't spot-fix one surface. **Same workshop, added 2026-08-22:** the mark
-  *animations* — the 16 picks in the Branding tab save but nothing applies them since the 3.0 header,
-  and the header draws an accent tile + "M" behind alpha marks ([#24](https://github.com/Nelnamara/moonglade-athenaeum/issues/24)).
+  *animations* — the 16 picks in the Branding tab save but nothing applies them since the 3.0 header
+  ([#24](https://github.com/Nelnamara/moonglade-athenaeum/issues/24); the accent-tile-behind-alpha-marks
+  half shipped 2026-08-27).
   Owner: "many if not all look janky now — workshop fixes or new ones", so this is a design pass
   (which animations survive, which are new, what the mark sits on), not a port of the classic CSS.
 
-- **Login page: render the Banner — login slot, restore the welcome hold** ([#25](https://github.com/Nelnamara/moonglade-athenaeum/issues/25))
-  The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one
-  (the card shows the header mark instead), and the designed welcome hold was removed for a test
-  expectation, so the login mascot barely plays. The hold is a small fix; the banner needs a design
-  call first (`Login.dc.html` has no banner element).
+- **Login page: render the Banner — login slot** ([#25](https://github.com/Nelnamara/moonglade-athenaeum/issues/25); the welcome-hold half shipped 2026-08-27)
+  The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one —
+  the card's art position shows the header mark instead, while the serve chain (owner crop → container →
+  sealed shipped default) is fully alive and unconsumed. One design call remains before the swap:
+  where the 4:1 banner sits on the card (`Login.dc.html` has no banner element).
 
 - **Claimable-reward notice in the activity tracker + gift icon on promo cards** *(the icon half of
   [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26) shipped 2026-08-22; this is the
   remaining design step)* — a notice when credits become claimable, and the gift icon on future promo gifts.
 
-- **Real generation progress — build the honest "starts in ~N" from the wait estimate** *(owner call, 2026-08-19)*
-  PixAI does **not** expose true render progress. It once showed the image taking shape (a blurred
-  wireframe resolving into focus), but that's gone; today it gives only a **start time + an estimated
-  wait**. Our own honest treatment (mascot + indeterminate shimmer, no fabricated %) already ships.
-  The build: surface a clearly-labelled "**about N minutes before this starts**" from that start-time
-  + estimated-wait — a QUEUE wait, never dressed as a render ETA. **Probe (2026-08-16):** the site calls `/v2/task/wait-time` on the
-  generate surface — that is a **queue-wait** figure, i.e. exactly the thing the constraint above
-  says must never be dressed as render progress. It may still be worth showing *as what it is*
-  ("about N minutes before this starts"). The dock's running tiles ship the honest treatment in the
-  meantime: mascot + indeterminate shimmer, no percentage.
+- **Queue-wait on the dock's queued tiles — the last slice of "starts in ~N"** *(owner call, 2026-08-19)*
+  The honest queue-wait readout ("est. N wait", never dressed as render progress) already ships in
+  the Activity tray's queued rows; the remaining slice is surfacing the same clearly-labelled figure
+  on the Generate dock's queued run tiles, which today show only the mascot + indeterminate shimmer.
+  Standing constraint unchanged: `/v2/task/wait-time` is a QUEUE wait, never a render ETA.
 
-- **Contest workbench (beyond Shortlist)**
+- **Contest workbench (beyond Shortlist)** *(being built, 2026-08-31)*
   The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
-  management — is still just wanted, not scoped.
+  management, in-app entry — is now designed and in build as the contest surface (detail view,
+  entry flow, My entries); it lands with the achievements-expansion release, at which point this
+  item moves to the CHANGELOG.
 
 ---
 
