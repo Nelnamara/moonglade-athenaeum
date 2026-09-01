@@ -53,6 +53,8 @@ def _fresh_cache(monkeypatch):
 
 def _idle_state(monkeypatch):
     monkeypatch.setattr(g, "_update_state", {"phase": "idle", "error": "", "at": 0.0})
+    # The real 2s handover pause exists for the browser poll; a test does not need it.
+    monkeypatch.setattr(g, "UPDATE_RESTART_DELAY", 0)
 
 
 # ---- version arithmetic ----------------------------------------------------
@@ -65,6 +67,23 @@ def test_versions_compare_numerically_not_as_text():
     assert g.version_tuple("v3.6.0") == (3, 6, 0)         # ...identically to its tag
     for junk in ("assets-2026-08-21", "v3.6", "v3.6.0-rc1", "", None, "latest"):
         assert g.version_tuple(junk) is None, junk
+
+
+def test_the_release_picker_takes_the_highest_version_not_the_first_listed():
+    """GitHub orders by creation date. A hotfix cut on an old line AFTER a newer release
+    lists FIRST -- and first-listed would then offer a 3.6.0 install a "newer" 3.5.1."""
+    picked = g.pick_latest_release([_rel("v3.5.1"), _rel("v3.6.0"), _rel("v3.4.9")])
+    assert picked["tag_name"] == "v3.6.0"
+    # ...and the comparison is numeric there too
+    assert g.pick_latest_release([_rel("v3.9.0"), _rel("v3.10.0")])["tag_name"] == "v3.10.0"
+
+
+def test_the_release_picker_skips_prereleases():
+    """"Update me" does not mean "put me on a release candidate"."""
+    picked = g.pick_latest_release([
+        {"tag_name": "v4.0.0", "prerelease": True, "html_url": "", "name": ""},
+        _rel("v3.6.0")])
+    assert picked["tag_name"] == "v3.6.0"
 
 
 def test_the_release_picker_skips_asset_packs():
@@ -122,12 +141,15 @@ def test_check_is_cached_for_the_ttl(tmp_path, monkeypatch):
     assert calls["n"] == 2
 
 
-def test_check_fails_soft_and_does_not_cache_the_failure(tmp_path, monkeypatch):
-    """An offline machine opening the Panel gets a Panel. And because the failure is not
-    cached, plugging the network back in doesn't leave a real update hidden for 30 min."""
+def test_check_fails_soft_and_memoizes_the_failure_briefly(tmp_path, monkeypatch):
+    """An offline machine opening the Panel gets a Panel -- and doesn't pay a full connect
+    timeout on every open. The failure IS cached, but only for UPDATE_FAILURE_TTL, so one
+    blip cannot hide a real update for the long TTL's half hour."""
     _fresh_cache(monkeypatch)
+    calls = {"n": 0}
 
     def _boom(**k):
+        calls["n"] += 1
         raise OSError("getaddrinfo failed")
     monkeypatch.setattr(g, "fetch_releases", _boom)
     cli = _client(tmp_path)
@@ -135,9 +157,15 @@ def test_check_fails_soft_and_does_not_cache_the_failure(tmp_path, monkeypatch):
     assert r.status_code == 200
     d = r.get_json()
     assert d["behind"] is False and "getaddrinfo failed" in d["error"]
-    assert g._update_cache["payload"] is None          # the failure was NOT cached
+    cli.get("/api/update/check")                      # a second open costs nothing
+    assert calls["n"] == 1
+    assert g._update_cache["ttl"] == g.UPDATE_FAILURE_TTL
+    assert g.UPDATE_FAILURE_TTL < g.UPDATE_CHECK_TTL  # ...and it is the SHORT one
+    # once that short window passes, it really does try again
+    g._update_cache["at"] -= (g.UPDATE_FAILURE_TTL + 1)
     monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
     assert cli.get("/api/update/check").get_json()["behind"] is True
+    assert g._update_cache["ttl"] == g.UPDATE_CHECK_TTL   # a success caches the long way
 
 
 def test_check_handles_a_release_list_with_no_versions(tmp_path, monkeypatch):
@@ -233,7 +261,7 @@ def test_apply_refuses_while_a_job_runs(tmp_path, monkeypatch):
     # and once the slot frees, the same call is allowed
     app.extensions["mg_panel_job"].update(status="idle", label="")
     monkeypatch.setattr(g.threading, "Thread",
-                        lambda target=None, args=(), daemon=None: type(
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
                             "T", (), {"start": lambda self_: None})())
     assert _apply(cli).status_code == 200
 
@@ -261,7 +289,7 @@ def test_apply_starts_the_update_when_every_gate_passes(tmp_path, monkeypatch):
     cli = _client(tmp_path)                 # built BEFORE the Thread patch: create_app
     started = {"n": 0}                      # starts threads of its own
     monkeypatch.setattr(g.threading, "Thread",
-                        lambda target=None, args=(), daemon=None: type(
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
                             "T", (), {"start": lambda self_: started.update(n=started["n"] + 1)})())
     r = _apply(cli)
     assert r.status_code == 200 and r.get_json()["ok"] is True
@@ -374,3 +402,191 @@ def test_status_route_reports_the_phase(tmp_path, monkeypatch):
     g._set_update_state("failed", "git pull failed:\nfatal: whatever")
     d = cli.get("/api/update/status").get_json()
     assert d["phase"] == "failed" and "fatal: whatever" in d["error"]
+
+
+# ---- rollback, retry, and the record that survives the restart ---------------
+
+def test_a_failed_pip_rolls_the_pull_back(monkeypatch):
+    """The dangerous failure. The tree was verified clean before the pull, so resetting to
+    the recorded HEAD loses nothing -- and it is what stops the install sitting on new code
+    with old dependencies."""
+    _idle_state(monkeypatch)
+    seen = []
+    heads = iter(["OLD", "NEW"])
+
+    def _git(args, **k):
+        seen.append(list(args))
+        if args[:1] == ["rev-parse"]:
+            return 0, next(heads, "NEW")
+        if args[:1] == ["diff"]:
+            return 0, "requirements.txt"
+        return 0, ""
+    monkeypatch.setattr(g, "_git", _git)
+    assert g.run_update(lambda: None,
+                        pip_fn=lambda: (1, "ERROR: no matching distribution")) is False
+    assert ["reset", "--hard", "OLD"] in seen, seen
+    st = g.update_state()
+    assert "no matching distribution" in st["error"]     # pip's own words, kept
+    assert "Rolled back to OLD" in st["error"]           # ...and what was done about it
+
+
+def test_a_failed_rollback_says_so_loudly(monkeypatch):
+    """If the reset ALSO fails the install is genuinely in a bad state, and the error has
+    to say which -- with the command to fix it by hand."""
+    _idle_state(monkeypatch)
+    heads = iter(["OLD", "NEW"])
+    monkeypatch.setattr(g, "_git", lambda args, **k:
+                        (0, next(heads, "NEW")) if args[:1] == ["rev-parse"]
+                        else (0, "requirements.txt") if args[:1] == ["diff"]
+                        else (1, "fatal: cannot reset") if args[:1] == ["reset"]
+                        else (0, ""))
+    assert g.run_update(lambda: None, pip_fn=lambda: (1, "boom")) is False
+    err = g.update_state()["error"]
+    assert "ROLLBACK ALSO FAILED" in err and "git reset --hard OLD" in err
+
+
+def test_retrying_after_a_pip_failure_really_re_runs_pip(monkeypatch):
+    """The retry trap the rollback closes. Without it the second attempt found the pull
+    already applied, saw no requirements diff against the new HEAD, skipped pip entirely
+    and declared success on an install whose dependencies were never installed."""
+    _idle_state(monkeypatch)
+    repo = {"head": "OLD"}                    # the checkout's real state across attempts
+    pip = {"n": 0, "ok": False}
+
+    def _git(args, **k):
+        if args[:1] == ["rev-parse"]:
+            return 0, repo["head"]
+        if args[:1] == ["pull"]:
+            repo["head"] = "NEW"
+            return 0, "Updating OLD..NEW"
+        if args[:1] == ["diff"]:
+            moved = args[1:] == ["--name-only", "OLD", "NEW"]
+            return 0, "requirements.txt" if moved else ""
+        if args[:1] == ["reset"]:
+            repo["head"] = args[2]
+            return 0, ""
+        return 0, ""
+
+    def _pip():
+        pip["n"] += 1
+        return (0, "ok") if pip["ok"] else (1, "ERROR: transient")
+    monkeypatch.setattr(g, "_git", _git)
+
+    assert g.run_update(lambda: None, pip_fn=_pip) is False
+    assert pip["n"] == 1 and repo["head"] == "OLD"        # rolled back, so...
+    pip["ok"] = True
+    assert g.run_update(lambda: None, pip_fn=_pip) is True
+    assert pip["n"] == 2, "the retry must actually re-run pip"
+
+
+def test_both_outcomes_are_written_to_the_activity_log(monkeypatch):
+    """The only part of an update that survives the restart it triggers -- and the only
+    record at all of one that failed while nobody was watching the modal."""
+    _idle_state(monkeypatch)
+    logged = []
+    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "SAME"))
+    assert g.run_update(lambda: None, pip_fn=lambda: (0, ""),
+                        log_fn=lambda status, error="": logged.append((status, error))) is True
+    assert logged == [("done", "")]
+
+    logged.clear()
+    monkeypatch.setattr(g, "_git", lambda args, **k:
+                        (0, "HEAD") if args[:1] == ["rev-parse"] else (1, "fatal: refusing"))
+    assert g.run_update(lambda: None,
+                        log_fn=lambda status, error="": logged.append((status, error))) is False
+    assert logged[0][0] == "failed" and "fatal: refusing" in logged[0][1]
+
+
+def test_a_logging_failure_never_breaks_the_update(monkeypatch):
+    _idle_state(monkeypatch)
+    monkeypatch.setattr(g, "_git", lambda args, **k: (0, "SAME"))
+
+    def _boom(status, error=""):
+        raise OSError("disk full")
+    assert g.run_update(lambda: None, pip_fn=lambda: (0, ""), log_fn=_boom) is True
+
+
+def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatch):
+    """End to end through the route: the jobs.jsonl line the activity tracker serves."""
+    import moonglade_backup as core
+    _apply_ready(monkeypatch)
+    monkeypatch.setattr(g, "_git", lambda args, **k:
+                        (0, "master") if args[:2] == ["rev-parse", "--abbrev-ref"]
+                        else (0, "") if args[:1] == ["status"]
+                        else (0, "SAME"))
+    cli = _client(tmp_path)
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda code: None)
+    real_thread = g.threading.Thread
+
+    def _inline(target=None, args=(), kwargs=None, daemon=None):
+        return type("T", (), {"start": lambda self_: target(*args, **(kwargs or {}))})()
+    monkeypatch.setattr(g.threading, "Thread", _inline)
+    assert _apply(cli).status_code == 200
+    monkeypatch.setattr(g.threading, "Thread", real_thread)
+    rows = [j for j in core.read_jobs(tmp_path) if j.get("type") == "update"]
+    assert len(rows) == 1 and rows[0]["status"] == "done"
+    assert rows[0]["label"] == "Updated Moonglade"
+
+
+# ---- mutual exclusion, both directions ---------------------------------------
+
+def _mid_update(monkeypatch, phase="pulling"):
+    monkeypatch.setattr(g, "_update_state", {"phase": phase, "error": "", "at": 0.0})
+
+
+def test_restart_and_stop_refuse_while_an_update_runs(tmp_path, monkeypatch):
+    """The reverse of test_apply_refuses_while_a_job_runs: restarting mid-pull would land
+    the process on half-pulled code."""
+    monkeypatch.setattr(g, "_supervised", lambda: True)
+    codes = []
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda c: codes.append(c))
+    cli = _client(tmp_path)
+    _mid_update(monkeypatch, "deps")
+    for path in ("/api/server/restart", "/api/server/stop"):
+        r = cli.post(path)
+        assert r.status_code == 409, path
+        assert "update is in progress" in r.get_json()["error"], path
+    assert codes == []                              # nothing was scheduled
+    # ...and once the update is done, both work again
+    _mid_update(monkeypatch, "idle")
+    assert cli.post("/api/server/restart").get_json()["action"] == "restart"
+    assert codes == [42]
+
+
+def test_a_panel_job_refuses_to_start_while_an_update_runs(tmp_path, monkeypatch):
+    cli = _client(tmp_path)
+    _mid_update(monkeypatch, "restarting")
+    r = cli.post("/api/panel/run", json={"action": "sync"})
+    assert r.status_code == 409 and "update is in progress" in r.get_json()["error"]
+
+
+def test_the_scheduler_skips_a_tick_while_an_update_runs():
+    """The one exclusion with no route to drive: a timer that fires mid-update would start
+    a job against changing code with nobody watching."""
+    import inspect
+    src = inspect.getsource(g.create_app)
+    loop = src[src.index("def _scheduler_loop():"):]
+    loop = loop[:loop.index("def ", 40)]
+    assert "_update_busy()" in loop, "the scheduler tick must skip while an update runs"
+
+
+def test_the_updates_own_restart_is_not_blocked_by_its_own_phase():
+    """The exemption that keeps the whole thing from deadlocking on itself: the updater
+    calls the exit scheduler directly, never through the route it just locked out."""
+    import inspect
+    src = inspect.getsource(g.create_app)
+    body = src[src.index("def _restart():"):]
+    assert "_schedule_server_exit(42)" in body[:900]
+    assert "_update_busy" not in body[:900]
+
+
+# ---- redaction ---------------------------------------------------------------
+
+def test_the_status_route_redacts_host_paths(tmp_path, monkeypatch):
+    """git and pip name real paths, and this payload is readable by any logged-in device
+    on the LAN. The unredacted copy stays in the server's own log."""
+    _idle_state(monkeypatch)
+    cli = _client(tmp_path)
+    g._set_update_state("failed", "error: cannot open %s/thing" % str(tmp_path))
+    d = cli.get("/api/update/status").get_json()
+    assert str(tmp_path) not in d["error"] and "cannot open" in d["error"]

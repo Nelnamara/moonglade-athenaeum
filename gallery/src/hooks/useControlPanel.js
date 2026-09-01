@@ -350,17 +350,40 @@ export default function useControlPanel() {
       setUpdErr((d && d.error) || "Network error — try again.");
       return;
     }
+    // THE HANDOVER, on any of three signals -- because the server is about to stop
+    // answering and the status route cannot be what tells us it worked:
+    //   1. it says "restarting" (the clean case; the server sleeps ~2s there so a poll
+    //      at this cadence can actually see it);
+    //   2. the poll stops connecting AFTER we saw real work -- that IS the restart, seen
+    //      from the outside;
+    //   3. it answers "idle" after having been busy -- a server that came back so fast
+    //      its fresh process is already serving.
+    // Only (1) was handled before, and only (1) is a timing assumption, which is exactly
+    // why the happy path used to strand on "updating…".
+    let sawWork = false;
+    const handover = () => {
+      clearInterval(updPollRef.current);
+      updPollRef.current = null;
+      _watch(true, (msg) => { setUpdPhase("failed"); setUpdErr(msg); });
+    };
     updPollRef.current = setInterval(() => {
-      apiGet("/api/update/status", null, { cache: "no-store" }).then((st) => {
-        if (!st || st.error) return;                       // a blip: keep watching
-        if (st.phase === "failed") {
-          clearInterval(updPollRef.current);
-          setUpdPhase("failed"); setUpdErr(st.error || "The update failed.");
-        } else if (st.phase === "restarting") {
-          clearInterval(updPollRef.current);
-          _watch(true);                                    // ...and this reloads the tab
-        }
-      });
+      apiGet("/api/update/status", null, { cache: "no-store" })
+        .then((st) => {
+          if (!st || st.error) { if (sawWork) handover(); return; }
+          if (st.phase === "failed") {
+            clearInterval(updPollRef.current);
+            updPollRef.current = null;
+            setUpdPhase("failed"); setUpdErr(st.error || "The update failed.");
+          } else if (st.phase === "restarting") {
+            sawWork = true;
+            handover();
+          } else if (st.phase === "idle") {
+            if (sawWork) handover();
+          } else {
+            sawWork = true;                                // pulling | deps
+          }
+        })
+        .catch(() => { if (sawWork) handover(); });
     }, 1500);
   };
   const closeUpdate = () => {
@@ -396,7 +419,7 @@ export default function useControlPanel() {
   // Ported verbatim from classic's own _watchServer() (moonglade_gallery.py) -- the REAL
   // mechanism the Stop/Restart reconnect overlay has used for a long time. Restart: poll
   // until it goes down, THEN comes back -> reload. Stop: poll until it stops answering.
-  const _watch = (comeBack) => {
+  const _watch = (comeBack, onFail) => {
     let tries = 0, sawDown = false;
     pingRef.current = setInterval(() => {
       tries++;
@@ -414,7 +437,12 @@ export default function useControlPanel() {
       });
       if (tries > PING_TRIES_MAX) {
         clearInterval(pingRef.current);
-        if (comeBack) { setPowerErr("Still restarting… give it a moment, then refresh."); setPowerPhase("failed"); }
+        // `onFail` exists because the updater watches through this same loop while the
+        // POWER modal is not on screen: without it, a timed-out update reported into an
+        // invisible UI and the update modal sat on "updating…" telling the user nothing.
+        const msg = "Still restarting… give it a moment, then refresh.";
+        if (onFail) onFail(msg);
+        else if (comeBack) { setPowerErr(msg); setPowerPhase("failed"); }
         else setPowerPhase("done");
       }
     }, PING_MS);

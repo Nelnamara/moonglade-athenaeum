@@ -280,13 +280,21 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (power) return; // let the power modal's own logic decide
+      // The update modal is a TOP layer too. Escape closes it and stops there -- falling
+      // through would have shut the whole Panel out from under it. Mid-apply it is inert:
+      // the update is running whatever this key does, and closing the one surface that
+      // reports it would leave the user watching nothing.
+      if (updOpen) {
+        if (updPhase !== "applying") closeUpdate();
+        return;
+      }
       if (subOverlay) setSubOverlay(null);
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [power, subOverlay]);
+  }, [power, subOverlay, updOpen, updPhase]);
 
   if (summaryErr) {
     return (
