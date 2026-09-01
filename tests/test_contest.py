@@ -569,6 +569,33 @@ def test_artworks_route_soft_fails_as_200(tmp_path, pixai):
     assert d["entries"] == [] and d["error"]
 
 
+def test_winners_route_marks_the_owner_and_ranks_the_podium(tmp_path, pixai):
+    """The strip's whole job: who won, in order, and which row is the owner's. The
+    account id is compared server-side and never reaches the client."""
+    pixai.on("/contest/s1/winners", [
+        {"id": "w1", "authorId": "u-other", "authorName": "@someone", "mediaId": "M1",
+         "prizeAmount": 250000, "rank": 1},
+        {"id": "w2", "authorId": "u-test", "authorName": "me", "mediaId": "M2"},
+    ])
+    cli = _client(tmp_path)
+    d = cli.get("/api/contest/s1/winners").get_json()
+    assert d["winners"][0]["rank"] == 1 and d["winners"][0]["mine"] is False
+    assert d["winners"][0]["thumb"] == "https://api.pixai.art/v1/media/M1/thumbnail"
+    assert d["winners"][0]["prize_amount"] == 250000
+    # no rank field on the second row -> its position in the podium order stands in
+    assert d["winners"][1]["rank"] == 2 and d["winners"][1]["mine"] is True
+    assert "u-test" not in json.dumps(d)          # the account id stays server-side
+
+
+def test_winners_route_is_empty_while_running_and_soft_fails(tmp_path, pixai):
+    pixai.on("/contest/s1/winners", [])
+    cli = _client(tmp_path)
+    assert cli.get("/api/contest/s1/winners").get_json() == {"winners": []}
+    pixai.fail("/contest/s2/winners", core.PixAIError("REST GET /contest -> 503"))
+    r = cli.get("/api/contest/s2/winners")
+    assert r.status_code == 200 and r.get_json()["winners"] == [] and r.get_json()["error"]
+
+
 # ---- GET /api/contest/mine ---------------------------------------------------
 
 def _seed_entries(tmp_path, keys, wins=()):

@@ -10805,6 +10805,53 @@ def create_app(out_dir: Path):
                         "total_count": int(env.get("totalCount") or 0),
                         "total_page": int(env.get("totalPage") or 0)})
 
+    @app.route("/api/contest/<slug>/winners")
+    @tier(LOGIN)
+    def api_contest_winners(slug):
+        """The winners of one contest -> the detail view's winners strip.
+
+        Empty until the contest's result date: PixAI answers a running contest with an
+        empty array rather than an error, which is exactly the "not decided yet" the strip
+        needs to stay hidden on. The caller is expected to ask only once result_at has
+        passed; asking early is simply empty, never wrong.
+
+        `mine` marks the owner's own row (the design's YOU chip) by comparing authorId to
+        the authenticated account -- the id never reaches the client. Rank comes from
+        whichever rank-ish field upstream sends, whose name was never verified against a
+        real decided contest, falling back to the row's position in a list PixAI returns
+        in podium order. Soft-error-as-200, like every other read on this surface."""
+        try:
+            core, session = _gen_session()
+            rows = core.contest_winners(session, slug)
+            uid = str(core._client_of(session).user_id or "")
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
+        winners = []
+        for i, w in enumerate(rows or []):
+            rank = 0
+            for key in ("rank", "place", "position"):
+                try:
+                    rank = int(w.get(key) or 0)
+                except (TypeError, ValueError):
+                    rank = 0
+                if rank:
+                    break
+            mid = str(w.get("mediaId") or "")
+            aid = str(w.get("authorId") or "")
+            try:
+                prize = int(w.get("prizeAmount") or 0)
+            except (TypeError, ValueError):
+                prize = 0
+            winners.append({
+                "id": str(w.get("id") or ""),
+                "rank": rank or (i + 1),
+                "author_name": str(w.get("authorName") or ""),
+                "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+                "prize_amount": prize,
+                "mine": bool(uid and aid == uid),
+            })
+        return jsonify({"winners": winners})
+
     @app.route("/api/contest/mine")
     @tier(LOGIN)
     def api_contest_mine():
