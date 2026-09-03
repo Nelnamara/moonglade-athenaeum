@@ -674,3 +674,115 @@ def test_metrics_are_the_set_cardinalities(tmp_path):
     m = g.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 2)
     assert isinstance(m["contest_entries"], int) and isinstance(m["contest_wins"], int)
+
+
+# ---- publish-and-enter (the 2026-09-01 live-walk bug) ------------------------
+# Attaching `challenge` to the publish mutation writes artwork METADATA -- the contest
+# back-link listArtworks returns on node.extra -- and does NOT enter anything. The entry
+# is a separate REST call. Publishing with a contest picked therefore produced no entry
+# at all, while the UI said "Free — entered with publish". These pin the second call.
+
+def _enter_stubs(monkeypatch, board=None, fail=None, success=True):
+    """The board the id->slug translation reads, and a recording contest_enter."""
+    calls = []
+    rows = [{"id": "c7", "slug": "ice-pop", "title": "Ice Pop"}] if board is None else board
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: rows)
+
+    def _enter(session, slug, artwork_id):
+        calls.append((slug, artwork_id))
+        if fail:
+            raise fail
+        return {"success": success}
+    monkeypatch.setattr(core, "contest_enter", _enter)
+    return calls
+
+
+def test_publish_with_a_challenge_actually_enters_the_contest(tmp_path, monkeypatch):
+    """The bug, fixed: the client sends the contest ID, contest_enter needs the SLUG, and
+    the entry uses the artwork id the publish just returned."""
+    seen = _kick_recorder(monkeypatch)
+    calls = _enter_stubs(monkeypatch)
+    cli = _publish_client(tmp_path, monkeypatch, artwork_id="newart1")
+    d = _publish(cli, challenge="c7").get_json()
+    assert d["published"] is True and d["entered"] is True
+    assert "entry_error" not in d
+    assert calls == [("ice-pop", "newart1")], "id -> slug, with the new artwork id"
+    assert seen["fired"].wait(5)          # ...and the sweep still verifies it from PixAI
+
+
+def test_publish_without_a_challenge_never_enters(tmp_path, monkeypatch):
+    calls = _enter_stubs(monkeypatch)
+    cli = _publish_client(tmp_path, monkeypatch)
+    d = _publish(cli).get_json()
+    assert d["published"] is True and calls == []
+    assert "entered" not in d and "entry_error" not in d
+
+
+def test_an_unresolvable_contest_id_is_reported_not_a_crash(tmp_path, monkeypatch):
+    """A contest id that is not on the board cannot be entered -- and the publish already
+    happened, so this is a partial success, not a 500."""
+    seen = _kick_recorder(monkeypatch)
+    calls = _enter_stubs(monkeypatch, board=[{"id": "other", "slug": "x"}])
+    cli = _publish_client(tmp_path, monkeypatch)
+    r = _publish(cli, challenge="c7")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["published"] is True and calls == []
+    assert "couldn't find that contest" in d["entry_error"]
+    assert seen["fired"].wait(5)
+
+
+def test_a_board_read_failure_is_reported_not_a_crash(tmp_path, monkeypatch):
+    seen = _kick_recorder(monkeypatch)
+    _enter_stubs(monkeypatch)
+    monkeypatch.setattr(core, "list_contests",
+                        lambda s, **k: (_ for _ in ()).throw(core.PixAIError("board down")))
+    cli = _publish_client(tmp_path, monkeypatch)
+    d = _publish(cli, challenge="c7").get_json()
+    assert d["published"] is True and "board down" in d["entry_error"]
+    assert seen["fired"].wait(5)
+
+
+def test_a_failed_entry_still_reports_the_publish_and_kicks_the_sweep(tmp_path, monkeypatch):
+    """Honest partial success. The publish is irreversible and already done, so an entry
+    failure can never turn this into a 502 -- it comes back alongside published:true."""
+    seen = _kick_recorder(monkeypatch)
+    _enter_stubs(monkeypatch, fail=core.PixAIError("NOT_ELIGIBLE"))
+    cli = _publish_client(tmp_path, monkeypatch)
+    r = _publish(cli, challenge="c7")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["published"] is True and "entered" not in d
+    assert "NOT_ELIGIBLE" in d["entry_error"]
+    assert seen["fired"].wait(5), "the sweep still runs -- PixAI is the authority"
+
+
+def test_a_success_false_response_is_treated_as_a_refusal(tmp_path, monkeypatch):
+    """A 2xx carrying success:false is a refusal wearing a success code -- the same rule
+    the direct-entry route applies."""
+    _kick_recorder(monkeypatch)
+    _enter_stubs(monkeypatch, success=False)
+    cli = _publish_client(tmp_path, monkeypatch)
+    d = _publish(cli, challenge="c7").get_json()
+    assert d["published"] is True and "entered" not in d
+    assert "refused the entry" in d["entry_error"]
+
+
+def test_a_publish_that_returned_no_artwork_id_cannot_enter(tmp_path, monkeypatch):
+    """PixAI answered the mutation with no id: there is nothing to enter, and saying so
+    beats calling the entry endpoint with an empty string."""
+    _kick_recorder(monkeypatch)
+    calls = _enter_stubs(monkeypatch)
+    cli = _publish_client(tmp_path, monkeypatch, artwork_id="")
+    d = _publish(cli, challenge="c7").get_json()
+    assert d["published"] is True and calls == []
+    assert "no artwork id" in d["entry_error"]
+
+
+def test_the_core_docstring_records_what_challenge_actually_does():
+    """The belief that cost the owner a live walk: that extra.challenge enters a contest.
+    It is metadata. Pinned so the next reader of publish_artwork_from_task is told."""
+    import inspect
+    doc = inspect.getdoc(core.publish_artwork_from_task) or ""
+    assert "DOES NOT ENTER A CONTEST" in doc
+    assert "contest_enter" in doc

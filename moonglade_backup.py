@@ -10217,7 +10217,13 @@ def publish_artwork_from_task(session, task_id, media_index=0, title="", descrip
     server already created the artwork would otherwise publish a duplicate. Costs no
     credits. Input shape mirrors the site's own publish form exactly (title/description/
     visibility/isPrivate/hidePrompts/tags=[]/tackIds/mediaIndex, challenge inside extra).
-    Returns the created artwork dict; raises PixAIError on failure."""
+    Returns the created artwork dict; raises PixAIError on failure.
+
+    `challenge` DOES NOT ENTER A CONTEST -- verified live 2026-09-01, after a publish made
+    with one attached produced no entry. It is artwork METADATA: the contest back-link that
+    listArtworks hands back on node.extra (private/API_OPERATIONS.md). Entering is a
+    separate REST call, `contest_enter` -> POST /v2/contest/{slug}/artwork, and a caller
+    that wants publish-and-enter has to make both (see api_myart_publish, which does)."""
     _check_read_only("publish an artwork to your PixAI account")
     vis = "PRIVATE" if private else "PUBLIC"
     ex = dict(extra or {})

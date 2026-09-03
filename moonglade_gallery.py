@@ -11210,18 +11210,57 @@ def create_app(out_dir: Path):
             if action == "publish":
                 changed["artwork_id"] = result.get("artwork_id") or ""
                 changed["published"] = not private
-                # Publishing WITH a challenge attached IS a contest entry -- the one entry
-                # path that already shipped. It does NOT write the key itself: the
-                # challenge value is the CLIENT's claim, unvalidated, and the set it would
-                # land in is grow-only, so a bogus or ended contest id would inflate the
-                # ladder permanently with nothing able to correct it. Instead it kicks the
-                # detection sweep, which reads the truth back from PixAI -- a real entry
-                # made seconds ago is there to be found, an imaginary one is not.
+                # PUBLISH-AND-ENTER. Attaching `challenge` to the publish mutation does
+                # NOT enter a contest -- found live 2026-09-01 (owner: "publish AND enter
+                # from the publish NAV did not work; I published and then did the entry
+                # successfully"). extra.challenge is artwork METADATA, the back-link
+                # listArtworks returns on node.extra; the entry itself is a separate REST
+                # call (POST /v2/contest/{slug}/artwork), which is exactly what the
+                # working direct-entry path does. This publish path never made it, so the
+                # contest row's "entering at publish is free" was a promise about
+                # something that never happened.
                 #
-                # Off-thread and outside the try above, on purpose: the publish already
-                # succeeded and is irreversible, so nothing the sweep does may delay this
-                # response or turn it into a 502.
-                if body.get("challenge"):
+                # So make it happen: the artwork exists now and has an id, which is the
+                # one thing the entry call needs. The client sends the contest ID (the
+                # select's own value) and contest_enter needs the SLUG, so the board is
+                # read to translate -- and that read doubles as validation, since an id
+                # that is not on the board cannot be entered anyway.
+                #
+                # HONEST PARTIAL SUCCESS: the publish already happened and is
+                # irreversible, so an entry failure can never turn this into a 502. It
+                # comes back as {published: true, entry_error: ...} and the client says
+                # both halves. Single attempt -- contest_enter is single-shot by
+                # construction and READ_ONLY-guarded; a retry here would risk a second
+                # entry for one click.
+                challenge = str(body.get("challenge") or "")
+                new_art_id = str(result.get("artwork_id") or "")
+                if challenge and new_art_id:
+                    try:
+                        slug = next((str(c.get("slug") or "")
+                                     for c in (core.list_contests(session, active_only=False,
+                                                                  max_pages=1) or [])
+                                     if isinstance(c, dict)
+                                     and str(c.get("id") or "") == challenge), "")
+                        if not slug:
+                            result["entry_error"] = ("couldn't find that contest on the "
+                                                     "board — the artwork was published, "
+                                                     "but not entered")
+                        else:
+                            resp = core.contest_enter(session, slug, new_art_id)
+                            if isinstance(resp, dict) and not resp.get("success", True):
+                                result["entry_error"] = "the contest refused the entry"
+                            else:
+                                result["entered"] = True
+                    except Exception as e:                    # noqa: BLE001
+                        result["entry_error"] = _redact_host_paths(str(e))[:200]
+                elif challenge:
+                    result["entry_error"] = ("the publish returned no artwork id, so the "
+                                             "contest entry could not be made")
+                # Then the detection sweep, which reads the truth back from PixAI: the
+                # ladder counts what PixAI says happened, not what this route believes.
+                # Off-thread and outside the try above, so nothing it does can delay this
+                # response or turn an irreversible publish into a failure.
+                if challenge:
                     try:
                         threading.Thread(target=_contest_sync_kick,
                                          args=(out_dir,), kwargs={"force": True},

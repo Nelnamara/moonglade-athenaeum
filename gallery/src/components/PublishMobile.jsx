@@ -144,6 +144,15 @@ export default function PublishMobile({ mediaId, onClose, onPublished }) {
         <div className="pubm-donebox">
           ✓ Published{done.unmatched_tags && done.unmatched_tags.length > 0
             ? " — these tags didn't exist on PixAI and weren't attached: " + done.unmatched_tags.join(", ") : "."}
+          {done.entered ? " Entered in the contest." : ""}
+          {/* Same partial-success honesty as desktop -- the publish landed, the entry is
+              its own call and can fail on its own. */}
+          {done.entry_error ? (
+            <div className="pubm-doneerr">
+              ⚠ The contest entry failed: {done.entry_error}. You can still enter it from
+              Contests.
+            </div>
+          ) : null}
         </div>
       ) : (
         <>

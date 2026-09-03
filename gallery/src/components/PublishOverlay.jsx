@@ -360,12 +360,25 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
               {err && <div className="mgpub-note err">⚠ {err}</div>}
 
               {done ? (
-                <div className="mgpub-note ok">
-                  ✓ Published. It's on your PixAI profile now
-                  {done.unmatched_tags && done.unmatched_tags.length > 0
-                    ? " — these tags didn't exist on PixAI and weren't attached: " + done.unmatched_tags.join(", ")
-                    : "."}
-                </div>
+                <>
+                  <div className="mgpub-note ok">
+                    ✓ Published. It's on your PixAI profile now
+                    {done.unmatched_tags && done.unmatched_tags.length > 0
+                      ? " — these tags didn't exist on PixAI and weren't attached: " + done.unmatched_tags.join(", ")
+                      : "."}
+                    {done.entered ? " Entered in the contest." : ""}
+                  </div>
+                  {/* Honest partial success: the publish is done and irreversible, and the
+                      contest entry is a second call that can fail on its own (an ended
+                      contest, art PixAI judges ineligible). Saying only "Published" there
+                      would be the same quiet lie this whole fix exists to end. */}
+                  {done.entry_error ? (
+                    <div className="mgpub-note err">
+                      ⚠ Published — but the contest entry failed: {done.entry_error}. You can
+                      still enter it from the Contests window.
+                    </div>
+                  ) : null}
+                </>
               ) : ask ? (
                 <div className="mgpub-confirm">
                   <div className="t">Publish this to your PixAI profile?</div>
