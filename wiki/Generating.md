@@ -466,7 +466,14 @@ python moonglade_backup.py --contests --all-contests  # include ended ones too
 ```
 
 Lists PixAI's contests — name, dates, entry tag — so you can aim a generation at one.
-The web gallery has the same list under **Contests** in the header. Read-only either way.
+The CLI command is read-only: it looks, it never enters.
+
+The web gallery goes further. Under **Contests** in the header you can open a contest and
+**enter** a published piece in it — also from **My Art**, or by picking a contest while you
+publish. Entering is an account write, not a browse: the artwork goes into a public contest
+under your name, PixAI offers no way to withdraw it, and every entry path asks you to
+confirm first. `READ_ONLY` in `config.json` refuses all of them — see
+[Trust & Safety](Trust-and-Safety).
 
 ---
 

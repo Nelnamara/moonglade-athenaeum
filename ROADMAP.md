@@ -105,9 +105,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   ("about N minutes before this starts"). The dock's running tiles ship the honest treatment in the
   meantime: mascot + indeterminate shimmer, no percentage.
 
-- **Contest workbench (beyond Shortlist)**
-  The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
-  management — is still just wanted, not scoped.
 
 ---
 

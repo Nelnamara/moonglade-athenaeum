@@ -80,12 +80,21 @@ def test_ladders_list_matches_every_ladder_achievements_track():
     carousel for that ladder)."""
     out = g.compute_achievements({}, [])
     ladder_ids = {t["id"] for t in out["ladders"]}
-    # self-computed: the payload's ladder list is exactly the sealed ladder_tracks, and
-    # every ladder achievement's track resolves to one of them with no orphan track (no
-    # hardcoded track count -- the roster is the source of truth).
-    assert ladder_ids == {t["id"] for t in g._ladder_tracks()}
+    # The payload's ladder list used to be compared to _ladder_tracks() -- which is the
+    # thing it is copied FROM, so it could never fail and asserted nothing. What actually
+    # matters is that the two SIDES agree: every track names achievements that exist, and
+    # every ladder achievement names a track that exists. Either half breaking is a
+    # silently empty carousel.
+    roster_ids = {a["id"] for a in g._roster()}
+    for t in g._ladder_tracks():
+        tiers = [a for a in g._roster()
+                 if a.get("bucket") == "ladder" and a.get("track") == t["id"]]
+        assert tiers, "ladder track %r has no achievements" % t["id"]
+        for a in tiers:
+            assert a["id"] in roster_ids
     achievement_tracks = {a["track"] for a in out["achievements"] if a["bucket"] == "ladder"}
     assert achievement_tracks == ladder_ids
+    assert ladder_ids, "the roster really does define ladder tracks"
 
 
 @needs_donor

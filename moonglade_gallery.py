@@ -1782,7 +1782,7 @@ def fold_series_units(rows_min, by_task):
 # closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
 # inline here, readable in a public `git clone`; they now live SEALED in
 # moonglade.dat's "achievements" payload (a dict), built from the private donor
-# ../moonglade-internal/achievements_sealed_donor.json by tools/build_container.py.
+# ../moonglade-internal/achievements_folio_donor.json by tools/build_container.py.
 # Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
 # A container-less install degrades to the free-skins-only fallback (empty Folio,
 # like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
@@ -3118,8 +3118,14 @@ _ACH_METRICS_LOCK = threading.Lock()
 
 
 def achievement_metrics(db_path, use_cache=True):
-    """The metric bundle every achievement threshold is measured against. Read-only
-    over the local catalog -- no network, no spend. Fails soft.
+    """The metric bundle every achievement threshold is measured against. Read-only over
+    the local catalog -- no network, no spend. Fails soft.
+
+    NOT the "cheap COUNTs" this docstring used to claim, which is why the memo below
+    exists: most of it is indexed COUNTs, but four passes read every matching ROW and
+    process it in Python -- `rated`, the LoRA CSV split, the palindrome seed scan, and the
+    prompt word counter. On a real library that is the expensive part of opening the Folio
+    or the Control Panel, and it ran on every /api/achievements call before 2026-09-03.
 
     CACHED (see _ACH_METRICS_CACHE): recomputed whenever the catalog's cheap key
     changes, and served from the memo when it has not. `use_cache=False` forces a real

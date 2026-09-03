@@ -1604,7 +1604,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
     Consolas,
     monospace;
   font-size: 11px;
-  color: #d4af37;
+  color: var(--gold);
   background: rgba(10, 8, 24, .85);
   border: 1px solid rgba(212, 175, 55, .4);
   border-radius: 999px;

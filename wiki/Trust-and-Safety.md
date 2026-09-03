@@ -145,13 +145,21 @@ for handing the tool to someone else — add this to your `config.json`:
 ```
 
 With it set, every path that can actually mutate your account — submitting a generation
-(image, video, reference video, or an edit), submitting a hand/face fix, deleting a task, or
-claiming a reward — refuses itself with a clear error, **regardless of `--confirm`,
+(image, video, reference video, or an edit), submitting a hand/face fix, deleting a task,
+claiming a reward, publishing an artwork, or **entering a contest** — refuses itself with a
+clear error, **regardless of `--confirm`,
 `--apply`, or `--yes`**, whether you triggered it from the CLI or the web app. Those flags
 exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you don't want to
 trust yet, so it overrides them rather than just changing their default. Browsing, backing up,
 and searching your existing catalog all keep working normally — only the account-mutating
 paths refuse.
+
+Contests deserve a word of their own, because they used to be read-only and are not any
+more. Browsing the contest board still changes nothing. But **entering** one is a real,
+public, account-changing act — your artwork goes into a public contest under your name, and
+PixAI offers no way to withdraw it — so it is covered by this flag like every other write,
+whether you enter from a contest's page, from My Art, or by picking a contest while you
+publish.
 
 `READ_ONLY` does **not** cover purely local operations (`--organize`, `--dedup`) — those never
 touch the network in the first place, so there's no account to protect. They're safe in a
