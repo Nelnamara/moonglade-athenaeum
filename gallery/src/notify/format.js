@@ -41,6 +41,9 @@ export function fmtDuration(s) {
 export const KIND_LABEL = {
   cli: "Terminal", panel: "Control Panel", generate: "Generate",
   delete: "Delete", import: "Import",
+  // A claimed daily reward. Without an entry here the fallback renders the raw enum --
+  // the exact "Cli" non-word this table exists to prevent.
+  claim: "Rewards",
 };
 export function kindLabel(t) { return KIND_LABEL[t] || t || "Job"; }
 

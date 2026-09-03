@@ -3556,6 +3556,10 @@ ${"=".repeat(48)}
     rows.forEach((j) => {
       const st = j.status || "running";
       const prev = last[j.job_id];
+      if (j.type === "claim") {
+        last[j.job_id] = st;
+        return;
+      }
       if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
         if (st === "done") {
           const mid = (j.media_ids || [])[0] || "";
@@ -4175,7 +4179,10 @@ ${"=".repeat(48)}
     panel: "Control Panel",
     generate: "Generate",
     delete: "Delete",
-    import: "Import"
+    import: "Import",
+    // A claimed daily reward. Without an entry here the fallback renders the raw enum --
+    // the exact "Cli" non-word this table exists to prevent.
+    claim: "Rewards"
   };
   function kindLabel(t) {
     return KIND_LABEL[t] || t || "Job";

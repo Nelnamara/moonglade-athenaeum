@@ -1321,3 +1321,87 @@ def test_task_status_still_treats_a_pixai_blip_as_non_terminal(tmp_path, monkeyp
     monkeypatch.setattr(core, "generation_status", blip)
     d = _status_client(tmp_path).get("/api/task-status?task_id=T2").get_json()
     assert d["phase"] == "running", "a transient blip must stay non-terminal: %s" % d
+
+
+# ---------------------------------------------------------------------------
+# The claim's own tracker line (owner ask, 2026-08-31). The activity tray renders
+# SERVER truth -- /api/jobs off jobs.jsonl -- so a claim's line is written by the
+# claim route itself, at the one seam both claim triggers (the header pill and the
+# mascot popup) funnel through.
+# ---------------------------------------------------------------------------
+
+def _claim_stubs(monkeypatch, rewards):
+    """A claimable account with no network: the route's session, its reward list, and a
+    claim call that succeeds. Nothing here reaches PixAI."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_claims", lambda s: rewards)
+    monkeypatch.setattr(core, "claim_reward", lambda s, cid: {"id": cid})
+
+
+def _claim_rows(cli):
+    return [j for j in cli.get("/api/jobs").get_json()["jobs"] if j.get("type") == "claim"]
+
+
+def test_a_successful_claim_writes_one_tracker_line(tmp_path, monkeypatch):
+    _claim_stubs(monkeypatch, [
+        {"id": "pixai-daily-credits", "amount": 30000, "canClaim": True},
+        {"id": "agent-daily-stamina", "amount": 20, "canClaim": True}])
+    cli = _authed_client(tmp_path)
+    d = cli.post("/api/claim").get_json()
+    assert (d["claimed"], d["credits"]) == (2, 30000)
+    rows = _claim_rows(cli)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    # Born terminal: claiming is instantaneous, so the row never passes through running.
+    assert row["status"] == "done"
+    assert row["label"] == "+30,000 credits claimed"
+    assert row["job_id"].startswith("claim-")
+    assert row["ts"] > 0
+    # It carries no spend/media fields -- "no field, no row" is the tracker's own rule,
+    # and a claim is a gain, so a COST row would misreport it.
+    assert "paid_credit" not in row and not row.get("media_ids")
+
+
+def test_a_second_claim_gets_its_own_line(tmp_path, monkeypatch):
+    """Each claim keeps its own line rather than overwriting the last -- the log collapses
+    by job_id, so a fixed id would have made the tracker show only the most recent claim."""
+    _claim_stubs(monkeypatch, [{"id": "pixai-daily-credits", "amount": 100, "canClaim": True}])
+    cli = _authed_client(tmp_path)
+    cli.post("/api/claim")
+    cli.post("/api/claim")
+    rows = _claim_rows(cli)
+    assert len(rows) == 2
+    assert len({r["job_id"] for r in rows}) == 2
+
+
+def test_a_claim_that_claims_nothing_writes_no_line(tmp_path, monkeypatch):
+    """Nothing happened, so nothing is reported. The tracker is a record of events, not of
+    button presses."""
+    _claim_stubs(monkeypatch, [{"id": "pixai-daily-credits", "amount": 30000, "canClaim": False}])
+    cli = _authed_client(tmp_path)
+    assert cli.post("/api/claim").get_json()["claimed"] == 0
+    assert _claim_rows(cli) == []
+
+
+def test_a_failed_claim_writes_no_line(tmp_path, monkeypatch):
+    """An upstream failure answers with its error and leaves no trail of a claim that never
+    landed."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_claims",
+                        lambda s: (_ for _ in ()).throw(core.PixAIError("claims are down")))
+    cli = _authed_client(tmp_path)
+    assert cli.post("/api/claim").get_json()["error"]
+    assert _claim_rows(cli) == []
+
+
+def test_claim_line_grammar(tmp_path):
+    """The wording, in one place. Credits lead when there are any -- grouped, like every
+    other figure in the tray -- and a stamina-only claim counts rewards instead of
+    announcing "+0 credits", which would read as a bug rather than a fact."""
+    from moonglade_gallery import claim_job_label
+    assert claim_job_label(1, 30000) == "+30,000 credits claimed"
+    assert claim_job_label(2, 500) == "+500 credits claimed"
+    assert claim_job_label(1, 0) == "1 reward claimed"
+    assert claim_job_label(3, 0) == "3 rewards claimed"
+    assert claim_job_label(1, None) == "1 reward claimed"      # junk degrades, never raises
+    assert claim_job_label(0, "nonsense") == "1 reward claimed"

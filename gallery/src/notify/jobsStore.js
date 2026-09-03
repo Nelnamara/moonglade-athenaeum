@@ -63,6 +63,13 @@ function toastTransitions(rows) {
   rows.forEach((j) => {
     const st = j.status || "running";
     const prev = last[j.job_id];
+    // A claim row is BORN terminal (the server writes it "done" -- claiming is
+    // instantaneous), so the transition rule below would read its first appearance as a
+    // just-finished job and toast "— done / Added to your gallery." Wrong on both counts:
+    // nothing was added to the gallery, and the claim already toasted its real "+N
+    // credits" at the moment of the click, seconds before this poll. The tracker LINE is
+    // what this feature adds; the toast was never missing.
+    if (j.type === "claim") { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";

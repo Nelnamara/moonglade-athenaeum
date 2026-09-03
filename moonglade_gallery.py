@@ -3170,6 +3170,24 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
             "earned_points": earned_points, "possible_points": possible_points}
 
 
+def claim_job_label(claimed, credits):
+    """The activity-tracker line for a successful claim.
+
+    Credits are the headline when there are any -- "+1,200 credits claimed" -- because
+    that is the number the owner came to see, grouped the same way every other figure in
+    the tracker is. A claim can also be worth zero credits (a stamina-only reward is
+    still a real claim), and "+0 credits claimed" would read as a bug rather than a
+    fact, so that case counts the rewards instead."""
+    try:
+        credits = int(credits or 0)
+    except (TypeError, ValueError):
+        credits = 0
+    if credits > 0:
+        return "+{:,} credits claimed".format(credits)
+    n = max(1, int(claimed or 1))
+    return "{} reward{} claimed".format(n, "" if n == 1 else "s")
+
+
 def _ach_state_path(out_dir):
     return Path(out_dir) / "achievements.json"
 
@@ -10302,7 +10320,15 @@ def create_app(out_dir: Path):
     def api_claim():
         """Claim ready daily rewards (free credits/stamina to the owner's OWN account -- no
         money moves). Login required; the header click IS the confirmation. One bad claim
-        doesn't abort the rest. Returns {claimed, credits}."""
+        doesn't abort the rest. Returns {claimed, credits}.
+
+        A successful claim also writes its own ACTIVITY TRACKER line (jobs.jsonl, which is
+        what /api/jobs serves the tray). Written here rather than in the client because
+        the tracker renders server truth -- a line added client-side would vanish on the
+        next poll -- and because this route is the single seam both claim triggers funnel
+        through: the header pill and the mascot popup share one `claim` in
+        useClaimModal.js, which posts here. One hook, both paths, plus anything that
+        claims later."""
         try:
             core, session = _gen_session()
             claimed, credits = 0, 0
@@ -10318,6 +10344,12 @@ def create_app(out_dir: Path):
                     pass
             if claimed:
                 telem_bump("claims", claimed, out_dir=out_dir)   # Claimant
+                # Terminal the moment it is written: a claim is instantaneous, so the row
+                # is born "done" rather than passing through running. Its own id keeps it
+                # out of the orphan sweep (which only chases numeric PixAI task ids) and
+                # lets each claim keep its own line instead of overwriting the last one.
+                _log_job("claim-" + secrets.token_hex(6), status="done", type="claim",
+                         label=claim_job_label(claimed, credits))
             return jsonify({"claimed": claimed, "credits": credits})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
