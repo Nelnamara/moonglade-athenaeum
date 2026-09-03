@@ -554,3 +554,35 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
 /* The 168px preview hosts the real 96px header mark now, so it centres rather than
    scaling a 56px chrome copy up. */
 .mgcp-markprevbox > .mgx-mark { margin: 0 auto; }
+
+/* The auto-updater (2026-09-01). Variant A: the existing footer version stamp WAKES UP
+   when a newer release is out -- gold, a leading dot, and a click that opens the confirm.
+   Up to date it renders the plain stamp exactly as before, so the quiet state is
+   byte-identical to what shipped. */
+button.mgcp-verup { font: inherit; font-size: inherit; padding: 0; border: 0; background: none;
+  color: var(--gold); cursor: pointer; text-align: left; display: inline-flex;
+  align-items: baseline; gap: 5px; }
+button.mgcp-verup .dot { font-size: 8px; line-height: 1; }
+button.mgcp-verup:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* The confirm modal reuses the power modal's card/scrim/host verbatim -- same z-rung, same
+   slab motion; only its innards are new. */
+.mgcp-updver { display: flex; align-items: baseline; gap: 9px; padding: 10px 0 2px;
+  font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.mgcp-updver .cur { color: var(--overlay0); font-size: 13px; }
+.mgcp-updver .arr { color: var(--overlay0); font-size: 12px; }
+.mgcp-updver .new { color: var(--gold); font-size: 16px; font-weight: 800; }
+.mgcp-updname { font-size: 13px; font-weight: 600; color: var(--text); padding-bottom: 2px; }
+.mgcp-updnotes { font-size: 11.5px; color: var(--lavender); text-decoration: underline;
+  text-underline-offset: 2px; }
+.mgcp-updwhat { margin: 12px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column;
+  gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--subtext); }
+.mgcp-upderr { margin: 12px 0 0; padding: 9px 11px; border-radius: 9px; max-height: 190px;
+  overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.5;
+  color: var(--red, #f38ba8); background: rgba(243,139,168,.08);
+  border: 1px solid rgba(243,139,168,.35); }
+.mgcp-updacts { display: flex; gap: 9px; justify-content: flex-end; padding-top: 16px; }
+button.mgcp-updgo { padding: 9px 18px; border-radius: 10px; font-size: 12.5px; font-weight: 800;
+  cursor: pointer; font-family: inherit; color: #241a05; border: 1px solid rgba(212,175,55,.7);
+  background: linear-gradient(180deg, #e2c04a, #a8871f); }
+button.mgcp-updgo:disabled { opacity: .6; cursor: not-allowed; }

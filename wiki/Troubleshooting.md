@@ -11,8 +11,9 @@ expect.
 A built-in identifier went stale after a PixAI frontend update. These ship with the
 app and are shared by everyone, so when one breaks it breaks for all users.
 
-- **First, update to the latest release** (`git pull`) — refreshed defaults usually land
-  there quickly.
+- **First, update to the latest release** — open the **Control Panel** and click the gold
+  version stamp in its sidebar footer if one is offered (`git pull` by hand otherwise).
+  Refreshed defaults usually land there quickly.
 - If it's still broken on the latest version, **open an issue** so the default can be
   updated for everyone.
 
@@ -73,9 +74,47 @@ server the paragraph appears on the console the first time and not again, so rea
 there rather than waiting for it to repeat.
 
 ## The gallery shows old behavior after I updated
-After `git pull`, **restart the gallery server** so it loads the new code — Stop/Restart
-from the browser, or relaunch **`Serve Gallery.pyw`**. Then **hard-refresh the browser
-(Ctrl+F5)** to clear the cached front-end (or the service worker).
+The Control Panel's one-click update restarts the server and reloads the tab for you. If you
+updated **by hand** with `git pull`, **restart the gallery server** so it loads the new code
+— Stop/Restart from the browser, or relaunch **`Serve Gallery.pyw`**. Either way, if a page
+still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
+the service worker).
+
+## The version stamp never turns gold
+That is the quiet, normal state: either you are already on the newest release, or the check
+could not reach GitHub (no network, a firewall, or GitHub's hourly limit for anonymous
+callers). The check is deliberately silent about its own failures — an update notice is not
+worth an error banner on a Panel you opened to do something else. `git pull` by hand always
+works, and the Panel tries again the next time you open it.
+
+## "Update now" is refused
+The modal names the reason. The usual ones:
+
+- **The server wasn't started through `Serve Gallery.pyw`.** Only the launcher relaunches the
+  app after an update — without it the server would simply stop.
+- **A Control Panel job is still running.** Let it finish or cancel it; changing the code
+  under a running job is how you get half-old, half-new behavior.
+- **The checkout is on a branch other than `master`.** Updating somebody's work-in-progress
+  branch is out of scope on purpose.
+- **The checkout has uncommitted local changes.** The update would overwrite them, so it
+  refuses and names the files in the way.
+- **`READ_ONLY` is set in `config.json`.** That flag means "don't change my install", and an
+  update is the biggest change there is.
+
+Each of those is fixable, and `git pull` by hand stays available regardless.
+
+## An update failed part-way
+The modal keeps git's or pip's own words, which is usually the whole diagnosis. Two shapes
+are worth knowing:
+
+- **The pull failed.** Nothing changed — the update pulls fast-forward-only, so it either
+  applies cleanly or refuses.
+- **The dependency install failed.** The update **rolls itself back** to the version you were
+  on, so you are left on a working install rather than new code with old dependencies. Fix
+  whatever pip reported (usually a network blip) and press Update again.
+
+Either way the attempt is also recorded in the activity tracker, so it is still there after
+the restart or the next time you open the app.
 
 ## Videos won't show a poster
 Posters need `ffmpeg` on your PATH. Without it, videos still back up and play; they

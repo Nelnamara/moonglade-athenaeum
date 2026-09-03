@@ -250,6 +250,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
+    update, updOpen, setUpdOpen, updPhase, updErr, applyUpdate, closeUpdate,
   } = useControlPanel();
   // Console heart: pipelines (the run buttons) vs ledger (the run history) --
   // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented
@@ -280,13 +281,21 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       if (power) return; // let the power modal's own logic decide
+      // The update modal is a TOP layer too. Escape closes it and stops there -- falling
+      // through would have shut the whole Panel out from under it. Mid-apply it is inert:
+      // the update is running whatever this key does, and closing the one surface that
+      // reports it would leave the user watching nothing.
+      if (updOpen) {
+        if (updPhase !== "applying") closeUpdate();
+        return;
+      }
       if (subOverlay) setSubOverlay(null);
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [power, subOverlay]);
+  }, [power, subOverlay, updOpen, updPhase]);
 
   if (summaryErr) {
     return (
@@ -419,8 +428,20 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                   real content for this slot -- it used to occupy the HEADER's credits slot
                   instead (see the credits fix above); this is where it actually belongs.
                   out_dir (local-only) stays as a real, useful addition alongside it. */}
+              {/* The version stamp WAKES UP when a newer release exists (owner ruling
+                  2026-09-01, Variant A): no new chrome, the stamp that was always here
+                  just becomes the notice. Up to date, it is byte-identical to what it
+                  has always rendered -- the whole point of the variant. */}
               <div className="mgcp-ver">
-                {boot?.build_stamp || "—"}
+                {update?.behind ? (
+                  <button type="button" className="mgcp-verup"
+                    title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
+                    onClick={() => setUpdOpen(true)}>
+                    <span className="dot" aria-hidden="true">●</span>
+                    {updPhase === "applying" ? "updating…"
+                      : update.latest + " available — view"}
+                  </button>
+                ) : (boot?.build_stamp || "—")}
                 {isLocal && summary.out_dir ? <><br /><span title={summary.out_dir}>{summary.out_dir}</span></> : null}
               </div>
             </div>
@@ -820,6 +841,10 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
       )}
       {power && (
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
+      )}
+      {updOpen && update && (
+        <UpdateModal update={update} phase={updPhase} error={updErr}
+          onApply={applyUpdate} onClose={closeUpdate} />
       )}
     </>
   );
@@ -1702,6 +1727,49 @@ export function TrashSubOverlay({ isLocal, onClose }) {
               <button type="button" className="mgcp-chip" onClick={cancelConfirm}>Cancel</button>
             </div>
           )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* The update confirm -- the one click that is never silent. Current -> new version, the
+   release's own title and notes link, and a plain account of what is about to happen,
+   because "Update now" on a server you are using deserves to say what it will do to it.
+   While applying, the buttons go quiet and the phase speaks; a failure holds the tool's
+   VERBATIM words (git's or pip's), which is the thing that actually tells you the fix. */
+export function UpdateModal({ update, phase, error, onApply, onClose }) {
+  const busy = phase === "applying";
+  return (
+    <>
+      <div className="mgcp-pwr-scrim" onClick={busy ? undefined : onClose} />
+      <div className="mgcp-pwr-host">
+        <div className="mgcp-pwr-card" role="dialog" aria-label="Update available">
+          <div className="mgcp-pwr-title">Update available</div>
+          <div className="mgcp-updver">
+            <span className="cur">{update.current || "?"}</span>
+            <span className="arr" aria-hidden="true">→</span>
+            <span className="new">{update.latest}</span>
+          </div>
+          {update.title ? <div className="mgcp-updname">{update.title}</div> : null}
+          {update.notes_url ? (
+            <a className="mgcp-updnotes" href={update.notes_url} target="_blank"
+              rel="noopener noreferrer">Release notes ↗</a>
+          ) : null}
+          <ul className="mgcp-updwhat">
+            <li>The update is pulled atomically — if it can't apply cleanly, nothing changes.</li>
+            <li>Dependencies are installed only if they changed in this release.</li>
+            <li>The server restarts (~10 seconds). This tab reloads itself when it is back.</li>
+          </ul>
+          {error ? <pre className="mgcp-upderr">{error}</pre> : null}
+          <div className="mgcp-updacts">
+            <button type="button" className="mgcp-toolbtn" onClick={onClose} disabled={busy}>
+              {phase === "failed" ? "Close" : "Not now"}
+            </button>
+            <button type="button" className="mgcp-updgo" onClick={onApply} disabled={busy}>
+              {busy ? "updating…" : phase === "failed" ? "Try again" : "Update now"}
+            </button>
+          </div>
         </div>
       </div>
     </>

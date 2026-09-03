@@ -316,6 +316,81 @@ export default function useControlPanel() {
     fetchSummary();
   };
 
+  /* ---- the auto-updater (P4) --------------------------------------------------
+     ON DEMAND, once per Panel open (owner ruling, 2026-09-01: no background tick
+     anywhere). The server caches for its own TTL, so opening the Panel repeatedly
+     costs GitHub nothing. A failed check answers behind:false with a reason and is
+     simply not shown -- an offline machine gets a Panel, not an error. */
+  const [update, setUpdate] = useState(null);      // the check payload
+  const [updOpen, setUpdOpen] = useState(false);   // the confirm modal
+  const [updPhase, setUpdPhase] = useState("");    // "" | applying | failed
+  const [updErr, setUpdErr] = useState("");
+  const updPollRef = useRef(null);
+  useEffect(() => {
+    let dead = false;
+    apiGet("/api/update/check").then((d) => { if (!dead && d && !d.error) setUpdate(d); });
+    return () => {
+      dead = true;
+      if (updPollRef.current) clearInterval(updPollRef.current);
+      if (pingRef.current) clearInterval(pingRef.current);
+    };
+  }, []);
+
+  /* Apply: one POST behind the modal's explicit yes, then WATCH. The server does the
+     work off the panel-job slot and reports its phase; when it reaches `restarting` we
+     hand over to the exact ping-watch the Restart chip uses -- the server is about to
+     stop answering, so the update's own status route cannot be what tells us it worked.
+     A failure keeps the tool's verbatim words: that text is the fix. */
+  const applyUpdate = async () => {
+    setUpdPhase("applying"); setUpdErr("");
+    const d = await apiPost("/api/update/apply",
+                            { confirm: true, csrf: summary?.csrf || "" }).catch(() => null);
+    if (!d || d.error) {
+      setUpdPhase("failed");
+      setUpdErr((d && d.error) || "Network error — try again.");
+      return;
+    }
+    // THE HANDOVER, on any of three signals -- because the server is about to stop
+    // answering and the status route cannot be what tells us it worked:
+    //   1. it says "restarting" (the clean case; the server sleeps ~2s there so a poll
+    //      at this cadence can actually see it);
+    //   2. the poll stops connecting AFTER we saw real work -- that IS the restart, seen
+    //      from the outside;
+    //   3. it answers "idle" after having been busy -- a server that came back so fast
+    //      its fresh process is already serving.
+    // Only (1) was handled before, and only (1) is a timing assumption, which is exactly
+    // why the happy path used to strand on "updating…".
+    let sawWork = false;
+    const handover = () => {
+      clearInterval(updPollRef.current);
+      updPollRef.current = null;
+      _watch(true, (msg) => { setUpdPhase("failed"); setUpdErr(msg); });
+    };
+    updPollRef.current = setInterval(() => {
+      apiGet("/api/update/status", null, { cache: "no-store" })
+        .then((st) => {
+          if (!st || st.error) { if (sawWork) handover(); return; }
+          if (st.phase === "failed") {
+            clearInterval(updPollRef.current);
+            updPollRef.current = null;
+            setUpdPhase("failed"); setUpdErr(st.error || "The update failed.");
+          } else if (st.phase === "restarting") {
+            sawWork = true;
+            handover();
+          } else if (st.phase === "idle") {
+            if (sawWork) handover();
+          } else {
+            sawWork = true;                                // pulling | deps
+          }
+        })
+        .catch(() => { if (sawWork) handover(); });
+    }, 1500);
+  };
+  const closeUpdate = () => {
+    if (updPollRef.current) clearInterval(updPollRef.current);
+    setUpdOpen(false); setUpdPhase(""); setUpdErr("");
+  };
+
   // Sidebar chips arm on the first click ("Confirm -- Restart?") and only actually fire
   // on the second -- classic gates the same actions behind window.confirm(); this is the
   // same inline-confirm language ActionChip already uses for destructive Maintenance
@@ -344,7 +419,7 @@ export default function useControlPanel() {
   // Ported verbatim from classic's own _watchServer() (moonglade_gallery.py) -- the REAL
   // mechanism the Stop/Restart reconnect overlay has used for a long time. Restart: poll
   // until it goes down, THEN comes back -> reload. Stop: poll until it stops answering.
-  const _watch = (comeBack) => {
+  const _watch = (comeBack, onFail) => {
     let tries = 0, sawDown = false;
     pingRef.current = setInterval(() => {
       tries++;
@@ -362,7 +437,12 @@ export default function useControlPanel() {
       });
       if (tries > PING_TRIES_MAX) {
         clearInterval(pingRef.current);
-        if (comeBack) { setPowerErr("Still restarting… give it a moment, then refresh."); setPowerPhase("failed"); }
+        // `onFail` exists because the updater watches through this same loop while the
+        // POWER modal is not on screen: without it, a timed-out update reported into an
+        // invisible UI and the update modal sat on "updating…" telling the user nothing.
+        const msg = "Still restarting… give it a moment, then refresh.";
+        if (onFail) onFail(msg);
+        else if (comeBack) { setPowerErr(msg); setPowerPhase("failed"); }
         else setPowerPhase("done");
       }
     }, PING_MS);
@@ -399,5 +479,6 @@ export default function useControlPanel() {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
+    update, updOpen, setUpdOpen, updPhase, updErr, applyUpdate, closeUpdate,
   };
 }
