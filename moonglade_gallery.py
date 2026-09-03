@@ -6820,16 +6820,10 @@ def create_app(out_dir: Path):
                     telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
                 except Exception:
                     pass
-                # Speak, Friend, and Enter (bridge_gens): a gen that LANDS ON PIXAI -- created via
-                # the mirror ('Mirror to PixAI' on, so _session_for_create used the browser JWT).
-                # Recorded as a DISTINCT task id, not a counter, so a re-poll or a second collector
-                # never inflates it. Enhance/scene tasks also pass through here and record the SAME
-                # tid at their own terminals -- the set dedupes, so no skip-check is needed. Silent-soft.
-                try:
-                    if core.mirror_enabled():
-                        telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)
-                except Exception:
-                    pass
+                # bridge_gen_tasks is NOT written here: owner ruling 2026-09-03 -- the metric
+                # counts the bridge's TOOLS only (enhance runs, AI-Tool scene runs), never an
+                # ordinary generation that merely routes through the mirror. The two writers
+                # that remain are the enhance and scene terminals.
                 return got
         finally:
             with _collect_mu:

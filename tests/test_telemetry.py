@@ -549,7 +549,9 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     cli.get("/api/task-status", query_string={"task_id": "T-SCENE-1"})
     assert g.telemetry_metrics(tmp_path)["scenes_used"] == 1
     assert g.load_telemetry(tmp_path)["sets"]["scenes"] == ["the-sun"]
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # a scene is a bridge gen (Speak, Friend)
+    # a scene run IS a bridge tool -- one of the only two writers left after the
+    # 2026-09-03 narrowing (the other is the enhance terminal).
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
     tel = g.load_telemetry(tmp_path)                                   # collect choke marked today
     assert tel["day_lists"]["gen_days"] and tel["day_lists"]["active_days"]
     # a second poll of the same finished task must not double-count -- scenes_used is a set, and
@@ -559,11 +561,12 @@ def test_scene_and_gen_daymark_hooks_fire_on_terminal_success(tmp_path, monkeypa
     assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must NOT inflate Speak-Friend
 
 
-def test_regular_gen_counts_bridge_gens_only_when_mirror_on(tmp_path, monkeypatch):
-    """Speak, Friend, and Enter (bridge_gens): a REGULAR gen that lands on PixAI -- collected while
-    the 'Mirror to PixAI' toggle is on (so _session_for_create used the browser JWT) -- counts. With
-    the mirror off it is a plain API-key gen and does NOT count. (Enhance/scene are covered by their
-    own terminals; this is the third under-the-bridge path.)"""
+def test_a_regular_mirror_gen_is_not_a_bridge_tool(tmp_path, monkeypatch):
+    """bridge_gens is NARROW (owner ruling, 2026-09-03): it counts the bridge's TOOLS --
+    an enhance run, an AI-Tool scene run -- and nothing else. An ordinary generation that
+    merely ROUTES through the mirror is not a tool use, so it counts either way the mirror
+    toggle is set. This replaces the earlier reading, where mirror-on made every plain gen
+    a bridge gen and the metric measured traffic instead of tool use."""
     import moonglade_backup as core
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
@@ -571,14 +574,48 @@ def test_regular_gen_counts_bridge_gens_only_when_mirror_on(tmp_path, monkeypatc
                         lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)
-    # mirror OFF -> a plain API-key gen is not under the bridge
-    monkeypatch.setattr(core, "mirror_enabled", lambda: False)
-    cli.get("/api/task-status", query_string={"task_id": "T-GEN-OFF"})
-    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0
-    # mirror ON -> the gen lands on PixAI, so it counts
-    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
-    cli.get("/api/task-status", query_string={"task_id": "T-GEN-ON"})
+    for mirror in (False, True):
+        monkeypatch.setattr(core, "mirror_enabled", lambda m=mirror: m)
+        cli.get("/api/task-status", query_string={"task_id": "T-GEN-%s" % mirror})
+        assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0, mirror
+    # ...and the collect choke still marks the day for a plain gen: narrowing ONE metric
+    # must not quietly take the streaks with it.
+    tel = g.load_telemetry(tmp_path)
+    assert tel["day_lists"]["gen_days"] and tel["day_lists"]["active_days"]
+
+
+def test_an_enhance_terminal_counts_as_a_bridge_tool(tmp_path, monkeypatch):
+    """The first of the two writers that survive the narrowing. Deferred to terminal
+    success like everything else on this path, and recorded as a distinct task id so a
+    re-poll cannot inflate it."""
+    import moonglade_backup as core
+    _arm_mirror_bridge(monkeypatch, core)
+    monkeypatch.setattr(core, "generation_status", lambda s, t: {"phase": "done", "paid_credit": 0})
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, t, out, **k: {"media_ids": ["OUT1"], "saved": 1, "is_video": False})
+    save_catalog(tmp_path / "catalog.db", [])
+    cli = login_client(tmp_path)
+    preset = core.BRIDGE_ENHANCE_PRESETS[0]["workflow_name"]
+    r = cli.post("/api/enhance", json={"source": "src1", "workflow_name": preset})
+    assert r.status_code == 200
+    tid = r.get_json()["task_id"]
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 0   # nothing at submit
+    cli.get("/api/task-status", query_string={"task_id": tid})
     assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1
+    cli.get("/api/task-status", query_string={"task_id": tid})
+    assert g.telemetry_metrics(tmp_path).get("bridge_gens", 0) == 1   # re-poll must not inflate
+
+
+def test_only_the_two_tool_terminals_write_the_bridge_set():
+    """The narrowing, pinned structurally: after the 2026-09-03 ruling the ONLY writers of
+    bridge_gen_tasks are the enhance and scene terminals. Self-computing -- it counts the
+    write sites in the source rather than restating where they are, so a third one added
+    anywhere (the collect choke again, a new route) fails here on the day it lands."""
+    import inspect
+    src = inspect.getsource(g)
+    writes = [ln.strip() for ln in src.splitlines()
+              if "telem_set_add(" in ln and "bridge_gen_tasks" in ln]
+    assert len(writes) == 2, writes
 
 
 def test_train_submit_hook_bumps_loras_trained(tmp_path, monkeypatch):
