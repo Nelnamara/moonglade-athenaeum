@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import "../styles/shell.css";
 import useFlavour from "../hooks/useFlavour.js";
 import { apiGet } from "../api.js";
+import MarkAnimated from "./MarkAnimated.jsx";
 
 /* The banner (DC "Frontend Gallery" §1): one region owning hero/slim state.
    Hero: art + right-aligned brand block on top, a bottom band with the library
@@ -78,16 +79,11 @@ export default function Banner({
               {fl.text}
             </button>
           </div>
-          <div className="mgx-mark">
-            <div className="mgx-mark-tilt">
-              <img src={boot.mark_url || "/branding/logo.png"} alt=""
-                onError={(e) => e.currentTarget.remove()} />
-              <div className="mgx-mark-sheenclip" aria-hidden="true">
-                <div className="mgx-mark-sheen" />
-              </div>
-            </div>
-            <div className="mgx-mark-halo" aria-hidden="true" />
-          </div>
+          {/* #24: the header now WEARS the picked animation. The markup is the same
+              tilt/sheen/halo it always had -- MarkAnimated is that structure plus the
+              mark-anim-<id> class and the four settings, so the treatment the Control
+              Panel writes is finally the treatment the header shows. */}
+          <MarkAnimated boot={boot} size={slim ? 56 : 96} />
         </div>
       </div>
 

@@ -1815,10 +1815,50 @@ def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 # icon is a Desktop .lnk whose icon we point at a mark's .ico (a .pyw can't
 # carry its own icon -- the shortcut can).
 
-MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot", "halo",
-              "eclipse", "ripple", "mist", "prism", "breathe", "tilt", "float",
-              "orbit", "none"]
-_BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic"}
+# The mark animation roster, settled by the two-round marks workshop (2026-08-31).
+# The survivors keep their ORIGINAL ids on purpose -- "classic" is the modernized
+# classic, not a new id -- so an install that already stored a pick keeps wearing the
+# treatment it chose, now rebuilt. moondust is the promoted canvas demo.
+MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot",
+              "eclipse", "mist", "prism", "moondust", "none"]
+# Retired by the same workshop. A stored pick of one of these is NOT an error: it
+# renders as classic (load_branding's own validation does that), the picker stops
+# offering it, and nothing has to migrate branding.json.
+MARK_ANIMS_RETIRED = ("halo", "breathe", "tilt", "float", "orbit", "ripple")
+
+# The owner-tunable animation settings the workshop asked for ("There should be a
+# speed and size slider setting for animations") plus glow's own colour/direction
+# pair. Numbers are clamped to these ranges server-side; the client's sliders use
+# the same bounds, but the server is the one that decides.
+_BRAND_NUM_RANGES = {"anim_speed": (0.25, 3.0), "anim_scale": (0.5, 2.0),
+                     "glow_angle": (0.0, 360.0)}
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_BRAND_DEFAULTS = {"mark": "mark_4", "anim": "classic",
+                   # 1.0 = the treatments' authored tempo. The workshop board
+                   # exported at 0.80x, but that was the owner auditioning the
+                   # slider, not a ruling on the default -- so the shipped default
+                   # stays the authored speed until he says otherwise.
+                   "anim_speed": 1.0, "anim_scale": 1.0,
+                   "glow_color": "#94e2d5", "glow_angle": 0.0}
+
+
+def _brand_num(key, value, fallback):
+    """One branding number, coerced and CLAMPED to its own range. A junk value
+    falls back rather than raising: branding is cosmetic and must never be the
+    reason a page fails to render."""
+    lo, hi = _BRAND_NUM_RANGES[key]
+    try:
+        return max(lo, min(hi, float(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _brand_color(value, fallback):
+    """A #rrggbb colour, or the fallback. Deliberately strict: this string is
+    interpolated into a CSS custom property, so anything that is not exactly a
+    six-digit hex colour never reaches the stylesheet."""
+    s = str(value or "").strip()
+    return s if _HEX_COLOR_RE.match(s) else fallback
 
 
 def branding_root():
@@ -2183,12 +2223,34 @@ def _seed_loose_manifest(rel):
 _MARK_TOMBSTONES = frozenset({"mark_12", "mark_74"})
 
 
+# A mark's art may be a .png or a .webp. The webp lane exists for ANIMATED marks:
+# an animated webp plays natively in an <img>, so the owner can author one himself
+# (his Grok -> key -> webp pipeline) and drop it in. png is tried first because
+# every shipped default is one; the order is the tie-break, not a preference.
+MARK_EXTS = (".png", ".webp")
+
+
+def mark_art_ext(mark_id):
+    """The extension one mark's art actually exists as (loose or container), or ""
+    when it has none. The single place the app decides what a mark's file is
+    called -- every other site asks here rather than assuming .png."""
+    for ext in MARK_EXTS:
+        if _branding_exists(_role_rel("marks", str(mark_id) + ext)):
+            return ext
+    return ""
+
+
 def list_marks(out_dir):
-    """Marks available on THIS machine: marks/marks.json entries whose .png
+    """Marks available on THIS machine: marks/marks.json entries whose art
     actually exists, resolved loose-then-container (_branding_bytes) so the
     shipped defaults show up even though branding/ itself is deliberately empty
     on a fresh install -- and still empty on a truly bare install with no
-    container at all. Tombstoned ids (_MARK_TOMBSTONES) never list."""
+    container at all. Tombstoned ids (_MARK_TOMBSTONES) never list.
+
+    Art is .png OR .webp (see MARK_EXTS). The payload key stays `png` even for a
+    webp mark: it is the shipped contract every client already reads (and
+    brand_context's mark_url comes straight off it), so renaming it would be a
+    breaking change for a field that was only ever a URL."""
     raw = _branding_bytes(_role_rel("marks", "marks.json"))
     if raw is None:
         return []
@@ -2207,10 +2269,12 @@ def list_marks(out_dir):
             continue
         # Disk/container lookups are coded; the emitted URL stays the PUBLIC
         # role form (the /branding/ route translates on the way back in).
-        if mid and _branding_exists(_role_rel("marks", mid + ".png")):
+        ext = mark_art_ext(mid) if mid else ""
+        if ext:
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
-                        "png": "/branding/marks/%s.png" % mid,
+                        "png": "/branding/marks/%s%s" % (mid, ext),
+                        "animated": ext == ".webp",
                         "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
     return out
 
@@ -2437,7 +2501,7 @@ def _mark_earned(out_dir, db_path, ach_id):
     return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
 
 
-def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
+def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     """Save The Great Library's custom-mark upload into branding/marks/ and make
     it the active mark. Same manifest shape list_marks() already reads
     (marks.json + <id>.png) -- one new kind:'upload' entry, not a new storage
@@ -2459,19 +2523,21 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark"):
     except (OSError, ValueError):
         marks = []
     for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
-        old_png = mdir / (str(old.get("id")) + ".png")
-        if old_png.exists():
-            old_png.unlink()
+        for old_ext in MARK_EXTS:        # the replaced upload may be either format
+            old_art = mdir / (str(old.get("id")) + old_ext)
+            if old_art.exists():
+                old_art.unlink()
     marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
     new_id = secrets.token_hex(4)
-    (mdir / (new_id + ".png")).write_bytes(png_bytes)
+    (mdir / (new_id + ext)).write_bytes(png_bytes)
     marks.append({"id": new_id, "label": label, "kind": "upload"})
     (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
     cfg = load_branding(out_dir)
     cfg["mark"] = new_id
     save_branding(out_dir, cfg)
     return {"id": new_id, "label": label, "kind": "upload",
-            "png": "/branding/marks/%s.png" % new_id, "ico": False}
+            "png": "/branding/marks/%s%s" % (new_id, ext),
+            "animated": ext == ".webp", "ico": False}
 
 
 def remove_custom_mark(out_dir, mark_id):
@@ -2492,9 +2558,10 @@ def remove_custom_mark(out_dir, mark_id):
         return False
     keep = [m for m in marks if m is not target]
     (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
-    png = mdir / (str(mark_id) + ".png")
-    if png.exists():
-        png.unlink()
+    for ext in MARK_EXTS:                # an uploaded mark may be png or webp
+        art = mdir / (str(mark_id) + ext)
+        if art.exists():
+            art.unlink()
     cfg = load_branding(out_dir)
     if cfg.get("mark") == str(mark_id):
         cfg["mark"] = "logo"
@@ -2646,6 +2713,19 @@ def ensure_branding_discovery_tree():
             pass
 
 
+def _is_readable_image(path):
+    """True when Pillow can open `path` as an image at all. The validation half of
+    the verbatim-webp path: the bytes are passed through untouched, so this is what
+    stops a renamed .txt (or anything else) from being adopted as a mark."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            im.verify()
+        return True
+    except Exception:                       # noqa: BLE001 -- any failure means "not an image"
+        return False
+
+
 def _adopt_dropped_file(path):
     """Re-encode a raw dropped image (PNG/JPEG/anything Pillow can read) into
     real PNG bytes, or None if it isn't a readable image at all -- the same
@@ -2663,12 +2743,15 @@ def _adopt_dropped_file(path):
         return None
 
 
-def _adopt_mark(out_dir, raw_stem, png_bytes):
-    """Register a raw dropped file into marks.json + write its .png, then make
-    it the active mark -- the marks-folder half of sweep_branding_drops()'s
+def _adopt_mark(out_dir, raw_stem, art_bytes, ext=".png"):
+    """Register a raw dropped file into marks.json + write its art, then make it
+    the active mark -- the marks-folder half of sweep_branding_drops()'s
     auto-adopt (marks predate BRANDING_SLOTS and keep their own established
     list_marks()/marks.json shape rather than being folded into the newer
-    per-slot manifest convention)."""
+    per-slot manifest convention).
+
+    `ext` is .png for anything re-encoded on the way in, .webp for a dropped webp
+    kept verbatim -- see the sweep, which is where that decision is made."""
     mdir = _role_dir("marks")
     mid = re.sub(r"[^a-z0-9_-]+", "-", raw_stem.lower()).strip("-")[:40] or "custom"
     # Tombstoned ids count as taken: adopting a drop AS a tombstoned id would
@@ -2684,7 +2767,7 @@ def _adopt_mark(out_dir, raw_stem, png_bytes):
         marks = []
     marks.append({"id": mid, "label": mid.replace("-", " "), "kind": "tile"})
     (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
-    (mdir / (mid + ".png")).write_bytes(png_bytes)
+    (mdir / (mid + ext)).write_bytes(art_bytes)
     cfg = load_branding(out_dir)
     cfg["mark"] = mid
     save_branding(out_dir, cfg)
@@ -2895,14 +2978,22 @@ def sweep_branding_drops(out_dir):
             if (not p.is_file() or p.name == "marks.json" or p.suffix.lower() == ".ico"
                     or p.stem in known or p.stem in _MARK_TOMBSTONES):
                 continue
-            png_bytes = _adopt_dropped_file(p)
-            if png_bytes is None:
+            # A dropped WEBP is kept VERBATIM. _adopt_dropped_file re-encodes to
+            # PNG, which is right for a still image and destructive for an animated
+            # one -- Pillow's convert() keeps frame one and throws the animation
+            # away. Since the whole point of the webp lane is an animated mark the
+            # owner authored, the bytes have to survive the trip; the file is still
+            # validated as a readable image first, so this is not an unchecked pass.
+            is_webp = p.suffix.lower() == ".webp"
+            art = p.read_bytes() if (is_webp and _is_readable_image(p)) \
+                else _adopt_dropped_file(p)
+            if art is None:
                 continue
             try:              # delete first -- see the identical note above
                 p.unlink()
             except OSError:
                 pass
-            _adopt_mark(out_dir, p.stem, png_bytes)
+            _adopt_mark(out_dir, p.stem, art, ext=".webp" if is_webp else ".png")
             adopted = True
     if adopted:
         telem_flag("branding_custom_file", out_dir=out_dir)
@@ -2917,8 +3008,17 @@ def load_branding(out_dir):
         raw = json.loads(_branding_path(out_dir).read_text(encoding="utf-8"))
         if isinstance(raw, dict):   # a corrupt file degrades to defaults, never a 500
             cfg.update({k: str(v) for k, v in raw.items() if k in ("mark", "anim")})
+            for k in ("anim_speed", "anim_scale", "glow_angle"):
+                if k in raw:
+                    cfg[k] = _brand_num(k, raw[k], _BRAND_DEFAULTS[k])
+            if "glow_color" in raw:
+                cfg["glow_color"] = _brand_color(raw["glow_color"],
+                                                 _BRAND_DEFAULTS["glow_color"])
     except (OSError, ValueError):
         pass
+    # A retired animation (the six the 2026-08-31 workshop killed) is a stored pick
+    # this build no longer has a treatment for -- it wears classic instead. Same
+    # line that has always caught a typo'd id; nothing migrates, nothing errors.
     if cfg["anim"] not in MARK_ANIMS:
         cfg["anim"] = "classic"
     have = {m["id"] for m in list_marks(out_dir)}
@@ -2928,9 +3028,28 @@ def load_branding(out_dir):
 
 
 def save_branding(out_dir, cfg):
-    _branding_path(out_dir).write_text(
-        json.dumps({"mark": cfg["mark"], "anim": cfg["anim"]}, indent=2),
-        encoding="utf-8")
+    """Persist the branding choice. Every key is written explicitly (never the
+    caller's whole dict) so a stray field can't land in branding.json, and the
+    numbers go through the same clamp load_branding applies on the way back in --
+    the file can only ever hold a value the app would accept."""
+    _branding_path(out_dir).write_text(json.dumps({
+        "mark": cfg["mark"], "anim": cfg["anim"],
+        "anim_speed": _brand_num("anim_speed", cfg.get("anim_speed"),
+                                 _BRAND_DEFAULTS["anim_speed"]),
+        "anim_scale": _brand_num("anim_scale", cfg.get("anim_scale"),
+                                 _BRAND_DEFAULTS["anim_scale"]),
+        "glow_color": _brand_color(cfg.get("glow_color"), _BRAND_DEFAULTS["glow_color"]),
+        "glow_angle": _brand_num("glow_angle", cfg.get("glow_angle"),
+                                 _BRAND_DEFAULTS["glow_angle"]),
+    }, indent=2), encoding="utf-8")
+
+
+def _branding_tuning(cfg):
+    """The four owner-tunable animation settings, as the API hands them out. One
+    function so /api/branding's GET, its POST echo and the Control Panel summary
+    can never disagree about the shape."""
+    return {"anim_speed": cfg["anim_speed"], "anim_scale": cfg["anim_scale"],
+            "glow_color": cfg["glow_color"], "glow_angle": cfg["glow_angle"]}
 
 
 def brand_context(out_dir):
@@ -2943,12 +3062,17 @@ def brand_context(out_dir):
     # latter, so this flag has to agree with what /branding/banner.png serves).
     has_banner = (_branding_exists("banner.png")
                   or _branding_exists(_flat_default_rel("banner_main")))
+    # The animation settings ride along on every page render, exactly as the mark
+    # and its anim id always have -- the header reads them straight off MG_BOOT and
+    # needs no extra fetch to dress itself correctly on first paint.
+    tune = {"anim_speed": cfg["anim_speed"], "anim_scale": cfg["anim_scale"],
+            "glow_color": cfg["glow_color"], "glow_angle": cfg["glow_angle"]}
     if cfg["mark"] in marks:
         m = marks[cfg["mark"]]
-        return {"mark_url": m["png"], "mark_anim": cfg["anim"], "mark_kind": m["kind"],
-                "has_banner": has_banner}
-    return {"mark_url": "/branding/logo.png", "mark_anim": cfg["anim"], "mark_kind": "alpha",
-            "has_banner": has_banner}
+        return dict(tune, mark_url=m["png"], mark_anim=cfg["anim"], mark_kind=m["kind"],
+                    has_banner=has_banner)
+    return dict(tune, mark_url="/branding/logo.png", mark_anim=cfg["anim"],
+                mark_kind="alpha", has_banner=has_banner)
 
 
 def _ps_quote(s):
@@ -6934,6 +7058,12 @@ def create_app(out_dir: Path):
             "mark_url": brand.get("mark_url") or "/branding/logo.png",
             "mark_anim": brand.get("mark_anim") or "classic",
             "mark_kind": brand.get("mark_kind") or "",
+            # The animation tuning rides with the pick it tunes -- one payload, so
+            # the header can never paint the right treatment at the wrong speed.
+            "anim_speed": brand.get("anim_speed", 1.0),
+            "anim_scale": brand.get("anim_scale", 1.0),
+            "glow_color": brand.get("glow_color") or "#94e2d5",
+            "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
             LOGIN_PAGE.replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
@@ -7246,9 +7376,10 @@ def create_app(out_dir: Path):
             "web_users": core.list_web_users(),
             "current_username": session.get("user"),
             "csrf": session["csrf"],
-            "branding": {"mark": branding["mark"], "anim": branding["anim"],
-                        "anims": MARK_ANIMS, "marks": list_marks(out_dir),
-                        "slots": branding_slots_payload(out_dir)},
+            "branding": dict(_branding_tuning(branding),
+                             mark=branding["mark"], anim=branding["anim"],
+                             anims=MARK_ANIMS, marks=list_marks(out_dir),
+                             slots=branding_slots_payload(out_dir)),
         })
 
     def _check_csrf(body):
@@ -11235,14 +11366,20 @@ def create_app(out_dir: Path):
             except Exception:
                 pass
             cfg = load_branding(out_dir)
-            return jsonify({"mark": cfg["mark"], "anim": cfg["anim"],
-                            "anims": MARK_ANIMS, "marks": list_marks(out_dir),
-                            "slots": branding_slots_payload(out_dir)})
+            return jsonify(dict(_branding_tuning(cfg),
+                                mark=cfg["mark"], anim=cfg["anim"],
+                                anims=MARK_ANIMS, marks=list_marks(out_dir),
+                                slots=branding_slots_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
         have = {m["id"] for m in list_marks(out_dir)}
         if "anim" in body:
             anim = str(body["anim"])
+            # A retired id is refused here rather than silently accepted: the picker
+            # no longer offers one, so a POST carrying it is a stale client or a
+            # hand-rolled call, and answering 400 is how it finds that out. (An
+            # ALREADY-STORED retired pick is a different case -- load_branding wears
+            # classic for it, so nobody's install breaks.)
             if anim not in MARK_ANIMS:
                 return jsonify({"error": "unknown animation"}), 400
             cfg["anim"] = anim
@@ -11251,12 +11388,24 @@ def create_app(out_dir: Path):
             if mark != "logo" and mark not in have:
                 return jsonify({"error": "unknown mark"}), 400
             cfg["mark"] = mark
+        # The tuning fields: clamped, never refused. A slider that sends 4.0 gets
+        # 3.0 back and the UI settles onto it -- an error toast for dragging too far
+        # would be a worse answer than the honest ceiling.
+        for k in ("anim_speed", "anim_scale", "glow_angle"):
+            if k in body:
+                cfg[k] = _brand_num(k, body[k], cfg[k])
+        if "glow_color" in body:
+            colour = _brand_color(body["glow_color"], None)
+            if colour is None:
+                return jsonify({"error": "glow_color must be #rrggbb"}), 400
+            cfg["glow_color"] = colour
         save_branding(out_dir, cfg)
         if "mark" in body or "anim" in body:   # Interior Decorator: dressing the halls
             telem_bump("skin_changed_runs", out_dir=out_dir)
         if cfg["anim"] == "eclipse":           # Eclipse: sun and moon in balance
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
-        return jsonify({"mark": cfg["mark"], "anim": cfg["anim"]})
+        return jsonify(dict(_branding_tuning(cfg),
+                            mark=cfg["mark"], anim=cfg["anim"]))
 
     @app.route("/api/branding/slot", methods=["POST"])
     @tier(LOGIN)
@@ -11346,16 +11495,27 @@ def create_app(out_dir: Path):
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
+        # An uploaded WEBP is stored verbatim, everything else is re-encoded to PNG.
+        # Same reasoning as the filesystem-drop path: re-encoding an animated webp
+        # keeps frame one and silently throws the animation away, which would make
+        # the one format the owner authors animated marks in the one format this
+        # route breaks. The bytes are still validated as an image before they land.
+        raw = f.read()
+        is_webp = str(f.filename).lower().endswith(".webp")
         try:
             import io
             from PIL import Image
-            im = Image.open(f.stream)
+            im = Image.open(io.BytesIO(raw))
             im.load()
-            buf = io.BytesIO()
-            im.convert("RGBA").save(buf, format="PNG")
+            if is_webp:
+                art = raw
+            else:
+                buf = io.BytesIO()
+                im.convert("RGBA").save(buf, format="PNG")
+                art = buf.getvalue()
         except Exception:
             return jsonify({"error": "not a readable image"}), 400
-        mark = add_custom_mark(out_dir, buf.getvalue())
+        mark = add_custom_mark(out_dir, art, ext=".webp" if is_webp else ".png")
         return jsonify({"mark": mark["id"], "marks": list_marks(out_dir)})
 
     @app.route("/api/branding/mark/custom/remove", methods=["POST"])
@@ -12549,6 +12709,12 @@ __DESIGN_TOKENS__
             "mark_url": brand.get("mark_url") or "/branding/logo.png",
             "mark_anim": brand.get("mark_anim") or "classic",
             "mark_kind": brand.get("mark_kind") or "",
+            # The animation tuning rides with the pick it tunes -- one payload, so
+            # the header can never paint the right treatment at the wrong speed.
+            "anim_speed": brand.get("anim_speed", 1.0),
+            "anim_scale": brand.get("anim_scale", 1.0),
+            "glow_color": brand.get("glow_color") or "#94e2d5",
+            "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
             NEXT_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())

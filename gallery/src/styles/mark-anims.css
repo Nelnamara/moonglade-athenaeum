@@ -1,0 +1,208 @@
+/* THE MARK ANIMATION ENGINE — the treatments the owner picked, wired to the pick.
+
+   Source of truth: the round-2 Marks Board (the v2-* keyframes), transcribed here
+   faithfully. What changed in the transcription is SELECTORS AND LAYERING only: the
+   board's `.mk` cell is this app's real header mark, whose structure already exists —
+
+     board                     app
+     .mk                       .mgx-mark            (the box; perspective lives here)
+     .mk .tiltbox              .mgx-mark-tilt       (the tilting inner)
+     .mk img                   .mgx-mark-tilt img   (the art itself)
+     .mk .sheenclip/.sheen     .mgx-mark-sheenclip/.mgx-mark-sheen
+     .mk::after (halo)         .mgx-mark-halo       (a real element here, not a pseudo)
+
+   — which leaves ::before and ::after on .mgx-mark free for exactly what the board
+   used them for. The base treatment (tilt + sheen + halo) is the kept reference and
+   stays on underneath; a picked animation LAYERS on top of it. `none` is the one that
+   silences everything, including the base.
+
+   TWO LAWS FROM THE BOARD, both load-bearing:
+   1. Every duration is `calc(<base> / var(--anim-speed))`, so the speed setting is one
+      multiplier over the whole roster rather than 20 hand-tuned numbers.
+   2. Every offset is em- or %-relative, never px. `.mgx-mark`'s font-size is derived
+      from its rendered size, so an effect scales WITH the mark instead of drifting —
+      this is the fix for the owner's "these look clunky at the new size": the old
+      classic-UI rules were px-tuned against a 42px tile and mis-scaled everywhere else.
+
+   The ids are the STORED ids (classic, glow, ...). A v2 treatment keeps the id it
+   replaces, so nobody's saved pick has to migrate. */
+
+.mgx-mark {
+  /* Defaults, so the engine is correct even before MG_BOOT's values arrive (and on
+     any surface that renders a mark without passing them). */
+  --anim-speed: 1;
+  --anim-scale: 1;
+  --glow-color: #94e2d5;
+  --glow-x: 50%;
+  --glow-y: 50%;
+  /* The em base: a quarter of the rendered mark, times the size setting. Every em
+     offset below is therefore a fraction of the mark itself. */
+  font-size: calc(96px * var(--anim-scale) / 4);
+}
+.mgx-bnr.slim .mgx-mark { font-size: calc(56px * var(--anim-scale) / 4); }
+
+/* The base treatment's own durations now ride the speed setting too (the board's
+   a-header cell: 9s tilt, 6.2s sheen). */
+.mgx-mark-tilt { animation-duration: calc(9s / var(--anim-speed)); }
+.mgx-mark-sheen { animation-duration: calc(6.2s / var(--anim-speed)); }
+
+/* The two free pseudo-elements. Nothing paints until a treatment fills them in. */
+.mgx-mark::before, .mgx-mark::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; }
+
+/* ---- none: the pick that means stillness -------------------------------------- */
+.mgx-mark.mark-anim-none .mgx-mark-tilt,
+.mgx-mark.mark-anim-none .mgx-mark-sheen,
+.mgx-mark.mark-anim-none .mgx-mark-tilt img { animation: none; }
+.mgx-mark.mark-anim-none::before,
+.mgx-mark.mark-anim-none::after { display: none; }
+
+/* ---- glow --------------------------------------------------------------------- */
+/* The bloom is written in em, which is the owner's "needs size slider" note honored:
+   drag the size setting and the glow grows with the mark instead of staying a fixed
+   halo around a bigger picture. Colour and origin are settings (glow_color /
+   glow_angle) — angle 0 keeps the bloom centred, any other angle pushes its origin
+   out along that compass bearing (the React side turns the angle into --glow-x/y). */
+@keyframes mgv2Glow {
+  0%, 100% { filter: brightness(1) drop-shadow(0 0 .08em var(--glow-color)); }
+  50% { filter: brightness(1.15) drop-shadow(0 0 .34em var(--glow-color)); } }
+@keyframes mgv2Bloom {
+  0%, 100% { opacity: .1; transform: scale(.85); }
+  50% { opacity: .8; transform: scale(1.08); } }
+.mgx-mark.mark-anim-glow .mgx-mark-tilt img {
+  animation: mgv2Glow calc(2.6s / var(--anim-speed)) ease-in-out infinite; }
+.mgx-mark.mark-anim-glow::before {
+  inset: -14%;
+  background: radial-gradient(circle at var(--glow-x) var(--glow-y),
+    color-mix(in srgb, var(--glow-color) 35%, transparent), transparent 65%);
+  animation: mgv2Bloom calc(2.6s / var(--anim-speed)) ease-in-out infinite; }
+
+/* ---- shine / aurora: masked sweeps -------------------------------------------- */
+/* The mask needs the mark's own URL, which a built stylesheet cannot know — it
+   arrives as --mark-url, set inline from the boot payload (the same hook the classic
+   chrome already used). Without it the sweep would be a rectangle across the box
+   instead of light travelling over the art's silhouette. */
+@keyframes mgv2Glint { 0% { background-position: 200% 0; } 100% { background-position: -100% 0; } }
+.mgx-mark.mark-anim-shine::before {
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, .55) 48%,
+    rgba(182, 146, 230, .38) 52%, transparent 62%);
+  background-size: 300% 100%;
+  animation: mgv2Glint calc(2.4s / var(--anim-speed)) linear infinite;
+  -webkit-mask: var(--mark-url) center / contain no-repeat;
+  mask: var(--mark-url) center / contain no-repeat; }
+.mgx-mark.mark-anim-aurora::before {
+  background: linear-gradient(115deg, transparent 34%, rgba(148, 226, 213, .55) 46%,
+    rgba(182, 146, 230, .6) 56%, transparent 68%);
+  background-size: 300% 100%;
+  animation: mgv2Glint calc(3.2s / var(--anim-speed)) linear infinite;
+  -webkit-mask: var(--mark-url) center / contain no-repeat;
+  mask: var(--mark-url) center / contain no-repeat; }
+
+/* ---- mist / prism ------------------------------------------------------------- */
+@keyframes mgv2Mist1 { 0%, 100% { transform: translate(-6%, 4%); } 50% { transform: translate(6%, -5%); } }
+@keyframes mgv2Mist2 { 0%, 100% { transform: translate(5%, -4%); } 50% { transform: translate(-6%, 6%); } }
+.mgx-mark.mark-anim-mist::before {
+  background: radial-gradient(circle at 35% 60%, rgba(90, 230, 180, .5), transparent 55%);
+  filter: blur(.14em); mix-blend-mode: screen;
+  animation: mgv2Mist1 calc(6s / var(--anim-speed)) ease-in-out infinite; }
+.mgx-mark.mark-anim-mist::after {
+  background: radial-gradient(circle at 65% 35%, rgba(150, 110, 240, .5), transparent 55%);
+  filter: blur(.14em); mix-blend-mode: screen;
+  animation: mgv2Mist2 calc(6s / var(--anim-speed)) ease-in-out infinite; }
+@keyframes mgv2Prism { to { filter: hue-rotate(360deg); } }
+.mgx-mark.mark-anim-prism .mgx-mark-tilt img {
+  animation: mgv2Prism calc(6s / var(--anim-speed)) linear infinite; }
+
+/* ---- classic (v2) ------------------------------------------------------------- */
+/* Same trio as the original classic — breath, sheen, glint — with modern manners:
+   softer glow, thinner sweep, and one restrained corner spark where the old one had a
+   cartoon star. Same id, so an install already wearing "classic" simply wakes up
+   wearing this. */
+@keyframes mgv2ClassicGlow {
+  0%, 100% { filter: drop-shadow(0 0 .06em rgba(182, 146, 230, .45)); }
+  50% { filter: drop-shadow(0 0 .2em rgba(182, 146, 230, .8)); } }
+@keyframes mgv2ClassicSpark {
+  0%, 74%, 100% { opacity: 0; transform: scale(.5) rotate(0); }
+  82% { opacity: 1; transform: scale(1) rotate(24deg); }
+  90% { opacity: 0; transform: scale(.55) rotate(24deg); } }
+.mgx-mark.mark-anim-classic .mgx-mark-tilt img {
+  animation: mgv2ClassicGlow calc(5.5s / var(--anim-speed)) ease-in-out infinite; }
+.mgx-mark.mark-anim-classic::before {
+  background: linear-gradient(115deg, transparent 43%, rgba(255, 255, 255, .45) 49%,
+    rgba(182, 146, 230, .3) 51%, transparent 57%);
+  background-size: 340% 100%;
+  animation: mgv2Glint calc(5.5s / var(--anim-speed)) ease-in-out infinite;
+  -webkit-mask: var(--mark-url) center / contain no-repeat;
+  mask: var(--mark-url) center / contain no-repeat; }
+.mgx-mark.mark-anim-classic::after {
+  content: "\2726"; inset: auto; top: -2%; right: -2%; color: var(--gold);
+  font-size: .55em; line-height: 1; text-shadow: 0 0 .5em rgba(212, 175, 55, .8);
+  animation: mgv2ClassicSpark calc(5.5s / var(--anim-speed)) ease-in-out infinite; }
+
+/* ---- twinkle (v2): a constellation, not popcorn -------------------------------- */
+/* Three points at staggered phases and sizes. They are real elements (the React mark
+   renders them only for this treatment) because two pseudo-elements cannot be three
+   stars; nth-child counts from the tilt box, which is child 1. */
+@keyframes mgv2Twinkle {
+  0%, 55%, 100% { opacity: 0; transform: scale(.5); }
+  12% { opacity: .95; transform: scale(1); }
+  30% { opacity: .25; transform: scale(.8); } }
+.mgx-mark.mark-anim-twinkle i {
+  position: absolute; color: var(--gold); font-style: normal; font-size: .42em;
+  line-height: 1; text-shadow: 0 0 .5em rgba(212, 175, 55, .7); pointer-events: none;
+  animation: mgv2Twinkle calc(3.4s / var(--anim-speed)) ease-in-out infinite; }
+.mgx-mark.mark-anim-twinkle i:nth-child(2) { top: -4%; right: 2%; }
+.mgx-mark.mark-anim-twinkle i:nth-child(3) { bottom: 6%; left: -5%; font-size: .3em;
+  color: #94e2d5; text-shadow: 0 0 .5em rgba(148, 226, 213, .7);
+  animation-delay: calc(-1.2s / var(--anim-speed)); }
+.mgx-mark.mark-anim-twinkle i:nth-child(4) { top: 34%; right: -9%; font-size: .24em;
+  color: var(--lavender); text-shadow: 0 0 .5em rgba(182, 146, 230, .7);
+  animation-delay: calc(-2.3s / var(--anim-speed)); }
+
+/* ---- shoot (v2): a real meteor ------------------------------------------------- */
+/* Long fading trail, a full arc past the mark, and a REST between passes so it stays
+   an event rather than a metronome (the old one read as orbiting). */
+@keyframes mgv2Shoot {
+  0%, 64% { opacity: 0; transform: translate(-60%, 42%) rotate(24deg); }
+  70% { opacity: 1; }
+  84%, 100% { opacity: 0; transform: translate(64%, -40%) rotate(24deg); } }
+.mgx-mark.mark-anim-shoot::before {
+  inset: auto; top: 16%; left: 6%; width: 38%; height: .045em; border-radius: 1em;
+  background: linear-gradient(90deg, transparent, rgba(207, 232, 255, .35) 55%, #fff);
+  box-shadow: 0 0 .35em rgba(207, 232, 255, .85);
+  animation: mgv2Shoot calc(4.4s / var(--anim-speed)) cubic-bezier(.5, .1, .6, .9) infinite; }
+
+/* ---- eclipse (v2) -------------------------------------------------------------- */
+/* The umbra is proportional to the mark (the owner's "needs a control for size"
+   note: it rides the size setting like everything else) and crosses on a shallow
+   orbit instead of sliding flat. */
+@keyframes mgv2Eclipse {
+  0%, 100% { transform: translate(-80%, 10%); } 50% { transform: translate(80%, -10%); } }
+.mgx-mark.mark-anim-eclipse::before {
+  inset: 6%; border-radius: 50%;
+  background: radial-gradient(circle, #0f0e1c 55%, rgba(15, 14, 28, 0) 72%);
+  box-shadow: 0 0 .5em rgba(120, 90, 200, .5);
+  animation: mgv2Eclipse calc(5s / var(--anim-speed)) ease-in-out infinite; }
+
+/* ---- moondust: the canvas treatment -------------------------------------------- */
+/* The particle field is drawn by MarkDust.jsx (a single rAF, a fixed pool, no
+   allocation per frame, paused when the tab is hidden). All this rule does is give
+   the canvas its place: centred on the mark, larger than it (the orbit is wider than
+   the art), and BEHIND the art so motes pass around the mark rather than over it. */
+.mgx-mark .mgx-mark-dust { position: absolute; left: 50%; top: 50%; z-index: 0;
+  transform: translate(-50%, -50%); pointer-events: none; }
+/* the art sits above the dust (shell.css owns the rest of this element's geometry) */
+.mgx-mark .mgx-mark-tilt { z-index: 1; }
+
+/* ---- the reduced-motion contract ----------------------------------------------- */
+/* A viewer who asked the OS for less motion gets the mark, still. This is the whole
+   roster's answer, including the base treatment -- moondust's own rAF checks the same
+   query in JS, since a canvas cannot be paused by CSS. */
+@media (prefers-reduced-motion: reduce) {
+  .mgx-mark .mgx-mark-tilt,
+  .mgx-mark .mgx-mark-sheen,
+  .mgx-mark .mgx-mark-tilt img,
+  .mgx-mark i,
+  .mgx-mark::before,
+  .mgx-mark::after { animation: none !important; }
+}
