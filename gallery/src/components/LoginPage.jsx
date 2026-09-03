@@ -136,6 +136,8 @@ export default function LoginPage({ boot }) {
 
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
+  // The login banner's one failure state -> fall back to the mark (see the render).
+  const [bannerFailed, setBannerFailed] = useState(false);
   const [createUser, setCreateUser] = useState("");
   const [createPass, setCreatePass] = useState("");
   const [createConfirm, setCreateConfirm] = useState("");
@@ -233,9 +235,27 @@ export default function LoginPage({ boot }) {
           </div>
         </div>
         <div className="lgn-card">
-          <div className="lgn-mark">
-            {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
-          </div>
+          {/* Issue #25's banner half -- owner design call, 2026-08-31 (screenshot in
+              chat): the Branding tab's login slot finally shows up where it was always
+              meant to, as a FULL-WIDTH strip across the top of the card above the title,
+              replacing the small mark that used to render here.
+
+              /branding/login-banner.png is PUBLIC-tier (this page is unauthenticated) and
+              rule-8-backed -- with no per-install crop rendered yet, the route serves the
+              slot's shipped sealed default -- so it resolves on a fresh install too. The
+              onError fallback to the mark is belt-and-braces on top of that: a sign-in
+              page is the one screen that must never show a broken image, and the mark is
+              exactly what rendered here before. */}
+          {bannerFailed ? (
+            <div className="lgn-mark">
+              {boot.mark_url ? <img src={boot.mark_url} alt="" /> : null}
+            </div>
+          ) : (
+            <div className="lgn-banner">
+              <img src="/branding/login-banner.png" alt=""
+                onError={() => setBannerFailed(true)} />
+            </div>
+          )}
           <div className="lgn-titlewrap">
             <div className="lgn-title">Moonglade Athenaeum</div>
             {createMode ? (

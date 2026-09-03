@@ -41,6 +41,23 @@
   box-shadow: 0 30px 90px rgba(0, 0, 0, .65), 0 0 90px rgba(100, 58, 172, .14);
   padding: 30px 32px 32px; animation: lgnRise .5s cubic-bezier(.2, .9, .24, 1) both; }
 
+/* #25's banner half (owner design call, 2026-08-31): the login slot's art as a
+   full-width strip across the TOP of the card, above the title.
+
+   The negative margins pull it out past the card's own 30px/32px padding to the
+   padding-box edge, so it bleeds the full width the way the owner's screenshot draws
+   it. The 15px top corners are the card's 16px radius MINUS its 1px border -- an inner
+   radius has to be smaller than its outer one, or a hairline of card background shows
+   at each corner. aspect-ratio reserves the height before the image lands, so the card
+   never jumps once it loads (the flat is cut 1920x480 -- _BANNER_RATIO's 4.0 for this
+   slot, so 4/1 is the art's own shape, not a crop imposed here). */
+.lgn-banner { position: relative; margin: -30px -32px 0; aspect-ratio: 4 / 1;
+  border-radius: 15px 15px 0 0; overflow: hidden;
+  background: radial-gradient(120% 140% at 18% 0%,
+    color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
+.lgn-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* The mark treatment stays: it is what the banner's onError falls back to. */
 .lgn-mark { position: relative; height: 88px; border-radius: 12px; overflow: hidden;
   box-shadow: 0 0 44px rgba(146, 109, 222, .32);
   background: radial-gradient(120% 140% at 18% 0%,
