@@ -3755,11 +3755,7 @@ ${"=".repeat(48)}
   function toastNew(d) {
     const newly = (d.newly || []).map((id) => (d.achievements || []).filter((a) => a.id === id)[0]).filter(Boolean);
     if (newly.length > 3) {
-      showToast({
-        icon: "\u{1F3C6}",
-        name: newly.length + " achievements unlocked",
-        desc: "Your catalog just earned a stack of achievements. Open \u{1F3C6} to review them."
-      });
+      _floodParade(newly);
       return;
     }
     newly.forEach((a) => celebrate(a));
@@ -4014,6 +4010,84 @@ ${"=".repeat(48)}
     });
   }
   var HOLD = { common: 4200, rare: 4800, epic: 5400, legendary: 6400, feat: 6400 };
+  var FLOOD_DWELL_MS = 2400;
+  var _trail = [];
+  var _chip = null;
+  function _recede(m) {
+    m.classList.add("trail");
+    _trail.unshift(m);
+    _trail.forEach((el, i) => {
+      el.classList.remove("trail-1", "trail-2", "trail-3", "trail-4");
+      if (i < 4) el.classList.add("trail-" + (i + 1));
+    });
+    while (_trail.length > 4) {
+      const old = _trail.pop();
+      old.classList.add("out");
+      setTimeout(() => {
+        if (old.parentNode) old.remove();
+      }, 500);
+    }
+  }
+  function _clearParade() {
+    _trail.splice(0).forEach((el) => {
+      el.classList.add("out");
+      setTimeout(() => {
+        if (el.parentNode) el.remove();
+      }, 500);
+    });
+    if (_chip) {
+      _chip.classList.add("out");
+      const c = _chip;
+      _chip = null;
+      setTimeout(() => {
+        if (c.parentNode) c.remove();
+      }, 500);
+    }
+  }
+  function _playFlood(built, after) {
+    const m = built.m, tw = built.tw;
+    document.body.appendChild(m);
+    void m.offsetWidth;
+    m.classList.add("go");
+    tw.classList.add("go");
+    const advance = () => {
+      if (m._adv) return;
+      m._adv = true;
+      _recede(m);
+      if (after) after();
+    };
+    m._t = setTimeout(advance, FLOOD_DWELL_MS);
+    m.addEventListener("click", () => {
+      clearTimeout(m._t);
+      advance();
+    });
+  }
+  function _floodParade(list) {
+    const q = list.slice();
+    let shown = 0;
+    const step = () => {
+      if (!q.length) {
+        setTimeout(_clearParade, 3200);
+        return;
+      }
+      const a = q.shift();
+      shown++;
+      const tier = a.tier || "common";
+      _chime(tier);
+      const built = _mkMoment(a, {});
+      if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+      _playFlood(built, step);
+      if (shown > 1) {
+        if (!_chip) {
+          _chip = document.createElement("div");
+          _chip.className = "ach-trailchip";
+          document.body.appendChild(_chip);
+        }
+        _chip.textContent = "\xD7" + shown + " earned";
+      }
+    };
+    step();
+  }
   function celebrate(a) {
     if (a) {
       _q.push(a);
@@ -4031,12 +4105,6 @@ ${"=".repeat(48)}
     const built = _mkMoment(a, {});
     if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
     _play(built, HOLD[tier] || 4600, _next);
-  }
-  function showToast(a) {
-    _play(_mkMoment(
-      { name: a.name, tier: "legendary", icon: a.icon || "\u{1F3C6}", id: "" },
-      { badge: false, mascot: false, pill: false, eyebrow: "Achievement Unlocked", line: a.desc || "" }
-    ), 6500, null);
   }
   function check() {
     load(true);

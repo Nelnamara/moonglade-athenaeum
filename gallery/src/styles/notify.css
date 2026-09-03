@@ -25,8 +25,24 @@
 .ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:system-ui,sans-serif;}
 .ach-m2.go{opacity:1;}
 .ach-m2.out{opacity:0;transition:opacity .5s;}
+/* ---- the flood TRAIL (owner ruling 2026-09-03): a receded moment keeps its card on screen,
+   shrinking and dimming down-screen behind the presenter. The receded layer drops its scrim
+   (five stacked .ach-m2 scrims would black the room out) and every pointer event; only the
+   front moment owns the click. Transform rides .tw so the enter animations on .toast/.mascot
+   are untouched. */
+.ach-m2.trail{background:transparent;pointer-events:none;}
+.ach-m2.trail .mascot,.ach-m2.trail .mglow,.ach-m2.trail .ee-star,.ach-m2.trail .m2-conf{opacity:0;transition:opacity .3s;}
+.ach-m2.trail-1 .tw{transform:translateY(150px) scale(.9);filter:brightness(.72);}
+.ach-m2.trail-2 .tw{transform:translateY(235px) scale(.8);filter:brightness(.54);}
+.ach-m2.trail-3 .tw{transform:translateY(300px) scale(.71);filter:brightness(.4);}
+.ach-m2.trail-4 .tw{transform:translateY(348px) scale(.64);filter:brightness(.28);opacity:.6;}
+.ach-trailchip{position:fixed;left:50%;transform:translateX(-50%);bottom:5vh;z-index:519;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#d4af37;
+  background:rgba(10,8,24,.85);border:1px solid rgba(212,175,55,.4);border-radius:999px;
+  padding:3px 11px;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1;transition:opacity .5s;}
+.ach-trailchip.out{opacity:0;}
 .ach-m2 .tstage{width:min(680px,94vw);}
-.ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;}
+.ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;transition:transform .45s cubic-bezier(.2,.9,.24,1),filter .45s,opacity .45s;}
 .ach-m2 .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}
 .ach-m2 .t-rare{--tc:#7fb0f4;--tcl:#d2e4ff;--tcd:#4a72b8;}
 .ach-m2 .t-epic{--tc:#c69cff;--tcl:#ead9ff;--tcd:#8a5cc4;}
@@ -71,7 +87,7 @@
 @keyframes m2runespinB{from{transform:rotate(360deg);}to{transform:rotate(0deg);}}
 .ach-m2 .m2-wisp{position:absolute;bottom:-2px;border-radius:50%;background:radial-gradient(circle,rgba(255,178,90,.95),rgba(255,90,50,.8) 40%,rgba(224,53,94,.55) 65%,transparent 78%);filter:blur(1.5px);pointer-events:none;animation-name:m2flamewisp;animation-timing-function:ease-in;animation-iteration-count:infinite;}
 @keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.57;}55%{opacity:.54;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}
-@media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} }
+@media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} .ach-m2 .tw{transition:none!important;} }
 .ach-m2 .tbody{min-width:0;flex:1;}
 .ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
 .ach-m2 .tw.go .tbody .u{animation:m2fade .4s ease .86s forwards;}
