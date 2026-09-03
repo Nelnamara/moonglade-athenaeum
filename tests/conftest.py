@@ -141,6 +141,22 @@ def sealed_donor_present():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_perf_memos():
+    """The 2026-09-03 perf pass added three module-level memos -- the achievement-metrics
+    cache, the contest-board cache, and the contest sweep's last-successful-run stamp.
+    Module singletons outlive a test, so without this one test's cached board (or its
+    "we swept recently") answers the next one's request. Same isolation the sealed-defs
+    and earned-ids caches above already get, and for the same reason."""
+    gallery._ACH_METRICS_CACHE.clear()
+    gallery._contests_cache.clear()
+    gallery._contest_sync_last_ok.update(at=0.0)
+    yield
+    gallery._ACH_METRICS_CACHE.clear()
+    gallery._contests_cache.clear()
+    gallery._contest_sync_last_ok.update(at=0.0)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_watch(monkeypatch):
     """create_app() is called by ~every test in this suite. Without this, its
     live-mirror watcher thread would call _make_session(None), which re-reads THIS

@@ -151,7 +151,7 @@ function Row({ a, ladderName, onOpen }) {
       onClick={() => onOpen(a)}>
       <span className="fm-row-gem" />
       <div className="fm-row-thumbwrap">
-        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" draggable={false}
+        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" loading="lazy" draggable={false}
           onError={(e) => e.currentTarget.remove()} />
         {!a.earned && <div className="fm-row-lock">🔒</div>}
       </div>
@@ -296,7 +296,7 @@ export default function FolioMobile({ onClose }) {
                   {vm.recent.map((a) => (
                     <button type="button" className="fm-reccard" key={a.id} onClick={() => openDetail(a)}>
                       <div className="fm-reccard-imgwrap">
-                        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" draggable={false}
+                        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" loading="lazy" draggable={false}
                           onError={(e) => e.currentTarget.remove()} />
                       </div>
                       <div className="fm-reccard-name">{a.name}</div>
@@ -381,7 +381,7 @@ export default function FolioMobile({ onClose }) {
                           <button type="button" key={l.id} className={"fm-laddericon" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
                             onClick={() => selectLadder(l.id)}>
                             <div className="fm-laddericon-tile">
-                              <img src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""} alt=""
+                              <img src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""} alt="" loading="lazy"
                                 draggable={false} onError={(e) => e.currentTarget.remove()} />
                             </div>
                             <div className="fm-laddericon-lab">{l.name}</div>
@@ -396,7 +396,7 @@ export default function FolioMobile({ onClose }) {
                           {activeLadder.name} · rung {tierIdxSafe + 1}/{tiersLen} · {activeLadder.earnedCount} earned
                         </div>
                         <div className={"fm-herobadgewrap" + (tier.earned ? " earned" : "")}>
-                          <img className="fm-heroimg" src={"/badge-thumb/" + encodeURIComponent(tier.id) + ".png"} alt=""
+                          <img className="fm-heroimg" src={"/badge-thumb/" + encodeURIComponent(tier.id) + ".png"} alt="" loading="lazy"
                             draggable={false} onError={(e) => e.currentTarget.remove()} />
                           {tier.earned && <div className="fm-herocheck">✓</div>}
                         </div>
@@ -523,7 +523,7 @@ export default function FolioMobile({ onClose }) {
         {sheetAch && (
           <div className={"mgfo-t-" + (sheetAch.tier || "common")}>
             <div className={"fm-sheet-imgwrap" + (sheetAch.earned ? " earned" : "")}>
-              <img src={"/badge-thumb/" + encodeURIComponent(sheetAch.id) + ".png"} alt="" draggable={false}
+              <img src={"/badge-thumb/" + encodeURIComponent(sheetAch.id) + ".png"} alt="" loading="lazy" draggable={false}
                 onError={(e) => e.currentTarget.remove()} />
             </div>
             <div className="fm-sheet-name">{sheetAch.name}</div>

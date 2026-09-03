@@ -3055,9 +3055,53 @@ def _prompt_word_counter(rows):
     return c
 
 
-def achievement_metrics(db_path):
-    """The metric bundle every achievement threshold is measured against. Cheap
-    COUNTs over the local catalog -- read-only, no network, no spend. Fails soft."""
+# The achievement-metrics cache. Keyed by db_path (so a test's tmp catalog never
+# collides) and invalidated on the same cheap `(COUNT(*), MAX(media_id))` key the
+# series cache uses.
+#
+# DELIBERATELY NO TIME FLOOR, unlike that cache. A floor means a catalog change is
+# bounded-stale, and one of this bundle's consumers is the ACHIEVEMENT GATE: earning
+# something unlocks its art, and "your banner appears within thirty seconds" is a bug,
+# not a bounded staleness (caught by tests/test_unlock_split.py, which earns mid-test
+# and asks for the art immediately). The key alone is enough for the case that was
+# actually slow -- repeatedly opening overlays against a catalog nobody is writing to,
+# which is every open outside a sync. During a sync it recomputes per request, exactly
+# as it did before this cache existed, so nothing regressed there either.
+#
+# It exists because this bundle is NOT the "cheap COUNTs" its docstring once claimed
+# on its own: four of its passes read every matching row -- rated, the LoRA CSV
+# split, the palindrome seed scan and the prompt word counter -- and the whole
+# bundle reran on EVERY /api/achievements call. That is the Folio opening, the
+# Control Panel opening, and every achievement re-check, each paying a full-library
+# walk. On a modest machine with a real library that is the overlay-open stall the
+# owner reported (2026-09-03).
+_ACH_METRICS_CACHE = {}
+_ACH_METRICS_LOCK = threading.Lock()
+
+
+def achievement_metrics(db_path, use_cache=True):
+    """The metric bundle every achievement threshold is measured against. Read-only
+    over the local catalog -- no network, no spend. Fails soft.
+
+    CACHED (see _ACH_METRICS_CACHE): recomputed whenever the catalog's cheap key
+    changes, and served from the memo when it has not. `use_cache=False` forces a real
+    read -- what a test asserting the computation itself wants."""
+    if use_cache:
+        try:
+            with catalog(db_path) as con:
+                cheap = tuple(con.execute(
+                    "SELECT COUNT(*), MAX(media_id) FROM catalog").fetchone())
+            with _ACH_METRICS_LOCK:
+                ent = _ACH_METRICS_CACHE.get(str(db_path))
+                if ent is not None and ent["key"] == cheap:
+                    return dict(ent["metrics"])          # a COPY: callers .update() it
+            fresh = achievement_metrics(db_path, use_cache=False)
+            with _ACH_METRICS_LOCK:
+                _ACH_METRICS_CACHE[str(db_path)] = {
+                    "key": cheap, "computed_at": time.time(), "metrics": dict(fresh)}
+            return fresh
+        except sqlite3.Error:
+            pass          # a broken/missing catalog falls through to the real read
     m = catalog_counts(db_path)   # images, videos, collections
     with catalog(db_path) as con:
         try:
@@ -3568,10 +3612,16 @@ def _best_day_streak(days):
     return best
 
 
-def telemetry_metrics(out_dir):
+def telemetry_metrics(out_dir, telem=None):
     """Flatten the telemetry store into the achievement metric namespace.
-    Counters/maxima pass through, sets become cardinalities, flags become 0/1."""
-    d = load_telemetry(out_dir)
+    Counters/maxima pass through, sets become cardinalities, flags become 0/1.
+
+    `telem` lets a caller that has ALREADY loaded the store hand it in rather than
+    making this parse the file again. /api/achievements needed the store three times
+    over (here, in first_sync_complete, and for compute's `sets`) and was reading and
+    JSON-parsing it three times per request; it now loads once and passes it through.
+    Absent, the behaviour is exactly as before."""
+    d = load_telemetry(out_dir) if telem is None else telem
     m = {}
     for src in (d["counters"], d["maxima"]):
         for k, v in src.items():
@@ -3636,7 +3686,7 @@ def telemetry_metrics(out_dir):
     return m
 
 
-def first_sync_complete(out_dir, db_path):
+def first_sync_complete(out_dir, db_path, telem=None):
     """True once the first FULL library sync has finished -- the gate that stops the
     achievement unlock toasts from firing mid-first-sync. `first-light` is metric
     images>=1, so without this gate it pops the instant image #1 lands, seconds into a
@@ -3656,7 +3706,8 @@ def first_sync_complete(out_dir, db_path):
     with a real library but a pristine achievement state simply resolves on its next
     `--sync`."""
     try:
-        if load_telemetry(out_dir)["flags"].get("first_sync_done"):
+        d = load_telemetry(out_dir) if telem is None else telem
+        if d["flags"].get("first_sync_done"):
             return True
         st = load_ach_state(out_dir)
         if st.get("seen") or st.get("earned_at"):
@@ -3718,6 +3769,20 @@ def sweep_telemetry(out_dir):
 # and its old rows cannot change, so sweeping all of it would be a request storm for
 # nothing -- but a running contest is where entries actually happen, so the cap must never
 # be what drops one.
+# The contest board, memoized per variant (see api_contests). Module-level so every
+# surface that mounts a contest list shares one answer rather than each paying its own
+# round trip on open.
+CONTESTS_TTL = 90.0
+_contests_cache = {}
+_contests_cache_lock = threading.Lock()
+
+# How long a completed sweep counts as recent enough to skip. The spec asked for this
+# and it never got built: opening the Contests overlay fired a full sweep EVERY time --
+# a paced walk over the board plus a per-contest entries read, on the open of a window
+# whose data changes on the order of days. A forced sweep (the publish kick, which is
+# confirming an entry made seconds ago) ignores this entirely.
+CONTEST_SYNC_RECENT_S = 600.0
+_contest_sync_last_ok = {"at": 0.0}
 _CONTEST_SYNC_MAX = 40
 _CONTEST_SYNC_RECENT_DAYS = 45
 _CONTEST_SYNC_PAUSE = 0.35          # paced: be polite to their servers
@@ -3769,6 +3834,16 @@ def _contest_detection_sync(out_dir, force=False):
     ever logged -- the log lines carry an exception type and a redacted message, no keys."""
     import logging as _logging
     log = _logging.getLogger(__name__)
+    # RUN-RECENCY GUARD. A sweep that just ran has nothing new to learn: the board moves
+    # over days and an entry made in the last ten minutes was either made HERE (in which
+    # case the publish kick forced its own sweep) or on the website, where ten more
+    # minutes of latency costs nothing. Without this, every Contests overlay open paid a
+    # paced walk of the board plus a read per contest. `force` bypasses it completely --
+    # that caller is confirming a specific entry it was just told about.
+    if not force:
+        age = time.time() - _contest_sync_last_ok.get("at", 0.0)
+        if age < CONTEST_SYNC_RECENT_S:
+            return True
     try:
         import moonglade_backup as core
         session = core._make_session(None)
@@ -3816,6 +3891,9 @@ def _contest_detection_sync(out_dir, force=False):
                 log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
                             _redact_host_paths_cli(out_dir, str(e))[:200])
                 continue
+        # Only a sweep that actually completed counts as recent -- a failed one must not
+        # buy ten minutes of silence.
+        _contest_sync_last_ok["at"] = time.time()
         return True
     except Exception as e:
         log.warning("contest sweep: gave up: %s: %s", type(e).__name__,
@@ -10753,16 +10831,34 @@ def create_app(out_dir: Path):
     def api_contests():
         """The live PixAI contest board (community + official). Read-only PUBLIC data (not
         owner-private, no spend), so NOT localhost-gated -- the owner browsing over LAN still
-        sees it. ?all=1 includes ended contests; default is only the currently-running ones."""
+        sees it. ?all=1 includes ended contests; default is only the currently-running ones.
+
+        MEMOIZED for CONTESTS_TTL. Four surfaces mount this on open -- Contests, My Art,
+        Publish and the mobile screen -- and each was pulling the live board over the
+        network on every mount, which is the stall the owner reported on a modest machine
+        (2026-09-03). A contest board changes over days; ninety seconds of staleness costs
+        nothing and turns four page-open round trips into one. The two variants cache
+        separately because they are different answers to different questions.
+
+        Soft-fail semantics are unchanged, and a failure is NOT cached: an offline blip
+        must not pin an empty board for the next minute and a half."""
         show_all = request.args.get("all") == "1"
+        now = time.time()
+        with _contests_cache_lock:
+            ent = _contests_cache.get(show_all)
+            if ent and (now - ent["at"]) < CONTESTS_TTL:
+                return jsonify(ent["payload"])
         try:
             core, session = _gen_session()
             contests = core.list_contests(session, active_only=not show_all)
-            return jsonify({"contests": contests,
-                            "official": sum(1 for c in contests if c["type"] == "official"),
-                            "community": sum(1 for c in contests if c["type"] != "official")})
+            payload = {"contests": contests,
+                       "official": sum(1 for c in contests if c["type"] == "official"),
+                       "community": sum(1 for c in contests if c["type"] != "official")}
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
+        with _contests_cache_lock:
+            _contests_cache[show_all] = {"at": time.time(), "payload": payload}
+        return jsonify(payload)
 
     @app.route("/api/contest/<slug>/artworks")
     @tier(LOGIN)
@@ -11009,13 +11105,20 @@ def create_app(out_dir: Path):
         this app counts. What the sets contain never leaves the store either."""
         if not _contest_sync_lock.acquire(False):
             return jsonify({"error": "a sync is already running"}), 409
+        recent = (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S
         try:
             ok = _contest_detection_sync(out_dir)
         finally:
             _contest_sync_lock.release()
         m = telemetry_metrics(out_dir)
-        return jsonify({"synced": bool(ok),
-                        "contest_entries": int(m.get("contest_entries", 0) or 0)})
+        payload = {"synced": bool(ok),
+                   "contest_entries": int(m.get("contest_entries", 0) or 0)}
+        if recent:
+            # The sweep short-circuited on recency, so the counts cannot have moved and
+            # the client can skip its own re-pull. Saying so beats making it guess from
+            # an unchanged number.
+            payload["skipped"] = "recent"
+        return jsonify(payload)
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -11638,16 +11741,20 @@ def create_app(out_dir: Path):
             sweep_branding_drops(out_dir)
         except Exception:
             pass
+        # ONE telemetry read for the whole request. This route wanted the store three
+        # times -- the metric flatten, the first-sync gate, and compute's `sets` -- and
+        # was reading and parsing the file for each. Same values, a third of the I/O.
+        telem = load_telemetry(out_dir)
         metrics = achievement_metrics(db_path)
-        metrics.update(telemetry_metrics(out_dir))
+        metrics.update(telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
         # first-light is images>=1, so without this it pops seconds into a fresh first sync.
-        fsd = first_sync_complete(out_dir, db_path)
+        fsd = first_sync_complete(out_dir, db_path, telem=telem)
         persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
-                                          sets=load_telemetry(out_dir).get("sets", {}),
+                                          sets=telem.get("sets", {}),
                                           earned_at=state.get("earned_at"))
             newly = result["newly"]
             if not fsd:

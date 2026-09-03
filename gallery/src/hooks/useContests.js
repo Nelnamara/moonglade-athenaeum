@@ -131,9 +131,13 @@ export default function useContests(opts) {
     if (!wantMine) return undefined;
     let dead = false;
     reloadMine();
-    apiPost("/api/contest/sync", {}).then(() => {
+    apiPost("/api/contest/sync", {}).then((d) => {
       if (dead) return;
       setSyncing(false);
+      // A sweep that short-circuited on recency changed nothing, so the second read
+      // would fetch the same rows we already have. The first reloadMine above is the
+      // only one that was ever needed in that case.
+      if (d && d.skipped === "recent") return;
       reloadMine();
     });
     return () => { dead = true; };
