@@ -80,7 +80,7 @@
 /* Loom mount only: Camera + Basic/Professional are each already owned by an existing Loom
    control -- data-loom-ctx on the element hides the shared drawer's own copies. */
 .gen-drawer[data-loom-ctx] .mgd-cam-wrap,.gen-drawer[data-loom-ctx] .mgd-quality-wrap{display:none;}
-/* MODE & CHANNEL (DC 1418-1441): the Basic|Professional and Normal|Enhanced pairs reuse the
+/* MODE & CHANNEL (DC 1418-1441): the Basic|Professional and Normal|Private pairs reuse the
    SHOT MODE track + segment rules (.mgd-seg, same DC seg container; segStyle 2834 is 10.5px
    where shotModes is 10px); the caption is a plain 10px subtext line (DC 1426 -- no chip, no
    crown tint); the two switches are the DC's switchVals pill (2836-2841). */

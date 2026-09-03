@@ -68,9 +68,13 @@ export const MODE_PH = {
   flf: "Describe the transition from start frame to end frame…",
   r2v: "Type @image1 / @video1 / @audio1 to cite a ref — it becomes a chip — ‘the girl from @image1 dances to @audio1…’",
 };
+// The channel captions, PixAI's own. The internal value "enhanced" is HISTORICAL: the site
+// renamed this channel Normal/Enhanced -> Normal/Private on 2026-08-18 and this is a
+// display-only relabel by decision -- the value stays "enhanced" and the wire field stays
+// is_private/isPrivate, so nothing about what gets submitted moved.
 export const CHANNEL_CAP = {
   normal: "Please keep creations SFW",
-  enhanced: "👑 Enhanced — for professional creators",
+  enhanced: "👑 Private — when selected, your generated works cannot be published",
 };
 // The CAMERA <select>'s options, value + label, in the DC's exact order (DC 1405-1411). The
 // values are PixAI's i2vPro.cameraMovement keys (unchanged); the labels are the DC's.

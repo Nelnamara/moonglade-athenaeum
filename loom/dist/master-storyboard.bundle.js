@@ -173,7 +173,7 @@ var LoomBundle = (() => {
       quality: project.draft ? "basic" : "professional",
       generate_audio: !!c.audioGen,
       audio_language: c.audioLanguage || "english",
-      // The Channel (Normal/Enhanced) -- the SAME real field mg-generate-drawer's own
+      // The Channel (Normal/Private) -- the SAME real field mg-generate-drawer's own
       // channel select has always submitted (is_private: enhanced), and the server's
       // shared build_shot_video_params has accepted on this route all along; the Loom
       // client just never sent it (2026-08-06, owner correction -- an earlier audit
@@ -2332,7 +2332,7 @@ ${"=".repeat(48)}
   };
   var CHANNEL_CAP = {
     normal: "Please keep creations SFW",
-    enhanced: "\u{1F451} Enhanced \u2014 for professional creators"
+    enhanced: "\u{1F451} Private \u2014 when selected, your generated works cannot be published"
   };
   var CAMERA_OPTS = [
     ["unset", "Unset"],
@@ -3380,7 +3380,7 @@ ${"=".repeat(48)}
       st.current.quality = v;
       rerender();
       reprice();
-    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Enhanced"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
+    } }, l))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "radiogroup", "aria-label": "Channel" }, [["normal", "Normal"], ["enhanced", "Private"]].map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("button", { key: v, type: "button", role: "radio", "aria-checked": s.channel === v, className: "mgd-channel" + (s.channel === v ? " on" : ""), onClick: () => {
       if (st.current.channel === v) return;
       st.current.channel = v;
       rerender();
@@ -9103,7 +9103,7 @@ ${"=".repeat(48)}
           onChange: (ev) => dfPatch((cc) => ({ ...cc, isPrivate: ev.target.value === "enhanced" }))
         },
         /* @__PURE__ */ React.createElement("option", { value: "normal" }, "Normal"),
-        /* @__PURE__ */ React.createElement("option", { value: "enhanced" }, "\u{1F451} Enhanced")
+        /* @__PURE__ */ React.createElement("option", { value: "enhanced" }, "\u{1F451} Private")
       )), /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("div", { className: "lm-hint", style: { marginTop: 22 } }, "Please keep creations SFW"))), /* @__PURE__ */ React.createElement("label", { className: "lm-check", style: { marginTop: 6 } }, /* @__PURE__ */ React.createElement(
         "input",
         {

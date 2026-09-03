@@ -535,8 +535,8 @@ describe("shotPayload", () => {
     assert.equal(p2.audio_language, "none");
   });
 
-  test("carries the shot's Channel (is_private) onto the payload -- Normal by default, Enhanced when set", () => {
-    // 2026-08-06 owner correction: the Normal/Enhanced channel is the REAL field
+  test("carries the shot's Channel (is_private) onto the payload -- Normal by default, Private when set", () => {
+    // 2026-08-06 owner correction: the Normal/Private channel is the REAL field
     // mg-generate-drawer has always submitted and the server's shared
     // build_shot_video_params has always accepted on this route -- the Loom client
     // just never sent it (an earlier audit wrongly recorded the field as nonexistent).
