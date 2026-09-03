@@ -10763,8 +10763,20 @@ def _contest_rows(payload):
     for r in rows:
         if not isinstance(r, dict):
             continue
-        out.append({str(k): v for k, v in r.items()
-                    if v is None or isinstance(v, (str, int, float, bool))})
+        flat = {str(k): v for k, v in r.items()
+                if v is None or isinstance(v, (str, int, float, bool))}
+        # ONE exception to the scalars-only rule, and it is an identity question rather
+        # than a tidiness one. An entry row can carry its artwork as a nested object
+        # (`{"id": <entry id>, "artwork": {"id": <artwork id>}}`), and dropping that
+        # leaves only the ENTRY id -- a different value from the artwork id every other
+        # path keys on. The dedupe set is grow-only, so one real entry then lands under
+        # two keys and counts twice, forever. Lift the artwork id out to the flat name
+        # the rest of the app already reads.
+        if not flat.get("artworkId"):
+            art = r.get("artwork")
+            if isinstance(art, dict) and art.get("id"):
+                flat["artworkId"] = str(art["id"])
+        out.append(flat)
     return out
 
 

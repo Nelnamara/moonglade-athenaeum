@@ -487,9 +487,13 @@ def test_sweep_without_an_account_id_does_nothing(tmp_path, monkeypatch, pixai):
 # ---- POST /api/contest/sync -------------------------------------------------
 
 def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, pixai):
-    """Ints, never contents -- and never contest_wins. That metric is hidden-only, so even a
-    zero in this response would tell a reader that winning is something the app counts."""
+    """Ints, never contents -- and never contest_wins. That metric is hidden-only, so even
+    a zero in this response would tell a reader that winning is something the app counts.
+
+    The route ANSWERS IMMEDIATELY since 2026-09-03 (the sweep moved off-thread), so the
+    sweep is run inline here and the counts are read afterwards."""
     _no_pause(monkeypatch)
+    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(core, "list_contests",
                         lambda s, **k: [_contest("c1", "s1", result_at=_iso(1))])
     monkeypatch.setattr(core, "contest_my_entries",
@@ -497,33 +501,48 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     monkeypatch.setattr(core, "contest_winners",
                         lambda s, slug: [{"authorId": pixai.user_id}])
     cli = _client(tmp_path)
-    d = cli.post("/api/contest/sync").get_json()
-    assert d == {"synced": True, "contest_entries": 2}
-    assert "contest_wins" not in d                      # the seal, not an oversight
+    real = g.threading.Thread
+    monkeypatch.setattr(g.threading, "Thread",
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
+                            "T", (), {"start": lambda self_: target(*args, **(kwargs or {}))})())
+    d = cli.post("/api/contest/sync", json={"csrf": _csrf(cli)}).get_json()
+    monkeypatch.setattr(g.threading, "Thread", real)
+    assert d["started"] is True
+    assert "contest_wins" not in json.dumps(d)         # the seal, not an oversight
     # ... and the win really was recorded; it just never appears in the response
     assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
-def test_sync_route_says_so_when_the_sweep_gave_up(tmp_path, monkeypatch, pixai):
-    """`synced` is what happened, not a constant: a poll that failed must not answer like
-    one that worked."""
+def test_sync_route_answers_even_when_the_sweep_gives_up(tmp_path, monkeypatch, pixai):
+    """The route no longer waits for the outcome, so a doomed sweep does not make it fail:
+    it reports that one STARTED, and the sweep's own failure is logged and left behind."""
     _no_pause(monkeypatch)
+    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
 
     def _boom(*a, **k):
         raise core.PixAIError("the board is unreachable")
     monkeypatch.setattr(core, "list_contests", _boom)
     cli = _client(tmp_path)
-    assert cli.post("/api/contest/sync").get_json() == {"synced": False,
-                                                        "contest_entries": 0}
+    real = g.threading.Thread
+    monkeypatch.setattr(g.threading, "Thread",
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
+                            "T", (), {"start": lambda self_: target(*args, **(kwargs or {}))})())
+    d = cli.post("/api/contest/sync", json={"csrf": _csrf(cli)}).get_json()
+    monkeypatch.setattr(g.threading, "Thread", real)
+    assert d["started"] is True and d["contest_entries"] == 0
+    assert g._contest_sync_last_ok["at"] == 0.0        # a failure buys no quiet window
 
 
-def test_sync_route_refuses_a_concurrent_sweep(tmp_path):
-    """Single-flight, the same busy shape the other long jobs use."""
+def test_sync_route_reports_a_concurrent_sweep_as_busy(tmp_path, monkeypatch):
+    """Still single-flight. Since the sweep went off-thread the answer is a state rather
+    than a refusal -- there is nothing for the caller to retry, one is already running."""
+    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
     cli = _client(tmp_path)
     assert g._contest_sync_lock.acquire(False)
     try:
-        r = cli.post("/api/contest/sync")
-        assert r.status_code == 409 and r.get_json()["error"]
+        d = cli.post("/api/contest/sync", json={"csrf": _csrf(cli)}).get_json()
+        assert d["started"] is False and d["busy"] is True
     finally:
         g._contest_sync_lock.release()
 
@@ -622,7 +641,9 @@ def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pi
     cli = _client(tmp_path, [_row(media_id="m1", artwork_id="aw1", filename="a_m1.png",
                                   created_at="2026-08-06T00:00:00")])
     d = cli.get("/api/contest/mine").get_json()
-    assert len(seen) == 1 and seen[0].get("max_pages") == 1
+    # ONE board read, at the shared snapshot's full depth (max_pages unset) -- every
+    # contest reader goes through the same memo since the 2026-09-03 ultrareview.
+    assert len(seen) == 1 and seen[0].get("max_pages") is None
     rows = {r["contest_id"]: r for r in d["contests"]}
     assert d["total_entries"] == 3
     assert rows["c1"]["title"] == "First" and rows["c1"]["active"] is True
@@ -651,7 +672,9 @@ def test_mine_soft_fails_to_key_only_rows(tmp_path, monkeypatch, pixai):
 def test_mine_is_empty_before_any_entry(tmp_path, monkeypatch, pixai):
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
-    assert cli.get("/api/contest/mine").get_json() == {"contests": [], "total_entries": 0}
+    d = cli.get("/api/contest/mine").get_json()
+    assert d["contests"] == [] and d["total_entries"] == 0
+    assert d["sync_running"] is False and "last_sync_at" in d
 
 
 def test_artwork_media_ids_maps_only_what_the_catalog_holds(tmp_path):

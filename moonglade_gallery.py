@@ -271,6 +271,11 @@ _MIGRATIONS = [
     # migrate() path rather than a duplicate ALTER + index inside init_db. It runs after the
     # batch ALTER above, so the column always exists by the time this CREATE INDEX fires.
     "CREATE INDEX IF NOT EXISTS idx_batch ON catalog(batch)",
+    # artwork_id had no index while artwork_media_ids' own docstring called itself an
+    # "indexed lookup" -- it was a full table scan, run two or three times per contest
+    # overlay open (2026-09-03 ultrareview). Same shape as idx_task_id above, and the
+    # column exists from _CREATE_TABLE, so it needs no ALTER ahead of it.
+    "CREATE INDEX IF NOT EXISTS idx_artwork_id ON catalog(artwork_id)",
     # A real txt2img original legitimately has an EMPTY source_media_id forever, which
     # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
     # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
@@ -1147,8 +1152,9 @@ def myart_items(db_path):
 def artwork_media_ids(db_path, artwork_ids):
     """{artwork_id: media_id} for the ids the catalog knows, skipping the ones it does
     not. Cheap by construction: --sync-artworks writes artwork_id onto the SAME row as
-    the media_id it belongs to, so this is an indexed lookup rather than any kind of
-    join. It is what lets an entries listing show real thumbnails (/thumbs/<media_id>)
+    the media_id it belongs to, so this is a lookup rather than any kind of join -- and
+    since 2026-09-03 it is genuinely indexed (idx_artwork_id), which this docstring
+    claimed for a while before the index existed. It is what lets an entries listing show real thumbnails (/thumbs/<media_id>)
     for artworks the local library already holds -- an entry made from another device
     simply has no local media and gets no thumb, which is the honest answer.
 
@@ -1389,20 +1395,52 @@ def _series_ts(created_at):
     History feed's _history_ts (which lives inside create_app and can't be
     shared from module level): PixAI's 24-char `...T06:14:10.545Z`, the 20-char
     no-millis `...Z`, and the 19-char naive legacy rows -- all UTC (#34 review:
-    timestamps are UTC ISO strings, hour math needs no zone care)."""
-    from datetime import datetime, timezone
+    timestamps are UTC ISO strings, hour math needs no zone care).
+
+    TWO SHAPES ADDED 2026-09-03, because this now also measures CONTEST dates, which do
+    not come from the same place catalog rows do:
+      * DATE-ONLY ("2026-09-20") returned None, so a contest whose end date carried no
+        time component read as having no date at all -- no countdown, and the sweep
+        recency window silently skipped it;
+      * a real UTC OFFSET was TRUNCATED and the time read as UTC, quietly wrong by up to
+        a day either way. A deadline is the one thing on that surface that must not be
+        approximately right."""
+    from datetime import datetime, timedelta, timezone
     s = str(created_at or "").strip()
-    if s.endswith("Z"):
+    if not s:
+        return None
+    if s[-1:] in ("Z", "z"):
         s = s[:-1]
+    # A trailing offset, scanned backwards from the end and never past the "T" -- the
+    # date's own hyphens are not offsets, and an offset only ever follows the time.
+    off = timedelta(0)
+    tpos = s.find("T")
+    if tpos > 0:
+        for i in range(len(s) - 1, tpos, -1):
+            ch = s[i]
+            if ch == "+" or ch == "-":
+                tail = s[i + 1:].replace(":", "")
+                if tail.isdigit() and len(tail) in (2, 4):
+                    hh = int(tail[:2])
+                    mm = int(tail[2:]) if len(tail) == 4 else 0
+                    off = timedelta(hours=hh, minutes=mm)
+                    if ch == "+":
+                        off = -off       # +09:00 is AHEAD of UTC: subtract to reach UTC
+                    s = s[:i]
+                break
     try:
         base = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     except ValueError:
-        return None
+        try:                             # date-only: midnight UTC on that day
+            base = datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        return (base + off).timestamp()
     frac = s[19:]
     ms = 0.0
     if frac.startswith(".") and frac[1:].isdigit():
         ms = float("0" + frac)
-    return base.timestamp() + ms
+    return (base + off).timestamp() + ms
 
 
 # Ported from gallery/src/gen/headline.js's SCAFFOLD set -- KEEP THE TWO IN SYNC
@@ -3275,6 +3313,43 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
             entry["criteria"] = crit[a["id"]]
         achs.append(entry)
     by_id = {x["id"]: x for x in achs}
+    # Generic `requires` meta-loop (Glories of the Curator/Forgewright + The Way Is Shut):
+    # an achievement carrying a `requires` prereq list earns when every prereq id is earned
+    # (or it is pin-once). Iterates the SEALED roster -- which carries `requires` -- rather
+    # than the built entries, which deliberately never copy it, so no prereq list ever
+    # reaches the payload/client. `current` reflects how many prereqs are met (for a masked
+    # feat this stays cloaked until earned anyway).
+    #
+    # A FIXED POINT, and ABOVE the two post-passes -- both of those matter:
+    #   * it used to read ONE `earned_ids` snapshot taken before the loop, so a meta whose
+    #     prereq is ITSELF a meta could never earn: the prereq earned during the same pass
+    #     and the snapshot never heard about it. Iterating until nothing new earns is what
+    #     makes a chain of any depth resolve.
+    #   * it used to run AFTER Skin Changer and Completionist, so a skin granted by a meta
+    #     was invisible to Skin Changer count, and a meta earned here never counted toward
+    #     Completionist "everything earned". Resolving first means both post-passes see the
+    #     finished picture.
+    # Bounded by construction: a round can only ADD earns, so it converges in at most one
+    # pass per requires-carrying achievement.
+    _reqs = [a for a in _roster() if a.get("requires")]
+    for _ in range(len(_reqs) + 1):
+        earned_ids = {x["id"] for x in achs if x["earned"]}
+        changed = False
+        for a in _reqs:
+            e = by_id.get(a["id"])
+            if e is None:
+                continue
+            req = a["requires"]
+            met = sum(1 for r in req if r in earned_ids)
+            e["current"] = met
+            was = e["earned"]
+            e["earned"] = (met == len(req)) or e["id"] in pinned
+            if e["earned"] and a.get("skin"):
+                earned_skins.add(a["skin"])
+            if e["earned"] and not was:
+                changed = True
+        if not changed:
+            break
     # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
     sc = by_id.get("skin-changer")
     if sc:
@@ -3288,25 +3363,6 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
         done = sum(1 for x in pool if x["earned"])
         comp["current"] = 1 if done == len(pool) else 0
         comp["earned"] = done == len(pool) or comp["id"] in pinned
-    # Generic `requires` meta-loop (Glories of the Curator/Forgewright + The Way Is Shut):
-    # an achievement carrying a `requires` prereq list earns when every prereq id is earned
-    # (or it is pin-once). Iterates the SEALED roster -- which carries `requires` -- rather
-    # than the built entries, which deliberately never copy it, so no prereq list ever
-    # reaches the payload/client. `current` reflects how many prereqs are met (for a masked
-    # feat this stays cloaked until earned anyway).
-    earned_ids = {x["id"] for x in achs if x["earned"]}
-    for a in _roster():
-        req = a.get("requires")
-        if not req:
-            continue
-        e = by_id.get(a["id"])
-        if e is None:
-            continue
-        met = sum(1 for r in req if r in earned_ids)
-        e["current"] = met
-        e["earned"] = (met == len(req)) or e["id"] in pinned
-        if e["earned"] and a.get("skin"):
-            earned_skins.add(a["skin"])
     skins = [{"id": s["id"], "name": s["name"], "desc": s["desc"],
               "earned": bool(s.get("free")) or s["id"] in earned_skins,
               "unlock": _skin_unlock().get(s["id"])}
@@ -3776,6 +3832,33 @@ CONTESTS_TTL = 90.0
 _contests_cache = {}
 _contests_cache_lock = threading.Lock()
 
+
+def contest_board(core, session, force=False):
+    """The WHOLE contest board, memoized for CONTESTS_TTL -- and the one read every
+    consumer goes through.
+
+    Before this there were four different boards. /api/contests read six pages; the
+    sweep read two; the enter route, the publish-and-enter hook and /api/contest/mine
+    each read ONE. So a contest past row ~50 was visible in the list and then refused by
+    the enter route as "unknown contest", and My entries rendered its rows with blank
+    titles -- the same contest, present or absent depending on which code asked. The
+    publish hook's one-page read was the worst of them: it happens AFTER the publish is
+    already committed, so failing to find the contest there means an artwork published
+    and silently not entered.
+
+    One snapshot, read the full depth (list_contests' own default), filtered by whoever
+    needs less. Costs no more upstream than the single widest read did, and every caller
+    now agrees about what exists."""
+    now = time.time()
+    with _contests_cache_lock:
+        ent = _contests_cache.get("board")
+        if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
+            return ent["rows"]
+    rows = core.list_contests(session, active_only=False)
+    with _contests_cache_lock:
+        _contests_cache["board"] = {"at": time.time(), "rows": rows}
+    return rows
+
 # How long a completed sweep counts as recent enough to skip. The spec asked for this
 # and it never got built: opening the Contests overlay fired a full sweep EVERY time --
 # a paced walk over the board plus a per-contest entries read, on the open of a window
@@ -3852,7 +3935,7 @@ def _contest_detection_sync(out_dir, force=False):
             log.info("contest sweep: no account id resolved -- nothing to poll")
             return False
         active, ended = [], []
-        for c in core.list_contests(session, active_only=False, max_pages=2) or []:
+        for c in contest_board(core, session) or []:
             if not isinstance(c, dict):
                 continue
             # A RUNNING contest is never capped out: it is the only kind an entry can still
@@ -10843,22 +10926,17 @@ def create_app(out_dir: Path):
         Soft-fail semantics are unchanged, and a failure is NOT cached: an offline blip
         must not pin an empty board for the next minute and a half."""
         show_all = request.args.get("all") == "1"
-        now = time.time()
-        with _contests_cache_lock:
-            ent = _contests_cache.get(show_all)
-            if ent and (now - ent["at"]) < CONTESTS_TTL:
-                return jsonify(ent["payload"])
         try:
             core, session = _gen_session()
-            contests = core.list_contests(session, active_only=not show_all)
-            payload = {"contests": contests,
-                       "official": sum(1 for c in contests if c["type"] == "official"),
-                       "community": sum(1 for c in contests if c["type"] != "official")}
+            rows = contest_board(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
-        with _contests_cache_lock:
-            _contests_cache[show_all] = {"at": time.time(), "payload": payload}
-        return jsonify(payload)
+        # Both variants come off the ONE snapshot -- `active` is the server's own
+        # runtimeStatus flag, the same thing list_contests(active_only=True) filters on.
+        contests = rows if show_all else [c for c in rows if c.get("active")]
+        return jsonify({"contests": contests,
+                        "official": sum(1 for c in contests if c["type"] == "official"),
+                        "community": sum(1 for c in contests if c["type"] != "official")})
 
     @app.route("/api/contest/<slug>/artworks")
     @tier(LOGIN)
@@ -10980,7 +11058,7 @@ def create_app(out_dir: Path):
         board = {}
         try:
             core, session = _gen_session()
-            for c in core.list_contests(session, active_only=False, max_pages=1) or []:
+            for c in contest_board(core, session) or []:
                 if isinstance(c, dict) and c.get("id"):
                     board[str(c["id"])] = c
         except Exception:                       # soft: key-only rows beat an error page
@@ -10991,9 +11069,27 @@ def create_app(out_dir: Path):
         except Exception:
             thumbs = {}
         rows = []
+        shown_by_contest = {}
         for cid in order:
             c = board.get(cid) or {}
             aids = by_contest[cid]
+            # DEFENSIVE DEDUPE at read. Until 2026-09-03 the sweep could key one entry by
+            # its ENTRY id while the enter/publish paths keyed the same entry by its
+            # ARTWORK id (the row's nested artwork object was being stripped), so an
+            # already-poisoned store holds two keys for one piece. Where the catalog can
+            # resolve both to the same local media, they are one entry and are shown once.
+            # Keys that resolve to nothing local cannot be compared and are left alone --
+            # the set is grow-only and no rewrite is attempted, so this corrects the
+            # DISPLAY without pretending to correct history.
+            shown, seen_media = [], set()
+            for a in aids:
+                mid_local = thumbs.get(a, "")
+                if mid_local:
+                    if mid_local in seen_media:
+                        continue
+                    seen_media.add(mid_local)
+                shown.append(a)
+            shown_by_contest[cid] = shown
             rows.append({
                 "contest_id": cid,
                 "slug": str(c.get("slug") or ""),
@@ -11003,14 +11099,16 @@ def create_app(out_dir: Path):
                 "result_at": str(c.get("result_at") or ""),
                 "active": bool(c.get("active")),
                 "url": str(c.get("url") or ""),
-                "entry_artwork_ids": aids,
+                "entry_artwork_ids": shown,
                 "entries": [{"artwork_id": a, "media_id": thumbs.get(a, ""),
                              "thumb": ("/thumbs/%s.jpg" % thumbs[a]) if thumbs.get(a) else ""}
-                            for a in aids],
+                            for a in shown],
                 "won": cid in won_ids,
             })
         return jsonify({"contests": rows,
-                        "total_entries": sum(len(by_contest[cid]) for cid in order)})
+                        "total_entries": sum(len(shown_by_contest[cid]) for cid in order),
+                        "sync_running": bool(_contest_sync_lock.locked()),
+                        "last_sync_at": _contest_sync_last_ok.get("at", 0.0)})
 
     @app.route("/api/contest/enter", methods=["POST"])
     @tier(LOGIN)
@@ -11055,7 +11153,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "PixAI session unavailable: %s"
                                      % _redact_host_paths(str(e))[:160]}), 502
         try:
-            board = core.list_contests(session, active_only=False, max_pages=1)
+            board = contest_board(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
         contest_id = next((str(c.get("id") or "") for c in board or []
@@ -11102,23 +11200,52 @@ def create_app(out_dir: Path):
 
         ONE count comes back, and only one. contest_wins is deliberately absent -- it is a
         hidden-only metric, and even a zero here would tell a reader that a win is something
-        this app counts. What the sets contain never leaves the store either."""
-        if not _contest_sync_lock.acquire(False):
-            return jsonify({"error": "a sync is already running"}), 409
-        recent = (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S
-        try:
-            ok = _contest_detection_sync(out_dir)
-        finally:
-            _contest_sync_lock.release()
+        this app counts. What the sets contain never leaves the store either.
+
+        CSRF, since 2026-09-03: every sibling POST on this surface carries the explicit
+        token, and this one did not. It reaches PixAI with the owner's credentials on a
+        cross-site-triggerable POST, which is exactly the shape the token exists for --
+        cheap to add, and it makes the surface uniform instead of one-route-special.
+
+        RETURNS IMMEDIATELY. The sweep runs on its own thread; the answer says whether one
+        STARTED (or was skipped as recent, or was already busy), and the client watches
+        /api/contest/mine's `sync_running` for completion."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
         m = telemetry_metrics(out_dir)
-        payload = {"synced": bool(ok),
-                   "contest_entries": int(m.get("contest_entries", 0) or 0)}
-        if recent:
-            # The sweep short-circuited on recency, so the counts cannot have moved and
-            # the client can skip its own re-pull. Saying so beats making it guess from
-            # an unchanged number.
-            payload["skipped"] = "recent"
-        return jsonify(payload)
+        entries = int(m.get("contest_entries", 0) or 0)
+        # RECENT: nothing to do, and nothing to wait for.
+        if (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S:
+            return jsonify({"started": False, "skipped": "recent",
+                            "contest_entries": entries})
+        if not _contest_sync_lock.acquire(False):
+            return jsonify({"started": False, "busy": True, "contest_entries": entries})
+
+        def _run():
+            try:
+                _contest_detection_sync(out_dir)
+            finally:
+                _contest_sync_lock.release()
+
+        # OFF-THREAD, and this is the whole point: the sweep is paced (a third of a second
+        # between contests, plus a read each) and can run 30-90 seconds against a real
+        # board. It was doing that INSIDE the request, so opening the Contests overlay held
+        # a worker and the browser's connection for the duration -- on a slow board the
+        # overlay simply hung. The client watches /api/contest/mine's sync_running flag
+        # instead, which costs a local telemetry read.
+        try:
+            threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:                   # noqa: BLE001
+            # The lock is acquired HERE and released by the thread, so a thread that never
+            # starts would leave contest sync permanently "busy" for the life of the
+            # process -- every later open answering busy:true forever. Release it here and
+            # say what happened. (Found by its own test, which stubs Thread.start.)
+            _contest_sync_lock.release()
+            return jsonify({"started": False,
+                            "error": _redact_host_paths(str(e))[:200],
+                            "contest_entries": entries}), 200
+        return jsonify({"started": True, "contest_entries": entries})
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -11334,8 +11461,7 @@ def create_app(out_dir: Path):
                 if challenge and new_art_id:
                     try:
                         slug = next((str(c.get("slug") or "")
-                                     for c in (core.list_contests(session, active_only=False,
-                                                                  max_pages=1) or [])
+                                     for c in (contest_board(core, session) or [])
                                      if isinstance(c, dict)
                                      and str(c.get("id") or "") == challenge), "")
                         if not slug:
@@ -11348,6 +11474,22 @@ def create_app(out_dir: Path):
                                 result["entry_error"] = "the contest refused the entry"
                             else:
                                 result["entered"] = True
+                                # RECORD IT HERE. This path answered entered:true and wrote
+                                # nothing, leaning on the sweep below -- which silently
+                                # no-ops when the single-flight lock is held (a sweep from
+                                # the overlay, or the previous publish's own kick). The
+                                # entry then existed on PixAI and nowhere locally until
+                                # some later sweep happened to catch it. The sweep is
+                                # reconciliation; the path that KNOWS an entry just
+                                # succeeded is the one that should say so. Same key shape
+                                # every other writer uses -- artwork id, so the set dedupes
+                                # against the sweep's own row rather than double-counting.
+                                try:
+                                    telem_set_add("contest_entry_keys",
+                                                  "%s:%s" % (challenge, new_art_id),
+                                                  out_dir=out_dir)
+                                except Exception:
+                                    pass
                     except Exception as e:                    # noqa: BLE001
                         result["entry_error"] = _redact_host_paths(str(e))[:200]
                 elif challenge:
@@ -14764,8 +14906,13 @@ __DESIGN_TOKENS__
         # of the count -- abandoned polls and done-but-empty terminals never inflate the peak (the
         # in-memory _gen_phase_seen set leaks on both). telem_max keeps the peak. Silent-soft.
         try:
+            # ...and only real GENERATIONS count. The log also carries panel jobs, imports,
+            # deletes and CLI runs, and counting those made the peak a measure of "rows in
+            # the log" rather than of generating several things at once -- one sync beside
+            # one import could satisfy a rung nobody had actually earned.
             _live = sum(1 for j in core.read_jobs(out_dir)
-                        if j.get("status") not in core._JOBS_TERMINAL)
+                        if j.get("status") not in core._JOBS_TERMINAL
+                        and (j.get("type") or "generate") == "generate")
             telem_max("jobs_concurrent", _live, out_dir=out_dir)
         except Exception:
             pass

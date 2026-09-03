@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
@@ -117,10 +117,30 @@ export default function useContests(opts) {
   const [mine, setMine] = useState(null);
   const [mineErr, setMineErr] = useState(null);
   const [syncing, setSyncing] = useState(wantMine);
+  // The sync POST carries the explicit CSRF token like every sibling POST on this
+  // surface. It rides along on /api/myart/items -- the same source PublishOverlay and
+  // ContestConfirm read it from -- so this is one small GET, once, not a token minted
+  // per call. Held in a ref so the effect below does not re-run when it lands.
+  const csrfRef = useRef("");
+  useEffect(() => {
+    if (!wantMine) return;
+    apiGet("/api/myart/items").then((d) => { csrfRef.current = (d && d.csrf) || ""; });
+  }, [wantMine]);
+
+  // `dead` is a REF, not a closure variable: reloadMine is called from the effect, from
+  // the poll, and by consumers after an entry lands, and every one of those can resolve
+  // after unmount. It used to setState unconditionally -- a stale answer could repaint a
+  // gone overlay, and an in-flight read outlived the surface that asked for it.
+  const deadRef = useRef(false);
+  useEffect(() => {
+    deadRef.current = false;
+    return () => { deadRef.current = true; };
+  }, []);
 
   const reloadMine = useCallback(() => {
     if (!wantMine) return Promise.resolve(null);
     return apiGet("/api/contest/mine").then((data) => {
+      if (deadRef.current) return data;
       if (data.error) setMineErr(data.error);
       else { setMine(data); setMineErr(null); }
       return data;
@@ -129,18 +149,45 @@ export default function useContests(opts) {
 
   useEffect(() => {
     if (!wantMine) return undefined;
-    let dead = false;
+    let stop = false;
+    let timer = null;
     reloadMine();
-    apiPost("/api/contest/sync", {}).then((d) => {
-      if (dead) return;
-      setSyncing(false);
-      // A sweep that short-circuited on recency changed nothing, so the second read
-      // would fetch the same rows we already have. The first reloadMine above is the
-      // only one that was ever needed in that case.
-      if (d && d.skipped === "recent") return;
-      reloadMine();
+    // The sweep runs SERVER-SIDE ON ITS OWN THREAD now and this POST returns at once, so
+    // the answer is "did one start", not "here is the result". Three shapes:
+    //   started:false + skipped:"recent"  -- nothing ran; the read above is already current
+    //   started:false + busy:true         -- somebody else's sweep is mid-flight; watch it
+    //   started:true                      -- ours is running; watch it
+    // Watching means polling /api/contest/mine (a local telemetry read) while its
+    // sync_running flag is set, and stopping the moment it clears -- or after the ceiling,
+    // so a wedged sweep cannot leave a tab polling forever.
+    const POLL_MS = 5000;
+    const CEILING_MS = 60000;
+    const started = Date.now();
+    const watch = () => {
+      if (stop || deadRef.current) return;
+      if (Date.now() - started > CEILING_MS) { setSyncing(false); return; }
+      timer = setTimeout(() => {
+        reloadMine().then((d) => {
+          if (stop || deadRef.current) return;
+          if (d && d.sync_running) { watch(); return; }
+          setSyncing(false);          // it finished; the rows above are the fresh ones
+        });
+      }, POLL_MS);
+    };
+    apiPost("/api/contest/sync", { csrf: csrfRef.current }).then((d) => {
+      if (stop || deadRef.current) return;
+      // A refusal (an expired token, a 409, anything with an error) is NOT a completed
+      // sync -- it used to fall through the same path as success and quietly report the
+      // sweep as done. Surface it and stop watching.
+      if (!d || d.error) {
+        setSyncing(false);
+        if (d && d.error) setMineErr(d.error);
+        return;
+      }
+      if (d.skipped === "recent") { setSyncing(false); return; }
+      watch();
     });
-    return () => { dead = true; };
+    return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [wantMine, reloadMine]);
 
   const mineRows = mine ? mine.contests || [] : [];

@@ -153,15 +153,23 @@ def test_the_contest_board_is_memoized(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_the_two_board_variants_cache_separately(tmp_path, monkeypatch):
-    """?all=1 is a different question and must not be served the running-only answer."""
+def test_both_board_variants_come_off_the_one_snapshot(tmp_path, monkeypatch):
+    """?all=1 used to be a SECOND cached read at a different depth. Since the ultrareview
+    there is one board -- read at full depth, filtered per variant -- so the running-only
+    view and the everything view can never disagree about what exists."""
     monkeypatch.setattr(g, "_contests_cache", {})
     calls = []
-    _board_stub(monkeypatch, calls)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: calls.append(1) or [
+        {"id": "a", "slug": "a", "title": "Running", "type": "official",
+         "prize_amount": 0, "active": True},
+        {"id": "b", "slug": "b", "title": "Ended", "type": "community",
+         "prize_amount": 0, "active": False}])
     cli = _client(tmp_path)
-    cli.get("/api/contests")
-    cli.get("/api/contests", query_string={"all": "1"})
-    assert calls == [True, False], "each variant pulls once, with its own active_only"
+    assert [c["id"] for c in cli.get("/api/contests").get_json()["contests"]] == ["a"]
+    everything = cli.get("/api/contests", query_string={"all": "1"}).get_json()
+    assert [c["id"] for c in everything["contests"]] == ["a", "b"]
+    assert len(calls) == 1, "one upstream read serves both variants"
 
 
 def test_the_board_memo_expires(tmp_path, monkeypatch):
@@ -170,7 +178,7 @@ def test_the_board_memo_expires(tmp_path, monkeypatch):
     _board_stub(monkeypatch, calls)
     cli = _client(tmp_path)
     cli.get("/api/contests")
-    g._contests_cache[False]["at"] -= (g.CONTESTS_TTL + 1)
+    g._contests_cache["board"]["at"] -= (g.CONTESTS_TTL + 1)
     cli.get("/api/contests")
     assert len(calls) == 2
 
@@ -233,14 +241,21 @@ def test_a_failed_sweep_does_not_count_as_recent(tmp_path, monkeypatch, pixai):
 
 
 def test_the_sync_route_tells_the_client_it_skipped(tmp_path, monkeypatch, pixai):
-    """The client's second /api/contest/mine re-pull is pointless after a skip, and it
-    should be told so rather than left to infer it from an unchanged number."""
+    """The client's re-pull is pointless after a skip, and it should be told rather than
+    left to infer it from an unchanged number. (The route answers immediately now, so the
+    first call is run inline to make the sweep actually happen.)"""
     monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
     monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
     cli = _client(tmp_path)
-    first = cli.post("/api/contest/sync").get_json()
-    assert first["synced"] is True and "skipped" not in first
-    second = cli.post("/api/contest/sync").get_json()
-    assert second["synced"] is True and second["skipped"] == "recent"
+    token = cli.get("/api/myart/items").get_json()["csrf"]
+    real = g.threading.Thread
+    monkeypatch.setattr(g.threading, "Thread",
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
+                            "T", (), {"start": lambda self_: target(*args, **(kwargs or {}))})())
+    first = cli.post("/api/contest/sync", json={"csrf": token}).get_json()
+    monkeypatch.setattr(g.threading, "Thread", real)
+    assert first["started"] is True and "skipped" not in first
+    second = cli.post("/api/contest/sync", json={"csrf": token}).get_json()
+    assert second["started"] is False and second["skipped"] == "recent"
     assert "contest_entries" in second
