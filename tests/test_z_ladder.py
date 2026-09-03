@@ -54,6 +54,11 @@ def z():
         "claim":         _z("styles/claim-modal.css", ".mgclaim-scrim"),
         "claim_host":    _z("styles/claim-modal.css", ".mgclaim-host"),
         "mgai":          _z("styles/ai-tools.css", ".mgai-scrim"),
+        "pal_scrim":     _z("styles/command-palette.css", ".mgpal-scrim"),
+        "pal_host":      _z("styles/command-palette.css", ".mgpal-host"),
+        "pal_gchip":     _z("styles/command-palette.css", ".mgpal-gchip"),
+        "ks_scrim":      _z("styles/command-palette.css", ".mgks-scrim"),
+        "ks_host":       _z("styles/command-palette.css", ".mgks-host"),
     }
 
 
@@ -78,6 +83,11 @@ def test_each_scrim_sits_under_its_own_content(z):
     # the claim modal's scrim went to 440 while its host sat at 361 -- a full-screen
     # click-eating scrim OVER the Claim button. Every scrim/host pair is listed now.
     assert z["claim_host"] > z["claim"]
+    # ...and the command palette + its cheat-sheet, added with the same pairing discipline
+    # the two recurrences above bought: a scrim without its host is a click-eating sheet of
+    # glass over the thing it is supposed to be dimming.
+    assert z["pal_host"] > z["pal_scrim"]
+    assert z["ks_host"] > z["ks_scrim"]
 
 
 def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
@@ -91,6 +101,17 @@ def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):
     # .mgai-scrim TIED .lbx at 400 and survived only on accidental DOM order --
     # now a deliberate rung above the lightbox.
     assert z["mgai"] > z["lbx"]
+
+
+def test_command_palette_band_clears_every_layer_it_opens_over(z):
+    """Ctrl/⌘ K works from ANY layer — that is the point of a palette — so its scrim must
+    clear the topmost thing the app can already have up (the claim modal's host), and the
+    cheat-sheet must in turn clear the palette. The `?` sheet opens FROM the palette; flip
+    that pair and the sheet paints behind the panel that launched it, which is the exact
+    class of bug #39 was about."""
+    assert z["pal_scrim"] > z["claim_host"], "the command palette opens under the claim modal"
+    assert z["pal_gchip"] > z["pal_host"], "the G… chip can be buried by the palette panel"
+    assert z["ks_scrim"] > z["pal_host"], "the cheat-sheet opens behind the palette"
 
 
 def test_actions_menu_can_never_outgrow_the_viewport():

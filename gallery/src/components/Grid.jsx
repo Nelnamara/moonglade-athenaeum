@@ -111,6 +111,11 @@ export default function Grid({
   blur, thumb, layout = "masonry",
   selectMode, selected, toggleSelected, openLightbox, onRate,
   onOpenDetails, onContextMenu,
+  // Which card the keyboard/mouse last put focus on, reported up as a media_id. The
+  // command palette's "On this image" group needs a FOCUSED picture, and this grid's own
+  // focus is DOM focus on the card element itself -- which the palette's search field
+  // takes away the instant it opens. App remembers the last one instead (its focusItem).
+  onFocusCard,
   // #34 direction B: opening a stacked card NAVIGATES (never the lightbox) --
   // a series to its members (onOpenSeries(sid) -> the ?series filter), a batch to
   // its outputs (onOpenBatch(task_id) -> the existing View-batch ?batch filter).
@@ -641,7 +646,14 @@ export default function Grid({
         data-laid-index={i}
         // keyboard-reachable (Tab) and the arrow handler's focus target (#31, Refit #7)
         tabIndex={0}
-        onFocus={(ev) => { if (ev.target === ev.currentTarget) lastFocusRef.current = i; }}
+        onFocus={(ev) => {
+          if (ev.target !== ev.currentTarget) return;
+          lastFocusRef.current = i;
+          // A stack cover is a navigation target, not a picture -- it has no single image
+          // for the palette's contextual group to act on (#34 B: stacks aren't selectable
+          // units either), so it reports nothing rather than a misleading media_id.
+          if (onFocusCard) onFocusCard(stack ? null : it.media_id);
+        }}
         // aspect-true / uniform-cell row span; a feature or wide cell spans 2 cols.
         style={{
           gridRow: "span " + cell.span,

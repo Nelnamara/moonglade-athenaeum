@@ -18,7 +18,13 @@
    Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .similar 414/415
      < .upscale-panel 420 < .mgcp-sub 422/423 < .mgcp-pwr 430/431
-     < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441 < .model-picker .mg-preview 600 */
+     < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441
+     < .mgpal-scrim/.mgpal-host 460/461 < .mgpal-gchip 462
+     < .mgks-scrim/.mgks-host 470/471 < .model-picker .mg-preview 600
+   The last three are the command palette, its two-stroke G… chip and its cheat-sheet
+   (command-palette.css). The palette opens from ANY of the layers above it — that is what
+   a Ctrl/⌘ K layer is for — so it clears all of them, and the cheat-sheet clears the
+   palette in turn. Escape unwinds in the reverse order, innermost first. */
 .mgv-scrim { position: fixed; inset: 0; z-index: 410; background: rgba(5,4,13,.62);
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
   animation: mgvFade .3s ease both; }

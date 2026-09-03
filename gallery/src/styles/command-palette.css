@@ -1,0 +1,201 @@
+/* COMMAND PALETTE + cheat-sheet + the G… chip.
+
+   Every number below is frame H of design/command-palette/Command Palette.dc.html
+   (moonglade-internal), which is the LOCKED pixel source this file is diffed against:
+
+     Geometry   panel 600px, anchored top 12vh, radius 14 · input row 13/16 pad, 14.5px
+                text · list cap 388px then scrolls · row 38px h, radius 8, 6px side margin
+                · section header 9.5px/700/.12em caps · label 13px · sub 10.5px tabular
+                · footer 10px · cheat-sheet panel 880px, radius 16
+     Color      scrim rgba(5,4,13,.62) + blur(7px) -- byte-identical to the app's own
+                .mgv-scrim shell, which is the point (BRIEF §4.1: read as native) · panel
+                the same slab gradient + --surface1 border every mgv overlay uses ·
+                selection --accent 13% fill / 45% inset ring / icon+hits full · active
+                layout ✓ and the On pill --emerald · chips --surface0 fill, --overlay0
+                mono 10px · NO --red anywhere: nothing destructive lives in the palette
+     Motion     scrim mgpalFade .32s · panel mgpalSlab .3s cubic-bezier(.2,.9,.24,1)
+                (12px rise + fade) · exit .34s reversed + a 340ms deferred unmount. The
+                same symmetric pair as mgvSlab/mgvFade in overlays.css and the notify
+                toasts' own 340ms exit -- deliberately not a second motion vocabulary.
+     Z          palette scrim/panel 460/461, cheat-sheet 470/471, G-chip 462. Above the
+                claim modal's 440/441 and below the model preview's 600; the ORDER is
+                what matters and tests/test_z_ladder.py is the referee. The canonical
+                ladder comment lives in overlays.css. */
+
+@keyframes mgpalSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+@keyframes mgpalFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------------------------------------------------------------- the palette */
+
+.mgpal-scrim { position: fixed; inset: 0; z-index: 460; background: rgba(5, 4, 13, .62);
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
+  animation: mgpalFade .32s ease both; }
+.mgpal-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none; }
+
+/* The host does the 12vh anchoring so the panel's own transform stays free for mgpalSlab
+   (a translateX(-50%) centring trick would be clobbered by the animation's transform). */
+.mgpal-host { position: fixed; inset: 0; z-index: 461; display: flex;
+  justify-content: center; align-items: flex-start; padding-top: 12vh;
+  pointer-events: none; }
+.mgpal-host.closing { pointer-events: none; }
+
+.mgpal { pointer-events: auto; box-sizing: border-box;
+  width: 600px; max-width: calc(100vw - 32px);
+  border-radius: 14px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .99) 0%, rgba(10, 8, 24, .99) 100%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .72); overflow: hidden;
+  animation: mgpalSlab .3s cubic-bezier(.2, .9, .24, 1) both; }
+.mgpal.closing { animation: mgpalSlab .34s cubic-bezier(.2, .9, .24, 1) reverse both;
+  pointer-events: none; }
+
+.mgpal-inputrow { display: flex; align-items: center; gap: 10px; padding: 13px 16px;
+  border-bottom: 1px solid var(--surface0); }
+.mgpal-sglyph { flex: none; font-size: 15px; color: var(--overlay0); }
+/* The DC draws a 2px --accent caret beside the placeholder; a real field gets it from
+   caret-color, which is the same mark without a fake one to keep in sync. */
+.mgpal-input { flex: 1 1 auto; min-width: 0; background: none; border: 0; outline: none;
+  color: var(--text); font-family: inherit; font-size: 14.5px; caret-color: var(--accent);
+  padding: 0; }
+.mgpal-input::placeholder { color: var(--overlay0); }
+/* styles.css puts a global 2px --accent :focus-visible ring on everything, which lands on
+   this field the instant the palette opens and boxes the whole input — the DC draws a bare
+   field whose only mark is the caret. Suppressed HERE only, and it costs nothing: the field
+   is auto-focused by definition, so the ring never tells anyone anything they don't already
+   know, and the panel's own border plus the selected row's ring are the visible focus. */
+.mgpal-input:focus-visible { outline: none; }
+
+.mgpal-listwrap { position: relative; }
+.mgpal-list { max-height: 388px; overflow-y: auto; padding: 2px 0 6px; }
+.mgpal-list::-webkit-scrollbar { width: 9px; }
+.mgpal-list::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 6px; }
+.mgpal-list::-webkit-scrollbar-track { background: transparent; }
+
+/* Scroll affordances, painted only when there IS more in that direction (frame A shows
+   the bottom fade alone; D and E add the top one once scrolled). */
+.mgpal-fade { position: absolute; left: 0; right: 0; pointer-events: none; }
+.mgpal-fade.top { top: 0; height: 26px; z-index: 1;
+  background: linear-gradient(to bottom, rgba(17, 13, 40, .98), rgba(17, 13, 40, 0)); }
+.mgpal-fade.bot { bottom: 0; height: 46px;
+  background: linear-gradient(to top, rgba(10, 8, 24, .98), rgba(10, 8, 24, 0)); }
+
+.mgpal-hdr { display: flex; align-items: baseline; gap: 8px; padding: 10px 16px 4px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--overlay0); }
+/* The contextual group's header names its target -- ON THIS IMAGE · moonfall_042.png --
+   in mono, un-capsed, and it truncates rather than pushing the header wide. */
+.mgpal-hdr-extra { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  text-transform: none; letter-spacing: 0; }
+
+.mgpal-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+  margin: 0 6px; border-radius: 8px; cursor: pointer; border: 0; background: none;
+  font-family: inherit; text-align: left; color: inherit; width: calc(100% - 12px); }
+.mgpal-row:hover { background: rgba(255, 255, 255, .045); }
+.mgpal-row.sel { background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.mgpal-ico { flex: none; width: 20px; text-align: center; font-size: 13px;
+  color: var(--overlay0); }
+.mgpal-row.sel .mgpal-ico { color: var(--accent); }
+.mgpal-label { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; }
+/* Matched characters: --accent + 700. No underline, no background -- the row already has
+   a highlight and two of them fight. */
+.mgpal-label .hit { color: var(--accent); font-weight: 700; }
+.mgpal-sub { flex: none; font-size: 10.5px; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; }
+.mgpal-spacer { flex: 1 1 auto; }
+.mgpal-right { flex: none; font-size: 12px; color: var(--emerald); }
+.mgpal-right.pill { font-size: 9.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--emerald) 16%, transparent); color: var(--emerald); }
+.mgpal-keys { flex: none; display: flex; gap: 4px; }
+.mgpal-key { font-family: ui-monospace, Menlo, monospace; font-size: 10px; line-height: 1.3;
+  padding: 2px 6px; border-radius: 5px; background: var(--surface0); color: var(--overlay0);
+  border: 1px solid rgba(255, 255, 255, .05); }
+
+.mgpal-none { padding: 30px 16px 34px; text-align: center; }
+.mgpal-none-1 { font-size: 13px; color: var(--subtext); }
+.mgpal-none-q { font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+.mgpal-none-2 { font-size: 11px; color: var(--overlay0); margin-top: 5px; }
+
+.mgpal-foot { display: flex; align-items: center; gap: 6px; padding: 8px 16px;
+  border-top: 1px solid var(--surface0); font-size: 10px; color: var(--overlay0); }
+.mgpal-fkey { font-family: ui-monospace, Menlo, monospace; font-size: 10px; padding: 1px 5px;
+  border-radius: 5px; background: var(--surface0); border: 1px solid rgba(255, 255, 255, .05); }
+.mgpal-fkey.gap { margin-left: 8px; }
+
+/* ------------------------------------------------------------ the G… chip (F) */
+
+.mgpal-gchip { position: fixed; left: 50%; transform: translateX(-50%); z-index: 462;
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .98) 0%, rgba(10, 8, 24, .98) 100%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .6); white-space: nowrap; pointer-events: none; }
+.mgpal-gkey { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700;
+  padding: 2px 7px; border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.mgpal-gdots { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--overlay0); }
+.mgpal-ghints { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--overlay0); }
+.mgpal-ghints b { font-weight: 400; color: var(--subtext); }
+
+/* --------------------------------------------------------- the cheat-sheet (G) */
+
+.mgks-scrim { position: fixed; inset: 0; z-index: 470; background: rgba(5, 4, 13, .62);
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
+  animation: mgpalFade .32s ease both; }
+.mgks-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none; }
+.mgks-host { position: fixed; inset: 0; z-index: 471; display: flex; justify-content: center;
+  align-items: flex-start; padding-top: 10vh; pointer-events: none; }
+
+.mgks { pointer-events: auto; box-sizing: border-box;
+  width: 880px; max-width: calc(100vw - 48px); max-height: 84vh; overflow-y: auto;
+  border-radius: 16px; border: 1px solid var(--surface1);
+  background: linear-gradient(180deg, rgba(18, 14, 42, .99) 0%, rgba(10, 8, 24, .99) 100%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .72); padding: 20px 24px 0;
+  animation: mgpalSlab .3s cubic-bezier(.2, .9, .24, 1) both; }
+.mgks.closing { animation: mgpalSlab .34s cubic-bezier(.2, .9, .24, 1) reverse both;
+  pointer-events: none; }
+
+.mgks-titlerow { display: flex; align-items: baseline; gap: 10px; }
+.mgks-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 21px; color: var(--text); }
+.mgks-sub { font-size: 10.5px; color: var(--overlay0); }
+.mgks-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 8px; border: 1px solid var(--surface1); background: rgba(33, 31, 58, .6);
+  color: var(--subtext); font-size: 12px; cursor: pointer; font-family: inherit; }
+.mgks-x:hover { color: var(--text); border-color: var(--accent); }
+
+.mgks-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
+  padding: 18px 0 16px; }
+.mgks-col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.mgks-coltitle { font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--overlay0);
+  border-bottom: 1px solid var(--surface0); padding-bottom: 6px; }
+.mgks-item { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.mgks-key { flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+  line-height: 1.3; padding: 2px 6px; border-radius: 5px; background: var(--surface0);
+  color: var(--overlay0); border: 1px solid rgba(255, 255, 255, .05); white-space: nowrap; }
+.mgks-sep { flex: none; font-size: 9px; color: var(--overlay0); font-style: italic; }
+.mgks-label { font-size: 11.5px; color: var(--subtext); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+.mgks-foot { display: flex; align-items: center; gap: 8px; margin: 0 -24px;
+  padding: 9px 24px 11px; border-top: 1px solid var(--surface0); font-size: 10px;
+  color: var(--overlay0); flex-wrap: wrap; }
+.mgks-footcaps { font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; }
+.mgks-foottxt { margin-left: 6px; }
+.mgks-fkey { font-family: ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 5px;
+  background: var(--surface0); border: 1px solid rgba(255, 255, 255, .05); }
+.mgks-fkey.gap { margin-left: 8px; }
+
+/* A narrow window folds the four columns rather than shrinking them past legibility --
+   the palette is desktop-only (BRIEF §9), but a half-width desktop window is not mobile. */
+@media (max-width: 760px) {
+  .mgks-cols { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mgpal-scrim, .mgpal, .mgks-scrim, .mgks,
+  .mgpal-scrim.closing, .mgpal.closing, .mgks-scrim.closing, .mgks.closing { animation: none; }
+}
