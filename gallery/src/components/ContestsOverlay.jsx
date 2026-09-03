@@ -51,7 +51,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const ct = useContests({ mine: true });
   const { d, err, contests, official, community, featured, restOfficial,
-          dateRange, daysLeft, mineRows, mineErr, entriesFor, enteredCount,
+          dateRange, daysLeft, mine, mineRows, mineErr, entriesFor, enteredCount,
           syncing, reloadMine } = ct;
   const [tab, setTab] = useState("contests");     // "contests" | "mine"
   const [detail, setDetail] = useState(null);     // the contest whose detail is open
@@ -123,7 +123,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
           </div>
 
           {tab === "mine" && (
-            <ContestMyEntries rows={mineRows} syncing={syncing} err={mineErr}
+            <ContestMyEntries rows={mineRows} loaded={mine !== null} syncing={syncing} err={mineErr}
               onOpen={openFromRow} onBrowse={() => setTab("contests")} />
           )}
 

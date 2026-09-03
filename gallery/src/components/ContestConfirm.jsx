@@ -33,18 +33,37 @@ function classify(msg) {
     return { icon: "🚫", title: "Contest closed",
              copy: "Entries are closed for this contest. Nothing was submitted." };
   }
+  // Deliberately NOT "nothing was submitted": a read timeout after PixAI accepted the
+  // entry looks identical from here, and telling someone their entry did not land when it
+  // may have is how they enter twice. Same shape gen/submitTask.js uses for the same
+  // ambiguity on the spend path.
   return { icon: "⚠", title: "Something went wrong on PixAI's side",
-           copy: "Nothing was submitted — your art and credits are untouched. " + m };
+           copy: "The entry MAY still have been submitted — check My entries before "
+                 + "trying again. " + m };
 }
 
-export default function ContestConfirm({ contest, art, onClose, onEntered, onPickDifferent }) {
+export default function ContestConfirm({ contest, art, onClose, onEntered, onPickDifferent,
+                                        csrfToken }) {
   const [csrf, setCsrf] = useState("");
   const [ask, setAsk] = useState(null);        // the server's preview
   const [busy, setBusy] = useState(false);
   const [fail, setFail] = useState(null);
   const [done, setDone] = useState(null);
 
-  useEffect(() => { apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || "")); }, []);
+  // The token comes from the parent when it has one (it usually does -- the publish
+  // surfaces already hold it), and is fetched only as a fallback. Either way a MISSING
+  // token is surfaced: without this the Confirm button simply never armed, because the
+  // preview effect below is gated on `csrf` and silently never ran. A dead button that
+  // explains nothing is the worst possible answer on an irreversible action.
+  useEffect(() => {
+    if (csrfToken) { setCsrf(csrfToken); return; }
+    apiGet("/api/myart/items").then((d) => {
+      const t = (d && d.csrf) || "";
+      if (t) setCsrf(t);
+      else setFail({ icon: "⚠", title: "Couldn't verify this session",
+                     copy: "Reload the page and try again — nothing was submitted." });
+    });
+  }, [csrfToken]);
 
   // The preview: no account is touched, and it carries the cost answer the slot renders.
   useEffect(() => {

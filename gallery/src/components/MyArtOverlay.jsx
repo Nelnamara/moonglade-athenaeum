@@ -529,6 +529,8 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
           entry road, wherever it started. */}
       {entering && (
         <ContestConfirm contest={entering.contest} art={entering.art}
+          csrfToken={csrf}
+          onEntered={() => load()}
           onClose={() => setEntering(null)} />
       )}
     </>

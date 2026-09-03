@@ -4028,7 +4028,9 @@ ${"=".repeat(48)}
       }, 500);
     }
   }
+  var _clearTimer = null;
   function _clearParade() {
+    _clearTimer = null;
     _trail.splice(0).forEach((el) => {
       el.classList.add("out");
       setTimeout(() => {
@@ -4067,7 +4069,7 @@ ${"=".repeat(48)}
     let shown = 0;
     const step = () => {
       if (!q.length) {
-        setTimeout(_clearParade, 3200);
+        _clearTimer = setTimeout(_clearParade, 3200);
         return;
       }
       const a = q.shift();
@@ -4112,6 +4114,13 @@ ${"=".repeat(48)}
   function replay(a, opts) {
     if (!a || !a.id) return {};
     opts = opts || {};
+    if (_clearTimer) {
+      clearTimeout(_clearTimer);
+      _clearTimer = null;
+    }
+    _q.length = 0;
+    _playing = false;
+    _clearParade();
     const tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });

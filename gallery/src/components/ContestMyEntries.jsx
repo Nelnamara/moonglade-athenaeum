@@ -14,7 +14,7 @@ import "../styles/myart-contests.css";
    is design-gated and does not exist yet. Rendering it dimmed says the affordance is
    coming; omitting it would quietly redesign the frame. */
 
-export default function ContestMyEntries({ rows, syncing, err, onOpen, onBrowse }) {
+export default function ContestMyEntries({ rows, loaded = true, syncing, err, onOpen, onBrowse }) {
   const list = (rows || []).slice().sort((a, b) => {
     const ka = tsOf(a.end_at) ?? tsOf(a.result_at) ?? Infinity;
     const kb = tsOf(b.end_at) ?? tsOf(b.result_at) ?? Infinity;
@@ -24,6 +24,13 @@ export default function ContestMyEntries({ rows, syncing, err, onOpen, onBrowse 
   const soonest = list
     .map((r) => (r.active ? countdown(r.end_at) : null))
     .find((c) => c && !c.over);
+
+  // "No entries yet" is a FACT about an account, and it was being shown before anything
+  // had been read -- so a slow first fetch told you that you had entered nothing. `rows`
+  // is null until the read lands; only then is the empty state true.
+  if (!loaded) {
+    return <div className="mgh-loading">reading your entries…</div>;
+  }
 
   if (!list.length) {
     return (

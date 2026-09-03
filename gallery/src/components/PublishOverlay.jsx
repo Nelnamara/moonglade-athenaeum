@@ -331,7 +331,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                         <span style={{ flex: 1, minWidth: 0 }}>
                           <span className="t">Not entering a contest</span>
                           <span className="s" style={{ display: "block" }}>
-                            pick a running contest — entering at publish is free
+                            pick a running contest — it enters when you publish
                           </span>
                         </span>
                         <span className="chev">⌄</span>
@@ -413,9 +413,17 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                           {(picked.type || "") === "official" ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
                         </span>
                       </div>
+                      {/* HONEST COST, matching ContestConfirm's own wording. This used
+                          to read "Free — entered with publish", which was never verified:
+                          PixAI's contest contract declares an INSUFFICIENT_CREDITS error
+                          for entry and no entry has ever been fired to find out whether
+                          one is charged (contest_enter's docstring). And since the
+                          publish-and-enter fix this path makes the SAME entry call the
+                          direct path does, so there is not even a "the publish covers it"
+                          story left to tell. */}
                       <div className="mgctc-cost">
                         <div className="k">Entry cost</div>
-                        <div className="v">Free — entered with publish</div>
+                        <div className="v unknown">Entry fee unverified</div>
                       </div>
                     </>
                   )}

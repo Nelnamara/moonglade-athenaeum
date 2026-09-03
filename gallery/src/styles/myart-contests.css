@@ -363,7 +363,11 @@ button.mgct-enter.small { font-size: 12.5px; padding: 10px 20px; }
   text-overflow: ellipsis; white-space: nowrap; }
 .mgct-you { flex: none; font-size: 9px; font-weight: 800; letter-spacing: .06em;
   padding: 2px 8px; border-radius: 999px; background: var(--gold); color: #2a1f06; }
-.mgct-prize { margin-left: auto; }
+/* Scoped to the confirm's own row. Unscoped, this reached .mgct-prize on every shipped
+   CONTEST CARD (ContestsOverlay's chip row) and shoved the prize chip to the far right --
+   a layout change to a surface this rule was never about. The line below shows the same
+   scoping pattern for the winners row. */
+.mgctc-ct .mgct-prize { margin-left: auto; }
 .mgct-winrow .mgct-prize { font-family: ui-monospace, Menlo, monospace; font-size: 11px;
   font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums;
   background: none; border: none; padding: 0; border-radius: 0; }
@@ -554,7 +558,12 @@ button.mgctch-row:hover { border-color: var(--accent); }
    ellipsis never engages and the title pushes the chip off the end */
 .mgctch-col { flex: 1 1 auto; min-width: 0; }
 /* F2 -- the My Art popover, anchored to the card's action row. */
-.mgctch-pop { position: absolute; top: 38px; right: 8px; z-index: 5; width: 300px;
+/* Anchored the way the sibling .mgma2-tagedit already is (inset: auto 8px 8px 8px):
+   pinned to the card's own edges rather than given a fixed width. At 300px inside a
+   ~221px card with overflow:hidden, roughly 40% of the chooser was clipped away --
+   including the rows it exists to offer. Restores the intended layout; the precedent is
+   eight lines up in this same file. */
+.mgctch-pop { position: absolute; inset: auto 8px 8px 8px; z-index: 5;
   box-sizing: border-box; border-radius: 14px; border: 1px solid rgba(182,146,230,.4);
   background: rgba(9,7,22,.98); box-shadow: 0 18px 50px rgba(0,0,0,.7); padding: 14px 16px;
   text-align: left; cursor: default; }

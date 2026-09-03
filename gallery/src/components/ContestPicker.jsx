@@ -22,6 +22,7 @@ import "../styles/myart-contests.css";
 export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish, onBrowse }) {
   const [items, setItems] = useState(null);
   const [shortIds, setShortIds] = useState(null);   // Set of media_id, or null while loading
+  const [shortTotal, setShortTotal] = useState(0);  // how many the collection really holds
   const [sel, setSel] = useState(null);
 
   useEffect(() => {
@@ -47,6 +48,12 @@ export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish
         .then((lib) => {
           if (dead) return;
           setShortIds(new Set((lib.items || []).map((it) => it.media_id)));
+          // The read is ONE page. A shortlist longer than that silently lost its tail --
+          // members simply absent from the section, with nothing saying so. The count is
+          // surfaced instead (the section header renders it), because quietly showing
+          // someone four of their six staged pictures is worse than showing four and
+          // saying there are six.
+          setShortTotal(typeof lib.total === "number" ? lib.total : (lib.items || []).length);
         });
     });
     return () => { dead = true; };
@@ -113,7 +120,11 @@ export default function ContestPicker({ contest, onCancel, onPick, onOpenPublish
               {shortlist.length > 0 && (
                 <>
                   <div className="mgct-pickh shortlist">
-                    ☆ SHORTLIST <span className="n">— staged for this contest · {shortlist.length}</span>
+                    ☆ SHORTLIST <span className="n">
+                      — staged for this contest · {shortlist.length}
+                      {shortTotal > (shortIds ? shortIds.size : 0)
+                        ? " of " + shortTotal + " (showing the newest)" : ""}
+                    </span>
                   </div>
                   <div className="mgct-pickgrid">{shortlist.map(tile)}</div>
                 </>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { localDay } from "../gen/dates.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useHealth.js/
@@ -20,7 +21,12 @@ export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
    Every count/date/countdown in the contest frames is ui-monospace + tabular-nums;
    these produce the STRINGS those slots render. */
 
-export const dayOf = (iso) => String(iso || "").slice(0, 10);
+// The DISPLAY day for a contest date. Was a raw slice(0,10) -- i.e. the UTC day -- so a
+// deadline read one day early for anyone west of Greenwich, disagreeing with the Grid and
+// the Details view, which have used localDay for exactly this reason for a while. Same
+// helper, so all three now say the same date about the same instant. (A bare "2026-09-20"
+// passes through untouched: it is already a day, with no zone to convert.)
+export const dayOf = (iso) => localDay(iso);
 
 export function tsOf(iso) {
   const t = Date.parse(String(iso || ""));

@@ -289,7 +289,13 @@ function _recede(m) {
   }
 }
 
+// The pending "the trail bows out" timer, held so it can be CANCELLED. Without this a
+// replay that starts while a parade is winding down inherits the parade's 3.2s timer,
+// which then rips the replay's own trail and chip out of the DOM mid-moment.
+let _clearTimer = null;
+
 function _clearParade() {
+  _clearTimer = null;
   _trail.splice(0).forEach((el) => {
     el.classList.add("out");
     setTimeout(() => { if (el.parentNode) el.remove(); }, 500);
@@ -317,7 +323,7 @@ function _floodParade(list) {
   const q = list.slice();
   let shown = 0;
   const step = () => {
-    if (!q.length) { setTimeout(_clearParade, 3200); return; }   // the trail lingers a beat, then bows out
+    if (!q.length) { _clearTimer = setTimeout(_clearParade, 3200); return; }  // lingers, then bows out
     const a = q.shift(); shown++;
     const tier = a.tier || "common";
     _chime(tier);
@@ -358,6 +364,17 @@ export function check() { load(true); }
 export function replay(a, opts) {
   if (!a || !a.id) return {};
   opts = opts || {};
+  // SERIALIZED against the parade. This path deliberately does not queue (a replay click
+  // is immediate and hands its driver handle back synchronously), which meant a click
+  // during a running parade opened a SECOND full-screen layer sharing the module-level
+  // _trail/_chip -- two moments on screen at once, and whichever finished first tore down
+  // the other's DOM. So the replay takes over instead of joining: any queued moments are
+  // dropped, the parade's own teardown is cancelled, and its trail clears before this one
+  // builds. Overlap is now impossible in either direction.
+  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  _q.length = 0;
+  _playing = false;
+  _clearParade();
   const tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });
