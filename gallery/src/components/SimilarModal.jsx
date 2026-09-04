@@ -7,7 +7,7 @@ import { apiGet } from "../api.js";
    fails soft to an empty list if that sidecar index isn't built yet, and the
    route distinguishes a genuinely-empty index from a real zero-match result.
 
-   Each result links to the pilot's own Details view (/next?image=<mid>,
+   Each result links to the app's own Details view (/?image=<mid>,
    bookmarkable), same modifier-key passthrough as the lightbox's own Details
    link: a plain click intercepts and navigates in-app, ctrl/cmd/middle-click
    is left alone for the browser's own new-tab handling. */

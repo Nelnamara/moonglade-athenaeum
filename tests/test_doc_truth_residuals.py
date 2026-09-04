@@ -24,7 +24,7 @@ def _read(relpath):
 # 2026-07-23 e36976d; visibility gated on the real check 2026-07-24, P3/S5-3).
 # PORTED 2026-08-08, the classic-UI cut: BASE_HTML/INDEX_HTML (the head-nav block,
 # ImportUI, and both classic comments these tests used to scrape) are deleted. The
-# same enforcement now lives in the React shell: next_gallery()'s boot payload
+# same enforcement now lives in the React shell: app_page()'s boot payload
 # ships the hardcoded `"is_local": True` PAIRED with the real
 # `"is_true_local": _is_local_request()`, and the surviving Import control
 # (gallery/src/components/NavSpine.jsx) is marked localOnly and withheld unless
@@ -58,7 +58,7 @@ def test_navspine_gates_and_documents_import_as_the_localhost_exception():
 
 
 def test_is_local_hardcode_ships_with_the_real_check_and_the_route_backs_the_doc():
-    """The `is_local: True` hardcode survives in next_gallery()'s boot payload. It is
+    """The `is_local: True` hardcode survives in app_page()'s boot payload. It is
     only safe because the REAL `_is_local_request()` verdict ships right beside it as
     `is_true_local` (what the Import control gates on), and because /api/import-local
     is LOCALHOST-tier server-side regardless of what any client renders --

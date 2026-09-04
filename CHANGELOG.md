@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **The `/next` codename is retired.** The gallery lives at one address — `/` — and the version reveal on the sign-in page (click the tagline) now shows just the version and its build sha, with no "next" in front of it. A bookmark from the pilot era pointing at `/next` no longer resolves; use `/`. (#51) (2026-09-04)
+
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
 - **One-click updates.** The Control Panel now checks for a new release when you open it, and the version stamp in its sidebar turns gold when one is out — click it and you get the release, its notes, and a plain account of what will happen before anything moves. Pressing **Update now** pulls it, installs dependencies only if they changed, restarts the server, and reloads your tab when it's back. Nothing is ever applied silently, and if your checkout has local edits, sits on a branch, or is mid-job, it says so instead of touching it. Updating by hand still works exactly as before. (2026-09-01)

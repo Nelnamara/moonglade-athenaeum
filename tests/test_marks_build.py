@@ -104,7 +104,7 @@ def test_tuning_reaches_the_page_boot_payload(tmp_path):
     shells are checked: the login page and the gallery."""
     cli = _client(tmp_path)
     cli.post("/api/branding", json={"anim_speed": 2.0, "glow_color": "#123456"})
-    for path in ("/login", "/next"):
+    for path in ("/login", "/"):
         html = cli.get(path).get_data(as_text=True)
         assert '"anim_speed": 2.0' in html or '"anim_speed":2.0' in html, path
         assert "#123456" in html, path

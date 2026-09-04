@@ -425,7 +425,7 @@ export default function Grid({
 
   /* Details straight from the thumbnail. App wires openDetails to the Lightbox
      but does not (yet) pass it here — so until it does, bridge through the URL
-     contract App already owns: push /next?image=<mid> and fire popstate, which
+     contract App already owns: push /?image=<mid> and fire popstate, which
      App's own listener reads back into state. Same destination, no new API. */
   const goDetails = (mid) => {
     if (typeof onOpenDetails === "function") { onOpenDetails(mid); return; }

@@ -1335,7 +1335,7 @@ def test_logged_in_lan_request_gets_the_same_full_ui_as_local(tmp_path):
     session), never the request's address. The classic page this test used to scrape
     for owner-only controls died with the classic cut (2026-08-08); the surviving
     surface is the React shell at "/", served whole to any authenticated session --
-    next_gallery() even hardcodes is_local=True in the boot blob -- so what's left to
+    app_page() even hardcodes is_local=True in the boot blob -- so what's left to
     pin is that the shell (MG_BOOT + the app bundle) reaches a logged-in LAN session
     identically to localhost, with no read-only in-between tier. See
     test_unauthenticated_lan_request_to_index_is_redirected_to_login for the other

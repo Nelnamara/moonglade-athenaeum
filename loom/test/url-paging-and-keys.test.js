@@ -55,9 +55,12 @@ describe("gen/urlState.js: the ONE URL builder (pure)", () => {
     assert.doesNotMatch(u, /a b&c/);
     assert.equal(new URLSearchParams(u.slice(1)).get("image"), "a b&c");
   });
-  test("pathname is preserved when given (/next stays /next), defaults to /", () => {
-    assert.equal(buildUrl({ page: 2 }, "", "/next"), "/next?page=2");
-    assert.equal(buildUrl({ page: 1 }, "", "/next"), "/next");
+  // The literal used to be "/next" -- the gallery's pilot-era second path, retired
+  // with the codename (issue #51). The PROPERTY under test is unchanged: whatever
+  // pathname the caller hands in comes back out. The app only ever hands it "/".
+  test("pathname is preserved when given, defaults to /", () => {
+    assert.equal(buildUrl({ page: 2 }, "", "/sub"), "/sub?page=2");
+    assert.equal(buildUrl({ page: 1 }, "", "/sub"), "/sub");
     assert.equal(buildUrl({ page: 2 }, "", ""), "/?page=2");
   });
   test("readPage: integer >= 1, else 1", () => {

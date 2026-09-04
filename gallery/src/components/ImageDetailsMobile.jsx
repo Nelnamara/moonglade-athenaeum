@@ -32,7 +32,7 @@ import "../styles/image-details-mobile.css";
    (App.jsx swaps it in for <main>, not an overlay atop it) -- giving mobile's
    equivalent the same "replaces the screen" status, rather than nesting it
    inside a generic push-screen built for menu destinations, matches that.
-   No URL sync (unlike desktop's bookmarkable /next?image=<mid>): AppMobile.jsx
+   No URL sync (unlike desktop's bookmarkable /?image=<mid>): AppMobile.jsx
    has no URL-synced state ANYWHERE yet (tabs/sheets/screens are all plain
    state) -- adding history.pushState/popstate wiring here would be a first,
    separate architectural change, out of scope for porting this one screen.

@@ -162,13 +162,13 @@ def test_branding_survives_corrupt_manifests(tmp_path):
     """A hand-edited/corrupt marks.json or branding.json must degrade to the
     logo.png defaults -- never 500 every page via the context processor
     (_inject_branding still runs brand_context() on every rendered template;
-    the React shell at /next is the surviving page that proves it)."""
+    the React shell at / is the surviving page that proves it)."""
     mdir = g._role_dir("marks")
     mdir.mkdir(parents=True)
     (mdir / "marks.json").write_text('{"marks": ["not-a-dict", 42]}', encoding="utf-8")
     (tmp_path / "branding.json").write_text('["not", "an", "object"]', encoding="utf-8")
     cli = _client(tmp_path)
-    assert cli.get("/next").status_code == 200
+    assert cli.get("/").status_code == 200
     d = cli.get("/api/branding").get_json()
     assert d["marks"] == [] and d["mark"] == "logo" and d["anim"] == "classic"
 

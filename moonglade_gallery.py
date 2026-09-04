@@ -6000,7 +6000,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 
 # Design tokens: the SINGLE source of truth for the gallery's palette + achievement
 # skins, shared (via the __DESIGN_TOKENS__ marker + .replace()) by the React shells
-# (NEXT_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
+# (APP_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
 # re-skins together instead of the Loom carrying its own copy that silently drifts.
 DESIGN_TOKENS_CSS = r"""
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
@@ -6088,7 +6088,7 @@ def _upscale_const_js():
       by tests/test_upscale_boosters.py); this exists so the new surface does not add a
       third place for those numbers to drift.
 
-    Substituted into NEXT_PAGE and the Loom shells (the surfaces with upscale UI)
+    Substituted into APP_PAGE and the Loom shells (the surfaces with upscale UI)
     since the classic cut (2026-08-08) removed the INDEX/DETAIL pages it was
     originally built for.
     """
@@ -13964,15 +13964,16 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
-    # ==== THE NEW GALLERY -- React pilot ====================================
-    # /next serves gallery/dist (Vite build: `npm run build` inside gallery/).
-    # This is the FIRST-CLASS frontend the gallery UI is migrating to -- real
+    # ==== THE GALLERY -- the React front door ================================
+    # "/" serves gallery/dist (Vite build: `npm run build` inside gallery/).
+    # This is the FIRST-CLASS frontend the gallery UI migrated to -- real
     # component files, its own purpose-built API below, NOT the Loom's delivery
-    # and NOT the picker routes. The classic gallery at / is untouched; pieces
-    # flip only on the owner's sign-off. Design lock + suite-shell rationale:
+    # and NOT the picker routes. It shipped under the `/next` codename through
+    # the pilot; that codename is retired (issue #51) and this page answers on
+    # one path. Design lock + suite-shell rationale:
     # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
     # Auth: covered by the global _enforce_front_door() hook like every route.
-    _NEXT_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
+    _GALLERY_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
 
     # No vanilla web components ride along anymore: the video Generate drawer and
     # its cost badge became the React <VideoDrawer>/<CostBadge> in the 2026-08-08
@@ -13981,7 +13982,7 @@ def create_app(out_dir: Path):
     # carries no <script src="/static/mg-*.js"> tags and no anchors.
     # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
     # same idiom as the classic pages.
-    NEXT_PAGE = """<!doctype html>
+    APP_PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
@@ -14021,16 +14022,16 @@ __UPSCALE_CONST__
 </body></html>"""
 
     # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
-    # template rather than reusing NEXT_PAGE verbatim. Two real reasons, not
+    # template rather than reusing APP_PAGE verbatim. Two real reasons, not
     # just tidiness:
-    #   1. NEXT_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
+    #   1. APP_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
     #      (pickers, cost badge, generate drawer, upscale panel) are for
     #      surfaces that don't exist on the login page at all -- dead weight
     #      to parse before a visitor has even signed in.
     #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
     #      public tier, and never needed to be until now -- only
     #      /next/assets/ (this page's own bundle/stylesheet) is
-    #      @tier(PUBLIC). Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      @tier(PUBLIC). Reusing APP_PAGE unmodified would have 404/401'd
     #      an unauthenticated visitor's <script> requests for all 8 -- caught
     #      live: those requests 302'd back to /login (the front door redoing
     #      its own job on itself), the module script's own fetch got HTML
@@ -14058,20 +14059,22 @@ __DESIGN_TOKENS__
 </style>
 </head><body>
 <div id="root"></div>
-{# |tojson, NOT json.dumps|safe -- same XSS reasoning as NEXT_PAGE's own boot
+{# |tojson, NOT json.dumps|safe -- same XSS reasoning as APP_PAGE's own boot
    script: Jinja's tojson escapes < > & so a stray "</script>" in, say, a
    redirected `next` path can never break out of this inline script. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 
-    # "/" is the FRONT DOOR now (the flip, 2026-08-01); /next stays as a second
-    # path to the same page so bookmarks and pushState URLs from the pilot era
-    # keep working. One endpoint, two paths -- no redirect hop, same tier.
+    # "/" is the FRONT DOOR (the flip, 2026-08-01) and, since issue #51, the
+    # ONLY path to it. The pilot-era `/next` alias is gone with the codename --
+    # nothing in the app, the launcher, the docs or the wiki linked it (the
+    # shell pushes window.location.pathname, and every in-app deep link is
+    # already "/?image="), so no redirect stands in for it. A pilot-era
+    # bookmark 404s: the owner's call, "default is retire".
     @app.route("/")
-    @app.route("/next")
     @tier(LOGIN)
-    def next_gallery():
+    def app_page():
         session.setdefault("csrf", secrets.token_hex(16))
         brand = brand_context(out_dir)
         stats = catalog_counts(db_path)
@@ -14127,14 +14130,14 @@ __DESIGN_TOKENS__
             "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
-            NEXT_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
+            APP_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
                      .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
             boot=boot)
 
     @app.route("/next/assets/<path:fname>")
     @tier(PUBLIC)
     def next_assets(fname):
-        resp = send_from_directory(str(_NEXT_DIST), fname)
+        resp = send_from_directory(str(_GALLERY_DIST), fname)
         # The bundle changes on every `npm run build` with NO url change, and this
         # response carried no Cache-Control -- so browsers HEURISTICALLY cached
         # app.css/app.js and kept painting days-old layout. Bit for real (2026-08-08):

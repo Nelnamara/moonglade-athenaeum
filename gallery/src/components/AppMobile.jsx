@@ -304,7 +304,7 @@ export default function AppMobile({ boot }) {
   // being opened from a tile tap and cover the WHOLE app shell (hero + tab
   // bar included, not just .glm-body), so it renders as a sibling of every
   // tab body below, same level as MobileScreen's own mount. No URL sync
-  // (unlike desktop's bookmarkable /next?image=<mid>) -- see
+  // (unlike desktop's bookmarkable /?image=<mid>) -- see
   // ImageDetailsMobile.jsx's own header comment for why that's a deliberate,
   // separate scope call, not an oversight.
   const [detailsFor, setDetailsFor] = useState(null);

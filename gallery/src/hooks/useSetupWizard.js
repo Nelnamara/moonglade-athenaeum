@@ -47,7 +47,7 @@ export default function useSetupWizard(boot) {
   // Asset download runs AHEAD of intro when needed (owner ruling, 2026-08-10,
   // docs/DECISIONS.md: "inside the wizard as phases ahead of the intro
   // carousel"). needs_assets is computed server-side the same cheap way as
-  // needs_key (moonglade_gallery.py's next_gallery()); an install that's
+  // needs_key (moonglade_gallery.py's app_page()); an install that's
   // already dressed (or has no manifest at all -- an old checkout) skips
   // straight to the phase this component always started at before.
   const [phase, setPhase] = useState(
