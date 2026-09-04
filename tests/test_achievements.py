@@ -12,7 +12,7 @@ from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_client, _SEALED_DONOR
 
-# The 57-roster is sealed in the container (built from the private donor), not in source.
+# The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin CONTENT -- NOT the whole module: the
 # store/SQL/badge tests here are donor-independent and must keep running in public CI, or a
 # fail-soft regression merges behind a green-but-quietly-reduced check (finding #3).
@@ -80,9 +80,18 @@ def test_ladders_list_matches_every_ladder_achievements_track():
     carousel for that ladder)."""
     out = g.compute_achievements({}, [])
     ladder_ids = {t["id"] for t in out["ladders"]}
-    assert len(ladder_ids) == 10
+    # The payload's ladder list used to be compared to _ladder_tracks() -- which is the
+    # thing it is copied FROM, so it could never fail and asserted nothing. What actually
+    # matters is that the two SIDES agree: every track names achievements that exist, and
+    # every ladder achievement names a track that exists. Either half breaking is a
+    # silently empty carousel.
+    for t in g._ladder_tracks():
+        tiers = [a for a in g._roster()
+                 if a.get("bucket") == "ladder" and a.get("track") == t["id"]]
+        assert tiers, "ladder track %r has no achievements" % t["id"]
     achievement_tracks = {a["track"] for a in out["achievements"] if a["bucket"] == "ladder"}
     assert achievement_tracks == ladder_ids
+    assert ladder_ids, "the roster really does define ladder tracks"
 
 
 @needs_donor
@@ -104,13 +113,16 @@ def test_ladder_rungs_are_contiguous_within_each_track():
 @needs_donor
 def test_epic_feats_unlock_skins():
     free = {s["id"] for s in g.compute_achievements({}, [])["skins"] if s["earned"]}
-    assert free == {"moonglade", "nightfallen"}          # the two free skins
-    # 50 videos earns Reel Director -> ember; 25 models earns Menagerie -> verdant
-    m = {"videos": 50, "models": 25, "images": 0, "collections": 0,
-         "published": 0, "tagged": 0}
+    assert free == {s["id"] for s in g._skins() if s.get("free")}   # the free skins, self-computed
+    # Derive each earnable skin's grant (the roster achievement whose `skin` == that skin,
+    # with its metric + threshold) -- no hardcoded threshold. Meet ember + verdant's grants
+    # while leaving moonlit's own metric at 0.
+    grant = {a["skin"]: (a["metric"], a["threshold"]) for a in g._roster() if a.get("skin")}
+    m = {grant["ember"][0]: grant["ember"][1], grant["verdant"][0]: grant["verdant"][1]}
+    m.setdefault(grant["moonlit"][0], 0)                 # explicitly below moonlit's threshold
     skins = {s["id"]: s["earned"] for s in g.compute_achievements(m, [])["skins"]}
     assert skins["ember"] is True and skins["verdant"] is True
-    assert skins["moonlit"] is False                     # needs 10k images
+    assert skins["moonlit"] is False                     # moonlit's own metric left at 0
 
 
 # ---- metrics from a real catalog -------------------------------------------

@@ -1083,7 +1083,11 @@ export default function App({ boot }) {
       )}
       {overlay === "contests" && (
         <ContestsOverlay onClose={() => setOverlay(null)}
-          onShortlist={shortlistContest} selectedCount={selected.size} />
+          onShortlist={shortlistContest} selectedCount={selected.size}
+          /* the picker's empty state offers a way out: publishing something new is how
+             you become eligible, so it hands the Publish flow over with no image picked
+             (its own strip/browse chooses one). */
+          onOpenPublish={() => { setPublishFor(""); setOverlay("publish"); }} />
       )}
       {overlay === "train" && (
         <TrainOverlay onClose={() => setOverlay(null)} />

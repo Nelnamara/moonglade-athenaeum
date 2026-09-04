@@ -313,7 +313,27 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
       </>
     );
   }
-  if (!summary) return null;
+  // Until the summary answers, show the SHELL rather than nothing. `return null` meant a
+  // click on Panel produced no visible response at all until the fetch landed -- on a
+  // modest machine that reads as a dead button, and the owner reported exactly that
+  // (2026-09-03). Same scrim + slab the error state above already renders, with the house
+  // loading line (Folio's "opening the record…"). A loading state, not a redesign.
+  if (!summary) {
+    return (
+      <>
+        <div className="mgv-scrim" onClick={onClose} />
+        <div className="mgv-host">
+          <div className="mgv-slab" role="dialog" aria-label="Control Panel">
+            <div className="mgv-titlerow">
+              <div className="mgv-title">Control Panel</div>
+              <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
+            </div>
+            <div className="mgh-loading">opening the panel…</div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const isLocal = summary.panel_is_local;
   const credits = account && account.credits != null ? Number(account.credits).toLocaleString() : "—";

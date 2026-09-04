@@ -48,11 +48,8 @@ function toastNew(d) {
   const newly = (d.newly || [])
     .map((id) => (d.achievements || []).filter((a) => a.id === id)[0])
     .filter(Boolean);
-  if (newly.length > 3) {        // returning user with a full catalog -> one summary, not a barrage
-    showToast({
-      icon: "🏆", name: newly.length + " achievements unlocked",
-      desc: "Your catalog just earned a stack of achievements. Open 🏆 to review them.",
-    });
+  if (newly.length > 3) {        // a flood -> the TRAIL parade (owner ruling 2026-09-03):
+    _floodParade(newly);         // every earn presents, then recedes down-screen behind the next
     return;
   }
   newly.forEach((a) => celebrate(a));   // real unlocks get the mid-screen moment (queued)
@@ -269,6 +266,78 @@ function _play(built, hold, after) {
 
 const HOLD = { common: 4200, rare: 4800, epic: 5400, legendary: 6400, feat: 6400 };
 
+/* ---- the flood TRAIL (owner ruling 2026-09-03, mock-approved): during a >3 flood each
+   achievement presents front-and-center with its normal moment, then RECEDES down the screen
+   into a shrinking, dimming stack of the already-earned while the next pops in front. The
+   stack is presented HISTORY, never the pending queue. Receded layers drop their scrim and
+   all pointer events; ~4 stay visible, older ones leave as the counter chip keeps score. */
+const FLOOD_DWELL_MS = 2400;   // flood cadence -- deliberately tunable in one place
+const _trail = [];
+let _chip = null;
+
+function _recede(m) {
+  m.classList.add("trail");
+  _trail.unshift(m);
+  _trail.forEach((el, i) => {
+    el.classList.remove("trail-1", "trail-2", "trail-3", "trail-4");
+    if (i < 4) el.classList.add("trail-" + (i + 1));
+  });
+  while (_trail.length > 4) {
+    const old = _trail.pop();
+    old.classList.add("out");
+    setTimeout(() => { if (old.parentNode) old.remove(); }, 500);
+  }
+}
+
+// The pending "the trail bows out" timer, held so it can be CANCELLED. Without this a
+// replay that starts while a parade is winding down inherits the parade's 3.2s timer,
+// which then rips the replay's own trail and chip out of the DOM mid-moment.
+let _clearTimer = null;
+
+function _clearParade() {
+  _clearTimer = null;
+  _trail.splice(0).forEach((el) => {
+    el.classList.add("out");
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 500);
+  });
+  if (_chip) { _chip.classList.add("out"); const c = _chip; _chip = null;
+    setTimeout(() => { if (c.parentNode) c.remove(); }, 500); }
+}
+
+function _playFlood(built, after) {
+  const m = built.m, tw = built.tw;
+  document.body.appendChild(m);
+  void m.offsetWidth;
+  m.classList.add("go"); tw.classList.add("go");
+  const advance = () => {
+    if (m._adv) return;
+    m._adv = true;
+    _recede(m);
+    if (after) after();
+  };
+  m._t = setTimeout(advance, FLOOD_DWELL_MS);
+  m.addEventListener("click", () => { clearTimeout(m._t); advance(); });  // click = next, same gesture as dismiss
+}
+
+function _floodParade(list) {
+  const q = list.slice();
+  let shown = 0;
+  const step = () => {
+    if (!q.length) { _clearTimer = setTimeout(_clearParade, 3200); return; }  // lingers, then bows out
+    const a = q.shift(); shown++;
+    const tier = a.tier || "common";
+    _chime(tier);
+    const built = _mkMoment(a, {});
+    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _playFlood(built, step);
+    if (shown > 1) {
+      if (!_chip) { _chip = document.createElement("div"); _chip.className = "ach-trailchip"; document.body.appendChild(_chip); }
+      _chip.textContent = "×" + shown + " earned";
+    }
+  };
+  step();
+}
+
 function celebrate(a) { if (a) { _q.push(a); if (!_playing) _next(); } }
 function _next() {
   if (!_q.length) { _playing = false; return; }
@@ -280,12 +349,8 @@ function _next() {
   _play(built, HOLD[tier] || 4600, _next);
 }
 
-function showToast(a) {          // the >3-unlock SUMMARY, in the same toast-v2 frame
-  _play(_mkMoment(
-    { name: a.name, tier: "legendary", icon: a.icon || "🏆", id: "" },
-    { badge: false, mascot: false, pill: false, eyebrow: "Achievement Unlocked", line: a.desc || "" },
-  ), 6500, null);
-}
+/* The old >3-unlock SUMMARY toast (showToast) is gone -- the trail parade replaced it
+   outright (owner ruling 2026-09-03); nothing else consumed it. */
 
 /* check(): the mark-and-toast pass -- fired on install (the old DOMContentLoaded auto-check)
    and after a real action completes (App.jsx onGenDone, submitTask). Exactly load(true). */
@@ -299,6 +364,17 @@ export function check() { load(true); }
 export function replay(a, opts) {
   if (!a || !a.id) return {};
   opts = opts || {};
+  // SERIALIZED against the parade. This path deliberately does not queue (a replay click
+  // is immediate and hands its driver handle back synchronously), which meant a click
+  // during a running parade opened a SECOND full-screen layer sharing the module-level
+  // _trail/_chip -- two moments on screen at once, and whichever finished first tore down
+  // the other's DOM. So the replay takes over instead of joining: any queued moments are
+  // dropped, the parade's own teardown is cancelled, and its trail clears before this one
+  // builds. Overlap is now impossible in either direction.
+  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  _q.length = 0;
+  _playing = false;
+  _clearParade();
   const tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });

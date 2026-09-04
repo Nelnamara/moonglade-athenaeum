@@ -47,6 +47,7 @@ import mimetypes
 import os
 import re
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -55,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
-                            save_catalog, _db_is_empty,
+                            save_catalog, _db_is_empty, rows_for_media_ids,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
                             # The one library scan (see moonglade_gallery.py's
@@ -3979,6 +3980,21 @@ def _merge_full(fm, kr):
     return {f: (fm.get(f) or kr.get(f, "")) for f in _FULL_META_FIELDS}
 
 
+def known_catalog_rows(db_path, ids):
+    """The pre-download snapshot carry_local_fields needs: media_id -> existing row.
+
+    Keyed to just this task's media, so it is a lookup rather than a whole-catalog read.
+    A catalog that does not exist yet -- the first collect into a fresh output folder,
+    before save_catalog creates the table -- means there is nothing local to carry, which
+    is an empty map and not an error.
+    """
+    try:
+        rows = rows_for_media_ids(db_path, ids)
+    except sqlite3.OperationalError:
+        return {}
+    return {r["media_id"]: r for r in rows if r.get("media_id")}
+
+
 def carry_local_fields(row, known):
     """Merge a freshly-rebuilt download row OVER its existing catalog row so LOCAL
     curation survives a re-pull. A download pass only knows API/file fields
@@ -3991,7 +4007,15 @@ def carry_local_fields(row, known):
     `known` maps media_id -> the existing catalog row (a pre-download snapshot).
     An empty fresh value never clobbers an existing one, so a missing download
     keeps the old filename. New media_ids (absent from `known`) pass through
-    unchanged. Applied at save time, it covers every row-builder path at once."""
+    unchanged. Applied at save time, it covers every row-builder path at once.
+
+    APPLIED AT: run_download's page saves and its backfill pass, and -- since
+    2026-09-03 -- _download_image_task and _download_video_task, which are the
+    per-task collect path every create route funnels through (run_generate,
+    run_edit_image, run_generate_video, collect_generation, the watch mirror, and
+    CLI --task-id recovery). Those two were missing it, so RE-collecting a task
+    wiped exactly the fields listed above; a finished generation polled twice was
+    enough to do it."""
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
         if v not in ("", None):
@@ -8331,6 +8355,10 @@ def _download_video_task(session, result, task_id, out, args, params):
     vdir.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
     rows, saved = [], []
+    # The same pre-download snapshot the image path takes, and for the same reason: this
+    # row is rebuilt from a blank template, so without the carry a re-collect blanks the
+    # video's rating, collections, title and published state.
+    known = known_catalog_rows(db_path, [o.get("video_media_id") for o in outs])
     for o in outs:
         vmid = o["video_media_id"]
         url = media_file_gql(session, vmid).get("fileUrl")
@@ -8390,7 +8418,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the catalog
             print("  poster thumbnail failed for {} ({}); video still cataloged".format(vmid, e))
         video_faststart(path)                        # iOS needs moov at the front to stream
-        rows.append(full)
+        rows.append(carry_local_fields(full, known))
         saved.append(str(path))
     if rows:
         save_catalog(db_path, rows)
@@ -8490,6 +8518,14 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     fm = extract_full_meta(result)
     _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     rows, saved = [], []
+    # THE PRE-DOWNLOAD SNAPSHOT. Every row below is rebuilt from a blank CATALOG_FIELDS
+    # template, which knows only API/file fields -- so upserting it raw BLANKS everything
+    # locally owned: artwork_id, is_published, title, rating, collections, art_tags,
+    # aes_score, blurhash. Collecting a task a second time therefore erased the work of
+    # having published, rated and filed the picture. (Owner, live, 2026-09-03: a published
+    # piece lost its artwork_id after a relaunch re-polled a finished task.) Keyed to this
+    # task's media only, so it stays a lookup rather than a whole-catalog read.
+    known = known_catalog_rows(db_path, [m for m, _ in media])
     for mid, seed in media:
         url, info = resolve_media(session, mid)
         if not url:
@@ -8542,7 +8578,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "height": str((info or {}).get("height") or ""),
         })
         full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
-        rows.append(full)
+        rows.append(carry_local_fields(full, known))
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:
@@ -10217,7 +10253,13 @@ def publish_artwork_from_task(session, task_id, media_index=0, title="", descrip
     server already created the artwork would otherwise publish a duplicate. Costs no
     credits. Input shape mirrors the site's own publish form exactly (title/description/
     visibility/isPrivate/hidePrompts/tags=[]/tackIds/mediaIndex, challenge inside extra).
-    Returns the created artwork dict; raises PixAIError on failure."""
+    Returns the created artwork dict; raises PixAIError on failure.
+
+    `challenge` DOES NOT ENTER A CONTEST -- verified live 2026-09-01, after a publish made
+    with one attached produced no entry. It is artwork METADATA: the contest back-link that
+    listArtworks hands back on node.extra (private/API_OPERATIONS.md). Entering is a
+    separate REST call, `contest_enter` -> POST /v2/contest/{slug}/artwork, and a caller
+    that wants publish-and-enter has to make both (see api_myart_publish, which does)."""
     _check_read_only("publish an artwork to your PixAI account")
     vis = "PRIVATE" if private else "PUBLIC"
     ex = dict(extra or {})
@@ -10689,7 +10731,21 @@ def list_contests(session, active_only=False, max_pages=6):
                 "end_at": r.get("endAt") or "",
                 "result_at": r.get("resultAt") or "",
                 "url": ("https://pixai.art/en/contest/%s" % slug) if slug else "",
-                "description": _contest_title(r.get("description"))[:600],
+                # WHOLE, never truncated. It used to be sliced to 600 chars, which was
+                # safe only while nothing rendered it. The brief is MARKDOWN upstream, so
+                # a mid-token cut can sever a **bold** run or a [link](url) and leave the
+                # renderer holding half a construct -- and the detail view now renders it.
+                "description": _contest_title(r.get("description")),
+                # The entry requirements, straight through (contest detail view):
+                #   rules  -- [{type: 'required_model_ids', model_ids: [...]}
+                #              | {type: 'required_lora_ids', lora_ids: [...]}]; [] = no restriction
+                #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
+                #   desc_url / result_url -- the contest's own rules + results documents,
+                #     both frequently absent (null upstream -> "" here)
+                "rules": [x for x in (r.get("rules") or []) if isinstance(x, dict)],
+                "tack_name": r.get("proposedTackName") or "",
+                "desc_url": r.get("descUrl") or "",
+                "result_url": r.get("resultUrl") or "",
             })
         total_page = int(d.get("totalPage") or 1)
         if page >= total_page or page >= max_pages:
@@ -10732,6 +10788,119 @@ def run_contests(args):
                 (c["start_at"] or "")[:10], (c["end_at"] or "")[:10], c["url"]))
         print("")
     print("(Read-only. Enter a contest from the PixAI website.)")
+
+
+def _contest_rows(payload):
+    """Flatten one contest-artwork payload into a list of plain dicts.
+
+    Two shapes are accepted on purpose. The sibling `/contest/list` answers with a
+    `{data:[...]}` envelope, while the per-user / winners routes are documented as bare
+    JSON arrays and only the array form was seen live -- so guessing one shape would put
+    an unverified assumption between the caller and the data. A dict payload yields its
+    `data` list, a list payload is itself, anything else yields nothing.
+
+    Each row is reduced to its SCALAR fields: the four the app actually uses (`id`,
+    `authorId`, `mediaId`, `title`) plus whatever else came flat -- a winner's rank field,
+    whose upstream name is unverified, therefore rides along untouched rather than being
+    guessed at by name. Nested envelopes (the echoed `contest{}` object) are dropped."""
+    if isinstance(payload, dict):
+        rows = payload.get("data") or []
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        flat = {str(k): v for k, v in r.items()
+                if v is None or isinstance(v, (str, int, float, bool))}
+        # ONE exception to the scalars-only rule, and it is an identity question rather
+        # than a tidiness one. An entry row can carry its artwork as a nested object
+        # (`{"id": <entry id>, "artwork": {"id": <artwork id>}}`), and dropping that
+        # leaves only the ENTRY id -- a different value from the artwork id every other
+        # path keys on. The dedupe set is grow-only, so one real entry then lands under
+        # two keys and counts twice, forever. Lift the artwork id out to the flat name
+        # the rest of the app already reads.
+        if not flat.get("artworkId"):
+            art = r.get("artwork")
+            if isinstance(art, dict) and art.get("id"):
+                flat["artworkId"] = str(art["id"])
+        out.append(flat)
+    return out
+
+
+def contest_my_entries(session, slug, user_id):
+    """One account's OWN entries in one contest, as plain dicts.
+
+    `GET /v2/contest/{slug}/artwork/{userId}` -- the "have I entered, and how many times"
+    read, without paging the contest's whole entry list. Read-only: browsing entries never
+    spends and never changes the account, so no `_check_read_only` here.
+
+    Raises PixAIError upward on a non-2xx (and ValueError on a malformed 200 body); every
+    caller of this is a poll that fails soft at its own layer, which keeps the failure
+    handling where the "what should a poll do about it" decision actually lives."""
+    return _contest_rows(_rest_get(
+        session, "/contest/%s/artwork/%s" % (slug, user_id)))
+
+
+def contest_winners(session, slug):
+    """The winners of one contest, as plain dicts. `GET /v2/contest/{slug}/winners`.
+
+    Verified live: a still-running contest answers with an EMPTY JSON array rather than an
+    error, and the list populates at the contest's `resultAt` -- so an empty result means
+    "not decided yet", never "call failed". `authorId` identifies each winner; any rank
+    field upstream sends is preserved as-is (see _contest_rows). Read-only, no spend."""
+    return _contest_rows(_rest_get(session, "/contest/%s/winners" % slug))
+
+
+def contest_artworks(session, slug, page=1):
+    """One page of a contest's PUBLIC entries -- everyone's, not just this account's.
+    `GET /v2/contest/{slug}/artwork` with `{"page": N, "sort": "newest"}` (page size is
+    the server's, ~20). Read-only; feeds the detail view's entries preview, where the
+    full browse is a link-out to pixai.art rather than a paging UI here.
+
+    Returns the envelope shape `{data, totalCount, page, totalPage}` with `data`
+    normalized by _contest_rows. A bare-array answer is tolerated the same way the
+    per-user route's is (only the sibling /contest/list envelope was verified live): the
+    rows are the array and the counts fall back to what was actually returned, so a
+    caller never reads an invented total. Raises PixAIError upward on a non-2xx."""
+    d = _rest_get(session, "/contest/%s/artwork" % slug,
+                  params={"page": int(page or 1), "sort": "newest"})
+    rows = _contest_rows(d)
+    env = d if isinstance(d, dict) else {}
+
+    def _int(key, fallback):
+        try:
+            return int(env.get(key) or fallback)
+        except (TypeError, ValueError):
+            return fallback
+    return {"data": rows, "totalCount": _int("totalCount", len(rows)),
+            "page": _int("page", int(page or 1)), "totalPage": _int("totalPage", 1)}
+
+
+def contest_enter(session, slug, artwork_id):
+    """Enter one ALREADY-PUBLISHED artwork into a contest. **ACCOUNT-MUTATING.**
+
+    This is account-visible in the strongest sense: it puts the artwork into a PUBLIC
+    contest under the owner's name, where everyone can see it, and the contract exposes no
+    un-enter route. So it is gated by `_check_read_only` before the network call fires,
+    exactly like submit_generation / submit_fixer / delete_task_gql / claim_reward, and it
+    rides the single-attempt `_rest_post` with NO retry loop of its own -- a re-POST after
+    a lost response would submit a second entry.
+
+    `POST /v2/contest/{slug}/artwork` with `{"artworkId": ...}` -> the parsed response
+    dict (`{"success": true}` upstream). Upstream refusals arrive as a PixAIError carrying
+    the status and body: NOT_ELIGIBLE (e.g. the artwork was published before the contest
+    opened), UNAUTHORIZED, INVALID_INPUT.
+
+    THE ENTRY FEE IS UNMEASURED. The contract also declares an INSUFFICIENT_CREDITS error,
+    so entering MAY cost credits -- but no entry has ever been submitted from here to find
+    out, and the capture scope deliberately stopped short of firing one. Callers must
+    present the cost as UNKNOWN; do not tell a user this is free."""
+    _check_read_only("enter a PixAI contest")
+    return _rest_post(session, "/contest/%s/artwork" % slug,
+                      {"artworkId": str(artwork_id)})
 
 
 # --- Free "cards" (kaisuuken / 回数券) -------------------------------------------

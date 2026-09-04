@@ -14,7 +14,36 @@ import moonglade_gallery as gallery
 # The sealed achievement-definitions donor (private companion repo). The roster no longer
 # lives in source, so roster tests need a container built from this.
 _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
-                 / "moonglade-internal" / "achievements_sealed_donor.json")
+                 / "moonglade-internal" / "achievements_folio_donor.json")
+
+
+def pytest_sessionstart(session):
+    """One loud line when the sealed donor is absent, naming the file and how many tests
+    it gates.
+
+    The skip mechanism itself is right -- public CI has no companion repo and those tests
+    cannot run there. What was wrong is that a run missing them still PRINTS as green, so
+    "all tests pass" could quietly mean "all tests that ran". This does not change what
+    runs; it makes the gap impossible to miss in the output."""
+    if _SEALED_DONOR.is_file():
+        return
+    gated = 0
+    try:
+        for path in Path(__file__).resolve().parent.glob("test_*.py"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            gated += text.count("@needs_donor") + text.count("sealed_donor_present")
+    except OSError:
+        gated = 0
+    line = ("!!! SEALED DONOR MISSING: %s\n"
+            "!!! ~%d roster-dependent test(s) will SKIP. A green run here does NOT mean\n"
+            "!!! the roster, seal and ladder behaviour were verified."
+            % (_SEALED_DONOR, gated))
+    print("\n" + "!" * 78 + "\n" + line + "\n" + "!" * 78)
+    try:
+        session.config.pluginmanager.get_plugin("terminalreporter").write_line(
+            line, red=True, bold=True)
+    except Exception:                      # noqa: BLE001 -- the print above already carried it
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -138,6 +167,22 @@ def sealed_donor_present():
     CI). Use on tests that assert specific roster content (ids, thresholds, the ladder)."""
     if not _SEALED_DONOR.is_file():
         pytest.skip("sealed-definitions donor (private repo) not present")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_perf_memos():
+    """The 2026-09-03 perf pass added three module-level memos -- the achievement-metrics
+    cache, the contest-board cache, and the contest sweep's last-successful-run stamp.
+    Module singletons outlive a test, so without this one test's cached board (or its
+    "we swept recently") answers the next one's request. Same isolation the sealed-defs
+    and earned-ids caches above already get, and for the same reason."""
+    gallery._ACH_METRICS_CACHE.clear()
+    gallery._contests_cache.clear()
+    gallery._contest_sync_last_ok.update(at=0.0)
+    yield
+    gallery._ACH_METRICS_CACHE.clear()
+    gallery._contests_cache.clear()
+    gallery._contest_sync_last_ok.update(at=0.0)
 
 
 @pytest.fixture(autouse=True)

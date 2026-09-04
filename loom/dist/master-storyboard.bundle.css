@@ -1564,6 +1564,59 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   opacity: 0;
   transition: opacity .5s;
 }
+.ach-m2.trail {
+  background: transparent;
+  pointer-events: none;
+}
+.ach-m2.trail .mascot,
+.ach-m2.trail .mglow,
+.ach-m2.trail .ee-star,
+.ach-m2.trail .m2-conf {
+  opacity: 0;
+  transition: opacity .3s;
+}
+.ach-m2.trail-1 .tw {
+  transform: translateY(150px) scale(.9);
+  filter: brightness(.72);
+}
+.ach-m2.trail-2 .tw {
+  transform: translateY(235px) scale(.8);
+  filter: brightness(.54);
+}
+.ach-m2.trail-3 .tw {
+  transform: translateY(300px) scale(.71);
+  filter: brightness(.4);
+}
+.ach-m2.trail-4 .tw {
+  transform: translateY(348px) scale(.64);
+  filter: brightness(.28);
+  opacity: .6;
+}
+.ach-trailchip {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 5vh;
+  z-index: 519;
+  font-family:
+    ui-monospace,
+    Menlo,
+    Consolas,
+    monospace;
+  font-size: 11px;
+  color: var(--gold);
+  background: rgba(10, 8, 24, .85);
+  border: 1px solid rgba(212, 175, 55, .4);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity .5s;
+}
+.ach-trailchip.out {
+  opacity: 0;
+}
 .ach-m2 .tstage {
   width: min(680px, 94vw);
 }
@@ -1571,6 +1624,10 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   position: relative;
   padding-top: 158px;
   cursor: pointer;
+  transition:
+    transform .45s cubic-bezier(.2, .9, .24, 1),
+    filter .45s,
+    opacity .45s;
 }
 .ach-m2 .t-common {
   --tc:#9fbad6;
@@ -2018,6 +2075,9 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   .ach-m2 .m2-runeB,
   .ach-m2 .m2-wisp {
     animation: none !important;
+  }
+  .ach-m2 .tw {
+    transition: none !important;
   }
 }
 .ach-m2 .tbody {

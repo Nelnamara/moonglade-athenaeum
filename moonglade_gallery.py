@@ -271,6 +271,11 @@ _MIGRATIONS = [
     # migrate() path rather than a duplicate ALTER + index inside init_db. It runs after the
     # batch ALTER above, so the column always exists by the time this CREATE INDEX fires.
     "CREATE INDEX IF NOT EXISTS idx_batch ON catalog(batch)",
+    # artwork_id had no index while artwork_media_ids' own docstring called itself an
+    # "indexed lookup" -- it was a full table scan, run two or three times per contest
+    # overlay open (2026-09-03 ultrareview). Same shape as idx_task_id above, and the
+    # column exists from _CREATE_TABLE, so it needs no ALTER ahead of it.
+    "CREATE INDEX IF NOT EXISTS idx_artwork_id ON catalog(artwork_id)",
     # A real txt2img original legitimately has an EMPTY source_media_id forever, which
     # makes "blank" ambiguous with "never checked" -- this is the persisted "checked, found
     # nothing" marker --backfill-lineage needs so it doesn't re-fetch every original task on
@@ -1144,6 +1149,33 @@ def myart_items(db_path):
         return [dict(r) for r in rows]
 
 
+def artwork_media_ids(db_path, artwork_ids):
+    """{artwork_id: media_id} for the ids the catalog knows, skipping the ones it does
+    not. Cheap by construction: --sync-artworks writes artwork_id onto the SAME row as
+    the media_id it belongs to, so this is a lookup rather than any kind of join -- and
+    since 2026-09-03 it is genuinely indexed (idx_artwork_id), which this docstring
+    claimed for a while before the index existed. It is what lets an entries listing show real thumbnails (/thumbs/<media_id>)
+    for artworks the local library already holds -- an entry made from another device
+    simply has no local media and gets no thumb, which is the honest answer.
+
+    Chunked because SQLite caps the number of bound parameters in one statement."""
+    ids = [str(a).strip() for a in (artwork_ids or []) if str(a or "").strip()]
+    if not ids:
+        return {}
+    out = {}
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            rows = con.execute(
+                "SELECT artwork_id, media_id FROM catalog WHERE artwork_id IN (%s)"
+                % ",".join("?" * len(chunk)), chunk).fetchall()
+            for r in rows:
+                aid, mid = str(r["artwork_id"] or ""), str(r["media_id"] or "")
+                if aid and mid:
+                    out[aid] = mid
+    return out
+
+
 def artwork_row(db_path, media_id):
     """The publish-relevant catalog row behind one media_id (artwork_id / task_id /
     title / art_tags / is_published), or None. What every My Art card action resolves
@@ -1363,20 +1395,52 @@ def _series_ts(created_at):
     History feed's _history_ts (which lives inside create_app and can't be
     shared from module level): PixAI's 24-char `...T06:14:10.545Z`, the 20-char
     no-millis `...Z`, and the 19-char naive legacy rows -- all UTC (#34 review:
-    timestamps are UTC ISO strings, hour math needs no zone care)."""
-    from datetime import datetime, timezone
+    timestamps are UTC ISO strings, hour math needs no zone care).
+
+    TWO SHAPES ADDED 2026-09-03, because this now also measures CONTEST dates, which do
+    not come from the same place catalog rows do:
+      * DATE-ONLY ("2026-09-20") returned None, so a contest whose end date carried no
+        time component read as having no date at all -- no countdown, and the sweep
+        recency window silently skipped it;
+      * a real UTC OFFSET was TRUNCATED and the time read as UTC, quietly wrong by up to
+        a day either way. A deadline is the one thing on that surface that must not be
+        approximately right."""
+    from datetime import datetime, timedelta, timezone
     s = str(created_at or "").strip()
-    if s.endswith("Z"):
+    if not s:
+        return None
+    if s[-1:] in ("Z", "z"):
         s = s[:-1]
+    # A trailing offset, scanned backwards from the end and never past the "T" -- the
+    # date's own hyphens are not offsets, and an offset only ever follows the time.
+    off = timedelta(0)
+    tpos = s.find("T")
+    if tpos > 0:
+        for i in range(len(s) - 1, tpos, -1):
+            ch = s[i]
+            if ch == "+" or ch == "-":
+                tail = s[i + 1:].replace(":", "")
+                if tail.isdigit() and len(tail) in (2, 4):
+                    hh = int(tail[:2])
+                    mm = int(tail[2:]) if len(tail) == 4 else 0
+                    off = timedelta(hours=hh, minutes=mm)
+                    if ch == "+":
+                        off = -off       # +09:00 is AHEAD of UTC: subtract to reach UTC
+                    s = s[:i]
+                break
     try:
         base = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     except ValueError:
-        return None
+        try:                             # date-only: midnight UTC on that day
+            base = datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        return (base + off).timestamp()
     frac = s[19:]
     ms = 0.0
     if frac.startswith(".") and frac[1:].isdigit():
         ms = float("0" + frac)
-    return base.timestamp() + ms
+    return (base + off).timestamp() + ms
 
 
 # Ported from gallery/src/gen/headline.js's SCAFFOLD set -- KEEP THE TWO IN SYNC
@@ -1718,7 +1782,7 @@ def fold_series_units(rows_min, by_task):
 # closed-set criteria labels, ladder-track names) are DEFINITIONS. They used to sit
 # inline here, readable in a public `git clone`; they now live SEALED in
 # moonglade.dat's "achievements" payload (a dict), built from the private donor
-# ../moonglade-internal/achievements_sealed_donor.json by tools/build_container.py.
+# ../moonglade-internal/achievements_folio_donor.json by tools/build_container.py.
 # Loaded LAZILY + cached (out_dir -- so the container path -- is not known at import).
 # A container-less install degrades to the free-skins-only fallback (empty Folio,
 # like missing art), never a crash. See ACHIEVEMENT_SEALING_SPEC.md; this is what
@@ -3127,9 +3191,85 @@ def make_launcher_shortcut(out_dir, mark_id):
     return str(lnk)
 
 
-def achievement_metrics(db_path):
-    """The metric bundle every achievement threshold is measured against. Cheap
-    COUNTs over the local catalog -- read-only, no network, no spend. Fails soft."""
+# Prompt word-cloud vocabulary, shared by the /health word cloud and the Watchword
+# achievement so both count the identical set of meaningful prompt words. Hoisted from
+# collection_health()'s own inline block (kept byte-identical) so top_word_uses can never
+# drift from what the dashboard shows.
+_PROMPT_STOPWORDS = frozenset({
+    "the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
+    "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
+    "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
+    "solo", "looking", "viewer"})
+
+
+def _prompt_word_counter(rows):
+    """Counter of meaningful prompt words across prompt_preview values. `rows` is an
+    iterable of 1-tuples (the SELECT prompt_preview shape) or bare strings. Pure; drops the
+    shared stopwords. Sealing note: the word itself is only ever surfaced as a COUNT by
+    callers (Watchword takes most_common(1)[0][1]) -- the word never leaves this layer."""
+    from collections import Counter
+    c = Counter()
+    for r in rows:
+        pp = r if isinstance(r, str) else r[0]   # a 1-tuple / sqlite3.Row / list -> its first col
+        for w in re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
+            if w not in _PROMPT_STOPWORDS:
+                c[w] += 1
+    return c
+
+
+# The achievement-metrics cache. Keyed by db_path (so a test's tmp catalog never
+# collides) and invalidated on the same cheap `(COUNT(*), MAX(media_id))` key the
+# series cache uses.
+#
+# DELIBERATELY NO TIME FLOOR, unlike that cache. A floor means a catalog change is
+# bounded-stale, and one of this bundle's consumers is the ACHIEVEMENT GATE: earning
+# something unlocks its art, and "your banner appears within thirty seconds" is a bug,
+# not a bounded staleness (caught by tests/test_unlock_split.py, which earns mid-test
+# and asks for the art immediately). The key alone is enough for the case that was
+# actually slow -- repeatedly opening overlays against a catalog nobody is writing to,
+# which is every open outside a sync. During a sync it recomputes per request, exactly
+# as it did before this cache existed, so nothing regressed there either.
+#
+# It exists because this bundle is NOT the "cheap COUNTs" its docstring once claimed
+# on its own: four of its passes read every matching row -- rated, the LoRA CSV
+# split, the palindrome seed scan and the prompt word counter -- and the whole
+# bundle reran on EVERY /api/achievements call. That is the Folio opening, the
+# Control Panel opening, and every achievement re-check, each paying a full-library
+# walk. On a modest machine with a real library that is the overlay-open stall the
+# owner reported (2026-09-03).
+_ACH_METRICS_CACHE = {}
+_ACH_METRICS_LOCK = threading.Lock()
+
+
+def achievement_metrics(db_path, use_cache=True):
+    """The metric bundle every achievement threshold is measured against. Read-only over
+    the local catalog -- no network, no spend. Fails soft.
+
+    NOT the "cheap COUNTs" this docstring used to claim, which is why the memo below
+    exists: most of it is indexed COUNTs, but four passes read every matching ROW and
+    process it in Python -- `rated`, the LoRA CSV split, the palindrome seed scan, and the
+    prompt word counter. On a real library that is the expensive part of opening the Folio
+    or the Control Panel, and it ran on every /api/achievements call before 2026-09-03.
+
+    CACHED (see _ACH_METRICS_CACHE): recomputed whenever the catalog's cheap key
+    changes, and served from the memo when it has not. `use_cache=False` forces a real
+    read -- what a test asserting the computation itself wants."""
+    if use_cache:
+        try:
+            with catalog(db_path) as con:
+                cheap = tuple(con.execute(
+                    "SELECT COUNT(*), MAX(media_id) FROM catalog").fetchone())
+            with _ACH_METRICS_LOCK:
+                ent = _ACH_METRICS_CACHE.get(str(db_path))
+                if ent is not None and ent["key"] == cheap:
+                    return dict(ent["metrics"])          # a COPY: callers .update() it
+            fresh = achievement_metrics(db_path, use_cache=False)
+            with _ACH_METRICS_LOCK:
+                _ACH_METRICS_CACHE[str(db_path)] = {
+                    "key": cheap, "computed_at": time.time(), "metrics": dict(fresh)}
+            return fresh
+        except sqlite3.Error:
+            pass          # a broken/missing catalog falls through to the real read
     m = catalog_counts(db_path)   # images, videos, collections
     with catalog(db_path) as con:
         try:
@@ -3159,9 +3299,42 @@ def achievement_metrics(db_path):
                     if t:
                         kw.add(t)
             m["distinct_keywords"] = len(kw)
+            # --- Folio expansion catalog metrics (all COUNT-only integers; no rating value,
+            # LoRA name, seed value, or prompt word ever leaves this function) ---
+            # The Bench (rated): health-panel-identical -- a non-empty, non-zero rating.
+            m["rated"] = _scalar(
+                "SELECT COUNT(*) FROM catalog "
+                "WHERE COALESCE(NULLIF(rating,''),'0') NOT IN ('0')")
+            # The Atelier (loras_distinct): distinct LoRA NAME-keys across the per-row `loras`
+            # CSV (drop ':weight'), parsed exactly like collection_health's top-LoRAs block.
+            # DISTINCT from telemetry's `lora_distinct` (Polyglot, a runtime set) -> a count only.
+            lk = set()
+            for (loras,) in con.execute(
+                    "SELECT loras FROM catalog WHERE COALESCE(loras,'') != ''"):
+                for part in (loras or "").split(","):
+                    name = part.strip().rsplit(":", 1)[0].strip()   # drop ":weight"
+                    if name:
+                        lk.add(name)
+            m["loras_distinct"] = len(lk)
+            # Mirror Seed (palindrome_seeds): distinct numeric-palindrome seeds of >=5 digits.
+            # COUNT ONLY -- no seed value is ever emitted.
+            pal = set()
+            for (seed,) in con.execute(
+                    "SELECT DISTINCT seed FROM catalog WHERE COALESCE(seed,'') != ''"):
+                s = str(seed or "").lstrip("-")
+                if len(s) >= 5 and s.isdigit() and s == s[::-1]:
+                    pal.add(s)                              # dedupe '12321' vs '-12321'
+            m["palindrome_seeds"] = len(pal)
+            # Watchword (top_word_uses): uses of the single most-common prompt word, via the
+            # shared /health word cloud. COUNT ONLY -- the word itself never leaves.
+            _wc = _prompt_word_counter(con.execute(
+                "SELECT prompt_preview FROM catalog "
+                "WHERE COALESCE(prompt_preview,'') != ''"))
+            m["top_word_uses"] = _wc.most_common(1)[0][1] if _wc else 0
         except sqlite3.Error:
             for k in ("models", "published", "tagged", "local_gens",
-                      "gens_in_a_day", "distinct_keywords"):
+                      "gens_in_a_day", "distinct_keywords",
+                      "rated", "loras_distinct", "palindrome_seeds", "top_word_uses"):
                 m.setdefault(k, 0)
     return m
 
@@ -3270,6 +3443,43 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
             entry["criteria"] = crit[a["id"]]
         achs.append(entry)
     by_id = {x["id"]: x for x in achs}
+    # Generic `requires` meta-loop (Glories of the Curator/Forgewright + The Way Is Shut):
+    # an achievement carrying a `requires` prereq list earns when every prereq id is earned
+    # (or it is pin-once). Iterates the SEALED roster -- which carries `requires` -- rather
+    # than the built entries, which deliberately never copy it, so no prereq list ever
+    # reaches the payload/client. `current` reflects how many prereqs are met (for a masked
+    # feat this stays cloaked until earned anyway).
+    #
+    # A FIXED POINT, and ABOVE the two post-passes -- both of those matter:
+    #   * it used to read ONE `earned_ids` snapshot taken before the loop, so a meta whose
+    #     prereq is ITSELF a meta could never earn: the prereq earned during the same pass
+    #     and the snapshot never heard about it. Iterating until nothing new earns is what
+    #     makes a chain of any depth resolve.
+    #   * it used to run AFTER Skin Changer and Completionist, so a skin granted by a meta
+    #     was invisible to Skin Changer count, and a meta earned here never counted toward
+    #     Completionist "everything earned". Resolving first means both post-passes see the
+    #     finished picture.
+    # Bounded by construction: a round can only ADD earns, so it converges in at most one
+    # pass per requires-carrying achievement.
+    _reqs = [a for a in _roster() if a.get("requires")]
+    for _ in range(len(_reqs) + 1):
+        earned_ids = {x["id"] for x in achs if x["earned"]}
+        changed = False
+        for a in _reqs:
+            e = by_id.get(a["id"])
+            if e is None:
+                continue
+            req = a["requires"]
+            met = sum(1 for r in req if r in earned_ids)
+            e["current"] = met
+            was = e["earned"]
+            e["earned"] = (met == len(req)) or e["id"] in pinned
+            if e["earned"] and a.get("skin"):
+                earned_skins.add(a["skin"])
+            if e["earned"] and not was:
+                changed = True
+        if not changed:
+            break
     # post-pass: Skin Changer counts unlocked skins (free ones + this pass's earns)
     sc = by_id.get("skin-changer")
     if sc:
@@ -3437,7 +3647,8 @@ def set_telemetry_out(out_dir):
     _TELEM_OUT = out_dir
 
 
-_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": []}
+_TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
+                "day_lists": {}}
 
 
 def load_telemetry(out_dir):
@@ -3533,6 +3744,35 @@ def telem_max(key, value, out_dir=None):
         key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
 
 
+def telem_set_discard(key, value, out_dir=None):
+    """sets[key] -= {value}. Returns True when something was actually removed.
+
+    These sets are GROW-ONLY by design -- they are the ladder's memory, and a metric that
+    can fall is a metric that can un-earn an achievement. This exists for the one case
+    that is not a retraction but a CORRECTION: a key written under an identity the app has
+    since learned was wrong, where the true key is being written in the same breath. The
+    count does not fall; a duplicate of something already counted stops being counted
+    twice. Every caller must be able to prove the two keys are the same thing, and the
+    removal is logged."""
+    removed = {"n": 0}
+
+    def _discard(d):
+        cur = d["sets"].get(key)
+        if not isinstance(cur, list):
+            return
+        v = str(value)
+        if v in cur:
+            cur.remove(v)
+            removed["n"] = 1
+        d["sets"][key] = cur
+    _telem_mutate(out_dir, _discard)
+    if removed["n"]:
+        import logging as _logging
+        _logging.getLogger(__name__).info(
+            "telemetry: discarded one superseded %s key", key)
+    return bool(removed["n"])
+
+
 def telem_set_add(key, value, out_dir=None):
     """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
     def _add(d):
@@ -3551,21 +3791,70 @@ def telem_flag(key, out_dir=None):
     _telem_mutate(out_dir, lambda d: d["flags"].__setitem__(key, 1))
 
 
-def telem_mark_day(out_dir=None):
-    """Record today in the distinct-days-used ledger (The Vigil)."""
+def telem_mark_day(out_dir=None, keys=None):
+    """Record today (idempotent) in the distinct-days ledger. `keys=None` marks the legacy
+    flat `days` list -- byte-identical to before (The Vigil / days_used). Otherwise mark today
+    under each named per-key list in `day_lists` (e.g. gen_days / curation_days / active_days),
+    for the streak + long-watch metrics. A given key records a day at most once."""
     import datetime as _dt
     today = _dt.date.today().isoformat()
 
     def _mark(d):
-        if today not in d["days"]:
-            d["days"].append(today)
+        if keys is None:
+            if today not in d["days"]:
+                d["days"].append(today)
+            return
+        dl = d.setdefault("day_lists", {})
+        if not isinstance(dl, dict):
+            dl = {}
+            d["day_lists"] = dl
+        for k in keys:
+            lst = dl.get(k)
+            if not isinstance(lst, list):
+                lst = []
+            if today not in lst:
+                lst.append(today)
+            dl[k] = lst
     _telem_mutate(out_dir, _mark)
 
 
-def telemetry_metrics(out_dir):
+def _best_day_streak(days):
+    """Best-ever run of consecutive calendar days in an ISO-date list. A later gap never
+    un-earns an already-reached streak (the metric is a high-water mark, like the maxima).
+    A malformed/empty list -> 0; unparseable dates are skipped."""
+    import datetime as _dt
+    dates = set()
+    for s in (days or []):
+        try:
+            dates.add(_dt.date.fromisoformat(str(s)))
+        except (TypeError, ValueError):
+            continue
+    if not dates:
+        return 0
+    one = _dt.timedelta(days=1)
+    best = 0
+    for d in dates:
+        if (d - one) in dates:
+            continue                       # not a run start
+        run, cur = 1, d
+        while (cur + one) in dates:
+            cur += one
+            run += 1
+        if run > best:
+            best = run
+    return best
+
+
+def telemetry_metrics(out_dir, telem=None):
     """Flatten the telemetry store into the achievement metric namespace.
-    Counters/maxima pass through, sets become cardinalities, flags become 0/1."""
-    d = load_telemetry(out_dir)
+    Counters/maxima pass through, sets become cardinalities, flags become 0/1.
+
+    `telem` lets a caller that has ALREADY loaded the store hand it in rather than
+    making this parse the file again. /api/achievements needed the store three times
+    over (here, in first_sync_complete, and for compute's `sets`) and was reading and
+    JSON-parsing it three times per request; it now loads once and passes it through.
+    Absent, the behaviour is exactly as before."""
+    d = load_telemetry(out_dir) if telem is None else telem
     m = {}
     for src in (d["counters"], d["maxima"]):
         for k, v in src.items():
@@ -3582,13 +3871,55 @@ def telemetry_metrics(out_dir):
     m["tools_used"] = _card("tools")
     m["lora_distinct"] = _card("loras")
     m["enhance_workflows_distinct"] = _card("enhance_workflows")
+    # Folio expansion set-cardinalities (count only -- the underlying scene ids / preset
+    # names never leave the store).
+    m["scenes_used"] = _card("scenes")                        # Doorwarden
+    m["bridge_gens"] = _card("bridge_gen_tasks")              # Speak, Friend: distinct bridge tasks (re-poll-safe)
+    # Contests. ONE dedupe set per metric is the whole rule: the publish-time hook, the
+    # explicit entry route and the detection poll all write the SAME keys, so the same
+    # image in the same contest can never count twice no matter which path saw it, an
+    # entry made off-app still lands, and a failed submit writes nothing. Values are
+    # "{contest_id}:{artwork_id}" / "{contest_id}" and never leave the store -- only the
+    # count does. Deliberately NOT also counters: the assignment below would shadow a
+    # same-named counter, and one source of truth is the point.
+    m["contest_entries"] = _card("contest_entry_keys")
+    m["contest_wins"] = _card("contest_win_keys")
+    # Blades of Gondolin (enhance_tools_complete): mastery of all SIX gen-drawer enhance tools.
+    # The five non-emotion presets each count once used; Change Emotion counts only when EVERY
+    # emotion in the universe has been used. The preset keys and the emotion-universe size come
+    # from core -- never hardcoded -- and ONLY the computed count is exposed (the underlying tool
+    # keys and emotion keys never leave the store). Silent-soft: an absent/bad core resolves to 0.
+    try:
+        import moonglade_backup as _core
+        _non_emotion = set()
+        for pp in getattr(_core, "BRIDGE_ENHANCE_PRESETS", ()):
+            _k = str(pp.get("key") or "").strip()
+            if _k and _k != "emotion":
+                _non_emotion.add(_k)
+        _tools = sets.get("enhance_tools")
+        _tools = set(_tools) if isinstance(_tools, list) else set()
+        _universe = len(getattr(_core, "ENHANCE_EMOTION_PROMPTS", ()) or ())
+        _emotion_done = _universe > 0 and _card("enhance_emotions") >= _universe
+        m["enhance_tools_complete"] = len(_tools & _non_emotion) + (1 if _emotion_done else 0)
+    except Exception:
+        m["enhance_tools_complete"] = 0
     for k, v in d["flags"].items():
         m[k] = 1 if v else 0
     m["days_used"] = len(d["days"])
+    # Keyed day-lists -> the streak + long-watch metrics. Each per-key list is validated
+    # here (a hostile file could store a non-list) before it is measured.
+    dl = d.get("day_lists") if isinstance(d.get("day_lists"), dict) else {}
+
+    def _days(key):
+        v = dl.get(key)
+        return v if isinstance(v, list) else []
+    m["gen_streak"] = _best_day_streak(_days("gen_days"))              # Seven Candles
+    m["curation_streak"] = _best_day_streak(_days("curation_days"))    # Lamplighter
+    m["distinct_active_days"] = len(set(_days("active_days")))         # Long Vigil / Unbroken Watch
     return m
 
 
-def first_sync_complete(out_dir, db_path):
+def first_sync_complete(out_dir, db_path, telem=None):
     """True once the first FULL library sync has finished -- the gate that stops the
     achievement unlock toasts from firing mid-first-sync. `first-light` is metric
     images>=1, so without this gate it pops the instant image #1 lands, seconds into a
@@ -3608,7 +3939,8 @@ def first_sync_complete(out_dir, db_path):
     with a real library but a pristine achievement state simply resolves on its next
     `--sync`."""
     try:
-        if load_telemetry(out_dir)["flags"].get("first_sync_done"):
+        d = load_telemetry(out_dir) if telem is None else telem
+        if d["flags"].get("first_sync_done"):
             return True
         st = load_ach_state(out_dir)
         if st.get("seen") or st.get("earned_at"):
@@ -3656,6 +3988,207 @@ def sweep_telemetry(out_dir):
             telem_flag("eclipse_anim_triggered", out_dir=out_dir)
     except Exception:
         pass
+
+
+# --- contest detection sweep ---------------------------------------------------------
+# The two ladder signals this app cannot see for itself: an entry made on pixai.art never
+# touches this process at all, and NOTHING local ever hears "you won" -- there is no local
+# event to hook. So both are read back FROM PixAI, into the very same dedupe sets the entry
+# paths write, which is what makes the sweep safe to run as often as it likes: re-seeing an
+# entry adds nothing, and an entry the app made itself is the same key the poll finds.
+#
+# Bounded on purpose: two pages of the board, every RUNNING contest, and at most
+# _CONTEST_SYNC_MAX ended ones from inside the recent window. The historical board is long
+# and its old rows cannot change, so sweeping all of it would be a request storm for
+# nothing -- but a running contest is where entries actually happen, so the cap must never
+# be what drops one.
+# The contest board, memoized per variant (see api_contests). Module-level so every
+# surface that mounts a contest list shares one answer rather than each paying its own
+# round trip on open.
+CONTESTS_TTL = 90.0
+_contests_cache = {}
+_contests_cache_lock = threading.Lock()
+
+
+def contest_board(core, session, force=False):
+    """The WHOLE contest board, memoized for CONTESTS_TTL -- and the one read every
+    consumer goes through.
+
+    Before this there were four different boards. /api/contests read six pages; the
+    sweep read two; the enter route, the publish-and-enter hook and /api/contest/mine
+    each read ONE. So a contest past row ~50 was visible in the list and then refused by
+    the enter route as "unknown contest", and My entries rendered its rows with blank
+    titles -- the same contest, present or absent depending on which code asked. The
+    publish hook's one-page read was the worst of them: it happens AFTER the publish is
+    already committed, so failing to find the contest there means an artwork published
+    and silently not entered.
+
+    One snapshot, read the full depth (list_contests' own default), filtered by whoever
+    needs less. Costs no more upstream than the single widest read did, and every caller
+    now agrees about what exists."""
+    now = time.time()
+    with _contests_cache_lock:
+        ent = _contests_cache.get("board")
+        if not force and ent and (now - ent["at"]) < CONTESTS_TTL:
+            return ent["rows"]
+    rows = core.list_contests(session, active_only=False)
+    with _contests_cache_lock:
+        _contests_cache["board"] = {"at": time.time(), "rows": rows}
+    return rows
+
+# How long a completed sweep counts as recent enough to skip. The spec asked for this
+# and it never got built: opening the Contests overlay fired a full sweep EVERY time --
+# a paced walk over the board plus a per-contest entries read, on the open of a window
+# whose data changes on the order of days. A forced sweep (the publish kick, which is
+# confirming an entry made seconds ago) ignores this entirely.
+CONTEST_SYNC_RECENT_S = 600.0
+_contest_sync_last_ok = {"at": 0.0}
+_CONTEST_SYNC_MAX = 40
+_CONTEST_SYNC_RECENT_DAYS = 45
+_CONTEST_SYNC_PAUSE = 0.35          # paced: be polite to their servers
+_CONTEST_SYNC_STARTUP_DELAY = 20.0  # let the app finish booting before any network work
+_contest_sync_lock = threading.Lock()
+
+
+def _contest_sync_is_recent(contest, now=None):
+    """True when a contest's result/end date parses AND lands inside the recent window --
+    "finished, but recently enough that its result is still worth one look".
+
+    An absent or unparseable date is deliberately NOT recent: the sweep would rather miss
+    a stale contest than fall back to polling the entire history every startup. A date in
+    the future is not recent either -- that contest is either still running (kept by the
+    `active` flag instead) or its dates disagree with its status, which is not a reason to
+    poll for winners that cannot exist yet."""
+    now = time.time() if now is None else now
+    window = _CONTEST_SYNC_RECENT_DAYS * 86400.0
+    for key in ("result_at", "end_at"):
+        ts = _series_ts(contest.get(key))
+        if ts is not None and 0 <= (now - ts) <= window:
+            return True
+    return False
+
+
+def _contest_detection_sync(out_dir, force=False):
+    """Read this account's contest entries and wins back from PixAI into telemetry.
+    Returns True when the sweep ran, False when it gave up.
+
+    Per kept contest: the owner's own entries (`/contest/{slug}/artwork/{userId}`) become
+    contest_entry_keys, and -- only once the contest's result date has actually passed --
+    the winners list is checked for the owner's own authorId, which becomes a
+    contest_win_key. Winners are not polled before `result_at` because the endpoint answers
+    an empty array until then; asking early is a request that cannot inform anything.
+
+    `force` drops the recent-window filter (every row the board returns is kept, ended ones
+    still capped). The publish kick uses it: the app has just been TOLD an entry was made,
+    and the point of that sweep is to confirm it against PixAI rather than take the client's
+    word -- so a contest the window would have skipped must not be what hides it.
+
+    FAIL-SOFT TOP TO BOTTOM, and that is the point rather than an afterthought: this runs on
+    a background thread and from a route, and a poll that can raise is a poll that can break
+    the very thing it exists to observe. A per-contest failure skips that contest and the
+    sweep continues; anything else ends the sweep. Both are LOGGED, not swallowed silently:
+    a detection sweep that quietly stops working looks exactly like an account that stopped
+    entering contests, and nothing else in the app would ever say otherwise.
+
+    Sealing: only counts ever leave the telemetry store, and nothing written to the store is
+    ever logged -- the log lines carry an exception type and a redacted message, no keys."""
+    import logging as _logging
+    log = _logging.getLogger(__name__)
+    # RUN-RECENCY GUARD. A sweep that just ran has nothing new to learn: the board moves
+    # over days and an entry made in the last ten minutes was either made HERE (in which
+    # case the publish kick forced its own sweep) or on the website, where ten more
+    # minutes of latency costs nothing. Without this, every Contests overlay open paid a
+    # paced walk of the board plus a read per contest. `force` bypasses it completely --
+    # that caller is confirming a specific entry it was just told about.
+    if not force:
+        age = time.time() - _contest_sync_last_ok.get("at", 0.0)
+        if age < CONTEST_SYNC_RECENT_S:
+            return True
+    try:
+        import moonglade_backup as core
+        session = core._make_session(None)
+        uid = str(core._client_of(session).user_id or "")
+        if not uid:
+            log.info("contest sweep: no account id resolved -- nothing to poll")
+            return False
+        active, ended = [], []
+        for c in contest_board(core, session) or []:
+            if not isinstance(c, dict):
+                continue
+            # A RUNNING contest is never capped out: it is the only kind an entry can still
+            # be made into, so dropping one to a cap would blind the sweep to live activity.
+            # The cap exists for the ended tail, which is long and cannot change.
+            if c.get("active"):
+                active.append(c)
+            elif (force or _contest_sync_is_recent(c)) and len(ended) < _CONTEST_SYNC_MAX:
+                ended.append(c)
+        for i, c in enumerate(active + ended):
+            if i:
+                time.sleep(_CONTEST_SYNC_PAUSE)
+            try:
+                cid = str(c.get("id") or "")
+                slug = str(c.get("slug") or "")
+                if not cid or not slug:
+                    continue
+                for row in core.contest_my_entries(session, slug, uid) or []:
+                    # MIGRATION, deliberate and narrow. Before 2026-09-03 this keyed by the
+                    # ENTRY id when the artwork id was nested (and therefore stripped), so
+                    # an old store can hold "cid:<entry id>" for a piece now keyed
+                    # "cid:<artwork id>" -- one entry counted twice, forever, in a set that
+                    # otherwise only grows. When upstream hands us BOTH ids we can prove
+                    # they are the same entry, which is the only moment that judgement is
+                    # safe to make, so the stale key is discarded here and nowhere else.
+                    # The by-user row's shape is UNVERIFIED against a real entry (the probe
+                    # that mapped this endpoint found no owner entries to compare), so the
+                    # explicit artwork field is preferred and the row id is only the
+                    # fallback -- they may or may not be the same value.
+                    row = row or {}
+                    art_id = str(row.get("artworkId") or "")
+                    row_id = str(row.get("id") or "")
+                    rid = art_id or row_id
+                    if rid:
+                        telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
+                                      out_dir=out_dir)
+                    # Both ids present and different: upstream has just told us they name
+                    # the same entry, so a stored key under the OLD identity is a duplicate
+                    # of the one just written, not a second entry. This is the only place
+                    # that can know, so this is the only place that heals it.
+                    if art_id and row_id and art_id != row_id:
+                        telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
+                                          out_dir=out_dir)
+                result_ts = _series_ts(c.get("result_at"))
+                if result_ts is None or result_ts > time.time():
+                    continue
+                for w in core.contest_winners(session, slug) or []:
+                    if str((w or {}).get("authorId") or "") == uid:
+                        telem_set_add("contest_win_keys", cid, out_dir=out_dir)
+                        break
+            except Exception as e:                           # one bad contest, not the sweep
+                log.warning("contest sweep: one contest failed: %s: %s", type(e).__name__,
+                            _redact_host_paths_cli(out_dir, str(e))[:200])
+                continue
+        # Only a sweep that actually completed counts as recent -- a failed one must not
+        # buy ten minutes of silence.
+        _contest_sync_last_ok["at"] = time.time()
+        return True
+    except Exception as e:
+        log.warning("contest sweep: gave up: %s: %s", type(e).__name__,
+                    _redact_host_paths_cli(out_dir, str(e))[:200])
+        return False
+
+
+def _contest_sync_kick(out_dir, force=False):
+    """Run one sweep under the single-flight lock, or skip if one is already running.
+
+    The lock is the whole contract: the startup sweep, the publish kick and the manual route
+    all reach the same work, and a caller that loses the race has nothing to do -- the sweep
+    already in flight reads the same account from the same board. Returns whether it ran."""
+    if not _contest_sync_lock.acquire(False):
+        return False
+    try:
+        return _contest_detection_sync(out_dir, force=force)
+    finally:
+        _contest_sync_lock.release()
 
 
 def top_published_rows(db_path, limit=12):
@@ -3943,17 +4476,9 @@ def collection_health(out_dir, db_path):
                 lora_counter[name] += 1
     top_loras = lora_counter.most_common(10)
 
-    # Prompt word-cloud: most common meaningful words across prompt previews.
-    import re as _re
-    stop = {"the", "and", "a", "an", "of", "with", "in", "on", "at", "to", "for",
-            "is", "by", "as", "or", "from", "best", "quality", "masterpiece",
-            "highres", "detailed", "very", "high", "score", "up", "1girl", "1boy",
-            "solo", "looking", "viewer"}
-    word_counter = Counter()
-    for (pp,) in prompt_rows:
-        for w in _re.findall(r"[a-z][a-z']{2,}", (pp or "").lower()):
-            if w not in stop:
-                word_counter[w] += 1
+    # Prompt word-cloud: most common meaningful words across prompt previews. Shared with the
+    # Watchword achievement via _prompt_word_counter() so the two can never drift.
+    word_counter = _prompt_word_counter(prompt_rows)
     top_words = word_counter.most_common(40)
 
     # A row is "missing" only if NEITHER its media id is on disk (the PixAI
@@ -6455,6 +6980,25 @@ def create_app(out_dir: Path):
     _enhance_pending = {}
     _enhance_pending_lock = threading.Lock()
 
+    # Scene (AI-Tools) telemetry is DEFERRED to terminal success exactly like enhance above
+    # (a scene task on the API key is accepted-charged-then-reaped), so /api/scene records
+    # {task_id -> scene_id} here and the poll's done-branch fires _fire_scene_telemetry once
+    # and drops the entry. Process-lifetime, tiny, bounded by in-flight scene tasks.
+    _scene_pending = {}
+    _scene_pending_lock = threading.Lock()
+
+    # The 6 Bridge-Enhance presets, mapped workflow_name -> preset key, computed once at
+    # app-creation (core is imported per-handler, not module-wide, so alias it locally here).
+    # _fire_enhance_telemetry uses this at TERMINAL success to record WHICH enhance tool was
+    # exercised (enhance_tools) -- never at submit, so a reaped/failed enhance never counts. Only
+    # the six known presets map; a non-preset enhance resolves to nothing and records no tool.
+    import moonglade_backup as _mb_bridge
+    _BRIDGE_PRESET_KEY_BY_NAME = {
+        n: k for n, k in (
+            (str(pp.get("workflow_name") or "").strip(), str(pp.get("key") or "").strip())
+            for pp in getattr(_mb_bridge, "BRIDGE_ENHANCE_PRESETS", ()))
+        if n and k}
+
     # The asset container's first-run fetch (2026-08-10, docs/DECISIONS.md "The
     # asset container, re-scoped from scratch"). A real streamed-download job,
     # not a subprocess like PANEL_ACTIONS below -- one instance per server
@@ -6867,28 +7411,53 @@ def create_app(out_dir: Path):
         return {"media_ids": [r["media_id"] for r in rows], "saved": 0,
                 "is_video": any(str(r["is_video"] or "") == "1" for r in rows)}
 
-    def _collect_single_flight(core, session, tid):
-        """core.collect_generation, but never twice concurrently for the same task id."""
+    def _collect_single_flight(core, session, tid, force=False):
+        """core.collect_generation, but never twice for the same task id -- concurrently
+        OR later.
+
+        The concurrent half was always here. The LATER half was the data-loss hole: the
+        in-flight entry is dropped once its last waiter leaves, so a second poll of the
+        same finished task (a relaunch re-polling a done job, which is ordinary use) found
+        no entry and re-ran the collect. That re-download rebuilt the catalog rows from a
+        blank template and upserted them, blanking artwork_id, is_published, title, rating,
+        collections and the rest -- the owner lost a published piece's artwork_id to
+        exactly this, live, 2026-09-03.
+
+        So: if the task's media are already in the catalog, that IS the answer. No
+        download, no upsert, nothing to lose. `force=True` keeps a deliberate re-collect
+        available (no caller needs one today). This mirrors api_import_task's own
+        pre-check; the row-level carry in moonglade_backup is the second belt."""
         tid = str(tid)
         with _collect_mu:
             ent = _collect_inflight.get(tid)
             if ent is None:
                 ent = _collect_inflight[tid] = {"lock": threading.Lock(),
-                                                "waiters": 0, "done": False}
+                                                "waiters": 0}
             ent["waiters"] += 1
         try:
             with ent["lock"]:
-                if ent["done"]:
-                    # A concurrent collect for this task finished while we waited --
-                    # its media is downloaded + catalogued, so report that instead of
-                    # re-downloading (and, for a video, re-remuxing). If it somehow
-                    # catalogued nothing (every download failed), fall through and
-                    # retry for real.
+                if not force:
+                    # ALREADY COLLECTED -- by a concurrent call that just finished, or by
+                    # any earlier one. Either way the media is downloaded and catalogued,
+                    # so report that instead of re-downloading (and, for a video,
+                    # re-remuxing) over the top of it. If nothing is catalogued (every
+                    # download failed, or this is the first pass), fall through and collect
+                    # for real.
                     got = _collected_from_catalog(tid)
                     if got is not None:
                         return got
                 got = core.collect_generation(session, tid, str(out_dir))
-                ent["done"] = True
+                # Seven Candles (gen_streak) + The Long Vigil (active_days): a gen collected
+                # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
+                # telemetry must never break a collect.
+                try:
+                    telem_mark_day(out_dir=out_dir, keys=("gen_days", "active_days"))
+                except Exception:
+                    pass
+                # bridge_gen_tasks is NOT written here: owner ruling 2026-09-03 -- the metric
+                # counts the bridge's TOOLS only (enhance runs, AI-Tool scene runs), never an
+                # ordinary generation that merely routes through the mirror. The two writers
+                # that remain are the enhance and scene terminals.
                 return got
         finally:
             with _collect_mu:
@@ -7245,11 +7814,26 @@ def create_app(out_dir: Path):
             _time.sleep(backoff)
             backoff = min(backoff * 3, 60)
 
+    def _contest_sync_startup():
+        """One contest detection sweep shortly after boot. Entries made on pixai.art, and
+        any win decided while the app was closed, are invisible to this process until
+        something reads them back -- and startup is the only moment guaranteed to follow
+        such a gap. Sleeps first so it never competes with the app's own boot work, and goes
+        through the same single-flight wrapper every other trigger uses, so a manual sync
+        and this one can never overlap. No `force`: at boot there is no specific entry to
+        confirm, so the recent window is exactly the right bound."""
+        time.sleep(_CONTEST_SYNC_STARTUP_DELAY)
+        _contest_sync_kick(out_dir)
+
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
     # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
-    # whatever real credentials happen to be in this machine's config.json.
+    # whatever real credentials happen to be in this machine's config.json. The contest
+    # sweep rides the SAME gate rather than inventing a second env var: it is background
+    # work that reaches PixAI with those same real credentials, which is the entire reason
+    # that gate exists.
     if os.environ.get("MOONGLADE_DISABLE_WATCH") != "1":
         threading.Thread(target=_watch_loop, daemon=True).start()
+        threading.Thread(target=_contest_sync_startup, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -8862,6 +9446,12 @@ def create_app(out_dir: Path):
         except (TypeError, ValueError):
             return json.dumps({"ok": False}), 400, {"Content-Type": "application/json"}
         update_rating(db_path, media_id, value)
+        # Lamplighter (curation_streak) + The Long Vigil (active_days): rating a piece --
+        # including clearing it to 0 -- is curation. Keyed day-lists, idempotent, silent-soft.
+        try:
+            telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+        except Exception:
+            pass
         return json.dumps({"ok": True, "rating": value}), 200, {"Content-Type": "application/json"}
 
     @app.route("/api/rebuild-poster/<media_id>", methods=["POST"])
@@ -10952,16 +11542,331 @@ def create_app(out_dir: Path):
     def api_contests():
         """The live PixAI contest board (community + official). Read-only PUBLIC data (not
         owner-private, no spend), so NOT localhost-gated -- the owner browsing over LAN still
-        sees it. ?all=1 includes ended contests; default is only the currently-running ones."""
+        sees it. ?all=1 includes ended contests; default is only the currently-running ones.
+
+        MEMOIZED for CONTESTS_TTL. Four surfaces mount this on open -- Contests, My Art,
+        Publish and the mobile screen -- and each was pulling the live board over the
+        network on every mount, which is the stall the owner reported on a modest machine
+        (2026-09-03). A contest board changes over days; ninety seconds of staleness costs
+        nothing and turns four page-open round trips into one. The two variants cache
+        separately because they are different answers to different questions.
+
+        Soft-fail semantics are unchanged, and a failure is NOT cached: an offline blip
+        must not pin an empty board for the next minute and a half."""
         show_all = request.args.get("all") == "1"
         try:
             core, session = _gen_session()
-            contests = core.list_contests(session, active_only=not show_all)
-            return jsonify({"contests": contests,
-                            "official": sum(1 for c in contests if c["type"] == "official"),
-                            "community": sum(1 for c in contests if c["type"] != "official")})
+            rows = contest_board(core, session)
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "contests": []}), 200
+        # Both variants come off the ONE snapshot -- `active` is the server's own
+        # runtimeStatus flag, the same thing list_contests(active_only=True) filters on.
+        contests = rows if show_all else [c for c in rows if c.get("active")]
+        return jsonify({"contests": contests,
+                        "official": sum(1 for c in contests if c["type"] == "official"),
+                        "community": sum(1 for c in contests if c["type"] != "official")})
+
+    @app.route("/api/contest/<slug>/artworks")
+    @tier(LOGIN)
+    def api_contest_artworks(slug):
+        """One page of a contest's public entries -> the detail view's preview grid.
+
+        `?page=N` (default 1). Thumbnails are built from each row's mediaId with the same
+        `/v1/media/{id}/thumbnail` pattern list_contests already uses for cover art -- the
+        entries are other people's artworks, so there is nothing local to serve. Only what
+        the preview renders comes back (id, author name, thumb): the raw upstream rows
+        carry more, and none of it is needed to draw eight squares.
+
+        Soft-error-as-200 with an empty list, matching /api/contests: a contest board
+        hiccup must not turn a detail view into an error page."""
+        try:
+            page = max(1, int(request.args.get("page") or 1))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            core, session = _gen_session()
+            env = core.contest_artworks(session, slug, page=page)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200],
+                            "entries": [], "total_count": 0, "total_page": 0}), 200
+        entries = []
+        for r in env.get("data") or []:
+            mid = str(r.get("mediaId") or "")
+            entries.append({
+                "id": str(r.get("id") or ""),
+                "author_name": str(r.get("authorName") or ""),
+                "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+            })
+        return jsonify({"entries": entries,
+                        "total_count": int(env.get("totalCount") or 0),
+                        "total_page": int(env.get("totalPage") or 0)})
+
+    @app.route("/api/contest/<slug>/winners")
+    @tier(LOGIN)
+    def api_contest_winners(slug):
+        """The winners of one contest -> the detail view's winners strip.
+
+        Empty until the contest's result date: PixAI answers a running contest with an
+        empty array rather than an error, which is exactly the "not decided yet" the strip
+        needs to stay hidden on. The caller is expected to ask only once result_at has
+        passed; asking early is simply empty, never wrong.
+
+        `mine` marks the owner's own row (the design's YOU chip) by comparing authorId to
+        the authenticated account -- the id never reaches the client. Rank comes from
+        whichever rank-ish field upstream sends, whose name was never verified against a
+        real decided contest, falling back to the row's position in a list PixAI returns
+        in podium order. Soft-error-as-200, like every other read on this surface."""
+        try:
+            core, session = _gen_session()
+            rows = core.contest_winners(session, slug)
+            uid = str(core._client_of(session).user_id or "")
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200], "winners": []}), 200
+        winners = []
+        for i, w in enumerate(rows or []):
+            rank = 0
+            for key in ("rank", "place", "position"):
+                try:
+                    rank = int(w.get(key) or 0)
+                except (TypeError, ValueError):
+                    rank = 0
+                if rank:
+                    break
+            mid = str(w.get("mediaId") or "")
+            aid = str(w.get("authorId") or "")
+            try:
+                prize = int(w.get("prizeAmount") or 0)
+            except (TypeError, ValueError):
+                prize = 0
+            winners.append({
+                "id": str(w.get("id") or ""),
+                "rank": rank or (i + 1),
+                "author_name": str(w.get("authorName") or ""),
+                "thumb": ("https://api.pixai.art/v1/media/%s/thumbnail" % mid) if mid else "",
+                "prize_amount": prize,
+                "mine": bool(uid and aid == uid),
+            })
+        return jsonify({"winners": winners})
+
+    @app.route("/api/contest/mine")
+    @tier(LOGIN)
+    def api_contest_mine():
+        """This account's own contest entries, grouped by contest -> the My entries tab.
+
+        TELEMETRY-DERIVED AND INSTANT. The entry record already lives locally (the same
+        dedupe sets every entry path writes), so this route performs exactly ONE upstream
+        call -- a single page of the contest board, purely to put titles and dates on the
+        rows. It deliberately does not re-poll PixAI per contest: that is the detection
+        sweep's job, on its own schedule, and a tab that fired N network calls on open
+        would be unusable with twenty contests in flight.
+
+        A failed board read is soft: the rows still come back, keyed by contest id with
+        empty titles, because knowing you have entries somewhere beats an error page.
+
+        Thumbs come from the local catalog by artwork_id (see artwork_media_ids); an
+        artwork the library does not hold gets no thumb rather than a broken image.
+
+        `won` is contest FACT and belongs on this surface -- the DC's results rows show
+        it. No metric name and no ladder language appears in this payload."""
+        d = load_telemetry(out_dir)
+        sets = d.get("sets") if isinstance(d.get("sets"), dict) else {}
+        raw_keys = sets.get("contest_entry_keys")
+        raw_wins = sets.get("contest_win_keys")
+        won_ids = {str(w) for w in raw_wins} if isinstance(raw_wins, list) else set()
+        by_contest, order = {}, []
+        for k in (raw_keys if isinstance(raw_keys, list) else []):
+            cid, _, aid = str(k).partition(":")
+            if not cid or not aid:
+                continue
+            if cid not in by_contest:
+                by_contest[cid] = []
+                order.append(cid)
+            if aid not in by_contest[cid]:
+                by_contest[cid].append(aid)
+        board = {}
+        try:
+            core, session = _gen_session()
+            for c in contest_board(core, session) or []:
+                if isinstance(c, dict) and c.get("id"):
+                    board[str(c["id"])] = c
+        except Exception:                       # soft: key-only rows beat an error page
+            board = {}
+        thumbs = {}
+        try:
+            thumbs = artwork_media_ids(db_path, [a for cid in order for a in by_contest[cid]])
+        except Exception:
+            thumbs = {}
+        rows = []
+        shown_by_contest = {}
+        for cid in order:
+            c = board.get(cid) or {}
+            aids = by_contest[cid]
+            # No dedupe here, and the reason is worth keeping: media_id is the catalog's
+            # PRIMARY KEY, so artwork_id -> media_id is injective and two keys can NEVER
+            # resolve to one piece. The "defensive dedupe" that used to sit here could not
+            # fire on any real store. The legacy double-key it was meant to cover is
+            # healed where the truth actually is -- in the sweep, which sees both ids on
+            # the upstream row and can discard the stale one.
+            shown = list(aids)
+            shown_by_contest[cid] = shown
+            rows.append({
+                "contest_id": cid,
+                "slug": str(c.get("slug") or ""),
+                "title": str(c.get("title") or ""),
+                "type": str(c.get("type") or ""),
+                "end_at": str(c.get("end_at") or ""),
+                "result_at": str(c.get("result_at") or ""),
+                "active": bool(c.get("active")),
+                "url": str(c.get("url") or ""),
+                "entry_artwork_ids": shown,
+                "entries": [{"artwork_id": a, "media_id": thumbs.get(a, ""),
+                             "thumb": ("/thumbs/%s.jpg" % thumbs[a]) if thumbs.get(a) else ""}
+                            for a in shown],
+                "won": cid in won_ids,
+            })
+        return jsonify({"contests": rows,
+                        "total_entries": sum(len(shown_by_contest[cid]) for cid in order),
+                        "sync_running": bool(_contest_sync_lock.locked()),
+                        "last_sync_at": _contest_sync_last_ok.get("at", 0.0)})
+
+    @app.route("/api/contest/enter", methods=["POST"])
+    @tier(LOGIN)
+    def api_contest_enter():
+        """Enter one already-published artwork into a PixAI contest.
+
+        ALWAYS-CONFIRM, and deliberately stronger than the house preview-first default:
+        every submit gets an explicit confirm step, no exceptions (owner ruling F4,
+        2026-08-31 contest-surface workshop). PixAI exposes no un-enter route, so there is
+        no such thing as an entry worth firing without the owner saying so twice. Without
+        `confirm: true` this route performs NO network call and returns what it WOULD do.
+
+        `spends_credits` is None, NOT False. The contest contract declares an
+        INSUFFICIENT_CREDITS error for this operation and no entry has ever been submitted
+        to measure whether one is charged, so the honest answer is "unknown". False would
+        be a promise the code cannot keep, on a screen a user reads before an irreversible
+        action.
+
+        THE CONTEST ID IS RESOLVED SERVER-SIDE, from the live board by slug -- a `contest_id`
+        in the body is accepted and ignored. The id is what the ladder dedupes on, and the
+        set it lands in is grow-only: a client that sent a wrong, stale or invented one would
+        write a key nothing can ever correct. The board read is also what makes an unknown
+        slug a 400 here rather than an upstream refusal later.
+
+        LOGIN tier, not LOCALHOST: this is the owner managing their OWN account, the same
+        class as publishing and claiming. CSRF: explicit-token class, matching
+        /api/myart/publish -- a real account mutation triggered by one web click.
+        READ_ONLY in config.json refuses the confirmed form regardless, inside core."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        slug = str(body.get("slug") or "").strip()
+        artwork_id = str(body.get("artwork_id") or "").strip()
+        if not (slug and artwork_id):
+            return jsonify({"error": "slug and artwork_id are both required"}), 400
+        if not body.get("confirm"):
+            return jsonify({"preview": True, "slug": slug, "artwork_id": artwork_id,
+                            "spends_credits": None, "irreversible": True})
+        try:
+            core, session = _gen_session()
+        except Exception as e:
+            return jsonify({"error": "PixAI session unavailable: %s"
+                                     % _redact_host_paths(str(e))[:160]}), 502
+        try:
+            board = contest_board(core, session)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
+        contest_id = next((str(c.get("id") or "") for c in board or []
+                           if isinstance(c, dict) and str(c.get("slug") or "") == slug), "")
+        if not contest_id:
+            return jsonify({"error": "unknown contest"}), 400
+        try:
+            resp = core.contest_enter(session, slug, artwork_id)
+        except Exception as e:
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 502
+        # A 2xx that says success:false is a refusal wearing a success code. Default True
+        # for any other shape -- the response body is documented as {success} but only the
+        # error paths were ever seen live, so absence must not read as failure.
+        if isinstance(resp, dict) and not resp.get("success", True):
+            return jsonify({"error": "the contest refused the entry"}), 502
+        # OUTSIDE the try, silent-soft: the entry is already live and irreversible by the
+        # time we get here, so a telemetry hiccup must never be reported as a failed entry.
+        # Same key shape the detection sweep writes -- one dedupe set, so entering the same
+        # artwork twice still counts once.
+        try:
+            telem_set_add("contest_entry_keys", "%s:%s" % (contest_id, artwork_id),
+                          out_dir=out_dir)
+        except Exception:
+            pass
+        return jsonify({"entered": True, "slug": slug, "artwork_id": artwork_id})
+
+    @app.route("/api/contest/sync", methods=["POST"])
+    @tier(LOGIN)
+    def api_contest_sync():
+        """Re-read this account's contest entries and wins from PixAI (see
+        _contest_detection_sync). Catches entries made on pixai.art and wins decided while
+        the app was closed -- neither of which produces any local event to hook.
+
+        CSRF REQUIRED, like every sibling POST on this surface. It reaches PixAI with the
+        owner's credentials on a cross-site-triggerable POST, which is what the token is
+        for. (An earlier version of this docstring said the opposite; it described a route
+        that no longer existed by the time anyone read it.)
+
+        Single-flight via a module lock, and the answer is a STATE rather than a refusal --
+        there is nothing for a caller to retry when a sweep is already running:
+          {started: true}                     -- one is now running on its own thread
+          {started: false, skipped: "recent"} -- one ran recently; nothing to do
+          {started: false, busy: true}        -- one is already in flight
+        Completion is NOT reported here: the sweep outlives this request. The client
+        watches `sync_running` on /api/contest/mine instead.
+
+        ONE count comes back, and only one. contest_wins is deliberately absent -- it is a
+        hidden-only metric, and even a zero here would tell a reader that a win is something
+        this app counts. What the sets contain never leaves the store either.
+
+        CSRF, since 2026-09-03: every sibling POST on this surface carries the explicit
+        token, and this one did not. It reaches PixAI with the owner's credentials on a
+        cross-site-triggerable POST, which is exactly the shape the token exists for --
+        cheap to add, and it makes the surface uniform instead of one-route-special.
+
+        RETURNS IMMEDIATELY. The sweep runs on its own thread; the answer says whether one
+        STARTED (or was skipped as recent, or was already busy), and the client watches
+        /api/contest/mine's `sync_running` for completion."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        m = telemetry_metrics(out_dir)
+        entries = int(m.get("contest_entries", 0) or 0)
+        # RECENT: nothing to do, and nothing to wait for.
+        if (time.time() - _contest_sync_last_ok.get("at", 0.0)) < CONTEST_SYNC_RECENT_S:
+            return jsonify({"started": False, "skipped": "recent",
+                            "contest_entries": entries})
+        if not _contest_sync_lock.acquire(False):
+            return jsonify({"started": False, "busy": True, "contest_entries": entries})
+
+        def _run():
+            try:
+                _contest_detection_sync(out_dir)
+            finally:
+                _contest_sync_lock.release()
+
+        # OFF-THREAD, and this is the whole point: the sweep is paced (a third of a second
+        # between contests, plus a read each) and can run 30-90 seconds against a real
+        # board. It was doing that INSIDE the request, so opening the Contests overlay held
+        # a worker and the browser's connection for the duration -- on a slow board the
+        # overlay simply hung. The client watches /api/contest/mine's sync_running flag
+        # instead, which costs a local telemetry read.
+        try:
+            threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:                   # noqa: BLE001
+            # The lock is acquired HERE and released by the thread, so a thread that never
+            # starts would leave contest sync permanently "busy" for the life of the
+            # process -- every later open answering busy:true forever. Release it here and
+            # say what happened. (Found by its own test, which stubs Thread.start.)
+            _contest_sync_lock.release()
+            return jsonify({"started": False,
+                            "error": _redact_host_paths(str(e))[:200],
+                            "contest_entries": entries}), 200
+        return jsonify({"started": True, "contest_entries": entries})
 
     @app.route("/api/artwork-views")
     @tier(LOGIN)
@@ -11150,11 +12055,89 @@ def create_app(out_dir: Path):
             if action == "publish":
                 changed["artwork_id"] = result.get("artwork_id") or ""
                 changed["published"] = not private
+                # PUBLISH-AND-ENTER. Attaching `challenge` to the publish mutation does
+                # NOT enter a contest -- found live 2026-09-01 (owner: "publish AND enter
+                # from the publish NAV did not work; I published and then did the entry
+                # successfully"). extra.challenge is artwork METADATA, the back-link
+                # listArtworks returns on node.extra; the entry itself is a separate REST
+                # call (POST /v2/contest/{slug}/artwork), which is exactly what the
+                # working direct-entry path does. This publish path never made it, so the
+                # contest row's "entering at publish is free" was a promise about
+                # something that never happened.
+                #
+                # So make it happen: the artwork exists now and has an id, which is the
+                # one thing the entry call needs. The client sends the contest ID (the
+                # select's own value) and contest_enter needs the SLUG, so the board is
+                # read to translate -- and that read doubles as validation, since an id
+                # that is not on the board cannot be entered anyway.
+                #
+                # HONEST PARTIAL SUCCESS: the publish already happened and is
+                # irreversible, so an entry failure can never turn this into a 502. It
+                # comes back as {published: true, entry_error: ...} and the client says
+                # both halves. Single attempt -- contest_enter is single-shot by
+                # construction and READ_ONLY-guarded; a retry here would risk a second
+                # entry for one click.
+                challenge = str(body.get("challenge") or "")
+                new_art_id = str(result.get("artwork_id") or "")
+                if challenge and new_art_id:
+                    try:
+                        slug = next((str(c.get("slug") or "")
+                                     for c in (contest_board(core, session) or [])
+                                     if isinstance(c, dict)
+                                     and str(c.get("id") or "") == challenge), "")
+                        if not slug:
+                            result["entry_error"] = ("couldn't find that contest on the "
+                                                     "board — the artwork was published, "
+                                                     "but not entered")
+                        else:
+                            resp = core.contest_enter(session, slug, new_art_id)
+                            if isinstance(resp, dict) and not resp.get("success", True):
+                                result["entry_error"] = "the contest refused the entry"
+                            else:
+                                result["entered"] = True
+                                # RECORD IT HERE. This path answered entered:true and wrote
+                                # nothing, leaning on the sweep below -- which silently
+                                # no-ops when the single-flight lock is held (a sweep from
+                                # the overlay, or the previous publish's own kick). The
+                                # entry then existed on PixAI and nowhere locally until
+                                # some later sweep happened to catch it. The sweep is
+                                # reconciliation; the path that KNOWS an entry just
+                                # succeeded is the one that should say so. Same key shape
+                                # every other writer uses -- artwork id, so the set dedupes
+                                # against the sweep's own row rather than double-counting.
+                                try:
+                                    telem_set_add("contest_entry_keys",
+                                                  "%s:%s" % (challenge, new_art_id),
+                                                  out_dir=out_dir)
+                                except Exception:
+                                    pass
+                    except Exception as e:                    # noqa: BLE001
+                        result["entry_error"] = _redact_host_paths(str(e))[:200]
+                elif challenge:
+                    result["entry_error"] = ("the publish returned no artwork id, so the "
+                                             "contest entry could not be made")
+                # Then the detection sweep, which reads the truth back from PixAI: the
+                # ladder counts what PixAI says happened, not what this route believes.
+                # Off-thread and outside the try above, so nothing it does can delay this
+                # response or turn an irreversible publish into a failure.
+                if challenge:
+                    try:
+                        threading.Thread(target=_contest_sync_kick,
+                                         args=(out_dir,), kwargs={"force": True},
+                                         daemon=True).start()
+                    except Exception:
+                        pass
             if private is not None:
                 changed["published"] = not private
             if tags is not None:
                 changed["art_tags"] = ", ".join(
                     str(t).lstrip("#").strip() for t in tags)
+                # Lamplighter (curation_streak) + The Long Vigil: tagging is curation.
+                # Keyed day-lists, idempotent, silent-soft.
+                try:
+                    telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+                except Exception:
+                    pass
             if title is not None:
                 changed["title"] = title
             publish_state(db_path, mid, **changed)
@@ -11477,6 +12460,12 @@ def create_app(out_dir: Path):
                                         category)
         except Exception as e:
             return jsonify({"error": str(e)}), 502
+        # The Academy (loras_trained): a LoRA training this server actually submitted.
+        # Silent-soft -- a telemetry blip must not fail a submit that already happened.
+        try:
+            telem_bump("loras_trained", out_dir=out_dir)
+        except Exception:
+            pass
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
                         "free_trainings_left": max(0, free_left - 1) if is_free else 0})
 
@@ -11515,16 +12504,20 @@ def create_app(out_dir: Path):
             sweep_branding_drops(out_dir)
         except Exception:
             pass
+        # ONE telemetry read for the whole request. This route wanted the store three
+        # times -- the metric flatten, the first-sync gate, and compute's `sets` -- and
+        # was reading and parsing the file for each. Same values, a third of the I/O.
+        telem = load_telemetry(out_dir)
         metrics = achievement_metrics(db_path)
-        metrics.update(telemetry_metrics(out_dir))
+        metrics.update(telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
         # first-light is images>=1, so without this it pops seconds into a fresh first sync.
-        fsd = first_sync_complete(out_dir, db_path)
+        fsd = first_sync_complete(out_dir, db_path, telem=telem)
         persist_error = None
         with _ach_lock:
             state = load_ach_state(out_dir)
             result = compute_achievements(metrics, state.get("seen"),
-                                          sets=load_telemetry(out_dir).get("sets", {}),
+                                          sets=telem.get("sets", {}),
                                           earned_at=state.get("earned_at"))
             newly = result["newly"]
             if not fsd:
@@ -12659,11 +13652,23 @@ def create_app(out_dir: Path):
             # createGenerationTask ACCEPTANCE (before start/completion), and a panelplugin job can
             # be accepted then reaped. Record the identity ACTUALLY submitted (workflowName when a
             # name preset, else the numeric id) so telem_set_add -- which skips falsy values --
-            # counts a workflowName preset too. The three producers fire from /api/task-status's
-            # terminal-success branch via _fire_enhance_telemetry.
+            # counts a workflowName preset too. When THIS submit is the Change-Emotion workflow,
+            # also carry the picked emotion key (the client's `emotion` field, the option stem --
+            # the same value build_request translates to the danbooru tag) so the terminal can
+            # record which of the emotion universe was used; gated on the emotion workflow exactly
+            # as build_request gates the arg, so a stray `emotion` on another preset carries nothing.
+            # The producers fire from /api/task-status's terminal-success branch via
+            # _fire_enhance_telemetry.
+            _wname = str(p.get("workflow_name") or "").strip()
+            _identity = _wname or str(p.get("workflow_id") or "").strip()
+            _emo = str(p.get("emotion") or "").strip()
+            _emo_key = _emo if (_emo and _wname == core.ENHANCE_EMOTION_WORKFLOW) else None
             with _enhance_pending_lock:
-                _enhance_pending[str(task_id)] = (str(p.get("workflow_name") or "").strip()
-                                                  or str(p.get("workflow_id") or "").strip())
+                _enhance_pending[str(task_id)] = (_identity, _emo_key)
+            # enhance_tools (Blades of Gondolin) + Speak-Friend (bridge_gens) are DEFERRED to
+            # terminal success in _fire_enhance_telemetry, gated on the bridge-preset identity --
+            # see there. A submit that is later reaped/failed must NOT count (parity with
+            # enhance_workflows).
             return jsonify({"task_id": task_id})
         except Exception as e:
             return jsonify({"error": _log_gen_failure(
@@ -12787,6 +13792,11 @@ def create_app(out_dir: Path):
                 core.make_mirror_session(), scene_id, media,
                 preset=str(p.get("preset") or "random"), custom=p.get("custom"),
                 selector_values=(p.get("selector_values") or p.get("selectorValues") or []))
+            # Doorwarden telemetry is DEFERRED to terminal success (see _fire_scene_telemetry),
+            # mirroring the enhance path: record the submitted scene id keyed by task id. The
+            # scene id is stored only to be counted (scenes_used = len) -- it never leaves.
+            with _scene_pending_lock:
+                _scene_pending[str(task_id)] = scene_id
             return jsonify({"task_id": task_id})
         except Exception as e:
             # Pass the submit SHAPE as a dict (not the bare scene_id str) so _log_gen_failure
@@ -14547,6 +15557,21 @@ __DESIGN_TOKENS__
                 if _gen_phase_seen.get(tid) != started:
                     return
         _log_job(tid, **fields)
+        # Chaotic Creationist (jobs_concurrent): the high-water count of LIVE (non-terminal) jobs,
+        # read from the authoritative job log so a task that later logs done/failed self-heals out
+        # of the count -- abandoned polls and done-but-empty terminals never inflate the peak (the
+        # in-memory _gen_phase_seen set leaks on both). telem_max keeps the peak. Silent-soft.
+        try:
+            # ...and only real GENERATIONS count. The log also carries panel jobs, imports,
+            # deletes and CLI runs, and counting those made the peak a measure of "rows in
+            # the log" rather than of generating several things at once -- one sync beside
+            # one import could satisfy a rung nobody had actually earned.
+            _live = sum(1 for j in core.read_jobs(out_dir)
+                        if j.get("status") not in core._JOBS_TERMINAL
+                        and (j.get("type") or "generate") == "generate")
+            telem_max("jobs_concurrent", _live, out_dir=out_dir)
+        except Exception:
+            pass
 
     def _forget_gen_phase(tid):
         with _gen_phase_lock:
@@ -14564,13 +15589,20 @@ __DESIGN_TOKENS__
         handler -- that would report a false 'failed'/'running' and, worse, prompt a re-poll
         that re-collects. Mirrors api_generate's LoRA-telemetry try/except."""
         with _enhance_pending_lock:
-            identity = _enhance_pending.pop(str(tid), None)
-        if identity is None:
+            pend = _enhance_pending.pop(str(tid), None)
+        if pend is None:
             return
+        identity, emotion_key = pend
         try:
             telem_bump("enhances", out_dir=out_dir)                        # first-enhance milestone
             telem_set_add("tools", "enhance", out_dir=out_dir)             # Full Toolbox
             telem_set_add("enhance_workflows", identity, out_dir=out_dir)  # Enhance Adept: distinct rituals
+            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: any enhance is a bridge gen (distinct task, re-poll-safe)
+            key = _BRIDGE_PRESET_KEY_BY_NAME.get(identity)                 # only the six known presets map; a non-preset enhance -> nothing
+            if key:
+                telem_set_add("enhance_tools", key, out_dir=out_dir)       # a gen-drawer enhance tool exercised (Blades of Gondolin)
+            if emotion_key:                                                # Change-Emotion carried the picked expression
+                telem_set_add("enhance_emotions", emotion_key, out_dir=out_dir)  # one of the emotion universe used
         except Exception:                                                  # noqa: BLE001
             pass
 
@@ -14580,6 +15612,29 @@ __DESIGN_TOKENS__
         never bumps a counter."""
         with _enhance_pending_lock:
             _enhance_pending.pop(str(tid), None)
+
+    def _fire_scene_telemetry(tid):
+        """Fire the AI-Tools scene producer once, on TERMINAL SUCCESS of a scene task THIS
+        server submitted. Deferred from /api/scene (which sees only createChatEditingSceneTask
+        ACCEPTANCE), so a scene that is accepted, charged, then reaped (or fails) never counts.
+        Records the scene id into the `scenes` set (Doorwarden); scenes_used exposes only its
+        length -- the scene id never leaves the store. A no-op for any non-scene task. Swallows
+        EVERY failure (by the time this runs the credit is spent + result collected)."""
+        with _scene_pending_lock:
+            scene_id = _scene_pending.pop(str(tid), None)
+        if not scene_id:
+            return
+        try:
+            telem_set_add("scenes", scene_id, out_dir=out_dir)   # Doorwarden: distinct scenes run
+            telem_set_add("bridge_gen_tasks", str(tid), out_dir=out_dir)   # Speak, Friend: a scene is a bridge gen (distinct task, re-poll-safe)
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    def _drop_scene_pending(tid):
+        """Forget a pending scene without firing -- for a terminal FAILURE (reaped, cancelled,
+        done-but-empty). Keeps the map from leaking and guarantees a failed run never counts."""
+        with _scene_pending_lock:
+            _scene_pending.pop(str(tid), None)
 
     @app.route("/api/task-status")
     @tier(LOGIN)
@@ -14616,6 +15671,7 @@ __DESIGN_TOKENS__
                 # (deferred from /api/enhance's submit-acceptance). No-op for non-enhance tasks;
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
                 _fire_enhance_telemetry(tid)
+                _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
                 return jsonify({"phase": "done", "media_ids": got["media_ids"],
                                 "is_video": got.get("is_video", False),
                                 "duration": got.get("duration"),
@@ -14623,6 +15679,7 @@ __DESIGN_TOKENS__
             if st["phase"] == "failed":
                 _forget_gen_phase(tid)
                 _drop_enhance_pending(tid)   # a reaped/cancelled enhance must NOT count
+                _drop_scene_pending(tid)     # nor a reaped/cancelled scene
                 # Carry PixAI's OWN reason (outputs.reason, e.g. "waiting timeout") into
                 # both the job log and the response. This branch already fired correctly
                 # for the owner's five reaped enhances -- it just logged the bare status,
@@ -14651,6 +15708,7 @@ __DESIGN_TOKENS__
             # forever. (Observed: an enhance submitted with an unusable input media id
             # sat at 'running' indefinitely while PixAI considered it long finished.)
             _drop_enhance_pending(tid)   # done-but-empty is a failure: it must NOT count
+            _drop_scene_pending(tid)     # nor a done-but-empty scene
             _log_job(tid, status="failed", error=_redact_host_paths(str(e))[:200])
             return jsonify({"phase": "failed", "error": _redact_host_paths(str(e))[:200]}), 200
         except (TypeError, AttributeError, NameError, KeyError, IndexError) as e:

@@ -115,7 +115,16 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
   }, [modelMenu]);
   const openModelMenu = () => {
     const r = modelBtn.current.getBoundingClientRect();
-    setModelMenu({ x: Math.max(10, Math.min(r.left, window.innerWidth - 252)), y: r.bottom + 8 });
+    // y was clamped on x only, so a button low on the screen opened a menu whose tail ran
+    // off the bottom with no way to reach it -- the exact defect #40 fixed for ActionsMenu.
+    // .mgl-menu carries a viewport max-height and its own scroll, so flipping above the
+    // trigger when there is more room up there always yields something that fits.
+    const MENU_MAX = 320;
+    const below = window.innerHeight - r.bottom - 18;
+    const y = (below < Math.min(MENU_MAX, 180) && r.top > below)
+      ? Math.max(10, r.top - Math.min(MENU_MAX, r.top - 18))
+      : r.bottom + 8;
+    setModelMenu({ x: Math.max(10, Math.min(r.left, window.innerWidth - 252)), y });
   };
   const modelLabel = adv.model ? (adv.model.length > 18 ? adv.model.slice(0, 17) + "…" : adv.model) : "any";
   return (

@@ -95,11 +95,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   on the Generate dock's queued run tiles, which today show only the mascot + indeterminate shimmer.
   Standing constraint unchanged: `/v2/task/wait-time` is a QUEUE wait, never a render ETA.
 
-- **Contest workbench (beyond Shortlist)** *(being built, 2026-08-31)*
-  The "☆ Shortlist" staging step shipped. The larger workbench — deadline tracking, submission
-  management, in-app entry — is now designed and in build as the contest surface (detail view,
-  entry flow, My entries); it lands with the achievements-expansion release, at which point this
-  item moves to the CHANGELOG.
 
 ---
 

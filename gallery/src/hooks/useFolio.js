@@ -39,6 +39,16 @@ export const BUCKETS = [
   { key: "feat", label: "Feats of the Athenaeum" },
 ];
 
+// The Folio renders four sections; the roster carries two extra structural buckets that
+// fold into existing sections rather than adding new tabs (owner decision, 2026-08-30):
+// meta achievements (the Glories / The Way Is Shut -- feat-tier, no points) render with the
+// Feats, and streaks (Seven Candles / Lamplighter) render with the Masteries. displayBucket
+// maps a card's raw bucket to the section it belongs to, so the four bucket denominators and
+// the three rendered sections all stay consistent. Bucket labels are structural, not roster
+// data -- sealing-safe.
+export const BUCKET_ALIAS = { meta: "feat", streak: "mastery" };
+export const displayBucket = (a) => BUCKET_ALIAS[a.bucket] || a.bucket;
+
 // Rarity/points table (wiki/Folio-of-Honors.md "Rarity and points") scores four
 // tiers -- feat is deliberately excluded from every rarity breakdown (it scores
 // 0 points by design, "pure bragging-rights flair", achievement_points() in
@@ -120,13 +130,15 @@ export function buildViewModel(data) {
   const earnedAt = data.earned_at || {};
   const ladderDefs = data.ladders || [];
 
-  const nonFeat = achievements.filter((a) => a.bucket !== "feat");
-  const feats = achievements.filter((a) => a.bucket === "feat");
+  // displayBucket folds meta -> feat and streak -> mastery, so the four sections stay the
+  // four sections and their denominators fold the extra buckets in consistently.
+  const nonFeat = achievements.filter((a) => displayBucket(a) !== "feat");
+  const feats = achievements.filter((a) => displayBucket(a) === "feat");
 
   // ---- Categories: the right rail's 4 bucket filters + Summary's ledger +
   // Statistics' "by bucket" list all read the same {key,label,earned,total}. ----
   const buckets = BUCKETS.map(({ key, label }) => {
-    const rows = achievements.filter((a) => a.bucket === key);
+    const rows = achievements.filter((a) => displayBucket(a) === key);
     return { key, label, earned: rows.filter((a) => a.earned).length, total: rows.length };
   });
 
@@ -185,8 +197,8 @@ export function buildViewModel(data) {
 
   return {
     achievements, ladders,
-    milestones: achievements.filter((a) => a.bucket === "milestone"),
-    masteries: achievements.filter((a) => a.bucket === "mastery"),
+    milestones: achievements.filter((a) => displayBucket(a) === "milestone"),
+    masteries: achievements.filter((a) => displayBucket(a) === "mastery"),
     feats,
     buckets, recent, withinReach, relics, skinsById, rarityRows, ladderRows,
     earnedNonFeat: nonFeat.filter((a) => a.earned).length, totalNonFeat: nonFeat.length,

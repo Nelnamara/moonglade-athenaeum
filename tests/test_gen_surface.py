@@ -102,7 +102,17 @@ def test_video_row_builders_apply_the_surface_fields():
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
     for fn in ("def _download_video_task", "def _do_task"):
         i = src.index(fn)
-        body = src[i:i + 3200]
+        # The whole function body, found by dedent rather than a fixed character window: a
+        # window silently starts testing less of the function every time a line is added
+        # above the assignment, and did (a comment added 2026-09-03 pushed the call out of
+        # a 3200-char slice and failed this guard for no real reason).
+        indent = len(src[:i].rsplit("\n", 1)[-1])
+        lines, body = src[i:].split("\n"), []
+        for n, line in enumerate(lines):
+            if n and line.strip() and len(line) - len(line.lstrip()) <= indent:
+                break
+            body.append(line)
+        body = "\n".join(body)
         assert "for k in _TASK_ROW_FIELDS" in body, \
             fn + " must apply _TASK_ROW_FIELDS to the video row (issue #18 + lineage)"
 

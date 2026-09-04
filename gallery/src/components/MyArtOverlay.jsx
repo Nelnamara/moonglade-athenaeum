@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import useMyArt, { fmt } from "../hooks/useMyArt.js";
+import useContests, { qualifies, dayOf } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
 import useScrollLock from "../hooks/useScrollLock.js";
+import ContestChooser from "./ContestChooser.jsx";
+import ContestConfirm from "./ContestConfirm.jsx";
 
 /* "My Art" overlay — rebuilt 2026-08-06 to the returned handoff's tabbed-gallery
    design (Frontend Gallery.dc.html ovMyArt, markup 599-809, logic 2277-2436):
@@ -109,6 +112,16 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
   // own docstring). Fetched once, lazily, the first time the tab is opened.
   const [loras, setLoras] = useState(null);
   const [lorasErr, setLorasErr] = useState("");
+
+  /* F2 (Contest Surface v2.dc.html) -- "★ Enter into contest…" on a published piece.
+     The action appears ONLY where the piece actually qualifies somewhere (a running
+     contest it post-dates), and the chooser lists just those; an ineligible contest
+     never renders. Picking one opens the SAME confirm the Contests overlay uses --
+     nothing submits from the chooser itself. */
+  const { contests } = useContests();
+  const [chooserFor, setChooserFor] = useState(null);   // media_id whose chooser is open
+  const [entering, setEntering] = useState(null);       // {contest, art} -> the confirm
+  const qualifyingFor = (it) => contests.filter((c) => qualifies(it, c));
   useEffect(() => {
     if (tab !== "loras" || loras !== null) return;
     let dead = false;
@@ -395,9 +408,31 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                           </button>
                           <button type="button" disabled={busy} title="Edit tags"
                             onClick={() => { setEditing(it.media_id); setTagDraft(it.tags.join(", ")); }}>✎</button>
+                          {/* F2 -- only on a piece that qualifies for a running contest */}
+                          {qualifyingFor(it).length > 0 && (
+                            <button type="button" disabled={busy} title="Enter into contest…"
+                              onClick={() => setChooserFor(chooserFor === it.media_id ? null : it.media_id)}>★</button>
+                          )}
                           <button type="button" disabled={busy} title="Delete from PixAI"
                             onClick={() => preview("delete", it)}>🗑</button>
                         </span>
+                        )}
+                        {!manageOn && chooserFor === it.media_id && (
+                          <div className="mgctch-pop" onClick={(e) => e.stopPropagation()}>
+                            <div className="mgctch-h">ENTER INTO…</div>
+                            <div className="mgctch-when">
+                              made {dayOf(it.created_at)} — qualifies for {qualifyingFor(it).length} running
+                              contest{qualifyingFor(it).length === 1 ? "" : "s"}
+                            </div>
+                            <ContestChooser contests={qualifyingFor(it)}
+                              onPick={(c) => {
+                                setChooserFor(null);
+                                setEntering({ contest: c, art: it });
+                              }} />
+                            <div className="mgctch-note">
+                              picking one opens the confirm — nothing submits from here
+                            </div>
+                          </div>
                         )}
                         {!manageOn && editing === it.media_id && (
                           <div className="mgma2-tagedit" onClick={(e) => e.stopPropagation()}>
@@ -490,6 +525,14 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
           </div>
         </div>
       </div>
+      {/* The same always-confirm the Contests overlay funnels into -- one dialog, one
+          entry road, wherever it started. */}
+      {entering && (
+        <ContestConfirm contest={entering.contest} art={entering.art}
+          csrfToken={csrf}
+          onEntered={() => load()}
+          onClose={() => setEntering(null)} />
+      )}
     </>
   );
 }
