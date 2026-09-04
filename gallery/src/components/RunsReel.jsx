@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { costColor, costText } from "../gen/historyCore.js";
+import { WAIT_MIN_TILE, queueWaitText } from "../gen/queueWait.js";
 import { RunningFace, ClusterFace, tipEnter } from "./HistoryStrip.jsx";
 
 /* The dock's RUNS REEL (design spec C3a, Frontend Gallery.dc.html ~1845-2060),
@@ -27,6 +28,30 @@ import { RunningFace, ClusterFace, tipEnter } from "./HistoryStrip.jsx";
    PROGRESS: PixAI reports no per-task render progress, so a running tile is a
    generic dim placeholder + an indeterminate spinner -- never a fake percentage
    or a blur-by-percent interpolation against a clock that isn't real.
+
+   QUEUE WAIT (2026-09-04, ROADMAP's last slice of "starts in ~N"): the one number
+   PixAI DOES publish is the queue wait for the model a task was submitted with.
+   It is recorded once, when the job was first seen queued (GET /v2/task/wait-time;
+   see moonglade_gallery._note_gen_phase) and rides every /api/jobs row as
+   `eta_seconds` -- the same feed and the same fetch this reel already makes, so
+   surfacing it costs no second poll of PixAI. The Activity tray has shown it since
+   2026-07-25 (notify/ActivityRow.jsx's .at-eta chip); a queued reel tile showed
+   nothing at all. It now carries the SAME figure in the SAME words, from the one
+   shared rule in gen/queueWait.js.
+
+   WHERE it sits, and why not the caption: the caption's second slot is the cost
+   line, and it is one line wide on a portrait column. Measured against the
+   committed CSS (react-dom/server + the real stylesheet, every reel tier): the
+   slot leaves 52px beside the #tag at the 132px tier and 34px at 96px, while
+   "est. 27s wait" needs 51px and "est. 1m 35s wait" needs 67px -- so the caption
+   clips the word the whole readout depends on. It goes INSIDE the tile instead,
+   bottom-anchored above the shimmer, which is where this tile already puts text
+   (.mgdock-vtag, .mgdock-tilehint) and where the full tile width is available.
+   The cost line is untouched.
+
+   It is a QUEUE wait, never a render ETA: nothing ticks, nothing recomputes, and
+   queueWaitText() returns "" the moment `started` flips true or the job goes
+   terminal -- so the readout disappears when the task leaves the queue.
 
    BATCH (2026-08-02, closes a verify-flagged gap -- see the report): a real
    PixAI count>1 submission is ONE job with N media_ids, atomic (queued/
@@ -135,6 +160,12 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
             // not because video is excluded. The reel IS the live history; a video that
             // can't be reopened there isn't a history.
             const clickable = done;
+            // "" unless PixAI has accepted this job, no worker has taken it, and the log
+            // carries the estimate it gave at that moment (gen/queueWait.js owns all three
+            // conditions). Batches included: a queued cluster waits like anything else.
+            // The tier floor is the same "no room, no render" rule the reel applies to
+            // itself (dockLayout's REEL_MIN_ROOM) -- see WAIT_MIN_TILE for the measurements.
+            const wait = th >= WAIT_MIN_TILE ? queueWaitText(j) : "";
             const enter = cluster ? undefined : tipEnter(onTip, tipRow(j, c));
             const tile = (
               <div
@@ -148,6 +179,9 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
                   <img className="mgdock-tileimg" src={"/thumbs/" + encodeURIComponent(c.mid) + ".jpg"} alt="" />
                 ) : null}
                 {cluster ? <ClusterFace count={c.count} /> : running ? <RunningFace /> : null}
+                {wait ? (
+                  <span className={"mgdock-runwait" + (cluster ? " up" : "")}>{wait}</span>
+                ) : null}
                 {failed && <span className="mgdock-tilefail">⚠</span>}
                 {done && (
                   <div className={"mgdock-tilehint" + (hover === hoverKey ? " show" : "")}>

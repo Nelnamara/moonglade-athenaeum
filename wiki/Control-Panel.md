@@ -271,7 +271,9 @@ minutes elapsed is your answer. That estimate is a prediction of the *wait*, tak
 the job went into the queue — it is not a countdown, and there is no percentage or progress
 bar, because PixAI does not report progress on a running task at all. A job that stays
 unstarted long enough is marked **stale** with an explanation; PixAI cancels and refunds
-tasks it never starts at about 60 minutes.
+tasks it never starts at about 60 minutes. The Generate dock's own runs strip shows the same
+figure on a queued tile, in the same words — see
+[Generating](Generating).
 
 **That live Time Spent stops when the job does.** It only ever ticks while the job is
 actually running, and it's re-checked on every poll rather than decided once when you opened
