@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../api.js";
+import { invalidate } from "./swrCache.js";
 
 /* Daily-claim popup's own state/handlers -- extracted so App.jsx (desktop) and
    AppMobile.jsx (mobile) can each mount <ClaimModal> off the SAME logic against
@@ -149,6 +150,10 @@ export default function useClaimModal(account, refreshAccount) {
           title: "Claimed +" + Number((d && d.credits) || 0).toLocaleString() + " credits",
         });
       }
+      // Claiming is an achievement metric (and the Panel's summary shows credits), so the
+      // cached roster is stale the moment this succeeds -- drop it rather than let the next
+      // Folio open paint a pre-claim answer.
+      invalidate(["/api/achievements", "/api/panel/summary"]);
       // Refresh so claim_credits drops to 0 -- THIS is what stops the nudge coming
       // back on the next load/return. (No "mark seen" needed.)
       if (refreshAccount) refreshAccount();

@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { apiGet } from "../api.js";
+import { useSwrGet } from "./swrCache.js";
 
 /* useMyArt -- MyArtOverlay.jsx's fetch/state/derivation, mechanically lifted
    out (2026-08-03) into its own hook so a new mobile screen can consume the
@@ -16,19 +15,13 @@ import { apiGet } from "../api.js";
 
 export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 
+// Stale-while-revalidate through the shared read cache (hooks/swrCache.js), the same
+// mechanism useHealth.js has used since 2026-08-06 and every nav overlay now shares:
+// a REOPEN paints the last totals/rows in the first frame and swaps in the fresh answer
+// behind. The mutation seams that must NOT show a stale answer -- App.jsx's afterMutation
+// and MyArtOverlay's own confirm/confirmBulk -- invalidate("/api/your-art") explicitly.
 export default function useMyArt() {
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    apiGet("/api/your-art")
-      .then((data) => {
-        if (dead) return;
-        if (data.error) setErr(data.error); else setD(data);
-      });
-    return () => { dead = true; };
-  }, []);
+  const { data: d, err } = useSwrGet("/api/your-art");
 
   const totals = d ? d.totals || {} : {};
   const items = d ? d.items || [] : [];

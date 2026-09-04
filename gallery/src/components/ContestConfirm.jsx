@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { invalidate } from "../hooks/swrCache.js";
 import { countdown, dayOf } from "../hooks/useContests.js";
 import { show as toast } from "../notify/toastStore.js";
 import "../styles/myart-contests.css";
@@ -83,6 +84,10 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
                             { slug: contest.slug, artwork_id: art.artwork_id, csrf, confirm: true });
     setBusy(false);
     if (d.error) { setFail(classify(d.error)); return; }
+    // An entry lands in The Arena, which is an achievement metric -- the cached roster the
+    // Folio and the Panel share is stale the moment this succeeds. (The entries list itself
+    // is refreshed by the caller's onEntered -> reloadMine, which writes through.)
+    invalidate("/api/achievements");
     setDone(d);
     toast({ kind: "ok", title: "Entry submitted",
             msg: contest.title + " · counts toward The Arena", thumb: art.thumb || "" });

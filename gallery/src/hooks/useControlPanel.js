@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { invalidate, peek, put } from "./swrCache.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
    ControlPanelOverlay.jsx (2026-08-03) into its own hook -- summary/achievements fetch,
@@ -71,7 +72,13 @@ export const DEDUP_STAGES = [
 async function applySkin(id, achievements, setAchievements) {
   const d = await apiPost("/api/skin", { skin: id });
   if (d.error) return d;
-  setAchievements({ ...achievements, skin: id });
+  const next = { ...achievements, skin: id };
+  setAchievements(next);
+  // The roster the Folio and the Panel share now says a different skin is active; write the
+  // mutated copy through rather than leaving the cache to hand the OLD one to the next open.
+  // Only when there WAS a roster: a spread of null is {skin}, and seeding the Folio from
+  // that stub would be worse than not caching at all.
+  if (achievements) put("/api/achievements", next);
   if (id === "moonglade") document.documentElement.removeAttribute("data-skin");
   else document.documentElement.setAttribute("data-skin", id);
   try { localStorage.setItem("skin", id); } catch { /* private browsing etc -- cosmetic only */ }
@@ -79,11 +86,25 @@ async function applySkin(id, achievements, setAchievements) {
 }
 
 export default function useControlPanel() {
-  const [summary, setSummary] = useState(null);
-  const [achievements, setAchievements] = useState(null);
+  /* THE FOUR OPEN-TIME READS ARE SEEDED FROM THE SHARED CACHE (hooks/swrCache.js), so a
+     reopened Panel paints its summary, its skins, its run history and its standing order in
+     the first frame and refreshes them behind. /api/panel/status is deliberately NOT among
+     them and never will be: it is the live-job resume check, and "is a job running RIGHT
+     NOW" is the one question a stale answer gets wrong.
+
+     ONE DISCLOSED CONSEQUENCE, checked rather than assumed: a SEEDED `summary` carries no
+     csrf, because the cache refuses to store one (swrStore.js's second refusal). Four
+     things read summary.csrf -- the Users sub-overlay's add/remove/change/reset -- plus the
+     updater's apply. Every one of them is behind opening a sub-overlay or a confirm modal
+     and typing into it, which cannot happen before fetchSummary() below lands (milliseconds
+     after mount) and replaces the seed with the live object, token included. If one somehow
+     did, the server refuses it and the surface shows that refusal; nothing spends and
+     nothing is silently mis-recorded. */
+  const [summary, setSummary] = useState(() => peek("/api/panel/summary"));
+  const [achievements, setAchievements] = useState(() => peek("/api/achievements"));
   const [summaryErr, setSummaryErr] = useState("");
-  const [panelHistory, setPanelHistory] = useState([]); // jobs.jsonl, type:"panel" only
-  const [schedule, setSchedule] = useState(null);       // /api/panel/schedule settings
+  const [panelHistory, setPanelHistory] = useState(() => (peek("/api/jobs.panel") || {}).rows || []);
+  const [schedule, setSchedule] = useState(() => peek("/api/panel/schedule"));
 
   const [running, setRunning] = useState(null); // {action, label}
   const [progress, setProgress] = useState(null);
@@ -129,10 +150,15 @@ export default function useControlPanel() {
     try {
       const d = await apiGet("/api/panel/summary");
       if (d.error) throw new Error(d.error);
+      put("/api/panel/summary", d);
       setSummary(d);
       setSummaryErr("");
     } catch {
-      setSummaryErr("Couldn't load the Panel — network error, try reopening it.");
+      // Same rule the shared cache applies everywhere: an error only surfaces when there is
+      // nothing cached to keep showing.
+      if (peek("/api/panel/summary") == null) {
+        setSummaryErr("Couldn't load the Panel — network error, try reopening it.");
+      }
     }
   };
   // ---- Run-history ledger + the standing order (Control Panel.dc.html:157-181) ----
@@ -144,24 +170,29 @@ export default function useControlPanel() {
   const fetchPanelHistory = async () => {
     try {
       const d = await apiGet("/api/jobs");
-      setPanelHistory((d.jobs || []).filter((j) => j.type === "panel" && !j.dismissed));
+      const rows = (d.jobs || []).filter((j) => j.type === "panel" && !j.dismissed);
+      // Cached under a DERIVED key ("/api/jobs.panel", never "/api/jobs"): what is stored is
+      // this hook's filtered panel-only view, not the raw feed the Activity tray reads, so
+      // the two can never be handed each other's rows.
+      put("/api/jobs.panel", { rows });
+      setPanelHistory(rows);
     } catch { /* the ledger view just renders empty -- non-critical */ }
   };
   const fetchSchedule = async () => {
     try {
       const d = await apiGet("/api/panel/schedule");
-      if (!d.error) setSchedule(d);
+      if (!d.error) { put("/api/panel/schedule", d); setSchedule(d); }
     } catch { /* standing-order row stays hidden -- non-critical */ }
   };
   const saveSchedule = async (patch) => {
     const d = await apiPost("/api/panel/schedule", patch);
-    if (!d.error) setSchedule(d);
+    if (!d.error) { put("/api/panel/schedule", d); setSchedule(d); }
     return d;
   };
   const fetchAchievements = async () => {
     try {
       const d = await apiGet("/api/achievements");
-      if (!d.error) setAchievements(d);
+      if (!d.error) { put("/api/achievements", d); setAchievements(d); }
     } catch { /* Skins sections just stay hidden without this — non-critical */ }
   };
 
@@ -255,6 +286,12 @@ export default function useControlPanel() {
       }
       fetchSummary();
     }
+    // A maintenance job that just finished moved the library under every OTHER surface's
+    // cached answer -- the Health walk and the achievement roster most of all (a sync
+    // collects new art, which is what earns things). Purge those two READ caches so the
+    // next Health/Folio open re-reads instead of painting a pre-job snapshot; fetchSummary
+    // above and fetchPanelHistory below refresh this hook's own two directly.
+    invalidate(["/api/health", "/api/achievements", "/api/your-art", "/api/next/detail/"]);
     // Either branch: the run just wrote its terminal event to jobs.jsonl, so the
     // ledger has a new row to show (failed runs are ledger rows too, by design --
     // the DC colors them, it doesn't hide them).

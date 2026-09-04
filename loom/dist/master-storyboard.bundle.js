@@ -3509,6 +3509,21 @@ ${"=".repeat(48)}
     return remove;
   }
 
+  // ../gallery/src/hooks/swrStore.js
+  var _store = /* @__PURE__ */ new Map();
+  function invalidate(prefix) {
+    const list = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean).map(String);
+    if (!list.length) return 0;
+    let n = 0;
+    for (const key of [..._store.keys()]) {
+      if (list.some((p) => key.startsWith(p))) {
+        _store.delete(key);
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -3686,6 +3701,7 @@ ${"=".repeat(48)}
           if (cb) cb("done", d);
         } catch {
         }
+        invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]);
         clearPending(id);
         refresh();
       } else if (d.phase === "failed") {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { localDay } from "../gen/dates.js";
 import { syncOnOpen, NO_TOKEN, REFUSED, WATCH } from "./contestSyncFlow.js";
+import { peek, put, useSwrGet } from "./swrCache.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useHealth.js/
@@ -74,18 +75,13 @@ export function qualifies(item, contest) {
 export default function useContests(opts) {
   const wantMine = !!(opts && opts.mine);
   const given = (opts && opts.csrfToken) || "";
-  const [d, setD] = useState(null);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    apiGet("/api/contests")
-      .then((data) => {
-        if (dead) return;
-        if (data.error) setErr(data.error); else setD(data);
-      });
-    return () => { dead = true; };
-  }, []);
+  // The BOARD rides the shared read cache (hooks/swrCache.js): four surfaces mount this
+  // on open and the server already memoizes the upstream pull, so a reopen paints the
+  // last board in the first frame and refreshes behind. The ENTRIES half below does NOT
+  // ride useSwrGet -- it has a sync handshake and a poll wrapped around its read, so it
+  // seeds from peek() and writes through with put() inside reloadMine instead, leaving
+  // that handshake byte-for-byte as it was.
+  const { data: d, err } = useSwrGet("/api/contests");
 
   const contests = d ? d.contests || [] : [];
   const official = contests.filter((c) => c.type === "official");
@@ -125,7 +121,7 @@ export default function useContests(opts) {
      /api/contest/mine is telemetry-derived and instant; the sync POST is the
      fire-and-forget refresh that catches entries made on pixai.art or on another
      device. It is kicked ONCE per mount, and the re-pull happens when it answers. */
-  const [mine, setMine] = useState(null);
+  const [mine, setMine] = useState(() => (wantMine ? peek("/api/contest/mine") : null));
   const [mineErr, setMineErr] = useState(null);
   const [syncing, setSyncing] = useState(wantMine);
   // The sync POST carries the explicit CSRF token like every sibling POST on this
@@ -166,8 +162,15 @@ export default function useContests(opts) {
   const reloadMine = useCallback(() => {
     if (!wantMine) return Promise.resolve(null);
     return apiGet("/api/contest/mine").then((data) => {
+      // Write through OUTSIDE the dead guard: a read that lands after the overlay closed
+      // still produced a good answer, and the next open should paint it.
+      put("/api/contest/mine", data);
       if (deadRef.current) return data;
-      if (data.error) setMineErr(data.error);
+      // Same rule useSwrGet applies: an error only SURFACES when there is nothing cached
+      // to keep showing. reloadMine's identity must stay pinned to [wantMine] -- the sync
+      // effect below depends on it, and a reloadMine that changed with the data would
+      // re-fire the whole open-handshake POST on every successful poll.
+      if (data.error) { if (peek("/api/contest/mine") == null) setMineErr(data.error); }
       else { setMine(data); setMineErr(null); }
       return data;
     });

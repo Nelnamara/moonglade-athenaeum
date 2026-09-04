@@ -33,6 +33,10 @@
      per-route copies. */
 
 import { apiPost } from "../api.js";
+// From the STORE, not hooks/swrCache.js: this module is a singleton deliberately outside
+// any React lifecycle (see the contract above), and swrStore.js imports nothing at all --
+// so the spend-critical poller picks up a Map and three functions, not React.
+import { invalidate } from "../hooks/swrStore.js";
 import { refresh as trayRefresh } from "./jobsStore.js";
 import { cadenceFor } from "./pollCadence.js";
 
@@ -133,7 +137,14 @@ function poll(id, cb, startedAt, tier) {
          master; it is closeable here only because `pending` exists and again()'s
          `if (pending[id])` guard then refuses to reschedule a cleared task. A broken UI
          callback must never resurrect a finished, already-collected generation. */
-      if (d.phase === "done") { try { if (cb) cb("done", d); } catch { /* host cb must not resurrect a finished poll */ } clearPending(id); trayRefresh(); }
+      /* A finished generation moved the library: new art on disk and in the catalog, new
+         achievement metrics, a changed Health walk, a changed credit balance. The shared
+         READ cache (hooks/swrCache.js) would otherwise hand the next overlay open a
+         pre-generation snapshot. This is a PURGE ONLY -- invalidate() drops cached entries
+         and issues no request of any kind, which is why it is allowed inside this module at
+         all: the spend-safety contract at the top of this file forbids adding any fetch or
+         submit here, and dropping a client-side map is neither. */
+      if (d.phase === "done") { try { if (cb) cb("done", d); } catch { /* host cb must not resurrect a finished poll */ } invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]); clearPending(id); trayRefresh(); }
       else if (d.phase === "failed") { try { if (cb) cb("failed", d); } catch { /* as above */ } clearPending(id); trayRefresh(); }
       else { if (cb) cb("running", d); again(d, 0); }
     })

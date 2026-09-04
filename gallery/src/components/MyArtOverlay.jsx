@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { invalidate, peek, put } from "../hooks/swrCache.js";
 import useMyArt, { fmt } from "../hooks/useMyArt.js";
 import useContests, { qualifies, dayOf } from "../hooks/useContests.js";
 import "../styles/overlays.css";
@@ -82,9 +83,18 @@ const dateLabel = (iso) => {
 export default function MyArtOverlay({ onClose, onOpenPost }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const { d, err, stats } = useMyArt();          // stat row: live views, as before
-  const [rows, setRows] = useState(null);
+  /* The ROWS are seeded from the shared read cache (hooks/swrCache.js) so a reopen paints
+     the artwork grid in the first frame; the mount read below still runs and replaces them.
+     THE TOKEN IS NOT: /api/myart/items answers with a `csrf` alongside its items, and the
+     cache refuses to store one (swrStore.js's second refusal) precisely because a stale
+     token is a POST the server can only refuse. So `csrf` starts empty even on a seeded
+     open, and withToken() below is what closes the gap for a click made inside that
+     window -- it waits for the live read rather than sending "". */
+  const [rows, setRows] = useState(() => (peek("/api/myart/items") || {}).items || null);
   const [rowsErr, setRowsErr] = useState(null);
   const [csrf, setCsrf] = useState("");
+  const csrfRef = useRef("");
+  const itemsReadyRef = useRef(null);
   const [tab, setTab] = useState("artworks");
   const [vis, setVis] = useState("all");
   const [sort, setSort] = useState("latest");
@@ -133,28 +143,54 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     return () => { dead = true; };
   }, [tab, loras]);
 
+  /* ONE place a good answer is applied, so the write-through, the token ref and the state
+     can never disagree about what the last read said. The token and the cache are written
+     even when the overlay is already gone (`dead`): a ref costs no render, and a click on a
+     REOPENED panel then has one waiting. Only the setState pair is guarded. */
+  const applyItems = (j, dead) => {
+    csrfRef.current = j.csrf || "";
+    put("/api/myart/items", j);          // the csrf is stripped on the way in
+    if (dead) return;
+    setRows(j.items || []);
+    setCsrf(j.csrf || "");
+  };
+
   const load = () => apiGet("/api/myart/items")
     .then((j) => {
       if (j.error) throw new Error(j.error);
-      setRows(j.items || []); setCsrf(j.csrf || "");
+      applyItems(j, false);
     });
 
   useEffect(() => {
     let dead = false;
-    apiGet("/api/myart/items")
+    itemsReadyRef.current = apiGet("/api/myart/items")
       .then((j) => {
-        if (dead) return;
-        if (j.error) setRowsErr(j.error);
-        else { setRows(j.items || []); setCsrf(j.csrf || ""); }
+        // An error only surfaces when there is nothing cached to keep showing.
+        if (j.error) {
+          if (!dead && peek("/api/myart/items") == null) setRowsErr(j.error);
+          return j;
+        }
+        applyItems(j, dead);
+        return j;
       });
     return () => { dead = true; };
   }, []);
+
+  /* The token, guaranteed. Rows can paint from the cache before the live read lands -- that
+     is the whole point of the seed -- and the cache never holds a csrf, so a click inside
+     that window must WAIT for the real read rather than POST an empty token and eat a 400. */
+  const withToken = async () => {
+    if (csrfRef.current) return csrfRef.current;
+    try { await itemsReadyRef.current; } catch { /* the caller surfaces the refusal */ }
+    return csrfRef.current;
+  };
 
   // Step 1: ask the server what this action WOULD do (no mutation, no spend).
   const preview = async (action, item, extra) => {
     setActErr(""); setBusy(true);
     try {
-      const p = await apiPost("/api/myart/publish", { action, media_id: item.media_id, csrf, ...extra });
+      const p = await apiPost("/api/myart/publish",
+        { action, media_id: item.media_id, csrf: await withToken(), ...extra });
       if (p.error) { setActErr(p.error); return; }
       setAsk({ action, item, extra: extra || {}, preview: p });
     } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
@@ -166,9 +202,13 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     setBusy(true); setActErr("");
     try {
       const res = await apiPost("/api/myart/publish",
-        { action: ask.action, media_id: ask.item.media_id, csrf, confirm: true, ...ask.extra });
+        { action: ask.action, media_id: ask.item.media_id, csrf: await withToken(),
+          confirm: true, ...ask.extra });
       if (res.error) { setActErr(res.error); return; }
       setAsk(null); setEditing(null);
+      // The account just changed: the My Art totals, the roster (publishing earns things)
+      // and this image's own record are all stale everywhere they are cached.
+      invalidate(["/api/your-art", "/api/achievements", "/api/next/detail/"]);
       await load();
     } catch (e) { setActErr(String(e.message || e)); } finally { setBusy(false); }
   };
@@ -193,15 +233,17 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     if (!bulkAsk) return;
     setBulkBusy(true); setBulkErr("");
     let ok = 0, fail = 0;
+    const token = await withToken();
     for (const mid of selected) {
       try {
         const res = await apiPost("/api/myart/publish",
-          { action: bulkAsk.action, media_id: mid, csrf, confirm: true, ...bulkAsk.extra });
+          { action: bulkAsk.action, media_id: mid, csrf: token, confirm: true, ...bulkAsk.extra });
         if (res.error) fail++; else ok++;
       } catch (e) { fail++; }
     }
     setBulkAsk(null); setBulkBusy(false); setBulkResult({ ok, fail });
     setSelected(new Set());
+    if (ok) invalidate(["/api/your-art", "/api/achievements", "/api/next/detail/"]);
     await load();
   };
 

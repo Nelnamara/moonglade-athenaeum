@@ -40,6 +40,25 @@ something was missing.
 **Duplicate Review** (opened from Health's Duplicates tile) shows cross-folder duplicate copies side-by-side before you dedup. For the filesystem-level audit/dedup tooling, see
 [Backing Up → Duplicate audit](Backing-Up).
 
+## How fresh are these numbers?
+
+Health measures the library by walking every file on disk, so on a large collection that is
+real work. It is cached, and the caching is arranged so you never see a stale number and
+rarely wait for a fresh one:
+
+- **The server keeps the last measurement** and hands it back instantly for as long as the
+  catalog has not changed. There is no timer and no staleness window — the moment anything
+  writes to `catalog.db` (a sync, an import, a delete), the cached answer is dropped.
+- **When it has changed**, the next open still answers immediately with the previous numbers
+  and re-measures in the background, so a fresh set is ready the next time you look. Only
+  the very first open of a server session can ever wait — and the server pre-measures once
+  at startup so that one usually doesn't either.
+- **Reopening any overlay** (Health, Folio, My Art, Contests, the Panel) paints the last
+  numbers you saw straight away and refreshes them behind, rather than showing an empty
+  panel while it loads.
+- **Force a re-measure** any time by closing and reopening after a sync, or by reloading the
+  page.
+
 ## Thumbnails & health accuracy
 
 Thumbnails are 768px JPEGs cached under `gallery/thumbs/` (videos get an
