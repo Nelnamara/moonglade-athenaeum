@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Fixed: **AI Tools now shows every tool PixAI actually offers.** The tile grid was a fixed list written into the app, so three tools PixAI has added since — Daily Fortune, Daily Setlog and Mini Mart Ad — had no tile at all and could not be opened, and the “All 28” count had stopped being true. The grid now asks PixAI what exists when you open it, so a tool added tomorrow appears without an update on your side — with PixAI’s own artwork standing in until a thumbnail ships for it. If the list can’t be fetched, the tools you already had render as before rather than an empty window. (#36) (2026-09-04)
+
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
 - **One-click updates.** The Control Panel now checks for a new release when you open it, and the version stamp in its sidebar turns gold when one is out — click it and you get the release, its notes, and a plain account of what will happen before anything moves. Pressing **Update now** pulls it, installs dependencies only if they changed, restarts the server, and reloads your tab when it's back. Nothing is ever applied silently, and if your checkout has local edits, sits on a branch, or is mid-job, it says so instead of touching it. Updating by hand still works exactly as before. (2026-09-01)
