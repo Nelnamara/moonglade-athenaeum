@@ -5478,6 +5478,12 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
         return {"ok": False, "error": str(e)}
 
     meta = _read_trash_meta(out_dir, media_id)
+    # Deliberately NOT moonglade_backup.build_catalog_row: this is a RESTORE, not a
+    # capture. The sidecar already holds the whole row the user owned -- rating,
+    # collections, title, published state -- and there is no task, no extract_full_meta
+    # surface, and (purge_media_local deleted the row) nothing in the catalog to carry
+    # forward. Seeding from the saved row is the inverse of the builder's contract
+    # (blank template + task fields + carry), so it stays its own thing. Issue #19.
     row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
     row["media_id"] = media_id
     row["filename"] = dest.name
@@ -15446,6 +15452,8 @@ __DESIGN_TOKENS__
         import io
         import time
         import zipfile
+
+        import moonglade_backup as core
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -15475,14 +15483,17 @@ __DESIGN_TOKENS__
                 make_video_thumbnail(dest, thumb_path)  # best-effort; --rebuild-thumbs backfills
             else:
                 make_thumbnail(dest, thumb_path)
-            row = {k: "" for k in CATALOG_FIELDS}
-            row.update({
-                "media_id": mid, "filename": str(dest.relative_to(out_dir)).replace("\\", "/"),
-                "source": "api", "status": "imported",
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "prompt_preview": dest.stem[:100], "is_video": "1" if is_vid else "",
-            })
-            rows.append(row)
+            # Same shared row-builder every capture path uses (issue #19): a bundle
+            # import is run_import_local's shape -- a file, no task, so no `fm` and no
+            # generation surface. `known` is omitted deliberately: the _loom_resolve_media
+            # guard above means only media this machine does NOT have reaches here.
+            # created_at stays this route's own naive local stamp, NOT _created_at_utc's
+            # UTC+Z -- see that helper for why the two sort differently.
+            rows.append(core.build_catalog_row(
+                mid, filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
+                source="api", status="imported",
+                created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
             save_catalog(db_path, rows)
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},

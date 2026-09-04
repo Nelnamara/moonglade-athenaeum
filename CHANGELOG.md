@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Under the hood: **every way a picture enters your library now writes its catalog entry through one piece of code** (#19, 2026-09-04). Seven of them -- a generation, an edit, a video, a video sync, a local import, a recovered task, a storyboard bundle -- each assembled that entry by hand, and they drifted: an earlier pass found the "made from" link missing from all of them at once, and the video paths quietly dropping fields the image ones kept. The September data-loss fix -- collecting a generation twice no longer erases what you did to it -- had to be applied to two of them by name; it is now part of the shared builder, so *every* path keeps your rating, collections, title, tags and published link by construction rather than by remembering to. Each path writes exactly the entry it wrote before, pinned by tests that compare against a frozen copy of the old code. Nothing you see changes.
+
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
 - **One-click updates.** The Control Panel now checks for a new release when you open it, and the version stamp in its sidebar turns gold when one is out — click it and you get the release, its notes, and a plain account of what will happen before anything moves. Pressing **Update now** pulls it, installs dependencies only if they changed, restarts the server, and reloads your tab when it's back. Nothing is ever applied silently, and if your checkout has local edits, sits on a branch, or is mid-job, it says so instead of touching it. Updating by hand still works exactly as before. (2026-09-01)

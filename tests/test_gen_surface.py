@@ -92,29 +92,65 @@ def test_preset_fill_skips_chat_and_video(monkeypatch):
         assert fm["steps"] == "" and fm["sampler"] == "" and fm["cfg_scale"] == ""
 
 
-def test_video_row_builders_apply_the_surface_fields():
-    """Regression guard (2026-08-15 adversarial review): the TWO video row-builders must persist
-    the surface fields, or every video row ships them blank -- notably video_mode/video_model,
-    the columns added FOR video, which --backfill can't repair for _download_video_task (its row
-    carries model_id, so _needs() skips it forever). Source-level because these functions do real
-    downloads that no unit test drives."""
+def _function_body(src, fn):
+    """The whole body of `fn`, found by DEDENT rather than a fixed character window: a
+    window silently starts testing less of the function every time a line is added above
+    the thing under test, and did (a comment added 2026-09-03 pushed the call out of a
+    3200-char slice and failed a guard here for no real reason)."""
+    i = src.index(fn)
+    indent = len(src[:i].rsplit("\n", 1)[-1])
+    lines, body = src[i:].split("\n"), []
+    for n, line in enumerate(lines):
+        if n and line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def test_every_capture_path_builds_its_row_through_the_shared_builder():
+    """Regression guard (2026-08-15 adversarial review, kept through issue #19's refactor):
+    the surface fields must reach EVERY capture path, or -- notably for the two video
+    builders -- rows ship with video_mode/video_model blank, and --backfill can't repair
+    _download_video_task's (its row carries model_id, so _needs() skips it forever).
+
+    Since issue #19 the spread lives in build_catalog_row and happens once, so the guard is
+    now two halves: the builder spreads _TASK_ROW_FIELDS, and every capture site routes
+    through the builder AND hands it `fm`. Source-level because these functions do real
+    downloads; tests/test_build_catalog_row.py drives each one end-to-end against a frozen
+    copy of its pre-refactor output."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
-    for fn in ("def _download_video_task", "def _do_task"):
-        i = src.index(fn)
-        # The whole function body, found by dedent rather than a fixed character window: a
-        # window silently starts testing less of the function every time a line is added
-        # above the assignment, and did (a comment added 2026-09-03 pushed the call out of
-        # a 3200-char slice and failed this guard for no real reason).
-        indent = len(src[:i].rsplit("\n", 1)[-1])
-        lines, body = src[i:].split("\n"), []
-        for n, line in enumerate(lines):
-            if n and line.strip() and len(line) - len(line.lstrip()) <= indent:
-                break
-            body.append(line)
-        body = "\n".join(body)
-        assert "for k in _TASK_ROW_FIELDS" in body, \
-            fn + " must apply _TASK_ROW_FIELDS to the video row (issue #18 + lineage)"
+
+    builder = _function_body(src, "def build_catalog_row")
+    assert "for k in _TASK_ROW_FIELDS" in builder, \
+        "build_catalog_row must spread _TASK_ROW_FIELDS (issue #18 + lineage)"
+
+    # Every create-time capture path in this module, video paths included.
+    for fn in ("def _download_video_task", "def _do_task", "def _download_image_task",
+               "def run_generate", "def run_edit_image"):
+        body = _function_body(src, fn)
+        assert "build_catalog_row(" in body, \
+            fn + " must build its catalog row through build_catalog_row (issue #19)"
+        assert "fm=" in body, \
+            fn + " must hand build_catalog_row its extract_full_meta result"
+        assert '{f: "" for f in CATALOG_FIELDS}' not in body, \
+            fn + " must not hand-assemble a row from the blank template any more"
+
+
+def test_the_local_import_paths_also_use_the_shared_builder():
+    """run_import_local has no task and no surface, but it writes the same catalog row --
+    so it goes through the same builder, and gets the carry for free. Same for the
+    gallery's Loom bundle import."""
+    import pathlib
+    src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
+    body = _function_body(src, "def run_import_local")
+    assert "build_catalog_row(" in body and '{f: "" for f in CATALOG_FIELDS}' not in body
+
+    import moonglade_gallery
+    gsrc = pathlib.Path(moonglade_gallery.__file__).read_text(encoding="utf-8")
+    loom = gsrc[gsrc.index("def api_loom_import_bundle"):]
+    loom = loom[:loom.index("media_added")]
+    assert "build_catalog_row(" in loom and '{k: "" for k in CATALOG_FIELDS}' not in loom
 
 
 def test_task_row_fields_carry_lineage():
@@ -235,7 +271,7 @@ def test_run_generate_reads_sampling_fields_from_the_model_not_the_submit():
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
     region = src[src.index("def run_generate("):src.index("def _download_video_task(")]
     for f in ("steps", "cfg_scale", "sampler"):
-        assert '"{0}": fm.get("{0}"'.format(f) in region, \
+        assert '{0}=fm.get("{0}"'.format(f) in region, \
             f + " must be read from the model surface (fm), not _pick's submitted fallback"
         assert '_pick("{}"'.format(f) not in region, \
             f + " must NOT fall back to the submitted value (owner ruling)"
