@@ -1,10 +1,12 @@
-"""The overlay-open perf pass (2026-09-03): the three memos that stopped every overlay
-open from paying for a full library walk, a live board pull, and a paced contest sweep.
+"""The overlay-open perf pass: the memos that stopped every overlay open from paying for a
+full library walk, a live board pull, and a paced contest sweep (2026-09-03), plus
+/api/health's own memo (2026-09-04).
 
 Each test asserts the BEHAVIOUR the memo has to keep -- a cached answer is still a correct
 answer, and an invalidation really invalidates -- rather than timing anything. Self-computing
 where a roster or a metric is involved; no roster facts.
 """
+import threading
 import time
 
 import moonglade_backup as core
@@ -259,3 +261,190 @@ def test_the_sync_route_tells_the_client_it_skipped(tmp_path, monkeypatch, pixai
     second = cli.post("/api/contest/sync", json={"csrf": token}).get_json()
     assert second["started"] is False and second["skipped"] == "recent"
     assert "contest_entries" in second
+
+
+# ---- the /api/health memo (2026-09-04) --------------------------------------
+#
+# collection_health() walks the whole library off disk. The route had a 120s TTL, which was
+# wrong in both directions at once -- a change made 5s ago stayed invisible for two minutes,
+# and a first open after two idle minutes paid the full walk with the user watching. It is
+# now keyed on the CATALOG FILE with no time floor (the _ACH_METRICS_CACHE ruling, same
+# reasoning), serves the previous answer while it recomputes, and is primed off-thread at
+# boot. These pin all three of those, plus the ?fresh=1 bypass.
+
+
+def _walk_stub(monkeypatch, calls, gate=None):
+    """Stand in for the real library walk, counting calls and (optionally) blocking every
+    call after the first on `gate` -- which is what makes 'served while recomputing'
+    assertable without timing anything."""
+    def _fake(out_dir, db_path):
+        calls.append(1)
+        if gate is not None and len(calls) > 1:
+            assert gate.wait(10), "the gated walk was never released"
+        return {"total_files": len(calls), "catalog_rows": len(calls)}
+    monkeypatch.setattr(g, "collection_health", _fake)
+
+
+def _settle(pred, timeout=10.0):
+    """Wait for a background refresh to land. Polls a predicate rather than sleeping a
+    guessed interval, so it is fast when it is fast and still honest on a slow machine."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_the_health_walk_is_memoized_between_opens(tmp_path, monkeypatch):
+    """The walk that made Health 'VERY slow' at 35k images. Asking twice against an
+    unchanged catalog must cost one walk."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    first = g.health_cached(tmp_path, db)
+    assert g.health_cached(tmp_path, db) == first
+    assert g.health_cached(tmp_path, db) == first
+    assert len(calls) == 1, "an unchanged catalog must be served from memory"
+
+
+def test_a_changed_catalog_invalidates_the_health_memo(tmp_path, monkeypatch):
+    """No time floor: the key is the catalog file itself, so a write invalidates at once
+    rather than at the end of some window."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    g.health_cached(tmp_path, db)
+    save_catalog(db, [_row(media_id="1", filename="a_1.png"),
+                      _row(media_id="2", filename="b_2.png")])
+    g.health_cached(tmp_path, db)                      # notices, kicks the refresh
+    assert _settle(lambda: len(calls) == 2), "a changed catalog must re-walk"
+    assert _settle(lambda: g.health_cached(tmp_path, db)["catalog_rows"] == 2)
+
+
+def test_the_stale_answer_is_served_WHILE_it_recomputes(tmp_path, monkeypatch):
+    """The point of the whole design: the request that notices the catalog moved is not the
+    one that pays for the new walk. It gets the previous payload straight back."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls, gate = [], threading.Event()
+    _walk_stub(monkeypatch, calls, gate)
+    try:
+        first = g.health_cached(tmp_path, db)          # nothing cached: this one blocks
+        save_catalog(db, [_row(media_id="1", filename="a_1.png"),
+                          _row(media_id="2", filename="b_2.png")])
+        served = g.health_cached(tmp_path, db)         # the walk behind this is still stuck
+        assert served is first, "the previous payload must come back, not a fresh walk"
+        assert _settle(lambda: len(calls) == 2), "the refresh must actually have started"
+    finally:
+        gate.set()
+    assert _settle(lambda: g._HEALTH_CACHE["payload"] is not first)
+    assert g.health_cached(tmp_path, db)["catalog_rows"] == 2
+
+
+def test_a_burst_of_opens_starts_ONE_recompute(tmp_path, monkeypatch):
+    """Single-flight. Six surfaces can ask inside the same second; six library walks is the
+    stall this memo exists to remove, not a smaller version of it."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls, gate = [], threading.Event()
+    _walk_stub(monkeypatch, calls, gate)
+    try:
+        g.health_cached(tmp_path, db)
+        save_catalog(db, [_row(media_id="1", filename="a_1.png"),
+                          _row(media_id="2", filename="b_2.png")])
+        for _ in range(6):
+            g.health_cached(tmp_path, db)
+        assert _settle(lambda: len(calls) == 2)
+        time.sleep(0.05)
+        assert len(calls) == 2, "one recompute, however many readers noticed"
+    finally:
+        gate.set()
+    assert _settle(lambda: not g._HEALTH_BUSY["on"])
+
+
+def test_fresh_forces_a_real_walk(tmp_path, monkeypatch):
+    """?fresh=1 is the explicit user refresh; it must never be answered from the memo."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    g.health_cached(tmp_path, db)
+    g.health_cached(tmp_path, db, fresh=True)
+    assert len(calls) == 2
+    assert g.health_cached(tmp_path, db)["total_files"] == 2, "and it re-seeds the memo"
+
+
+def test_the_boot_prime_warms_the_memo(tmp_path, monkeypatch):
+    """A perfect memo still leaves the FIRST open of a session slow -- the one that is
+    actually noticed. main() primes it off-thread once the socket is bound."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    g._health_prime(tmp_path, db).join(10)
+    assert len(calls) == 1, "the prime does the walk"
+    assert g.health_cached(tmp_path, db)["total_files"] == 1
+    assert len(calls) == 1, "so the first real open walks nothing at all"
+
+
+def test_the_prime_survives_a_library_it_cannot_walk(tmp_path, monkeypatch):
+    """A boot nicety must never be able to stop the server from starting."""
+    def _boom(out_dir, db_path):
+        raise OSError("the library is on a disconnected drive")
+    monkeypatch.setattr(g, "collection_health", _boom)
+    g._health_prime(tmp_path, tmp_path / "catalog.db").join(10)
+    assert g._HEALTH_CACHE["payload"] is None
+
+
+def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
+    """A library with no catalog.db yet is a real state (a fresh install), and os.stat
+    raises there. It must answer, and answer from the memo the second time."""
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    assert g._health_key(tmp_path / "catalog.db") is None
+    g.health_cached(tmp_path, tmp_path / "catalog.db")
+    g.health_cached(tmp_path, tmp_path / "catalog.db")
+    assert len(calls) == 1
+
+
+def test_the_health_route_still_answers_correctly(tmp_path):
+    """Driven through the real route with the real walk, twice -- the second is the cached
+    path, and it must report the same numbers rather than a differently-shaped answer."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2026-01-01T00:00:00")])
+    first = cli.get("/api/health").get_json()
+    second = cli.get("/api/health").get_json()
+    assert first == second
+    assert first["catalog_rows"] == 1
+
+
+def test_the_health_route_picks_up_a_changed_catalog(tmp_path):
+    """End to end, no stubs: write the catalog and the route stops answering with the old
+    numbers -- eventually by way of one stale answer, never permanently."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2026-01-01T00:00:00")])
+    assert cli.get("/api/health").get_json()["catalog_rows"] == 1
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2026-01-01T00:00:00"),
+                  _row(media_id="2", filename="b_2.png", created_at="2026-01-02T00:00:00")])
+    cli.get("/api/health")                       # may legitimately serve the stale answer
+    assert _settle(lambda: cli.get("/api/health").get_json()["catalog_rows"] == 2)
+
+
+def test_fresh_on_the_route_never_serves_a_stale_answer(tmp_path):
+    """The client sends ?fresh=1 only on an explicit user refresh, and that one must be
+    true the instant it answers -- no stale-then-behind."""
+    cli = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
+                                  created_at="2026-01-01T00:00:00")])
+    cli.get("/api/health")
+    save_catalog(tmp_path / "catalog.db",
+                 [_row(media_id="1", filename="a_1.png", created_at="2026-01-01T00:00:00"),
+                  _row(media_id="2", filename="b_2.png", created_at="2026-01-02T00:00:00")])
+    assert cli.get("/api/health", query_string={"fresh": "1"}).get_json()["catalog_rows"] == 2
+
+
+def test_collection_health_itself_stays_uncached(tmp_path):
+    """The cache lives outside the computation, as it always has: the classic /health page
+    and every test calling collection_health() directly get a real read every time."""
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    g.health_cached(tmp_path, db)                                  # warm the memo
+    save_catalog(db, [_row(media_id="1", filename="a_1.png"),
+                      _row(media_id="2", filename="b_2.png")])
+    assert g.collection_health(tmp_path, db)["catalog_rows"] == 2

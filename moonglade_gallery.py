@@ -4522,6 +4522,117 @@ def collection_health(out_dir, db_path):
     }
 
 
+# ---------------------------------------------------------------------------
+# THE HEALTH MEMO -- the same treatment achievement_metrics() got in 49a646b, applied to
+# the other walk every overlay open was paying for.
+#
+# collection_health() walks the ENTIRE library off disk (sizes, buckets, Class-A duplicate
+# detection) plus a handful of catalog queries. At 35k images that is seconds, and the owner
+# reported it as "VERY slow" back on 2026-08-06. The route has had a 120s TTL cache since
+# then, which helped and was wrong in two directions at once: a change made 5s ago was
+# invisible for two minutes, and a first open after two idle minutes paid the full walk with
+# the user watching.
+#
+# KEYED ON THE CATALOG FILE, NO TIME FLOOR -- the same ruling as _ACH_METRICS_CACHE, for the
+# same reason (see its comment: a floor makes a real change bounded-stale, and that is what
+# broke tests/test_unlock_split.py's earn-then-read). The key is the catalog's
+# (mtime_ns, size): every write to the library goes through that file, so the instant it
+# changes the memo is invalid, and a catalog nobody is writing to -- which is every open
+# outside a sync -- is served from memory. os.stat is microseconds; the walk is seconds.
+#
+# SERVE-STALE-WHILE-RECOMPUTING. When the key HAS moved, the request that notices does not
+# pay for the new walk: it gets the previous payload immediately and a single background
+# thread recomputes for whoever asks next. Only two callers ever block -- the first read of a
+# process (nothing to serve yet) and an explicit ?fresh=1 -- and _HEALTH_BUSY makes the
+# refresh single-flight, so a burst of opens cannot start a walk each.
+#
+# BOOT PRIME (_health_prime, called from main()). Even a perfect memo leaves the FIRST open
+# of a session slow, which is the one actually noticed. Priming it off-thread just after the
+# server binds makes that open a memory read too. Prime + mtime key is what makes good on the
+# owner's "loaded periodically and cached" -- with no timer and no staleness window.
+_HEALTH_CACHE = {"key": None, "payload": None, "at": 0.0}
+_HEALTH_LOCK = threading.Lock()
+_HEALTH_BUSY = {"on": False}
+
+
+def _health_key(db_path):
+    """The cheap invalidation key: what the catalog file looks like right now. None when it
+    does not exist yet -- a library with no catalog is still a valid thing to report on, and
+    None compares equal to None, so it memoizes like any other key."""
+    try:
+        st = os.stat(str(db_path))
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def health_snapshot(out_dir, db_path):
+    """collection_health(), memoized. Reads the key BEFORE the walk and stores the payload
+    under that one: a catalog written DURING the walk therefore leaves a key that no longer
+    matches, and the next reader recomputes rather than trusting a half-old answer."""
+    key = _health_key(db_path)
+    payload = collection_health(out_dir, db_path)
+    with _HEALTH_LOCK:
+        _HEALTH_CACHE.update(key=key, payload=payload, at=time.time())
+    return payload
+
+
+def _health_refresh_async(out_dir, db_path):
+    """Recompute behind a stale answer, once. Returns the thread (or None when one was
+    already running) so a test can join it instead of sleeping."""
+    with _HEALTH_LOCK:
+        if _HEALTH_BUSY["on"]:
+            return None
+        _HEALTH_BUSY["on"] = True
+
+    def _run():
+        try:
+            health_snapshot(out_dir, db_path)
+        except Exception:
+            pass                      # a background nicety must never take the server down
+        finally:
+            with _HEALTH_LOCK:
+                _HEALTH_BUSY["on"] = False
+    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-refresh")
+    t.start()
+    return t
+
+
+def health_cached(out_dir, db_path, fresh=False):
+    """What /api/health answers with. Four ways out, in order:
+       1. ?fresh=1 -- walk now, block, store. The explicit user refresh.
+       2. nothing cached at all -- the blocking walk. This is the first read of a process,
+          and it is what _health_prime pre-pays off-thread at boot.
+       3. the key matches -- the memo, free.
+       4. the key moved -- hand back the STALE payload now and recompute behind it."""
+    if fresh:
+        return health_snapshot(out_dir, db_path)
+    key = _health_key(db_path)
+    with _HEALTH_LOCK:
+        payload = _HEALTH_CACHE["payload"]
+        hit = payload is not None and _HEALTH_CACHE["key"] == key
+    if payload is None:
+        return health_snapshot(out_dir, db_path)
+    if hit:
+        return payload
+    _health_refresh_async(out_dir, db_path)
+    return payload
+
+
+def _health_prime(out_dir, db_path):
+    """Warm the memo off-thread at boot so the first Health open of a session is a memory
+    read too. Daemon, so it can never hold up an exit; fail-soft, so a broken library still
+    starts a server. Returns the thread for the test that asserts it really primes."""
+    def _run():
+        try:
+            health_snapshot(out_dir, db_path)
+        except Exception:
+            pass
+    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-prime")
+    t.start()
+    return t
+
+
 def duplicate_groups(out_dir, limit=300):
     """Class-A duplicates for the gallery review browser: media_ids whose file
     exists in more than one folder bucket. Cheap (no hashing). Returns a list of
@@ -8154,10 +8265,6 @@ def create_app(out_dir: Path):
             return jsonify({"error": route_tier_message(view)}), 403
         return None
 
-    _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
-    # (Used to live beside the classic /health page; the page died in the 2026-08-08 cut,
-    # the cache moved here to its one surviving consumer.)
-
     @app.route("/api/health")
     @tier(LOGIN)
     def api_health():
@@ -8166,24 +8273,17 @@ def create_app(out_dir: Path):
         /health page). Same computation, same fields, same LOGIN tier as the page it
         un-bakes; the page route stays until demolition.
 
-        ROUTE-LEVEL TTL CACHE (owner report 2026-08-06: "VERY slow" at 35k images).
-        collection_health() walks the whole library; at production scale that is
-        seconds of disk work per open, and the numbers it produces are glance-stats
-        that do not change second to second. 120s of staleness on a dashboard is
-        invisible; re-walking 70k files per open is not. The cache lives HERE, not in
-        collection_health() itself, so every direct caller (the classic /health page,
-        the tests) stays pure. ?fresh=1 bypasses -- the client sends it on an explicit
-        user refresh, never on a plain open."""
-        import time as _time
-        now = _time.time()
-        if (not request.args.get("fresh")
-                and _health_cache.get("payload") is not None
-                and now - _health_cache.get("ts", 0) < 120):
-            return jsonify(_health_cache["payload"])
-        payload = collection_health(out_dir, db_path)
-        _health_cache["payload"] = payload
-        _health_cache["ts"] = now
-        return jsonify(payload)
+        THE CACHE IS health_cached() (module level -- see its own block for the reasoning):
+        keyed on the CATALOG FILE with no time floor, serve-stale-while-recomputing, and
+        primed off-thread at boot. It replaced the 120s TTL this route carried from
+        2026-08-06, which was stale in one direction (a change made 5s ago stayed invisible
+        for two minutes) and cold in the other (a first open after two idle minutes paid the
+        whole walk with the user watching). The cache still lives OUTSIDE
+        collection_health(), as it always has, so every direct caller -- the classic /health
+        page, the tests -- gets a pure, uncached computation. ?fresh=1 bypasses; the client
+        sends it on an explicit user refresh, never on a plain open."""
+        return jsonify(health_cached(out_dir, db_path,
+                                     fresh=bool(request.args.get("fresh"))))
 
     @app.route("/api/panel/summary")
     @tier(LOGIN)
@@ -16119,6 +16219,11 @@ def main():
                     _bonjour.hostname, scheme, _bonjour.hostname, args.port))
     except Exception:                    # noqa: BLE001 -- advertising must never stop the server
         pass
+    # Warm the Health memo off-thread, now that the socket is bound and requests can already
+    # be served. AFTER startup, never blocking it: this is a daemon thread doing a disk walk,
+    # and its only job is to make the FIRST Health open of the session a memory read instead
+    # of a full library walk with the user watching. See _health_prime / health_cached.
+    _health_prime(out_dir, db_path)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
