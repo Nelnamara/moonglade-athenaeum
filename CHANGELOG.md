@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **A queued run on the Generate dock now says how long the queue is.** A tile waiting for a worker used to show only the mascot and a moving bar; it now also reads *est. 27s wait* — the queue wait PixAI itself predicted for that model, the same figure the Activity tracker already showed for the same job. It is an estimate of the *wait*, taken once when the job entered the queue: it never ticks down, it is never dressed up as render progress (PixAI reports none), and it disappears the instant a worker picks the job up. (2026-09-04)
+
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
 - **One-click updates.** The Control Panel now checks for a new release when you open it, and the version stamp in its sidebar turns gold when one is out — click it and you get the release, its notes, and a plain account of what will happen before anything moves. Pressing **Update now** pulls it, installs dependencies only if they changed, restarts the server, and reloads your tab when it's back. Nothing is ever applied silently, and if your checkout has local edits, sits on a branch, or is mid-job, it says so instead of touching it. Updating by hand still works exactly as before. (2026-09-01)

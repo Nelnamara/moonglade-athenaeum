@@ -169,6 +169,18 @@
   border-radius: 999px; background: rgba(255, 255, 255, .14); overflow: hidden; }
 .mgdock-shim > i { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 999px;
   background: var(--mauve); animation: mgShimmer 1.8s ease-in-out infinite; }
+/* the QUEUE WAIT on a queued tile (RunsReel.jsx, 2026-09-04). PixAI's own estimate of the
+   wait BEFORE a worker takes the job -- the tray's .at-eta chip, on the dock's tile. Same
+   size/colour role as the reel's caption and as .at-sub's overlay0 in notify.css: no new
+   colour, no pill, no motion. Motion would read as a countdown, and this number never
+   moves. Bottom-anchored above the 2px shimmer, where this tile already puts text
+   (.mgdock-vtag / .mgdock-tilehint), and full tile width -- the caption's second slot is
+   too narrow to keep the word "wait". pointer-events:none so it cannot steal the hover
+   that raises the dock's hoisted tooltip. `.up` clears the batch cluster's own footer. */
+.mgdock-runwait { position: absolute; left: 3px; right: 3px; bottom: 11px; z-index: 2;
+  text-align: center; font-size: 9.5px; line-height: 1.25; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; pointer-events: none; }
+.mgdock-runwait.up { bottom: 30px; }
 /* a running job submitted with count>1 -- one reel slot, an NxN grid of
    indeterminate placeholders sized by how many images were requested (capped
    at 4). No per-cell progress: our job model has no partial-batch state (see
