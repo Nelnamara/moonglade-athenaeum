@@ -252,6 +252,7 @@ TIER_SNAPSHOT = [
     "/api/workflows [GET] LOGIN",
     "/api/your-art [GET] LOGIN",
     "/badge-thumb/<aid>.png [GET] LOGIN",
+    "/badge-thumb/<aid>.webp [GET] LOGIN",
     "/branding/<path:fname> [GET] PUBLIC",
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",

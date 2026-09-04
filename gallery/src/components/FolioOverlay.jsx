@@ -4,6 +4,7 @@ import "../styles/folio-overlay.css";
 import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
 import useHealth from "../hooks/useHealth.js";
 import useScrollLock from "../hooks/useScrollLock.js";
+import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -76,9 +77,12 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
   const masked = !a.earned && a.hidden;
   const isFeat = displayBucket(a) === "feat";   // meta folds into feats (no points, "for the glory")
   const tierClass = "mgfo-t-" + (a.tier || "common");
-  const badgeSrc = masked
+  // Masked cards keep the mystery art (the id is sanitized anyway); every real badge
+  // takes the webp-first ladder -- badgeHop returns false for the mystery src, so the
+  // handler below still falls through to the old "remove the element" behaviour.
+  const badgeUrl = masked
     ? "/branding/mystery/secret_feat.png"
-    : "/badge-thumb/" + encodeURIComponent(a.id) + ".png";
+    : badgeSrc(a.id);
   const desc = masked ? "Hidden until earned" : commentary(a, reveal);
   const skinName = a.skin && skinsById && skinsById[a.skin] ? skinsById[a.skin].name : a.skin;
   const sub = a.earned ? (date || "") : "not yet";
@@ -91,8 +95,8 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
       <span className="mgfo-card-gem" aria-hidden="true" />
       <div className="mgfo-card-ico">
         <span className="mgfo-card-emoji" aria-hidden="true">{masked ? "❓" : a.icon}</span>
-        <img className="mgfo-card-badge" src={badgeSrc} alt="" loading="lazy" draggable={false}
-          onError={(e) => e.currentTarget.remove()} />
+        <img className="mgfo-card-badge" src={badgeUrl} alt="" loading="lazy" draggable={false}
+          onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
       </div>
       <div className="mgfo-card-body">
         <div className="mgfo-card-nm">{masked ? "???" : a.name}</div>
@@ -282,8 +286,8 @@ export default function FolioOverlay({ onClose }) {
                           <div className={"mgfo-recrow mgfo-t-" + a.tier} key={a.id} onClick={() => replayToast(a)}>
                             <span className="mgfo-recrow-gem" aria-hidden="true" />
                             <div className="mgfo-recico">
-                              <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" loading="lazy"
-                                onError={(e) => e.currentTarget.remove()} />
+                              <img src={badgeSrc(a.id)} alt="" loading="lazy"
+                                onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
                             </div>
                             <div className="mgfo-rectxt">
                               <div className="mgfo-recnm">{a.name}</div>
@@ -388,8 +392,8 @@ export default function FolioOverlay({ onClose }) {
                                 <div className="mgfo-plinth-inset" />
                                 <div className="mgfo-plinth-float">
                                   <div className={"mgfo-plinth-badge" + (carTier.earned ? " earned" : "")}>
-                                    <img src={"/badge-thumb/" + encodeURIComponent(carTier.id) + ".png"} alt="" loading="lazy"
-                                      draggable={false} onError={(e) => e.currentTarget.remove()} />
+                                    <img src={badgeSrc(carTier.id)} alt="" loading="lazy"
+                                      draggable={false} onError={(e) => { if (!badgeHop(e.currentTarget, carTier.id)) e.currentTarget.remove(); }} />
                                   </div>
                                 </div>
                                 <div className="mgfo-plinth-glow" />
@@ -449,8 +453,8 @@ export default function FolioOverlay({ onClose }) {
                               <div key={l.id} className={"mgfo-ladderbadge" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
                                 onClick={() => selectLadder(l.id)}>
                                 <div className="mgfo-lb-img">
-                                  <img src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""} alt="" loading="lazy"
-                                    onError={(e) => e.currentTarget.remove()} />
+                                  <img src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""} alt="" loading="lazy"
+                                    onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
                                 </div>
                                 <div className="mgfo-lb-pips">
                                   {l.tiers.map((t) => <i key={t.id} className={t.earned ? "mgfo-t-" + t.tier : ""} />)}
@@ -487,8 +491,9 @@ export default function FolioOverlay({ onClose }) {
                                 <div key={l.id} className="mgfo-group">
                                   <div className="mgfo-group-h">
                                     <img className="mgfo-group-icon"
-                                      src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""}
-                                      alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
+                                      src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""}
+                                      alt="" loading="lazy"
+                                      onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
                                     <span className="mgfo-group-name">{l.name} — measured in {l.metric}</span>
                                     <span className="mgfo-group-count">
                                       {l.filteredTiers.filter((t) => t.earned).length}/{l.filteredTiers.length}
@@ -578,8 +583,8 @@ export default function FolioOverlay({ onClose }) {
                         {vm.ladderRows.map((l) => (
                           <div className="mgfo-progrow" key={l.id}>
                             {l.iconTierId && (
-                              <img className="mgfo-progrow-ico" src={"/badge-thumb/" + encodeURIComponent(l.iconTierId) + ".png"} alt="" loading="lazy"
-                                onError={(e) => e.currentTarget.remove()} />
+                              <img className="mgfo-progrow-ico" src={badgeSrc(l.iconTierId)} alt="" loading="lazy"
+                                onError={(e) => { if (!badgeHop(e.currentTarget, l.iconTierId)) e.currentTarget.remove(); }} />
                             )}
                             <div className="mgfo-progrow-lab wide">{l.name}</div>
                             <Bar pct={l.total ? (l.earned / l.total) * 100 : 0} />

@@ -3718,6 +3718,25 @@ ${"=".repeat(48)}
     document.addEventListener("visibilitychange", wakePending);
   }
 
+  // ../gallery/src/notify/badgeArt.js
+  var _start = /* @__PURE__ */ new Map();
+  function badgeSources(id, size) {
+    const stem = "/badge-thumb/" + encodeURIComponent(id);
+    return [stem + ".webp", stem + ".png" + (size === 384 ? "?size=384" : "")];
+  }
+  function badgeSrc(id, size) {
+    return badgeSources(id, size)[_start.get(id) || 0];
+  }
+  function badgeHop(img, id, size) {
+    if (!img) return false;
+    const list = badgeSources(id, size);
+    const i = list.indexOf(img.getAttribute("src") || "");
+    if (i < 0 || i + 1 >= list.length) return false;
+    if ((_start.get(id) || 0) < i + 1) _start.set(id, i + 1);
+    img.src = list[i + 1];
+    return true;
+  }
+
   // ../gallery/src/notify/ach.js
   var data = null;
   function unleashed() {
@@ -3859,12 +3878,13 @@ ${"=".repeat(48)}
       const b = document.createElement("img");
       b.className = "badge";
       b.onerror = function() {
+        if (badgeHop(this, a.id, 384)) return;
         const e = document.createElement("div");
         e.className = "badge emoji";
         e.textContent = a.icon || "\u{1F3C6}";
         if (this.parentNode) this.parentNode.replaceChild(e, this);
       };
-      b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png?size=384";
+      b.src = badgeSrc(a.id, 384);
       cap.appendChild(b);
       const ring = document.createElement("div");
       ring.className = "ring";

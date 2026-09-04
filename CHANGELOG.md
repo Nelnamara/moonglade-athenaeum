@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **An animated badge now actually animates.** Badge art could only ever be a still: the server turned every master into a PNG thumbnail, so an animated medallion arrived flattened to its first frame — the same wall the header marks came through in 3.7.0. An animated `.webp` dropped beside a badge's still now plays wherever that badge appears: the unlock moment's medallion, and the Folio of Honors' tiles, rails, ladder heroes and detail sheet. It is passed through exactly as you made it — every frame, its own timing, its transparency — and a badge with no animation beside it is served precisely as before. (2026-09-04)
+
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
 - **One-click updates.** The Control Panel now checks for a new release when you open it, and the version stamp in its sidebar turns gold when one is out — click it and you get the release, its notes, and a plain account of what will happen before anything moves. Pressing **Update now** pulls it, installs dependencies only if they changed, restarts the server, and reloads your tab when it's back. Nothing is ever applied silently, and if your checkout has local edits, sits on a branch, or is mid-job, it says so instead of touching it. Updating by hand still works exactly as before. (2026-09-01)

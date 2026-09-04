@@ -3625,6 +3625,40 @@ def _badge_thumb(out_dir, aid, size=256):
             return raw
 
 
+# An ANIMATED badge master is a `<id>.webp` dropped beside the stills in the badges
+# role -- the same "drop it in and it moves" move the toast mascot already takes
+# (notify/ach.js's mascot chain). It is served THROUGH, byte-for-byte, never down a
+# PIL path: measured here on Pillow 12.2.0, reading an animated webp hands back every
+# frame but reports each frame's `duration` as None (the masters carry a real 66 ms in
+# their ANMF chunks), so a re-encode silently invents the cadence the art was authored
+# at -- and re-compresses the artist's chroma-keyed alpha on top of it. Pass-through
+# keeps frames, timing, loop count and alpha exactly as made. The still-PNG path below
+# is untouched by any of this: a badge with no .webp beside it serves exactly as before.
+#
+# The cap is the one thing pass-through has to bring of its own, since nothing is being
+# resized: an animated master is whole-file, and the ones banked for future feats run
+# ~3-8 MB each. 12 MB clears those with headroom while still refusing something absurd;
+# over the cap the .webp 404s and the client's chain falls back to the still thumb.
+_BADGE_ANIM_MAX_BYTES = 12 * 1024 * 1024
+
+
+def _badge_anim(aid):
+    """The animated master's bytes for `aid`, or None when there isn't one (no
+    `<id>.webp` in the badges role, unreadable, or over _BADGE_ANIM_MAX_BYTES).
+    None is the fallback signal, not an error: the route 404s and the client's
+    webp-first chain drops to the still `<id>.png` thumb. Reads through
+    _branding_bytes(), so a loose master wins over the container's, same as the
+    stills. NO cache entry: there is no derived artefact to cache -- the bytes
+    served ARE the master."""
+    rel = _role_rel("badges", aid + ".webp")
+    if not _branding_exists(rel):
+        return None
+    raw = _branding_bytes(rel)
+    if raw is None or len(raw) > _BADGE_ANIM_MAX_BYTES:
+        return None
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Telemetry: the persisted counters behind every achievement metric that is NOT
 # a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
@@ -10577,11 +10611,20 @@ def create_app(out_dir: Path):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
 
-    @app.route("/badge-thumb/<aid>.png")
+    @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
+    @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
     @tier(LOGIN)
-    def badge_thumb(aid):
+    def badge_thumb(aid, ext):
         """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
-        truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
+        truth). Lazily generated on first hit; path-safe (no slashes via <aid>).
+
+        TWO extensions, ONE gate. `.webp` answers the client's webp-first probe with the
+        ANIMATED master passed through untouched (_badge_anim), and 404s when there is no
+        animated master -- which is the normal answer for most ids, and the signal the
+        chain falls back to `.png` on. Both rules land on this one view function
+        deliberately: the roster/hidden-feat gate below is written once and cannot be
+        half-applied to one extension, which is exactly how a second route would have
+        leaked a sealed feat's art."""
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)
@@ -10608,6 +10651,16 @@ def create_app(out_dir: Path):
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
+        if ext == "webp":
+            # Past the same gate the stills pass, so an unearned hidden feat's
+            # animation is no more fishable than its still. Served whole -- see
+            # _badge_anim on why an animated master is never re-encoded here.
+            raw = _badge_anim(aid)
+            if raw is None:
+                abort(404)             # no animated master -> the chain falls back to .png
+            resp = app.response_class(raw, mimetype="image/webp")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
         # The celebration toast asks for 384px so the enlarged medallion stays crisp
         # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
         # the cache can't be spammed into unbounded sizes.
