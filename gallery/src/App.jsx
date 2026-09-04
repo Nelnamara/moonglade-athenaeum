@@ -32,6 +32,7 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
+import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage } from "./gen/urlState.js";
 
 /* ============================ THE APP SHELL =================================
@@ -325,7 +326,12 @@ export default function App({ boot }) {
      capture identical "before"/"after" snapshots. Feature-detected: browsers
      without support (pre-111 Firefox/Safari) just get the plain instant swap
      they already had. */
-  const openDetails = (mid) => {
+  /* useCallback from here down through filterBySeries: these are <Grid> props, and Grid is
+     memoized (see its own foot-of-file note), so a fresh identity on every App render would
+     defeat the memo before it did anything. Each closes over setUrl (itself useCallback'd)
+     and setState functions only, so the dep lists are honest rather than pruned -- none of
+     them can go stale. */
+  const openDetails = useCallback((mid) => {
     const commit = () => {
       setLbIndex(null);
       setUrl({ image: mid });
@@ -333,11 +339,11 @@ export default function App({ boot }) {
     };
     if (document.startViewTransition) document.startViewTransition(() => flushSync(commit));
     else commit();
-  };
-  const closeDetails = () => {
+  }, [setUrl]);
+  const closeDetails = useCallback(() => {
     setUrl({ image: null });   // keeps ?page=N -- the grid underneath is still on it
     setDetailsFor(null);
-  };
+  }, [setUrl]);
   /* Back/forward re-read BOTH params: the image (as before) and the page -- a
      ?page= that differs from the grid's current page loads it. Refs, because the
      listener mounts once and load's identity follows the filters. */
@@ -365,27 +371,27 @@ export default function App({ boot }) {
     setUrl({ page }, true);
   }, [page, loading, total, setUrl]);
   /* A user page change is a real navigation: pushState, then load. */
-  const goToPage = (p) => {
+  const goToPage = useCallback((p) => {
     setUrl({ page: p });
     load(p, true);
-  };
-  const filterByModel = (name) => {
+  }, [setUrl, load]);
+  const filterByModel = useCallback((name) => {
     closeDetails();
     setAdv((old) => ({ ...old, model: name }));
-  };
-  const filterByBatch = (batch) => {
+  }, [closeDetails, setAdv]);
+  const filterByBatch = useCallback((batch) => {
     closeDetails();
     setAdv((old) => ({ ...old, batch, series: "" }));
-  };
+  }, [closeDetails, setAdv]);
   /* Open a SERIES stack (#34 direction B) -- the mirror of filterByBatch: set the
      `series` drill-down to the sid, which the backend resolves to the series'
      member task_ids (?series=<sid>). load() suppresses the grouping fold while a
      drill-down is active, so this lands on the series' members ungrouped; clearing
      the filter (or Clear) snaps back to the still-lit stacked grid. */
-  const filterBySeries = (series) => {
+  const filterBySeries = useCallback((series) => {
     closeDetails();
     setAdv((old) => ({ ...old, series, batch: "" }));
-  };
+  }, [closeDetails, setAdv]);
 
   /* Generation completions refresh the library + credits chip.
      THREE channels, because there are three producers:
@@ -422,7 +428,15 @@ export default function App({ boot }) {
       document.removeEventListener("mg-submit", onSubmit);
       document.removeEventListener("mg-result", onResult);
     };
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+    // [load], not the missing dep array it had. With no array at all this effect tore down
+    // and re-added three global listeners on EVERY render of the shell -- an overlay
+    // opening, a star being clicked -- purely to keep `load` fresh in the closure. `load`
+    // is the only value here that ever changes identity (useLibrary's useCallback, keyed to
+    // the filters); fetchAccount is a module import and setAccount/setRunning are setState
+    // functions, all three permanently stable. So the listeners are now re-bound exactly
+    // when the closure would otherwise go stale, which is the behaviour the missing array
+    // was buying at the cost of doing it always.
+  }, [load]);
 
   /* Two thumbnail links live outside this component's own tree (the notify system's
      ActivityTray and the shared VideoDrawer, both portaled/deeply nested with no direct
@@ -519,7 +533,17 @@ export default function App({ boot }) {
 
   /* ---- bulk Actions: the classic flows, confirm texts verbatim ---- */
   const selIds = [...selected];
+  /* THE ONE MUTATION SEAM. Every bulk action here funnels through it, and so do the two
+     overlays that change the library from outside this list (ImportOverlay's onImported,
+     DuplicateReviewOverlay's onResolved). So it is also where the shared read cache
+     (hooks/swrCache.js) is purged: the overlays paint from last-known data on reopen, and
+     "last known" has to stop meaning "before the thing you just did". Five families, each
+     because a mutation here really can change it -- My Art's totals, the per-image records,
+     the achievement roster (collecting/deleting moves metrics), the Health walk, and the
+     library pages themselves. A purge only DROPS cached reads; it fetches nothing. */
   const afterMutation = async () => {
+    invalidate(["/api/your-art", "/api/myart/items", "/api/next/detail/",
+                "/api/achievements", "/api/health", "/api/next/library"]);
     setSelected(new Set());
     load(1, true);
     const c = await fetchCollections();
@@ -628,7 +652,7 @@ export default function App({ boot }) {
     afterMutation();
   };
 
-  const rate = async (mid, value) => {
+  const rate = useCallback(async (mid, value) => {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
     try {
@@ -636,7 +660,7 @@ export default function App({ boot }) {
     } catch {
       /* a failed rate leaves the optimistic value; the next load corrects it */
     }
-  };
+  }, [setItems]);
 
   /* Lightbox "Edit"/"To Video" -> the dock, matching classic's
      lbEdit()/lbVideo() (close the lightbox, then open the dock already on
@@ -686,7 +710,8 @@ export default function App({ boot }) {
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
   const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
   const [similarFor, setSimilarFor] = useState(null); // media_id | null
-  const openContextMenu = (mid, thumb, x, y, isVideo) => setCtxMenu({ mid, thumb, x, y, isVideo });
+  const openContextMenu = useCallback(
+    (mid, thumb, x, y, isVideo) => setCtxMenu({ mid, thumb, x, y, isVideo }), []);
   const ctxActions = {
     onEdit: requestEdit,
     onVideo: requestVideo,
@@ -957,6 +982,13 @@ export default function App({ boot }) {
           dockOpen={dockActive}
           onToggleDock={toggleDock}
           onFolio={() => openOverlay("folio")}
+          /* NOT memoized, deliberately (2026-09-04 perf pass). React.memo pays only where
+             the props can be made referentially stable, and two of LibraryBar's cannot be
+             without a wider refactor than this pass: `lib` is the whole useLibrary()
+             return, a fresh object every render by construction, and `actions` is an object
+             literal of closures over selIds/items/adv/applied. Wrapping it would add a
+             comparison that can never pass -- strictly slower. Grid and GenerateDrawer,
+             whose props ARE all stable, are the two that got the memo. */
           libraryBar={
             <LibraryBar
               lib={lib}

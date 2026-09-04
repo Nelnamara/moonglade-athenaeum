@@ -154,7 +154,12 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                   <div className="mgct-cardwrap official">
                     <button type="button" className="mgct-official" onClick={() => openDetail(featured)}>
                       <div className="mgct-cover official">
-                        {featured.cover_url ? <img src={featured.cover_url} alt="" /> : null}
+                        {/* Board covers are RAW PixAI hotlinks: lazy + async decode so a
+                            long community list does not fetch and decode a screenful of
+                            remote images on the frame the overlay opens. */}
+                        {featured.cover_url
+                          ? <img src={featured.cover_url} alt="" loading="lazy" decoding="async" />
+                          : null}
                         <div className="mgct-scrim" />
                         <div className="mgct-overlaid">
                           <div className="mgct-title big">{featured.title}</div>
@@ -189,7 +194,11 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                   {restOfficial.map((c) => (
                     <div className="mgct-cardwrap" key={c.id}>
                       <button type="button" className="mgct-card" onClick={() => openDetail(c)}>
-                        <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
+                        <div className="mgct-cover">
+                          {c.cover_url
+                            ? <img src={c.cover_url} alt="" loading="lazy" decoding="async" />
+                            : null}
+                        </div>
                         <div className="mgct-body">
                           <div className="mgct-title">{c.title}</div>
                           <div className="mgct-tags">
@@ -207,7 +216,11 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                   {community.map((c) => (
                     <div className="mgct-cardwrap" key={c.id}>
                       <button type="button" className="mgct-card" onClick={() => openDetail(c)}>
-                        <div className="mgct-cover">{c.cover_url ? <img src={c.cover_url} alt="" /> : null}</div>
+                        <div className="mgct-cover">
+                          {c.cover_url
+                            ? <img src={c.cover_url} alt="" loading="lazy" decoding="async" />
+                            : null}
+                        </div>
                         <div className="mgct-body">
                           <div className="mgct-title">{c.title}</div>
                           <div className="mgct-tags">

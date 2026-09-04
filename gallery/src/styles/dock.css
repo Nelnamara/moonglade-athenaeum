@@ -60,10 +60,15 @@
   background: radial-gradient(130% 80% at 50% 0%, rgba(100, 58, 172, .26) 0%, rgba(10, 8, 24, 0) 68%); }
 
 /* expanded scrim (sibling of the dock; click collapses the settings) */
+/* The blur lands AFTER the fade, not during it -- the same split overlays.css makes on
+   .mgv-scrim, whose header carries the full reasoning: a backdrop-filter on a full-viewport
+   element under an opacity animation re-blurs everything behind it on every one of those
+   350ms, and behind this one is the whole grid. Resting look unchanged (same rgba, same
+   blur(6px)); only WHEN the blur turns on moved. `forwards`, never `both`. */
 .mgdock-scrim { position: fixed; inset: 0; z-index: 6;
-  background: rgba(5, 4, 13, .52); backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  animation: mgFade .35s ease both; }
+  background: rgba(5, 4, 13, .52);
+  animation: mgFade .35s ease both, mgdockScrimBlur .01s linear .35s forwards; }
+@keyframes mgdockScrimBlur { to { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); } }
 
 /* ============================== HEADER ====================================== */
 .mgdock-head { position: relative; display: flex; align-items: center; gap: 11px;

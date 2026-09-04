@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { peek, put } from "./swrCache.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -207,7 +208,12 @@ export function buildViewModel(data) {
 }
 
 export default function useFolio() {
-  const [data, setData] = useState(null);
+  // Seeded from the shared read cache (hooks/swrCache.js) so a REOPEN paints the roster,
+  // the points and the ladders in the first frame instead of showing the empty shell while
+  // /api/achievements re-measures. The refetch below still runs every open and replaces it
+  // in place; the seams that must never show a stale roster -- a claim, a contest entry, a
+  // finished job, App.jsx's afterMutation -- invalidate("/api/achievements") explicitly.
+  const [data, setData] = useState(() => peek("/api/achievements"));
   const [err, setErr] = useState(null);
   const [tab, setTab] = useState("summary");
   const [q, setQ] = useState("");
@@ -240,8 +246,12 @@ export default function useFolio() {
     let dead = false;
     apiGet("/api/achievements")
       .then((d) => {
+        put("/api/achievements", d);
         if (dead) return;
-        if (d.error) setErr(d.error); else setData(d);
+        // An error only surfaces when there is nothing cached to keep showing -- the
+        // shared cache's own rule (hooks/swrCache.js).
+        if (d.error) { if (peek("/api/achievements") == null) setErr(d.error); }
+        else setData(d);
       });
     return () => { dead = true; };
   }, []);
@@ -413,7 +423,10 @@ export default function useFolio() {
         if (res && (res.snapped || (res.pokes || 0) >= 5)) {
           setTriggered(true);
           apiGet("/api/achievements")
-            .then((d) => { if (mountedRef.current && !d.error) setData(d); });
+            .then((d) => {
+              put("/api/achievements", d);
+              if (mountedRef.current && !d.error) setData(d);
+            });
         }
       });
   }

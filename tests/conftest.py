@@ -172,17 +172,20 @@ def sealed_donor_present():
 @pytest.fixture(autouse=True)
 def _fresh_perf_memos():
     """The 2026-09-03 perf pass added three module-level memos -- the achievement-metrics
-    cache, the contest-board cache, and the contest sweep's last-successful-run stamp.
-    Module singletons outlive a test, so without this one test's cached board (or its
-    "we swept recently") answers the next one's request. Same isolation the sealed-defs
+    cache, the contest-board cache, and the contest sweep's last-successful-run stamp --
+    and the 2026-09-04 pass added a fourth, /api/health's own. Module singletons outlive a
+    test, so without this one test's cached board (or its "we swept recently", or another
+    tmp_path's library walk) answers the next one's request. Same isolation the sealed-defs
     and earned-ids caches above already get, and for the same reason."""
-    gallery._ACH_METRICS_CACHE.clear()
-    gallery._contests_cache.clear()
-    gallery._contest_sync_last_ok.update(at=0.0)
+    def _clear():
+        gallery._ACH_METRICS_CACHE.clear()
+        gallery._contests_cache.clear()
+        gallery._contest_sync_last_ok.update(at=0.0)
+        gallery._HEALTH_CACHE.update(key=None, payload=None, at=0.0)
+        gallery._HEALTH_BUSY["on"] = False
+    _clear()
     yield
-    gallery._ACH_METRICS_CACHE.clear()
-    gallery._contests_cache.clear()
-    gallery._contest_sync_last_ok.update(at=0.0)
+    _clear()
 
 
 @pytest.fixture(autouse=True)
