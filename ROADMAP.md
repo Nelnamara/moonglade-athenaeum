@@ -84,12 +84,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   shipped 2026-08-31 (3.7.0). What remains is the gift icon on future promo gifts — blocked until a
   promo/card-claim surface exists to carry it.
 
-- **Queue-wait on the dock's queued tiles — the last slice of "starts in ~N"** *(owner call, 2026-08-19)*
-  The honest queue-wait readout ("est. N wait", never dressed as render progress) already ships in
-  the Activity tray's queued rows; the remaining slice is surfacing the same clearly-labelled figure
-  on the Generate dock's queued run tiles, which today show only the mascot + indeterminate shimmer.
-  Standing constraint unchanged: `/v2/task/wait-time` is a QUEUE wait, never a render ETA.
-
 
 ---
 
