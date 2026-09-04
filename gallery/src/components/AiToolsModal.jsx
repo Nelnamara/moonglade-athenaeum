@@ -1,13 +1,22 @@
 import React, { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
+import { sceneRows, shapeTally } from "../gen/sceneCatalog.js";
 import "../styles/ai-tools.css";
 
-/* The Bridge §4 "AI Tools — a browsable catalog of 28" (The Bridge.dc.html 247-293). Its own modal,
+/* The Bridge §4 "AI Tools — a browsable catalog" (The Bridge.dc.html 247-293). Its own modal,
    launched from the nav when the mirror is armed (DECISIONS: "the AI-Tools tier splits by function —
    browse in a nav modal, generate in the gen drawer"). Browsing lives here (grid · search · tier
    tabs); picking a scene hands off to the gen drawer's generator (onPick). Each card carries the
    scene's real captured thumbnail and its control-row SHAPE so you know before opening whether it's
    one tap or a form. Thumbnails resolve loose-then-container via /branding/bridge/scene_*.webp
-   (onError falls back to the initial, matching the branding contract). */
+   (matching the branding contract), then fall back to the catalog's own art for a scene we ship no
+   local webp for, then to the initial.
+
+   THE GRID IS LIVE (issue #36, 2026-09-04). It used to be a hardcoded 28-entry array, so the
+   scenes PixAI has added since — daily-fortune, daily-setlog, mini-mart-ad — had no tile and were
+   unreachable. It now comes from GET /api/scenes (listChatEditingScenes, normalized server-side);
+   gen/sceneCatalog.js holds the curated copy overlaid on those rows and the 28-tile OFFLINE
+   FALLBACK, so the modal is never empty. Same tiles, same layout — only the source changed. */
 
 const SHAPE = {
   click:  { label: "1-Click",  color: "#8a93a2" },
@@ -17,44 +26,10 @@ const SHAPE = {
   dual:   { label: "Dual",     color: "var(--mauve)" },
 };
 
-// [name, slug (thumbnail file), shape, tier, detail] -- from the comp's scene table (475-504),
-// slugs matched to the captured scene_*.webp set.
-const SCENES = [
-  ["Acrylic Standee", "acrylic-standee", "click", false, ""],
-  ["Anime Badge", "anime-badge", "click", false, ""],
-  ["Anime Figure", "anime-figure", "select", false, "Figure / With-char"],
-  ["Blush & Glasses", "blush-and-glasses", "click", true, ""],
-  ["Character Ad", "character-ad", "select", true, "Billboard / Pop-up"],
-  ["Character Card", "character-card", "lang", true, "+ Other"],
-  ["Character Style", "character-style-generator", "lang", true, "EN / JP / KR / TC"],
-  ["Chatfic", "chatfic", "lang", true, "EN / JP / KR / TC"],
-  ["Christmas", "christmas", "select", false, "Hat / Scarf / Outfit"],
-  ["Dakimakura", "dakimakura", "click", false, ""],
-  ["Desktop Pet", "desktop-pet", "select", true, "Landscape / Portrait"],
-  ["Duo Character", "dual-character-generator", "dual", true, "2 refs · ~26 poses"],
-  ["Fantasy Character", "fantasy-character", "select", true, "5 classes"],
-  ["Gacha Screen", "gacha-screen", "text", true, "name + lang"],
-  ["Galgame", "galgame", "text", true, "name + lang"],
-  ["Giant Statue", "giant-statue", "click", false, ""],
-  ["JRPG Guide", "jrpg-guidebook", "select", true, "4 classes"],
-  ["Lego", "lego", "click", false, ""],
-  ["Magazine Cover", "magazine-cover", "click", false, ""],
-  ["Paper Cutout", "paper-cutout", "select", true, "Silhouette / Layered"],
-  ["Plushie", "plushie", "click", false, ""],
-  ["Polaroid", "polaroid", "text", true, "name + lang"],
-  ["RPG Gameplay", "rpg-gameplay", "text", true, "name + lang"],
-  ["Stadium Big Screen", "stadium-big-screen", "click", true, ""],
-  ["Summer Magazine", "summer-magazine", "click", true, ""],
-  ["Tarot Card", "tarot-card", "select", false, "4 modes"],
-  ["Trading Card", "trading-card", "click", true, ""],
-  ["VTuber", "vtuber", "text", true, "name + lang"],
-];
-
-const TIERS = [["all", "All " + SCENES.length], ["free", "Free"], ["tier1", "Tier 1"]];
-
 export default function AiToolsModal({ open, onClose, onPick }) {
   const [q, setQ] = useState("");
   const [tier, setTier] = useState("all");
+  const [live, setLive] = useState(null);   // null until /api/scenes answers; [] on failure
 
   // Esc closes the top layer, like the drawer's overlays.
   useEffect(() => {
@@ -64,11 +39,26 @@ export default function AiToolsModal({ open, onClose, onPick }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // The live catalog, read once per open. apiGet never throws and never retries (api.js's one
+  // rule), so a refusal, an outage or an unarmed mirror all land the same way: [] -> the
+  // curated 28 render instead of an empty grid.
+  useEffect(() => {
+    if (!open) return undefined;
+    let alive = true;
+    apiGet("/api/scenes").then((d) => {
+      if (alive) setLive((d && !d.error && d.scenes) || []);
+    });
+    return () => { alive = false; };
+  }, [open]);
+
   if (!open) return null;
 
-  const shown = SCENES.filter(([name, , , t]) =>
-    (tier === "all" || (tier === "tier1" && t) || (tier === "free" && !t)) &&
-    (!q.trim() || name.toLowerCase().includes(q.trim().toLowerCase())));
+  const scenes = sceneRows(live);
+  const TIERS = [["all", "All " + scenes.length], ["free", "Free"], ["tier1", "Tier 1"]];
+
+  const shown = scenes.filter((s) =>
+    (tier === "all" || (tier === "tier1" && s.tier) || (tier === "free" && !s.tier)) &&
+    (!q.trim() || s.name.toLowerCase().includes(q.trim().toLowerCase())));
 
   return (
     <div className="mgai-scrim" onClick={onClose}>
@@ -90,23 +80,30 @@ export default function AiToolsModal({ open, onClose, onPick }) {
         </div>
 
         <div className="mgai-grid">
-          {shown.map(([name, slug, shape, t, detail]) => {
-            const m = SHAPE[shape];
+          {shown.map((s) => {
+            const m = SHAPE[s.shape] || SHAPE.click;
             return (
-              <button key={slug} type="button" className="mgai-card"
-                onClick={() => onPick && onPick({ name, slug, shape, tier: t, detail })}
-                title={name}>
+              <button key={s.slug} type="button" className="mgai-card"
+                onClick={() => onPick && onPick({ name: s.name, slug: s.slug, shape: s.shape,
+                                                  tier: s.tier, detail: s.detail })}
+                title={s.name}>
                 <div className="mgai-thumb">
-                  <span className="mgai-initial">{name[0]}</span>
-                  <img src={"/branding/bridge/scene_" + slug + ".webp"} alt="" loading="lazy"
-                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                  {t ? <span className="mgai-tierbadge">Tier 1</span> : null}
+                  <span className="mgai-initial">{s.name[0]}</span>
+                  <img src={"/branding/bridge/scene_" + s.slug + ".webp"} alt="" loading="lazy"
+                    onError={(e) => {
+                      // No local art for this scene -> try the catalog's own thumbnail once,
+                      // then give up and let the initial show through.
+                      const el = e.currentTarget;
+                      if (s.thumb && el.dataset.fell !== "1") { el.dataset.fell = "1"; el.src = s.thumb; return; }
+                      el.style.display = "none";
+                    }} />
+                  {s.tier ? <span className="mgai-tierbadge">Tier 1</span> : null}
                   <span className="mgai-shapedot" style={{ background: m.color }} />
                 </div>
                 <div className="mgai-meta">
-                  <div className="mgai-name">{name}</div>
+                  <div className="mgai-name">{s.name}</div>
                   <span className="mgai-chip" style={{ color: m.color, borderColor: m.color }}>{m.label}</span>
-                  {detail ? <div className="mgai-detail">{detail}</div> : null}
+                  {s.detail ? <div className="mgai-detail">{s.detail}</div> : null}
                 </div>
               </button>
             );
@@ -116,7 +113,7 @@ export default function AiToolsModal({ open, onClose, onPick }) {
 
         <div className="mgai-foot">
           <span><b>{shown.length}</b> shown</span>
-          <span className="mgai-tally">11 one-click · 8 select · 5 text · 3 language · 1 dual</span>
+          <span className="mgai-tally">{shapeTally(scenes)}</span>
         </div>
       </div>
     </div>
