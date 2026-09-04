@@ -88,6 +88,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ---
 
+- **Full surface audit — Phases B and C** *(kept on the books — owner, 2026-09-04)*
+  Phase A (the owner's walk, 2026-08-29) is done and fed #42–#51 and the S4 batch. What has never run:
+  **Phase B**, a per-surface comp-diff of all 24 surfaces against their design mockups (one agent
+  fan-out each), and **Phase C**, triage + re-verify of B's findings. Scope and severity scale:
+  `../moonglade-internal/scopes/SCOPE_2026-08-26_surface-audit.md`. Not dropped; run when scheduled.
+
 ## Design-pass reworks — rescope, don't just build
 
 - **Ladder representative badges.** Ladders currently show their FIRST rung's art. A new design
