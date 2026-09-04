@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { localDay } from "../gen/dates.js";
+import { syncOnOpen, NO_TOKEN, REFUSED, WATCH } from "./contestSyncFlow.js";
 
 /* useContests -- ContestsOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useHealth.js/
@@ -72,6 +73,7 @@ export function qualifies(item, contest) {
 
 export default function useContests(opts) {
   const wantMine = !!(opts && opts.mine);
+  const given = (opts && opts.csrfToken) || "";
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -94,8 +96,11 @@ export default function useContests(opts) {
   const openContest = (row) => { if (row.url) window.open(row.url, "_blank", "noopener"); };
 
   const dateRange = (row) => {
-    const s = (row.start_at || "").slice(0, 10);
-    const e = (row.end_at || "").slice(0, 10);
+    // localDay, like dayOf -- these two render the SAME dates on the same screen (a card's
+    // range and its detail's day), so a UTC slice here and a local day there meant the
+    // overlay could contradict itself by a day west of Greenwich.
+    const s = localDay(row.start_at || "");
+    const e = localDay(row.end_at || "");
     return s && e ? s + " – " + e : s || e || "";
   };
 
@@ -127,11 +132,26 @@ export default function useContests(opts) {
   // surface. It rides along on /api/myart/items -- the same source PublishOverlay and
   // ContestConfirm read it from -- so this is one small GET, once, not a token minted
   // per call. Held in a ref so the effect below does not re-run when it lands.
-  const csrfRef = useRef("");
-  useEffect(() => {
-    if (!wantMine) return;
-    apiGet("/api/myart/items").then((d) => { csrfRef.current = (d && d.csrf) || ""; });
-  }, [wantMine]);
+  // The sync POST carries the explicit CSRF token like every sibling POST on this
+  // surface. It rides along on /api/myart/items -- the same source PublishOverlay and
+  // ContestConfirm read it from.
+  //
+  // AWAITED, not raced. This used to be a sibling effect writing a ref, and the sync
+  // effect below read that ref synchronously on the same mount -- so the token was ALWAYS
+  // still in flight and the POST always went out empty. The server answered 400 every
+  // time, the on-open sweep never ran once, and the only trace was an error line reachable
+  // solely from the empty-entries state. One promise, created once, and the POST waits for
+  // it. A caller that already holds a token passes it and no GET happens at all.
+  const tokenRef = useRef(null);
+  const getToken = useCallback(() => {
+    if (given) return Promise.resolve(given);
+    if (!tokenRef.current) {
+      tokenRef.current = apiGet("/api/myart/items")
+        .then((d) => (d && d.csrf) || "")
+        .catch(() => "");
+    }
+    return tokenRef.current;
+  }, [given]);
 
   // `dead` is a REF, not a closure variable: reloadMine is called from the effect, from
   // the poll, and by consumers after an entry lands, and every one of those can resolve
@@ -167,32 +187,53 @@ export default function useContests(opts) {
     // sync_running flag is set, and stopping the moment it clears -- or after the ceiling,
     // so a wedged sweep cannot leave a tab polling forever.
     const POLL_MS = 5000;
-    const CEILING_MS = 60000;
+    // 150s, not 60: the sweep's own documented range is 30-90s and the ceiling sat UNDER
+    // the top of it, so a slow-but-healthy sweep was abandoned as if it had hung.
+    const CEILING_MS = 150000;
+    const MAX_POLL_ERRORS = 2;      // a blip is not a dead sweep
     const started = Date.now();
+    let pollErrors = 0;
+    // However the watch ends -- finished, ceiling, or giving up on errors -- it ends with
+    // ONE more read. Stopping without it left the tab showing pre-sweep rows while the
+    // sweep had in fact finished and written new ones.
+    const finish = () => {
+      if (stop || deadRef.current) return;
+      setSyncing(false);
+      reloadMine();
+    };
     const watch = () => {
       if (stop || deadRef.current) return;
-      if (Date.now() - started > CEILING_MS) { setSyncing(false); return; }
+      if (Date.now() - started > CEILING_MS) { finish(); return; }
       timer = setTimeout(() => {
         reloadMine().then((d) => {
           if (stop || deadRef.current) return;
-          if (d && d.sync_running) { watch(); return; }
-          setSyncing(false);          // it finished; the rows above are the fresh ones
+          if (!d || d.error) {
+            pollErrors += 1;
+            if (pollErrors > MAX_POLL_ERRORS) { finish(); return; }
+            watch();                 // one bad poll is not the end of the sweep
+            return;
+          }
+          pollErrors = 0;
+          if (d.sync_running) { watch(); return; }
+          finish();                  // it finished; read once more and settle
         });
       }, POLL_MS);
     };
-    apiPost("/api/contest/sync", { csrf: csrfRef.current }).then((d) => {
-      if (stop || deadRef.current) return;
-      // A refusal (an expired token, a 409, anything with an error) is NOT a completed
-      // sync -- it used to fall through the same path as success and quietly report the
-      // sweep as done. Surface it and stop watching.
-      if (!d || d.error) {
+    // The handshake itself lives in contestSyncFlow.js so its ORDERING can be tested (see
+    // loom/test/contest-sync-open.test.js) -- the shipped path and the tested path are the
+    // same function, not two copies of one idea.
+    syncOnOpen(getToken, (token) => apiPost("/api/contest/sync", { csrf: token }))
+      .then((res) => {
+        if (stop || deadRef.current) return;
+        if (res.outcome === WATCH) { watch(); return; }
         setSyncing(false);
-        if (d && d.error) setMineErr(d.error);
-        return;
-      }
-      if (d.skipped === "recent") { setSyncing(false); return; }
-      watch();
-    });
+        if (res.outcome === NO_TOKEN) {
+          setMineErr("Couldn't verify this session — reload to refresh your entries.");
+        } else if (res.outcome === REFUSED && res.error) {
+          setMineErr(res.error);
+        }
+        // SKIPPED: a recent sweep changed nothing, and the read above is already current.
+      });
     return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [wantMine, reloadMine]);
 

@@ -3602,6 +3602,35 @@ def telem_max(key, value, out_dir=None):
         key, max(int(d["maxima"].get(key, 0) or 0), int(value))))
 
 
+def telem_set_discard(key, value, out_dir=None):
+    """sets[key] -= {value}. Returns True when something was actually removed.
+
+    These sets are GROW-ONLY by design -- they are the ladder's memory, and a metric that
+    can fall is a metric that can un-earn an achievement. This exists for the one case
+    that is not a retraction but a CORRECTION: a key written under an identity the app has
+    since learned was wrong, where the true key is being written in the same breath. The
+    count does not fall; a duplicate of something already counted stops being counted
+    twice. Every caller must be able to prove the two keys are the same thing, and the
+    removal is logged."""
+    removed = {"n": 0}
+
+    def _discard(d):
+        cur = d["sets"].get(key)
+        if not isinstance(cur, list):
+            return
+        v = str(value)
+        if v in cur:
+            cur.remove(v)
+            removed["n"] = 1
+        d["sets"][key] = cur
+    _telem_mutate(out_dir, _discard)
+    if removed["n"]:
+        import logging as _logging
+        _logging.getLogger(__name__).info(
+            "telemetry: discarded one superseded %s key", key)
+    return bool(removed["n"])
+
+
 def telem_set_add(key, value, out_dir=None):
     """sets[key] |= {value} (e.g. 'video_modes', 'tools', 'loras')."""
     def _add(d):
@@ -3960,15 +3989,31 @@ def _contest_detection_sync(out_dir, force=False):
                 if not cid or not slug:
                     continue
                 for row in core.contest_my_entries(session, slug, uid) or []:
+                    # MIGRATION, deliberate and narrow. Before 2026-09-03 this keyed by the
+                    # ENTRY id when the artwork id was nested (and therefore stripped), so
+                    # an old store can hold "cid:<entry id>" for a piece now keyed
+                    # "cid:<artwork id>" -- one entry counted twice, forever, in a set that
+                    # otherwise only grows. When upstream hands us BOTH ids we can prove
+                    # they are the same entry, which is the only moment that judgement is
+                    # safe to make, so the stale key is discarded here and nowhere else.
                     # The by-user row's shape is UNVERIFIED against a real entry (the probe
                     # that mapped this endpoint found no owner entries to compare), so the
                     # explicit artwork field is preferred and the row id is only the
                     # fallback -- they may or may not be the same value.
                     row = row or {}
-                    rid = str(row.get("artworkId") or row.get("id") or "")
+                    art_id = str(row.get("artworkId") or "")
+                    row_id = str(row.get("id") or "")
+                    rid = art_id or row_id
                     if rid:
                         telem_set_add("contest_entry_keys", "%s:%s" % (cid, rid),
                                       out_dir=out_dir)
+                    # Both ids present and different: upstream has just told us they name
+                    # the same entry, so a stored key under the OLD identity is a duplicate
+                    # of the one just written, not a second entry. This is the only place
+                    # that can know, so this is the only place that heals it.
+                    if art_id and row_id and art_id != row_id:
+                        telem_set_discard("contest_entry_keys", "%s:%s" % (cid, row_id),
+                                          out_dir=out_dir)
                 result_ts = _series_ts(c.get("result_at"))
                 if result_ts is None or result_ts > time.time():
                     continue
@@ -11079,22 +11124,13 @@ def create_app(out_dir: Path):
         for cid in order:
             c = board.get(cid) or {}
             aids = by_contest[cid]
-            # DEFENSIVE DEDUPE at read. Until 2026-09-03 the sweep could key one entry by
-            # its ENTRY id while the enter/publish paths keyed the same entry by its
-            # ARTWORK id (the row's nested artwork object was being stripped), so an
-            # already-poisoned store holds two keys for one piece. Where the catalog can
-            # resolve both to the same local media, they are one entry and are shown once.
-            # Keys that resolve to nothing local cannot be compared and are left alone --
-            # the set is grow-only and no rewrite is attempted, so this corrects the
-            # DISPLAY without pretending to correct history.
-            shown, seen_media = [], set()
-            for a in aids:
-                mid_local = thumbs.get(a, "")
-                if mid_local:
-                    if mid_local in seen_media:
-                        continue
-                    seen_media.add(mid_local)
-                shown.append(a)
+            # No dedupe here, and the reason is worth keeping: media_id is the catalog's
+            # PRIMARY KEY, so artwork_id -> media_id is injective and two keys can NEVER
+            # resolve to one piece. The "defensive dedupe" that used to sit here could not
+            # fire on any real store. The legacy double-key it was meant to cover is
+            # healed where the truth actually is -- in the sweep, which sees both ids on
+            # the upstream row and can discard the stale one.
+            shown = list(aids)
             shown_by_contest[cid] = shown
             rows.append({
                 "contest_id": cid,
@@ -11193,16 +11229,18 @@ def create_app(out_dir: Path):
         _contest_detection_sync). Catches entries made on pixai.art and wins decided while
         the app was closed -- neither of which produces any local event to hook.
 
-        No CSRF token, matching /api/claim's one-click simplicity: nothing about the
-        account changes here. It is a read of the owner's own contest rows that lands in
-        local telemetry.
+        CSRF REQUIRED, like every sibling POST on this surface. It reaches PixAI with the
+        owner's credentials on a cross-site-triggerable POST, which is what the token is
+        for. (An earlier version of this docstring said the opposite; it described a route
+        that no longer existed by the time anyone read it.)
 
-        Single-flight via a module lock -- a second call while one is sweeping gets a 409,
-        the same busy shape /api/panel/run and /api/assets/fetch use. The sweep is paced,
-        so overlapping runs would only stack paced traffic on PixAI.
-
-        `synced` is whether the sweep actually ran, not a constant: a poll that fails must
-        not answer like one that worked.
+        Single-flight via a module lock, and the answer is a STATE rather than a refusal --
+        there is nothing for a caller to retry when a sweep is already running:
+          {started: true}                     -- one is now running on its own thread
+          {started: false, skipped: "recent"} -- one ran recently; nothing to do
+          {started: false, busy: true}        -- one is already in flight
+        Completion is NOT reported here: the sweep outlives this request. The client
+        watches `sync_running` on /api/contest/mine instead.
 
         ONE count comes back, and only one. contest_wins is deliberately absent -- it is a
         hidden-only metric, and even a zero here would tell a reader that a win is something

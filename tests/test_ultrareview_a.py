@@ -7,11 +7,19 @@ nothing like today's.
 import json
 import time
 
+import pytest
+
 import moonglade_backup as core
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_test_client
+from tests.conftest import login_test_client, _SEALED_DONOR
+
+# Same marker the sibling roster tests use. This test used to RETURN EARLY when the donor
+# was absent, which counts as a pass and hides it from conftest's donor-skip warning --
+# the one thing that warning exists to make visible.
+needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
+                                 reason="sealed-definitions donor (private repo) not present")
 
 
 def _row(**kw):
@@ -99,26 +107,59 @@ def test_the_sweep_keys_entries_by_artwork_not_entry_id(tmp_path, monkeypatch, p
     assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
 
 
-def test_mine_collapses_two_keys_that_resolve_to_one_local_piece(tmp_path, monkeypatch):
-    """The defensive read for an ALREADY-poisoned store. Where the catalog resolves two
-    keys to the same local media they are one entry and are shown once.
+def test_the_sweep_heals_a_legacy_double_key(tmp_path, monkeypatch, pixai):
+    """The REAL migration, in the one place it can be made safely.
 
-    And the honest limit, asserted rather than glossed: a key the catalog cannot resolve
-    is LEFT ALONE. An entry-id key from the old sweep and an entry made on another device
-    look identical from here -- both resolve to nothing local -- so dropping one would
-    also drop the other. New poisoning is prevented at the source (the normalizer keeps
-    the artwork id); the store itself is grow-only and is never rewritten."""
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
-    monkeypatch.setattr(core, "list_contests", lambda s, **k: [])
-    for key in ("c1:art-9", "c1:entry-1"):
-        g.telem_set_add("contest_entry_keys", key, out_dir=tmp_path)
-    cli = _client(tmp_path, [_row(media_id="m1", artwork_id="art-9", filename="a_m1.png")])
-    d = cli.get("/api/contest/mine").get_json()
-    # unresolvable key kept: it is indistinguishable from a real off-device entry
-    assert d["contests"][0]["entry_artwork_ids"] == ["art-9", "entry-1"]
-    # ...and the resolvable duplicate really does collapse
-    g.telem_set_add("contest_entry_keys", "c1:art-9", out_dir=tmp_path)   # set dedupes
-    assert len(g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == 2
+    Before the artwork id was preserved, the sweep keyed an entry by its ENTRY id while the
+    enter and publish paths keyed the same entry by its ARTWORK id -- one entry, two keys,
+    in a set that only grows. It cannot be untangled from the keys alone. But when upstream
+    hands back a row carrying BOTH ids, it has just told us they name the same entry, and
+    that is the moment -- the only moment -- the stale key can be discarded honestly."""
+    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    # a store poisoned the old way: the entry id, from a pre-fix sweep
+    g.telem_set_add("contest_entry_keys", "c1:entry-1", out_dir=tmp_path)
+    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+        {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
+    monkeypatch.setattr(core, "contest_my_entries",
+                        lambda s, slug, uid: core._contest_rows(
+                            [{"id": "entry-1", "artwork": {"id": "art-9"}}]))
+    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    g._contest_detection_sync(tmp_path)
+    # one entry, one key -- the true one
+    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:art-9"]
+    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 1
+
+
+def test_the_sweep_leaves_an_unpaired_key_alone(tmp_path, monkeypatch, pixai):
+    """The limit of the migration, asserted rather than assumed: with only one id on the
+    row there is nothing to prove, so nothing is discarded. An entry made on another device
+    is not evidence that some other key is stale."""
+    monkeypatch.setattr(g, "_contest_sync_last_ok", {"at": 0.0})
+    monkeypatch.setattr(g, "_CONTEST_SYNC_PAUSE", 0)
+    g.telem_set_add("contest_entry_keys", "c1:somebody-else", out_dir=tmp_path)
+    monkeypatch.setattr(core, "list_contests", lambda s, **k: [
+        {"id": "c1", "slug": "s1", "active": True, "result_at": "", "end_at": ""}])
+    monkeypatch.setattr(core, "contest_my_entries",
+                        lambda s, slug, uid: [{"artworkId": "art-9"}])   # no entry id
+    monkeypatch.setattr(core, "contest_winners", lambda s, slug: [])
+    g._contest_detection_sync(tmp_path)
+    assert sorted(g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"]) == [
+        "c1:art-9", "c1:somebody-else"]
+
+
+def test_set_discard_is_narrow_and_honest(tmp_path):
+    """The primitive itself. These sets are grow-only on purpose -- a metric that can fall
+    can un-earn an achievement -- so the one exception reports whether it actually did
+    anything and does nothing at all when the key is not there."""
+    g.telem_set_add("contest_entry_keys", "c1:a", out_dir=tmp_path)
+    assert g.telem_set_discard("contest_entry_keys", "c1:nope", out_dir=tmp_path) is False
+    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == ["c1:a"]
+    assert g.telem_set_discard("contest_entry_keys", "c1:a", out_dir=tmp_path) is True
+    assert g.load_telemetry(tmp_path)["sets"]["contest_entry_keys"] == []
+    # an absent set is not an error
+    assert g.telem_set_discard("never_existed", "x", out_dir=tmp_path) is False
 
 
 # ---- finding 6: the requires fixed point ------------------------------------
@@ -150,12 +191,12 @@ def test_a_meta_of_a_meta_earns_in_one_pass():
     assert by["outer-meta"]["current"] == 1
 
 
+@needs_donor
 def test_the_real_roster_still_resolves_its_metas(tmp_path):
     """The live roster, through the real path -- the fixed point must not change what the
     shipped metas do. Self-computing: satisfies every threshold and asserts every
     requires-meta earns."""
-    if not [a for a in g._roster() if a.get("requires")]:
-        return                                     # donor absent -> nothing to assert
+    assert [a for a in g._roster() if a.get("requires")], "the roster really has metas"
     full = {a["metric"]: 10 ** 9 for a in g._roster()}
     by = {a["id"]: a for a in g.compute_achievements(full)["achievements"]}
     for a in g._roster():

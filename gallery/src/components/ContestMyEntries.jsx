@@ -32,6 +32,24 @@ export default function ContestMyEntries({ rows, loaded = true, syncing, err, on
     return <div className="mgh-loading">reading your entries…</div>;
   }
 
+  // An error belongs in the LOADED state, not only inside the empty one. A failed first
+  // read used to leave this on "reading your entries…" forever with the error unreachable
+  // -- the one case where something had gone wrong and the surface said nothing.
+  if (err && !list.length) {
+    return (
+      <div className="mgcte-empty">
+        <div className="glyph">🏅</div>
+        <div className="t">Couldn't read your entries</div>
+        <div className="c">{err}</div>
+        <div className="a">
+          <button type="button" className="mgct-ghost lav" onClick={onBrowse}>
+            Browse running contests
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!list.length) {
     return (
       <div className="mgcte-empty">

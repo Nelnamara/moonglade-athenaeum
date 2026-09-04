@@ -123,7 +123,8 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
           </div>
 
           {tab === "mine" && (
-            <ContestMyEntries rows={mineRows} loaded={mine !== null} syncing={syncing} err={mineErr}
+            <ContestMyEntries rows={mineRows} loaded={mine !== null || mineErr !== null}
+              syncing={syncing} err={mineErr}
               onOpen={openFromRow} onBrowse={() => setTab("contests")} />
           )}
 
