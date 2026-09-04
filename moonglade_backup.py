@@ -4011,10 +4011,15 @@ def carry_local_fields(row, known):
 
     APPLIED AT, since issue #19 closed the gap, in TWO places and no others:
 
-      * `build_catalog_row` -- so EVERY create-time capture path gets the carry by
-        construction rather than by remembering: run_sync_videos, run_import_local,
-        run_generate, _download_video_task, _download_image_task, run_edit_image, and
-        the gallery's /api/loom/import-bundle. The two collect writers
+      * `build_catalog_row` -- so EVERY create-time capture path builds its row in one
+        place: run_sync_videos, run_import_local, run_generate, _download_video_task,
+        _download_image_task, run_edit_image, and the gallery's /api/loom/import-bundle.
+        The builder applies the merge, but only over the `known` map its CALLER hands it,
+        so a site that omits `known` still writes a blanking row -- the shared builder
+        removes the drift, not the need to pass the snapshot. (The Loom bundle import
+        shipped omitting it, on a comment claiming its file-resolution guard proved the
+        media_id was uncataloged; a catalog row outlives its file by design, so it did
+        not.) The two collect writers
         (_download_image_task / _download_video_task) are the per-task path every
         create route funnels through -- run_generate, run_edit_image,
         run_generate_video, collect_generation, the watch mirror, CLI --task-id

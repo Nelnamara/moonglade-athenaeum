@@ -569,6 +569,33 @@ def test_loom_bundle_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
     assert "Z" not in got["created_at"]      # the pre-existing divergence, still there
 
 
+def test_loom_bundle_carries_local_fields(tmp_path, monkeypatch):
+    """A catalog row OUTLIVES its file. reconcile_catalog_with_disk keeps the row of a
+    media_id whose file is gone -- quarantined by --dedup, deleted by hand -- as normal,
+    supported state. The route's _loom_resolve_media guard only asks whether a FILE
+    resolves, never whether a ROW exists, so a rated/published/collected media_id whose
+    image is missing locally reaches the builder. The bytes genuinely aren't here, so the
+    file must be written; the row must keep every locally-owned column. Omitting `known`
+    here blanked all of them through save_catalog's full-row upsert -- the 2026-09-03
+    data-loss class, at the one site issue #19 left unwired."""
+    monkeypatch.setattr(g, "make_thumbnail", lambda *a, **k: None)
+    monkeypatch.setattr(g, "make_video_thumbnail", lambda *a, **k: None)
+    _seed_local(tmp_path / "catalog.db", "m-gone")
+    assert not (tmp_path / "images" / "old.png").exists()   # row present, file is not
+
+    cli = login_test_client(g.create_app(tmp_path))
+    r = cli.post("/api/loom/import-bundle",
+                 data={"file": (_bundle("m-gone"), "bundle.zip")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["media_added"] == 1          # the guard did let it through
+
+    row = _row(tmp_path / "catalog.db", "m-gone")
+    assert {f: row[f] for f in LOCAL} == LOCAL       # curation survived
+    assert (tmp_path / "imported" / "m-gone.png").exists()
+    assert row["filename"] == "imported/m-gone.png"  # and the row points at the new file
+
+
 # --------------------------------------------------------------------------------------
 # The helper's own contract
 # --------------------------------------------------------------------------------------

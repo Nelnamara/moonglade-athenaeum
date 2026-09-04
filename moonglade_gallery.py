@@ -15466,6 +15466,20 @@ __DESIGN_TOKENS__
         if not project:
             return jsonify({"error": "bundle's project.json has no project"}), 400
         imported_dir = out_dir / "imported"
+        # The carry map for this bundle's media, read ONCE (issue #19). The
+        # _loom_resolve_media guard below does NOT establish that a media_id is absent from
+        # the catalog -- it only asks whether a FILE resolves (find_files_for_media_id, or
+        # a video row whose filename exists on disk). A row whose file is gone is normal,
+        # supported state: reconcile_catalog_with_disk leaves it intact by design, so a
+        # media_id quarantined by --dedup or deleted by hand still carries its rating,
+        # title, collections, artwork_id and published state. Without `known`, importing a
+        # bundle that references such a media_id would write the file AND blank every one
+        # of those columns through save_catalog's full-row upsert -- exactly the 2026-09-03
+        # data loss. The file is still written (the bytes really are missing here); the row
+        # keeps what the user owns.
+        known = core.known_catalog_rows(db_path, [
+            Path(n).stem for n in z.namelist()
+            if n.startswith("media/") and not n.endswith("/")])
         rows = []
         for name in z.namelist():
             if not name.startswith("media/") or name.endswith("/"):
@@ -15485,12 +15499,13 @@ __DESIGN_TOKENS__
                 make_thumbnail(dest, thumb_path)
             # Same shared row-builder every capture path uses (issue #19): a bundle
             # import is run_import_local's shape -- a file, no task, so no `fm` and no
-            # generation surface. `known` is omitted deliberately: the _loom_resolve_media
-            # guard above means only media this machine does NOT have reaches here.
-            # created_at stays this route's own naive local stamp, NOT _created_at_utc's
-            # UTC+Z -- see that helper for why the two sort differently.
+            # generation surface, but WITH `known` (see above -- a missing file does not
+            # mean a missing row). created_at stays this route's own naive local stamp,
+            # NOT _created_at_utc's UTC+Z -- see that helper for why the two sort
+            # differently.
             rows.append(core.build_catalog_row(
-                mid, filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
+                mid, known=known,
+                filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
                 source="api", status="imported",
                 created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                 prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))

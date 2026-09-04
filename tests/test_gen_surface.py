@@ -139,8 +139,12 @@ def test_every_capture_path_builds_its_row_through_the_shared_builder():
 
 def test_the_local_import_paths_also_use_the_shared_builder():
     """run_import_local has no task and no surface, but it writes the same catalog row --
-    so it goes through the same builder, and gets the carry for free. Same for the
-    gallery's Loom bundle import."""
+    so it goes through the same builder. The builder is not the whole carry, though: it
+    merges over the `known` map its CALLER passes, so a site that reaches it without
+    `known=` still writes a blanking row. The gallery's Loom bundle import did exactly
+    that -- its file-resolution guard does not prove the media_id is uncataloged, because
+    a row outlives its file (dedup quarantine, manual deletion) -- so this guard asserts
+    the argument is actually there, not merely that the builder is called."""
     import pathlib
     src = pathlib.Path(core.__file__).read_text(encoding="utf-8")
     body = _function_body(src, "def run_import_local")
@@ -151,6 +155,10 @@ def test_the_local_import_paths_also_use_the_shared_builder():
     loom = gsrc[gsrc.index("def api_loom_import_bundle"):]
     loom = loom[:loom.index("media_added")]
     assert "build_catalog_row(" in loom and '{k: "" for k in CATALOG_FIELDS}' not in loom
+    assert "known_catalog_rows(" in loom, \
+        "the Loom bundle import must build its carry map (known_catalog_rows)"
+    assert "known=known" in loom, \
+        "the Loom bundle import must hand build_catalog_row that carry map (known=)"
 
 
 def test_task_row_fields_carry_lineage():
