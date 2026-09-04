@@ -48,7 +48,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
   - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
-  - Login version reveal recopy: tracked as [#51](https://github.com/Nelnamara/moonglade-athenaeum/issues/51) (retire `/next`) — the issue is the home, not this list.
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
@@ -69,25 +68,16 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   project has *already* spent. Only the global account credit ledger tracks historical spend today.
   Low priority, but needs scoping before build.
 
-- **Marks render too small, everywhere they appear** *(scope + workshop the right size — owner, 2026-08-19)*
-  A recurring, real sizing defect ("song as old as time"), long deprioritised as cosmetic. The header
-  is the worst example. Owner call: **workshop it and settle the right size**, then apply everywhere
-  marks appear — don't spot-fix one surface. **Same workshop, added 2026-08-22:** the mark
-  *animations* — the 16 picks in the Branding tab save but nothing applies them since the 3.0 header
-  ([#24](https://github.com/Nelnamara/moonglade-athenaeum/issues/24); the accent-tile-behind-alpha-marks
-  half shipped 2026-08-27).
-  Owner: "many if not all look janky now — workshop fixes or new ones", so this is a design pass
-  (which animations survive, which are new, what the mark sits on), not a port of the classic CSS.
+- **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
+  The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
+  3.7.0. Left: sweep every surface that renders a mark for proportional scaling (marks-anims spec §1),
+  and get the owner's eight final animated .webp marks into the repo. The pre-unlock mark picker is
+  [#50](https://github.com/Nelnamara/moonglade-athenaeum/issues/50)'s home, not this line.
 
-- **Login page: render the Banner — login slot** ([#25](https://github.com/Nelnamara/moonglade-athenaeum/issues/25); the welcome-hold half shipped 2026-08-27)
-  The Branding tab sells three banner slots; since the 3.0 React login nothing draws the login one —
-  the card's art position shows the header mark instead, while the serve chain (owner crop → container →
-  sealed shipped default) is fully alive and unconsumed. One design call remains before the swap:
-  where the 4:1 banner sits on the card (`Login.dc.html` has no banner element).
-
-- **Claimable-reward notice in the activity tracker + gift icon on promo cards** *(the icon half of
-  [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26) shipped 2026-08-22; this is the
-  remaining design step)* — a notice when credits become claimable, and the gift icon on future promo gifts.
+- **Gift icon on promo cards** *(the last slice of [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))*
+  The icon on the claim chip shipped 2026-08-22 and the claimed-reward line in the activity tracker
+  shipped 2026-08-31 (3.7.0). What remains is the gift icon on future promo gifts — blocked until a
+  promo/card-claim surface exists to carry it.
 
 - **Queue-wait on the dock's queued tiles — the last slice of "starts in ~N"** *(owner call, 2026-08-19)*
   The honest queue-wait readout ("est. N wait", never dressed as render progress) already ships in
@@ -117,9 +107,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
-- **Community read-only surface.** Scouted data (per-artwork view counts — which dwarf likes —
-  lifetime stats, contest catalog). Much has since shipped in some form; audit what's left
-  worth surfacing before building anything.
+- **Community read-only surface.** Scouted data: per-artwork view counts (which dwarf likes) and
+  lifetime stats. The contest-catalog half is fully satisfied by the 3.7.0 contest workbench. Audit
+  what's left worth surfacing before building anything.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
