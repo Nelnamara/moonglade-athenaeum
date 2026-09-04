@@ -47,6 +47,7 @@ import mimetypes
 import os
 import re
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -55,7 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
-                            save_catalog, _db_is_empty,
+                            save_catalog, _db_is_empty, rows_for_media_ids,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
                             # The one library scan (see moonglade_gallery.py's
@@ -3979,6 +3980,21 @@ def _merge_full(fm, kr):
     return {f: (fm.get(f) or kr.get(f, "")) for f in _FULL_META_FIELDS}
 
 
+def known_catalog_rows(db_path, ids):
+    """The pre-download snapshot carry_local_fields needs: media_id -> existing row.
+
+    Keyed to just this task's media, so it is a lookup rather than a whole-catalog read.
+    A catalog that does not exist yet -- the first collect into a fresh output folder,
+    before save_catalog creates the table -- means there is nothing local to carry, which
+    is an empty map and not an error.
+    """
+    try:
+        rows = rows_for_media_ids(db_path, ids)
+    except sqlite3.OperationalError:
+        return {}
+    return {r["media_id"]: r for r in rows if r.get("media_id")}
+
+
 def carry_local_fields(row, known):
     """Merge a freshly-rebuilt download row OVER its existing catalog row so LOCAL
     curation survives a re-pull. A download pass only knows API/file fields
@@ -3991,7 +4007,15 @@ def carry_local_fields(row, known):
     `known` maps media_id -> the existing catalog row (a pre-download snapshot).
     An empty fresh value never clobbers an existing one, so a missing download
     keeps the old filename. New media_ids (absent from `known`) pass through
-    unchanged. Applied at save time, it covers every row-builder path at once."""
+    unchanged. Applied at save time, it covers every row-builder path at once.
+
+    APPLIED AT: run_download's page saves and its backfill pass, and -- since
+    2026-09-03 -- _download_image_task and _download_video_task, which are the
+    per-task collect path every create route funnels through (run_generate,
+    run_edit_image, run_generate_video, collect_generation, the watch mirror, and
+    CLI --task-id recovery). Those two were missing it, so RE-collecting a task
+    wiped exactly the fields listed above; a finished generation polled twice was
+    enough to do it."""
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
         if v not in ("", None):
@@ -8331,6 +8355,10 @@ def _download_video_task(session, result, task_id, out, args, params):
     vdir.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
     rows, saved = [], []
+    # The same pre-download snapshot the image path takes, and for the same reason: this
+    # row is rebuilt from a blank template, so without the carry a re-collect blanks the
+    # video's rating, collections, title and published state.
+    known = known_catalog_rows(db_path, [o.get("video_media_id") for o in outs])
     for o in outs:
         vmid = o["video_media_id"]
         url = media_file_gql(session, vmid).get("fileUrl")
@@ -8390,7 +8418,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the catalog
             print("  poster thumbnail failed for {} ({}); video still cataloged".format(vmid, e))
         video_faststart(path)                        # iOS needs moov at the front to stream
-        rows.append(full)
+        rows.append(carry_local_fields(full, known))
         saved.append(str(path))
     if rows:
         save_catalog(db_path, rows)
@@ -8490,6 +8518,14 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     fm = extract_full_meta(result)
     _fill_preset_defaults(session, fm, result)   # issue #18: model-preset steps/sampler/cfg
     rows, saved = [], []
+    # THE PRE-DOWNLOAD SNAPSHOT. Every row below is rebuilt from a blank CATALOG_FIELDS
+    # template, which knows only API/file fields -- so upserting it raw BLANKS everything
+    # locally owned: artwork_id, is_published, title, rating, collections, art_tags,
+    # aes_score, blurhash. Collecting a task a second time therefore erased the work of
+    # having published, rated and filed the picture. (Owner, live, 2026-09-03: a published
+    # piece lost its artwork_id after a relaunch re-polled a finished task.) Keyed to this
+    # task's media only, so it stays a lookup rather than a whole-catalog read.
+    known = known_catalog_rows(db_path, [m for m, _ in media])
     for mid, seed in media:
         url, info = resolve_media(session, mid)
         if not url:
@@ -8542,7 +8578,7 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             "height": str((info or {}).get("height") or ""),
         })
         full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
-        rows.append(full)
+        rows.append(carry_local_fields(full, known))
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:

@@ -7003,28 +7003,42 @@ def create_app(out_dir: Path):
         return {"media_ids": [r["media_id"] for r in rows], "saved": 0,
                 "is_video": any(str(r["is_video"] or "") == "1" for r in rows)}
 
-    def _collect_single_flight(core, session, tid):
-        """core.collect_generation, but never twice concurrently for the same task id."""
+    def _collect_single_flight(core, session, tid, force=False):
+        """core.collect_generation, but never twice for the same task id -- concurrently
+        OR later.
+
+        The concurrent half was always here. The LATER half was the data-loss hole: the
+        in-flight entry is dropped once its last waiter leaves, so a second poll of the
+        same finished task (a relaunch re-polling a done job, which is ordinary use) found
+        no entry and re-ran the collect. That re-download rebuilt the catalog rows from a
+        blank template and upserted them, blanking artwork_id, is_published, title, rating,
+        collections and the rest -- the owner lost a published piece's artwork_id to
+        exactly this, live, 2026-09-03.
+
+        So: if the task's media are already in the catalog, that IS the answer. No
+        download, no upsert, nothing to lose. `force=True` keeps a deliberate re-collect
+        available (no caller needs one today). This mirrors api_import_task's own
+        pre-check; the row-level carry in moonglade_backup is the second belt."""
         tid = str(tid)
         with _collect_mu:
             ent = _collect_inflight.get(tid)
             if ent is None:
                 ent = _collect_inflight[tid] = {"lock": threading.Lock(),
-                                                "waiters": 0, "done": False}
+                                                "waiters": 0}
             ent["waiters"] += 1
         try:
             with ent["lock"]:
-                if ent["done"]:
-                    # A concurrent collect for this task finished while we waited --
-                    # its media is downloaded + catalogued, so report that instead of
-                    # re-downloading (and, for a video, re-remuxing). If it somehow
-                    # catalogued nothing (every download failed), fall through and
-                    # retry for real.
+                if not force:
+                    # ALREADY COLLECTED -- by a concurrent call that just finished, or by
+                    # any earlier one. Either way the media is downloaded and catalogued,
+                    # so report that instead of re-downloading (and, for a video,
+                    # re-remuxing) over the top of it. If nothing is catalogued (every
+                    # download failed, or this is the first pass), fall through and collect
+                    # for real.
                     got = _collected_from_catalog(tid)
                     if got is not None:
                         return got
                 got = core.collect_generation(session, tid, str(out_dir))
-                ent["done"] = True
                 # Seven Candles (gen_streak) + The Long Vigil (active_days): a gen collected
                 # into the archive marks today. Keyed day-lists, idempotent, silent-soft --
                 # telemetry must never break a collect.
