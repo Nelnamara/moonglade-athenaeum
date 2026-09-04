@@ -10731,7 +10731,21 @@ def list_contests(session, active_only=False, max_pages=6):
                 "end_at": r.get("endAt") or "",
                 "result_at": r.get("resultAt") or "",
                 "url": ("https://pixai.art/en/contest/%s" % slug) if slug else "",
-                "description": _contest_title(r.get("description"))[:600],
+                # WHOLE, never truncated. It used to be sliced to 600 chars, which was
+                # safe only while nothing rendered it. The brief is MARKDOWN upstream, so
+                # a mid-token cut can sever a **bold** run or a [link](url) and leave the
+                # renderer holding half a construct -- and the detail view now renders it.
+                "description": _contest_title(r.get("description")),
+                # The entry requirements, straight through (contest detail view):
+                #   rules  -- [{type: 'required_model_ids', model_ids: [...]}
+                #              | {type: 'required_lora_ids', lora_ids: [...]}]; [] = no restriction
+                #   tack_name -- the tag an entry must carry (PixAI calls a tag a "tack")
+                #   desc_url / result_url -- the contest's own rules + results documents,
+                #     both frequently absent (null upstream -> "" here)
+                "rules": [x for x in (r.get("rules") or []) if isinstance(x, dict)],
+                "tack_name": r.get("proposedTackName") or "",
+                "desc_url": r.get("descUrl") or "",
+                "result_url": r.get("resultUrl") or "",
             })
         total_page = int(d.get("totalPage") or 1)
         if page >= total_page or page >= max_pages:

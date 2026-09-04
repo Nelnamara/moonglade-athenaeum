@@ -344,6 +344,79 @@ button.mgct-enter.small { font-size: 12.5px; padding: 10px 20px; }
 .mgct-prevgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
 .mgct-prevtile { aspect-ratio: 1 / 1; width: 100%; border-radius: 8px; object-fit: cover;
   border: 1px solid rgba(255,255,255,.06); background: var(--surface0); }
+
+/* ---- B · detail, the brief board (Contest Brief Board.dc.html, OPTION A — owner's
+   verdict 2026-09-03). Three blocks the first build shipped without: the brief, the
+   per-tier prize breakdown, and the entry requirements. The eyebrows reuse the shipped
+   .mgct-sechead/.mgct-sectitle rather than the handoff's own mono tracking, so all four
+   labels on this screen (…the three below plus ENTRIES PREVIEW) match each other, which
+   is the relationship the handoff draws. ---- */
+.mgct-chip .sep { color: var(--overlay0); padding: 0 5px; }
+.mgct-brief { max-width: 68ch; }
+.mgct-md { font-size: 13.5px; line-height: 1.62; color: var(--text); }
+.mgct-md p { margin: 0 0 10px; }
+.mgct-md > :last-child { margin-bottom: 0; }
+.mgct-md h4, .mgct-md h5, .mgct-md h6 { font-size: 13px; font-weight: 800; margin: 14px 0 6px;
+  letter-spacing: .01em; color: var(--text); }
+.mgct-md h5 { font-size: 12.5px; }
+.mgct-md h6 { font-size: 12px; color: var(--subtext); }
+.mgct-md ul, .mgct-md ol { margin: 0 0 10px; padding-left: 20px; }
+.mgct-md li { margin-bottom: 3px; }
+.mgct-md strong { font-weight: 800; color: var(--text); }
+.mgct-md em { font-style: italic; }
+.mgct-md a { color: var(--lavender); text-decoration: underline;
+  text-underline-offset: 2px; overflow-wrap: anywhere; }
+.mgct-md a:hover { color: var(--text); }
+
+/* The handoff's 1.25fr / 1fr row: prizes read as a set of cards, requirements as rows. */
+.mgct-cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; margin-bottom: 16px; }
+.mgct-cols.oneup { grid-template-columns: 1fr; }
+.mgct-tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mgct-tier { display: flex; flex-direction: column; gap: 6px; padding: 11px 12px;
+  border: 1px solid var(--surface1); border-radius: 10px; background: var(--surface0); }
+/* Rank 1 wears the gold, per the surface's fixed hues — gold is prizes and winning. */
+.mgct-tier.top { border-color: rgba(212,175,55,.42);
+  box-shadow: inset 0 0 0 1px rgba(212,175,55,.12); }
+.mgct-tierrank { font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600;
+  letter-spacing: .1em; color: var(--overlay0); }
+.mgct-tierrank b { color: var(--gold); font-weight: 700; }
+.mgct-tieramt { font-family: ui-monospace, Menlo, monospace; font-size: 16px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.mgct-tier.top .mgct-tieramt { color: var(--gold); }
+.mgct-tieramt small { font-size: 10px; font-weight: 500; color: var(--subtext); margin-left: 3px; }
+.mgct-tierwin { font-size: 11px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgct-tierfoot { display: flex; justify-content: space-between; gap: 10px; padding-top: 8px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; font-weight: 600;
+  color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.mgct-tierfoot b { color: var(--gold); font-weight: 700; }
+
+.mgct-reqs { display: flex; flex-direction: column; gap: 9px; }
+.mgct-req { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: start;
+  font-size: 12px; }
+.mgct-reqk { font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--overlay0); padding-top: 3px; }
+.mgct-reqv { color: var(--subtext); line-height: 1.5; }
+.mgct-reqv .mgct-viewall { margin-left: 0; }
+.mgct-ok { color: var(--emerald); font-weight: 700; margin-right: 5px; }
+.mgct-none { color: var(--overlay0); font-style: italic; }
+/* Mauve, because the required tag is the community half of the surface's vocabulary. */
+.mgct-tack { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+  border-radius: 7px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
+  font-weight: 600; background: rgba(182,146,230,.16); color: var(--mauve);
+  border: 1px solid rgba(182,146,230,.36); overflow-wrap: anywhere; }
+.mgct-tack .h { color: var(--overlay0); }
+.mgct-reqrule { display: flex; flex-direction: column; gap: 4px; }
+.mgct-reqrule + .mgct-reqrule { margin-top: 7px; }
+.mgct-reqnote { color: var(--subtext); }
+.mgct-idlink { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+  color: var(--lavender); overflow-wrap: anywhere; }
+.mgct-idlink .a { color: var(--overlay0); }
+.mgct-idlink:hover { color: var(--text); }
+@media (max-width: 720px) {
+  .mgct-cols { grid-template-columns: 1fr; }
+  .mgct-tiers { grid-template-columns: repeat(2, 1fr); }
+}
+
 .mgct-winhead { font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--gold);
   padding: 16px 0 9px; }
 .mgct-winhead .n { color: var(--overlay0); font-weight: 600; letter-spacing: 0; }

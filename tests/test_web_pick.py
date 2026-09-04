@@ -1208,12 +1208,20 @@ def test_distinct_task_count(tmp_path):
     assert g.distinct_task_count(tmp_path / "catalog.db") == 2
 
 
+# A brief longer than the 600 chars the normalizer used to slice it to, so the
+# never-truncated assertion below can actually fail if the slice ever comes back.
+_LONG_BRIEF = ("Show us your **best** work. " * 40) + "[rules](https://pixai.art/rules)"
+
 _CONTEST_PAGES = {
     1: {"data": [
         {"id": "1", "title": {"en": "Summer Embers", "zh": "x"}, "slug": "pixai-summer-embers",
          "type": "official", "runtimeStatus": "running", "voteType": "creator_pick",
          "prizeAmount": 29000000, "mediaId": "M1", "startAt": "2026-06-26T00:00:00Z",
-         "endAt": "2026-07-06T00:00:00Z", "prizeDistribution": [{"rank": 1, "count": 1, "amount": 100}]},
+         "endAt": "2026-07-06T00:00:00Z", "prizeDistribution": [{"rank": 1, "count": 1, "amount": 100}],
+         "description": {"en": _LONG_BRIEF, "ja": "nope"},
+         "rules": [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}, "junk"],
+         "proposedTackName": "summer-embers", "descUrl": "https://pixai.art/doc/se",
+         "resultUrl": None},
         {"id": "2", "title": {"en": "Rookie Contest"}, "slug": "user-rookie", "type": "community",
          "runtimeStatus": "running", "prizeAmount": 100000, "mediaId": "M2",
          "startAt": "2026-06-29T00:00:00Z", "endAt": "2026-07-10T00:00:00Z"},
@@ -1242,6 +1250,29 @@ def test_list_contests_normalizes_and_pages(pixai):
     # all -> the ended one is included
     allc = core.list_contests(pixai, active_only=False)
     assert any(c["id"] == "3" and c["active"] is False for c in allc)
+
+
+def test_list_contests_carries_the_whole_brief_and_the_entry_requirements(pixai):
+    """The detail view renders the brief, the prize tiers and the requirements, so the
+    normalizer has to hand them over intact. The description in particular is MARKDOWN and
+    used to be sliced to 600 chars -- a cut that can sever a **bold** run or a link and
+    hand the renderer half a construct."""
+    pixai.on("/contest/list", lambda call: _CONTEST_PAGES[call.params["page"]])
+    rows = {c["id"]: c for c in core.list_contests(pixai, active_only=False)}
+    c1 = rows["1"]
+    # WHOLE, not sliced -- and still English-first off the {en, ja, ...} bundle.
+    assert c1["description"] == _LONG_BRIEF
+    assert len(c1["description"]) > 600
+    assert c1["description"].endswith("[rules](https://pixai.art/rules)")
+    # the requirements, passed through; the non-dict rule entry is dropped, not carried
+    assert c1["rules"] == [{"type": "required_model_ids", "model_ids": ["mA", "mB"]}]
+    assert c1["tack_name"] == "summer-embers"
+    assert c1["desc_url"] == "https://pixai.art/doc/se"
+    assert c1["result_url"] == ""            # null upstream -> "", never None
+    # a contest that publishes none of it gets the empty shapes, never a missing key
+    c2 = rows["2"]
+    assert c2["rules"] == [] and c2["tack_name"] == "" and c2["desc_url"] == ""
+    assert c2["result_url"] == "" and c2["description"] == ""
 
 
 def test_api_contests_route(tmp_path, pixai):
