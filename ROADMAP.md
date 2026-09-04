@@ -101,9 +101,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Scoped-but-unbuilt — decided once, never executed
 
-- **Generation Flags: scope it or drop it.** Owner, verbatim: "either we keep deferring this
-  or it's actually done. WHAT is the scope." The one concrete near-free version: flag
-  near-duplicate generations. Still unanswered.
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
@@ -134,8 +131,10 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Epic A — The Foundry (image → 3D print).** Gated on an explicit go, resin-first, its own optional
   install, never bundled. Stage 1 is a go/no-go spike (one image → mesh → printable). Low priority.
-- **Epic B — Provider Deck.** A provider seam so a second generation backend can plug in; build it
-  only when a real second provider actually lands (so two concrete cases shape it). Low priority.
+- **Epic B — Provider Deck.** A provider seam so a second generation backend can plug in. Per
+  NORTH_STAR (locked 2026-08-25) the seam comes *before* the second provider — it is how the core
+  proves itself provider-agnostic — and it follows the Loom-unify decision in that sequence. Low
+  priority until that decision is taken.
 - **Themed progress bar art.** A moon-phase gauge (near-finished art already banked) for
   generation/render/job progress. Decided in principle, unbuilt.
 - **UPnP / SSDP (or WS-Discovery) LAN presence — show up in Windows Explorer's "Network".**
