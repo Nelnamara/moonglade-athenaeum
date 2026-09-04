@@ -46,13 +46,21 @@ Health measures the library by walking every file on disk, so on a large collect
 real work. It is cached, and the caching is arranged so you never see a stale number and
 rarely wait for a fresh one:
 
-- **The server keeps the last measurement** and hands it back instantly for as long as the
-  catalog has not changed. There is no timer and no staleness window — the moment anything
-  writes to `catalog.db` (a sync, an import, a delete), the cached answer is dropped.
-- **When it has changed**, the next open still answers immediately with the previous numbers
-  and re-measures in the background, so a fresh set is ready the next time you look. Only
-  the very first open of a server session can ever wait — and the server pre-measures once
-  at startup so that one usually doesn't either.
+- **The server keeps the last measurement** and hands it back instantly for as long as
+  nothing has moved. The moment anything writes to `catalog.db` (a sync, an import, a
+  delete), the cached answer is dropped — no timer, no waiting for a window to expire.
+- **Changes you make on disk count too.** Half of what Health reports is read off the folder
+  rather than the catalog — how many files there are, how much space they take, what is in
+  each folder, the duplicate counters, and the two drift numbers. Delete a picture in
+  Explorer or drop one in by hand and the next open notices, with nothing having written to
+  the catalog at all.
+- **And it re-measures at least every ten minutes** even when nothing looks like it moved,
+  so a change too deep for the quick check to see (an edit inside a batch folder, a file
+  replaced under the same name) can never sit there indefinitely.
+- **When something has changed**, the next open still answers immediately with the previous
+  numbers and re-measures in the background, so a fresh set is ready the next time you look.
+  Only the very first open of a server session can ever wait — and the server pre-measures
+  once at startup so that one usually doesn't either.
 - **Reopening any overlay** (Health, Folio, My Art, Contests, the Panel) paints the last
   numbers you saw straight away and refreshes them behind, rather than showing an empty
   panel while it loads.

@@ -24,13 +24,22 @@
 
 @keyframes mgpalSlab { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
 @keyframes mgpalFade { from { opacity: 0; } to { opacity: 1; } }
+/* THE SCRIMS' BLUR IS APPLIED AFTER THE FADE, NOT DURING IT -- the same split overlays.css
+   makes on .mgv-scrim, which is what "byte-identical to .mgv-scrim" above now means for the
+   motion too. A backdrop-filter on a full-viewport element under an opacity animation makes
+   the browser re-blur everything behind it on every frame, and behind these two is a live
+   grid. The resting look is unchanged; only WHEN the blur turns on moved. `forwards`, never
+   `both`: a backwards fill would apply the blur before the delay elapsed. */
+@keyframes mgpalScrimBlur { to { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); } }
 
 /* ---------------------------------------------------------------- the palette */
 
 .mgpal-scrim { position: fixed; inset: 0; z-index: 460; background: rgba(5, 4, 13, .62);
-  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-  animation: mgpalFade .32s ease both; }
-.mgpal-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none; }
+  animation: mgpalFade .32s ease both, mgpalScrimBlur .01s linear .32s forwards; }
+/* The close REPLACES the animation shorthand, dropping the deferred keyframe with it,
+   so the blur is stated directly here -- it is already on when the exit starts. */
+.mgpal-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none;
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 
 /* The host does the 12vh anchoring so the panel's own transform stays free for mgpalSlab
    (a translateX(-50%) centring trick would be clobbered by the animation's transform). */
@@ -141,9 +150,11 @@
 /* --------------------------------------------------------- the cheat-sheet (G) */
 
 .mgks-scrim { position: fixed; inset: 0; z-index: 470; background: rgba(5, 4, 13, .62);
-  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-  animation: mgpalFade .32s ease both; }
-.mgks-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none; }
+  animation: mgpalFade .32s ease both, mgpalScrimBlur .01s linear .32s forwards; }
+/* The close REPLACES the animation shorthand, dropping the deferred keyframe with it,
+   so the blur is stated directly here -- it is already on when the exit starts. */
+.mgks-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none;
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 .mgks-host { position: fixed; inset: 0; z-index: 471; display: flex; justify-content: center;
   align-items: flex-start; padding-top: 10vh; pointer-events: none; }
 
@@ -198,4 +209,7 @@
 @media (prefers-reduced-motion: reduce) {
   .mgpal-scrim, .mgpal, .mgks-scrim, .mgks,
   .mgpal-scrim.closing, .mgpal.closing, .mgks-scrim.closing, .mgks.closing { animation: none; }
+  /* `animation: none` kills the deferred-blur keyframe with the fade, so the blur is stated
+     directly here -- no motion to defer it behind, and the resting look must be the same. */
+  .mgpal-scrim, .mgks-scrim { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 }

@@ -449,9 +449,14 @@ button.mgct-enter.small { font-size: 12.5px; padding: 10px 20px; }
 /* ---- the sub-modal band: picker (C), confirm (D), My Art chooser (F2) ----
    These open ON TOP of an mgv-hosted overlay, so they take their own rung above
    .mgv-host (411) -- see THE OVERLAY LADDER in overlays.css. */
+/* The blur is applied AFTER the fade, not during it -- byte-identical to .mgv-scrim's own
+   animation (overlays.css), whose header carries the full reasoning: a backdrop-filter on a
+   full-viewport element under an opacity animation re-blurs everything behind it every frame,
+   and this one opens over an already-open overlay AND the grid. Same rgba, same blur(7px);
+   only WHEN the blur turns on moved. This file has no reduced-motion block, so nothing kills
+   the keyframe -- if one is ever added, it must state the blur directly (see overlays.css). */
 .mgct-subscrim { position: fixed; inset: 0; z-index: 424; background: rgba(5,4,13,.62);
-  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-  animation: mgvFade .3s ease both; }
+  animation: mgvFade .3s ease both, mgvScrimBlur .01s linear .3s forwards; }
 .mgct-subhost { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center;
   pointer-events: none; }
 .mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; overflow-y: auto;

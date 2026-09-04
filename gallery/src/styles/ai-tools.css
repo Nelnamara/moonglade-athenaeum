@@ -2,8 +2,15 @@
    centred panel (header · scene grid · tally footer), reusing the picker-modal chrome. Browse the
    28; pick hands off to the gen drawer. */
 .mgai-scrim { position: fixed; inset: 0; z-index: 412; /* was 400 -- a TIE with .lbx that survived on accidental DOM order; now a deliberate rung on overlays.css's ladder */ display: flex; align-items: center; justify-content: center;
-  padding: 24px; background: rgba(5, 4, 13, .72); backdrop-filter: blur(4px); animation: mgaiIn .16s ease both; }
+  padding: 24px; background: rgba(5, 4, 13, .72);
+  animation: mgaiIn .16s ease both, mgaiScrimBlur .01s linear .16s forwards; }
 @keyframes mgaiIn { from { opacity: 0; } to { opacity: 1; } }
+/* The blur lands AFTER the fade, not during it -- the same split overlays.css makes on
+   .mgv-scrim, whose header carries the full reasoning: a backdrop-filter on a full-viewport
+   element under an opacity animation re-blurs the whole viewport every frame, and behind this
+   one is the live grid. Resting look unchanged (same rgba, same blur(4px)); only the timing of
+   the blur moved. `forwards`, never `both` -- a backwards fill would defeat the delay. */
+@keyframes mgaiScrimBlur { to { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); } }
 .mgai-modal { width: min(980px, 100%); max-height: min(720px, 92vh); display: flex; flex-direction: column;
   border: 1px solid var(--surface1); border-radius: 16px; overflow: hidden; background: rgba(8, 6, 20, .98);
   box-shadow: 0 40px 100px rgba(0, 0, 0, .6); }

@@ -4393,8 +4393,11 @@ def collection_health(out_dir, db_path):
     # extra exclusion (named disagreement 5) and videos are its own extra kind
     # (named disagreement 4) -- both asked for here, neither imposed on the others.
     # Guarded by tests/test_gallery_filters.py's existing health tests.
-    for e in scan_library(out_dir, kinds=("image", "video"),
-                          exclude=QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)):
+    #
+    # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
+    # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
+    # anything if it watches exactly the roots this walk descends into.
+    for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
         on_disk_rels.add(str(e.rel).replace("\\", "/"))
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
@@ -4535,10 +4538,25 @@ def collection_health(out_dir, db_path):
 #
 # KEYED ON THE CATALOG FILE, NO TIME FLOOR -- the same ruling as _ACH_METRICS_CACHE, for the
 # same reason (see its comment: a floor makes a real change bounded-stale, and that is what
-# broke tests/test_unlock_split.py's earn-then-read). The key is the catalog's
+# broke tests/test_unlock_split.py's earn-then-read). Half the key is the catalog's
 # (mtime_ns, size): every write to the library goes through that file, so the instant it
 # changes the memo is invalid, and a catalog nobody is writing to -- which is every open
 # outside a sync -- is served from memory. os.stat is microseconds; the walk is seconds.
+#
+# ...AND ON THE DISK, because half of what is memoized never touches the catalog. What
+# collection_health() returns is not a catalog summary: total_files, total_bytes, per_bucket
+# and dup_redundant/dup_bytes come off the WALK, and `missing`/`uncataloged` are the DIFF
+# between the walk and the catalog. A file deleted or dropped in by hand moves every one of
+# those and writes nothing to catalog.db, so a catalog-only key served a payload that was
+# provably wrong until some unrelated write happened to move the db file. _health_dir_key()
+# is the cheap disk-side half: the mtimes of the walk's own roots.
+#
+# THE PERIODIC BACKSTOP (HEALTH_MAX_AGE). Directory mtimes catch an add or a delete in the
+# directories themselves, not one nested deeper (batches/<name>/x.png), and not an in-place
+# rewrite that leaves a file's name alone. So the memo also carries a CEILING on age -- a
+# ceiling, never a floor: a catalog write still invalidates in the same instant it lands.
+# Past the ceiling the reader is still served immediately, the recompute just happens behind
+# it, which is the same serve-stale path a moved key already takes.
 #
 # SERVE-STALE-WHILE-RECOMPUTING. When the key HAS moved, the request that notices does not
 # pay for the new walk: it gets the previous payload immediately and a single background
@@ -4554,6 +4572,14 @@ _HEALTH_CACHE = {"key": None, "payload": None, "at": 0.0}
 _HEALTH_LOCK = threading.Lock()
 _HEALTH_BUSY = {"on": False}
 
+# How long a snapshot may be served before a recompute is kicked off behind it, EVEN when
+# neither half of the key moved. Ten minutes: long enough that an idle session never pays
+# the walk twice over, short enough that the drift the key cannot see (a file swapped inside
+# batches/<name>/, an in-place rewrite) is bounded instead of permanent. This is the owner's
+# own "loaded periodically and cached", and it is a ceiling on staleness, not a floor on
+# freshness -- a catalog write still invalidates in the instant it lands.
+HEALTH_MAX_AGE = 600.0
+
 
 def _health_key(db_path):
     """The cheap invalidation key: what the catalog file looks like right now. None when it
@@ -4566,11 +4592,69 @@ def _health_key(db_path):
         return None
 
 
+def _health_dir_key(out_dir):
+    """The cheap DISK-side key: the mtimes of the roots collection_health() actually walks.
+
+    A directory's own mtime moves whenever an entry is added to or removed from it, so one
+    scandir of out_dir plus the mtime of each immediate subdirectory the walk descends into
+    (HEALTH_EXCLUDE pruned, the same set scan_library() is handed) notices a file deleted
+    from or dropped into any month folder, images/, imported/ or the root itself -- exactly
+    the buckets bucket_of() names and per_bucket/total_files/missing/uncataloged are built
+    from. Cost is ONE directory listing plus one stat per top-level directory -- dozens of
+    syscalls against a library of tens of thousands of files, and flat in that count, which
+    is the whole point of not re-walking.
+
+    THE STAT HAS TO BE os.stat(e.path), NOT e.stat(). scan_library() reads size straight off
+    the DirEntry for exactly the reason that would tempt someone here -- on Windows a
+    DirEntry is already populated by the directory read, so e.stat() is free. For a
+    SUBDIRECTORY it is also WRONG: what NTFS hands back there is the duplicated timestamp
+    copy held in the parent's index entry, and that copy is not refreshed when a file inside
+    the subdirectory is added or deleted. Measured on this box: after `unlink()` of a file in
+    2026-01/, os.stat("2026-01") moved and the scandir DirEntry did not. The free stat would
+    have made this whole key silently never fire, which is the bug it exists to fix.
+
+    What it does NOT see: a change nested deeper than one level (batches/<name>/x.png) or a
+    same-name in-place rewrite. HEALTH_MAX_AGE is the backstop for those, not this.
+
+    None when out_dir cannot be listed at all (a disconnected drive) -- the same shape
+    _health_key uses for a missing catalog, and it memoizes the same way.
+    """
+    root = str(out_dir)
+    top_names, any_names = _split_exclusions(HEALTH_EXCLUDE)
+    skip = {n.lower() for n in top_names} | set(any_names)
+    try:
+        marks = [os.stat(root).st_mtime_ns]
+    except OSError:
+        return None
+    subs = []
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                try:
+                    if not e.is_dir(follow_symlinks=False):
+                        continue
+                    if e.name.lower() in skip:
+                        continue
+                    subs.append((e.name, os.stat(e.path).st_mtime_ns))
+                except OSError:
+                    continue          # vanished mid-listing: the next read will see it
+    except OSError:
+        return None
+    # Sorted so the key does not depend on the order the filesystem hands entries back.
+    return (marks[0], tuple(sorted(subs)))
+
+
+def _health_memo_key(out_dir, db_path):
+    """Both halves. The catalog file AND the walk's roots -- either one moving invalidates."""
+    return (_health_key(db_path), _health_dir_key(out_dir))
+
+
 def health_snapshot(out_dir, db_path):
     """collection_health(), memoized. Reads the key BEFORE the walk and stores the payload
-    under that one: a catalog written DURING the walk therefore leaves a key that no longer
-    matches, and the next reader recomputes rather than trusting a half-old answer."""
-    key = _health_key(db_path)
+    under that one: a catalog (or a file) written DURING the walk therefore leaves a key that
+    no longer matches, and the next reader recomputes rather than trusting a half-old
+    answer."""
+    key = _health_memo_key(out_dir, db_path)
     payload = collection_health(out_dir, db_path)
     with _HEALTH_LOCK:
         _HEALTH_CACHE.update(key=key, payload=payload, at=time.time())
@@ -4599,18 +4683,22 @@ def _health_refresh_async(out_dir, db_path):
 
 
 def health_cached(out_dir, db_path, fresh=False):
-    """What /api/health answers with. Four ways out, in order:
+    """What /api/health answers with. Five ways out, in order:
        1. ?fresh=1 -- walk now, block, store. The explicit user refresh.
        2. nothing cached at all -- the blocking walk. This is the first read of a process,
           and it is what _health_prime pre-pays off-thread at boot.
-       3. the key matches -- the memo, free.
-       4. the key moved -- hand back the STALE payload now and recompute behind it."""
+       3. the key matches and the snapshot is younger than HEALTH_MAX_AGE -- the memo, free.
+       4. the key moved (catalog file OR the walk's own directories) -- hand back the STALE
+          payload now and recompute behind it.
+       5. the key matches but the snapshot has aged past HEALTH_MAX_AGE -- same serve-stale
+          path, because drift deeper than the directory mtimes see must still be bounded."""
     if fresh:
         return health_snapshot(out_dir, db_path)
-    key = _health_key(db_path)
+    key = _health_memo_key(out_dir, db_path)
     with _HEALTH_LOCK:
         payload = _HEALTH_CACHE["payload"]
-        hit = payload is not None and _HEALTH_CACHE["key"] == key
+        fresh_enough = (time.time() - _HEALTH_CACHE["at"]) <= HEALTH_MAX_AGE
+        hit = payload is not None and _HEALTH_CACHE["key"] == key and fresh_enough
     if payload is None:
         return health_snapshot(out_dir, db_path)
     if hit:
@@ -4930,6 +5018,10 @@ QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME)
 QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
 # --import-local's internal scan: the three above plus legacy branding/.
 IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
+# collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
+# IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
+# the health memo's correctness depends on THIS one matching the health walk exactly.
+HEALTH_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
 
 _VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
 # What moonglade_similar's CLIP index will actually embed -- deliberately narrower

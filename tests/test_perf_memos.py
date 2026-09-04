@@ -404,6 +404,104 @@ def test_a_missing_catalog_still_memoizes(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+def _fresh_health_cache(monkeypatch):
+    """Start from an empty memo. The cache is process-wide, so without this a test inherits
+    whatever the previous one left in it and reads the serve-stale path where it meant to
+    read the first-call one."""
+    assert _settle(lambda: not g._HEALTH_BUSY["on"]), "a previous refresh never finished"
+    monkeypatch.setattr(g, "_HEALTH_CACHE", {"key": None, "payload": None, "at": 0.0})
+
+
+def test_a_file_deleted_off_disk_invalidates_the_health_memo(tmp_path, monkeypatch):
+    """Half of what Health reports comes off the DISK, never the catalog: total_files,
+    total_bytes, per_bucket, the two dup counters, and the missing/uncataloged drift pair.
+    Delete an image by hand -- no catalog write anywhere -- and the memo has to notice, or
+    the panel keeps reporting a file that is gone until something unrelated happens to write
+    catalog.db. The immediate-subdirectory mtimes are what see it."""
+    _fresh_health_cache(monkeypatch)
+    month = tmp_path / "2026-01"
+    month.mkdir()
+    (month / "a_1.png").write_bytes(b"x")
+    (month / "b_2.png").write_bytes(b"y")
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png"),
+                          _row(media_id="2", filename="b_2.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    first = g.health_cached(tmp_path, db)
+    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "memoized to start"
+
+    catalog_key = g._health_key(db)
+    (month / "b_2.png").unlink()
+    assert g._health_key(db) == catalog_key, \
+        "nothing wrote the catalog -- if this moves, the test proves the wrong thing"
+
+    served = g.health_cached(tmp_path, db)
+    assert served is first, "the stale answer still comes back at once"
+    assert _settle(lambda: len(calls) == 2), "a file removed off disk must re-walk"
+    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2), \
+        "and the next read gets the answer that reflects the disk"
+
+
+def test_a_snapshot_past_HEALTH_MAX_AGE_is_served_stale_and_refreshed(tmp_path, monkeypatch):
+    """The backstop, for the drift neither half of the key can see: a file swapped inside
+    batches/<name>/ (nested past the directories that are stat'ed) or an in-place rewrite
+    that leaves the name alone. Past the ceiling the reader is still answered immediately --
+    the recompute runs behind it, exactly as a moved key already does."""
+    _fresh_health_cache(monkeypatch)
+    assert 60 <= g.HEALTH_MAX_AGE <= 3600, "a ceiling, in seconds, not a sentinel"
+    db = _seed(tmp_path, [_row(media_id="1", filename="a_1.png")])
+    calls = []
+    _walk_stub(monkeypatch, calls)
+    first = g.health_cached(tmp_path, db)
+    assert g.health_cached(tmp_path, db) is first and len(calls) == 1, "young: pure memo"
+
+    with g._HEALTH_LOCK:                       # age it, rather than sleep ten real minutes
+        g._HEALTH_CACHE["at"] = time.time() - g.HEALTH_MAX_AGE - 1
+    served = g.health_cached(tmp_path, db)
+    assert served is first, "an aged answer is SERVED, never waited on"
+    assert _settle(lambda: len(calls) == 2), "and it kicks the refresh behind itself"
+    assert _settle(lambda: g.health_cached(tmp_path, db)["total_files"] == 2)
+
+
+def test_the_disk_side_key_is_a_handful_of_stats_not_a_walk(tmp_path):
+    """The memo only pays if its key costs far less than what it memoizes. One directory
+    listing plus one stat per top-level directory -- and crucially the syscall count must NOT
+    move when the library grows, which is the property that keeps it honest at the owner's
+    35k. (A stat per top-level dir rather than the free DirEntry one is deliberate: see
+    _health_dir_key's docstring -- the free one is stale for subdirectories on Windows.)"""
+    import os
+
+    def _library(root, per_dir):
+        for name in ("2026-01", "2026-02", "images", "gallery"):   # gallery/ is excluded
+            (root / name).mkdir(parents=True, exist_ok=True)
+            for i in range(per_dir):
+                (root / name / "a_{}.png".format(i)).write_bytes(b"x")
+        return root
+
+    def _cost(root):
+        real_stat, real_scandir = os.stat, os.scandir
+        seen = {"stat": 0, "scandir": 0}
+        os.stat = lambda *a, **k: (seen.__setitem__("stat", seen["stat"] + 1),
+                                   real_stat(*a, **k))[1]
+        os.scandir = lambda *a, **k: (seen.__setitem__("scandir", seen["scandir"] + 1),
+                                      real_scandir(*a, **k))[1]
+        try:
+            key = g._health_dir_key(root)
+        finally:
+            os.stat, os.scandir = real_stat, real_scandir
+        return seen, key
+
+    small, big = _cost(_library(tmp_path / "small", 2)), _cost(_library(tmp_path / "big", 300))
+    assert small[0] == big[0], \
+        "the key's cost must be flat in library size: {} vs {}".format(small[0], big[0])
+    assert small[0]["scandir"] == 1, "one listing of out_dir, and no descent"
+    # out_dir itself + the three kept top-level dirs; gallery/ is pruned, not stat'ed.
+    assert small[0]["stat"] == 4
+    assert small[0]["stat"] + small[0]["scandir"] <= 6, "a handful of syscalls, not a walk"
+    # ...and it really is keying on the walk's own roots, minus the walk's own exclusions.
+    assert [n for n, _ in small[1][1]] == ["2026-01", "2026-02", "images"]
+
+
 def test_the_health_route_still_answers_correctly(tmp_path):
     """Driven through the real route with the real walk, twice -- the second is the cached
     path, and it must report the same numbers rather than a differently-shaped answer."""

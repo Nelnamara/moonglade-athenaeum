@@ -9,6 +9,14 @@
 @keyframes mgclaimPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.45); } 50% { box-shadow: 0 0 0 9px rgba(79,201,154,0); } }
 @keyframes mgclaimCardIn { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes mgclaimFadeOut { from { opacity: 1; } to { opacity: 0; } }
+/* THE SCRIM'S BLUR IS APPLIED AFTER THE FADE, NOT DURING IT -- the same split overlays.css
+   makes on .mgv-scrim, and for the same reason: this popup can appear AT BOOT over the
+   freshly loaded grid (see the header above), and a backdrop-filter on a full-viewport
+   element under an opacity animation re-blurs everything behind it on every frame. The
+   resting look is unchanged -- same rgba, same blur(7px); only WHEN the blur turns on
+   moved. `forwards`, never `both`: a backwards fill would apply the blur before the delay
+   elapsed, which is the whole thing being avoided. */
+@keyframes mgclaimScrimBlur { to { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); } }
 @keyframes mgclaimCardOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(.97); } }
 /* The 1-up: pops from the mascot's hands, arcs up with a spin, shrinks away.
    Duration must match useClaimModal.js's EXIT_MS (480ms). */
@@ -20,9 +28,12 @@
 }
 
 .mgclaim-scrim { position: fixed; inset: 0; z-index: 440; /* opens OVER Contests/MyArt (mgv 411) -- overlays.css ladder */ background: rgba(5,4,13,.7);
-  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-  animation: mgclaimFadeOut .2s ease reverse both; cursor: pointer; }
-.mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both; }
+  animation: mgclaimFadeOut .2s ease reverse both, mgclaimScrimBlur .01s linear .2s forwards;
+  cursor: pointer; }
+/* The exit REPLACES the animation shorthand, which drops the deferred keyframe with it, so
+   the blur is stated directly here -- it must already be on when the fade-out starts. */
+.mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both;
+  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 
 .mgclaim-host { position: fixed; inset: 0; z-index: 441; /* above its own scrim (440) -- the pair moves together, overlays.css ladder */ display: grid; place-items: center;
   padding: 24px; pointer-events: none; }
@@ -72,5 +83,8 @@ button.mgclaim-primary:disabled { opacity: .65; cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
   .mgclaim-scrim, .mgclaim-card, .mgclaim-halo, .mgclaim-coin { animation: none; }
+  /* `animation: none` kills the deferred-blur keyframe with the fade, so the blur is stated
+     directly here -- no motion to defer it behind, and the resting look must be the same. */
+  .mgclaim-scrim { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
   .mgclaim-scrim.exiting, .mgclaim-card.exiting { opacity: 0; }
 }
