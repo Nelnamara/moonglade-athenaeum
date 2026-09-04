@@ -16,7 +16,7 @@ const boot = window.MG_BOOT || {};
 // none of its authenticated-only effects (fetchLibrary, fetchAccount, ...)
 // can fire against a session that doesn't exist yet.
 //
-// needs_key/catalog_empty (next_gallery()'s boot, same computation classic's index() has
+// needs_key/catalog_empty (app_page()'s boot, same computation classic's index() has
 // always made) are the first-run state: no PIXAI_API_KEY yet, or a key but zero synced
 // media. SetupWizard owns that state instead of App -- an empty/keyless gallery has
 // nothing for App's fetchLibrary/fetchAccount to usefully show anyway, and the DC's own

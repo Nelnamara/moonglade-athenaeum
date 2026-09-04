@@ -182,7 +182,7 @@ def _boot(cli):
 class TestWizardBootGating:
     """PORTED from the /classic server-rendered banner (cut 2026-08-08 with
     INDEX_HTML): the banner itself is a React surface now, but the SERVER still owns
-    the gating -- next_gallery() computes needs_key/catalog_empty from a FRESH
+    the gating -- app_page() computes needs_key/catalog_empty from a FRESH
     config.json read (never the module-cached core._cfg, same as classic's index()
     did, so a key pasted via the wizard flips the state on the very next load) and
     ships them in window.MG_BOOT. These tests lock in that computation.

@@ -1,15 +1,15 @@
 <!doctype html>
 <html lang="en">
 <!-- DEV entry only (npm run dev). Production is served by moonglade_gallery.py's
-     /next route, which injects window.MG_BOOT server-side. Dev fakes a minimal boot
+     "/" route, which injects window.MG_BOOT server-side. Dev fakes a minimal boot
      and the Vite proxy supplies real /api data from the running server. -->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Moonglade Athenaeum — next (dev)</title>
+  <title>Moonglade Athenaeum (dev)</title>
   <!-- PWA installability (2026-08-02). Dev-only paths: Vite serves gallery/public/
        at root ("/") in dev regardless of the "/next/assets/" build base -- the
-       production paths (NEXT_PAGE/LOGIN_PAGE in moonglade_gallery.py) point at
+       production paths (APP_PAGE/LOGIN_PAGE in moonglade_gallery.py) point at
        /next/assets/... instead, where the same public/ files land after
        `npm run build`. No service worker registration -- not in scope. -->
   <link rel="manifest" href="/next/assets/manifest.json">

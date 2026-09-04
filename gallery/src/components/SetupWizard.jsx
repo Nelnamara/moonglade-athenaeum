@@ -5,7 +5,7 @@ import "../styles/setup-wizard.css";
 
 /* First-run Setup Wizard -- design spec: Setup Wizard.dc.html / Setup Wizard Mobile.dc.html.
    Rendered by main.jsx in place of <App> whenever boot.needs_key or boot.catalog_empty is
-   true (see moonglade_gallery.py's next_gallery(), which computes both the SAME way
+   true (see moonglade_gallery.py's app_page(), which computes both the SAME way
    classic's index() always has). App never mounts in that case, matching LoginPage's own
    pattern -- nothing here can race an authenticated-only fetch that assumes a real catalog.
 

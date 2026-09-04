@@ -21,15 +21,18 @@ export default function useFlavour(flavours, buildStamp) {
     }, 9000);
     return () => { clearInterval(id); clearTimeout(swap); };
   }, []);
-  // click reveals the real build for 3s (the DC hardcodes a version; the real
-  // app has the true stamp in boot)
+  // click reveals the real build for 3s -- boot.build_stamp VERBATIM and nothing
+  // else (version + short git sha; _build_stamp() in moonglade_gallery.py owns the
+  // format). The "next · build " prefix retired with the /next codename (issue #51):
+  // the reveal is the version, not a pilot name. (The DC hardcodes a version; the
+  // real app has the true stamp in boot.)
   useEffect(() => {
     if (!version) return;
     const t = setTimeout(() => setVersion(false), 3000);
     return () => clearTimeout(t);
   }, [version]);
   return {
-    text: version ? "next · build " + (buildStamp || "?") : lines[i % lines.length],
+    text: version ? (buildStamp || "?") : lines[i % lines.length],
     fading,
     alt: i % 2 === 1,
     reveal: () => setVersion(true),
