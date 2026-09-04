@@ -4009,13 +4009,27 @@ def carry_local_fields(row, known):
     keeps the old filename. New media_ids (absent from `known`) pass through
     unchanged. Applied at save time, it covers every row-builder path at once.
 
-    APPLIED AT: run_download's page saves and its backfill pass, and -- since
-    2026-09-03 -- _download_image_task and _download_video_task, which are the
-    per-task collect path every create route funnels through (run_generate,
-    run_edit_image, run_generate_video, collect_generation, the watch mirror, and
-    CLI --task-id recovery). Those two were missing it, so RE-collecting a task
-    wiped exactly the fields listed above; a finished generation polled twice was
-    enough to do it."""
+    APPLIED AT, since issue #19 closed the gap, in TWO places and no others:
+
+      * `build_catalog_row` -- so EVERY create-time capture path builds its row in one
+        place: run_sync_videos, run_import_local, run_generate, _download_video_task,
+        _download_image_task, run_edit_image, and the gallery's /api/loom/import-bundle.
+        The builder applies the merge, but only over the `known` map its CALLER hands it,
+        so a site that omits `known` still writes a blanking row -- the shared builder
+        removes the drift, not the need to pass the snapshot. (The Loom bundle import
+        shipped omitting it, on a comment claiming its file-resolution guard proved the
+        media_id was uncataloged; a catalog row outlives its file by design, so it did
+        not.) The two collect writers
+        (_download_image_task / _download_video_task) are the per-task path every
+        create route funnels through -- run_generate, run_edit_image,
+        run_generate_video, collect_generation, the watch mirror, CLI --task-id
+        recovery -- and until 2026-09-03 they were missing it, so RE-collecting a task
+        wiped exactly the fields listed above; a finished generation polled twice was
+        enough to do it. Four of the seven builders still had no carry at all until the
+        helper gave them one.
+      * run_download's page saves and its backfill pass, which build their rows from
+        the feed rather than through build_catalog_row and so still apply it directly.
+    """
     base = dict(known.get(row.get("media_id", ""), {}))
     for k, v in row.items():
         if v not in ("", None):
@@ -4023,6 +4037,120 @@ def carry_local_fields(row, known):
         else:
             base.setdefault(k, "")
     return base
+
+
+def _created_at_utc(value=""):
+    """A capture's `created_at`: PixAI's own `createdAt` when the task carries one, else
+    NOW as UTC + 'Z'.
+
+    The Z matters. `created_at` is sorted as a plain STRING (`_SORT_SQL` does no
+    `datetime()` wrapping), so a naive LOCAL-time stamp reads as hours "older" than a
+    same-moment UTC one west of Greenwich -- a local save at 23:0X PDT sorted behind rows
+    PixAI timestamped 06:05 UTC the "next" day, an hour earlier in real time. Found via
+    run_import_local, which had the same defect; the four task-capture paths each carried
+    their own copy of this rule AND of the paragraph explaining it, which is why it now
+    lives in exactly one place."""
+    return value or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def build_catalog_row(media_id, *, fm=None, known=None,
+                      task_id="", filename="", url="", source="", status="",
+                      created_at="", prompt_full="", prompt_preview=None,
+                      natural_prompt="", negative_prompt="", seed="",
+                      steps="", sampler="", cfg_scale="", clip_skip="",
+                      model_id="", model_name="", loras="", paid_credit="",
+                      width="", height="",
+                      is_video="", poster_media_id="", video_duration=""):
+    """THE create-time catalog row. Every capture path -- download, generate, edit, video,
+    local import -- builds its row here, so they all write the same surface and none of them
+    can clobber what the user owns (issue #19 item 4).
+
+    Three things happen, in this order, for every caller:
+
+      1. Start from the blank `CATALOG_FIELDS` template, so a row always carries every
+         column and a newly added column is blank rather than absent.
+      2. Set the API/file fields below, then spread `_TASK_ROW_FIELDS` from `fm`
+         (`extract_full_meta`'s output) UNIFORMLY -- the 15 generation-surface columns of
+         issue #18 plus lineage (`source_media_id`/`derive_kind`). A caller with no task
+         (a local import) passes no `fm` and those stay blank.
+      3. Merge the result over `known` via `carry_local_fields`, so LOCAL curation --
+         artwork_id, is_published, title, rating, collections, art_tags, aes_score,
+         blurhash -- survives a re-capture of a media_id already in the catalog.
+
+    Step 3 is the point. Before this helper, six call sites hand-assembled the same row and
+    only two of them remembered the carry; re-collecting an already-collected generation
+    rebuilt its row from the blank template and erased the user's work (owner, live,
+    2026-09-03: a published piece lost its artwork_id when a relaunch re-polled a finished
+    task). `known` maps media_id -> the pre-capture catalog row; pass
+    `known_catalog_rows(db_path, ids)`. Omitting it is only correct where the caller has
+    already established that the media_id is NOT in the catalog.
+
+    They also DRIFT, which is the other half of why this exists: the 2026-08-15 audit found
+    lineage missing from every site at once, and the video paths dropping fields the image
+    paths kept. A field added here now reaches every capture path in one edit.
+
+    WHO SETS WHAT (7 call sites; blank at any site not listed):
+
+      field              set by                                source
+      -----------------  ------------------------------------  --------------------------
+      media_id           all                                   the output's media id
+      task_id            SV, GEN, VID, IMG, EDIT               the task's id
+      filename           all                                   path relative to out/, '/'-joined
+      url                GEN, VID, IMG, EDIT                   resolve_media / media_file_gql
+      source             IMP='local'; GEN,VID,IMG,EDIT,LOOM='api'  provenance (SV leaves '')
+      status             SV,GEN,VID,IMG,EDIT='completed'; IMP,LOOM='imported'
+      created_at         all                                   _created_at_utc(task.createdAt)
+                                                               at GEN/VID/IMG/EDIT; the node's
+                                                               own createdAt at SV (no
+                                                               fallback); file mtime as UTC+Z
+                                                               at IMP
+      prompt_full        SV, GEN, VID, IMG, EDIT               task prompt / submitted prompt
+      prompt_preview     defaults to prompt_full[:100]         SV passes promptsPreview,
+                                                               IMP/LOOM the file stem
+      negative_prompt    SV, GEN, VID, IMG                     video shared block (SV/VID),
+                                                               fm->submitted (GEN), fm (IMG)
+      natural_prompt     GEN, IMG                              fm
+      seed               SV, GEN, VID, IMG, EDIT               the per-output seed
+      steps/sampler/     GEN, IMG                              fm ONLY -- task-echoed ->
+        cfg_scale                                              model preset -> blank; never
+                                                               the submitted value (owner
+                                                               ruling 2026-08-15)
+      clip_skip          GEN, IMG                              fm
+      model_id           SV, GEN, VID, IMG, EDIT               parameters.modelId / the
+                                                               submitted block / fm /
+                                                               chat.modelId
+      model_name         GEN, IMG, EDIT                        _resolved_model_name /
+                                                               _edit_model_label
+      loras              GEN, IMG                              _resolved_loras (resolved
+                                                               names+weights, not fm)
+      paid_credit        SV, GEN, VID, IMG, EDIT               _paid_credit_str -- TASK-level,
+                                                               repeated on each media row
+      width/height       SV, GEN, VID, IMG, EDIT               media info -> detailParameters
+                                                               -> submitted dims
+      is_video           SV, VID='1'; IMP, LOOM per extension
+      poster_media_id    SV, VID                               the still-frame media id
+      video_duration     SV, VID                               shared/submitted duration
+      _TASK_ROW_FIELDS   every site, uniformly                 fm (blank when there is no task)
+
+    Sites: SV=run_sync_videos, IMP=run_import_local, GEN=run_generate,
+    VID=_download_video_task, IMG=_download_image_task, EDIT=run_edit_image,
+    LOOM=moonglade_gallery's /api/loom/import-bundle."""
+    row = {f: "" for f in CATALOG_FIELDS}
+    row.update({
+        "task_id": task_id, "media_id": media_id, "filename": filename, "url": url,
+        "source": source, "status": status, "created_at": created_at,
+        "prompt_full": prompt_full,
+        "prompt_preview": (prompt_full or "")[:100] if prompt_preview is None else prompt_preview,
+        "natural_prompt": natural_prompt, "negative_prompt": negative_prompt,
+        "seed": seed, "steps": steps, "sampler": sampler, "cfg_scale": cfg_scale,
+        "clip_skip": clip_skip, "model_id": model_id, "model_name": model_name,
+        "loras": loras, "paid_credit": paid_credit, "width": width, "height": height,
+        "is_video": is_video, "poster_media_id": poster_media_id,
+        "video_duration": video_duration,
+    })
+    # issue #18 + lineage, spread for EVERY caller instead of once per site.
+    row.update({k: (fm or {}).get(k, "") for k in _TASK_ROW_FIELDS})
+    return carry_local_fields(row, known or {})
 
 
 def cmd_convert_existing(args, out):
@@ -6013,8 +6141,8 @@ def run_sync_videos(args):
     # Pre-pass snapshot of the existing rows, keyed by media_id: the rows built
     # below start from an all-blank CATALOG_FIELDS template, so upserting them raw
     # blanked every locally-owned column (rating, collections, art_tags, title,
-    # is_published, aes_score, blurhash) on EVERY re-run of this sync. Merged back
-    # at save time via carry_local_fields, the same way the download passes do.
+    # is_published, aes_score, blurhash) on EVERY re-run of this sync. Handed to
+    # build_catalog_row, which carries those columns forward for every capture path.
     known = {r["media_id"]: r for r in load_catalog(db_path) if r.get("media_id")}
     session = _make_session(getattr(args, "token", None))
     vdir = out / "videos"
@@ -6104,26 +6232,25 @@ def run_sync_videos(args):
                     node["id"], vmid, name_length, name_sep)
                 status, path = download(session, url, stem)
             if status in ("ok", "skip") and path:
-                full = {f: "" for f in CATALOG_FIELDS}
-                full.update({
-                    "task_id": str(node["id"]),
-                    "media_id": vmid,
-                    "filename": str(path.relative_to(out)).replace("\\", "/"),
-                    "prompt_full": shared.get("prompt", ""),
-                    "prompt_preview": (node.get("promptsPreview") or "")[:100],
-                    "seed": str(o.get("seed") or ""),
-                    "created_at": node.get("createdAt", ""),
-                    "width": str(detail.get("width") or ""),
-                    "height": str(detail.get("height") or ""),
-                    "model_id": str(params.get("modelId") or ""),
-                    "negative_prompt": shared.get("negative_prompt", ""),   # video block, not top level
-                    "status": "completed",
-                    "is_video": "1",
-                    "poster_media_id": o.get("poster_media_id", ""),
-                    "paid_credit": _paid_credit_str(task),   # actual cost, task-level
-                    "video_duration": str(shared.get("duration") or ""),
-                })
-                full.update({k: full_meta.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
+                full = build_catalog_row(
+                    vmid, fm=full_meta, known=known,   # fm: issue #18 (no preset fill: video)
+                    task_id=str(node["id"]),
+                    filename=str(path.relative_to(out)).replace("\\", "/"),
+                    prompt_full=shared.get("prompt", ""),
+                    # NOT prompt_full[:100]: the summary node carries its own preview.
+                    prompt_preview=(node.get("promptsPreview") or "")[:100],
+                    seed=str(o.get("seed") or ""),
+                    created_at=node.get("createdAt", ""),   # a listed task always has one
+                    width=str(detail.get("width") or ""),
+                    height=str(detail.get("height") or ""),
+                    model_id=str(params.get("modelId") or ""),
+                    negative_prompt=shared.get("negative_prompt", ""),   # video block, not top level
+                    status="completed",
+                    is_video="1",
+                    poster_media_id=o.get("poster_media_id", ""),
+                    paid_credit=_paid_credit_str(task),   # actual cost, task-level
+                    video_duration=str(shared.get("duration") or ""),
+                )
                 _ensure_video_thumb(vmid, o.get("poster_media_id"), path)
                 video_faststart(path)                # iOS needs moov at the front to stream
                 rows.append(full)
@@ -6142,7 +6269,7 @@ def run_sync_videos(args):
             elif item == "missing":
                 missing += 1
     if new_rows:
-        save_catalog(db_path, [carry_local_fields(r, known) for r in new_rows])
+        save_catalog(db_path, new_rows)   # the carry already happened in build_catalog_row
     print("Videos saved/present: {}{}.".format(
         ok, " | {} had no resolvable file url".format(missing) if missing else ""))
     return {"i2v_tasks": len(i2v_nodes), "videos": ok}
@@ -6672,6 +6799,12 @@ def run_import_local(args):
     # though its on-disk path no longer equals the stored `filename` string. This
     # is what stops --import-local from re-cataloging the whole backup as 'local'.
     existing_mids = {r.get("media_id") for r in catalog_rows if r.get("media_id")}
+    # The same snapshot as a media_id -> row map, for build_catalog_row's carry. Free
+    # (catalog_rows is already in hand). Belt-and-braces here rather than load-bearing:
+    # the two guards above mean an already-cataloged file is skipped before it ever
+    # reaches the builder, so there is nothing to carry -- but the guarantee lives in
+    # the builder for every path, not in each caller's memory.
+    known = {r["media_id"]: r for r in catalog_rows if r.get("media_id")}
 
     # IMPORT_EXCLUDE = the shared quarantine set plus legacy branding/ (named
     # disagreement 5) -- app chrome that must never be catalogued as gallery
@@ -6749,14 +6882,11 @@ def run_import_local(args):
                                     time.gmtime(stored.stat().st_mtime))
         except OSError:
             created = ""
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "media_id": mid, "filename": rel, "source": "local",
-            "status": "imported", "created_at": created,
-            "prompt_preview": stored.stem[:100],
-            "is_video": "1" if is_vid else "",
-        })
-        rows.append(full)
+        rows.append(build_catalog_row(
+            mid, known=known, filename=rel, source="local",
+            status="imported", created_at=created,
+            prompt_preview=stored.stem[:100],       # no prompt: name the file after itself
+            is_video="1" if is_vid else ""))        # no fm: a local file has no task
         if is_vid:
             video_poster_thumb(stored, thumb_dir / "{}.jpg".format(mid))  # ffmpeg, optional
             video_faststart(stored)                  # iOS needs moov at the front to stream
@@ -8224,6 +8354,10 @@ def run_generate(args):
 
     img_dir = out / "images"
     rows, saved = [], []
+    # The pre-download snapshot build_catalog_row carries forward -- see its step 3 and
+    # _download_image_task's fuller note. Recovering a task by --task-id can perfectly
+    # well land on media that is already catalogued, rated and published.
+    known = known_catalog_rows(db_path, mids)
     for mid in mids:
         url, info = resolve_media(session, mid)
         if not url:
@@ -8236,48 +8370,41 @@ def run_generate(args):
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "task_id": str(task_id), "media_id": mid,
-            "filename": str(path.relative_to(out)).replace("\\", "/"),
-            "url": url, "source": "api", "status": "completed",
-            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
-            # sorted as a plain string with no datetime() wrapping, so a naive local-time
-            # stamp here would read hours "older" than a same-moment UTC one west of
-            # Greenwich (see run_import_local's matching fix for how this was found).
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "prompt_full": prompt,
-            "prompt_preview": (prompt or "")[:100],
-            "negative_prompt": _pick("negative_prompt", "negativePrompts"),
-            "seed": seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
+        full = build_catalog_row(
+            mid, fm=fm, known=known,   # fm spread: issue #18 + lineage
+            task_id=str(task_id),
+            filename=str(path.relative_to(out)).replace("\\", "/"),
+            url=url, source="api", status="completed",
+            created_at=_created_at_utc(result.get("createdAt")),
+            prompt_full=prompt,        # prompt_preview derives from it
+            negative_prompt=_pick("negative_prompt", "negativePrompts"),
+            seed=seeds.get(mid) or _pick("seed", "seed"),   # per-image seed on a batch
             # Model's truth, not the submit: fm holds task-echoed -> preset -> blank. No
             # _pick here on purpose -- a submitted samplingSteps/cfgScale the model ignored
             # must not stand in for the model's real behavior (owner ruling; see above).
-            "steps": fm.get("steps", ""),
-            "cfg_scale": fm.get("cfg_scale", ""),
-            "model_id": _pick("model_id", "modelId"),
+            steps=fm.get("steps", ""),
+            cfg_scale=fm.get("cfg_scale", ""),
+            model_id=_pick("model_id", "modelId"),
             # Resolved here, not just in the backfill. extract_full_meta only fills
             # model_name for a CHAT task (from the local EDIT_MODELS table); every ordinary
             # generation left it blank, so every freshly captured image showed a raw
             # 19-digit model id on its detail page until a later --backfill-full-meta
             # happened to come past. model_name_gql is process-cached, so this is one call
             # per distinct model for the whole run, not one per image.
-            "model_name": _resolved_model_name(session, fm, _pick("model_id", "modelId")),
+            model_name=_resolved_model_name(session, fm, _pick("model_id", "modelId")),
             # Four fields extract_full_meta hands over that this row used to drop, so they
             # arrived blank on every live capture and only appeared once a
             # --backfill-full-meta came past -- which is the manual step the whole
             # capture-it-as-it-happens path exists to remove. `loras` in particular is
             # always "" out of extract_full_meta by design: it documents that the CALLER
             # resolves it, the backfill did, and this did not.
-            "sampler": fm.get("sampler", ""),
-            "natural_prompt": fm.get("natural_prompt", ""),
-            "clip_skip": fm.get("clip_skip", ""),
-            "loras": _resolved_loras(session, result),
-            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
-            "width": str((info or {}).get("width") or params.get("width") or ""),
-            "height": str((info or {}).get("height") or params.get("height") or ""),
-        })
-        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
+            sampler=fm.get("sampler", ""),
+            natural_prompt=fm.get("natural_prompt", ""),
+            clip_skip=fm.get("clip_skip", ""),
+            loras=_resolved_loras(session, result),
+            paid_credit=_paid_credit_str(result),   # actual cost, task-level
+            width=str((info or {}).get("width") or params.get("width") or ""),
+            height=str((info or {}).get("height") or params.get("height") or ""))
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
@@ -8355,9 +8482,9 @@ def _download_video_task(session, result, task_id, out, args, params):
     vdir.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
     rows, saved = [], []
-    # The same pre-download snapshot the image path takes, and for the same reason: this
+    # The same pre-download snapshot the image path takes, and for the same reason: the
     # row is rebuilt from a blank template, so without the carry a re-collect blanks the
-    # video's rating, collections, title and published state.
+    # video's rating, collections, title and published state. build_catalog_row applies it.
     known = known_catalog_rows(db_path, [o.get("video_media_id") for o in outs])
     for o in outs:
         vmid = o["video_media_id"]
@@ -8369,27 +8496,21 @@ def _download_video_task(session, result, task_id, out, args, params):
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "task_id": str(task_id), "media_id": vmid,
-            "filename": str(path.relative_to(out)).replace("\\", "/"),
-            "url": url, "source": "api", "status": "completed", "is_video": "1",
-            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
-            # sorted as a plain string with no datetime() wrapping, so a naive local-time
-            # stamp here would read hours "older" than a same-moment UTC one west of
-            # Greenwich (see run_import_local's matching fix for how this was found).
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
-            "negative_prompt": sent.get("negativePrompts", ""),
-            "seed": str(o.get("seed") or ""),
-            "poster_media_id": o.get("poster_media_id", ""),
-            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
-            "video_duration": str(shared.get("duration") or sent.get("duration") or ""),
-            "model_id": str(sent.get("model") or ""),
-            "width": str(detail.get("width") or ""),
-            "height": str(detail.get("height") or ""),
-        })
-        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18 (no preset fill: video)
+        full = build_catalog_row(
+            vmid, fm=fm, known=known,   # fm: issue #18 (no preset fill: video)
+            task_id=str(task_id),
+            filename=str(path.relative_to(out)).replace("\\", "/"),
+            url=url, source="api", status="completed", is_video="1",
+            created_at=_created_at_utc(result.get("createdAt")),
+            prompt_full=prompt,        # prompt_preview derives from it
+            negative_prompt=sent.get("negativePrompts", ""),
+            seed=str(o.get("seed") or ""),
+            poster_media_id=o.get("poster_media_id", ""),
+            paid_credit=_paid_credit_str(result),   # actual cost, task-level
+            video_duration=str(shared.get("duration") or sent.get("duration") or ""),
+            model_id=str(sent.get("model") or ""),
+            width=str(detail.get("width") or ""),
+            height=str(detail.get("height") or ""))
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
         # A transient Windows lock on the poster's temp file (WinError 32) used to raise from
         # download() right here, before rows.append below, so the clip was pulled to videos/
@@ -8418,7 +8539,7 @@ def _download_video_task(session, result, task_id, out, args, params):
         except Exception as e:                       # noqa: BLE001 -- poster is cosmetic, never abort the catalog
             print("  poster thumbnail failed for {} ({}); video still cataloged".format(vmid, e))
         video_faststart(path)                        # iOS needs moov at the front to stream
-        rows.append(carry_local_fields(full, known))
+        rows.append(full)
         saved.append(str(path))
     if rows:
         save_catalog(db_path, rows)
@@ -8525,6 +8646,8 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
     # having published, rated and filed the picture. (Owner, live, 2026-09-03: a published
     # piece lost its artwork_id after a relaunch re-polled a finished task.) Keyed to this
     # task's media only, so it stays a lookup rather than a whole-catalog read.
+    # build_catalog_row applies it -- which is what makes this structural rather than
+    # something each of the capture paths has to remember (issue #19).
     known = known_catalog_rows(db_path, [m for m, _ in media])
     for mid, seed in media:
         url, info = resolve_media(session, mid)
@@ -8541,17 +8664,13 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "task_id": str(task_id), "media_id": mid, "seed": seed,
-            "filename": str(path.relative_to(out)).replace("\\", "/"),
-            "url": url, "source": "api", "status": "completed",
-            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
-            # sorted as a plain string with no datetime() wrapping, so a naive local-time
-            # stamp here would read hours "older" than a same-moment UTC one west of
-            # Greenwich (see run_import_local's matching fix for how this was found).
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "prompt_full": prompt, "prompt_preview": (prompt or "")[:100],
+        full = build_catalog_row(
+            mid, fm=fm, known=known,   # fm spread: issue #18 + lineage
+            task_id=str(task_id), seed=seed,
+            filename=str(path.relative_to(out)).replace("\\", "/"),
+            url=url, source="api", status="completed",
+            created_at=_created_at_utc(result.get("createdAt")),
+            prompt_full=prompt,        # prompt_preview derives from it
             # Everything extract_full_meta resolved from the task. This row used to write
             # only the model id, so a generation captured as it happened landed with an
             # em-dash for Steps, Sampler, CFG, LoRAs and the rest -- not because PixAI never
@@ -8563,22 +8682,20 @@ def _download_image_task(session, result, task_id, out, args, prompt="", model_n
             # nothing: a CHAT task (Edit/Fix) has no detailParameters at all, so these
             # resolve to "" and render as before. An explicit model_name from the caller
             # still wins over the looked-up one.
-            "model_id": fm.get("model_id", ""),
-            "model_name": model_name or _resolved_model_name(session, fm,
-                                                             fm.get("model_id", "")),
-            "steps": fm.get("steps", ""),
-            "sampler": fm.get("sampler", ""),
-            "cfg_scale": fm.get("cfg_scale", ""),
-            "negative_prompt": fm.get("negative_prompt", ""),
-            "natural_prompt": fm.get("natural_prompt", ""),
-            "clip_skip": fm.get("clip_skip", ""),
-            "loras": _resolved_loras(session, result),
-            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
-            "width": str((info or {}).get("width") or ""),
-            "height": str((info or {}).get("height") or ""),
-        })
-        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
-        rows.append(carry_local_fields(full, known))
+            model_id=fm.get("model_id", ""),
+            model_name=model_name or _resolved_model_name(session, fm,
+                                                          fm.get("model_id", "")),
+            steps=fm.get("steps", ""),
+            sampler=fm.get("sampler", ""),
+            cfg_scale=fm.get("cfg_scale", ""),
+            negative_prompt=fm.get("negative_prompt", ""),
+            natural_prompt=fm.get("natural_prompt", ""),
+            clip_skip=fm.get("clip_skip", ""),
+            loras=_resolved_loras(session, result),
+            paid_credit=_paid_credit_str(result),   # actual cost, task-level
+            width=str((info or {}).get("width") or ""),
+            height=str((info or {}).get("height") or ""))
+        rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))
     if rows:
@@ -9768,6 +9885,9 @@ def run_edit_image(args):
     edit_model_name = _edit_model_label(session, fm, edit_model_id_used)
     img_dir = out / "images"
     rows, saved = [], []
+    # See build_catalog_row step 3: an edit recovered by --edit-task-id can land on media
+    # the user has already rated, filed or published.
+    known = known_catalog_rows(db_path, mids)
     for mid in mids:
         url, info = resolve_media(session, mid)
         if not url:
@@ -9779,24 +9899,18 @@ def run_edit_image(args):
         status, path = download(session, url, stem)
         if status not in ("ok", "skip") or not path:
             continue
-        full = {f: "" for f in CATALOG_FIELDS}
-        full.update({
-            "task_id": str(task_id), "media_id": mid, "seed": seeds.get(mid, ""),
-            "filename": str(path.relative_to(out)).replace("\\", "/"),
-            "url": url, "source": "api", "status": "completed",
-            # UTC + Z fallback, matching PixAI's own createdAt format -- created_at is
-            # sorted as a plain string with no datetime() wrapping, so a naive local-time
-            # stamp here would read hours "older" than a same-moment UTC one west of
-            # Greenwich (see run_import_local's matching fix for how this was found).
-            "created_at": result.get("createdAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "prompt_full": prompt_used, "prompt_preview": (prompt_used or "")[:100],
-            "model_id": edit_model_id_used,
-            "model_name": edit_model_name,
-            "paid_credit": _paid_credit_str(result),   # actual cost, task-level
-            "width": str((info or {}).get("width") or ""),
-            "height": str((info or {}).get("height") or ""),
-        })
-        full.update({k: fm.get(k, "") for k in _TASK_ROW_FIELDS})   # issue #18
+        full = build_catalog_row(
+            mid, fm=fm, known=known,   # fm spread: issue #18 + lineage
+            task_id=str(task_id), seed=seeds.get(mid, ""),
+            filename=str(path.relative_to(out)).replace("\\", "/"),
+            url=url, source="api", status="completed",
+            created_at=_created_at_utc(result.get("createdAt")),
+            prompt_full=prompt_used,   # prompt_preview derives from it
+            model_id=edit_model_id_used,
+            model_name=edit_model_name,
+            paid_credit=_paid_credit_str(result),   # actual cost, task-level
+            width=str((info or {}).get("width") or ""),
+            height=str((info or {}).get("height") or ""))
         rows.append(full)
         make_thumbnail(path, thumb_dir / "{}.jpg".format(mid))
         saved.append(str(path))

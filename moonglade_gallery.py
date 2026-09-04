@@ -5478,6 +5478,12 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
         return {"ok": False, "error": str(e)}
 
     meta = _read_trash_meta(out_dir, media_id)
+    # Deliberately NOT moonglade_backup.build_catalog_row: this is a RESTORE, not a
+    # capture. The sidecar already holds the whole row the user owned -- rating,
+    # collections, title, published state -- and there is no task, no extract_full_meta
+    # surface, and (purge_media_local deleted the row) nothing in the catalog to carry
+    # forward. Seeding from the saved row is the inverse of the builder's contract
+    # (blank template + task fields + carry), so it stays its own thing. Issue #19.
     row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
     row["media_id"] = media_id
     row["filename"] = dest.name
@@ -15449,6 +15455,8 @@ __DESIGN_TOKENS__
         import io
         import time
         import zipfile
+
+        import moonglade_backup as core
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -15461,6 +15469,20 @@ __DESIGN_TOKENS__
         if not project:
             return jsonify({"error": "bundle's project.json has no project"}), 400
         imported_dir = out_dir / "imported"
+        # The carry map for this bundle's media, read ONCE (issue #19). The
+        # _loom_resolve_media guard below does NOT establish that a media_id is absent from
+        # the catalog -- it only asks whether a FILE resolves (find_files_for_media_id, or
+        # a video row whose filename exists on disk). A row whose file is gone is normal,
+        # supported state: reconcile_catalog_with_disk leaves it intact by design, so a
+        # media_id quarantined by --dedup or deleted by hand still carries its rating,
+        # title, collections, artwork_id and published state. Without `known`, importing a
+        # bundle that references such a media_id would write the file AND blank every one
+        # of those columns through save_catalog's full-row upsert -- exactly the 2026-09-03
+        # data loss. The file is still written (the bytes really are missing here); the row
+        # keeps what the user owns.
+        known = core.known_catalog_rows(db_path, [
+            Path(n).stem for n in z.namelist()
+            if n.startswith("media/") and not n.endswith("/")])
         rows = []
         for name in z.namelist():
             if not name.startswith("media/") or name.endswith("/"):
@@ -15478,14 +15500,18 @@ __DESIGN_TOKENS__
                 make_video_thumbnail(dest, thumb_path)  # best-effort; --rebuild-thumbs backfills
             else:
                 make_thumbnail(dest, thumb_path)
-            row = {k: "" for k in CATALOG_FIELDS}
-            row.update({
-                "media_id": mid, "filename": str(dest.relative_to(out_dir)).replace("\\", "/"),
-                "source": "api", "status": "imported",
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "prompt_preview": dest.stem[:100], "is_video": "1" if is_vid else "",
-            })
-            rows.append(row)
+            # Same shared row-builder every capture path uses (issue #19): a bundle
+            # import is run_import_local's shape -- a file, no task, so no `fm` and no
+            # generation surface, but WITH `known` (see above -- a missing file does not
+            # mean a missing row). created_at stays this route's own naive local stamp,
+            # NOT _created_at_utc's UTC+Z -- see that helper for why the two sort
+            # differently.
+            rows.append(core.build_catalog_row(
+                mid, known=known,
+                filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
+                source="api", status="imported",
+                created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
             save_catalog(db_path, rows)
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},

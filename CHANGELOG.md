@@ -17,6 +17,7 @@ git tags. Full prose notes for tagged versions live on
 ## [Unreleased]
 
 - **The `/next` codename is retired.** The gallery lives at one address — `/` — and the version reveal on the sign-in page (click the tagline) now shows just the version and its build sha, with no "next" in front of it. A bookmark from the pilot era pointing at `/next` no longer resolves; use `/`. (#51) (2026-09-04)
+- Under the hood: **every way a picture enters your library now writes its catalog entry through one piece of code** (#19, 2026-09-04). Seven of them -- a generation, an edit, a video, a video sync, a local import, a recovered task, a storyboard bundle -- each assembled that entry by hand, and they drifted: an earlier pass found the "made from" link missing from all of them at once, and the video paths quietly dropping fields the image ones kept. The September data-loss fix -- collecting a generation twice no longer erases what you did to it -- had to be applied to two of them by name; it is now part of the shared builder, so *every* path keeps your rating, collections, title, tags and published link by construction rather than by remembering to. Each path writes exactly the entry it wrote before, pinned by tests that compare against a frozen copy of the old code. Nothing you see changes.
 
 ## [3.7.0] - 2026-09-03 — The Third Life: the Folio at 94, and the contest hall
 
