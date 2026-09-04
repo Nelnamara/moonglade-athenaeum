@@ -23,6 +23,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **Contests on the phone** *(design handoff pending — owner, 2026-09-04)*
+  The contest workbench shipped desktop-first ("the phone gets its pass next"). The mobile pass
+  waits on an owner Claude Design handoff in `../moonglade-internal/design/contest/`; nothing on
+  it is built from prose.
+
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
