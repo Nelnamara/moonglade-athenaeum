@@ -17,6 +17,7 @@
    the same localStorage key), as are syncSkin/applySkin (check() reconciles the active skin). */
 
 import { apiGet } from "../api.js";
+import { badgeSrc, badgeHop } from "./badgeArt.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
@@ -140,11 +141,14 @@ function _mkMoment(a, opts) {
   } else {                                       // the medallion sweeps R->L into the cap
     const b = document.createElement("img"); b.className = "badge";
     b.onerror = function () {
+      // The badge walks a fail-soft ladder of its own now, exactly like the mascot below:
+      // animated master -> still thumb -> emoji. badgeHop is false only once it's spent.
+      if (badgeHop(this, a.id, 384)) return;
       const e = document.createElement("div"); e.className = "badge emoji";
       e.textContent = a.icon || "🏆";
       if (this.parentNode) this.parentNode.replaceChild(e, this);
     };
-    b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png?size=384";   // 384px cached thumb -- crisp on HiDPI at the enlarged medallion, still tiny vs the 5.6MB master; the achievement is always earned when its toast fires, so a sealed feat badge still serves
+    b.src = badgeSrc(a.id, 384);   // <id>.webp when the medallion is animated; else the 384px cached thumb -- crisp on HiDPI at the enlarged medallion, still tiny vs the 5.6MB master; the achievement is always earned when its toast fires, so a sealed feat badge still serves
     cap.appendChild(b);
     const ring = document.createElement("div"); ring.className = "ring"; cap.appendChild(ring);
     // Badge-local ambient decoration, legendary/feat only -- positions/counts verbatim from
