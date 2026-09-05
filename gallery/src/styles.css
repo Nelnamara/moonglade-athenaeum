@@ -13,7 +13,17 @@
   --cyan: var(--loomc, #47cbc3);
 }
 * { box-sizing: border-box; }
-html { color-scheme: dark; }
+/* scrollbar-gutter: RESERVE THE TRACK, ALWAYS. Opening any full-screen panel sets
+   body{overflow:hidden} (hooks/useScrollLock.js), which on a classic-scrollbar platform
+   REMOVES the scrollbar and hands the page ~15px of extra width. That width change is a
+   real layout change: the grid re-measures, and both ResizeObservers in the shell (App.jsx's
+   thumbMax measure and the sticky-chrome height publisher) plus Grid.jsx's own column
+   measure fire mid-open-animation -- a reflow storm on the exact frame the overlay is
+   trying to animate, and the whole page visibly shifts sideways under the scrim. Reserving
+   the gutter permanently makes hiding the scrollbar a no-op for layout. (Where the property
+   is unsupported -- older Safari -- useScrollLock falls back to padding compensation, same
+   effect, and it feature-detects rather than sniffing.) */
+html { color-scheme: dark; scrollbar-gutter: stable; }
 body { margin: 0; background: var(--mantle); color: var(--text);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button { font: inherit; cursor: pointer; }

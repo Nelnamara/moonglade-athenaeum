@@ -55,9 +55,12 @@ describe("gen/urlState.js: the ONE URL builder (pure)", () => {
     assert.doesNotMatch(u, /a b&c/);
     assert.equal(new URLSearchParams(u.slice(1)).get("image"), "a b&c");
   });
-  test("pathname is preserved when given (/next stays /next), defaults to /", () => {
-    assert.equal(buildUrl({ page: 2 }, "", "/next"), "/next?page=2");
-    assert.equal(buildUrl({ page: 1 }, "", "/next"), "/next");
+  // The literal used to be "/next" -- the gallery's pilot-era second path, retired
+  // with the codename (issue #51). The PROPERTY under test is unchanged: whatever
+  // pathname the caller hands in comes back out. The app only ever hands it "/".
+  test("pathname is preserved when given, defaults to /", () => {
+    assert.equal(buildUrl({ page: 2 }, "", "/sub"), "/sub?page=2");
+    assert.equal(buildUrl({ page: 1 }, "", "/sub"), "/sub");
     assert.equal(buildUrl({ page: 2 }, "", ""), "/?page=2");
   });
   test("readPage: integer >= 1, else 1", () => {
@@ -106,15 +109,19 @@ describe("A. URL page addressing (App.jsx)", () => {
     assert.equal(writes.length - inHelper.length, 1);
     assert.match(app, /window\.history\.replaceState\(null, "", window\.location\.pathname \+ window\.location\.search\);/);
     // closeDetails: drop image only, keep the page
-    const close = app.slice(app.indexOf("const closeDetails = () => {"), app.indexOf("const pageRef"));
+    // openDetails/closeDetails/goToPage are useCallback'd since 2026-09-04 (they are props
+    // on the memoized <Grid>); what these slices pin -- which keys each one patches -- is
+    // unchanged.
+    const close = app.slice(app.indexOf("const closeDetails = useCallback(() => {"), app.indexOf("const pageRef"));
     assert.match(close, /setUrl\(\{ image: null \}\)/);
     assert.doesNotMatch(close, /setUrl\(\{ page/);
     // openDetails: patch the image, keep the page
-    const open = app.slice(app.indexOf("const openDetails = (mid) => {"), app.indexOf("const closeDetails"));
+    const open = app.slice(app.indexOf("const openDetails = useCallback((mid) => {"), app.indexOf("const closeDetails"));
     assert.match(open, /setUrl\(\{ image: mid \}\)/);
   });
   test("goToPage pushes ?page=N through the helper, then loads", () => {
-    const go = app.slice(app.indexOf("const goToPage = (p) => {"), app.indexOf("};", app.indexOf("const goToPage = (p) => {")));
+    const goAt = app.indexOf("const goToPage = useCallback((p) => {");
+    const go = app.slice(goAt, app.indexOf("}, [", goAt));
     assert.match(go, /setUrl\(\{ page: p \}\);/);
     assert.match(go, /load\(p, true\);/);
     assert.match(app, /goToPage=\{goToPage\}/);

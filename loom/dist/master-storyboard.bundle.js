@@ -3509,6 +3509,21 @@ ${"=".repeat(48)}
     return remove;
   }
 
+  // ../gallery/src/hooks/swrStore.js
+  var _store = /* @__PURE__ */ new Map();
+  function invalidate(prefix) {
+    const list = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean).map(String);
+    if (!list.length) return 0;
+    let n = 0;
+    for (const key of [..._store.keys()]) {
+      if (list.some((p) => key.startsWith(p))) {
+        _store.delete(key);
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -3686,6 +3701,7 @@ ${"=".repeat(48)}
           if (cb) cb("done", d);
         } catch {
         }
+        invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]);
         clearPending(id);
         refresh();
       } else if (d.phase === "failed") {
@@ -3716,6 +3732,25 @@ ${"=".repeat(48)}
   }
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("visibilitychange", wakePending);
+  }
+
+  // ../gallery/src/notify/badgeArt.js
+  var _start = /* @__PURE__ */ new Map();
+  function badgeSources(id, size) {
+    const stem = "/badge-thumb/" + encodeURIComponent(id);
+    return [stem + ".webp", stem + ".png" + (size === 384 ? "?size=384" : "")];
+  }
+  function badgeSrc(id, size) {
+    return badgeSources(id, size)[_start.get(id) || 0];
+  }
+  function badgeHop(img, id, size) {
+    if (!img) return false;
+    const list = badgeSources(id, size);
+    const i = list.indexOf(img.getAttribute("src") || "");
+    if (i < 0 || i + 1 >= list.length) return false;
+    if ((_start.get(id) || 0) < i + 1) _start.set(id, i + 1);
+    img.src = list[i + 1];
+    return true;
   }
 
   // ../gallery/src/notify/ach.js
@@ -3859,12 +3894,13 @@ ${"=".repeat(48)}
       const b = document.createElement("img");
       b.className = "badge";
       b.onerror = function() {
+        if (badgeHop(this, a.id, 384)) return;
         const e = document.createElement("div");
         e.className = "badge emoji";
         e.textContent = a.icon || "\u{1F3C6}";
         if (this.parentNode) this.parentNode.replaceChild(e, this);
       };
-      b.src = "/badge-thumb/" + encodeURIComponent(a.id) + ".png?size=384";
+      b.src = badgeSrc(a.id, 384);
       cap.appendChild(b);
       const ring = document.createElement("div");
       ring.className = "ring";

@@ -1124,9 +1124,15 @@ def test_live_capture_writes_every_field_the_backfill_would(monkeypatch, tmp_pat
            / "moonglade_backup.py").read_text(encoding="utf-8")
     # _download_image_task is the SHARED downloader: collect_generation (the web
     # app + job tracker) goes through it, so it is the path that matters most.
+    # Since issue #19 it hands the fields to build_catalog_row as KEYWORDS rather than
+    # writing dict keys, so a field counts as written either way -- and `fm=fm` covers
+    # the _TASK_ROW_FIELDS the builder spreads for it.
     body = src[src.index("def _download_image_task("):]
     body = body[:body.index(chr(10) + "        rows.append(full)")]
-    missing = sorted(f for f in expected if '"{}"'.format(f) not in body)
+    spread = set(core._TASK_ROW_FIELDS) if "fm=fm" in body else set()
+    missing = sorted(f for f in expected
+                     if f not in spread
+                     and '"{}"'.format(f) not in body and "{}=".format(f) not in body)
     assert not missing, (
         "the live capture never writes {} -- they stay blank until a backfill comes past"
         .format(missing))

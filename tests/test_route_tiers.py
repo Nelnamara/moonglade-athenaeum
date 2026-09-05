@@ -252,6 +252,7 @@ TIER_SNAPSHOT = [
     "/api/workflows [GET] LOGIN",
     "/api/your-art [GET] LOGIN",
     "/badge-thumb/<aid>.png [GET] LOGIN",
+    "/badge-thumb/<aid>.webp [GET] LOGIN",
     "/branding/<path:fname> [GET] PUBLIC",
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",
@@ -261,7 +262,6 @@ TIER_SNAPSHOT = [
     "/loom [GET] LOGIN",
     "/loom/dist/<path:fname> [GET] LOGIN",
     "/loom/vendor/<path:fname> [GET] LOGIN",
-    "/next [GET] LOGIN",
     "/next/assets/<path:fname> [GET] PUBLIC",
     "/static/<path:filename> [GET] LOGIN",
     "/thumbs/<media_id>.jpg [GET] LOGIN",
@@ -882,3 +882,36 @@ def test_panel_status_is_not_blanket_localhost_gated(app):
 # actually enforce, @tier(LOGIN), and keeps its own `spec["destructive"] and not
 # _is_local_request()` check. Nothing was lost in that correction; this comment exists
 # so the next reader can confirm it rather than assume it.
+
+
+# ---------------------------------------------------------------------------
+# THE RETIRED CODENAME (issue #51)
+# ---------------------------------------------------------------------------
+
+def test_the_pilot_codename_has_no_page_route(app):
+    """`/next` -- the codename the React app shipped under through the pilot -- is
+    gone from the url_map, and stays gone.
+
+    It was a SECOND path onto the same view (`@app.route("/")` + `@app.route("/next")`,
+    one endpoint, no redirect hop), kept so pilot-era bookmarks and pushState URLs
+    resolved. The owner retired the name outright rather than leave a redirect
+    standing in for it (issue #51, "default is retire"), and nothing needed one:
+    no page in the app, the launcher, the wiki or docs/ linked it, the shell pushes
+    `window.location.pathname`, and every in-app deep link is already `/?image=<mid>`.
+
+    Probed with a REAL logged-in session on purpose. Anonymously, EVERY unrouted path
+    redirects to /login -- the front door refuses to map the app for a stranger (see
+    _enforce_front_door's `level = ... if view is not None else LOGIN`) -- so an
+    anonymous probe would pass just as happily against a live /next and prove nothing.
+    Behind a session an unrouted path is a plain 404, which is the only response that
+    actually tells "retired" apart from "still there".
+    """
+    cli = _login(app)
+    assert cli.get("/").status_code == 200, (
+        "the front door itself stopped answering -- this test would be measuring nothing")
+    assert cli.get("/next").status_code == 404, (
+        "/next answers again. It is retired (issue #51): the React app has ONE path, "
+        "and the codename is not a URL any more.")
+    assert "/next" not in {str(r) for r in app.url_map.iter_rules()}, (
+        "a rule for /next is registered again -- see the docstring above before adding "
+        "it back")

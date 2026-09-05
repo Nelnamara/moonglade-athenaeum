@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { apiGet } from "../api.js";
+import { useSwrGet } from "./swrCache.js";
 
 /* useHealth -- HealthOverlay.jsx's fetch/state/derivation, mechanically
    lifted out (2026-08-03), same precedent as useMyArt.js/useContests.js/
@@ -24,22 +23,17 @@ export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 // images). The last payload survives across opens for the whole page session; a reopen
 // renders those numbers INSTANTLY while the refetch replaces them in place. First open
 // still waits (nothing to show yet) -- that first wait is what the server-side walk
-// rewrite + api_health's TTL cache attack.
-let _lastHealth = null;
-
+// rewrite + api_health's memo attack.
+//
+// This file's own `_lastHealth` module variable WAS that cache, alone, for every overlay in
+// the app (2026-09-04): it is now hooks/swrStore.js's map, and this hook is one ordinary
+// consumer of it -- same mechanism, same wording above, one implementation. The one
+// behavioural difference is the shared rule's, and it is the better answer: a failed
+// REFRESH no longer reports an error over numbers that are seconds old (HealthMobile.jsx
+// returns early on `err` and would have replaced a full screen of good stats with one
+// error line). Nothing cached still surfaces the error exactly as before.
 export default function useHealth() {
-  const [h, setH] = useState(_lastHealth);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    let dead = false;
-    apiGet("/api/health")
-      .then((d) => {
-        if (d.error) { if (!dead) setErr(d.error); return; }
-        _lastHealth = d; if (!dead) setH(d);
-      });
-    return () => { dead = true; };
-  }, []);
+  const { data: h, err } = useSwrGet("/api/health");
 
   // Stats tiles: real fields from collection_health(), the full 12-tile set
   // HealthOverlay.jsx already shows on desktop (gold = the celebration

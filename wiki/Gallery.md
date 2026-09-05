@@ -31,6 +31,13 @@ A row of frosted glow-pill buttons, one hue per destination:
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
 
+**Overlays reopen instantly.** Each of these remembers what it last showed for the rest of
+the browser session: reopening one paints those numbers/rows in the first frame and
+refreshes them behind, instead of showing an empty panel while it loads. Anything you do
+that changes the library — publishing, importing, resolving duplicates, a finished
+generation, a maintenance job — drops what is remembered, so a reopen after a change always
+re-reads. See [Health → How fresh are these numbers?](Health).
+
 **Everything here needs a login as of v2.0.0**, including on the machine running the server.
 Once signed in, **Generate**, **The Loom**, **Panel** and the balance chip are available from
 any device — generating from a tablet is exactly what the login was built for.

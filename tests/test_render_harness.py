@@ -223,7 +223,7 @@ def render_server(tmp_path_factory):
     Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "harness_0.png")
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
     # This module's tests assume an already-onboarded install (the real gallery, not the
-    # first-run Setup Wizard) -- next_gallery()'s boot payload now computes needs_key from
+    # first-run Setup Wizard) -- app_page()'s boot payload now computes needs_key from
     # a fresh config.json read, and this fixture's config would otherwise have none.
     # test_setup_wizard_onboards_a_genuinely_fresh_install below gets its OWN dedicated
     # server with no key and an empty catalog, precisely so it can exercise the state this
@@ -502,7 +502,7 @@ def test_saved_skin_is_applied_before_the_body_exists(logged_in_page):
     `document.body === null` and `readyState === 'loading'` -- i.e. during head parsing,
     before `<body>` is even parsed, therefore before any paint.
 
-    Since the classic cut this measures the React shell at "/" -- NEXT_PAGE carries the
+    Since the classic cut this measures the React shell at "/" -- APP_PAGE carries the
     same pre-paint inline script in `<head>`, and (2026-08-08 port note) the post-load
     syncSkin() reconcile this test's seeding dance exists for now lives in
     gallery/src/notify/ach.js, bundled into "/" -- same behaviour, new home.

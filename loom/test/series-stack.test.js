@@ -83,11 +83,13 @@ describe("(c) opening a stack NAVIGATES: series -> series filter, batch -> View-
     assert.ok(grid.includes("else if (kind === \"batch\" && onOpenBatch) onOpenBatch(it.batch.task_id);"));
   });
   test("App mirrors filterByBatch as filterBySeries (sets the series drill-down) and wires both", () => {
-    // filterBySeries is the mirror: it sets adv.series (the ?series filter)
-    assert.ok(app.includes("const filterBySeries = (series) => {"));
+    // filterBySeries is the mirror: it sets adv.series (the ?series filter).
+    // Both are useCallback'd since 2026-09-04 -- they are props on the memoized <Grid>, and
+    // a fresh identity per render would defeat that memo. The wiring is what matters here.
+    assert.ok(app.includes("const filterBySeries = useCallback((series) => {"));
     assert.ok(app.includes("setAdv((old) => ({ ...old, series, batch: \"\" }));"));
     // the batch open is the EXISTING path, reused exactly
-    assert.ok(app.includes("const filterByBatch = (batch) => {"));
+    assert.ok(app.includes("const filterByBatch = useCallback((batch) => {"));
     // both handed to the grid
     assert.ok(app.includes("onOpenSeries={filterBySeries}"));
     assert.ok(app.includes("onOpenBatch={filterByBatch}"));

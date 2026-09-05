@@ -12,7 +12,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
    real pagination at either end (classic navigates a real page link; the
    pilot fetches the adjacent page and jumps to its edge item).
 
-   Details is a real link to the pilot's OWN /next?image=<mid> (bookmarkable,
+   Details is a real link to the app's OWN /?image=<mid> (bookmarkable,
    opens correctly in a new tab/window) -- a plain click intercepts and
    navigates in-app via onOpenDetails; a modifier-key or middle click is left
    alone so the browser's own new-tab/new-window handling still works,

@@ -164,7 +164,7 @@ function groupSeriesSteps(steps, currentTaskId) {
 /* The Details view -- "the layer deeper" (owner, 2026-07-30). Classic's
    /image/<media_id> page, ported: the full metadata, the whole action bar,
    edit-prompt, both delete paths, focus mode. A real view (App.jsx gives it a
-   bookmarkable /next?image=<mid> URL via the History API), not a modal bolted
+   bookmarkable /?image=<mid> URL via the History API), not a modal bolted
    onto the lightbox -- matching classic's genuinely separate page.
 
    Rebuilt 2026-08-23 to the PIXEL source, design_handoff/design_handoff_moonglade_suite/

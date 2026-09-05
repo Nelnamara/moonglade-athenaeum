@@ -1883,7 +1883,10 @@ def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 # The survivors keep their ORIGINAL ids on purpose -- "classic" is the modernized
 # classic, not a new id -- so an install that already stored a pick keeps wearing the
 # treatment it chose, now rebuilt. moondust is the promoted canvas demo.
-MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot",
+# "sheen" split out of classic 2026-09-04 (owner: "star and glint should be
+# separate. the star was the OG classic") -- classic is the star alone; sheen is
+# the vanilla interface's selectable glass sweep, masked to the mark's silhouette.
+MARK_ANIMS = ["classic", "sheen", "glow", "shine", "aurora", "twinkle", "shoot",
               "eclipse", "mist", "prism", "moondust", "none"]
 # Retired by the same workshop. A stored pick of one of these is NOT an error: it
 # renders as classic (load_branding's own validation does that), the picker stops
@@ -3625,6 +3628,40 @@ def _badge_thumb(out_dir, aid, size=256):
             return raw
 
 
+# An ANIMATED badge master is a `<id>.webp` dropped beside the stills in the badges
+# role -- the same "drop it in and it moves" move the toast mascot already takes
+# (notify/ach.js's mascot chain). It is served THROUGH, byte-for-byte, never down a
+# PIL path: measured here on Pillow 12.2.0, reading an animated webp hands back every
+# frame but reports each frame's `duration` as None (the masters carry a real 66 ms in
+# their ANMF chunks), so a re-encode silently invents the cadence the art was authored
+# at -- and re-compresses the artist's chroma-keyed alpha on top of it. Pass-through
+# keeps frames, timing, loop count and alpha exactly as made. The still-PNG path below
+# is untouched by any of this: a badge with no .webp beside it serves exactly as before.
+#
+# The cap is the one thing pass-through has to bring of its own, since nothing is being
+# resized: an animated master is whole-file, and the ones banked for future feats run
+# ~3-8 MB each. 12 MB clears those with headroom while still refusing something absurd;
+# over the cap the .webp 404s and the client's chain falls back to the still thumb.
+_BADGE_ANIM_MAX_BYTES = 12 * 1024 * 1024
+
+
+def _badge_anim(aid):
+    """The animated master's bytes for `aid`, or None when there isn't one (no
+    `<id>.webp` in the badges role, unreadable, or over _BADGE_ANIM_MAX_BYTES).
+    None is the fallback signal, not an error: the route 404s and the client's
+    webp-first chain drops to the still `<id>.png` thumb. Reads through
+    _branding_bytes(), so a loose master wins over the container's, same as the
+    stills. NO cache entry: there is no derived artefact to cache -- the bytes
+    served ARE the master."""
+    rel = _role_rel("badges", aid + ".webp")
+    if not _branding_exists(rel):
+        return None
+    raw = _branding_bytes(rel)
+    if raw is None or len(raw) > _BADGE_ANIM_MAX_BYTES:
+        return None
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Telemetry: the persisted counters behind every achievement metric that is NOT
 # a cheap catalog COUNT (edits run, pieces culled, distinct days, feat events...).
@@ -4393,8 +4430,11 @@ def collection_health(out_dir, db_path):
     # extra exclusion (named disagreement 5) and videos are its own extra kind
     # (named disagreement 4) -- both asked for here, neither imposed on the others.
     # Guarded by tests/test_gallery_filters.py's existing health tests.
-    for e in scan_library(out_dir, kinds=("image", "video"),
-                          exclude=QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)):
+    #
+    # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
+    # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
+    # anything if it watches exactly the roots this walk descends into.
+    for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
         on_disk_rels.add(str(e.rel).replace("\\", "/"))
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
@@ -4520,6 +4560,202 @@ def collection_health(out_dir, db_path):
         "top_loras": top_loras,
         "top_words": top_words,
     }
+
+
+# ---------------------------------------------------------------------------
+# THE HEALTH MEMO -- the same treatment achievement_metrics() got in 49a646b, applied to
+# the other walk every overlay open was paying for.
+#
+# collection_health() walks the ENTIRE library off disk (sizes, buckets, Class-A duplicate
+# detection) plus a handful of catalog queries. At 35k images that is seconds, and the owner
+# reported it as "VERY slow" back on 2026-08-06. The route has had a 120s TTL cache since
+# then, which helped and was wrong in two directions at once: a change made 5s ago was
+# invisible for two minutes, and a first open after two idle minutes paid the full walk with
+# the user watching.
+#
+# KEYED ON THE CATALOG FILE, NO TIME FLOOR -- the same ruling as _ACH_METRICS_CACHE, for the
+# same reason (see its comment: a floor makes a real change bounded-stale, and that is what
+# broke tests/test_unlock_split.py's earn-then-read). Half the key is the catalog's
+# (mtime_ns, size): every write to the library goes through that file, so the instant it
+# changes the memo is invalid, and a catalog nobody is writing to -- which is every open
+# outside a sync -- is served from memory. os.stat is microseconds; the walk is seconds.
+#
+# ...AND ON THE DISK, because half of what is memoized never touches the catalog. What
+# collection_health() returns is not a catalog summary: total_files, total_bytes, per_bucket
+# and dup_redundant/dup_bytes come off the WALK, and `missing`/`uncataloged` are the DIFF
+# between the walk and the catalog. A file deleted or dropped in by hand moves every one of
+# those and writes nothing to catalog.db, so a catalog-only key served a payload that was
+# provably wrong until some unrelated write happened to move the db file. _health_dir_key()
+# is the cheap disk-side half: the mtimes of the walk's own roots.
+#
+# THE PERIODIC BACKSTOP (HEALTH_MAX_AGE). Directory mtimes catch an add or a delete in the
+# directories themselves, not one nested deeper (batches/<name>/x.png), and not an in-place
+# rewrite that leaves a file's name alone. So the memo also carries a CEILING on age -- a
+# ceiling, never a floor: a catalog write still invalidates in the same instant it lands.
+# Past the ceiling the reader is still served immediately, the recompute just happens behind
+# it, which is the same serve-stale path a moved key already takes.
+#
+# SERVE-STALE-WHILE-RECOMPUTING. When the key HAS moved, the request that notices does not
+# pay for the new walk: it gets the previous payload immediately and a single background
+# thread recomputes for whoever asks next. Only two callers ever block -- the first read of a
+# process (nothing to serve yet) and an explicit ?fresh=1 -- and _HEALTH_BUSY makes the
+# refresh single-flight, so a burst of opens cannot start a walk each.
+#
+# BOOT PRIME (_health_prime, called from main()). Even a perfect memo leaves the FIRST open
+# of a session slow, which is the one actually noticed. Priming it off-thread just after the
+# server binds makes that open a memory read too. Prime + mtime key is what makes good on the
+# owner's "loaded periodically and cached" -- with no timer and no staleness window.
+_HEALTH_CACHE = {"key": None, "payload": None, "at": 0.0}
+_HEALTH_LOCK = threading.Lock()
+_HEALTH_BUSY = {"on": False}
+
+# How long a snapshot may be served before a recompute is kicked off behind it, EVEN when
+# neither half of the key moved. Ten minutes: long enough that an idle session never pays
+# the walk twice over, short enough that the drift the key cannot see (a file swapped inside
+# batches/<name>/, an in-place rewrite) is bounded instead of permanent. This is the owner's
+# own "loaded periodically and cached", and it is a ceiling on staleness, not a floor on
+# freshness -- a catalog write still invalidates in the instant it lands.
+HEALTH_MAX_AGE = 600.0
+
+
+def _health_key(db_path):
+    """The cheap invalidation key: what the catalog file looks like right now. None when it
+    does not exist yet -- a library with no catalog is still a valid thing to report on, and
+    None compares equal to None, so it memoizes like any other key."""
+    try:
+        st = os.stat(str(db_path))
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _health_dir_key(out_dir):
+    """The cheap DISK-side key: the mtimes of the roots collection_health() actually walks.
+
+    A directory's own mtime moves whenever an entry is added to or removed from it, so one
+    scandir of out_dir plus the mtime of each immediate subdirectory the walk descends into
+    (HEALTH_EXCLUDE pruned, the same set scan_library() is handed) notices a file deleted
+    from or dropped into any month folder, images/, imported/ or the root itself -- exactly
+    the buckets bucket_of() names and per_bucket/total_files/missing/uncataloged are built
+    from. Cost is ONE directory listing plus one stat per top-level directory -- dozens of
+    syscalls against a library of tens of thousands of files, and flat in that count, which
+    is the whole point of not re-walking.
+
+    THE STAT HAS TO BE os.stat(e.path), NOT e.stat(). scan_library() reads size straight off
+    the DirEntry for exactly the reason that would tempt someone here -- on Windows a
+    DirEntry is already populated by the directory read, so e.stat() is free. For a
+    SUBDIRECTORY it is also WRONG: what NTFS hands back there is the duplicated timestamp
+    copy held in the parent's index entry, and that copy is not refreshed when a file inside
+    the subdirectory is added or deleted. Measured on this box: after `unlink()` of a file in
+    2026-01/, os.stat("2026-01") moved and the scandir DirEntry did not. The free stat would
+    have made this whole key silently never fire, which is the bug it exists to fix.
+
+    What it does NOT see: a change nested deeper than one level (batches/<name>/x.png) or a
+    same-name in-place rewrite. HEALTH_MAX_AGE is the backstop for those, not this.
+
+    None when out_dir cannot be listed at all (a disconnected drive) -- the same shape
+    _health_key uses for a missing catalog, and it memoizes the same way.
+    """
+    root = str(out_dir)
+    top_names, any_names = _split_exclusions(HEALTH_EXCLUDE)
+    skip = {n.lower() for n in top_names} | set(any_names)
+    try:
+        marks = [os.stat(root).st_mtime_ns]
+    except OSError:
+        return None
+    subs = []
+    try:
+        with os.scandir(root) as it:
+            for e in it:
+                try:
+                    if not e.is_dir(follow_symlinks=False):
+                        continue
+                    if e.name.lower() in skip:
+                        continue
+                    subs.append((e.name, os.stat(e.path).st_mtime_ns))
+                except OSError:
+                    continue          # vanished mid-listing: the next read will see it
+    except OSError:
+        return None
+    # Sorted so the key does not depend on the order the filesystem hands entries back.
+    return (marks[0], tuple(sorted(subs)))
+
+
+def _health_memo_key(out_dir, db_path):
+    """Both halves. The catalog file AND the walk's roots -- either one moving invalidates."""
+    return (_health_key(db_path), _health_dir_key(out_dir))
+
+
+def health_snapshot(out_dir, db_path):
+    """collection_health(), memoized. Reads the key BEFORE the walk and stores the payload
+    under that one: a catalog (or a file) written DURING the walk therefore leaves a key that
+    no longer matches, and the next reader recomputes rather than trusting a half-old
+    answer."""
+    key = _health_memo_key(out_dir, db_path)
+    payload = collection_health(out_dir, db_path)
+    with _HEALTH_LOCK:
+        _HEALTH_CACHE.update(key=key, payload=payload, at=time.time())
+    return payload
+
+
+def _health_refresh_async(out_dir, db_path):
+    """Recompute behind a stale answer, once. Returns the thread (or None when one was
+    already running) so a test can join it instead of sleeping."""
+    with _HEALTH_LOCK:
+        if _HEALTH_BUSY["on"]:
+            return None
+        _HEALTH_BUSY["on"] = True
+
+    def _run():
+        try:
+            health_snapshot(out_dir, db_path)
+        except Exception:
+            pass                      # a background nicety must never take the server down
+        finally:
+            with _HEALTH_LOCK:
+                _HEALTH_BUSY["on"] = False
+    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-refresh")
+    t.start()
+    return t
+
+
+def health_cached(out_dir, db_path, fresh=False):
+    """What /api/health answers with. Five ways out, in order:
+       1. ?fresh=1 -- walk now, block, store. The explicit user refresh.
+       2. nothing cached at all -- the blocking walk. This is the first read of a process,
+          and it is what _health_prime pre-pays off-thread at boot.
+       3. the key matches and the snapshot is younger than HEALTH_MAX_AGE -- the memo, free.
+       4. the key moved (catalog file OR the walk's own directories) -- hand back the STALE
+          payload now and recompute behind it.
+       5. the key matches but the snapshot has aged past HEALTH_MAX_AGE -- same serve-stale
+          path, because drift deeper than the directory mtimes see must still be bounded."""
+    if fresh:
+        return health_snapshot(out_dir, db_path)
+    key = _health_memo_key(out_dir, db_path)
+    with _HEALTH_LOCK:
+        payload = _HEALTH_CACHE["payload"]
+        fresh_enough = (time.time() - _HEALTH_CACHE["at"]) <= HEALTH_MAX_AGE
+        hit = payload is not None and _HEALTH_CACHE["key"] == key and fresh_enough
+    if payload is None:
+        return health_snapshot(out_dir, db_path)
+    if hit:
+        return payload
+    _health_refresh_async(out_dir, db_path)
+    return payload
+
+
+def _health_prime(out_dir, db_path):
+    """Warm the memo off-thread at boot so the first Health open of a session is a memory
+    read too. Daemon, so it can never hold up an exit; fail-soft, so a broken library still
+    starts a server. Returns the thread for the test that asserts it really primes."""
+    def _run():
+        try:
+            health_snapshot(out_dir, db_path)
+        except Exception:
+            pass
+    t = threading.Thread(target=_run, daemon=True, name="moonglade-health-prime")
+    t.start()
+    return t
 
 
 def duplicate_groups(out_dir, limit=300):
@@ -4819,6 +5055,10 @@ QUARANTINE_EXCLUDE = (GALLERY_DIRNAME, DUPLICATES_DIRNAME, DELETED_DIRNAME)
 QUARANTINE_EXCLUDE_ANYWHERE = tuple("**/" + n for n in QUARANTINE_EXCLUDE)
 # --import-local's internal scan: the three above plus legacy branding/.
 IMPORT_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
+# collection_health()'s walk, and therefore _health_dir_key()'s stat set. Same names as
+# IMPORT_EXCLUDE today; kept separate because the two would not have to move together and
+# the health memo's correctness depends on THIS one matching the health walk exactly.
+HEALTH_EXCLUDE = QUARANTINE_EXCLUDE + (BRANDING_DIRNAME,)
 
 _VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
 # What moonglade_similar's CLIP index will actually embed -- deliberately narrower
@@ -5478,6 +5718,12 @@ def restore_quarantined_media(out_dir, thumb_dir, db_path, media_id):
         return {"ok": False, "error": str(e)}
 
     meta = _read_trash_meta(out_dir, media_id)
+    # Deliberately NOT moonglade_backup.build_catalog_row: this is a RESTORE, not a
+    # capture. The sidecar already holds the whole row the user owned -- rating,
+    # collections, title, published state -- and there is no task, no extract_full_meta
+    # surface, and (purge_media_local deleted the row) nothing in the catalog to carry
+    # forward. Seeding from the saved row is the inverse of the builder's contract
+    # (blank template + task fields + carry), so it stays its own thing. Issue #19.
     row = {f: (meta.get(f, "") if meta else "") for f in CATALOG_FIELDS}
     row["media_id"] = media_id
     row["filename"] = dest.name
@@ -6000,7 +6246,7 @@ def build_thumbnails(rows, out_dir, thumb_dir, force=False, progress_cb=None, wo
 
 # Design tokens: the SINGLE source of truth for the gallery's palette + achievement
 # skins, shared (via the __DESIGN_TOKENS__ marker + .replace()) by the React shells
-# (NEXT_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
+# (APP_PAGE/LOGIN_PAGE) and LOOM_PAGE_BUNDLE so every surface
 # re-skins together instead of the Loom carrying its own copy that silently drifts.
 DESIGN_TOKENS_CSS = r"""
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
@@ -6088,7 +6334,7 @@ def _upscale_const_js():
       by tests/test_upscale_boosters.py); this exists so the new surface does not add a
       third place for those numbers to drift.
 
-    Substituted into NEXT_PAGE and the Loom shells (the surfaces with upscale UI)
+    Substituted into APP_PAGE and the Loom shells (the surfaces with upscale UI)
     since the classic cut (2026-08-08) removed the INDEX/DETAIL pages it was
     originally built for.
     """
@@ -6862,6 +7108,193 @@ def assert_every_route_declares_a_tier(app):
             "noticed until a route-gating audit found it."
             .format(len(missing),
                     "\n".join("    {} ({})".format(r, e) for e, r in missing)))
+
+
+# --- the AI-Tools scene catalog ------------------------------------------------------
+# PixAI's `listChatEditingScenes`, memoized module-level on the contest_board pattern: ONE
+# snapshot every consumer shares, a lock around it, and FAILURES ARE NOT CACHED (a raise
+# never reaches the store, and an empty answer is not banked as "the catalog is empty").
+#
+# Two consumers, one read: the AI-Tools nav modal browses the TILES and the gen drawer's
+# scene generator reads the picked scene's CONTROL SCHEMA. Before 2026-09-04 the modal read
+# nothing at all -- it rendered a hardcoded 28-entry array, so `daily-fortune`, `daily-setlog`
+# and `mini-mart-ad` (live on PixAI, 31 scenes as of this writing) had no tile and were
+# unreachable in the UI (issue #36). Both halves now come from here.
+#
+# TTL stays at an hour, NOT the contest board's 90s: a contest's entries change by the
+# minute, the scene catalog gains a scene every few weeks, and the repo's standing rule is
+# to be polite to their servers. The shared pattern is the memo, not the number.
+SCENES_TTL = 3600.0
+_scenes_cache = {}
+_scenes_cache_lock = threading.Lock()
+
+# Preset keys PixAI uses for the "pick a language" scenes. Every human-readable string in the
+# catalog is an i18n key (`growth:chat-editing-scene.<slug>.title`), so the catalog cannot
+# name a scene or a preset for us -- but the KEYS are stable, and these are the ones that mean
+# "this scene's presets are languages" (captured live 2026-09-04: character-card
+# english/japanese/chinese/korean, chatfic en/ja/ko/zh-tw, character-style-generator +
+# daily-fortune + mini-mart-ad english/japanese/korean/traditional-chinese).
+_SCENE_LANG_KEYS = {
+    "english": "EN", "en": "EN", "japanese": "JP", "ja": "JP", "jp": "JP",
+    "korean": "KR", "ko": "KR", "kr": "KR", "chinese": "CN", "zh": "CN", "zh-cn": "CN",
+    "traditional-chinese": "TC", "zh-tw": "TC", "tw": "TC",
+    "simplified-chinese": "CN", "zh-hant": "TC", "zh-hans": "CN",
+}
+# The only host the CDN thumbnail proxy will fetch (api_train_cover's SSRF guard). A catalog
+# demo image on any other host is passed through as-is rather than pointed at a proxy that
+# would 403 it.
+_SCENE_CDN_HOST = "images-ng.pixai.art"
+
+
+def scene_catalog(core, session, force=False):
+    """The WHOLE live scene catalog (listChatEditingScenes), memoized for SCENES_TTL.
+
+    The one read both scene consumers go through, so opening the modal and then opening the
+    generator costs a single round trip rather than two. `force` drops the memo.
+
+    Failure handling is the point: `core.chat_editing_scenes` raising propagates BEFORE the
+    store is touched (the next caller retries against PixAI instead of being served a
+    remembered outage), and an empty list is likewise not banked -- an account that briefly
+    answers `[]` must not blank the modal for the next hour."""
+    now = time.time()
+    with _scenes_cache_lock:
+        ent = _scenes_cache.get("catalog")
+        if not force and ent and (now - ent["at"]) < SCENES_TTL:
+            return ent["rows"]
+    rows = core.chat_editing_scenes(session)
+    if rows:
+        with _scenes_cache_lock:
+            _scenes_cache["catalog"] = {"at": time.time(), "rows": rows}
+    return rows
+
+
+def _scene_label(key):
+    """A display label for a scene/preset/selector key -- PixAI's own `name` is the full
+    workflow prompt (tarot) and its `title` is an i18n key
+    (`growth:chat-editing-scene.plushie.title`), so the human-readable form is the
+    title-cased key ('the-sun' -> 'The Sun', 'daily-fortune' -> 'Daily Fortune')."""
+    return (str(key or "").replace("-", " ").replace("_", " ").strip().title())
+
+
+def _scene_shape(preset_keys, has_custom, ref_min):
+    """Which control row a scene needs, from its live schema alone -- the tile's shape chip.
+
+    Ordered most-specific first, and verified against all 28 curated tiles on 2026-09-04:
+    this derivation reproduces every one of the shipped shapes, which is what makes it safe
+    to let a scene PixAI adds tomorrow classify itself.
+      dual   -- needs two source images (dual-character-generator)
+      lang   -- its presets ARE the language list (character-card, chatfic, daily-fortune)
+      text   -- it takes a custom text field (polaroid, vtuber, gacha-screen)
+      select -- any other preset chips (tarot modes, fantasy classes, setlog times)
+      click  -- no presets at all: one tap (plushie, lego, giant-statue)
+    `lang` beats `text` deliberately: character-card has BOTH, and its shipped chip is
+    Language."""
+    keys = [str(k or "").strip().lower() for k in (preset_keys or []) if k]
+    if int(ref_min or 1) >= 2:
+        return "dual"
+    if keys and all(k in _SCENE_LANG_KEYS for k in keys):
+        return "lang"
+    if has_custom:
+        return "text"
+    return "select" if keys else "click"
+
+
+def _scene_detail(shape, preset_keys):
+    """The tile's small grey line under the name, derived for scenes we carry no curated copy
+    for. Deliberately modest -- it says what the live schema actually shows (language codes,
+    the first few preset names, a count) and never invents flavour text."""
+    keys = [str(k or "").strip().lower() for k in (preset_keys or []) if k]
+    if shape == "lang":
+        seen, codes = set(), []
+        for k in keys:
+            code = _SCENE_LANG_KEYS.get(k)
+            if code and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        return " / ".join(codes)
+    if shape == "dual":
+        return "2 refs · %d poses" % len(keys) if keys else "2 refs"
+    if shape == "text":
+        return "custom text"
+    if shape == "select":
+        if 0 < len(keys) <= 3:
+            return " / ".join(_scene_label(k) for k in keys)
+        return "%d options" % len(keys) if keys else ""
+    return ""
+
+
+def scene_thumb_url(images):
+    """The catalog's OWN thumbnail for a scene, as a URL this app can actually load.
+
+    PixAI serves scene demo art from its image CDN, which the browser cannot fetch
+    cross-origin from localhost -- so a CDN url is handed back through the existing
+    /api/pixai-cdn/thumb proxy (the same one the Train panel and My Art's LoRA cards use)
+    rather than growing a second one. `images.demo` is a LIST of urls used directly as an
+    <img src> by PixAI's own /ai-tools/<slug> page; `images.background` was empty on every
+    one of the 31 scenes captured 2026-09-04, so demo[0] is the picture. Anything off the
+    CDN host is passed through untouched -- the proxy's SSRF guard would refuse it, and a
+    raw url at least has a chance of loading. Returns "" when the scene ships no art."""
+    import urllib.parse as _up
+    imgs = images if isinstance(images, dict) else {}
+    cands = []
+    for field in ("demo", "background"):
+        val = imgs.get(field)
+        if isinstance(val, str):
+            cands.append(val)
+        elif isinstance(val, (list, tuple)):
+            cands.extend(val)
+    for raw in cands:
+        url = str(raw or "").strip()
+        if not url:
+            continue
+        try:
+            parsed = _up.urlparse(url)
+        except ValueError:
+            continue
+        if parsed.scheme == "https" and parsed.netloc == _SCENE_CDN_HOST:
+            return "/api/pixai-cdn/thumb?u=" + _up.quote(url, safe="")
+        return url
+    return ""
+
+
+def scene_row(sc):
+    """One raw chatEditingScene -> the row both scene surfaces render.
+
+    The CONTROL half (presets / selectors / custom / refMin) is what the gen drawer's scene
+    generator builds its form from. The TILE half (label / shape / detail / thumb / tier) is
+    what the AI-Tools modal's grid draws, and exists so a scene PixAI adds gets a tile with
+    no code change -- the whole point of issue #36.
+
+    Every human string in the catalog is an i18n key, so `label` is the title-cased sceneId,
+    not PixAI's `title`. The modal still overlays its own curated copy where it has some
+    ("Character Style Generator" ships as "Character Style"); this is the floor, not a
+    redesign of the shipped tiles.
+
+    NO price: the catalog carries no price/credit/cost field anywhere (confirmed over all 31
+    live scenes, 2026-09-04), which is the same reason SceneTab's confirm names the spend
+    instead of quoting it."""
+    presets = [{"key": p.get("key"), "label": _scene_label(p.get("key"))}
+               for p in (sc.get("presets") or []) if p.get("key")]
+    selectors = [{"id": x.get("id"), "label": x.get("label") or _scene_label(x.get("id")),
+                  "default": x.get("defaultKey"),
+                  "options": [{"key": o.get("key"),
+                               "label": o.get("label") or _scene_label(o.get("key"))}
+                              for o in (x.get("options") or []) if o.get("key")]}
+                 for x in (sc.get("selectors") or []) if x.get("id")]
+    refs = sc.get("refImages") or {}
+    ref_min = int(refs.get("minCount") or 1)
+    ref_max = int(refs.get("maxCount") or max(ref_min, 1))
+    keys = [p["key"] for p in presets]
+    shape = _scene_shape(keys, bool(sc.get("custom")), ref_min)
+    return {"sceneId": sc.get("sceneId"), "modelId": sc.get("modelId"),
+            "tier": (sc.get("permission") or {}).get("membershipTier"),
+            "refMin": ref_min, "refMax": ref_max,
+            "presets": presets, "selectors": selectors,
+            "custom": bool(sc.get("custom")),
+            "label": _scene_label(sc.get("sceneId")),
+            "shape": shape,
+            "detail": _scene_detail(shape, keys),
+            "thumb": scene_thumb_url(sc.get("images"))}
 
 
 def create_app(out_dir: Path):
@@ -8154,10 +8587,6 @@ def create_app(out_dir: Path):
             return jsonify({"error": route_tier_message(view)}), 403
         return None
 
-    _health_cache = {"ts": 0, "payload": None}   # api_health's TTL cache -- see its docstring
-    # (Used to live beside the classic /health page; the page died in the 2026-08-08 cut,
-    # the cache moved here to its one surviving consumer.)
-
     @app.route("/api/health")
     @tier(LOGIN)
     def api_health():
@@ -8166,24 +8595,17 @@ def create_app(out_dir: Path):
         /health page). Same computation, same fields, same LOGIN tier as the page it
         un-bakes; the page route stays until demolition.
 
-        ROUTE-LEVEL TTL CACHE (owner report 2026-08-06: "VERY slow" at 35k images).
-        collection_health() walks the whole library; at production scale that is
-        seconds of disk work per open, and the numbers it produces are glance-stats
-        that do not change second to second. 120s of staleness on a dashboard is
-        invisible; re-walking 70k files per open is not. The cache lives HERE, not in
-        collection_health() itself, so every direct caller (the classic /health page,
-        the tests) stays pure. ?fresh=1 bypasses -- the client sends it on an explicit
-        user refresh, never on a plain open."""
-        import time as _time
-        now = _time.time()
-        if (not request.args.get("fresh")
-                and _health_cache.get("payload") is not None
-                and now - _health_cache.get("ts", 0) < 120):
-            return jsonify(_health_cache["payload"])
-        payload = collection_health(out_dir, db_path)
-        _health_cache["payload"] = payload
-        _health_cache["ts"] = now
-        return jsonify(payload)
+        THE CACHE IS health_cached() (module level -- see its own block for the reasoning):
+        keyed on the CATALOG FILE with no time floor, serve-stale-while-recomputing, and
+        primed off-thread at boot. It replaced the 120s TTL this route carried from
+        2026-08-06, which was stale in one direction (a change made 5s ago stayed invisible
+        for two minutes) and cold in the other (a first open after two idle minutes paid the
+        whole walk with the user watching). The cache still lives OUTSIDE
+        collection_health(), as it always has, so every direct caller -- the classic /health
+        page, the tests -- gets a pure, uncached computation. ?fresh=1 bypasses; the client
+        sends it on an explicit user refresh, never on a plain open."""
+        return jsonify(health_cached(out_dir, db_path,
+                                     fresh=bool(request.args.get("fresh"))))
 
     @app.route("/api/panel/summary")
     @tier(LOGIN)
@@ -10577,11 +10999,20 @@ def create_app(out_dir: Path):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
 
-    @app.route("/badge-thumb/<aid>.png")
+    @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
+    @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
     @tier(LOGIN)
-    def badge_thumb(aid):
+    def badge_thumb(aid, ext):
         """Cached ~256px badge for the Folio of Honors tiles (masters stay the source of
-        truth). Lazily generated on first hit; path-safe (no slashes via <aid>)."""
+        truth). Lazily generated on first hit; path-safe (no slashes via <aid>).
+
+        TWO extensions, ONE gate. `.webp` answers the client's webp-first probe with the
+        ANIMATED master passed through untouched (_badge_anim), and 404s when there is no
+        animated master -- which is the normal answer for most ids, and the signal the
+        chain falls back to `.png` on. Both rules land on this one view function
+        deliberately: the roster/hidden-feat gate below is written once and cannot be
+        half-applied to one extension, which is exactly how a second route would have
+        leaked a sealed feat's art."""
         from flask import send_from_directory, abort
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)
@@ -10608,6 +11039,16 @@ def create_app(out_dir: Path):
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
+        if ext == "webp":
+            # Past the same gate the stills pass, so an unearned hidden feat's
+            # animation is no more fishable than its still. Served whole -- see
+            # _badge_anim on why an animated master is never re-encoded here.
+            raw = _badge_anim(aid)
+            if raw is None:
+                abort(404)             # no animated master -> the chain falls back to .png
+            resp = app.response_class(raw, mimetype="image/webp")
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+            return resp
         # The celebration toast asks for 384px so the enlarged medallion stays crisp
         # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
         # the cache can't be spammed into unbounded sizes.
@@ -13705,64 +14146,29 @@ def create_app(out_dir: Path):
                      "img": v, "membership": k in gated} for k, v in sorted(found.items())]
         return jsonify({"emotions": emotions})
 
-    # The AI-Tools scene catalog (PixAI 'chat editing scenes'). Like the Enhance preset prices,
-    # the list is fetched LIVE (not baked) so it self-updates the day PixAI adds/retires a scene,
-    # and cached because it is account-stable. TTL in seconds.
-    _scene_cache = {"at": 0.0, "scenes": None}
-    _SCENE_TTL = 3600.0
-
-    def _scene_label(key):
-        """A display label for a preset/selector key -- PixAI's own `name` is the full workflow
-        prompt (tarot) or an i18n key, so the human-readable form is the title-cased key
-        ('the-sun' -> 'The Sun', 'facing-hug' -> 'Facing Hug')."""
-        return (str(key or "").replace("-", " ").replace("_", " ").strip().title())
-
-    def _scene_row(sc):
-        """One raw chatEditingScene -> the control schema the drawer's scene generator renders:
-        the preset chips, the selector dropdowns (language / aspect-ratio), whether it takes a
-        custom text field, and how many source images it needs (1 for most, 2 for dual)."""
-        presets = [{"key": p.get("key"), "label": _scene_label(p.get("key"))}
-                   for p in (sc.get("presets") or []) if p.get("key")]
-        selectors = [{"id": x.get("id"), "label": x.get("label") or _scene_label(x.get("id")),
-                      "default": x.get("defaultKey"),
-                      "options": [{"key": o.get("key"),
-                                   "label": o.get("label") or _scene_label(o.get("key"))}
-                                  for o in (x.get("options") or []) if o.get("key")]}
-                     for x in (sc.get("selectors") or []) if x.get("id")]
-        refs = sc.get("refImages") or {}
-        ref_min = int(refs.get("minCount") or 1)
-        ref_max = int(refs.get("maxCount") or max(ref_min, 1))
-        return {"sceneId": sc.get("sceneId"), "modelId": sc.get("modelId"),
-                "tier": (sc.get("permission") or {}).get("membershipTier"),
-                "refMin": ref_min, "refMax": ref_max,
-                "presets": presets, "selectors": selectors,
-                "custom": bool(sc.get("custom"))}
-
     @app.route("/api/scenes")
     @tier(LOGIN)
     def api_scenes():
-        """The AI-Tools scene catalog + each scene's control schema, so the nav modal browses
-        and the gen drawer renders the right form. 'Fetch, don't bake': the list is pulled LIVE
-        from listChatEditingScenes through the mirror session (the identity that runs a scene),
-        cleaned to what the UI needs, and cached. Mirror-gated exactly like /api/enhance -- the
-        AI-Tools tier only exists when the Bridge is armed. LOGIN tier; read-only, spends
-        nothing."""
+        """The AI-Tools scene catalog: every live scene, its TILE fields (label, shape chip,
+        detail line, catalog thumbnail, membership tier) and its CONTROL schema (presets,
+        selectors, custom text, how many sources it needs). The nav modal browses the first
+        half, the gen drawer's scene generator renders the second, and both share one
+        memoized upstream read (scene_catalog).
+
+        'Fetch, don't bake': the list is pulled LIVE from listChatEditingScenes through the
+        mirror session (the identity that runs a scene) and cleaned to what the UI needs, so
+        a scene PixAI adds appears with no code change -- the modal used to draw a hardcoded
+        28 and could not see daily-fortune, daily-setlog or mini-mart-ad at all (issue #36).
+        Mirror-gated exactly like /api/enhance -- the AI-Tools tier only exists when the
+        Bridge is armed. LOGIN tier; read-only, spends nothing."""
         import moonglade_backup as core
         if not core.mirror_enabled() or core.make_mirror_session() is None:
             return jsonify({"error": "Mirror to PixAI must be armed to browse AI Tools"}), 409
-        now = time.time()
-        cached = _scene_cache["scenes"]
-        if cached is not None and (now - _scene_cache["at"]) < _SCENE_TTL:
-            return jsonify({"scenes": cached})
         try:
-            raw = core.chat_editing_scenes(core.make_mirror_session())
+            raw = scene_catalog(core, core.make_mirror_session())
         except Exception as e:
             return jsonify({"error": _log_gen_failure("/api/scenes", e, None)[:200]}), 200
-        out = [_scene_row(sc) for sc in raw if sc.get("sceneId")]
-        if out:
-            _scene_cache["scenes"] = out
-            _scene_cache["at"] = now
-        return jsonify({"scenes": out})
+        return jsonify({"scenes": [scene_row(sc) for sc in raw if sc.get("sceneId")]})
 
     @app.route("/api/scene", methods=["POST"])
     @tier(LOGIN)
@@ -13964,15 +14370,16 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
-    # ==== THE NEW GALLERY -- React pilot ====================================
-    # /next serves gallery/dist (Vite build: `npm run build` inside gallery/).
-    # This is the FIRST-CLASS frontend the gallery UI is migrating to -- real
+    # ==== THE GALLERY -- the React front door ================================
+    # "/" serves gallery/dist (Vite build: `npm run build` inside gallery/).
+    # This is the FIRST-CLASS frontend the gallery UI migrated to -- real
     # component files, its own purpose-built API below, NOT the Loom's delivery
-    # and NOT the picker routes. The classic gallery at / is untouched; pieces
-    # flip only on the owner's sign-off. Design lock + suite-shell rationale:
+    # and NOT the picker routes. It shipped under the `/next` codename through
+    # the pilot; that codename is retired (issue #51) and this page answers on
+    # one path. Design lock + suite-shell rationale:
     # docs/DECISIONS.md "THE MIX is the pilot's locked direction" (2026-07-29).
     # Auth: covered by the global _enforce_front_door() hook like every route.
-    _NEXT_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
+    _GALLERY_DIST = Path(__file__).resolve().parent / "gallery" / "dist"
 
     # No vanilla web components ride along anymore: the video Generate drawer and
     # its cost badge became the React <VideoDrawer>/<CostBadge> in the 2026-08-08
@@ -13981,7 +14388,7 @@ def create_app(out_dir: Path):
     # carries no <script src="/static/mg-*.js"> tags and no anchors.
     # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
     # same idiom as the classic pages.
-    NEXT_PAGE = """<!doctype html>
+    APP_PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Moonglade Athenaeum</title>
@@ -14021,16 +14428,16 @@ __UPSCALE_CONST__
 </body></html>"""
 
     # LoginPage.jsx's own shell (2026-08-02) -- deliberately its OWN, smaller
-    # template rather than reusing NEXT_PAGE verbatim. Two real reasons, not
+    # template rather than reusing APP_PAGE verbatim. Two real reasons, not
     # just tidiness:
-    #   1. NEXT_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
+    #   1. APP_PAGE's 8 <script src="/static/mg-*.js"> custom-element tags
     #      (pickers, cost badge, generate drawer, upscale panel) are for
     #      surfaces that don't exist on the login page at all -- dead weight
     #      to parse before a visitor has even signed in.
     #   2. Those files (and __UPSCALE_CONST__) are NOT on the public
     #      public tier, and never needed to be until now -- only
     #      /next/assets/ (this page's own bundle/stylesheet) is
-    #      @tier(PUBLIC). Reusing NEXT_PAGE unmodified would have 404/401'd
+    #      @tier(PUBLIC). Reusing APP_PAGE unmodified would have 404/401'd
     #      an unauthenticated visitor's <script> requests for all 8 -- caught
     #      live: those requests 302'd back to /login (the front door redoing
     #      its own job on itself), the module script's own fetch got HTML
@@ -14058,20 +14465,22 @@ __DESIGN_TOKENS__
 </style>
 </head><body>
 <div id="root"></div>
-{# |tojson, NOT json.dumps|safe -- same XSS reasoning as NEXT_PAGE's own boot
+{# |tojson, NOT json.dumps|safe -- same XSS reasoning as APP_PAGE's own boot
    script: Jinja's tojson escapes < > & so a stray "</script>" in, say, a
    redirected `next` path can never break out of this inline script. #}
 <script>window.MG_BOOT = {{ boot|tojson }};</script>
 <script type="module" src="/next/assets/app.js"></script>
 </body></html>"""
 
-    # "/" is the FRONT DOOR now (the flip, 2026-08-01); /next stays as a second
-    # path to the same page so bookmarks and pushState URLs from the pilot era
-    # keep working. One endpoint, two paths -- no redirect hop, same tier.
+    # "/" is the FRONT DOOR (the flip, 2026-08-01) and, since issue #51, the
+    # ONLY path to it. The pilot-era `/next` alias is gone with the codename --
+    # nothing in the app, the launcher, the docs or the wiki linked it (the
+    # shell pushes window.location.pathname, and every in-app deep link is
+    # already "/?image="), so no redirect stands in for it. A pilot-era
+    # bookmark 404s: the owner's call, "default is retire".
     @app.route("/")
-    @app.route("/next")
     @tier(LOGIN)
-    def next_gallery():
+    def app_page():
         session.setdefault("csrf", secrets.token_hex(16))
         brand = brand_context(out_dir)
         stats = catalog_counts(db_path)
@@ -14127,14 +14536,14 @@ __DESIGN_TOKENS__
             "glow_angle": brand.get("glow_angle", 0.0),
         }
         return render_template_string(
-            NEXT_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
+            APP_PAGE.replace("__UPSCALE_CONST__", _upscale_const_js())
                      .replace("__DESIGN_TOKENS__", DESIGN_TOKENS_CSS),
             boot=boot)
 
     @app.route("/next/assets/<path:fname>")
     @tier(PUBLIC)
     def next_assets(fname):
-        resp = send_from_directory(str(_NEXT_DIST), fname)
+        resp = send_from_directory(str(_GALLERY_DIST), fname)
         # The bundle changes on every `npm run build` with NO url change, and this
         # response carried no Cache-Control -- so browsers HEURISTICALLY cached
         # app.css/app.js and kept painting days-old layout. Bit for real (2026-08-08):
@@ -15446,6 +15855,8 @@ __DESIGN_TOKENS__
         import io
         import time
         import zipfile
+
+        import moonglade_backup as core
         f = request.files.get("file")
         if f is None or not f.filename:
             return jsonify({"error": "no file"}), 400
@@ -15458,6 +15869,20 @@ __DESIGN_TOKENS__
         if not project:
             return jsonify({"error": "bundle's project.json has no project"}), 400
         imported_dir = out_dir / "imported"
+        # The carry map for this bundle's media, read ONCE (issue #19). The
+        # _loom_resolve_media guard below does NOT establish that a media_id is absent from
+        # the catalog -- it only asks whether a FILE resolves (find_files_for_media_id, or
+        # a video row whose filename exists on disk). A row whose file is gone is normal,
+        # supported state: reconcile_catalog_with_disk leaves it intact by design, so a
+        # media_id quarantined by --dedup or deleted by hand still carries its rating,
+        # title, collections, artwork_id and published state. Without `known`, importing a
+        # bundle that references such a media_id would write the file AND blank every one
+        # of those columns through save_catalog's full-row upsert -- exactly the 2026-09-03
+        # data loss. The file is still written (the bytes really are missing here); the row
+        # keeps what the user owns.
+        known = core.known_catalog_rows(db_path, [
+            Path(n).stem for n in z.namelist()
+            if n.startswith("media/") and not n.endswith("/")])
         rows = []
         for name in z.namelist():
             if not name.startswith("media/") or name.endswith("/"):
@@ -15475,14 +15900,18 @@ __DESIGN_TOKENS__
                 make_video_thumbnail(dest, thumb_path)  # best-effort; --rebuild-thumbs backfills
             else:
                 make_thumbnail(dest, thumb_path)
-            row = {k: "" for k in CATALOG_FIELDS}
-            row.update({
-                "media_id": mid, "filename": str(dest.relative_to(out_dir)).replace("\\", "/"),
-                "source": "api", "status": "imported",
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "prompt_preview": dest.stem[:100], "is_video": "1" if is_vid else "",
-            })
-            rows.append(row)
+            # Same shared row-builder every capture path uses (issue #19): a bundle
+            # import is run_import_local's shape -- a file, no task, so no `fm` and no
+            # generation surface, but WITH `known` (see above -- a missing file does not
+            # mean a missing row). created_at stays this route's own naive local stamp,
+            # NOT _created_at_utc's UTC+Z -- see that helper for why the two sort
+            # differently.
+            rows.append(core.build_catalog_row(
+                mid, known=known,
+                filename=str(dest.relative_to(out_dir)).replace("\\", "/"),
+                source="api", status="imported",
+                created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                prompt_preview=dest.stem[:100], is_video="1" if is_vid else ""))
         if rows:
             save_catalog(db_path, rows)
         return jsonify({"project": project, "thumbs": data.get("thumbs") or {},
@@ -16119,6 +16548,11 @@ def main():
                     _bonjour.hostname, scheme, _bonjour.hostname, args.port))
     except Exception:                    # noqa: BLE001 -- advertising must never stop the server
         pass
+    # Warm the Health memo off-thread, now that the socket is bound and requests can already
+    # be served. AFTER startup, never blocking it: this is a daemon thread doing a disk walk,
+    # and its only job is to make the FIRST Health open of the session a memory read instead
+    # of a full library walk with the user watching. See _health_prime / health_cached.
+    _health_prime(out_dir, db_path)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

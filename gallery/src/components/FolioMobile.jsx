@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
 import MobileSheet from "./MobileSheet.jsx";
+import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
 import "../styles/folio-mobile.css";
@@ -57,9 +58,10 @@ import "../styles/folio-mobile.css";
       achieving true recency in the mock's own fabricated per-array demo data
       (it just reverse()'d two separate static arrays, never merge-sorted by
       date).
-   3. DETAIL SHEET IMAGE: the REAL square `/badge-thumb/<id>.png` (the same
-      asset AchCard/the recent strip/every other badge image in this app
-      already uses), object-fit:cover into the design's 1.6:1 frame -- not
+   3. DETAIL SHEET IMAGE: the REAL square badge -- badgeSrc(): the animated
+      `/badge-thumb/<id>.webp` master when there is one, else the `.png` thumb
+      (the same asset AchCard/the recent strip/every other badge image in this
+      app already uses) -- object-fit:cover into the design's 1.6:1 frame, not
       the mock's own wide illustration path, which points at a per-item
       "hero art" file that doesn't exist anywhere on disk. Inventing pixels
       for an asset that isn't there is exactly what this codebase's own
@@ -151,8 +153,8 @@ function Row({ a, ladderName, onOpen }) {
       onClick={() => onOpen(a)}>
       <span className="fm-row-gem" />
       <div className="fm-row-thumbwrap">
-        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" loading="lazy" draggable={false}
-          onError={(e) => e.currentTarget.remove()} />
+        <img src={badgeSrc(a.id)} alt="" loading="lazy" draggable={false}
+          onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
         {!a.earned && <div className="fm-row-lock">🔒</div>}
       </div>
       <div className="fm-row-textcol">
@@ -296,8 +298,8 @@ export default function FolioMobile({ onClose }) {
                   {vm.recent.map((a) => (
                     <button type="button" className="fm-reccard" key={a.id} onClick={() => openDetail(a)}>
                       <div className="fm-reccard-imgwrap">
-                        <img src={"/badge-thumb/" + encodeURIComponent(a.id) + ".png"} alt="" loading="lazy" draggable={false}
-                          onError={(e) => e.currentTarget.remove()} />
+                        <img src={badgeSrc(a.id)} alt="" loading="lazy" draggable={false}
+                          onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
                       </div>
                       <div className="fm-reccard-name">{a.name}</div>
                     </button>
@@ -381,8 +383,8 @@ export default function FolioMobile({ onClose }) {
                           <button type="button" key={l.id} className={"fm-laddericon" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
                             onClick={() => selectLadder(l.id)}>
                             <div className="fm-laddericon-tile">
-                              <img src={l.tiers[0] ? "/badge-thumb/" + encodeURIComponent(l.tiers[0].id) + ".png" : ""} alt="" loading="lazy"
-                                draggable={false} onError={(e) => e.currentTarget.remove()} />
+                              <img src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""} alt="" loading="lazy"
+                                draggable={false} onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
                             </div>
                             <div className="fm-laddericon-lab">{l.name}</div>
                           </button>
@@ -396,8 +398,8 @@ export default function FolioMobile({ onClose }) {
                           {activeLadder.name} · rung {tierIdxSafe + 1}/{tiersLen} · {activeLadder.earnedCount} earned
                         </div>
                         <div className={"fm-herobadgewrap" + (tier.earned ? " earned" : "")}>
-                          <img className="fm-heroimg" src={"/badge-thumb/" + encodeURIComponent(tier.id) + ".png"} alt="" loading="lazy"
-                            draggable={false} onError={(e) => e.currentTarget.remove()} />
+                          <img className="fm-heroimg" src={badgeSrc(tier.id)} alt="" loading="lazy"
+                            draggable={false} onError={(e) => { if (!badgeHop(e.currentTarget, tier.id)) e.currentTarget.remove(); }} />
                           {tier.earned && <div className="fm-herocheck">✓</div>}
                         </div>
                         <div className="fm-heronavrow">
@@ -523,8 +525,8 @@ export default function FolioMobile({ onClose }) {
         {sheetAch && (
           <div className={"mgfo-t-" + (sheetAch.tier || "common")}>
             <div className={"fm-sheet-imgwrap" + (sheetAch.earned ? " earned" : "")}>
-              <img src={"/badge-thumb/" + encodeURIComponent(sheetAch.id) + ".png"} alt="" loading="lazy" draggable={false}
-                onError={(e) => e.currentTarget.remove()} />
+              <img src={badgeSrc(sheetAch.id)} alt="" loading="lazy" draggable={false}
+                onError={(e) => { if (!badgeHop(e.currentTarget, sheetAch.id)) e.currentTarget.remove(); }} />
             </div>
             <div className="fm-sheet-name">{sheetAch.name}</div>
             <div className="fm-sheet-metarow">

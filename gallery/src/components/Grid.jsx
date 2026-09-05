@@ -106,7 +106,13 @@ function bandFor(date, today, yesterday) {
 // fixed-height grid cell from ~172 down, so the gate sits above that with margin.
 const STRIP_MIN_THUMB = 190;
 
-export default function Grid({
+/* MEMOIZED (see the export at the foot of this file). Grid is the app's most expensive
+   child by a wide margin -- it lays out and renders a whole page of cards -- and every
+   overlay open/close is a setState on App, which re-reconciled all of it for nothing.
+   Its props are referentially stable by construction: state values, plus callbacks App
+   holds in useCallback. Anything added here must keep that property or the memo silently
+   stops paying. */
+function Grid({
   items, total, loading, page, pages, goToPage,
   blur, thumb, layout = "masonry",
   selectMode, selected, toggleSelected, openLightbox, onRate,
@@ -425,7 +431,7 @@ export default function Grid({
 
   /* Details straight from the thumbnail. App wires openDetails to the Lightbox
      but does not (yet) pass it here — so until it does, bridge through the URL
-     contract App already owns: push /next?image=<mid> and fire popstate, which
+     contract App already owns: push /?image=<mid> and fire popstate, which
      App's own listener reads back into state. Same destination, no new API. */
   const goDetails = (mid) => {
     if (typeof onOpenDetails === "function") { onOpenDetails(mid); return; }
@@ -900,3 +906,10 @@ function PageBar({ page, pages, go }) {
     </nav>
   );
 }
+
+/* The memo boundary. A plain reference comparison over the props above is exactly right
+   here: `items`/`selected` are replaced (never mutated) by useLibrary, and everything else
+   is a scalar or a stable callback -- so a real change always produces a new reference and
+   an overlay opening produces none. No custom comparator: one would have to be kept in
+   sync with the prop list, which is the failure mode memoization usually ships with. */
+export default React.memo(Grid);

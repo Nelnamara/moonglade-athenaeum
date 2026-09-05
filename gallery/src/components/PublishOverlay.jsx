@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { invalidate, peek, put } from "../hooks/swrCache.js";
 import "../styles/overlays.css";
 import "../styles/publish.css";
 import useScrollLock from "../hooks/useScrollLock.js";
@@ -55,12 +56,17 @@ import "../styles/myart-contests.css";
    for a preview (what it would do, which tags resolved, which image of the batch it
    worked out) and only then sends confirm: true. */
 
+// The strip's read, written once: the seed and the fetch must key the shared cache on the
+// SAME string or the seed would never hit.
+const STRIP_PATH = "/api/next/library?page=1&page_size=24&media=image&sort=newest";
+
 export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   useScrollLock();
   const [row, setRow] = useState(null);
   const [err, setErr] = useState("");
   const [csrf, setCsrf] = useState("");
-  const [contests, setContests] = useState([]);
+  const [contests, setContests] = useState(
+    () => ((peek("/api/contests") || {}).contests || []).filter((c) => c && c.title));
   const [mid, setMid] = useState(mediaId || "");
 
   const [title, setTitle] = useState("");
@@ -75,8 +81,13 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
   const [picking, setPicking] = useState(false);
-  // The DC's inline "choose a different image" strip, on real recent library images.
-  const [strip, setStrip] = useState([]);
+  /* The DC's inline "choose a different image" strip, on real recent library images --
+     seeded from the shared read cache (hooks/swrCache.js) so a reopened panel draws its
+     swatches immediately. The contest list below is seeded the same way. NEITHER the csrf
+     nor GET /api/next/detail/<mid> is: a stale artwork_id would re-enable the Publish
+     button for a piece that is already published, which is the one wrong answer this panel
+     can give, so that read stays live on every open. */
+  const [strip, setStrip] = useState(() => (peek(STRIP_PATH) || {}).items || []);
   // ✦ suggest-a-title: PixAI's own image-to-prompt (free, read-only).
   const [sugOpen, setSugOpen] = useState(false);
   const [sugs, setSugs] = useState(null);
@@ -116,9 +127,15 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
   useEffect(() => {
     apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
     apiGet("/api/contests")
-      .then((d) => setContests((d.contests || []).filter((c) => c && c.title)));
-    apiGet("/api/next/library?page=1&page_size=24&media=image&sort=newest")
-      .then((d) => setStrip((d.items || []).slice(0, 24)));
+      .then((d) => {
+        put("/api/contests", d);
+        setContests((d.contests || []).filter((c) => c && c.title));
+      });
+    apiGet(STRIP_PATH)
+      .then((d) => {
+        put(STRIP_PATH, d);
+        setStrip((d.items || []).slice(0, 24));
+      });
   }, []);
 
   // ✦ Suggest a title -- PixAI's image-to-prompt for THIS image. Free and read-only
@@ -171,6 +188,11 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
     try {
       const res = await post({ confirm: true });
       if (res.error) { setErr(res.error); setAsk(null); return; }
+      // Published: this image's record now carries an artwork_id, My Art has a new row and
+      // publishing is an achievement metric. Drop all three rather than let a reopen paint
+      // the pre-publish answer. (App.jsx's onPublished -> afterMutation does the same for
+      // the library; this covers the surfaces it doesn't.)
+      invalidate(["/api/next/detail/", "/api/your-art", "/api/achievements", "/api/myart/items"]);
       setDone(res);
       if (onPublished) onPublished(mid);
     } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
@@ -201,7 +223,10 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
             {/* LEFT: the real image + where it came from */}
             <div className="mgpub-left">
               <div className="mgpub-frame" style={{ aspectRatio: aspect }}>
-                {mid ? <img src={"/full/" + encodeURIComponent(mid)} alt="" /> : null}
+                {/* decoding="async" only: WHAT this loads (the full-res original, not a
+                    thumb) is the owner's design and is untouched -- this just keeps the
+                    decode off the main thread so it cannot block the open animation. */}
+                {mid ? <img src={"/full/" + encodeURIComponent(mid)} alt="" decoding="async" /> : null}
                 <div className="mgpub-gloss" />
               </div>
               <div className="mgpub-srcrow">

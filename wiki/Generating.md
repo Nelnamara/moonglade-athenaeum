@@ -550,8 +550,12 @@ the button comes back — the app will tell you it doesn't know rather than leav
 - **Runs** — the strip across the top of the dock is *today's* runs: each finished picture is
   a tile as soon as it lands (blur → sharp), a batch still cooking shows as one 2×2 cluster,
   and a running tile carries the mascot and a moving bar rather than a made-up percentage
-  (PixAI reports no per-image progress, so none is shown). Click any finished tile to load
-  its settings back into the composer.
+  (PixAI reports no per-image progress, so none is shown). While a run is still *queued* —
+  accepted by PixAI, no worker on it yet — the tile also reads **est. 27s wait**: the queue
+  wait PixAI itself predicted for that model, the same figure the Activity tracker shows for
+  the same job. It is an estimate of the *wait*, taken once when the job went into the queue;
+  it is not a countdown, it does not tick, and it disappears the moment a worker picks the job
+  up. Click any finished tile to load its settings back into the composer.
 - **History** — the **History** button turns the strip into a **seven-day timeline** read from
   your own catalog (not just this session): one column per day, newest first, two rows deep so
   a busy day reads as a compact block, empty days say "No runs", and **Load N older days ⌄** at

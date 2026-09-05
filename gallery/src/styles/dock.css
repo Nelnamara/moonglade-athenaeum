@@ -60,10 +60,15 @@
   background: radial-gradient(130% 80% at 50% 0%, rgba(100, 58, 172, .26) 0%, rgba(10, 8, 24, 0) 68%); }
 
 /* expanded scrim (sibling of the dock; click collapses the settings) */
+/* The blur lands AFTER the fade, not during it -- the same split overlays.css makes on
+   .mgv-scrim, whose header carries the full reasoning: a backdrop-filter on a full-viewport
+   element under an opacity animation re-blurs everything behind it on every one of those
+   350ms, and behind this one is the whole grid. Resting look unchanged (same rgba, same
+   blur(6px)); only WHEN the blur turns on moved. `forwards`, never `both`. */
 .mgdock-scrim { position: fixed; inset: 0; z-index: 6;
-  background: rgba(5, 4, 13, .52); backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  animation: mgFade .35s ease both; }
+  background: rgba(5, 4, 13, .52);
+  animation: mgFade .35s ease both, mgdockScrimBlur .01s linear .35s forwards; }
+@keyframes mgdockScrimBlur { to { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); } }
 
 /* ============================== HEADER ====================================== */
 .mgdock-head { position: relative; display: flex; align-items: center; gap: 11px;
@@ -169,6 +174,18 @@
   border-radius: 999px; background: rgba(255, 255, 255, .14); overflow: hidden; }
 .mgdock-shim > i { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 999px;
   background: var(--mauve); animation: mgShimmer 1.8s ease-in-out infinite; }
+/* the QUEUE WAIT on a queued tile (RunsReel.jsx, 2026-09-04). PixAI's own estimate of the
+   wait BEFORE a worker takes the job -- the tray's .at-eta chip, on the dock's tile. Same
+   size/colour role as the reel's caption and as .at-sub's overlay0 in notify.css: no new
+   colour, no pill, no motion. Motion would read as a countdown, and this number never
+   moves. Bottom-anchored above the 2px shimmer, where this tile already puts text
+   (.mgdock-vtag / .mgdock-tilehint), and full tile width -- the caption's second slot is
+   too narrow to keep the word "wait". pointer-events:none so it cannot steal the hover
+   that raises the dock's hoisted tooltip. `.up` clears the batch cluster's own footer. */
+.mgdock-runwait { position: absolute; left: 3px; right: 3px; bottom: 11px; z-index: 2;
+  text-align: center; font-size: 9.5px; line-height: 1.25; color: var(--overlay0);
+  font-variant-numeric: tabular-nums; pointer-events: none; }
+.mgdock-runwait.up { bottom: 30px; }
 /* a running job submitted with count>1 -- one reel slot, an NxN grid of
    indeterminate placeholders sized by how many images were requested (capped
    at 4). No per-cell progress: our job model has no partial-batch state (see

@@ -26,9 +26,24 @@
    at the top: the palette opens from ANY of the layers above it — that is what a Ctrl/⌘ K
    layer is for — so it clears all of them, and the cheat-sheet clears the palette in turn.
    Escape unwinds in the reverse order, innermost first. */
+/* THE SCRIM'S BLUR IS APPLIED AFTER THE FADE, NOT DURING IT (perf, 2026-09-04). The
+   resting look is IDENTICAL -- the same rgba over the same blur(7px); what changed is only
+   WHEN the blur turns on. A backdrop-filter on a full-viewport element under an opacity
+   animation makes the browser re-blur everything behind it on every frame of those 300ms,
+   and behind it is a live 100-card grid: that is the single most expensive thing an overlay
+   open does. So the 300ms fades a PLAIN dark scrim, and a second, zero-motion animation
+   switches the blur on once the first has settled.
+   CSS-only on purpose, no animationend listener: 13 render sites share this class, and the
+   reduced-motion block at the foot of this file sets `animation: none`, which would mean an
+   animationend that never fires and a blur that never arrives. That block applies the blur
+   directly instead -- one place, both paths covered. */
 .mgv-scrim { position: fixed; inset: 0; z-index: 410; background: rgba(5,4,13,.62);
-  -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-  animation: mgvFade .3s ease both; }
+  animation: mgvFade .3s ease both, mgvScrimBlur .01s linear .3s forwards; }
+/* `forwards`, never `both`: a backwards fill would apply the blur before the delay elapsed,
+   which is the whole thing being avoided. */
+@keyframes mgvScrimBlur {
+  to { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
+}
 .mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
@@ -140,5 +155,8 @@ button.mgh-segbtn.on { background: var(--accent); color: var(--mantle); }
 
 @media (prefers-reduced-motion: reduce) {
   .mgv-scrim, .mgv-slab { animation: none; }
+  /* `animation: none` kills the deferred-blur keyframe with the fade, so the blur is stated
+     directly here -- no motion to defer it behind, and the resting look must be the same. */
+  .mgv-scrim { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
   .mgh-bar, .mgh-donut, .mgh-trendbox svg path, .mgh-trendbox svg circle { animation: none !important; opacity: 1; stroke-dashoffset: 0 !important; }
 }

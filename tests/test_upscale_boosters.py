@@ -302,7 +302,7 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
     cli = login_client(tmp_path)
-    # Since the classic cut the marker is substituted into NEXT_PAGE ("/") and the
+    # Since the classic cut the marker is substituted into APP_PAGE ("/") and the
     # Loom shells -- the surfaces with upscale UI -- not INDEX/DETAIL.
     for path in ("/", "/loom"):
         html = cli.get(path).get_data(as_text=True)
@@ -320,7 +320,7 @@ def test_upscale_constants_reach_the_client_from_core(tmp_path):
 
 
 def test_the_login_shell_does_not_leak_the_marker(tmp_path):
-    """__UPSCALE_CONST__ is substituted into NEXT_PAGE and the Loom shells only. The login
+    """__UPSCALE_CONST__ is substituted into APP_PAGE and the Loom shells only. The login
     shell is the one other full page a browser renders (deliberately its own, smaller
     template), and the marker placed in a shared head instead would render as literal text
     to every anonymous visitor. (Was the /health//panel//dupes BASE_HTML check before the

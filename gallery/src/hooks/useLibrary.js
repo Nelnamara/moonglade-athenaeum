@@ -175,12 +175,16 @@ export default function useLibrary({ initialPage = 1, group = "" } = {}) {
     setApplied("");
   };
 
-  const toggleSelected = (mid) =>
+  // useCallback with NO deps, and that is not decoration: this is a prop on the memoized
+  // <Grid> (App.jsx), so a fresh identity every render would defeat the memo on its own. It
+  // closes over nothing but setSelected -- a setState, permanently stable -- and reads the
+  // previous Set through the updater, so the empty dep list is the honest one.
+  const toggleSelected = useCallback((mid) =>
     setSelected((old) => {
       const s = new Set(old);
       s.has(mid) ? s.delete(mid) : s.add(mid);
       return s;
-    });
+    }), []);
 
   return {
     media, setMedia, shelf, setShelf, perPage, setPerPage,

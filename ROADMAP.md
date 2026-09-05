@@ -93,12 +93,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   shipped 2026-08-31 (3.7.0). What remains is the gift icon on future promo gifts — blocked until a
   promo/card-claim surface exists to carry it.
 
-- **Queue-wait on the dock's queued tiles — the last slice of "starts in ~N"** *(owner call, 2026-08-19)*
-  The honest queue-wait readout ("est. N wait", never dressed as render progress) already ships in
-  the Activity tray's queued rows; the remaining slice is surfacing the same clearly-labelled figure
-  on the Generate dock's queued run tiles, which today show only the mascot + indeterminate shimmer.
-  Standing constraint unchanged: `/v2/task/wait-time` is a QUEUE wait, never a render ETA.
-
 
 ---
 
@@ -176,13 +170,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   asset name, so it rides a pack rebuild, not a point release. Cosmetic; low priority.
 - **Real unlock SFX.** The loader ships and falls back to a synth chime; the actual sound assets are
   still to be sourced/added.
-- **Animated achievement-toast badges (exploring).** The mascot already takes an animated
-  `<id>.webp` (drop it beside the stills and it moves); the badge does not -- the toast loads a
-  static `/badge-thumb/<id>.png` and the server PIL-thumbnails masters to PNG, so an animated master
-  would flatten to one frame. Owner is playing with animating the medallions for fun (the ornate-frame
-  direction for the Legendary/feat tiers was dropped). To wire it: a webp-first client chain like the
-  mascot's, plus a badge-serve path that passes an animated webp through (bypass the PNG thumbnail for
-  webp -- serve the webp master or an animated thumb). For funsies; low priority.
 - **BlurHash grid placeholders.** A `blurhash` column is stored but there's no front-end decoder /
   placeholder render. Low ROI; revisit if it matters.
 - **Loom preview / placement follow-ups.** A handful of small Loom tweaks on a surface the owner

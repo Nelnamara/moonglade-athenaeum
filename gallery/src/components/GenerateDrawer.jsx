@@ -77,7 +77,12 @@ function ExpandToggle({ expanded, onToggle }) {
   );
 }
 
-export default function GenerateDrawer({ open, onClose, account, request }) {
+/* MEMOIZED at the foot of this file. The drawer NEVER unmounts (App.jsx's dock host keeps
+   it mounted so the shared video component's poll timers survive a close), so it was being
+   re-rendered by every unrelated setState in the shell -- an overlay opening, a page
+   changing -- while sitting invisible. All four of its props are already stable: two
+   scalars, App's useCallback'd closeDock, and two state values. */
+function GenerateDrawer({ open, onClose, account, request }) {
   const [tab, setTab] = useState("image");
   const [sub, setSub] = useState("edit");          // edit | fixer | enhance | scene (scene = the
   // Bridge §5 AI-Tools generator, reached ONLY via the "✦ AI Tools" nav modal's pick, never a
@@ -1273,3 +1278,7 @@ function clampField(raw, bounds, defMin, defMax) {
   const max = bounds.max != null ? bounds.max : defMax;
   return String(Math.max(min, Math.min(max, n)));
 }
+
+/* See the note on the component above: nothing here is a fresh object per parent render,
+   so the default shallow comparison is sufficient and needs no comparator to maintain. */
+export default React.memo(GenerateDrawer);
