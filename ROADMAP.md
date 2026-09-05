@@ -23,6 +23,14 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **The living library — maintenance runs itself** *(scoped 2026-09-04; owner's ask that day)*
+  "It's not just a backup dump. It's a living library that should update itself and its data
+  without my need to clicky click." The artworks sync gets the contest sweep's triggers (publish
+  kick, boot kick, periodic sweep with a ran-recently guard) plus the image pull's stop-when-known
+  short-circuit; the scheduler becomes a small list of safe jobs on their own cadences; the Panel's
+  safe buttons demote to "Run now." Nothing destructive ever automatic. Scope + owner calls:
+  `../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md`. Builds after the 3.7.1 wave.
+
 - **Contests on the phone** *(design handoff pending — owner, 2026-09-04)*
   The contest workbench shipped desktop-first ("the phone gets its pass next"). The mobile pass
   waits on an owner Claude Design handoff in `../moonglade-internal/design/contest/`; nothing on
@@ -68,10 +76,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   skeptical these layouts are even viable on a phone — so this is a maybe pending a look, not a
   committed build.
 
-- **Loom per-project spend ledger (historical)**
+- **Loom per-project spend ledger (historical)** *(scoped 2026-09-04)*
   The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
-  project has *already* spent. Only the global account credit ledger tracks historical spend today.
-  Low priority, but needs scoping before build.
+  project has *already* spent. The join exists today (each finished shot's `resultMid` → the
+  catalog's `paid_credit`, which is PixAI's real charge); the build is small. Scope + owner calls:
+  `../moonglade-internal/scopes/SCOPE_2026-09-04_loom-spend-ledger.md`.
 
 - **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
   The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
@@ -115,9 +124,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
-- **Community read-only surface.** Scouted data: per-artwork view counts (which dwarf likes) and
-  lifetime stats. The contest-catalog half is fully satisfied by the 3.7.0 contest workbench. Audit
-  what's left worth surfacing before building anything.
+- **Community read-only surface** *(audited + scoped 2026-09-04)*
+  Followers/following and per-card comment counts are already fetched and never shown (free to
+  show); the top-12 view counts are paid for on every My Art open and thrown away; a real views
+  column needs one read-only probe first, then rides the artworks sync instead of live calls.
+  Scope + owner calls: `../moonglade-internal/scopes/SCOPE_2026-09-04_community-surface.md`.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
