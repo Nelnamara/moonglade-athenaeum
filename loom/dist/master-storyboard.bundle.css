@@ -9,7 +9,7 @@
   padding: 20px;
   background: rgba(5, 4, 13, .62);
   backdrop-filter: blur(7px);
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 13px/1.4 var(--font-system,system-ui,sans-serif);
   animation: mgPkScrimIn .32s cubic-bezier(.2, .9, .24, 1) both;
 }
 .mg-gallery-picker.mg-closing {
@@ -128,7 +128,7 @@
   border-radius: 8px;
   padding: 7px 9px;
   color: var(--text,#d6d2e2);
-  font: 13px/1.2 system-ui;
+  font: 13px/1.2 var(--font-system,system-ui,sans-serif);
 }
 .mg-gallery-picker .mg-pk-q:focus {
   outline: 0;
@@ -290,7 +290,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 13px/1.4 var(--font-system,system-ui,sans-serif);
   color: var(--text,#d6d2e2);
 }
 .model-picker .mg-q {
@@ -397,7 +397,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   border: 1px solid var(--surface1,#3a3460);
   border-radius: 6px;
   color: var(--subtext,#9a93ab);
-  font: 10.5px/1.3 system-ui;
+  font: 10.5px/1.3 var(--font-system,system-ui,sans-serif);
   padding: 4px 6px;
   cursor: pointer;
 }
@@ -618,7 +618,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   border-radius: 6px;
   background: var(--surface0, #211f3a);
   border: 1px solid var(--surface1, #3a3460);
-  font: 12.5px/1.4 system-ui, sans-serif;
+  font: 12.5px/1.4 var(--font-system, system-ui, sans-serif);
   color: var(--text, #d6d2e2);
 }
 .cost-badge[data-state=idle],
@@ -855,7 +855,7 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   border: 1px solid rgba(182, 146, 230, .32);
   box-shadow: 0 24px 60px rgba(0, 0, 0, .55), 0 0 34px rgba(182, 146, 230, .14);
   animation: mgdDockIn .44s cubic-bezier(.2, .9, .24, 1);
-  font: 13px/1.4 system-ui, sans-serif;
+  font: 13px/1.4 var(--font-system,system-ui,sans-serif);
   color: var(--text,#d6d2e2);
 }
 .gen-drawer::before {
@@ -1555,7 +1555,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   opacity: 0;
   transition: opacity .35s;
   padding: 20px;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-system,system-ui,sans-serif);
 }
 .ach-m2.go {
   opacity: 1;
@@ -2104,7 +2104,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   flex: 1;
 }
 .ach-m2 .tbody .u {
-  font: 700 10px/1 sans-serif;
+  font: 700 10px/1 var(--font-system,system-ui,sans-serif);
   letter-spacing: .22em;
   text-transform: uppercase;
   color: var(--tc);
@@ -2114,7 +2114,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   animation: m2fade .4s ease .86s forwards;
 }
 .ach-m2 .tbody .n {
-  font: 700 22px/1.08 Georgia, serif;
+  font: 700 22px/1.08 var(--font-hero,Georgia,serif);
   margin: 3px 0 5px;
   opacity: 0;
   color: var(--text);
@@ -2236,7 +2236,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   position: relative;
   display: inline-block;
   margin-top: 8px;
-  font: 800 9px/1 sans-serif;
+  font: 800 9px/1 var(--font-system,system-ui,sans-serif);
   letter-spacing: .09em;
   text-transform: uppercase;
   color: #241c10;
@@ -2388,7 +2388,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
 .ach-m2 .pts-pill {
   display: inline-block;
   margin: 8px 0 0 8px;
-  font: 800 9px/1 sans-serif;
+  font: 800 9px/1 var(--font-system,system-ui,sans-serif);
   letter-spacing: .06em;
   color: var(--gold,#e0c268);
   border: 1px solid #6b5330;
@@ -2432,7 +2432,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   border: 1px solid rgba(255, 255, 255, .14);
   background: rgba(12, 10, 28, .55);
   transition: border-color .2s, background .2s;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-system,system-ui,sans-serif);
   font-size: 10.5px;
   font-weight: 600;
   color: rgba(214, 210, 226, .7);
@@ -2536,7 +2536,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
       var(--surface0),
       var(--mantle) 60%);
   box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-system,system-ui,sans-serif);
   animation: atSlideIn .22s cubic-bezier(.2, .9, .24, 1) both;
 }
 .at-panel.edge-left {
@@ -2579,10 +2579,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   flex: none;
 }
 .at-title {
-  font-family:
-    Georgia,
-    "Times New Roman",
-    serif;
+  font-family: var(--font-hero);
   font-style: italic;
   font-size: 15px;
   color: var(--text);
@@ -2941,7 +2938,7 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   gap: 9px;
   align-items: flex-end;
   pointer-events: none;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-system,system-ui,sans-serif);
 }
 .mg-toast {
   pointer-events: auto;

@@ -323,26 +323,31 @@
 /* ---- The ten ladder tracks (badge picker) ---- */
 .mgfo-laddergrid { display: grid; gap: 12px; grid-template-columns: repeat(5, 1fr); }
 .mgfo-ladderbadge { cursor: pointer; user-select: none; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+/* THE FACE (Identity Chrome handoff C4), drawn the way the handoff draws it and nothing
+   more: the art, a 2px border in the face rung's own rarity colour sitting ON the tile
+   edge, that colour's glow, and the r№ badge bottom-right. A track with nothing earned is
+   the same drawing dimmed (grayscale .6 · brightness .6) -- border, glow and badge included,
+   because the filter is on this element and everything inside it dims together.
+
+   NOT an outline with an offset, which is what shipped: that drew a second rounded
+   rectangle floating in the gap OUTSIDE the tile -- a box around the badge that the handoff
+   has no line for -- and it grew a bright accent copy of itself on the selected track. The
+   selected track is named in lavender under the tile (and is the one the plinth above is
+   showing), which is the whole of the selection cue the handoff draws.
+
+   No hover motion either: the art used to scale 1.08 under the pointer inside an
+   overflow:hidden tile, so mousing over a badge shoved it forward and cut its own edges
+   off. The handoff draws these tiles still. */
 .mgfo-lb-img {
   position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 13px; overflow: hidden;
-  outline: 2px solid transparent; outline-offset: 2px; background: var(--base);
-  transition: outline-color .18s, box-shadow .18s;
+  background: var(--base); border: 2px solid var(--tc);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--tc) 27%, transparent);
 }
-.mgfo-lb-img img { width: 100%; height: 100%; object-fit: cover; transition: transform .18s; }
-.mgfo-ladderbadge:hover .mgfo-lb-img img { transform: scale(1.08); }
-/* THE FACE (handoff C4). A track with a rung earned wears that rung's own rarity colour as
-   its ring and glow (--tc, set by the mgfo-t-* class on the badge itself) and badges the
-   rung number; a track with nothing earned shows rung 1's art at the handoff's dim --
-   grayscale .6 / brightness .6, lighter than the old .75/.45 so the art still reads. */
+.mgfo-lb-img img { width: 100%; height: 100%; object-fit: cover; }
 .mgfo-ladderbadge.zero .mgfo-lb-img { filter: grayscale(.6) brightness(.6); }
-.mgfo-ladderbadge.faced .mgfo-lb-img { outline-color: var(--tc);
-  box-shadow: 0 0 14px -1px color-mix(in srgb, var(--tc) 45%, transparent); }
 .mgfo-lb-rung { position: absolute; right: 5px; bottom: 5px; border-radius: 4px; padding: 1px 5px;
   font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 800;
   color: var(--tc); background: rgba(5, 4, 13, .8); }
-/* Selection still wins over the rarity ring -- which track you are LOOKING at has to be
-   unambiguous, and it is the one state the rarity colour could otherwise be mistaken for. */
-.mgfo-ladderbadge.on .mgfo-lb-img { outline-color: var(--accent); box-shadow: 0 0 16px -2px var(--accent); }
 .mgfo-lb-pips { display: flex; gap: 2px; }
 .mgfo-lb-pips i { width: 5px; height: 5px; border-radius: 50%; background: var(--surface1); }
 .mgfo-lb-pips i.mgfo-t-common, .mgfo-lb-pips i.mgfo-t-rare, .mgfo-lb-pips i.mgfo-t-epic,

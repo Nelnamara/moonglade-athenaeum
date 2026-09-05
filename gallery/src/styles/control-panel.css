@@ -232,7 +232,12 @@ button.mgcp-idmark, .mgcp-idmark { position: relative; width: 34px; height: 34px
   background: var(--surface0); border: 1px solid var(--surface1); color: var(--text);
   font-family: inherit; cursor: pointer; }
 button.mgcp-idmark img { width: 100%; height: 100%; object-fit: cover; }
-button.mgcp-idmark.on { border-color: var(--gold); }
+/* The chosen mark is FILLED, not ringed (Identity Chrome handoff C3): lavender tile, dark
+   ink on it -- the same on-lavender pairing .mgbr-connect uses further down this file. It
+   wore a gold border instead, which read as the locked cue: gold in this strip means LOCKED
+   (the 🔒 masking and the note under the rows both use it), so the applied mark and the one
+   you cannot have were wearing the same colour. */
+button.mgcp-idmark.on { color: #14102a; background: var(--lavender); border-color: var(--lavender); }
 button.mgcp-idmark:disabled { cursor: default; opacity: .7; }
 .mgcp-idmark.locked { cursor: not-allowed; font-size: 13px; opacity: .6;
   border-color: color-mix(in oklab, var(--gold) 35%, transparent); color: var(--overlay0); }

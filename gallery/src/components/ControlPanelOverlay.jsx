@@ -954,6 +954,36 @@ const SKIN_SW = {
   verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
 };
 
+/* THE FIVE SKIN SWATCHES, one entry each, exactly as the Identity Chrome handoff draws
+   them (Identity Chrome Handoff.dc.html C3, the SKIN row -- and the live sample beside it,
+   which is moonglade's own pair).
+
+   Every stop is a real skin colour: the left one is that skin's --accent, and the right one
+   is the highlight THAT skin ends on -- which is not one field across the five. Moonlit,
+   ember and verdant end on their --gold; moonglade ends on its --emerald; nightfallen ends
+   on the deep plum the whole palette was sampled from. No single derivation produces all
+   five, which is exactly why the old one-rule version (accent -> gold) painted moonglade
+   and nightfallen differently from the design on screen.
+
+   The plum is NOT a new colour and NOT off-palette: it is --purple-deep (#33236d), on
+   :root in design-tokens.css since the palette was sampled from the violet armour
+   reference, and no skin overrides it -- so var() resolves to the same plum on every
+   swatch whatever skin is applied, which is what a fixed swatch needs. The other four
+   pairs stay literal for the same reason SKIN_VARS below is literal: each swatch must
+   paint in ITS OWN skin's colours, and those vars only exist under that skin's own
+   html[data-skin] block, so the cascade cannot hand them over. */
+const SKIN_SWATCH = {
+  moonglade:   ["#b692e6", "#4fc99a"],              // accent -> emerald
+  nightfallen: ["#a678f0", "var(--purple-deep)"],   // accent -> the :root plum, #33236d
+  moonlit:     ["#8fb8e8", "#cfe1f5"],              // accent -> gold
+  ember:       ["#e8935f", "#ffcf7a"],              // accent -> gold
+  verdant:     ["#5fd39a", "#c8e6a8"],              // accent -> gold
+};
+const skinSwatchGrad = (id) => {
+  const g = SKIN_SWATCH[id] || SKIN_SWATCH.moonglade;
+  return "linear-gradient(135deg, " + g[0] + ", " + g[1] + ")";
+};
+
 /* THE IDENTITY STRIP -- what a locked install gets instead of nothing (Identity Chrome
    handoff C3, and the 2026-07-27 three-layers design behind it, #50).
 
@@ -983,17 +1013,13 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
     (a) => a.id === "the-great-library" && a.earned
   );
   const customMark = marks.find((m) => m.kind === "upload") || null;
-  /* Swatch gradient = the skin's own accent -> its own highlight, straight out of SKIN_SW
-     (the classic Trophy Hall's relic-row table, already the one source for these five
-     palettes). ONE rule for all five rather than the handoff's five hand-picked pairs:
-     three of the comp's five (moonlit, ember, verdant) ARE this rule already, and the
-     house rule here is that a colour comes from the DS. TWO of the five therefore differ
-     from the comp on screen: moonglade's is lavender->gold (#b692e6 -> #d4af37) where the
-     comp drew lavender->emerald, and nightfallen's ends on its own light-lavender
-     highlight (#d9b3ff) where the comp drew a dark plum (#33236d) that appears in no token
-     table at all. Both are the rule doing its job, not an oversight. */
-  const sw = SKIN_SW[activeSkin] || SKIN_SW.moonglade;
-  const skinGrad = "linear-gradient(135deg, " + sw[1] + ", " + sw[3] + ")";
+  /* Swatch gradient: SKIN_SWATCH above, the handoff's own five pairs, one entry per skin.
+     (This used to derive all five from one accent->gold rule and disclose that two of them
+     -- moonglade and nightfallen -- therefore came out different from the design on screen,
+     on the grounds that the plum nightfallen ends on "appears in no token table at all".
+     It does: --purple-deep, on :root. There was no colour to invent and no rule worth
+     keeping; all five now paint what the design draws.) */
+  const skinGrad = skinSwatchGrad(activeSkin);
 
   const pickMark = async (id) => {
     if (busy) return;
@@ -1034,11 +1060,10 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
           <div className="mgcp-idrow">
             <span className="mgcp-idlab">SKIN</span>
             {skins.map((sk) => {
-              const c = SKIN_SW[sk.id] || SKIN_SW.moonglade;
               return (
                 <button type="button" key={sk.id}
                   className={"mgcp-idskin" + (sk.id === activeSkin ? " on" : "") + (sk.earned ? "" : " locked")}
-                  style={{ background: "linear-gradient(135deg, " + c[1] + ", " + c[3] + ")" }}
+                  style={{ background: skinSwatchGrad(sk.id) }}
                   onClick={() => pickSkinHere(sk)}
                   title={sk.earned ? sk.name : sk.name + " — 🔒 " + (sk.unlock || "locked")}>
                   {!sk.earned && <span className="mgcp-idlock" aria-hidden="true">🔒</span>}

@@ -1,4 +1,6 @@
-/* notify/updateStore.js -- the release ANNOUNCEMENT, and nothing else.
+/* notify/updateStore.js -- the two things this app SAYS about a release: that one is out
+   (the announcement, below) and that one landed (the receipt, at the foot of this file).
+   Both are words to a person. Neither can install anything -- see ANNOUNCE ONLY.
 
    Why it exists at all: the server now re-checks GitHub roughly hourly and says what it
    finds (owner ruling 2026-09-04, reversing his own 2026-09-01 "no background tick
@@ -167,6 +169,69 @@ export function note(payload) {
     sticky: true,
     title: "Moonglade " + version + " is ready",
     msg: "Open the Control Panel to update.",
+  });
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
+   THE RECEIPT -- what tells you the update actually landed.
+
+   The apply ends in a page reload (hooks/useControlPanel.js): the bundle still running is
+   the code that was just replaced, so loading the new build is the only honest way to show
+   the new version. But the reload is ALSO the whole problem -- the modal, its three ticks
+   and its meter go with it, and what comes back is the gallery, looking exactly as it did
+   before. Owner, 2026-09-05: "just a restart with no endpoint tells the user that nothing
+   happened unless they go BACK to the panel."
+
+   So the apply writes down the version it is going for, and the next boot pays it out:
+
+     armReceipt(target)   -- immediately before the reload. localStorage only; memory
+                             cannot survive the thing it is here to survive.
+     claimReceipt(stamp)  -- on boot, handed the version this process is REALLY running
+                             (window.MG_BOOT.build_stamp, "v3.8.0 · a1b2c3d").
+
+   HONEST OR SILENT, never optimistic. The note is shown only when the running version IS
+   the version that was promised. An update that failed, was rolled back, or left the
+   machine on the old build says nothing at all -- and its record is torn up all the same,
+   so it cannot pay out later against some future release that happens to match. One boot,
+   one answer, either way; the second reload shows nothing. A boot that cannot tell what it
+   is running (no stamp) leaves the record alone rather than eating it. --------------- */
+const RECEIPT_KEY = "mg_update_receipt";
+
+/* The build stamp is "vX.Y.Z" or "vX.Y.Z · <sha>" -- the version is the first token. */
+export function versionFromStamp(stamp) {
+  return String(stamp == null ? "" : stamp).trim().split(/[·\s]/)[0] || "";
+}
+
+function clearReceipt() {
+  try { localStorage.removeItem(RECEIPT_KEY); } catch { /* private mode: nothing to clear */ }
+}
+
+/* Write down what this apply is going for. A version nobody can parse is not written at
+   all: an unpayable record is just litter in the next boot's way. */
+export function armReceipt(version) {
+  const v = String(version == null ? "" : version).trim();
+  if (!v || parseVersion(v) === null) return false;
+  try { localStorage.setItem(RECEIPT_KEY, v); } catch { return false; }
+  return true;
+}
+
+export function claimReceipt(stamp) {
+  let want = "";
+  try { want = localStorage.getItem(RECEIPT_KEY) || ""; } catch { return false; }
+  if (!want) return false;
+  const have = versionFromStamp(stamp);
+  // Nothing to compare against: this boot cannot honestly say either way, so it says
+  // nothing and leaves the record for a boot that can.
+  if (!have || parseVersion(have) === null) return false;
+  clearReceipt();                       // ONCE, whichever answer comes back
+  if (cmpVersions(have, want) !== 0) return false;   // it did not land: silence
+  const label = /^v/i.test(want) ? want : "v" + want;
+  toastShow({
+    kind: "ok",
+    sticky: true,
+    title: "Updated to " + label,
+    msg: "The restart finished — this is the new build.",
   });
   return true;
 }

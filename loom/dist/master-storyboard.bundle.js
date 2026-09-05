@@ -282,7 +282,7 @@ var LoomBundle = (() => {
   };
   var mediaRefIndex = (project) => {
     const ids = {};
-    const note = (mid, where) => {
+    const note2 = (mid, where) => {
       const k = String(mid);
       (ids[k] = ids[k] || []).push(where);
     };
@@ -290,15 +290,15 @@ var LoomBundle = (() => {
       (act.cards || []).forEach((c, ci) => {
         const title = (c.title || "").trim();
         const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
-        if (c.resultMid) note(c.resultMid, `${code} (shot result)`);
+        if (c.resultMid) note2(c.resultMid, `${code} (shot result)`);
         ["openFrame", "closeFrame"].forEach((slot) => {
           const f = c[slot] || {};
-          if (f.mediaId) note(f.mediaId, `${code} (${slot})`);
+          if (f.mediaId) note2(f.mediaId, `${code} (${slot})`);
         });
       });
     });
     ((project || {}).assets || []).forEach((a) => {
-      if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+      if (a.mediaId) note2(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
     });
     return ids;
   };
@@ -2093,7 +2093,7 @@ ${"=".repeat(48)}
     return { state: "error", note: "", msg: "", raw: d };
   }
   function build(view, props) {
-    const { state, note, msg, raw } = view;
+    const { state, note: note2, msg, raw } = view;
     const d = raw || {};
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
@@ -2132,7 +2132,7 @@ ${"=".repeat(48)}
     } else if (state === "checking") {
       main = "Checking cost\u2026";
     } else {
-      main = note || (props.hint || "").trim() || DEFAULT_HINT;
+      main = note2 || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
     const stack = !!props.stack;
@@ -2652,7 +2652,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit3, count, onPhase }) {
+  async function submitTask(route, payload, { label, emit: emit4, count, onPhase }) {
     let d;
     try {
       const r = await fetch(route, {
@@ -2662,14 +2662,14 @@ ${"=".repeat(48)}
       });
       d = await r.json();
     } catch {
-      emit3({
+      emit4({
         kind: "err",
         text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
       });
       return null;
     }
     if (d.error || !d.task_id) {
-      emit3({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
+      emit4({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
       return null;
     }
     const adj = (d.adjusted || []).map((a) => a.field + " " + a.asked + "\u2192" + a.used).join(", ");
@@ -2680,9 +2680,9 @@ ${"=".repeat(48)}
         msg: adj
       });
     }
-    emit3({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    emit4({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
     if (!window.Jobs) {
-      emit3({
+      emit4({
         kind: "ok",
         text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
       });
@@ -2692,7 +2692,7 @@ ${"=".repeat(48)}
       const data2 = st || {};
       if (phase === "done") {
         const paid = data2.paid_credit;
-        emit3({
+        emit4({
           kind: "ok",
           text: paid === 0 ? "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
           media: data2.media_ids || []
@@ -2700,12 +2700,12 @@ ${"=".repeat(48)}
         window.dispatchEvent(new CustomEvent("mg-gen-done"));
         if (window.Ach) window.Ach.check();
       } else if (phase === "failed") {
-        emit3({
+        emit4({
           kind: "err",
           text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
-        emit3({
+        emit4({
           kind: "err",
           text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
         });
@@ -2860,7 +2860,7 @@ ${"=".repeat(48)}
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const emit3 = useCallback((name, detail) => {
+    const emit4 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
@@ -2881,7 +2881,7 @@ ${"=".repeat(48)}
     };
     const userSetMode = (m) => {
       setMode(m, true);
-      emit3("mg-mode-commit", { vmode: m });
+      emit4("mg-mode-commit", { vmode: m });
     };
     const applyModelGating2 = (userDriven) => {
       applyModelGating(st.current, userDriven);
@@ -2924,11 +2924,11 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit3("mg-prompt-commit", { text: promptText2() });
+      emit4("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
-      emit3("mg-dirty", {});
+      emit4("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify2(false);
@@ -2978,7 +2978,7 @@ ${"=".repeat(48)}
       previewTimer.current = setTimeout(() => p.classList.remove("open"), 180);
     };
     const requestPick = (bank, i) => {
-      emit3("mg-pick-request", {
+      emit4("mg-pick-request", {
         slot: i,
         bank,
         mode: st.current.mode,
@@ -3092,21 +3092,21 @@ ${"=".repeat(48)}
         const elapsed = Date.now() - startedAt;
         if (phase === "done") {
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-          emit3("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          emit4("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
         } else if (phase === "failed") {
           const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
-          emit3("mg-error", { error: msg });
+          emit4("mg-error", { error: msg });
         } else if (phase === "stalled") {
           updateLine(id, {
             kind: "plain",
             text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
           });
-          emit3("mg-paused", { task_id: taskId });
+          emit4("mg-paused", { task_id: taskId });
         } else if (phase === "slow" || phase === "stale") {
           tier = phase;
           updateLine(id, tierLine(phase, elapsed));
-          emit3("mg-slow", { tier: phase, elapsed, task_id: taskId });
+          emit4("mg-slow", { tier: phase, elapsed, task_id: taskId });
         } else {
           updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
         }
@@ -3114,16 +3114,16 @@ ${"=".repeat(48)}
       const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
       unlock();
       if (!tid) {
-        emit3("mg-error", { error: lastErr || "submit failed" });
+        emit4("mg-error", { error: lastErr || "submit failed" });
         return;
       }
       taskId = tid;
-      emit3("mg-submit", { task_id: tid, payload: p });
+      emit4("mg-submit", { task_id: tid, payload: p });
       reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
-      emit3("mg-error", { error: msg });
+      emit4("mg-error", { error: msg });
     };
     const setRefs = (refs) => {
       applySetRefs(st.current, refs);
@@ -3395,7 +3395,7 @@ ${"=".repeat(48)}
           st.current.audioGen = e.target.checked;
           rerender();
           reprice();
-          emit3("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
+          emit4("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Generate audio")), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Off by default \u2014 the opposite of image gen" }, /* @__PURE__ */ react_global_shim_default.createElement(
@@ -3420,7 +3420,7 @@ ${"=".repeat(48)}
           st.current.audioLanguage = e.target.value;
           rerender();
           reprice();
-          emit3("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
+          emit4("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
@@ -3441,7 +3441,7 @@ ${"=".repeat(48)}
             st.current.duration = d;
             rerender();
             reprice();
-            emit3("mg-duration-commit", { duration: d });
+            emit4("mg-duration-commit", { duration: d });
           }
         },
         d
@@ -3524,6 +3524,121 @@ ${"=".repeat(48)}
     return n;
   }
 
+  // ../gallery/src/notify/updateStore.js
+  var SEEN_KEY = "mg_update_announced";
+  var current = null;
+  var subs2 = /* @__PURE__ */ new Set();
+  var memSeen = "";
+  function emit2() {
+    subs2.forEach((fn) => fn(current));
+  }
+  function parseVersion(v) {
+    const s = String(v == null ? "" : v).trim().replace(/^v/i, "");
+    if (!/^\d+(\.\d+)*$/.test(s)) return null;
+    return s.split(".").map(Number);
+  }
+  function cmpVersions(a, b) {
+    const pa = parseVersion(a), pb = parseVersion(b);
+    if (!pa || !pb) return null;
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] || 0, y = pb[i] || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+  function readStored() {
+    try {
+      return localStorage.getItem(SEEN_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+  function highestSeen() {
+    const stored = readStored();
+    if (!memSeen) return stored;
+    if (!stored) return memSeen;
+    const c = cmpVersions(stored, memSeen);
+    if (c === null) return memSeen;
+    return c > 0 ? stored : memSeen;
+  }
+  function markSeen(v) {
+    memSeen = v;
+    const stored = readStored();
+    if (stored) {
+      const c = cmpVersions(v, stored);
+      if (c === null || c <= 0) return;
+    }
+    try {
+      localStorage.setItem(SEEN_KEY, v);
+    } catch {
+    }
+  }
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("storage", (e) => {
+      if (!e || e.key !== SEEN_KEY) return;
+      const v = String(e.newValue || "");
+      if (!v) return;
+      if (!memSeen) {
+        memSeen = v;
+        return;
+      }
+      const c = cmpVersions(v, memSeen);
+      if (c !== null && c > 0) memSeen = v;
+    });
+  }
+  function note(payload) {
+    const next = payload && payload.behind && payload.latest ? payload : null;
+    const version = next ? String(next.latest) : "";
+    const was = current ? String(current.latest) : "";
+    current = next;
+    if (version !== was) emit2();
+    if (!version) return false;
+    if (memSeen) {
+      const m = cmpVersions(version, memSeen);
+      if (m === null || m <= 0) return false;
+    }
+    const c = cmpVersions(version, highestSeen() || "0");
+    if (c === null || c <= 0) return false;
+    markSeen(version);
+    show({
+      sticky: true,
+      title: "Moonglade " + version + " is ready",
+      msg: "Open the Control Panel to update."
+    });
+    return true;
+  }
+  var RECEIPT_KEY = "mg_update_receipt";
+  function versionFromStamp(stamp) {
+    return String(stamp == null ? "" : stamp).trim().split(/[·\s]/)[0] || "";
+  }
+  function clearReceipt() {
+    try {
+      localStorage.removeItem(RECEIPT_KEY);
+    } catch {
+    }
+  }
+  function claimReceipt(stamp) {
+    let want = "";
+    try {
+      want = localStorage.getItem(RECEIPT_KEY) || "";
+    } catch {
+      return false;
+    }
+    if (!want) return false;
+    const have = versionFromStamp(stamp);
+    if (!have || parseVersion(have) === null) return false;
+    clearReceipt();
+    if (cmpVersions(have, want) !== 0) return false;
+    const label = /^v/i.test(want) ? want : "v" + want;
+    show({
+      kind: "ok",
+      sticky: true,
+      title: "Updated to " + label,
+      msg: "The restart finished \u2014 this is the new build."
+    });
+    return true;
+  }
+
   // ../gallery/src/notify/jobsStore.js
   var LSK = "mg_jobs_open";
   var jobs = [];
@@ -3532,14 +3647,14 @@ ${"=".repeat(48)}
   var timer = null;
   var seeded = false;
   var last = {};
-  var subs2 = /* @__PURE__ */ new Set();
-  function emit2() {
-    subs2.forEach((fn) => fn({ jobs, open }));
+  var subs3 = /* @__PURE__ */ new Set();
+  function emit3() {
+    subs3.forEach((fn) => fn({ jobs, open }));
   }
   function subscribe2(fn) {
-    subs2.add(fn);
+    subs3.add(fn);
     fn({ jobs, open });
-    return () => subs2.delete(fn);
+    return () => subs3.delete(fn);
   }
   function runningCount() {
     return jobs.filter((j) => (j.status || "running") === "running").length;
@@ -3557,7 +3672,7 @@ ${"=".repeat(48)}
     } catch {
     }
     open = !!v;
-    emit2();
+    emit3();
   }
   function openTray() {
     setOpen(true);
@@ -3572,6 +3687,10 @@ ${"=".repeat(48)}
       const st = j.status || "running";
       const prev = last[j.job_id];
       if (j.type === "claim") {
+        last[j.job_id] = st;
+        return;
+      }
+      if (j.type === "update" && st === "done") {
         last[j.job_id] = st;
         return;
       }
@@ -3615,8 +3734,9 @@ ${"=".repeat(48)}
     return apiGet("/api/jobs").then((d) => {
       const rows = d && d.jobs || [];
       toastTransitions(rows);
+      if (d && !d.error) note(d.update);
       jobs = rows;
-      emit2();
+      emit3();
     }).catch(() => {
     });
   }
@@ -3644,7 +3764,7 @@ ${"=".repeat(48)}
     if (started) return;
     started = true;
     open = readOpen();
-    emit2();
+    emit3();
     refresh().then(schedule);
   }
 
@@ -4259,6 +4379,8 @@ ${"=".repeat(48)}
     window.Ach = { check, replay };
     start();
     check();
+    const boot = typeof window !== "undefined" && window.MG_BOOT || {};
+    claimReceipt(boot.build_stamp || "");
   }
   function NotifyRoot() {
     return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);

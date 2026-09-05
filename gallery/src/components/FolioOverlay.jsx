@@ -450,10 +450,13 @@ export default function FolioOverlay({ onClose }) {
                           <span className="mgfo-count">{fmt(vm.buckets.find((b) => b.key === "ladder").earned)}/{fmt(vm.buckets.find((b) => b.key === "ladder").total)} rungs</span>
                         </div>
                         {/* THE LADDER FACES (handoff C4). Each tile wears the art of the
-                            track's HIGHEST EARNED rung, ringed in that rung's own rarity
+                            track's HIGHEST EARNED rung, bordered in that rung's own rarity
                             colour and badged with its number, so the row reads as a record
-                            of how far up each track you are. Nothing earned yet: rung 1's
-                            art, dimmed, and no r№ claim. */}
+                            of how far up each track you are. Nothing earned yet: the SAME
+                            drawing, showing rung 1 and dimmed -- the number included, which
+                            is how the handoff draws an untouched track (it was left off
+                            here, so a track you had not started showed no rung at all while
+                            every other tile named one). */}
                         <div className="mgfo-laddergrid">
                           {vm.ladders.map((l) => {
                             const on = activeLadder && l.id === activeLadder.id;
@@ -462,7 +465,7 @@ export default function FolioOverlay({ onClose }) {
                             return (
                               <div key={l.id}
                                 className={"mgfo-ladderbadge mgfo-t-" + ((face && face.rarity) || "common")
-                                  + (on ? " on" : "") + (face && face.earned ? " faced" : " zero")}
+                                  + (on ? " on" : "") + (face && face.earned ? "" : " zero")}
                                 onClick={() => selectLadder(l.id)}
                                 title={l.name + (face && face.earned
                                   ? " — rung " + face.rung + " of " + l.totalCount
@@ -470,9 +473,7 @@ export default function FolioOverlay({ onClose }) {
                                 <div className="mgfo-lb-img">
                                   <img src={art ? badgeSrc(art.id) : ""} alt="" loading="lazy"
                                     onError={(e) => { if (!(art && badgeHop(e.currentTarget, art.id))) e.currentTarget.remove(); }} />
-                                  {face && face.earned && (
-                                    <span className="mgfo-lb-rung">r{face.rung}</span>
-                                  )}
+                                  {face && <span className="mgfo-lb-rung">r{face.rung}</span>}
                                 </div>
                                 <div className="mgfo-lb-pips">
                                   {l.tiers.map((t) => <i key={t.id} className={t.earned ? "mgfo-t-" + t.tier : ""} />)}

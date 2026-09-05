@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
-import { note as noteUpdate, subscribe as subscribeUpdate } from "../notify/updateStore.js";
+import { note as noteUpdate, subscribe as subscribeUpdate,
+         armReceipt as armUpdateReceipt } from "../notify/updateStore.js";
 import { invalidate, peek, put } from "./swrCache.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
@@ -559,6 +560,14 @@ export default function useControlPanel() {
                // (notify/jobsStore.js), because this list is the receipt now.
                advanceSteps(null, { sawDeps });
                setUpdPhase("done");
+               // WRITE THE RECEIPT before the page goes. The reload takes the modal, its
+               // three ticks and its meter with it, and what comes back is the gallery
+               // looking exactly as it did before -- "a restart with no endpoint tells the
+               // user that nothing happened unless they go BACK to the panel" (owner,
+               // 2026-09-05). This records the version that was promised; the next boot
+               // shows a note only if that is the version it is really running. See
+               // notify/updateStore.js and notify/index.jsx.
+               armUpdateReceipt((updTargetRef.current && updTargetRef.current.latest) || "");
                setTimeout(() => window.location.reload(), 900);
              });
     };
