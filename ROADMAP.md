@@ -104,6 +104,18 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
+- **The updater's apply flow — progress + toast styling.** *(owner, 2026-09-04, minutes after the
+  first live pull)* The apply worked end to end, but the ~10s pull/restart shows no progress
+  meter, and the success toast's colors and font usage look off — the confirm modal and toast
+  were built from the scope's prose (the design mock covered only the footer stamp), so this
+  surface never had its design step. Wants: a progress presentation for the apply, and the
+  toast brought onto the house type/palette.
+
+- **Branding unlock: a font picker for the System and Hero fonts.** *(owner, 2026-09-04)* The
+  unlock currently opens marks/skins/banners; it should also let the owner pick the app's two
+  type roles. Needs design (where it lives in the Branding tab, the offered set, preview) and
+  mechanics (how faces load/serve, fallbacks) before build.
+
 - **Ladder representative badges.** Ladders currently show their FIRST rung's art. A new design
   pass on ladder badges is wanted.
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
