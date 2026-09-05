@@ -87,6 +87,7 @@ is not a reason to skip adding a rendering test here.
 """
 import base64
 import json
+import re
 import threading
 
 import pytest
@@ -322,6 +323,92 @@ def logged_in_page(render_server, render_browser, monkeypatch):
     finally:
         for ctx in contexts:
             ctx.close()
+
+
+# The one route in this app that must never fire for real from a test. Named once so the
+# guard below and the contest helpers at the bottom of the file cannot drift apart.
+_CONTEST_ENTER_ROUTE = "**/api/contest/enter"
+
+
+def _is_confirmed_entry(body):
+    """Does this /api/contest/enter body ask the server to actually SUBMIT?
+
+    An unreadable body counts as confirmed on purpose: a guard whose whole job is to prove
+    that nothing irreversible happened must fail on anything it cannot prove is harmless.
+    """
+    try:
+        return bool((json.loads(body or "{}") or {}).get("confirm"))
+    except (TypeError, ValueError):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def no_confirmed_contest_entry(render_browser):
+    """MODULE-WIDE BACKSTOP: no test in this file may submit a CONFIRMED contest entry.
+
+    Entering a contest is an irreversible, PUBLIC account write and PixAI publishes no
+    un-enter route -- `moonglade_gallery.py::api_contest_enter` says exactly that in its own
+    docstring. Until this fixture existed, the only thing standing between this harness and
+    a real one was the `page.route` inside `_open_contests_on_the_phone`: a CONVENTION, not
+    a rule. Any test that reached the entry screen by another door -- the lightbox's
+    "Enter contest" chip, say, which is precisely what
+    `test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked` below now does --
+    would have had no interception at all, on a screen whose confirm bar is one click from
+    armed. This makes the guarantee structural.
+
+    It hangs off the ONE thing every page in this module has in common: `new_context` on the
+    module's single browser, which both page-creating sites (`logged_in_page`'s factory and
+    `test_setup_wizard_onboards_a_genuinely_fresh_install`'s own context) go through. So it
+    covers a test nobody has written yet, which is the point of a backstop. Each context
+    gets two halves, and they do different jobs -- proven against a live chromium, not
+    assumed from the docs:
+
+      * `ctx.route()` INTERCEPTS, so a page with no interception of its own can never reach
+        the real route. A test's own `page.route` still wins over it (page routes are
+        matched before context routes), which is why `_open_contests_on_the_phone`'s own
+        interception stays exactly as it was: this is the floor, not a replacement.
+      * `ctx.on("request")` RECORDS every body regardless of who fulfils it -- the request
+        event fires for intercepted requests too -- so the assertion below sees the helper's
+        traffic as well as its own.
+
+    TWO OTHER LAYERS EXIST and neither is a reason to drop this one. The entry screen POSTs
+    `confirm: true` only from a press of its confirm bar; and the server short-circuits an
+    unconfirmed body before any network call at all (`if not body.get("confirm"): return
+    jsonify({"preview": True, ...})` -- the same route's own preview contract, which is why
+    the unconfirmed previews these tests DO fire are safe). Both of those stop the
+    unconfirmed form. Nothing but this stops the confirmed one.
+    """
+    seen = []
+
+    def _arm(ctx):
+        def _record(req):
+            if req.method == "POST" and req.url.endswith("/api/contest/enter"):
+                seen.append(req.post_data or "")
+        ctx.on("request", _record)
+        # The same shape the real route answers an unconfirmed body with, so a page that
+        # falls through to here gets the server's own preview instead of an error.
+        ctx.route(_CONTEST_ENTER_ROUTE, lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"preview": True, "spends_credits": None})))
+
+    real_new_context = render_browser.new_context
+
+    def _guarded(*args, **kwargs):
+        ctx = real_new_context(*args, **kwargs)
+        _arm(ctx)
+        return ctx
+
+    render_browser.new_context = _guarded
+    try:
+        yield seen
+    finally:
+        # Drop the instance attribute rather than re-assigning the bound method, so the
+        # shared module-scoped browser is left byte-for-byte as it was found.
+        del render_browser.new_context
+    confirmed = [b for b in seen if _is_confirmed_entry(b)]
+    assert not confirmed, (
+        "a CONFIRMED /api/contest/enter left this test: {!r} -- entering a contest is an "
+        "irreversible, public account write with no un-enter route".format(confirmed))
 
 
 # ---------------------------------------------------------------------------
@@ -1530,3 +1617,795 @@ def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
     recrow = page.locator(".idm-recrow").inner_text()
     assert "Filter by model" in recrow
     assert "Find similar (model)" not in recrow
+
+
+# ---------------------------------------------------------------------------
+# 9. Contests on the phone (Contest Mobile Handoff.dc.html, Session D 2026-09-04)
+# ---------------------------------------------------------------------------
+# 390x844 is the frame the handoff is drawn at (an iPhone-class CSS viewport) and it is
+# under useIsMobile.js's 430px breakpoint, so the REAL mobile build mounts -- these drive
+# AppMobile.jsx, not App.jsx behind a narrow window.
+MOBILE = {"width": 390, "height": 844}
+
+# Every contest read is fulfilled from here. Two reasons, and the second is the important
+# one: (a) the harness's PixAI key is a fake, so a real board read would soft-fail to an
+# empty board and there would be nothing to measure; (b) ENTERING A CONTEST IS AN
+# IRREVERSIBLE, PUBLIC ACCOUNT WRITE that PixAI offers no way to withdraw. Nothing here may
+# reach the real route even by accident, so /api/contest/enter is intercepted and the test
+# asserts that the only body it ever saw was the server's own unconfirmed preview.
+_MOBILE_BOARD = {
+    "contests": [
+        {"id": "c-off", "slug": "autumn-grimoire", "title": "Autumn Grimoire",
+         "type": "official", "status": "running", "active": True,
+         "vote_type": "creator_pick", "prize_amount": 1000000,
+         "prize_distribution": [{"rank": 1, "count": 1, "amount": 1000000}],
+         "cover_url": "", "start_at": "2026-08-01T00:00:00.000Z",
+         "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+         "url": "https://pixai.art/en/contest/autumn-grimoire",
+         "description": "Show us an autumn grimoire.", "rules": [],
+         "tack_name": "autumn", "desc_url": "", "result_url": ""},
+        {"id": "c-com", "slug": "jojo-pose", "title": "JoJo Pose",
+         "type": "community", "status": "running", "active": True,
+         "vote_type": "user_vote", "prize_amount": 500000,
+         "prize_distribution": [{"rank": 1, "count": 1, "amount": 200000},
+                                {"rank": 2, "count": 3, "amount": 50000},
+                                {"rank": 3, "count": 5, "amount": 30000}],
+         "cover_url": "", "start_at": "2026-08-01T00:00:00.000Z",
+         "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+         "url": "https://pixai.art/en/contest/jojo-pose",
+         "description": "Your coolest JoJo pose.", "rules": [],
+         "tack_name": "jojo", "desc_url": "", "result_url": ""},
+    ],
+    "official": 1, "community": 1,
+}
+_MOBILE_ART = {
+    "csrf": "harness-csrf",
+    "items": [
+        {"media_id": "a%d" % i, "artwork_id": "art%d" % i, "title": "Piece %d" % i,
+         "thumb": "/thumbs/a%d.jpg" % i, "is_video": False, "is_nsfw": False,
+         "date": "2026-08-20", "created_at": "2026-08-20T00:00:00", "tags": [],
+         "public": True, "sensitive": False, "likes": 0, "comments": 0}
+        for i in range(6)
+    ],
+}
+# The SAME published-art shape, but keyed to the media_ids `render_server` actually writes
+# into the harness catalog (100..105). The image-side entry path needs that overlap and the
+# board-side path does not: pre-selection matches the media_id the LIBRARY grid handed down
+# against the eligible set read from /api/myart/items, so with `_MOBILE_ART`'s a0..a5 the
+# tick could never land and the test would pass for the wrong reason (an empty selection
+# looks identical to one the source picture was rightly refused from). Titles carry the
+# media_id because the picker's tile puts `title` on the button -- that attribute is the
+# only thing in the rendered DOM that says WHICH picture came back ticked.
+_MOBILE_ART_FROM_LIBRARY = {
+    "csrf": "harness-csrf",
+    "items": [
+        {"media_id": str(100 + i), "artwork_id": "art-lib-%d" % i,
+         "title": "Harness %d" % (100 + i),
+         "thumb": "/thumbs/%d.jpg" % (100 + i), "is_video": False, "is_nsfw": False,
+         "date": "2026-08-20", "created_at": "2026-08-20T00:00:00", "tags": [],
+         "public": True, "sensitive": False, "likes": 0, "comments": 0}
+        for i in range(6)
+    ],
+}
+
+
+def _json_route(page, pattern, payload):
+    page.route(pattern, lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(payload)))
+
+
+def _open_contests_on_the_phone(page, entry_posts):
+    """Menu -> Contests, with every contest read stubbed and the entry POST captured."""
+    _json_route(page, "**/api/contests", _MOBILE_BOARD)
+    _json_route(page, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART)
+
+    def _enter(route):
+        entry_posts.append(route.request.post_data or "")
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"preview": True, "spends_credits": None}))
+    page.route(_CONTEST_ENTER_ROUTE, _enter)
+
+    # Motion frozen BEFORE the Menu is opened: the pushed screen slides in over 220ms
+    # (glmScreenIn's translateX), and a screen measured mid-slide is a screen sitting
+    # partly off the right edge -- the exact "measured an interpolated value" trap this
+    # module's _FREEZE_MOTION_CSS exists for.
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    _settle(page)
+
+
+def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entries(
+        logged_in_page):
+    """Frame D1. The mobile build really mounts at 390pt, the official contest renders as a
+    16:9 hero carrying the GOLD METAL official badge, community contests are list cards
+    below it, and "MY ENTRIES" is a real 44pt target rather than the 9px label the frame
+    draws (the handoff's own plumbing note asks for >=44pt, which a 9px line is not).
+
+    Measured, not read off the stylesheet: a 16/9 aspect-ratio declaration means nothing if
+    an ancestor's flex rules override the box, which is exactly the class of defect this
+    module exists for."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+
+    assert page.locator(".glm-screen").count() == 1, (
+        "the desktop shell mounted at 390pt -- this is not the mobile build")
+    geo = page.evaluate("""() => {
+        const r = (s) => { const el = document.querySelector(s); if (!el) return null;
+                           const b = el.getBoundingClientRect();
+                           return {w: b.width, h: b.height, top: b.top, bottom: b.bottom}; };
+        const badge = document.querySelector('.cmb-hero .cmb-badge');
+        const bcs = badge ? getComputedStyle(badge) : null;
+        return {hero: r('.cmb-hero'), door: r('.cmb-door'), card: r('.cmb-card'),
+                cards: document.querySelectorAll('.cmb-card').length,
+                badgeClass: badge ? badge.className : '',
+                badgeColor: bcs ? bcs.color : '',
+                badgeFill: bcs ? bcs.backgroundImage : '',
+                badgeBg: bcs ? bcs.backgroundColor : ''};
+    }""")
+    ratio = geo["hero"]["w"] / geo["hero"]["h"]
+    assert abs(ratio - 16 / 9) < 0.05, (
+        "the official hero renders {:.3f}:1, not the D1 frame's 16:9".format(ratio))
+    assert "official" in geo["badgeClass"], "the hero's badge is not the OFFICIAL one"
+    # The hue law, checked against the LIVE token rather than a hex written here: OFFICIAL
+    # is GOLD AND METALLIC (owner ruling, 2026-09-05), and a regression to the flat lavender
+    # this surface wore earlier that same day is the specific mistake worth catching.
+    # Because the badge is metal, its gold is in the FACE, not in the text: the ink is dark
+    # for contrast and --gold is the gradient's dominant stop. Reading backgroundImage is
+    # therefore reading the badge's colour, not a detail of how it is built -- a flat gold
+    # fill would fail here too, and it should: the ruling says metallic.
+    # The desktop half of the same law is driven by
+    # test_official_and_community_wear_one_badge_law_on_both_surfaces below.
+    lav, gold = page.evaluate("""() => {
+        const cs = getComputedStyle(document.documentElement);
+        const probe = (v) => { const el = document.createElement('span');
+            el.style.color = v; document.body.appendChild(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; };
+        return [probe(cs.getPropertyValue('--lavender').trim()),
+                probe(cs.getPropertyValue('--gold').trim())];
+    }""")
+    assert "gradient" in geo["badgeFill"] and gold in geo["badgeFill"], (
+        "the OFFICIAL badge's face is {!r} -- the law is the house gold metal, a gradient "
+        "whose dominant stop is the live --gold ({})".format(geo["badgeFill"], gold))
+    assert lav not in geo["badgeFill"] and geo["badgeBg"] != lav, (
+        "the OFFICIAL badge is painted lavender ({}) -- that was this surface's pre-ruling "
+        "state and is the exact revert this pins: {!r}".format(lav, geo))
+    assert geo["door"]["h"] >= 44, (
+        "MY ENTRIES is {:.1f}px tall -- under the handoff's 44pt floor".format(
+            geo["door"]["h"]))
+    assert geo["cards"] == 1 and geo["card"]["h"] >= 44, (
+        "community cards missing or under 44pt: {!r}".format(geo))
+
+    # THE COMMUNITY HALF OF THE SAME HUE LAW, which nothing guarded. Only the official half
+    # is asserted above, so a revert of the community half -- to the gold it wore before the
+    # ruling moved gold to OFFICIAL, or to the mauve the desktop board painted before that
+    # -- would have gone through green.
+    #
+    # Read one tap OFF the board, and that is deliberate rather than a wander: the board's
+    # community CARD renders no badge at all. `.cmb-badge` is emitted in exactly two places
+    # in the whole gallery -- ContestsMobile's hero (always `official`) and
+    # ContestDetailMobile's banner (`official` or `community`) -- so the community hue's
+    # only live pixel anywhere is the detail banner of the very contest this card opens.
+    # Following the card there is the shortest honest path to the thing being guarded; a
+    # `.cmb-badge.community` probe synthesised on the board would assert a rule, not a
+    # rendering, which is the substring-in-a-blob habit this whole module exists to break.
+    page.click(".cmb-card")
+    page.wait_for_selector(".cmb-banner .cmb-badge", timeout=10_000)
+    _settle(page)
+    com = page.evaluate("""() => {
+        const badge = document.querySelector('.cmb-banner .cmb-badge');
+        const cs = getComputedStyle(document.documentElement);
+        // null (not a colour) for a token that does not resolve, so a vanished --mauve
+        // cannot make the "differs from mauve" assertion below quietly vacuous.
+        const probe = (name) => { const v = cs.getPropertyValue(name).trim();
+            if (!v) return null;
+            const el = document.createElement('span');
+            el.style.color = v; document.body.appendChild(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; };
+        return {cls: badge.className, color: getComputedStyle(badge).color,
+                gold: probe('--gold'), lav: probe('--lavender'), mauve: probe('--mauve')};
+    }""")
+    assert "community" in com["cls"], (
+        "the community contest's banner badge is not the COMMUNITY one: {!r}".format(
+            com["cls"]))
+    assert None not in (com["gold"], com["lav"], com["mauve"]), (
+        "a token this assertion compares against no longer resolves: {!r}".format(com))
+    assert com["color"] == com["lav"], (
+        "the COMMUNITY badge is {} -- the 2026-09-05 ruling assigns it --lavender ({})"
+        .format(com["color"], com["lav"]))
+    assert com["color"] != com["gold"] and com["color"] != com["mauve"], (
+        "the COMMUNITY badge collapsed onto another hue (gold {}, mauve {}) -- gold is what "
+        "this badge wore before the ruling handed gold to OFFICIAL, and mauve is what "
+        "desktop's .mgct-badge.community painted before that; both are the reverts this "
+        "guards".format(com["gold"], com["mauve"]))
+
+
+def test_the_phone_contest_detail_folds_to_one_open_section_over_a_pinned_enter_bar(
+        logged_in_page):
+    """Frame D2. Three sections, the brief open on arrival, exactly ONE body rendered at a
+    time, and the Enter bar pinned INSIDE the viewport (sticky) rather than scrolled off the
+    bottom of a long brief -- which is the whole reason the handoff pins it."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    page.click(".cmb-hero")
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    _settle(page)
+
+    read = """() => {
+        const heads = [...document.querySelectorAll('.cmb-sechead')];
+        const bar = document.querySelector('.cmb-enterbar').getBoundingClientRect();
+        const btn = document.querySelector('.cmb-enterbar .cmb-metal').getBoundingClientRect();
+        return {
+            sections: heads.length,
+            open: heads.map(h => h.parentElement.querySelector('.cmb-secbody') ? 1 : 0),
+            labels: heads.map(h => h.querySelector('.cmb-seclab').textContent.trim()),
+            shortest: Math.min(...heads.map(h => h.getBoundingClientRect().height)),
+            barBottom: bar.bottom, btnH: btn.height, vh: window.innerHeight,
+        };
+    }"""
+    before = page.evaluate(read)
+    assert before["sections"] == 3, (
+        "expected brief/prizes/requirements, got {!r}".format(before["labels"]))
+    assert sum(before["open"]) == 1 and before["open"][0] == 1, (
+        "the accordion is not one-open-at-a-time with the brief first: {!r}".format(before))
+    assert before["shortest"] >= 44, (
+        "an accordion row is {:.1f}px tall -- under 44pt".format(before["shortest"]))
+    assert before["barBottom"] <= before["vh"] + 0.5, (
+        "the Enter bar's bottom is at {:.1f} in an {:.0f}px viewport -- it is not pinned"
+        .format(before["barBottom"], before["vh"]))
+    assert before["btnH"] >= 44, (
+        "the Enter button is {:.1f}px tall -- under 44pt".format(before["btnH"]))
+
+    # Opening Prizes closes the brief: one section open, never two.
+    page.click(".cmb-acc .cmb-sec:nth-child(2) .cmb-sechead")
+    _settle(page)
+    after = page.evaluate(read)
+    assert sum(after["open"]) == 1 and after["open"][1] == 1, (
+        "opening a second section did not close the first: {!r}".format(after))
+
+
+def test_the_phone_entry_screen_never_enters_on_one_tap(logged_in_page):
+    """Frame D3, and the safety half of it. The confirm bar is DISABLED with nothing picked,
+    the tiles are real 44pt+ targets, picking two arms the bar with the count -- and no
+    confirmed POST ever leaves this test: the only /api/contest/enter body seen is the
+    server's own unconfirmed preview, which touches no account. Entering a contest is
+    irreversible and public; a rendering test must never fire one."""
+    posts = []
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, posts)
+    page.click(".cmb-hero")
+    page.wait_for_selector(".cmb-enterbar .cmb-metal", timeout=10_000)
+    page.click(".cmb-enterbar .cmb-metal")
+    page.wait_for_selector(".cmb-entry", timeout=10_000)
+    page.wait_for_selector(".cmb-tile", timeout=10_000)
+    _settle(page)
+
+    read = """() => {
+        const btn = document.querySelector('.cmb-confirmbar .cmb-metal');
+        const bar = document.querySelector('.cmb-confirmbar');
+        const tile = document.querySelector('.cmb-tile').getBoundingClientRect();
+        return {disabled: btn.disabled, label: btn.textContent.trim(),
+                tileW: tile.width, tileH: tile.height,
+                barPad: getComputedStyle(bar).paddingBottom,
+                screenText: document.querySelector('.cmb-entry').textContent,
+                feeSlots: document.querySelectorAll('.cmb-entry .fee').length,
+                count: document.querySelector('.cmb-entryhead .n').textContent.trim()};
+    }"""
+    idle = page.evaluate(read)
+    # THERE ARE NO ENTRY FEES (owner, 2026-09-05). This screen used to end its tag line with
+    # a cost slot -- "Free", "♦ N CR", or "Entry fee unverified" -- and all three told a
+    # reader that entering might cost something. Asserted as RENDERED TEXT rather than as
+    # the absence of a class, so re-introducing the sentence by any other markup fails too.
+    assert idle["feeSlots"] == 0, "the entry screen still renders a cost slot"
+    assert not re.search(r"\bfree\b|\bfees?\b|\bCR\b|♦|credit", idle["screenText"], re.I), (
+        "the entry screen still says something about cost: {!r}".format(idle["screenText"]))
+    assert idle["disabled"] is True, "the confirm bar is armed with nothing picked"
+    assert "Pick at least one" in idle["label"], (
+        "the disabled bar dropped its reason: {!r}".format(idle["label"]))
+    assert idle["tileW"] >= 44 and idle["tileH"] >= 44, (
+        "picker tiles are {:.1f}x{:.1f} -- under 44pt".format(idle["tileW"], idle["tileH"]))
+    # >=18px of bottom padding: the handoff's own D3 value, and what
+    # max(18px, env(safe-area-inset-bottom)) resolves to on a browser reporting no inset
+    # (which headless chromium does) -- so this measures the max(), not the inset.
+    assert float(idle["barPad"].replace("px", "")) >= 18, (
+        "the confirm bar sits flush against the safe area: {}".format(idle["barPad"]))
+
+    page.click(".cmb-grid .cmb-tile:nth-child(1)")
+    page.click(".cmb-grid .cmb-tile:nth-child(2)")
+    _settle(page)
+    armed = page.evaluate(read)
+    assert armed["disabled"] is False, "two picks did not arm the confirm bar"
+    assert "2 images" in armed["label"], (
+        "the confirm bar does not count the picks: {!r}".format(armed["label"]))
+    assert armed["count"] == "2 selected", (
+        "the header counter reads {!r} -- the board row states no entry limit, so it must "
+        "not quote a '/ N max' the contest never published".format(armed["count"]))
+    # Not one body, confirmed or otherwise: picking no longer probes the route (the cost
+    # probe died with the cost slot), so the only thing that may POST here is the bar.
+    assert posts == [], (
+        "an entry POST left this test without the confirm bar being pressed: {!r}"
+        .format(posts))
+
+
+def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
+        logged_in_page, no_confirmed_contest_entry):
+    """THE IMAGE-SIDE DOOR, and the half of D3 the board-side tests structurally cannot see.
+
+    The handoff keeps THREE entry points and only two of them start from a picture -- the
+    lightbox's action row and Image Details' chip -- and those two are exactly the two that
+    PRE-SELECT the picture they came from. Every test above drives the third (the board's
+    own Enter bar), which pre-selects nothing by design, so the whole pre-selection chain
+    shipped unmeasured: LightboxMobile's chip -> AppMobile's `openContestFor` -> the ENTER
+    INTO A CONTEST sheet -> `openContestEntry(contest, contestFor)` -> ContestEntryMobile's
+    one-shot `seeded` effect. Four hand-offs of one media_id, any of which can drop it, and
+    a dropped one fails SILENTLY: the screen simply opens with nothing ticked, which is also
+    what a legitimately ineligible source looks like.
+
+    Driven as a person drives it, at 390pt: tap a real grid tile, tap the chip, pick a
+    contest in the sheet, and land on the entry screen. Every one of those is an ordinary
+    `page.click`, which makes this test ALSO the standing guard on the chooser sheet's
+    z-index: Playwright refuses a click on a covered element, so if the sheet ever slips
+    back under the viewer that opened it (the 2026-09-04 defect -- MobileSheet's shared
+    30/31 behind .lbm-root's 55) the row click fails outright with the intercepting
+    element named. The assertion is that the ticked tile is THAT picture and no other, and
+    that the confirm bar came up armed and counting one. The bar is left unpressed -- this
+    proves the screen opens ready, never that it fires -- and the module-wide guard fixture
+    is asserted for the same guarantee the board-side test makes with its own `posts` list.
+
+    ONE of the two image-side doors is driven here, not both: the lightbox's. Image
+    Details' chip is gated on `row.artwork_id` (ImageDetailsMobile.jsx) and `render_server`
+    seeds all six catalog rows from a blank CATALOG_FIELDS template, so artwork_id is ""
+    for every one of them and that chip does not render on this fixture at all. Reaching it
+    would mean stubbing /api/next/detail with an invented published row -- a fixture this
+    module does not have and this test is not the place to invent. The z-index half is
+    covered regardless, and by the HARDER of the two: .idm-root is 50 and .lbm-root is 55,
+    so a chooser that clears the lightbox clears Image Details by construction. What stays
+    unmeasured is Details' own chip wiring, not the layer it opens onto.
+    """
+    page = logged_in_page(**MOBILE)
+    _json_route(page, "**/api/contests", _MOBILE_BOARD)
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART_FROM_LIBRARY)
+
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)                      # before the lightbox's own 280ms slide-in
+    page.wait_for_selector(".glm-tile", timeout=10_000)
+    # Catalog row 100 is the ONE row render_server gives a prompt_full to ("harness prompt"),
+    # so its caption is unique among the six -- rows 101..105 caption "harness row n". That
+    # makes this a deterministic handle on a known media_id without a data-* attribute the
+    # component does not ship.
+    page.click('.glm-tile:has-text("harness prompt")')
+    page.wait_for_selector(".lbm-root", timeout=10_000)
+    _settle(page)
+
+    page.click('.lbm-chip:has-text("Enter contest")')
+    page.wait_for_selector(".glm-sheet .mgctch-row", timeout=10_000)
+    _settle(page)
+    rows = page.locator(".glm-sheet .mgctch-row")
+    assert rows.count() == 2, (
+        "the chooser is not offering both running contests: {!r}".format(
+            rows.all_inner_texts()))
+
+    # A REAL click, and the load-bearing one. Playwright's actionability check refuses a
+    # click on a covered element and names the element doing the covering, so this single
+    # line is what holds the chooser above the viewer that opened it: when the sheet rode
+    # MobileSheet's shared 30/31 it failed here with "<button class='lbm-chip'>Similar
+    # </button> from .lbm-root subtree intercepts pointer events" -- .lbm-root is z 55 and
+    # opaque. It now sits on contest-mobile.css's own rung (.cmb-choosersheet, 67/68), the
+    # tap lands on the row itself, and picking the contest closes the sheet and mounts the
+    # entry screen at z 70.
+    page.click('.glm-sheet .mgctch-row:has-text("JoJo Pose")')
+    page.wait_for_selector(".cmb-entry .cmb-tile", timeout=10_000)
+    _settle(page)
+
+    got = page.evaluate("""() => {
+        const tiles = [...document.querySelectorAll('.cmb-entry .cmb-tile')];
+        const on = tiles.filter(t => t.classList.contains('on'));
+        const btn = document.querySelector('.cmb-confirmbar .cmb-metal');
+        return {
+            tiles: tiles.length,
+            ticked: on.map(t => t.getAttribute('title')),
+            pressed: on.map(t => t.getAttribute('aria-pressed')),
+            head: document.querySelector('.cmb-entryhead .t').textContent.trim(),
+            count: document.querySelector('.cmb-entryhead .n').textContent.trim(),
+            label: btn.textContent.trim(), disabled: btn.disabled,
+            notes: [...document.querySelectorAll('.cmb-entrynote')]
+                     .map(n => n.textContent.trim()),
+        };
+    }""")
+    assert got["head"] == "Enter JoJo Pose", (
+        "the sheet's pick did not carry into the entry screen: {!r}".format(got["head"]))
+    assert got["tiles"] == 6, (
+        "the picker is not showing the eligible library: {!r}".format(got))
+    assert got["ticked"] == ["Harness 100"], (
+        "the entry screen opened with {!r} ticked -- the lightbox's own picture (Harness "
+        "100) must arrive pre-selected, and nothing else may".format(got["ticked"]))
+    assert got["pressed"] == ["true"], (
+        "the ticked tile does not report aria-pressed -- a screen reader is told nothing "
+        "was pre-selected: {!r}".format(got["pressed"]))
+    assert got["notes"] == [], (
+        "the entry screen is explaining itself instead of pre-selecting: {!r}".format(
+            got["notes"]))
+    assert got["count"] == "1 selected", (
+        "the header counter reads {!r}".format(got["count"]))
+    assert got["disabled"] is False, "the pre-selection did not arm the confirm bar"
+    assert "1 image" in got["label"] and "1 images" not in got["label"], (
+        "the confirm bar mis-counts (or mis-pluralises) one pick: {!r}".format(got["label"]))
+    # Same guarantee the board-side test makes with its own `posts` list, read off the
+    # module-wide guard instead -- which is the whole reason that guard exists: this test
+    # reaches the armed confirm bar through a door `_open_contests_on_the_phone` never opens.
+    #
+    # NOTHING AT ALL is on that wire now, and that is the assertion. Until 2026-09-05 the
+    # seeded pick fired an unconfirmed POST to ask the route what an entry WOULD cost, and
+    # this block waited for that body; the cost slot is gone (there are no entry fees), the
+    # probe went with it, and /api/contest/enter is now touched by exactly one thing: a
+    # press of the confirm bar, which this test does not make.
+    assert no_confirmed_contest_entry == [], (
+        "the entry screen reached /api/contest/enter without the confirm bar being "
+        "pressed: {!r}".format(no_confirmed_contest_entry))
+
+
+def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line(
+        logged_in_page):
+    """The handoff's one door: "MY ENTRIES · n" does not open a second layout, it filters
+    THIS board to the contests this library has pieces in and adds ONE status line to the
+    same card. Asserted as rendered DOM -- same .cmb-card class, one row per entered
+    contest, a derived status (running / awaiting results / won / not placed), and no
+    official hero, because a filtered board is not the board plus a list."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    # Re-answer /api/contest/mine with real rows, then reopen the screen so it re-reads.
+    _json_route(page, "**/api/contest/mine", {"sync_running": False, "total_entries": 3,
+        "contests": [
+            {"contest_id": "c-com", "slug": "jojo-pose", "title": "JoJo Pose",
+             "type": "community", "active": True, "won": False,
+             "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+             "url": "", "entry_artwork_ids": ["art0", "art1"], "entries": []},
+            {"contest_id": "c-old", "slug": "spring-oath", "title": "Spring Oath",
+             "type": "official", "active": False, "won": True,
+             "end_at": "2026-08-20T00:00:00.000Z", "result_at": "2026-08-25T00:00:00.000Z",
+             "url": "", "entry_artwork_ids": ["art2"], "entries": []},
+        ]})
+    page.click(".glm-screen-back")
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-door", timeout=10_000)
+    page.click(".cmb-door")
+    page.wait_for_selector(".cmb-cardstatus", timeout=10_000)
+    _settle(page)
+
+    got = page.evaluate("""() => [...document.querySelectorAll('.cmb-card')].map(c => ({
+        name: c.querySelector('.cmb-cardname').textContent.trim(),
+        status: (c.querySelector('.cmb-cardstatus') || {}).textContent || '',
+        cls: (c.querySelector('.cmb-cardstatus') || {}).className || '',
+    }))""")
+    assert len(got) == 2, (
+        "My entries is not the board filtered to entered contests: {!r}".format(got))
+    by = {g["name"]: g for g in got}
+    assert "RUNNING" in by["JoJo Pose"]["status"], by
+    assert "2 pieces" in by["JoJo Pose"]["status"], by
+    # An ENDED contest is not on the running board at all, so its card is rebuilt from the
+    # entries row itself -- the only way a finished contest can still be opened in-app.
+    assert "WON" in by["Spring Oath"]["status"] and "won" in by["Spring Oath"]["cls"], by
+    assert page.locator(".cmb-hero").count() == 0, (
+        "the official hero is still painted in the My-entries view")
+
+
+# A brief long enough that the detail REALLY scrolls at 390x844. The harness board's own
+# one-liner descriptions leave the detail shorter than the screen, and a scroll test on a
+# surface with nothing to scroll proves nothing.
+_LONG_BRIEF = ("Show us an autumn grimoire. " * 60).strip()
+
+
+def _board_with_a_long_brief():
+    board = json.loads(json.dumps(_MOBILE_BOARD))
+    for row in board["contests"]:
+        row["description"] = _LONG_BRIEF
+    return board
+
+
+def _open_contests_from_the_control_tab(page, board):
+    """The owner's own route in: stand on Control, then the menu -> Contests."""
+    _json_route(page, "**/api/contests", board)
+    _json_route(page, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART)
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('.glm-navitem:has-text("Control")')
+    page.wait_for_selector(".glm-tab", timeout=10_000)
+    _settle(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    _settle(page)
+
+
+# What the Control tab paints, and nothing the Contests screen ever paints: if one of these
+# is under the thumb, the screen has been scrolled away and the tab beneath is showing.
+_CONTROL_MARKS = ".mgcp-tilenote, .mgcp-skindesc, .mgcp-skinsrow, .mgcp-tilesmall, .ctm-stat"
+
+_SCROLL_READ = """() => {
+    const body = document.querySelector('.glm-body');
+    const screen = document.querySelector('.glm-screen');
+    const sbody = document.querySelector('.glm-screen-body');
+    const detail = document.querySelector('.cmb-detailbody');
+    const bar = document.querySelector('.cmb-enterbar');
+    const r = screen.getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    const sb = sbody.getBoundingClientRect();
+    // Three probes down the screen's own height: what a thumb would actually be on.
+    const at = [r.top + 30, (r.top + r.bottom) / 2, r.bottom - 30].map((y) => {
+        const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(y));
+        if (!el) return null;
+        return (el.closest(CONTROL_MARKS) ? 'CONTROL:' : '') + (el.className || el.tagName);
+    });
+    // VISIBLE, not merely laid out: the Control tab is always sitting under this screen,
+    // so an intersection test would count it even when the opaque screen covers it. A
+    // Control node counts only if it WINS the hit test at its own centre.
+    const shown = [...document.querySelectorAll(CONTROL_MARKS)].filter((el) => {
+        const q = el.getBoundingClientRect();
+        if (q.width <= 0 || q.height <= 0) return false;
+        const cx = Math.round(q.left + q.width / 2), cy = Math.round(q.top + q.height / 2);
+        if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) return false;
+        const hit = document.elementFromPoint(cx, cy);
+        return !!hit && (hit === el || el.contains(hit));
+    }).length;
+    return {
+        bodyTop: body.scrollTop, bodyRange: body.scrollHeight - body.clientHeight,
+        screenTop: r.top, screenBottom: r.bottom,
+        sbodyRange: sbody.scrollHeight - sbody.clientHeight,
+        detailTop: detail.scrollTop, detailRange: detail.scrollHeight - detail.clientHeight,
+        barBottom: b.bottom, sbodyBottom: sb.bottom, at, controlShown: shown,
+    };
+}""".replace("CONTROL_MARKS", json.dumps(_CONTROL_MARKS))
+
+
+def _flick(page, x=195, y=430, times=8):
+    """A real wheel over the detail, well past the end of anything on this screen."""
+    page.mouse.move(x, y)
+    for _ in range(times):
+        page.mouse.wheel(0, 600)
+    _settle(page)
+
+
+def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under_it(
+        logged_in_page):
+    """THE 2026-09-05 DEFECT, in the owner's own words: "opening a contest the enter button
+    is a floating panel in front of the rest scrolling behind it. If you tap back to the
+    contest details and begin scrolling it leads into the CONTROL PANEL???!!! BROKEN".
+
+    Measured before the fix, at 390x844 with Control as the standing tab: `.glm-screen` is
+    position:absolute INSIDE `.glm-body`, which is the tab's own scroller and still held the
+    whole Control panel underneath -- 1579px of range against a 600px screen. The detail's
+    scroll chained straight out of `.glm-screen-body` into that, and the entire Contests
+    screen slid off the top (top +172 -> -1407), leaving the Control panel's tiles under the
+    thumb. The same root cause opened a screen at top -824 -- invisible -- whenever the tab
+    beneath happened to be scrolled when Contests was tapped.
+
+    What this asserts, in the order it goes wrong: the DETAIL is what scrolls; the tab's
+    scroller never moves; the screen never leaves the place it was drawn; the Enter bar
+    stays on the bottom edge of that screen; and no Control-panel node is ever inside the
+    screen's rectangle. Then it walks the owner's second half -- into the entry screen, back
+    out, scroll again -- because that is where he saw it, and finally proves itself by
+    putting the pre-fix CSS back in the page and watching every one of those flip."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_from_the_control_tab(page, _board_with_a_long_brief())
+    page.click(".cmb-hero")
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    _settle(page)
+
+    start = page.evaluate(_SCROLL_READ)
+    assert start["bodyRange"] > 200, (
+        "the Control tab under this screen has only {:.0f}px of scroll range -- this test "
+        "cannot see the defect it exists for".format(start["bodyRange"]))
+    assert start["detailRange"] > 100, (
+        "the contest detail has only {:.0f}px of its own to scroll; the brief fixture is "
+        "not long enough for this to mean anything".format(start["detailRange"]))
+    assert start["sbodyRange"] <= 1, (
+        "the Contests screen's body still scrolls ({:.0f}px) -- the detail is meant to fill "
+        "it exactly and own the scrolling itself".format(start["sbodyRange"]))
+    assert abs(start["barBottom"] - start["sbodyBottom"]) <= 1, (
+        "the Enter bar's bottom is {:.1f} against a screen body ending at {:.1f} -- it is "
+        "not the layer's footer".format(start["barBottom"], start["sbodyBottom"]))
+
+    _flick(page)
+    after = page.evaluate(_SCROLL_READ)
+    assert after["detailTop"] > 100, (
+        "the flick did not scroll the detail at all ({:.0f}px) -- nothing was measured"
+        .format(after["detailTop"]))
+    assert after["bodyTop"] == 0, (
+        "the Control tab's scroller moved to {:.0f} -- the flick chained out of the contest "
+        "screen".format(after["bodyTop"]))
+    assert abs(after["screenTop"] - start["screenTop"]) < 1, (
+        "the Contests screen moved from {:.1f} to {:.1f} -- it is being scrolled away"
+        .format(start["screenTop"], after["screenTop"]))
+    assert after["controlShown"] == 0 and not any(
+        (p or "").startswith("CONTROL:") for p in after["at"]), (
+        "the Control panel is showing through the contest screen: {!r}".format(after))
+    assert abs(after["barBottom"] - after["sbodyBottom"]) <= 1, (
+        "the Enter bar left the bottom edge while the detail scrolled: {!r}".format(after))
+
+    # The owner's second half: into the entry screen, back to the detail, scroll again.
+    page.click(".cmb-enterbar .cmb-metal")
+    page.wait_for_selector(".cmb-entry .cmb-tile", timeout=10_000)
+    _settle(page)
+    page.click(".cmb-entryhead .cmb-back")
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    _settle(page)
+    _flick(page)
+    back = page.evaluate(_SCROLL_READ)
+    assert back["bodyTop"] == 0 and back["controlShown"] == 0, (
+        "coming back from the entry screen and scrolling still lands in the Control "
+        "panel: {!r}".format(back))
+    assert abs(back["screenTop"] - start["screenTop"]) < 1, (
+        "the Contests screen is no longer where it was drawn after the round trip: {!r}"
+        .format(back))
+
+    # PROVE IT. The pre-fix state, applied as an in-page override -- never a committed
+    # revert: the tab's scroller unlocked and both latches off, which is exactly what
+    # shipped on 2026-09-04. Every assertion above must flip.
+    page.add_style_tag(content=(
+        ".glm-body:has(.glm-screen) { overflow: auto !important; }"
+        ".glm-screen-body, .cmb-detailbody { overscroll-behavior: auto !important; }"))
+    _settle(page)
+    _flick(page, times=12)
+    broke = page.evaluate(_SCROLL_READ)
+    assert broke["bodyTop"] > 100, (
+        "with the pre-fix CSS back the tab's scroller still did not move -- this guard is "
+        "not measuring what it claims to: {!r}".format(broke))
+    assert broke["screenTop"] < start["screenTop"] - 100, (
+        "with the pre-fix CSS back the Contests screen did not slide away: {!r}".format(
+            broke))
+    assert broke["controlShown"] > 0, (
+        "with the pre-fix CSS back the Control panel still never showed -- the defect this "
+        "guards is not reproducible from here: {!r}".format(broke))
+
+
+def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_page):
+    """ONE BADGE LAW, PINNED ON BOTH SURFACES AT ONCE (owner ruling, 2026-09-05): OFFICIAL
+    is GOLD AND METALLIC, COMMUNITY is LAVENDER, on the phone AND on the desktop board.
+
+    The ruling was given at the desktop board, whose official contest is already framed in
+    gold -- "I think the official contest badge should be gold too. and metallic IMO" -- and
+    it supersedes the same day's earlier alignment, which had made official lavender on both
+    surfaces. Lavender, the pair's other hue, moves to COMMUNITY.
+
+    Both halves are read in ONE test, from REAL renders in two viewports, and asserted equal
+    to each other as well as to the law: a drift on either surface fails here, which is the
+    only way two stylesheets stay in step. Because OFFICIAL is metal, its gold lives in the
+    FACE and its text is dark ink, so the official half is read off backgroundImage -- the
+    gradient must carry the live --gold as its dominant stop, and a FLAT gold fill fails
+    here too, which is the "and metallic" half of the ruling.
+
+    The desktop pair is read where each word actually renders: the board's own section
+    headers (.mgct-h.official / .mgct-h.community) and the detail banner's badge, which
+    means opening a contest -- the same one tap a person makes."""
+    phone = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(phone, [])
+    phone.click(".cmb-card")                       # the community contest's own detail
+    phone.wait_for_selector(".cmb-banner .cmb-badge", timeout=10_000)
+    _settle(phone)
+    ph = phone.evaluate("""() => {
+        const cs = getComputedStyle(document.documentElement);
+        const probe = (name) => { const v = cs.getPropertyValue(name).trim();
+            if (!v) return null;
+            const el = document.createElement('span'); el.style.color = v;
+            document.body.appendChild(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; };
+        return {community: getComputedStyle(
+                    document.querySelector('.cmb-banner .cmb-badge.community')).color,
+                lav: probe('--lavender'), gold: probe('--gold'), mauve: probe('--mauve')};
+    }""")
+    phone.click(".cmb-back")
+    phone.wait_for_selector(".cmb-hero .cmb-badge.official", timeout=10_000)
+    _settle(phone)
+    ph["official"] = phone.evaluate("""() => {
+        const cs = getComputedStyle(
+            document.querySelector('.cmb-hero .cmb-badge.official'));
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
+    }""")
+
+    desk = logged_in_page(**DESKTOP)
+    _json_route(desk, "**/api/contests", _MOBILE_BOARD)
+    _json_route(desk, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(desk, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(desk, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    desk.goto("/", wait_until="domcontentloaded")
+    _freeze_motion(desk)
+    desk.wait_for_selector(".mgx-navspine", timeout=10_000)
+    desk.click('.mgx-navspine button.mgx-nav:has-text("Contests")')
+    desk.wait_for_selector(".mgct-h.official", timeout=10_000)
+    _settle(desk)
+    dk = desk.evaluate("""() => {
+        const c = (s) => { const el = document.querySelector(s);
+                           return el ? getComputedStyle(el).color : null; };
+        return {hOfficial: c('.mgct-h.official'), hCommunity: c('.mgct-h.community')};
+    }""")
+    desk.click(".mgct-card")                       # the community contest's own detail
+    desk.wait_for_selector(".mgct-badge.community", timeout=10_000)
+    _settle(desk)
+    dk["badgeCommunity"] = desk.evaluate(
+        "() => getComputedStyle(document.querySelector('.mgct-badge.community')).color")
+    # The OFFICIAL badge is read LAST so it is the one still on screen for the proof phase
+    # below -- it is the half the ruling actually moved.
+    desk.click(".mgct-back")
+    desk.wait_for_selector(".mgct-official", timeout=10_000)
+    desk.click(".mgct-official")                   # the featured official contest
+    desk.wait_for_selector(".mgct-badge.official", timeout=10_000)
+    _settle(desk)
+    dk["badgeOfficial"] = desk.evaluate("""() => {
+        const cs = getComputedStyle(document.querySelector('.mgct-badge.official'));
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
+    }""")
+
+    assert None not in (ph["lav"], ph["gold"], ph["mauve"]), (
+        "a token this test compares against no longer resolves: {!r}".format(ph))
+    # The phone half of the law. OFFICIAL is metal, so its gold is the gradient's dominant
+    # stop rather than its text colour; COMMUNITY is a plain lavender word.
+    assert "gradient" in ph["official"]["face"] and ph["gold"] in ph["official"]["face"], (
+        "the phone's OFFICIAL badge face is {!r} -- the law is gold metal, a gradient whose "
+        "dominant stop is --gold ({})".format(ph["official"]["face"], ph["gold"]))
+    assert ph["community"] == ph["lav"], (
+        "the phone's COMMUNITY badge is {} -- the law is lavender ({})".format(
+            ph["community"], ph["lav"]))
+    # The desktop half, and the two words wherever desktop writes them.
+    assert dk["hOfficial"] == ph["gold"], (
+        "the desktop board's 'Official' header is {} -- the law is gold ({}), which is "
+        "what the phone's official badge is made of".format(dk["hOfficial"], ph["gold"]))
+    assert dk["hCommunity"] == ph["lav"], (
+        "the desktop board's 'Community' header is {} -- the law is lavender ({}), which is "
+        "what the phone paints".format(dk["hCommunity"], ph["lav"]))
+    # ZERO DRIFT, asserted between the two REAL renders rather than between two stylesheets:
+    # the same face, the same ink, on a 1280pt window and a 390pt one.
+    assert dk["badgeOfficial"]["face"] == ph["official"]["face"], (
+        "the OFFICIAL badge wears a different face on each surface --\n  desktop {!r}\n  "
+        "phone   {!r}".format(dk["badgeOfficial"]["face"], ph["official"]["face"]))
+    assert dk["badgeOfficial"]["ink"] == ph["official"]["ink"], (
+        "the OFFICIAL badge's ink differs: desktop {}, phone {}".format(
+            dk["badgeOfficial"]["ink"], ph["official"]["ink"]))
+    assert ph["lav"] not in dk["badgeOfficial"]["face"] and (
+        dk["badgeOfficial"]["bg"] != ph["lav"]), (
+        "the desktop OFFICIAL badge is filled lavender ({}) -- that was the state between "
+        "the two 2026-09-05 rulings and is the exact revert this pins: {!r}".format(
+            ph["lav"], dk["badgeOfficial"]))
+    assert dk["badgeCommunity"] == ph["lav"], (
+        "the desktop COMMUNITY badge is {} -- the law is lavender ({})".format(
+            dk["badgeCommunity"], ph["lav"]))
+    assert ph["mauve"] not in (dk["hCommunity"], dk["badgeCommunity"]), (
+        "the desktop community word fell back onto mauve: {!r}".format(dk))
+    assert dk["badgeCommunity"] != ph["gold"], (
+        "the desktop COMMUNITY badge is gold -- gold belongs to OFFICIAL since the ruling")
+
+    # PROVE IT. The OFFICIAL badge exactly as it read between the two 2026-09-05 rulings --
+    # a FLAT lavender fill with pale ink -- applied as an in-page override (never a
+    # committed revert) to the badge on screen right now. Every official assertion above
+    # has to flip: no gradient, no gold, and the fill back on lavender.
+    desk.add_style_tag(content=(
+        ".mgct-badge.official { background: var(--lavender) !important;"
+        " color: #14102a !important; }"))
+    _settle(desk)
+    reverted = desk.evaluate("""() => {
+        const cs = getComputedStyle(document.querySelector('.mgct-badge.official'));
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
+    }""")
+    assert reverted["bg"] == ph["lav"] and "gradient" not in reverted["face"], (
+        "the pre-ruling rule no longer changes what the OFFICIAL badge paints ({!r} vs "
+        "lavender {}) -- this guard is reading something other than that badge's face"
+        .format(reverted, ph["lav"]))
+    assert ph["gold"] not in reverted["face"], (
+        "the reverted OFFICIAL badge still carries gold ({}) in its face {!r} -- the gold "
+        "this test reads is coming from somewhere the ruling does not govern".format(
+            ph["gold"], reverted["face"]))

@@ -1,0 +1,298 @@
+/* CONTESTS ON THE PHONE — pixel source
+   `../moonglade-internal/design/contest/Contest Mobile Handoff.dc.html` (Session D,
+   committed 2026-09-04, picks 1a · 1d · 1f). Its three frames are D1 BOARD, D2 DETAIL
+   and D3 ENTRY, and every rule below is that file's own inline style, re-expressed as a
+   class. Where a number here differs from the frame it is because a hit target had to
+   reach 44pt (the handoff's own plumbing note) — those are marked.
+
+   Every colour is a token. The badge pair is the one place this file departs from the
+   handoff: OFFICIAL is GOLD AND METALLIC and COMMUNITY is LAVENDER, on BOTH surfaces
+   (owner ruling, 2026-09-05; myart-contests.css's .mgct-h block states it there, with the
+   reasoning). The handoff draws that pair the other way round.
+
+   The metal keyframes are named cmbMetal/cmbSheen, NOT mgMetal: gen-drawer.css already
+   defines a global `mgMetal` with different stops (a ping-pong, where the handoff's runs
+   0%->220% linear) and redefining that name would retune the Generate dock's own button
+   from a file that has no business touching it. */
+
+@keyframes cmbMetal { 0% { background-position: 0% 50%; } 100% { background-position: 220% 50%; } }
+@keyframes cmbSheen { 0% { transform: translateX(-120%); } 60%, 100% { transform: translateX(320%); } }
+
+/* The metal CTA, verbatim from the handoff's D2/D3 bars. */
+.cmb-metal { position: relative; overflow: hidden; display: block; width: 100%;
+  box-sizing: border-box; text-align: center; cursor: pointer; font-family: inherit;
+  font-size: 12.5px; font-weight: 800; color: #fff; padding: 14px 0; border-radius: 11px;
+  border: 1px solid rgba(255,255,255,.3); text-shadow: 0 1px 2px rgba(51,35,109,.65);
+  background: linear-gradient(100deg, var(--purple-deep) 0%, var(--purple-bright) 22%,
+    var(--lavender) 43%, #efe6ff 50%, var(--lavender) 57%, var(--purple-bright) 78%,
+    var(--purple-deep) 100%);
+  background-size: 220% 100%; animation: cmbMetal 7s linear infinite;
+  box-shadow: 0 8px 26px rgba(100,58,172,.5), inset 0 1px 0 rgba(255,255,255,.5),
+    inset 0 -2px 6px rgba(51,35,109,.55); }
+.cmb-metal i { position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.55), transparent);
+  transform: translateX(-120%); animation: cmbSheen 7s ease-in-out infinite;
+  pointer-events: none; }
+/* MUTED, never a flat opacity fade — the same grammar gen-drawer.css uses for its own
+   metal: the metal stays and desaturates, and §8.3's rule holds (the label says what the
+   button is; the reason sits under it). */
+.cmb-metal:disabled { cursor: not-allowed; filter: saturate(.35) brightness(.62);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22); animation-play-state: paused; }
+.cmb-metal:disabled i { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cmb-metal { animation: none; }
+  .cmb-metal i { display: none; }
+}
+
+/* ---- D1 · BOARD ------------------------------------------------------------------ */
+
+/* The one door to My entries. 44pt tall (the handoff draws it as a bare 9px mono label on
+   the title line; a 9px label is not a touch target). */
+.cmb-boardhead { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+button.cmb-door { margin-left: auto; display: flex; align-items: center; min-height: 44px;
+  padding: 0 2px; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .1em; font-weight: 700; color: var(--lavender); background: none;
+  border: none; cursor: pointer; }
+button.cmb-door.on { color: var(--text); }
+.cmb-door .n { color: var(--overlay0); }
+
+.cmb-sectionlab { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0);
+  padding: 6px 0 2px; }
+
+/* The official hero — 16:9, badge top-left, title + prize/countdown overlaid bottom-left. */
+button.cmb-hero { position: relative; display: block; width: 100%; padding: 0;
+  border-radius: 14px; overflow: hidden; border: 1px solid var(--surface1);
+  aspect-ratio: 16 / 9; cursor: pointer; font-family: inherit; text-align: left;
+  background: radial-gradient(120% 120% at 22% 20%, var(--purple-bright) 0%,
+    var(--purple-deep) 46%, var(--mantle) 100%); }
+.cmb-hero img, .cmb-thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; }
+.cmb-heroveil { position: absolute; inset: 0;
+  background: linear-gradient(0deg, rgba(6,4,16,.78) 0%, rgba(6,4,16,.12) 52%, transparent 100%); }
+.cmb-herofoot { position: absolute; left: 12px; right: 12px; bottom: 11px; }
+.cmb-heroname { display: block; font-family: var(--serif, Georgia, "Times New Roman", serif);
+  font-style: italic; font-size: 19px; line-height: 1.15; color: #fff;
+  text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+.cmb-herometa { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: rgba(255,255,255,.75); margin-top: 2px; }
+
+/* The badges. OFFICIAL gold and metallic · COMMUNITY lavender — the owner's 2026-09-05
+   ruling, which is the law on the desktop board too (myart-contests.css's .mgct-h block
+   states it there, with the reasoning). It overrides the handoff's own assignment, which
+   read the pair the other way round.
+
+   The official face is the metal recipe of .cmb-metal above in the house's gold stops
+   (shell.css .mgx-metal-folio), shrunk to badge size. Its gradient is written stop-for-stop
+   identically to myart-contests.css's .mgct-badge.official, so the two surfaces paint the
+   same face -- that equality is asserted from real renders, not read off either file. Only
+   the keyframe NAME differs, for the reason given at the top of this file, so the drift is
+   this file's linear 0->220% rather than the desktop's ping-pong; both take 7s. */
+.cmb-badge { position: absolute; top: 9px; left: 10px; font-size: 8.5px; font-weight: 800;
+  letter-spacing: .09em; padding: 3px 9px; border-radius: 999px;
+  background: rgba(12,10,28,.78); }
+.cmb-badge.official { color: #2a1f06; border: 1px solid rgba(255,255,255,.28);
+  text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background: linear-gradient(100deg, #7a5f1c 0%, var(--gold) 18%, #fff3cd 34%,
+    var(--gold) 50%, #9c7d24 68%, #fff3cd 84%, #7a5f1c 100%);
+  background-size: 220% 100%; animation: cmbMetal 7s linear infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 3px rgba(42,31,6,.4),
+    0 2px 7px rgba(0,0,0,.4); }
+.cmb-badge.community { color: var(--lavender); border: 1px solid rgba(182,146,230,.4); }
+/* The badge's own reduced-motion guard, and it has to live HERE rather than in the metal
+   block at the top of this file: that block's `.cmb-badge.official` would carry the same
+   specificity as the rule above and lose to it on source order, so the guard would be dead
+   and this file would claim a stillness it does not deliver. Only the DRIFT stops -- the
+   brushed gold face stays. */
+@media (prefers-reduced-motion: reduce) {
+  .cmb-badge.official { animation: none; }
+}
+
+/* Community list cards. */
+.cmb-list { display: flex; flex-direction: column; gap: 8px; }
+button.cmb-card { display: flex; gap: 10px; align-items: center; width: 100%;
+  box-sizing: border-box; text-align: left; min-height: 80px; padding: 9px;
+  border: 1px solid var(--surface1); border-radius: 12px; background: var(--surface0);
+  cursor: pointer; font-family: inherit; color: var(--text); }
+button.cmb-card.ended { opacity: .8; }
+.cmb-thumb { position: relative; width: 62px; height: 62px; flex: none; border-radius: 9px;
+  overflow: hidden; border: 1px solid var(--surface1);
+  background: linear-gradient(150deg, var(--purple-deep), var(--surface0)); }
+.cmb-cardcol { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cmb-cardname { font-size: 12.5px; font-weight: 800; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmb-cardprize { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: var(--gold); }
+.cmb-cardmeta { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: var(--overlay0); }
+/* The My-entries view's extra line — the one thing that view adds to the same card. */
+.cmb-cardstatus { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-weight: 700; letter-spacing: .08em; color: var(--subtext); }
+.cmb-cardstatus.won { color: var(--gold); }
+.cmb-cardstatus.awaiting { color: var(--overlay0); }
+.cmb-cardstatus.hot { color: var(--gold); }
+
+.cmb-note { font-size: 11px; line-height: 1.6; color: var(--subtext); padding: 14px 0; }
+.cmb-note b { color: var(--text); }
+.cmb-foot { font-size: 10px; line-height: 1.6; color: var(--overlay0); padding-top: 12px; }
+.cmb-foot a { color: var(--lavender); text-decoration: underline; }
+
+/* ---- D2 · DETAIL ----------------------------------------------------------------- */
+
+/* THE DETAIL IS A LAYER, NOT A COLUMN (owner report 2026-09-05: "opening a contest the
+   enter button is a floating panel in front of the rest scrolling behind it. If you tap
+   back to the contest details and begin scrolling it leads into the CONTROL PANEL").
+   It fills the Contests screen's body exactly, `.cmb-detailbody` owns the scrolling and
+   latches it, and the Enter bar is this layer's footer -- so nothing behind the bar can
+   move and nothing can chain out of it. `height: 100%` is against .glm-screen-body's
+   content box, which is why the footer keeps the negative margins that reach back out to
+   that box's padding edges. */
+.cmb-detail { display: flex; flex-direction: column; height: 100%; }
+.cmb-detailbody { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 9px; }
+button.cmb-back { display: flex; align-items: center; gap: 5px; align-self: flex-start;
+  min-height: 44px; padding: 0 2px; font-size: 11px; color: var(--lavender);
+  background: none; border: none; cursor: pointer; font-family: inherit; }
+.cmb-banner { position: relative; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--surface1); aspect-ratio: 2.4 / 1;
+  background: radial-gradient(120% 120% at 22% 20%, var(--purple-bright) 0%,
+    var(--purple-deep) 46%, var(--mantle) 100%); }
+.cmb-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cmb-bannername { position: absolute; left: 11px; right: 11px; bottom: 9px;
+  font-family: var(--serif, Georgia, "Times New Roman", serif); font-style: italic;
+  font-size: 19px; line-height: 1.15; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+
+.cmb-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.cmb-chip { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
+  font-variant-numeric: tabular-nums; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--surface1); color: var(--subtext); }
+.cmb-chip.gold { background: rgba(212,175,55,.14); border-color: rgba(212,175,55,.42);
+  color: var(--gold); }
+.cmb-chip.entered { background: rgba(212,175,55,.22); border-color: rgba(212,175,55,.5);
+  color: var(--gold); font-weight: 700; }
+
+/* The accordion. One section open at a time; the collapsed row keeps its key figure. */
+.cmb-acc { display: flex; flex-direction: column; gap: 8px; }
+.cmb-sec { border: 1px solid var(--surface1); border-radius: 11px; background: var(--surface0);
+  overflow: hidden; }
+button.cmb-sechead { display: flex; align-items: center; gap: 8px; width: 100%;
+  box-sizing: border-box; min-height: 44px; padding: 10px 12px; cursor: pointer;
+  background: none; border: none; font-family: inherit; text-align: left; }
+.cmb-seclab { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0); }
+.cmb-sechint { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--gold); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cmb-secchev { margin-left: auto; font-size: 10px; color: var(--overlay0); }
+.cmb-secbody { padding: 0 12px 11px; font-size: 11px; line-height: 1.55; color: var(--subtext); }
+.cmb-secbody p { margin: 0 0 8px; }
+.cmb-secbody p:last-child { margin-bottom: 0; }
+.cmb-secbody ul, .cmb-secbody ol { margin: 0 0 8px; padding-left: 18px; }
+.cmb-secbody h4, .cmb-secbody h5, .cmb-secbody h6 { margin: 0 0 6px; font-size: 11.5px;
+  color: var(--text); }
+.cmb-secbody a { color: var(--lavender); }
+.cmb-secbody .k { display: block; font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--overlay0); margin-top: 8px; }
+.cmb-secbody .k:first-child { margin-top: 0; }
+.cmb-tack { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 600;
+  padding: 1px 6px; border-radius: 5px; background: rgba(182,146,230,.16); color: var(--mauve); }
+.cmb-ok { color: var(--emerald); font-weight: 700; }
+.cmb-tier { display: flex; align-items: baseline; gap: 6px; padding: 3px 0;
+  font-variant-numeric: tabular-nums; }
+.cmb-tier .r { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .1em;
+  color: var(--overlay0); }
+.cmb-tier .a { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700;
+  color: var(--gold); }
+.cmb-tier .w { margin-left: auto; font-size: 10px; color: var(--overlay0); }
+
+/* The Enter bar — the detail layer's own footer, above the safe area. It was a sticky
+   passenger inside the Contests screen's scroller until 2026-09-05, which is what made it
+   read as "a floating panel in front of the rest scrolling behind it": what scrolled
+   behind it was not the detail but the whole screen, on its way out of view. Now it is
+   `flex: none` under `.cmb-detailbody`, the same shape D3's confirm bar has always had.
+   The negative margins reach out to the screen body's own padding edges (13px), so the
+   bar still spans the full width and sits flush on the bottom; the safe-area pad is the
+   Moonglade Mobile bulk-bar idiom (myart-mobile.css's .myam-bulkbar). */
+.cmb-enterbar { flex: none; display: flex; align-items: center;
+  gap: 10px; margin: 0 -13px -13px; padding: 10px 13px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.cmb-enterbar .cmb-metal { flex: 1 1 auto; width: auto; }
+.cmb-when { flex: none; }
+.cmb-whenk { font-size: 8px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0); }
+.cmb-whenv { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.cmb-whenv.hot { color: var(--gold); }
+.cmb-why { flex: none; font-size: 10px; color: var(--overlay0); padding: 4px 0; }
+
+/* ---- D3 · ENTRY ------------------------------------------------------------------ */
+
+.cmb-entry { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  background: var(--mantle); }
+.cmb-entryhead { flex: none; display: flex; align-items: center; gap: 8px;
+  padding: max(6px, env(safe-area-inset-top)) 14px 8px; }
+.cmb-entryhead .t { font-family: var(--serif, Georgia, "Times New Roman", serif);
+  font-style: italic; font-size: 15px; color: var(--text); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cmb-entryhead .n { margin-left: auto; flex: none; font-family: ui-monospace, Menlo, monospace;
+  font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+/* The tag line, and nothing about money: there are no entry fees, so the `.fee` slot that
+   sat at the end of this line is deleted (owner, 2026-09-05). */
+.cmb-tagline { flex: none; padding: 0 14px 8px; font-size: 10px; line-height: 1.5;
+  color: var(--subtext); }
+/* The picker owns its scrolling too, and latches it: this screen is a fixed layer, so a
+   flick past the last row has nowhere legitimate to go. */
+.cmb-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 0 14px 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  align-content: start; }
+button.cmb-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 8px; padding: 0;
+  overflow: hidden; cursor: pointer; border: 1px solid var(--surface1);
+  background: var(--surface0); }
+button.cmb-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+button.cmb-tile.on { border: 2px solid var(--lavender);
+  box-shadow: 0 0 10px rgba(182,146,230,.4); }
+button.cmb-tile:disabled { opacity: .45; cursor: not-allowed; }
+.cmb-tick { position: absolute; top: 4px; right: 4px; width: 15px; height: 15px;
+  border-radius: 5px; background: var(--lavender); color: #14102a; display: grid;
+  place-items: center; font-size: 9px; font-weight: 800; }
+.cmb-entrynote { flex: none; padding: 0 14px 10px; font-size: 10.5px; line-height: 1.55;
+  color: var(--subtext); }
+.cmb-entrynote b { color: var(--text); }
+.cmb-fail { flex: none; margin: 0 14px 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(243,139,168,.4); background: rgba(243,139,168,.1);
+  font-size: 10.5px; line-height: 1.5; color: var(--subtext); }
+.cmb-fail .t { font-weight: 700; color: var(--red, #f38ba8); }
+.cmb-confirmbar { flex: none; padding: 10px 14px max(18px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.cmb-confirmbar .cmb-metal { font-size: 12px; padding: 12px 0; border-radius: 10px; }
+
+/* The contest chooser sheet's own note (the sheet chrome itself is MobileSheet's). */
+.cmb-choosernote { font-size: 11px; line-height: 1.6; color: var(--subtext);
+  padding-bottom: 8px; }
+
+/* ---- THE PHONE'S CONTEST LADDER -------------------------------------------------------
+   The one rung MobileSheet's shared 30/31 cannot supply, and the reason the class exists.
+
+   The chooser is the middle step of the image-side door: a viewer is already up when it
+   opens, and both viewers are OPAQUE full-viewport slabs. AppMobile mounts this sheet as
+   their SIBLING (see its own header comment on why contestEntry/contestFor are lifted to
+   the app root), so the shared 30/31 put it behind the thing that opened it -- the tap
+   read as nothing happening at all. Every other MobileSheet caller mounts inside its own
+   root, where 30/31 is correct, so the shared class stays where it is and this pair alone
+   is re-rung. The scrim moves with the slab: left at 30 it would dim nothing and the
+   tap-outside would land on the viewer instead of closing the sheet.
+
+   The phone's own ladder, in the order a person walks it -- change a number, keep the ORDER
+   (the same law overlays.css states for the desktop band, which this is NOT part of; that
+   band starts at .lbx 400 and none of it is reachable from these surfaces):
+     .idm-root 50 < .lbm-root 55                      the two viewers the chip sits on
+       < .idm-sheet-scrim/-slab 60/61                 Image Details' own Upscale sheet
+       < .lbm-sheet-scrim/-slab 65/66                 the lightbox's own Upscale sheet
+       < .glm-scrim/.glm-sheet .cmb-choosersheet 67/68   ENTER INTO A CONTEST (here)
+       < .cmb-entry 70                                the entry screen the chooser opens
+   67/68 clears both viewers AND both of their always-mounted Upscale sheets, so the pair
+   is above everything either door can already have on screen, and stays under the entry
+   screen it hands off to. Scrim under its own slab, never level with it or over it. */
+.glm-scrim.cmb-choosersheet { z-index: 67; }
+.glm-sheet.cmb-choosersheet { z-index: 68; }
