@@ -85,7 +85,7 @@ describe("A. URL page addressing (App.jsx)", () => {
   const lib = src("gallery/src/hooks/useLibrary.js");
 
   test("(a) init reads ?page= and the hook's mount load honors it", () => {
-    assert.match(app, /import \{ buildUrl, readPage, readImage \} from "\.\/gen\/urlState\.js";/);
+    assert.match(app, /import \{ buildUrl, readPage, readImage, readSeries \} from "\.\/gen\/urlState\.js";/);
     assert.match(app, /const \[initialPage\] = useState\(\(\) => readPage\(window\.location\.search\)\);/);
     // #34 direction B: the hook also takes the persisted `group` toggle (default off)
     assert.match(app, /useLibrary\(\{ initialPage, group \}\)/);

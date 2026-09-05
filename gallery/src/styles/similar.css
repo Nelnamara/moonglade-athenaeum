@@ -1,0 +1,81 @@
+/* ============================================================================
+   simres — B2's Similar results surface (Gallery Chrome Handoff.dc.html,
+   2026-09-04). Replaces the retired .similar-modal block in styles.css: Similar
+   is a STATE on the library now, so this is an in-flow surface that takes the
+   grid's place, not a fixed layer over it. No scrim, no z-index, no fixed
+   positioning — deliberately, because those are what made the old modal a
+   takeover you had to dismiss on its own terms.
+
+   Every colour is a DS token. The handoff's literals map: rgba(182,146,230,·) is
+   --lavender, rgba(5,4,13,·) is --mantle, rgba(33,31,58,·) is --surface0. The
+   mark's hue is lavender throughout — ◈ is an action, and this is the app's one
+   visual-similarity family.
+
+   Tile size follows the SIZE slider's --thumb like the real grid does, so
+   stepping into Similar doesn't resize the library under you.
+   ========================================================================== */
+
+.simres { padding: 4px 0 28px; }
+
+.simres-grid { display: grid; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumb, 210px), 1fr));
+  grid-auto-rows: var(--thumb, 210px); gap: 12px; }
+
+.simres-card { position: relative; display: block; overflow: hidden;
+  border-radius: 12px; background: var(--surface0);
+  border: 1px solid var(--surface1);
+  transition: transform .2s cubic-bezier(.2, .9, .24, 1), box-shadow .2s, border-color .2s; }
+.simres-card:hover { transform: translateY(-2px);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--mantle) 70%, transparent);
+  border-color: color-mix(in srgb, var(--lavender) 45%, transparent); }
+.simres-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* The source picture leads the set, ringed and marked — the handoff's answer to
+   "similar to what?" being visible on the surface, not only in the bar's token. */
+.simres-card.is-source { border-color: color-mix(in srgb, var(--lavender) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lavender) 30%, transparent); }
+.simres-card.is-source:hover { transform: none; }
+.simres-mark { position: absolute; left: 6px; bottom: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 5px; border-radius: 4px; color: var(--lavender);
+  background: color-mix(in srgb, var(--mantle) 78%, transparent); }
+
+/* The ◈ door on a result — 26×26, radius 8, lavender-ringed, revealed on hover
+   or keyboard focus (the handoff draws it top-right of a hovered tile). */
+.simres-door { position: absolute; top: 7px; right: 7px; z-index: 2;
+  width: 26px; height: 26px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px; line-height: 1;
+  color: var(--lavender);
+  border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  opacity: 0; transform: translateY(-3px);
+  transition: opacity .2s, transform .2s cubic-bezier(.2, .9, .24, 1), background .18s; }
+.simres-card:hover .simres-door,
+.simres-door:focus-visible { opacity: 1; transform: none; }
+.simres-door:hover { background: color-mix(in srgb, var(--lavender) 22%, var(--mantle)); }
+
+.simres-vbadge { position: absolute; top: 7px; left: 7px; font-size: 10px;
+  padding: 2px 6px; border-radius: 6px; color: var(--text);
+  background: color-mix(in srgb, var(--mantle) 72%, transparent); }
+
+.simres-score { position: absolute; left: 6px; bottom: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px; padding: 2px 6px; border-radius: 4px; color: var(--lavender);
+  background: color-mix(in srgb, var(--mantle) 72%, transparent); }
+
+.simres-note { font-size: 12px; color: var(--subtext); padding: 26px 4px; text-align: center; }
+.simres-empty { display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 20px 4px 40px; }
+.simres-empty .simres-note { padding: 6px 4px; max-width: 62ch; }
+.simres-back { font-size: 11.5px; font-weight: 700; padding: 6px 14px; border-radius: 999px;
+  cursor: pointer; font-family: inherit; color: var(--lavender);
+  border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--lavender) 10%, transparent);
+  transition: background .18s; }
+.simres-back:hover { background: color-mix(in srgb, var(--lavender) 20%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .simres-card, .simres-door, .simres-back { transition: none; }
+  .simres-card:hover { transform: none; }
+}

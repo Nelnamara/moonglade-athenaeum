@@ -4,6 +4,13 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// B3 of the 2026-09-04 Gallery Chrome handoff changed where a stack OPENS. It used to
+// be a navigation -- the sid went into the library's own `series` filter and the whole
+// gallery re-loaded as that series' members, with Clear as the only way back. It opens a
+// MODAL over the gallery now (SeriesModal.jsx), the library underneath is untouched, and
+// Esc goes straight back. The (c) group below pins the new wiring; everything else about
+// stacking -- the fold, the badges, the deck, the not-selectable rules -- is unchanged.
+//
 // Issue #34 direction B -- grid stacking, the UI half. Source guards, short and
 // literal like placard.test.js: the front-end can't be booted headless here (React
 // + a live login-gated API), so these pin the exact wiring the build depends on --
@@ -77,29 +84,89 @@ describe("(b) a series||batch unit renders the stack markup + the right badge (G
   });
 });
 
-describe("(c) opening a stack NAVIGATES: series -> series filter, batch -> View-batch", () => {
+describe("(c) opening a stack: series -> the B3 modal, batch -> View-batch", () => {
   test("Grid routes a stack open to onOpenSeries(sid) / onOpenBatch(task_id)", () => {
     assert.ok(grid.includes("if (kind === \"series\" && onOpenSeries) onOpenSeries(it.series.sid);"));
     assert.ok(grid.includes("else if (kind === \"batch\" && onOpenBatch) onOpenBatch(it.batch.task_id);"));
   });
-  test("App mirrors filterByBatch as filterBySeries (sets the series drill-down) and wires both", () => {
-    // filterBySeries is the mirror: it sets adv.series (the ?series filter).
-    // Both are useCallback'd since 2026-09-04 -- they are props on the memoized <Grid>, and
-    // a fresh identity per render would defeat that memo. The wiring is what matters here.
-    assert.ok(app.includes("const filterBySeries = useCallback((series) => {"));
-    assert.ok(app.includes("setAdv((old) => ({ ...old, series, batch: \"\" }));"));
-    // the batch open is the EXISTING path, reused exactly
+  test("B3: a series opens the MODAL -- openSeries, not the retired ?series= takeover", () => {
+    // openSeries is useCallback'd like filterByBatch beside it: both are props on the
+    // memoized <Grid>, and a fresh identity per render would defeat that memo.
+    assert.ok(app.includes("const openSeries = useCallback((sid) => {"));
+    assert.ok(app.includes("const closeSeries = useCallback(() => {"));
+    // it opens the modal and addresses it -- it does NOT push the sid into the filters
+    assert.ok(app.includes("setSeriesFor(sid);"));
+    assert.ok(app.includes("setUrl({ series: sid });"));
+    assert.ok(!app.includes("setAdv((old) => ({ ...old, series, batch:"),
+      "the ?series= drill-down must no longer be SET from a stack click");
+    assert.ok(!app.includes("filterBySeries"), "filterBySeries is retired");
+    // the batch open is the EXISTING path, reused exactly and untouched
     assert.ok(app.includes("const filterByBatch = useCallback((batch) => {"));
     // both handed to the grid
-    assert.ok(app.includes("onOpenSeries={filterBySeries}"));
+    assert.ok(app.includes("onOpenSeries={openSeries}"));
     assert.ok(app.includes("onOpenBatch={filterByBatch}"));
+    // ...and the modal is mounted on the sid, closing straight back
+    assert.ok(app.includes("<SeriesModal sid={seriesFor} onClose={closeSeries}"));
   });
-  test("the tray toggle flips group and lights when on (next to the layout picker)", () => {
+  test("B3: the modal is a place -- ?series=<sid> is read, written and popstate-restored", () => {
+    const url = src("gallery/src/gen/urlState.js");
+    assert.ok(url.includes("export function readSeries(search)"));
+    assert.ok(url.includes('p.set("series", String(patchObj.series));'));
+    assert.ok(app.includes("useState(() => readSeries(window.location.search))"));
+    assert.ok(app.includes("setSeriesFor(readSeries(window.location.search));"));
+  });
+  test("B3: the rail, the sort and the run badge are the handoff's own (SeriesModal.jsx)", () => {
+    const modal = src("gallery/src/components/SeriesModal.jsx");
+    // the LINEAGE rail: an "All runs" head, then the runs on an indented descent line
+    assert.ok(modal.includes("All runs"));
+    assert.ok(modal.includes("marginLeft: 8 + i * 7"));
+    assert.ok(modal.includes("Run {s.v}"));
+    assert.ok(modal.includes("{s.n} img"));
+    // facet chips AND with the run pick, rather than replacing it
+    assert.ok(modal.includes("(run < 0 || t.rn === run + 1)"));
+    assert.ok(modal.includes("active.every(([, , test]) => test(t.it))"));
+    // the header sort pair, and the r-number badge that makes its order legible
+    assert.ok(modal.includes(">run \u2116</button>"));
+    assert.ok(modal.includes(">newest</button>"));
+    assert.ok(modal.includes('badge: "r" + rn + "\u00b7" + i'));
+    // Esc goes STRAIGHT back -- one key, one level
+    assert.ok(modal.includes('if (e.key !== "Escape") return;'));
+    assert.ok(modal.includes("Esc \u21a9 gallery"));
+    // it reads the series itself; the library's own state is never touched
+    assert.ok(modal.includes("fetchSeriesStack(sid)"));
+  });
+  test("the tray toggle flips group and lights when on", () => {
     assert.ok(tray.includes('onClick={() => setGroup(group !== "series")}'));
     assert.ok(tray.includes('active={group === "series"}'));
     assert.ok(tray.includes('label="Stack sessions"'));
-    // it sits right after the LayoutPicker in the tray
-    assert.ok(tray.indexOf("<LayoutPicker") < tray.indexOf('label="Stack sessions"'));
+    // B1 moved the layout picker OUT of this tray (it is the separator bar's glyph trio
+    // now), so the chip leads the tray rather than following the picker.
+    assert.ok(!tray.includes("<LayoutPicker"), "the layout picker left the tray in B1");
+    assert.ok(!tray.includes("mgl-laybtn"));
+  });
+});
+
+describe("(c2) B1: the layout switcher is the separator bar's glyph trio", () => {
+  const sep = src("gallery/src/components/SeparatorBar.jsx");
+  const shell = src("gallery/src/styles/shell.css");
+  test("three 28x28 cells, the handoff's own glyphs, no labels, beside SIZE", () => {
+    assert.ok(sep.includes('["masonry", "\u25a4", "Masonry \u2014 aspect-true, no crop"]'));
+    assert.ok(sep.includes('["grid", "\u25a6", "Grid \u2014 4:3, smart-cropped"]'));
+    assert.ok(sep.includes('["timeline", "\u2261", "Timeline \u2014 date-banded, newest first"]'));
+    assert.ok(sep.includes('className="mgx-lay"'));
+    // it sits immediately before the SIZE pill
+    assert.ok(sep.indexOf('className="mgx-lay"') < sep.indexOf('className="mgx-size"'));
+    // 92px all in: 3 x 28 cells + 2px gaps + 2px padding
+    assert.match(shell, /\.mgx-laycell \{[^}]*width: 28px; height: 28px;/);
+    assert.match(shell, /\.mgx-lay \{[^}]*gap: 2px; padding: 2px;/);
+  });
+  test("NO mobile switcher -- the control does not render below the desktop breakpoint", () => {
+    assert.match(shell, /@media \(max-width: 860px\) \{ \.mgx-lay \{ display: none; \} \}/);
+  });
+  test("selection still persists in localStorage beside the size value (App owns both)", () => {
+    assert.ok(app.includes('localStorage.setItem("mg_gallery_layout", v);'));
+    assert.ok(app.includes('localStorage.setItem("mg_gallery_density", String(v));'));
+    assert.ok(app.includes("layout={layout} setLayout={setLayout}"));
   });
 });
 

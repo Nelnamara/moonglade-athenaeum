@@ -281,6 +281,35 @@
   background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
 
 /* ---- SIZE pill ---- */
+/* ---- B1: the layout trio (Gallery Chrome Handoff.dc.html, 2026-09-04) --------
+   92px all in, exactly as the handoff measures it: three 28×28 glyph cells, 2px
+   gaps, 2px padding, sitting in the SIZE group. No labels -- each cell's title
+   attribute (and aria-label) carries its name. The active cell fills lavender
+   with a dark glyph, the handoff's one selection idiom for this control.
+
+   Every colour is a token: the group's ground is --base at 70%, the active fill
+   is --lavender flat, and the dark glyph on it is --mantle (the handoff's
+   #14102a is that same near-black violet, expressed as the palette's own so a
+   skin retints the whole control rather than stranding one hardcoded stop).
+
+   NO MOBILE SWITCHER (handoff, verbatim): below the desktop breakpoint the
+   control does not render at all -- mobile is masonry only. App.jsx itself only
+   mounts above 430px (useIsMobile), so this rule covers the in-between case, a
+   desktop window dragged narrow, rather than being the only guard. */
+.mgx-lay { display: flex; gap: 2px; padding: 2px; border-radius: 8px; flex: none;
+  border: 1px solid var(--surface1);
+  background: color-mix(in srgb, var(--base) 70%, transparent); }
+.mgx-laycell { width: 28px; height: 28px; padding: 0; flex: none;
+  display: grid; place-items: center; border: none; border-radius: 6px;
+  background: transparent; cursor: pointer; font-family: inherit;
+  font-size: 14px; line-height: 1; color: var(--subtext);
+  transition: background .18s, color .18s; }
+.mgx-laycell:hover { color: var(--text);
+  background: color-mix(in srgb, var(--lavender) 14%, transparent); }
+.mgx-laycell.on, .mgx-laycell.on:hover { background: var(--lavender); color: var(--mantle); }
+@media (max-width: 860px) { .mgx-lay { display: none; } }
+@media (prefers-reduced-motion: reduce) { .mgx-laycell { transition: none; } }
+
 .mgx-size { display: flex; align-items: center; gap: 7px; padding: 4px 11px;
   border-radius: 999px; border: 1px solid rgba(255, 255, 255, .12);
   background: rgba(7, 5, 18, .5); }

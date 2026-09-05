@@ -35,39 +35,11 @@ const SORT_LABELS = {
 };
 const PER_CYCLE = [50, 100, 200];
 
-/* Layout icon picker (drift §46). Owner: "icons not a menu" — so this is four
-   glyph buttons at the HEAD of the Filters tray, not a dropdown. Timeline (§47)
-   is the fourth. Titles are the workshop's verbatim. The chosen mode persists in
-   mg_gallery_layout (App owns the state); selecting only re-lays the same cards. */
-const LAYOUTS = [
-  ["masonry", "Masonry", "▦", "Masonry — Aspect-true, no crop"],
-  ["grid", "Grid", "▤", "Grid — 4:3, smart-cropped"],
-  ["hero", "Hero", "▧", "Hero — Feature + grid"],
-  ["timeline", "Timeline", "≣", "Timeline — Date-banded, newest first"],
-];
-
-function LayoutPicker({ layout, setLayout }) {
-  return (
-    <div className="mgl-layoutrow">
-      <span className="mgl-laylabel">LAYOUT</span>
-      <div className="mgl-laypick">
-        {LAYOUTS.map(([key, label, glyph, title]) => (
-          <button
-            key={key}
-            type="button"
-            className={"mgl-laybtn" + (layout === key ? " on" : "")}
-            title={title}
-            aria-pressed={layout === key}
-            onClick={() => setLayout(key)}
-          >
-            <span className="mgl-layglyph" aria-hidden="true">{glyph}</span>
-            <span className="mgl-laylbl">{label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+/* The LAYOUT icon picker (drift §46) used to live here: its own full-width row at
+   the head of this tray, four labelled glyph buttons. B1 of the 2026-09-04
+   Gallery Chrome handoff shrank it to an inline 28×28 glyph trio beside the SIZE
+   control -- it is SeparatorBar.jsx's LAYOUT_TRIO now, and this tray no longer
+   takes `layout`/`setLayout` at all. */
 
 function Chip({ label, active, onClick, title }) {
   return (
@@ -87,7 +59,7 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, layout, setLayout, group, setGroup }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, group, setGroup }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
   const shelfOpts = [""].concat(collections || []);
@@ -129,10 +101,10 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
   const modelLabel = adv.model ? (adv.model.length > 18 ? adv.model.slice(0, 17) + "…" : adv.model) : "any";
   return (
     <div className={"mgl-tray" + (closing ? " closing" : "")}>
-      {setLayout ? <LayoutPicker layout={layout} setLayout={setLayout} /> : null}
       {/* #34 direction B: fold every session (a multi-task dial-in series, or a
-          lone batch's siblings) into ONE cover card. Sits beside the layout picker
-          -- it changes what the grid SHOWS, like layout changes how it lays out.
+          lone batch's siblings) into ONE cover card. It changes what the grid
+          SHOWS, so it belongs with the filters even though the layout picker it
+          used to sit beside has moved to the separator bar (B1).
           Reuses the tray Chip vocabulary; `active` lights the metal like any filter. */}
       {setGroup ? (
         <Chip label="Stack sessions" active={group === "series"}
@@ -179,8 +151,15 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
    INTERFACE. Sixteen of its props were one object taken apart: it is a view of the LIBRARY --
    filters, query, selection, the flyout -- so it takes `lib`, the useLibrary() return, whole.
    The rest is what the library does not own: `boot` (models, is_true_local), `actions` (App's
-   verb table, which the Flyout and the actions menu both read), `collections`, the grid
-   `layout` pair, and the two optional post-mutation hooks a mount may supply.
+   verb table, which the Flyout and the actions menu both read), `collections`, and the two
+   optional post-mutation hooks a mount may supply.
+
+   B1 (2026-09-04) took the `layout`/`setLayout` pair back out again: the layout picker moved
+   to the separator bar's SIZE group, so this bar no longer touches it.
+
+   B2 (2026-09-04) added `similar`/`onClearSimilar`: when a ◈ door is open, the search slab
+   wears the "◈ Similar to [thumb]" token in front of the field, and the match count sits
+   beside the bar. The token is the ONE result state every ◈ in the app pushes into.
 
    Eight props went away entirely rather than being folded in, because nothing here ever read
    them: `account`, `blur`/`setBlur` and `onGenerate` were Strip.jsx swap-in compatibility that
@@ -192,9 +171,9 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
    Strip's Import stub is dropped: the NavSpine carries Import (gated on boot.is_true_local). */
 export function LibraryBar({
   lib, boot, actions, collections,
-  layout, setLayout,
   onSendVideo, onMutated,
   group, setGroup,
+  similar, onClearSimilar,
 }) {
   const {
     media, perPage, shelf,
@@ -268,12 +247,26 @@ export function LibraryBar({
           collections={collections}
           models={boot.models || []}
           commit={applyAdvanced}
-          layout={layout} setLayout={setLayout}
           group={group} setGroup={setGroup}
         />
       )}
       <div className="mgl-bar">
-        <div className={"mgl-search" + (flyOpen ? " open" : "")} ref={searchRef}>
+        <div className={"mgl-search" + (flyOpen ? " open" : "") + (similar ? " simon" : "")} ref={searchRef}>
+          {/* B2 -- the ◈ token. Every Similar door in the app (tile hover, lightbox
+              row, right-click, the Details strip) pushes THIS, and only this: the
+              source picture's own thumb, the mark, and a ✕. It is a state badge on
+              the library, not a query -- the field, the filters and the page the
+              grid was on are all untouched underneath, which is what lets ✕/Esc
+              restore the previous view exactly rather than re-running anything. */}
+          {similar ? (
+            <span className="mgl-simtok" title="Showing what looks like this picture">
+              <img className="mgl-simtok-th" src={similar.thumb} alt="" loading="lazy" decoding="async" />
+              <span className="mgl-simtok-lbl">◈ Similar to this</span>
+              <button type="button" className="mgl-simtok-x" title="Back to the library (Esc)"
+                aria-label="Clear the Similar view"
+                onClick={onClearSimilar}>✕</button>
+            </span>
+          ) : null}
           <i className="mgl-sglyph" onClick={() => submitQuery()} title="Search">⌕</i>
           <input
             value={query}
@@ -303,6 +296,15 @@ export function LibraryBar({
             />
           )}
         </div>
+
+        {/* B2 -- the count beside the token, emerald, mono. It says by what: these
+            are matches by likeness, not by the query in the field beside it. */}
+        {similar ? (
+          <span className="mgl-simcount">
+            {similar.loading ? "finding lookalikes…"
+              : similar.count + (similar.count === 1 ? " match" : " matches") + " · by likeness"}
+          </span>
+        ) : null}
 
         <button
           type="button"

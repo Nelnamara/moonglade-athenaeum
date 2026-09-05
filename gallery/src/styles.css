@@ -362,25 +362,13 @@ button:disabled { cursor: default; }
 .lb { position: fixed; inset: 0; z-index: 315; display: grid; place-items: center;
   background: rgba(6, 4, 14, .88); backdrop-filter: blur(6px); }
 
-/* ---- similar-images modal (classic's #similar-scrim/#similar-modal, class-based) ---- */
-.similar-scrim { position: fixed; inset: 0; z-index: 414; /* above .lbx 400 -- see overlays.css ladder (#39) */ background: rgba(6, 4, 16, .6); }
-.similar-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 900px; max-width: 94vw; height: 84vh; max-height: 84vh; background: var(--mantle);
-  border: 1px solid var(--surface1); border-radius: 12px; z-index: 415; display: flex;
-  flex-direction: column; padding: 14px; }
-.pick-head { display: flex; align-items: center; margin-bottom: 10px; }
-.pick-head .t { font-size: 15px; font-weight: 600; color: var(--text); }
-.pick-head .x { margin-left: auto; background: none; border: none; color: var(--subtext);
-  font-size: 22px; cursor: pointer; }
-.pick-empty { color: var(--subtext); font-size: 12px; padding: 24px; text-align: center; }
-.similar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  grid-auto-rows: 150px; gap: 10px; overflow-y: auto; flex: 1; min-height: 0;
-  align-content: start; padding: 4px; }
-.scard { position: relative; display: block; border-radius: 8px; overflow: hidden;
-  background: var(--surface0); }
-.scard img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.smeta { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 3px 7px;
-  font-size: 11px; color: var(--text); background: linear-gradient(transparent, rgba(0,0,0,.72)); }
+/* The similar-images MODAL's rules (.similar-scrim/.similar-modal/.pick-head/
+   .pick-empty/.similar-grid/.scard/.smeta) lived here until B2 of the 2026-09-04
+   Gallery Chrome handoff retired the modal itself: Similar is a state on the
+   library now -- the ◈ token in the search bar, results in the grid's place --
+   not a scrimmed layer over it. Nothing renders any of those classes any more,
+   so they go with the markup rather than sit here as orphans. The replacement
+   surface's rules are styles/similar.css (.simres-*). */
 
 /* ---- Details view -- "the layer deeper", classic's /image/<mid> page ----
    Rebuilt 2026-08-23 to the PIXEL source, design_handoff/design_handoff_moonglade_suite/

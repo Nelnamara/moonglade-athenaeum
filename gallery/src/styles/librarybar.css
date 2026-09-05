@@ -44,26 +44,13 @@
   background: color-mix(in srgb, var(--accent) 30%, rgba(12, 10, 28, .55));
   color: var(--text); }
 
-/* ---- LAYOUT icon picker (drift §46): its OWN full-width row at the head of the
-   tray, above the cycle-chips. "icons not a menu" -- four glyph buttons that
-   re-lay the same cards. flex:1 1 100% forces the wrap onto its own line since
-   .mgl-tray is flex-wrap. ---- */
-.mgl-layoutrow { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; }
-.mgl-laylabel { font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
-  color: rgba(214, 210, 226, .5); flex: none; }
-.mgl-laypick { display: flex; gap: 6px; flex: 1 1 auto; }
-.mgl-laybtn { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
-  gap: 3px; padding: 7px 4px; border-radius: 9px; cursor: pointer;
-  font-family: inherit; user-select: none;
-  border: 1px solid var(--surface1); background: rgba(12, 10, 28, .5);
-  color: rgba(214, 210, 226, .78);
-  transition: border-color .15s, background .15s, color .15s, filter .15s; }
-.mgl-laybtn:hover { filter: brightness(1.2); }
-.mgl-laybtn.on { border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, rgba(12, 10, 28, .5));
-  color: var(--text); }
-.mgl-layglyph { font-size: 17px; line-height: 1; }
-.mgl-laylbl { font-size: 9px; font-weight: 700; }
+/* The LAYOUT icon picker's rules (.mgl-layoutrow/.mgl-laylabel/.mgl-laypick/
+   .mgl-laybtn/.mgl-layglyph/.mgl-laylbl) lived here until B1 of the 2026-09-04
+   Gallery Chrome handoff shrank that control to an inline glyph trio in the
+   separator bar. Nothing renders those classes any more, so they are gone with
+   the markup rather than left behind as an orphan block (the same discipline the
+   v3.7.2 classic-leftovers sweep applied). The trio's own rules are .mgx-lay /
+   .mgx-laycell in shell.css. */
 
 /* ---- the bar row: NEVER wraps (drift §10) ---- */
 .mgl-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
@@ -91,6 +78,34 @@
   background: none; border: 0; padding: 0 1px; cursor: pointer; font-family: inherit;
   transition: transform .3s cubic-bezier(.2, .9, .24, 1), color .2s; }
 .mgl-scaret.open { transform: rotate(180deg); color: var(--mauve); }
+
+/* ---- B2: the ◈ Similar token (Gallery Chrome Handoff.dc.html, 2026-09-04) ----
+   ONE result state for every Similar door in the app. The slab tightens its left
+   padding to seat the token, its border warms to lavender so the bar itself reads
+   as "showing lookalikes", and the token carries the source picture's own thumb so
+   there is never a question of WHAT it is similar to. ✕ dismisses; so does Esc.
+   All three colours are tokens (--lavender at 14%/45%, --overlay0, --emerald). */
+.mgl-search.simon { padding-left: 6px;
+  /* the token needs its own room: at the resting 320px basis it would eat the field it
+     sits in front of, and the bar never wraps (drift §10) */
+  flex-basis: 430px;
+  border-color: color-mix(in srgb, var(--lavender) 40%, transparent); }
+.mgl-simtok { flex: none; display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 8px 4px 4px; border-radius: 7px; max-width: 190px;
+  border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
+  background: color-mix(in srgb, var(--lavender) 14%, transparent); }
+.mgl-simtok-th { width: 22px; height: 22px; flex: none; border-radius: 5px;
+  object-fit: cover; display: block;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent); }
+.mgl-simtok-lbl { font-size: 11px; font-weight: 700; white-space: nowrap;
+  color: var(--lavender); }
+.mgl-simtok-x { flex: none; padding: 0 1px; font-size: 11px; line-height: 1;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+  color: var(--overlay0); transition: color .15s; }
+.mgl-simtok-x:hover { color: var(--text); }
+.mgl-simcount { flex: none; white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; color: var(--emerald); }
 
 /* pills: ⚲ Filters / Clear / Select (DC filtersToggleStyle/clearStyle/selectStyle) */
 .mgl-pill { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
@@ -142,5 +157,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mgl-tray, .mgl-tray.closing, .mgl-menu, .mgl-menu.closing { animation: none; }
-  .mgl-scaret, .mgl-chip, .mgl-pill, .mgl-laybtn { transition: none; }
+  .mgl-scaret, .mgl-chip, .mgl-pill, .mgl-simtok-x { transition: none; }
 }

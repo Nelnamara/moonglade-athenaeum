@@ -5,7 +5,8 @@ import SeparatorBar from "./components/SeparatorBar.jsx";
 import { LibraryBar } from "./components/FiltersPanel.jsx";
 import Grid from "./components/Grid.jsx";
 import GridContextMenu from "./components/GridContextMenu.jsx";
-import SimilarModal from "./components/SimilarModal.jsx";
+import SimilarResults from "./components/SimilarResults.jsx";
+import SeriesModal from "./components/SeriesModal.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import DetailsView from "./components/DetailsView.jsx";
 import HealthOverlay from "./components/HealthOverlay.jsx";
@@ -32,8 +33,9 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
+import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
-import { buildUrl, readPage, readImage } from "./gen/urlState.js";
+import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -326,7 +328,7 @@ export default function App({ boot }) {
      capture identical "before"/"after" snapshots. Feature-detected: browsers
      without support (pre-111 Firefox/Safari) just get the plain instant swap
      they already had. */
-  /* useCallback from here down through filterBySeries: these are <Grid> props, and Grid is
+  /* useCallback from here down through openSeries: these are <Grid> props, and Grid is
      memoized (see its own foot-of-file note), so a fresh identity on every App render would
      defeat the memo before it did anything. Each closes over setUrl (itself useCallback'd)
      and setState functions only, so the dep lists are honest rather than pruned -- none of
@@ -353,6 +355,9 @@ export default function App({ boot }) {
   useEffect(() => {
     const onPop = () => {
       setDetailsFor(readImage(window.location.search));
+      // B3: the open series stack is addressable too, so Back closes it (or reopens
+      // the one the entry it landed on had up) exactly like it does for Details.
+      setSeriesFor(readSeries(window.location.search));
       const p = readPage(window.location.search);
       if (p !== pageRef.current) loadRef.current(p, true);
     };
@@ -383,15 +388,36 @@ export default function App({ boot }) {
     closeDetails();
     setAdv((old) => ({ ...old, batch, series: "" }));
   }, [closeDetails, setAdv]);
-  /* Open a SERIES stack (#34 direction B) -- the mirror of filterByBatch: set the
-     `series` drill-down to the sid, which the backend resolves to the series'
-     member task_ids (?series=<sid>). load() suppresses the grouping fold while a
-     drill-down is active, so this lands on the series' members ungrouped; clearing
-     the filter (or Clear) snaps back to the still-lit stacked grid. */
-  const filterBySeries = useCallback((series) => {
+  /* Open a SERIES stack -- a MODAL over the gallery (B3, Gallery Chrome Handoff,
+     2026-09-04).
+
+     It used to be the mirror of filterByBatch: push the sid into `adv.series` and
+     let the whole library re-load as that series' members (#34 direction B's
+     ?series= drill-down). That was a takeover -- the grid you were reading was
+     replaced, and getting back meant finding Clear -- and the handoff retires it.
+     The library is untouched now: same filters, same page, same scroll. The modal
+     asks for the series itself (api.js's fetchSeriesStack) and Esc closes it, which
+     is the whole of the way back.
+
+     The address follows, so a stack is a place: ?series=<sid> alongside ?image= and
+     ?page=. That sid has always been deterministic precisely so a bookmarked
+     ?series= URL keeps resolving (moonglade_gallery.py, compute_series); until now
+     nothing on this side ever read it back.
+
+     `adv.series` itself is deliberately left in place and still rides every listing
+     request -- the CSV export writes it, and it is the parameter this modal's own
+     fetch uses. What went away is the one caller that SET it from a click. */
+  const [seriesFor, setSeriesFor] = useState(() => readSeries(window.location.search));
+  const openSeries = useCallback((sid) => {
     closeDetails();
-    setAdv((old) => ({ ...old, series, batch: "" }));
-  }, [closeDetails, setAdv]);
+    setLbIndex(null);
+    setUrl({ series: sid });
+    setSeriesFor(sid);
+  }, [closeDetails, setUrl]);
+  const closeSeries = useCallback(() => {
+    setUrl({ series: null });
+    setSeriesFor(null);
+  }, [setUrl]);
 
   /* Generation completions refresh the library + credits chip.
      THREE channels, because there are three producers:
@@ -716,7 +742,10 @@ export default function App({ boot }) {
     onEdit: requestEdit,
     onVideo: requestVideo,
     onRemix: requestRemix,
-    onSimilar: (mid) => setSimilarFor(mid),
+    // B2: the right-click row is a ◈ door like the other three, so it calls the SAME
+    // verb rather than setting the state itself -- it used to be the one entry point
+    // that skipped showSimilar's "close whatever is open first" step.
+    onSimilar: (mid) => showSimilar(mid),
     onCopyId: (mid) => { try { navigator.clipboard.writeText(String(mid)); } catch { /* no-op */ } },
     onDetails: openDetails,
     // #28: rebuild a video's poster straight from the grid (the menu gates this on
@@ -727,17 +756,69 @@ export default function App({ boot }) {
         : { kind: "err", title: "Couldn't rebuild the poster", msg: (d && d.error) || "" });
     }),
   };
-  /* ✧ Similar from the Lightbox's chip or Details' "see all N" NAVIGATES here: the viewer
-     (and the record) close and the gallery's own lookalike set -- the same SimilarModal the
-     grid's right-click "Find similar" opens, over the grid -- takes over. Lightbox.dc.html:354
-     sends Similar to Frontend Gallery.dc.html and Image Details.dc.html:127-140 keeps only
-     the inline 8-strip in the record; the refit had both stacking the modal on the open
-     surface instead ("Where the Refit Broke" #6). */
-  const showSimilar = (mid) => {
+  /* ◈ SIMILAR, ONE SYSTEM (B2, Gallery Chrome Handoff, 2026-09-04).
+
+     FOUR DOORS, ONE VERB. The ◈ on a hovered grid tile, the ◈ Similar chip in the
+     lightbox's action row, the ◈ Find similar row in the right-click menu, and the
+     ◈ door on the Details record's related strip all call THIS. There is no second
+     similarity code path in the app, and the mark is the same everywhere so the four
+     read as one control rather than four cousins.
+
+     ONE RESULT STATE. It is not a modal any more. The viewer and the record close,
+     the ◈ token appears in the library bar carrying the source picture's own thumb,
+     and the lookalikes take the grid's place underneath it. Nothing about the library
+     is touched -- not the query, not the filters, not the page, not the scroll -- so
+     ✕ on the token or Escape restores the previous view EXACTLY, by having never
+     disturbed it. (Lightbox.dc.html:354 sends Similar to the gallery and Image
+     Details.dc.html:127-140 keeps only the inline strip in the record; the refit had
+     both stacking a modal on the open surface -- "Where the Refit Broke" #6. B2
+     finishes that repair by removing the modal itself.)
+
+     The fetch lives here rather than in the results component because two surfaces
+     read it: the results grid, and the library bar's match count beside the token.
+
+     useCallback with a dependency list of one STABLE callback, because since B2 this
+     is also a <Grid> prop and Grid is memoized -- a fresh identity per render would
+     defeat that memo before it did anything (the same reasoning openDetails and the
+     filterBy* pair carry). The old body branched on `detailsFor` before closing the
+     record, which would have put a changing value in the deps; closeDetails is safe
+     to call with no record open (setUrl no-ops when the address is already right,
+     setDetailsFor(null) on null is a no-op), so the branch was doing nothing the
+     unconditional call doesn't. */
+  const showSimilar = useCallback((mid) => {
     setLbIndex(null);
-    if (detailsFor) closeDetails();
+    closeDetails();
+    setSeriesFor(null);
     setSimilarFor(mid);
-  };
+  }, [closeDetails]);
+  const similar = useSimilar(similarFor);
+  const similarSource = useMemo(() => {
+    if (!similarFor) return null;
+    const row = items.find((it) => it.media_id === similarFor);
+    return { media_id: similarFor, thumb: (row && row.thumb) || ("/thumbs/" + encodeURIComponent(similarFor) + ".jpg") };
+  }, [similarFor, items]);
+  const similarToken = useMemo(() => (similarFor ? {
+    mid: similarFor,
+    thumb: similarSource.thumb,
+    loading: similar.loading,
+    count: similar.images.length,
+  } : null), [similarFor, similarSource, similar.loading, similar.images.length]);
+  /* Escape dismisses the ◈ token, at the same rung the Details record and the
+     lightbox sit on: the surface under the pointer goes away and the library is
+     back. Capture phase, and only when Similar is the top thing up -- the grid
+     context menu and the series modal own their own Escape, and a nav overlay or
+     the palette is a layer ABOVE this one. */
+  useEffect(() => {
+    if (!similarFor) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (overlayRef.current || paletteUpRef.current || isPickerOpen()) return;
+      e.stopPropagation();
+      setSimilarFor(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [similarFor]);
 
   const dockActive = dockOpen && !dockClosing;
 
@@ -782,8 +863,9 @@ export default function App({ boot }) {
     setOverlay(null);
     setLbIndex(null);
     setSimilarFor(null);
+    setSeriesFor(null);
     if (dockStateRef.current.open) closeDock();
-    setUrl({ image: null });
+    setUrl({ image: null, series: null });
     setDetailsFor(null);
   }, [closeDock, setUrl]);
 
@@ -865,14 +947,17 @@ export default function App({ boot }) {
       });
     }
 
-    // The layout picker's own four modes and its own exact glyphs (FiltersPanel's LAYOUTS),
-    // active one marked with the emerald ✓. The DC board drew three rows and paired ▧ with
-    // Timeline; the shipped picker pairs ▧ with Hero and ≣ with Timeline, and §8.2's ruling
-    // is "the layout picker's exact glyphs" -- so the glyphs win and Hero gets its row
-    // rather than being the one layout the palette cannot reach.
+    // The layout picker's own modes and its own exact glyphs, active one marked with the
+    // emerald ✓. §8.2's ruling is "the layout picker's exact glyphs", so these follow the
+    // picker wherever it lives -- and since B1 (2026-09-04) it is SeparatorBar's
+    // LAYOUT_TRIO, whose handoff-sourced marks are ▤ masonry · ▦ grid · ≡ timeline (the
+    // first two swapped against the old tray row's, the third a lighter mark).
+    // HERO keeps its row for the same reason it always had one: the trio has no cell for
+    // it, so the palette is the one place that can still reach it, and a layout the app
+    // still renders must stay reachable. Its ▧ is unchanged.
     for (const [key, label, glyph] of [
-      ["masonry", "Masonry", "▦"], ["grid", "Grid", "▤"],
-      ["hero", "Hero", "▧"], ["timeline", "Timeline", "≣"],
+      ["masonry", "Masonry", "▤"], ["grid", "Grid", "▦"],
+      ["hero", "Hero", "▧"], ["timeline", "Timeline", "≡"],
     ]) {
       list.push({
         id: "layout." + key, group: "Layout", icon: glyph, label,
@@ -919,7 +1004,9 @@ export default function App({ boot }) {
       img("again", "↻", "Again — new seed", () => requestAgain(mid), { keys: ["R"], hotkey: "r" });
       img("remix", "✱", "Remix", () => ctxActions.onRemix(mid));
       img("video", "▶", "Send to Video", () => ctxActions.onVideo(mid, focusItem.thumb));
-      img("similar", "≈", "Find similar", () => showSimilar(mid));
+      // ◈, matching every other Similar door since B2 (2026-09-04) -- the palette
+      // mirrors the buttons, so it wears the buttons' mark.
+      img("similar", "◈", "Find similar", () => showSimilar(mid));
       img("edit", "✎", "Edit", () => ctxActions.onEdit(mid));
       img("details", "ⓘ", "Open details", () => ctxActions.onDetails(mid));
       img("copyid", "⎘", "Copy id", () => ctxActions.onCopyId(mid), { sub: shortId(mid) });
@@ -941,13 +1028,15 @@ export default function App({ boot }) {
   useEffect(() => { paletteUpRef.current = palette.open || palette.sheetOpen; });
 
   /* Grid arrow-key navigation (#31, Refit #7) only while the grid is the top
-     layer: no lightbox, no Details, no nav overlay, no dock, no context menu or
-     Similar modal, no palette -- each of those owns (or must not lose) the arrow
-     keys. Arrows drive the PALETTE while it is open and the GRID while it is
-     closed (BRIEF §6); the palette's own input would already swallow them, this
-     is the explicit half of the same rule. */
+     layer: no lightbox, no Details, no nav overlay, no dock, no context menu, no
+     Similar view, no series stack, no palette -- each of those owns (or must not
+     lose) the arrow keys. Arrows drive the PALETTE while it is open and the GRID
+     while it is closed (BRIEF §6); the palette's own input would already swallow
+     them, this is the explicit half of the same rule. `similarFor` is in the list
+     for a second reason since B2: the grid isn't even mounted then. */
   const gridKeys = lbIndex == null && !detailsFor && !overlay && !ctxMenu
-    && !similarFor && !dockActive && !claimModal.open && !palette.active && !palette.sheetActive;
+    && !similarFor && !seriesFor && !dockActive && !claimModal.open
+    && !palette.active && !palette.sheetActive;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
      DetailsView's own JSX call site. A fresh object every render meant a
@@ -995,8 +1084,8 @@ export default function App({ boot }) {
               boot={boot}
               actions={actions}
               collections={collections}
-              layout={layout} setLayout={setLayout}
               group={group} setGroup={setGroup}
+              similar={similarToken} onClearSimilar={() => setSimilarFor(null)}
             />
           }
         />
@@ -1005,6 +1094,7 @@ export default function App({ boot }) {
           slim={slim} onToggleSlim={() => setSlim(!slim)}
           blur={blur} onToggleBlur={() => setBlur(!blur)}
           thumb={thumb} thumbMax={thumbMax} onThumb={setThumb}
+          layout={layout} setLayout={setLayout}
           running={running}
           dockOpen={dockActive} onToggleDock={toggleDock}
           onOverlay={openOverlay}
@@ -1036,6 +1126,18 @@ export default function App({ boot }) {
               onSimilar={showSimilar}
               morph={lbIndex == null}
             />, document.body)
+        ) : similarFor ? (
+          /* B2: the lookalikes take the GRID's place, in the same column, under the
+             same bar -- which is now wearing the ◈ token. The library's own state is
+             not touched while this is up, so clearing the token is the entire way
+             back; nothing is re-fetched and nothing has moved. */
+          <SimilarResults
+            source={similarSource}
+            state={similar}
+            onOpenDetails={openDetails}
+            onSimilar={showSimilar}
+            onClear={() => setSimilarFor(null)}
+          />
         ) : (
           <Grid
             items={items} total={total} loading={loading}
@@ -1051,7 +1153,8 @@ export default function App({ boot }) {
             onRate={rate}
             onContextMenu={openContextMenu}
             onFocusCard={setGridFocus}
-            onOpenSeries={filterBySeries}
+            onSimilar={showSimilar}
+            onOpenSeries={openSeries}
             onOpenBatch={filterByBatch}
           />
         )}
@@ -1060,9 +1163,12 @@ export default function App({ boot }) {
       {ctxMenu && (
         <GridContextMenu target={ctxMenu} actions={ctxActions} onClose={() => setCtxMenu(null)} />
       )}
-      {similarFor && (
-        <SimilarModal mediaId={similarFor} onClose={() => setSimilarFor(null)}
-          onOpenDetails={(mid) => { setSimilarFor(null); openDetails(mid); }} />
+      {/* B3: a series stack, over the gallery. Opening a picture from inside it closes
+          the modal first -- the record is the deeper view, not a third layer stacked on
+          a second one. */}
+      {seriesFor && (
+        <SeriesModal sid={seriesFor} onClose={closeSeries}
+          onOpenDetails={(mid) => { closeSeries(); openDetails(mid); }} />
       )}
 
       {/* the DC's veil: keeps the column bottom legible under the (future) dock */}

@@ -133,7 +133,37 @@
   /* DC literal (near-white at .9), restored per owner 2026-08-01 -- the token
      substitution pass dimmed this without asking. */
   font-size: 9px; color: rgba(214, 210, 226, .9); pointer-events: none;
+  transition: opacity .2s;
 }
+
+/* ---- B2: the ◈ door (Gallery Chrome Handoff.dc.html, 2026-09-04) -------------
+   26×26, radius 8, lavender-ringed, top-right of a hovered tile -- the handoff's
+   own measurements. It reveals on the same hover as the top-left cluster, in the
+   same 3px-slide idiom, so the card still reads as the picture until you ask for
+   more. Keyboard reaches it: it stays in the tab order and shows itself on
+   :focus-visible, and the card's own focus ring reveals it too.
+
+   It SHARES the corner with .mgg-vglyph, which fades out for exactly as long as
+   the door is up -- the top-left VIDEO pill arrives on the same hover and carries
+   that fact in words, so nothing is actually hidden.
+
+   Colours are tokens (--lavender, --mantle): ◈ is lavender wherever it appears. */
+.mgg-door {
+  position: absolute; top: 7px; right: 7px; z-index: 3;
+  width: 26px; height: 26px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px; line-height: 1;
+  color: var(--lavender);
+  border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--mantle) 80%, transparent);
+  opacity: 0; transform: translateY(-3px);
+  transition: opacity .2s, transform .2s cubic-bezier(.2, .9, .24, 1), background .18s;
+}
+.mgg-card:hover .mgg-door,
+.mgg-card:focus-within .mgg-door,
+.mgg-door:focus-visible { opacity: 1; transform: none; }
+.mgg-door:hover { background: color-mix(in srgb, var(--lavender) 22%, var(--mantle)); }
+.mgg-card:hover .mgg-vglyph,
+.mgg-card:focus-within .mgg-vglyph { opacity: 0; }
 
 /* ---- #34 direction B: the stacked card (a grouped SESSION unit) ----------------
    A series or batch cover renders as a "deck": two offset layers BEHIND the cover
@@ -343,7 +373,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mgg-card, .mgg-art, .mgg-top, .mgg-cap { transition: none; }
+  .mgg-card, .mgg-art, .mgg-top, .mgg-cap, .mgg-door, .mgg-vglyph { transition: none; }
   .mgg-card:hover { transform: none; }
   .mgg-card:hover .mgg-art { transform: none; }
   .mgg-tl-jump { transition: none; }

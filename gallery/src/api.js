@@ -150,6 +150,49 @@ export async function fetchSeries(taskId) {
   return d && Array.isArray(d.steps) && d.steps.length ? d : null;
 }
 
+/* B3 (Gallery Chrome Handoff, 2026-09-04): everything one series stack's MODAL needs,
+   in one call -- the runs for its lineage rail and the pictures for its grid.
+
+   Two existing routes, no new backend. GET /api/series/<sid> is the run list: the
+   ordered steps {task_id, v, reroll, label, first_media_id, n}, each step being one
+   RUN of the dial-in. GET /api/next/library?series=<sid> is the pictures: the same
+   ?series= drill-down the retired custom-search takeover used to push into the
+   library's own filters, asked for directly here instead -- so the modal reads the
+   series without disturbing the library underneath it, which is what lets Esc go
+   straight back to a gallery that never moved.
+
+   THE MODAL SHOWS THE SERIES WHOLE -- it does not page, because a lineage rail that
+   only knows about the first page would put wrong counts against its runs. So this
+   walks the listing to the end. /api/next/library caps page_size at 200 server-side
+   (asking for more is silently clamped, so this asks for exactly the cap), and a
+   dial-in series runs to at most ~801 images -- PAGE_CAP of 5 covers that with room,
+   and is a real ceiling rather than an unbounded loop: if a series ever exceeds it,
+   `truncated` says so instead of the rail quietly under-counting.
+
+   Fails soft to null, like fetchSeries: a 404 sid (a series dissolved by deletions)
+   or an unreachable route means no modal, never an error surface. */
+const SERIES_PAGE_SIZE = 200;   // /api/next/library's own server-side cap
+const SERIES_PAGE_CAP = 5;      // 1000 images; the documented series maximum is ~801
+
+export async function fetchSeriesStack(sid) {
+  if (!sid) return null;
+  const meta = await apiGet("/api/series/" + encodeURIComponent(sid));
+  if (!meta || meta.error || !Array.isArray(meta.steps) || !meta.steps.length) return null;
+  const items = [];
+  let total = null, pages = 1, truncated = false;
+  for (let p = 1; p <= SERIES_PAGE_CAP; p++) {
+    const lib = await apiGet("/api/next/library",
+      { series: sid, page: p, page_size: SERIES_PAGE_SIZE });
+    if (!lib || lib.error || !Array.isArray(lib.items)) break;
+    items.push(...lib.items);
+    if (typeof lib.total === "number") total = lib.total;
+    if (typeof lib.pages === "number") pages = lib.pages;
+    if (p >= pages) break;
+    if (p === SERIES_PAGE_CAP) truncated = true;
+  }
+  return { ...meta, items, total, truncated };
+}
+
 // ZIP download goes through a real form submit so the browser owns the download.
 export function downloadZipForm(idList) {
   const f = document.createElement("form");

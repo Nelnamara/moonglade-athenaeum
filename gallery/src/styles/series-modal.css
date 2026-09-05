@@ -1,0 +1,146 @@
+/* ============================================================================
+   mgss — B3's series stack modal (Gallery Chrome Handoff.dc.html, 2026-09-04).
+
+   Opening a stacked series used to REPLACE the gallery (the ?series= drill-down);
+   it opens over it now, and Esc goes straight back. Every metric here is the
+   handoff's own: the 186px rail, the 8 + 7·n descent indent, 7px dots, 78px
+   tiles, the run №/newest segmented pair, and the facet chips in the rail's foot.
+
+   Colours are DS tokens throughout. The handoff's literals map: rgba(182,146,230,·)
+   is --lavender, rgba(12,10,28,·) is --base, rgba(5,4,13,·) is --mantle,
+   #14102a (the dark glyph on a lavender fill) is --mantle.
+
+   TWO PLACES THE HANDOFF IS A DRAWING AND THIS IS A BUILD. Its panel is a flat
+   700px box holding eight tiles; a real series runs from two images to several
+   hundred, so the panel takes a viewport-bounded max-height and the tile grid
+   scrolls inside it while the header and rail stay put. And the rail's own list
+   scrolls when a dial-in has more runs than fit, with the facet footer pinned
+   below it — the handoff pins that footer with margin-top:auto, which is the same
+   intent at the size it drew.
+
+   Z: 414/415, the rung the retired Similar modal used to hold (see THE OVERLAY
+   LADDER in overlays.css, guarded by tests/test_z_ladder.py).
+   ========================================================================== */
+
+@keyframes mgssIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 10px)); }
+  to { opacity: 1; transform: translate(-50%, -50%); } }
+
+.mgss-scrim { position: fixed; inset: 0; z-index: 414;
+  background: color-mix(in srgb, var(--mantle) 66%, transparent);
+  animation: mgvFade .3s ease both, mgvScrimBlur .01s linear .3s forwards; }
+/* The per-device blur switch (owner ruling, 2026-09-04) — the canonical
+   explanation lives in overlays.css beside .mgv-scrim. */
+html.mg-noblur .mgss-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+
+.mgss { position: fixed; top: 50%; left: 50%; z-index: 415;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 48px)); max-height: min(84vh, 720px);
+  display: flex; flex-direction: column; overflow: hidden; outline: none;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--lavender) 30%, transparent);
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--surface0) 62%, var(--base)) 0%, var(--base) 100%);
+  box-shadow: 0 30px 80px color-mix(in srgb, var(--mantle) 78%, transparent);
+  animation: mgssIn .26s cubic-bezier(.2, .9, .24, 1) both; }
+
+/* ---- header: title · counts · sort · Esc hint · close ---------------------- */
+.mgss-head { flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; border-bottom: 1px solid var(--surface1); }
+.mgss-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 17px; color: var(--text); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mgss-meta { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
+.mgss-sp { flex: 1 1 auto; }
+
+.mgss-segs { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px;
+  border: 1px solid var(--surface1);
+  background: color-mix(in srgb, var(--base) 70%, transparent); }
+.mgss-seg { padding: 5px 11px; border: 0; border-radius: 6px; cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .06em; white-space: nowrap;
+  color: var(--subtext); background: transparent; transition: background .18s, color .18s; }
+.mgss-seg:hover { color: var(--text); }
+.mgss-seg.on, .mgss-seg.on:hover { font-weight: 800;
+  color: var(--mantle); background: var(--lavender); }
+
+.mgss-esc { flex: none; font-size: 11px; color: var(--overlay0); white-space: nowrap; }
+.mgss-x { flex: none; width: 26px; height: 26px; padding: 0; display: grid; place-items: center;
+  border-radius: 8px; border: 1px solid var(--surface1); background: transparent;
+  color: var(--subtext); font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: color .18s, border-color .18s; }
+.mgss-x:hover { color: var(--text); border-color: var(--lavender); }
+
+/* ---- body: 186px lineage rail + the tile grid ------------------------------ */
+.mgss-body { flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: 186px minmax(0, 1fr); }
+
+.mgss-rail { display: flex; flex-direction: column; gap: 2px; min-height: 0;
+  padding: 12px 10px; overflow-y: auto;
+  border-right: 1px solid var(--surface1); }
+
+/* One run on the descent line. The indent is inline (8 + 7·n, the handoff's own
+   step) because it is per-row data, not a fixed class. */
+.mgss-run { display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 6px 7px; border-radius: 9px; cursor: pointer; text-align: left;
+  font-family: inherit; border: 1px solid transparent; background: transparent;
+  transition: background .18s, border-color .18s; }
+.mgss-run:hover { background: color-mix(in srgb, var(--lavender) 7%, transparent); }
+.mgss-run.on { border-color: color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--lavender) 10%, transparent); }
+.mgss-dot { width: 7px; height: 7px; flex: none; border-radius: 50%;
+  background: var(--surface1); transition: background .18s, box-shadow .18s; }
+.mgss-run.on .mgss-dot { background: var(--lavender);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--lavender) 80%, transparent); }
+.mgss-runtext { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mgss-runname { font-size: 11px; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgss-runmeta { font-size: 9px; color: var(--overlay0); white-space: nowrap; }
+
+/* Facet chips, pinned to the rail's foot. They AND with whatever run is picked. */
+.mgss-facets { margin-top: auto; padding-top: 10px; flex: none;
+  display: flex; flex-wrap: wrap; gap: 4px;
+  border-top: 1px solid var(--surface1); }
+.mgss-facet { font-size: 9px; padding: 2px 7px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; color: var(--subtext); background: transparent;
+  border: 1px solid var(--surface1);
+  transition: color .18s, border-color .18s, background .18s; }
+.mgss-facet:hover { color: var(--text); }
+.mgss-facet.on { color: var(--lavender);
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+
+/* ---- the tiles ------------------------------------------------------------- */
+.mgss-grid { min-height: 0; overflow-y: auto; padding: 13px 15px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; align-content: start; }
+.mgss-tile { position: relative; height: 78px; padding: 0; overflow: hidden;
+  border-radius: 9px; border: 1px solid var(--surface1); background: var(--surface0);
+  cursor: pointer; font-family: inherit;
+  transition: border-color .18s, transform .18s cubic-bezier(.2, .9, .24, 1); }
+.mgss-tile:hover { transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.mgss-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Every tile badges its run so the sort order is legible, not implied — r№·i,
+   the handoff's own notation (run number · position within that run). */
+.mgss-badge { position: absolute; left: 5px; bottom: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px; padding: 1px 5px; border-radius: 4px; color: var(--subtext);
+  background: color-mix(in srgb, var(--mantle) 72%, transparent); }
+.mgss-v { position: absolute; top: 5px; right: 5px; font-size: 9px; color: var(--text);
+  padding: 1px 4px; border-radius: 4px;
+  background: color-mix(in srgb, var(--mantle) 72%, transparent); }
+
+.mgss-note { grid-column: 1 / -1; margin: 0; padding: 22px 6px; text-align: center;
+  font-size: 12px; color: var(--subtext); }
+.mgss-wide { padding-top: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgss { animation: none; }
+  .mgss-scrim { animation: none;
+    -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
+  .mgss-seg, .mgss-x, .mgss-run, .mgss-dot, .mgss-facet, .mgss-tile { transition: none; }
+  .mgss-tile:hover { transform: none; }
+}

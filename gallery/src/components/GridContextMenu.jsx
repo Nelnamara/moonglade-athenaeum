@@ -64,7 +64,11 @@ export default function GridContextMenu({ target, onClose, actions }) {
     // #28 scope-add: videos only -- re-extract this clip's poster on demand (same
     // POST /api/rebuild-poster route as Image Details' button). Gated on target.isVideo.
     ...(target.isVideo ? [["🖼", "Rebuild poster", () => actions.onRebuildPoster(target.mid)]] : []),
-    ["✧", "Find similar", () => actions.onSimilar(target.mid)],
+    // ◈, not the ✧ this row wore before: B2 of the 2026-09-04 Gallery Chrome
+    // handoff makes ◈ the one mark for visual similarity everywhere in the app,
+    // so this menu row, the tile's own hover door, the lightbox row and the
+    // Details strip all wear it — and all push the same ◈ token into the bar.
+    ["◈", "Find similar", () => actions.onSimilar(target.mid)],
     ["⧉", "Copy id", () => actions.onCopyId(target.mid)],
     ["⤢", "Open details", () => actions.onDetails(target.mid)],
   ];

@@ -126,6 +126,12 @@ function Grid({
   // a series to its members (onOpenSeries(sid) -> the ?series filter), a batch to
   // its outputs (onOpenBatch(task_id) -> the existing View-batch ?batch filter).
   onOpenSeries, onOpenBatch,
+  // B2 (Gallery Chrome Handoff, 2026-09-04): the ◈ hover door. It is the SAME verb
+  // the right-click menu's "Find similar" row, the lightbox row's chip and the
+  // Details strip's door call -- App's showSimilar -- so the tile grows a door
+  // without growing a second code path. Stacks don't get one (a stack cover is a
+  // navigation target, not a picture, the same reason it has no checkbox).
+  onSimilar,
   // App says whether the grid is the top layer (no lightbox/details/overlay/dock):
   // the arrow-key handler below stays silent otherwise.
   keysEnabled = true,
@@ -742,6 +748,19 @@ function Grid({
           </span>
         )}
         {it.is_video ? <span className="mgg-vglyph">▶</span> : null}
+        {/* B2 -- the ◈ door, top-right on hover. It shares that corner with the
+            little ▶ video glyph, so grid.css fades that glyph out for exactly as
+            long as the door is up: nothing is lost, because the VIDEO pill in the
+            top-left appears on the same hover and says the same thing in words. */}
+        {(!stack && onSimilar) ? (
+          <button
+            type="button" className="mgg-door" title="Find what looks like this one"
+            aria-label="Find what looks like this one"
+            onClick={(ev) => { ev.stopPropagation(); onSimilar(it.media_id); }}
+          >
+            ◈
+          </button>
+        ) : null}
         <figcaption className="mgg-cap">
           {/* Accession Stamp (#30, direction A; pixel source: the owner's locked
               "Placard identity -- five directions" artifact). The title slot holds

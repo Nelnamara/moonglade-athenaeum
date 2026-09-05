@@ -72,8 +72,10 @@ describe("the memo only pays if the props stay referentially stable", () => {
   });
 
   test("every callback <Grid> takes is useCallback'd (or a setState)", () => {
+    // openSeries replaced filterBySeries in B3 (a stack opens a modal now, it does not
+    // set a filter) and showSimilar joined the list in B2 (the tile's own hover door).
     for (const name of ["goToPage", "openDetails", "rate", "openContextMenu",
-                        "filterBySeries", "filterByBatch"]) {
+                        "openSeries", "filterByBatch", "showSimilar"]) {
       assert.match(app, new RegExp("const " + name + " = useCallback\\("), name);
     }
     // openLightbox={setLbIndex} / onFocusCard={setGridFocus}: setState functions, stable by

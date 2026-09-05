@@ -42,8 +42,11 @@ def z():
         "lbx":           _z("styles/lightbox.css", ".lbx "),
         "mgv_scrim":     _z("styles/overlays.css", ".mgv-scrim"),
         "mgv_host":      _z("styles/overlays.css", ".mgv-host"),
-        "similar_scrim": _z("styles.css", ".similar-scrim"),
-        "similar_modal": _z("styles.css", ".similar-modal"),
+        # B2 (2026-09-04) retired the Similar MODAL: Similar renders in the grid's own
+        # place under a token in the library bar, so it has no z-index to place and cannot
+        # paint behind anything. B3's series stack modal took its 414/415 rung.
+        "series_scrim":  _z("styles/series-modal.css", ".mgss-scrim"),
+        "series_panel":  _z("styles/series-modal.css", ".mgss "),
         "upscale":       _z("styles/upscale-panel.css", ".upscale-panel:not(.inline) "),
         "cp_sub":        _z("styles/control-panel.css", ".mgcp-sub-scrim"),
         "cp_sub_host":   _z("styles/control-panel.css", ".mgcp-sub-host"),
@@ -65,16 +68,20 @@ def z():
 
 
 def test_lightbox_launched_layers_clear_the_lightbox(z):
-    """Publish (mgv band), Similar and Upscale all open from inside the lightbox/Details —
-    each must paint ABOVE it, or its scrim+content render invisibly behind the picture."""
+    """Publish (mgv band) and Upscale open from inside the lightbox/Details — each must
+    paint ABOVE it, or its scrim+content render invisibly behind the picture. (Similar was
+    the third; B2 turned it into a state on the library rather than a layer, so it is no
+    longer on this ladder at all — see the series modal below, which took its rung.)"""
     assert z["mgv_scrim"] > z["lbx"], "the shared overlay band is BEHIND the lightbox again"
-    assert z["similar_scrim"] > z["lbx"], "Similar opens behind the lightbox again"
     assert z["upscale"] > z["lbx"], "the Upscale modal opens behind the picture it upscales"
+    # the series stack modal opens over the GRID, never from inside the lightbox, but it
+    # stays above 400 with the rest of the band: one ladder, one direction.
+    assert z["series_scrim"] > z["lbx"], "the series stack modal fell under the lightbox"
 
 
 def test_each_scrim_sits_under_its_own_content(z):
     assert z["mgv_host"] > z["mgv_scrim"]
-    assert z["similar_modal"] > z["similar_scrim"]
+    assert z["series_panel"] > z["series_scrim"]
     assert z["mgl_menu"] > z["mgl_scrim"]
     # the first cut of #39 raised these two SCRIMS and left their hosts at 321/341 --
     # the scrim painted over its own sub-overlay and the render harness's Trash-close

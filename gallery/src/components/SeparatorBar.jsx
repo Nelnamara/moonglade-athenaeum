@@ -23,6 +23,27 @@ import "../styles/shell.css";
    markup, fed live from /api/account (credits/cards are real, not the DC's
    hardcoded 46,200/13). */
 
+/* B1 -- the layout switcher, shrunk (Gallery Chrome Handoff.dc.html, 2026-09-04).
+   It used to be four labelled buttons on their own full-width row at the head of
+   the Filters tray (FiltersPanel's LayoutPicker); the handoff draws it instead as
+   an inline glyph trio sitting in this bar's SIZE group -- 92px all in: three
+   28x28 cells, 2px gaps, 2px padding, no text (each cell's tooltip carries its
+   name). Two earlier passes at this control were built from prose and backed out
+   (#41), which is why the .dc.html is the pixel source and these three glyphs are
+   ITS three, not the old row's (masonry and grid swap marks: ▤ is masonry now).
+
+   HERO is deliberately absent. The handoff's trio is masonry/grid/timeline and
+   its 92px is exactly three cells wide, so Hero has no cell -- but it is not
+   deleted: it stays a valid stored `mg_gallery_layout` value and keeps its
+   command-palette row (App.jsx), so a library already in Hero renders in Hero
+   and nothing that could reach it lost the ability. With Hero active no cell
+   lights, which is honest; clicking any of the three moves out of it. */
+const LAYOUT_TRIO = [
+  ["masonry", "▤", "Masonry — aspect-true, no crop"],
+  ["grid", "▦", "Grid — 4:3, smart-cropped"],
+  ["timeline", "≡", "Timeline — date-banded, newest first"],
+];
+
 function lapse(account) {
   // Membership-lapse warning: /api/account ships sub {end, cancel}. Warn ONLY
   // when the subscription will actually stop (cancelAtPeriodEnd) — `end` with
@@ -41,6 +62,7 @@ export default function SeparatorBar({
   slim, onToggleSlim,
   blur, onToggleBlur,
   thumb, thumbMax, onThumb,
+  layout, setLayout,
   running, dockOpen, onToggleDock,
   onOverlay,
   onClaim, claiming,
@@ -137,6 +159,29 @@ export default function SeparatorBar({
             {blur ? <path d="M2.6 13.4L13.4 2.6" /> : null}
           </svg>
         </button>
+
+        {/* B1 layout trio — beside SIZE, per the handoff. Persisted in
+            mg_gallery_layout alongside the size value's mg_gallery_density
+            (both are App state, both localStorage-backed). Hidden below the
+            desktop breakpoint in shell.css: mobile is masonry only, so there
+            is nothing there to switch between. */}
+        {setLayout ? (
+          <div className="mgx-lay" role="group" aria-label="Gallery layout">
+            {LAYOUT_TRIO.map(([key, glyph, title]) => (
+              <button
+                key={key}
+                type="button"
+                className={"mgx-laycell" + (layout === key ? " on" : "")}
+                title={title}
+                aria-label={title}
+                aria-pressed={layout === key}
+                onClick={() => setLayout(key)}
+              >
+                <span aria-hidden="true">{glyph}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {/* SIZE pill — drives the grid's --thumb var (152 … 4-across max). The
             native <input type=range> was swapped for the shared Custom Slider
