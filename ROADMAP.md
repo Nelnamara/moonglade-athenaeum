@@ -23,6 +23,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **Full mobile-surface audit against the designs.** *(owner, 2026-09-05, after the wave
+  walkthrough)* "The next audit is going to be the full mobile surface against the designs."
+  The walkthrough surfaced real phone breakage (contest detail scroll bleeding into the
+  Control screen; a false "no search field on mobile" claim) — sweep every phone screen
+  against its design source and the desktop behavior it mirrors, screen by screen, in a
+  driven browser at phone size. Runs after the design-queue wave merges.
+
 - **The living library — maintenance runs itself** *(scoped 2026-09-04; owner's ask that day)*
   "It's not just a backup dump. It's a living library that should update itself and its data
   without my need to clicky click." The artworks sync gets the contest sweep's triggers (publish
