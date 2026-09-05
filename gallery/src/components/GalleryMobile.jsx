@@ -4,6 +4,7 @@ import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
+import SimilarResults from "./SimilarResults.jsx";
 import "../styles/gallery-mobile.css";
 
 /* The Gallery tab (design spec: Moonglade Mobile.dc.html isGallery block, lines
@@ -37,7 +38,19 @@ import "../styles/gallery-mobile.css";
    (selIds)`), opening the real ContactSheetMobile.jsx full-screen destination
    instead of ActionsMenu's own desktop-shaped fallback (a bare window.open of
    the classic print page). See AppMobile.jsx's own header comment for the
-   contactSheetTarget wiring. */
+   contactSheetTarget wiring.
+
+   ◈ SIMILAR (2026-09-05): this tab is where the phone's Similar ANSWER lands,
+   the same way the desktop's <main> is. AppMobile.jsx owns the id, the fetch and
+   both dismiss paths (see its header comment); this renders the two halves the
+   desktop renders -- the dismissible ◈ token in the search bar, and
+   <SimilarResults> (the shared component, not a mobile fork) in the grid's
+   place. The token wraps onto its own line inside .glm-bar rather than sitting
+   in front of the field the way desktop's does: desktop's search slab grows to a
+   430px basis to make room, and a 390px phone bar has none to give -- the field
+   would be crushed to a few characters. Same token, same thumb, same ✕, one line
+   lower. Nothing about the library's own state changes while it is up, so ✕ is
+   the whole way back. */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -58,6 +71,7 @@ export default function GalleryMobile({
   items, total, page, pages, loading, load,
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
   onOpenDetails, onOpenLightbox, onOpenContactSheet,
+  similar, similarState, similarSource, onSimilar, onClearSimilar,
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
@@ -134,6 +148,26 @@ export default function GalleryMobile({
         <button type="button" className={"glm-metal" + (selectMode ? " on" : "")} onClick={toggleSelectMode}>
           {selectMode ? "Cancel" : "Select"}
         </button>
+        {/* The ◈ token -- every phone door pushes THIS and only this: the source
+            picture's own thumb, the mark, a ✕, and the match count beside it. It is a
+            state badge on the library, not a query: the field above, the filters and
+            the page are untouched underneath, which is what lets ✕ (or the Back
+            gesture) restore the previous view exactly rather than re-running
+            anything. */}
+        {similar ? (
+          <div className="glm-simrow">
+            <span className="glm-simtok" title="Showing what looks like this picture">
+              <img className="glm-simtok-th" src={similar.thumb} alt="" loading="lazy" decoding="async" />
+              <span className="glm-simtok-lbl">◈ Similar to this</span>
+              <button type="button" className="glm-simtok-x" title="Back to the library"
+                aria-label="Clear the Similar view" onClick={onClearSimilar}>✕</button>
+            </span>
+            <span className="glm-simcount">
+              {similar.loading ? "finding lookalikes…"
+                : similar.count + (similar.count === 1 ? " match" : " matches") + " · by likeness"}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="glm-bar2">
@@ -160,12 +194,27 @@ export default function GalleryMobile({
         )}
       </div>
 
-      <GalleryGridMobile
-        items={items} loading={loading} selectMode={selectMode} selected={selected}
-        toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
-      />
+      {similar ? (
+        /* The lookalikes take the GRID's place, in the same column, under the same
+           bar -- which is now wearing the ◈ token. The library's own state is not
+           touched while this is up, so clearing the token is the entire way back;
+           nothing is re-fetched and nothing has moved. The pager goes with the grid:
+           a lookalike set is one answer, not a paged library. */
+        <SimilarResults
+          source={similarSource}
+          state={similarState}
+          onOpenDetails={onOpenDetails}
+          onSimilar={onSimilar}
+          onClear={onClearSimilar}
+        />
+      ) : (
+        <GalleryGridMobile
+          items={items} loading={loading} selectMode={selectMode} selected={selected}
+          toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+        />
+      )}
 
-      {!loading && pages > 1 && (
+      {!similar && !loading && pages > 1 && (
         <nav className="glm-pager" aria-label="Pages">
           <button type="button" className="glm-metal" disabled={page <= 1} onClick={() => load(page - 1, true)}>
             ‹ Prev

@@ -70,6 +70,16 @@
   border: 1px solid rgba(255,255,255,.12); background: rgba(12,10,28,.72);
   color: rgba(226,222,238,.82); text-decoration: none; }
 .lbx-chip:hover { border-color: rgba(182,146,230,.4); color: #f4eeff; }
+/* B2 (Gallery Chrome Handoff, 2026-09-04): the ◈ Similar chip is drawn as a
+   lavender action rather than a neutral one — same treatment the tile's hover
+   door and the Details strip's door wear, because they are one control shown in
+   three places. Tokens only; ◈ is lavender wherever it appears. */
+.lbx-similar { color: var(--lavender);
+  border-color: color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--lavender) 10%, transparent); }
+.lbx-similar:hover { color: var(--lavender);
+  border-color: var(--lavender);
+  background: color-mix(in srgb, var(--lavender) 20%, transparent); }
 /* skin-aware accent-mix metal (kit v2 §1) — the DC's recipe verbatim */
 .lbx-chip-metal, .lbx-chip-metal:hover {
   border: 1px solid rgba(255,255,255,.3);

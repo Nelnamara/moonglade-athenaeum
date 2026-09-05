@@ -243,12 +243,14 @@ export default function Lightbox({
               onClick={() => onEdit(it.media_id)}>✎ Edit</button>
             <button className="lbx-chip" title="Send as a start frame"
               onClick={() => onToVideo(it.media_id, it.thumb)}>▶ To Video</button>
-            {/* ✧ Similar NAVIGATES (Lightbox.dc.html:354 sends it to the gallery): the viewer
-                closes and the gallery's own 48-lookalike set opens over the grid -- the same
-                destination as Details' "see all". It no longer stacks a modal on the viewer
-                ("Where the Refit Broke" #6). */}
-            <button className="lbx-chip" title="Lookalikes by eye — the 48 closest"
-              onClick={() => onSimilar && onSimilar(it.media_id)}>✧ Similar</button>
+            {/* ◈ Similar NAVIGATES (Lightbox.dc.html:354 sends it to the gallery): the viewer
+                closes and the library shows the lookalike set in the grid's place, with the
+                ◈ token in the search bar -- the same destination every other ◈ in the app
+                reaches. It no longer stacks a modal on the viewer ("Where the Refit Broke"
+                #6), and since B2 (2026-09-04) it is not a modal at all. The mark is ◈, not
+                the ✧ this chip used to wear: one glyph for visual similarity, app-wide. */}
+            <button className="lbx-chip lbx-similar" title="Lookalikes by eye — the 48 closest"
+              onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
             <button className="lbx-chip" title="Upscale or Hires this picture"
               onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
             {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since

@@ -117,6 +117,14 @@
   cursor: pointer; font-family: inherit; color: var(--text);
   background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.16)), color-mix(in srgb, var(--surface0) 88%, #000);
   border: 1px solid rgba(255,255,255,.14); box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 1px 2px rgba(0,0,0,.45); }
+/* The ◈ Similar chip is drawn as a lavender ACTION rather than a neutral one --
+   the same treatment the desktop lightbox's own chip wears (.lbx-similar,
+   lightbox.css), because they are one control shown on two screens. Tokens only;
+   ◈ is lavender wherever it appears. The gradient/shadow of .lbm-chip is dropped
+   for the flat lavender face the mark's family uses everywhere else. */
+.lbm-similar { color: var(--lavender); text-shadow: none; box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent);
+  background: color-mix(in srgb, var(--lavender) 10%, transparent); }
 .lbm-chip.on { color: #fff;
   background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)), color-mix(in srgb, var(--lavender) 32%, var(--surface0));
   border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }

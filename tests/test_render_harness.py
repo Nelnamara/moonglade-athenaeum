@@ -115,6 +115,10 @@ _PASSWORD = "a-real-test-password-1"
 # 1280x900 desktop: what every threshold below was measured at.
 DESKTOP = {"width": 1280, "height": 900}
 
+# 390x844 phone: the width Login Mobile.dc.html proves the design at, and comfortably
+# inside useIsMobile.js's own 430px breakpoint, so main.jsx mounts AppMobile.jsx here.
+PHONE = {"width": 390, "height": 844}
+
 # Kill every transition/animation so a geometry read can never catch an interpolated
 # mid-flight value. `*` + !important beats the app's id-selector rules; applied to the
 # document under test, never to committed CSS.
@@ -1349,3 +1353,180 @@ def test_tracker_spin_ring_renders_as_a_true_circle_not_an_ellipse(logged_in_pag
     assert abs(geo["ring"]["w"] - geo["ring"]["h"]) < 0.5, (
         ".at-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
         "rotates instead of spinning cleanly".format(geo["ring"]))
+
+
+# ---------------------------------------------------------------------------
+# 8. The phone's ◈ Similar: viewer door -> results -> token -> the library back
+# ---------------------------------------------------------------------------
+def _fake_similar_module(hits):
+    """A stand-in for `moonglade_similar`, the optional CLIP sidecar.
+
+    The real module needs pixeltable + a built index, which no test machine here has, so
+    the live route would answer `images: []` + an error line and only the EMPTY path
+    would ever be exercised. This is patched into `sys.modules` for one test, so
+    `moonglade_gallery.api_similar`'s own in-handler `import moonglade_similar` picks it
+    up and EVERY OTHER PART of the route stays real -- the login gate, the media_id and
+    on-disk-file lookups, the per-hit `get_row` catalog reads, the response shape the
+    client renders. Only the CLIP maths is faked, because only the CLIP maths is absent.
+    """
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        similar=lambda path, k=24, exclude_media_id=None: [
+            (mid, score) for mid, score in hits if mid != exclude_media_id][:k],
+        count=lambda: len(hits),
+    )
+
+
+# The one harness row with a real bitmap on disk (render_server writes harness_0.png for
+# it), which find_image_file has to resolve before /api/similar will look for neighbours
+# at all -- so every door pressed below is pressed on this picture.
+_DOOR_TILE = '.glm-tile:has(img[src="/thumbs/100.jpg"])'
+
+
+def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
+        logged_in_page, monkeypatch):
+    """The phone half of B2's one-system Similar, end to end at a real 390px viewport.
+
+    Owner, 2026-09-05: the phone's ◈ Similar was left a stub toast and the carve-out
+    written into the changelog, on the claim that the phone had nowhere to put the token.
+    It has a search field (GalleryMobile.jsx's `.glm-search`), so this pins the whole
+    round trip the desktop already has: the full-screen viewer's ◈ Similar chip is a real
+    DOOR, the lookalikes take the grid's place, the dismissible ◈ token rides in the
+    search bar with the match count, and ✕ puts the library back with its own state --
+    query, tiles, scroll offset -- untouched.
+
+    Everything below is the real app against the real Flask route; only the absent CLIP
+    sidecar is stubbed (see _fake_similar_module).
+    """
+    import sys
+    monkeypatch.setitem(sys.modules, "moonglade_similar",
+                        _fake_similar_module([("101", 0.91), ("102", 0.88), ("103", 0.77)]))
+
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+
+    # The phone really does have a search field -- the premise the carve-out denied.
+    assert page.locator(".glm-search input").count() == 1
+    page.fill(".glm-search input", "harness")
+    tiles_before = page.locator(".glm-grid .glm-tile").count()
+
+    # A tap opens the full-screen viewer (GalleryMobile's tapView -> LightboxMobile).
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    # Put the library at a known offset UNDER the viewer -- the offset is set here rather
+    # than before the tap because Playwright scrolls the tile into view to click it, which
+    # moves .glm-body itself. This is the number that has to come back.
+    page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 40; }")
+    _settle(page)
+    scroll_before = page.evaluate("() => document.querySelector('.glm-body').scrollTop")
+    assert scroll_before == 40, (
+        "the phone's library scroller would not take a test offset ({!r}) -- the restore "
+        "assertion below would be vacuous".format(scroll_before))
+
+    # ...and the viewer's Similar is a DOOR now, wearing the app's one mark, not a toast.
+    chip = page.locator(".lbm-actsrow .lbm-similar")
+    assert chip.count() == 1
+    assert "◈" in chip.inner_text()
+    chip.click()
+
+    # The viewer closes, the lookalikes take the GRID's place, and the token is up.
+    page.wait_for_selector(".lbm-root", state="detached")
+    page.wait_for_selector(".simres-grid .simres-card")
+    assert page.locator(".glm-grid").count() == 0, "the library grid is still rendered under Similar"
+    assert page.locator(".glm-pager").count() == 0, "the library's pager rode along into Similar"
+    tok = page.locator(".glm-simtok")
+    assert tok.count() == 1, "no ◈ token in the phone's search bar"
+    assert "◈ Similar to this" in tok.inner_text()
+    # the token carries the SOURCE picture's own thumb, so "similar to what?" is answered
+    assert page.locator(".glm-simtok-th").get_attribute("src") == "/thumbs/100.jpg"
+    assert "3 matches" in page.locator(".glm-simcount").inner_text()
+    # three neighbours + the badged source tile leading the set
+    assert page.locator(".simres-card").count() == 4
+    assert page.locator(".simres-card.is-source").count() == 1
+    # the token sits inside the real search bar, not floating somewhere else...
+    assert page.evaluate(
+        "() => document.querySelector('.glm-bar')"
+        ".contains(document.querySelector('.glm-simtok'))")
+    # ...on its OWN line, below the field, rather than crushing it (the phone's one
+    # deliberate deviation from the desktop token's placement)
+    geo = page.evaluate("""() => {
+        const f = document.querySelector('.glm-search input').getBoundingClientRect();
+        const t = document.querySelector('.glm-simtok').getBoundingClientRect();
+        return {fieldW: f.width, fieldBottom: f.bottom, tokTop: t.top};
+    }""")
+    assert geo["tokTop"] >= geo["fieldBottom"] - 1, "the token is beside the field, not under it"
+    assert geo["fieldW"] > 200, (
+        "the search field was crushed to {:.0f}px by the token".format(geo["fieldW"]))
+    # a phone has no hover, so a result's own ◈ door must be visible without one
+    assert page.evaluate(
+        "() => getComputedStyle(document.querySelector('.simres-door')).opacity") == "1"
+    # ...and the results are laid out for a phone, not in the desktop's one 210px column
+    cols = page.evaluate(
+        "() => getComputedStyle(document.querySelector('.simres-grid'))"
+        ".gridTemplateColumns.split(' ').length")
+    assert cols == 2, "the lookalikes render {} column(s) on a 390px phone".format(cols)
+
+    # ✕ puts the library back EXACTLY: same query, same tiles, same place on the page.
+    page.locator(".glm-simtok-x").click()
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.locator(".glm-simtok").count() == 0
+    assert page.locator(".simres").count() == 0
+    assert page.input_value(".glm-search input") == "harness"
+    assert page.locator(".glm-grid .glm-tile").count() == tiles_before
+    _settle(page)
+    assert page.evaluate("() => document.querySelector('.glm-body').scrollTop") == scroll_before
+
+
+def test_phone_similar_is_dismissed_by_the_back_gesture_too(logged_in_page, monkeypatch):
+    """The phone's stand-in for the desktop's Escape.
+
+    AppMobile.jsx pushes ONE same-address history entry when Similar opens, so the
+    hardware/browser Back gesture pops it and lands back on the library instead of
+    walking out of the app.
+    """
+    import sys
+    monkeypatch.setitem(sys.modules, "moonglade_similar",
+                        _fake_similar_module([("104", 0.8), ("105", 0.7)]))
+
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    page.locator(".lbm-actsrow .lbm-similar").click()
+    page.wait_for_selector(".simres-grid .simres-card")
+
+    page.go_back()
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.locator(".glm-simtok").count() == 0, "Back left the token up"
+    assert "/login" not in page.url, "Back walked out of the app instead of dismissing Similar"
+
+
+def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
+    """The picture screen was the last surface in the app still wearing ✧.
+
+    Its SIMILAR strip reads ◈ now -- one mark for visual similarity, everywhere -- and
+    the model filter beside it says what it does ("Filter by model"), the same rename
+    the desktop record took in B2. The strip's own data is left to the live route: with
+    no CLIP sidecar installed it renders its honest unavailable line, which is exactly
+    the state this test wants to leave alone.
+    """
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    page.click(".lbm-actsrow >> text=Details")
+    page.wait_for_selector(".idm-similar")
+
+    head = page.locator(".idm-similar .idm-subhead").inner_text()
+    assert "◈ SIMILAR" in head, "the picture screen still wears the old mark: {!r}".format(head)
+    recrow = page.locator(".idm-recrow").inner_text()
+    assert "Filter by model" in recrow
+    assert "Find similar (model)" not in recrow

@@ -47,11 +47,14 @@ import "../styles/image-details-mobile.css";
        row -- Media ID already has its own copy icon in the ledger below, and
        the rest don't appear at all, so they're not built here.
      - Record-action chips: Edit prompt (real, same inline-textarea +
-       POST /edit-prompt/<mid> as desktop's "Edit Prompt"), Find similar
-       (model) (real -- reads as "find more from the same model", wired to
-       the same onFilterByModel desktop's kicker "find more" link uses; hidden
-       when the model isn't known, matching desktop's own row.batch-gated
-       "View Batch" precedent), View batch (real, same onFilterByBatch),
+       POST /edit-prompt/<mid> as desktop's "Edit Prompt"), Filter by model
+       (real -- wired to the same onFilterByModel desktop's kicker "find more"
+       link uses; hidden when the model isn't known, matching desktop's own
+       row.batch-gated "View Batch" precedent; called "Find similar (model)"
+       until 2026-09-05, when it took the same rename desktop's record took --
+       it filters by the model that made the picture and never found lookalikes,
+       so the borrowed word made two unrelated controls look like a pair),
+       View batch (real, same onFilterByBatch),
        Suggest prompt (real, same runSuggest). Send to Video is a DISCLOSED
        placeholder toast: AppMobile.jsx's Video mode (VideoMode.jsx) has no
        "load this image as the source frame" entry point at all yet (unlike
@@ -60,10 +63,16 @@ import "../styles/image-details-mobile.css";
        toast, matching this exact codebase's own established convention for
        an undone surface (the same message GalleryMobile.jsx's own tapView
        used before this build, and AppMobile.jsx's soonToast()).
-     - SIMILAR box: REAL data (GET /api/similar/<mid>?k=48, the exact route
-       SimilarModal.jsx already uses) -- not the design mock's placeholder
-       PHOTOS array. First 8 render in the strip; "see all N" (a real count,
-       not the mock's hardcoded "48") opens the full grid in a MobileSheet.
+     - SIMILAR box: REAL data (GET /api/similar/<mid>?k=48, through the shared
+       useSimilar hook every Similar surface in the app reads) -- not the design
+       mock's placeholder PHOTOS array. First 8 render in the strip; "see all N"
+       (a real count, not the mock's hardcoded "48") opens the full grid in a
+       MobileSheet. The mark is ◈ since 2026-09-05, here and on that sheet:
+       visual similarity wears ONE mark app-wide, and this screen was the last
+       place still wearing ✧. The sheet stays a SHEET -- it is the phone's own
+       idiom for "the rest of these", it was already real, and the door that
+       hands the whole library over to a lookalike set lives on the full-screen
+       viewer (LightboxMobile.jsx) where the desktop puts it too.
      - LINEAGE box: intentionally OMITTED. No backend anywhere tracks a
        source -> this -> upscaled -> clip generation chain, and the design
        mock's own lineage thumbnails are flat placeholder tint blocks with no
@@ -311,7 +320,7 @@ export default function ImageDetailsMobile({
 
         <div className="idm-similar">
           <div className="idm-similar-head">
-            <span className="idm-subhead">✧ SIMILAR</span>
+            <span className="idm-subhead">◈ SIMILAR</span>
             <span className="idm-dimtext">closest by eye</span>
             <div className="idm-fill" />
             {similar.images.length > 8 ? (
@@ -342,9 +351,14 @@ export default function ImageDetailsMobile({
             onClick={() => toast("Send to Video", "Its own mobile wiring — coming later.")}>
             Send to Video
           </button>
+          {/* "Filter by model" was called "Find similar (model)" until the phone's
+              Similar pass (2026-09-05), the same rename the desktop record took in B2:
+              it never did find lookalikes, it filtered the library by the model that
+              made the picture, and borrowing the word made two unrelated controls look
+              like a pair. */}
           {row.model_name ? (
             <button type="button" className="idm-chip" onClick={() => onFilterByModel(row.model_name)}>
-              Find similar (model)
+              Filter by model
             </button>
           ) : null}
           {row.batch ? (
@@ -402,7 +416,7 @@ export default function ImageDetailsMobile({
           wide viewport, would overflow a 390px sheet). This one has no
           persistent-DOM requirement, so the shared MobileSheet.jsx chrome is
           reused as-is. */}
-      <MobileSheet open={simSheetOpen} closing={simClosing} onClose={closeSimSheet} title="✧ SIMILAR">
+      <MobileSheet open={simSheetOpen} closing={simClosing} onClose={closeSimSheet} title="◈ SIMILAR">
         <div className="idm-simgrid">
           {similar.images.map((it) => (
             <button key={it.media_id} type="button" className="idm-simtile"

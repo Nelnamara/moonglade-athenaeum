@@ -151,7 +151,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-metal:disabled { opacity: .5; cursor: default; }
 
 /* ---- Gallery tab toolbar (DC barStyle/bar2Style/mediaPills, lines 66-88 & 912-929) ---- */
-.glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px;
+.glm-bar { display: flex; align-items: center; gap: 6px; padding: 8px 11px; flex-wrap: wrap;
   border-bottom: 1px solid var(--surface1); position: sticky; top: 0; z-index: 5; background: var(--base); }
 .glm-search { flex: 1; position: relative; min-width: 0; display: flex; align-items: center; }
 .glm-search-icon { position: absolute; left: 9px; color: var(--overlay0); font-size: 11px; cursor: pointer; }
@@ -162,6 +162,46 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-search-adv { position: absolute; right: 4px; font-size: 9.5px; padding: 3px 8px; border-radius: 11px;
   color: var(--lavender); cursor: pointer; border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
   background: color-mix(in srgb, var(--lavender) 20%, var(--surface0)); font-family: inherit; }
+/* ---- ◈ Similar, the phone half (2026-09-05) --------------------------------
+   The token the desktop wears INSIDE its search slab (librarybar.css's
+   .mgl-simtok). Same construction, same tokens -- lavender at 14%/45% for the
+   chip, --overlay0 for the ✕, --emerald for the count -- on its own line inside
+   the search bar rather than in front of the field: .glm-bar is only ~368px of
+   usable width on a 390px phone, and the field would be left with a few
+   characters if the token sat beside it. flex-basis:100% is what makes it wrap
+   (the bar's own two children never wrap on their own), so the token rides with
+   the STICKY bar and stays on screen while the results scroll under it. */
+.glm-simrow { flex: 0 0 100%; display: flex; align-items: center; gap: 8px;
+  min-width: 0; padding-top: 2px; }
+.glm-simtok { flex: none; display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 8px 4px 4px; border-radius: 7px; max-width: 62%;
+  border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
+  background: color-mix(in srgb, var(--lavender) 14%, transparent); }
+.glm-simtok-th { width: 22px; height: 22px; flex: none; border-radius: 5px;
+  object-fit: cover; display: block;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent); }
+.glm-simtok-lbl { font-size: 11px; font-weight: 700; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; color: var(--lavender); }
+.glm-simtok-x { flex: none; padding: 0 3px; font-size: 12px; line-height: 1;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+  color: var(--overlay0); }
+.glm-simcount { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; color: var(--emerald); }
+
+/* The shared <SimilarResults> in the phone's gallery. Its own similar.css sizes
+   the grid off the desktop SIZE slider's --thumb (210px), which is ONE column on
+   a 390px phone -- so the track is re-cut to the two columns .glm-grid above
+   already uses, and the tiles are squared by aspect-ratio rather than the
+   desktop's fixed --thumb row height. The ◈ door on a result is hover-revealed
+   on the desktop; a phone has no hover, so it is simply always up. */
+.glm-tab-gallery .simres { padding: 9px; }
+.glm-tab-gallery .simres-grid { grid-template-columns: 1fr 1fr; gap: 7px;
+  grid-auto-rows: auto; }
+.glm-tab-gallery .simres-card { aspect-ratio: 1 / 1; }
+.glm-tab-gallery .simres-door { opacity: 1; transform: none; }
+
 .glm-bar2 { display: flex; align-items: center; gap: 6px; padding: 6px 11px 9px; flex-wrap: nowrap;
   overflow-x: auto; }
 .glm-pill-accent { color: #fff;
