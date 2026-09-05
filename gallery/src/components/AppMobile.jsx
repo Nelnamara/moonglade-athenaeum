@@ -19,6 +19,8 @@ import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
+import ContestChooserMobile from "./ContestChooserMobile.jsx";
+import ContestEntryMobile from "./ContestEntryMobile.jsx";
 import PublishMobile from "./PublishMobile.jsx";
 import TrainMobile from "./TrainMobile.jsx";
 import FolioMobile from "./FolioMobile.jsx";
@@ -182,10 +184,16 @@ import "../styles/create-mobile.css";
        the design specifies no picker at all; "Browse a folder…" dropped
        (webkitdirectory has no reliable mobile support); collection picker
        is a real <select> of live `collections` data + new-collection input.
-     - Contests: official/community split, live vote-type pills, real
-       cover_url images, and pixai.art click-through all ported forward;
-       community cards show a computed "days left" (design's own compact
-       shape) instead of desktop's literal date range.
+     - Contests: REBUILT 2026-09-04 to `Contest Mobile Handoff.dc.html`
+       (Session D) -- an official 16:9 hero over community list cards, a
+       "MY ENTRIES · n" door into the same board filtered to what this
+       library has entered, an accordion detail, and a full-screen entry
+       picker. The line that used to sit here ("pixai.art click-through
+       ported forward") describes what this screen did BEFORE that pass:
+       every card opened the website because there was no in-app
+       destination. There is one now, and the link-out survives only as
+       the detail view's footnote. See ContestsMobile.jsx's own header for
+       the real-data deviations and the badge-hue divergence from desktop.
      - Publish (2026-08-07): single column, real /api/myart/publish preview-
        then-confirm pipeline (the exact one desktop's PublishOverlay.jsx
        proved), real recent-image strip, live suggest-a-title + tag search,
@@ -317,6 +325,27 @@ export default function AppMobile({ boot }) {
   // Mirrors desktop App.jsx's publishFor/openPublish exactly.
   const [publishFor, setPublishFor] = useState("");
   const openPublish = (mid) => { setPublishFor(mid || ""); openScreenKey("publish"); };
+
+  /* CONTEST ENTRY (2026-09-04, Contest Mobile Handoff.dc.html frame D3) -- lifted HERE
+     for the identical reason detailsFor/lbIndex/folioOpen are: the handoff keeps THREE
+     entry points and two of them (the lightbox's action row, Image Details' chip) live on
+     surfaces that already cover the whole shell, so the entry screen has to sit above
+     them rather than inside the Contests screen that owns the third.
+       contestEntry  -- {contest, mediaId} while the full-screen picker is up
+       contestFor    -- the media_id waiting on a contest choice (the chooser sheet)
+       entriesEpoch  -- bumped when an entry lands, so the Contests screen's "MY ENTRIES"
+                        count and My-entries view re-read without being reopened. */
+  const [contestEntry, setContestEntry] = useState(null);
+  const [contestFor, setContestFor] = useState("");
+  const [entriesEpoch, setEntriesEpoch] = useState(0);
+  // From an image: choose the contest first (the sheet), then the picker with that image
+  // pre-selected. From the board: the contest is already known, so it goes straight in.
+  const openContestFor = (mid) => { setContestFor(mid || ""); openSheet("contest"); };
+  const openContestEntry = (contest, mid) => {
+    closeSheet();
+    setContestEntry({ contest, mediaId: mid || "" });
+  };
+  const closeContestEntry = () => setContestEntry(null);
 
   // Lightbox Mobile (2026-08-03) -- mutually exclusive with detailsFor, see
   // header comment. Since #35 (2026-08-29) openLightbox has TWO callers with
@@ -606,7 +635,10 @@ export default function AppMobile({ boot }) {
             />
           )}
           {screen === "import" && <ImportMobile collections={collections} onImported={afterImported} />}
-          {screen === "contests" && <ContestsMobile />}
+          {screen === "contests" && (
+            <ContestsMobile onEnter={(c) => openContestEntry(c, "")}
+              entriesEpoch={entriesEpoch} />
+          )}
           {screen === "publish" && (
             <PublishMobile mediaId={publishFor} onClose={closeScreen} onPublished={afterPublishOrTrain} />
           )}
@@ -636,6 +668,7 @@ export default function AppMobile({ boot }) {
           advParams={detailsAdvParams} items={lib.items}
           onOpenLightbox={openLightbox}
           onPublish={(mid) => { closeDetails(); openPublish(mid); }}
+          onEnterContest={openContestFor}
         />
       )}
 
@@ -647,6 +680,7 @@ export default function AppMobile({ boot }) {
           onClose={closeLightbox} onRate={rate}
           page={lib.page} pages={lib.pages} loadPage={lib.load}
           onOpenDetails={openDetailsFromLightbox}
+          onEnterContest={openContestFor}
         />
       )}
 
@@ -666,6 +700,25 @@ export default function AppMobile({ boot }) {
           onClose={closeContactSheet}
         />
       )}
+
+      {/* Contest entry (Contest Mobile Handoff.dc.html D3) -- a fixed, full-viewport
+          surface at z 70, above LightboxMobile's own sheet (66), because the lightbox is
+          one of the three places it opens from. See its own header comment for the
+          always-a-confirm contract and the disclosed "/N max". */}
+      {contestEntry && (
+        <ContestEntryMobile
+          contest={contestEntry.contest} preselectMediaId={contestEntry.mediaId}
+          onClose={closeContestEntry}
+          onEntered={() => setEntriesEpoch((n) => n + 1)}
+        />
+      )}
+
+      {/* "Enter into a contest…" -- the choose-a-contest step for the two image-side
+          entry points. The board's own Enter bar skips it: the contest is already known. */}
+      <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
+        title="ENTER INTO A CONTEST">
+        <ContestChooserMobile onPick={(c) => openContestEntry(c, contestFor)} />
+      </MobileSheet>
 
       <MobileSheet open={sheet === "activity"} closing={closing} onClose={closeSheet}
         title={

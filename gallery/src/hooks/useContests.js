@@ -13,9 +13,15 @@ import { peek, put, useSwrGet } from "./swrCache.js";
 
    2026-08-31, the contest workbench: the entries half (GET /api/contest/mine +
    the one fire-and-forget POST /api/contest/sync on open) is OPT-IN via
-   useContests({ mine: true }). Desktop asks for it; ContestsMobile's bare
-   useContests() call makes not one extra request, which is what keeps the
-   mobile surface genuinely untouched by this pass rather than untouched-looking. */
+   useContests({ mine: true }). Desktop asked for it; ContestsMobile's bare call
+   made not one extra request, which is what kept the mobile surface genuinely
+   untouched by THAT pass rather than untouched-looking.
+
+   2026-09-04, contests on the phone: ContestsMobile now asks for { mine: true }
+   too -- its header carries a live "MY ENTRIES · n" count and My entries is a
+   real view there, so the entries half is load-bearing on both surfaces. The
+   bare call is still what ContestChooserMobile (the "enter into a contest…"
+   sheet) makes, because a chooser needs the board and nothing else. */
 
 export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
 

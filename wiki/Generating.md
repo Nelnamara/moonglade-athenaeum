@@ -504,6 +504,17 @@ under your name, PixAI offers no way to withdraw it, and every entry path asks y
 confirm first. `READ_ONLY` in `config.json` refuses all of them — see
 [Trust & Safety](Trust-and-Safety).
 
+**On a phone** the same board, the same contest pages and the same entry road are all
+there — under **Contests** in the ☰ menu. The official contest sits at the top as a wide
+picture with the community ones listed below it, and **MY ENTRIES** in the corner shows
+that same list narrowed to the contests you have a piece in, with where each one stands. A
+contest's page folds the brief, the prizes and the requirements so only the part you are
+reading is open, and keeps the deadline and **Enter this contest** at the bottom of the
+screen. Entering opens a full-screen picker where you can tap **more than one** picture —
+the bar underneath counts them and waits for you to confirm, so nothing enters on a single
+tap. You can also start an entry from the full-screen viewer or from a published picture's
+details, and the picker opens with that picture already ticked.
+
 ---
 
 ## The Generate drawer (web gallery, v1.9.0)

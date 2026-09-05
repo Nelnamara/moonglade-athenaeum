@@ -1,0 +1,229 @@
+/* CONTESTS ON THE PHONE — pixel source
+   `../moonglade-internal/design/contest/Contest Mobile Handoff.dc.html` (Session D,
+   committed 2026-09-04, picks 1a · 1d · 1f). Its three frames are D1 BOARD, D2 DETAIL
+   and D3 ENTRY, and every rule below is that file's own inline style, re-expressed as a
+   class. Where a number here differs from the frame it is because a hit target had to
+   reach 44pt (the handoff's own plumbing note) — those are marked.
+
+   Every colour is a token. The two hues the handoff assigns to the badges are the
+   OPPOSITE way round from the desktop surface: OFFICIAL is lavender here and gold there,
+   COMMUNITY gold here and lavender-outlined there. The handoff is the pixel source and it
+   wins; ContestsMobile.jsx's header discloses the divergence in full.
+
+   The metal keyframes are named cmbMetal/cmbSheen, NOT mgMetal: gen-drawer.css already
+   defines a global `mgMetal` with different stops (a ping-pong, where the handoff's runs
+   0%->220% linear) and redefining that name would retune the Generate dock's own button
+   from a file that has no business touching it. */
+
+@keyframes cmbMetal { 0% { background-position: 0% 50%; } 100% { background-position: 220% 50%; } }
+@keyframes cmbSheen { 0% { transform: translateX(-120%); } 60%, 100% { transform: translateX(320%); } }
+
+/* The metal CTA, verbatim from the handoff's D2/D3 bars. */
+.cmb-metal { position: relative; overflow: hidden; display: block; width: 100%;
+  box-sizing: border-box; text-align: center; cursor: pointer; font-family: inherit;
+  font-size: 12.5px; font-weight: 800; color: #fff; padding: 14px 0; border-radius: 11px;
+  border: 1px solid rgba(255,255,255,.3); text-shadow: 0 1px 2px rgba(51,35,109,.65);
+  background: linear-gradient(100deg, var(--purple-deep) 0%, var(--purple-bright) 22%,
+    var(--lavender) 43%, #efe6ff 50%, var(--lavender) 57%, var(--purple-bright) 78%,
+    var(--purple-deep) 100%);
+  background-size: 220% 100%; animation: cmbMetal 7s linear infinite;
+  box-shadow: 0 8px 26px rgba(100,58,172,.5), inset 0 1px 0 rgba(255,255,255,.5),
+    inset 0 -2px 6px rgba(51,35,109,.55); }
+.cmb-metal i { position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.55), transparent);
+  transform: translateX(-120%); animation: cmbSheen 7s ease-in-out infinite;
+  pointer-events: none; }
+/* MUTED, never a flat opacity fade — the same grammar gen-drawer.css uses for its own
+   metal: the metal stays and desaturates, and §8.3's rule holds (the label says what the
+   button is; the reason sits under it). */
+.cmb-metal:disabled { cursor: not-allowed; filter: saturate(.35) brightness(.62);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22); animation-play-state: paused; }
+.cmb-metal:disabled i { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cmb-metal { animation: none; }
+  .cmb-metal i { display: none; }
+}
+
+/* ---- D1 · BOARD ------------------------------------------------------------------ */
+
+/* The one door to My entries. 44pt tall (the handoff draws it as a bare 9px mono label on
+   the title line; a 9px label is not a touch target). */
+.cmb-boardhead { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+button.cmb-door { margin-left: auto; display: flex; align-items: center; min-height: 44px;
+  padding: 0 2px; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .1em; font-weight: 700; color: var(--lavender); background: none;
+  border: none; cursor: pointer; }
+button.cmb-door.on { color: var(--text); }
+.cmb-door .n { color: var(--overlay0); }
+
+.cmb-sectionlab { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0);
+  padding: 6px 0 2px; }
+
+/* The official hero — 16:9, badge top-left, title + prize/countdown overlaid bottom-left. */
+button.cmb-hero { position: relative; display: block; width: 100%; padding: 0;
+  border-radius: 14px; overflow: hidden; border: 1px solid var(--surface1);
+  aspect-ratio: 16 / 9; cursor: pointer; font-family: inherit; text-align: left;
+  background: radial-gradient(120% 120% at 22% 20%, var(--purple-bright) 0%,
+    var(--purple-deep) 46%, var(--mantle) 100%); }
+.cmb-hero img, .cmb-thumb img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; }
+.cmb-heroveil { position: absolute; inset: 0;
+  background: linear-gradient(0deg, rgba(6,4,16,.78) 0%, rgba(6,4,16,.12) 52%, transparent 100%); }
+.cmb-herofoot { position: absolute; left: 12px; right: 12px; bottom: 11px; }
+.cmb-heroname { display: block; font-family: var(--serif, Georgia, "Times New Roman", serif);
+  font-style: italic; font-size: 19px; line-height: 1.15; color: #fff;
+  text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+.cmb-herometa { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: rgba(255,255,255,.75); margin-top: 2px; }
+
+/* The badges. OFFICIAL lavender · COMMUNITY gold — the handoff's assignment. */
+.cmb-badge { position: absolute; top: 9px; left: 10px; font-size: 8.5px; font-weight: 800;
+  letter-spacing: .09em; padding: 3px 9px; border-radius: 999px;
+  background: rgba(12,10,28,.78); }
+.cmb-badge.official { color: var(--lavender); border: 1px solid rgba(182,146,230,.4); }
+.cmb-badge.community { color: var(--gold); border: 1px solid rgba(212,175,55,.4); }
+
+/* Community list cards. */
+.cmb-list { display: flex; flex-direction: column; gap: 8px; }
+button.cmb-card { display: flex; gap: 10px; align-items: center; width: 100%;
+  box-sizing: border-box; text-align: left; min-height: 80px; padding: 9px;
+  border: 1px solid var(--surface1); border-radius: 12px; background: var(--surface0);
+  cursor: pointer; font-family: inherit; color: var(--text); }
+button.cmb-card.ended { opacity: .8; }
+.cmb-thumb { position: relative; width: 62px; height: 62px; flex: none; border-radius: 9px;
+  overflow: hidden; border: 1px solid var(--surface1);
+  background: linear-gradient(150deg, var(--purple-deep), var(--surface0)); }
+.cmb-cardcol { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cmb-cardname { font-size: 12.5px; font-weight: 800; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmb-cardprize { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: var(--gold); }
+.cmb-cardmeta { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-variant-numeric: tabular-nums; color: var(--overlay0); }
+/* The My-entries view's extra line — the one thing that view adds to the same card. */
+.cmb-cardstatus { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-weight: 700; letter-spacing: .08em; color: var(--subtext); }
+.cmb-cardstatus.won { color: var(--gold); }
+.cmb-cardstatus.awaiting { color: var(--overlay0); }
+.cmb-cardstatus.hot { color: var(--gold); }
+
+.cmb-note { font-size: 11px; line-height: 1.6; color: var(--subtext); padding: 14px 0; }
+.cmb-note b { color: var(--text); }
+.cmb-foot { font-size: 10px; line-height: 1.6; color: var(--overlay0); padding-top: 12px; }
+.cmb-foot a { color: var(--lavender); text-decoration: underline; }
+
+/* ---- D2 · DETAIL ----------------------------------------------------------------- */
+
+.cmb-detail { display: flex; flex-direction: column; gap: 9px; }
+button.cmb-back { display: flex; align-items: center; gap: 5px; align-self: flex-start;
+  min-height: 44px; padding: 0 2px; font-size: 11px; color: var(--lavender);
+  background: none; border: none; cursor: pointer; font-family: inherit; }
+.cmb-banner { position: relative; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--surface1); aspect-ratio: 2.4 / 1;
+  background: radial-gradient(120% 120% at 22% 20%, var(--purple-bright) 0%,
+    var(--purple-deep) 46%, var(--mantle) 100%); }
+.cmb-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cmb-bannername { position: absolute; left: 11px; right: 11px; bottom: 9px;
+  font-family: var(--serif, Georgia, "Times New Roman", serif); font-style: italic;
+  font-size: 19px; line-height: 1.15; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+
+.cmb-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.cmb-chip { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
+  font-variant-numeric: tabular-nums; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--surface1); color: var(--subtext); }
+.cmb-chip.gold { background: rgba(212,175,55,.14); border-color: rgba(212,175,55,.42);
+  color: var(--gold); }
+.cmb-chip.entered { background: rgba(212,175,55,.22); border-color: rgba(212,175,55,.5);
+  color: var(--gold); font-weight: 700; }
+
+/* The accordion. One section open at a time; the collapsed row keeps its key figure. */
+.cmb-acc { display: flex; flex-direction: column; gap: 8px; }
+.cmb-sec { border: 1px solid var(--surface1); border-radius: 11px; background: var(--surface0);
+  overflow: hidden; }
+button.cmb-sechead { display: flex; align-items: center; gap: 8px; width: 100%;
+  box-sizing: border-box; min-height: 44px; padding: 10px 12px; cursor: pointer;
+  background: none; border: none; font-family: inherit; text-align: left; }
+.cmb-seclab { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--overlay0); }
+.cmb-sechint { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--gold); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cmb-secchev { margin-left: auto; font-size: 10px; color: var(--overlay0); }
+.cmb-secbody { padding: 0 12px 11px; font-size: 11px; line-height: 1.55; color: var(--subtext); }
+.cmb-secbody p { margin: 0 0 8px; }
+.cmb-secbody p:last-child { margin-bottom: 0; }
+.cmb-secbody ul, .cmb-secbody ol { margin: 0 0 8px; padding-left: 18px; }
+.cmb-secbody h4, .cmb-secbody h5, .cmb-secbody h6 { margin: 0 0 6px; font-size: 11.5px;
+  color: var(--text); }
+.cmb-secbody a { color: var(--lavender); }
+.cmb-secbody .k { display: block; font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--overlay0); margin-top: 8px; }
+.cmb-secbody .k:first-child { margin-top: 0; }
+.cmb-tack { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; font-weight: 600;
+  padding: 1px 6px; border-radius: 5px; background: rgba(182,146,230,.16); color: var(--mauve); }
+.cmb-ok { color: var(--emerald); font-weight: 700; }
+.cmb-tier { display: flex; align-items: baseline; gap: 6px; padding: 3px 0;
+  font-variant-numeric: tabular-nums; }
+.cmb-tier .r { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .1em;
+  color: var(--overlay0); }
+.cmb-tier .a { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700;
+  color: var(--gold); }
+.cmb-tier .w { margin-left: auto; font-size: 10px; color: var(--overlay0); }
+
+/* The Enter bar — pinned above the safe area, the Moonglade Mobile bulk-bar idiom
+   (myart-mobile.css's .myam-bulkbar): sticky bottom, negative margins to reach the
+   scroller's edges, env(safe-area-inset-bottom) in the bottom pad. */
+.cmb-enterbar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center;
+  gap: 10px; margin: 4px -13px -13px; padding: 10px 13px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.cmb-enterbar .cmb-metal { flex: 1 1 auto; width: auto; }
+.cmb-when { flex: none; }
+.cmb-whenk { font-size: 8px; font-weight: 700; letter-spacing: .12em; color: var(--overlay0); }
+.cmb-whenv { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.cmb-whenv.hot { color: var(--gold); }
+.cmb-why { font-size: 10px; color: var(--overlay0); padding: 0 0 4px; }
+
+/* ---- D3 · ENTRY ------------------------------------------------------------------ */
+
+.cmb-entry { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  background: var(--mantle); }
+.cmb-entryhead { flex: none; display: flex; align-items: center; gap: 8px;
+  padding: max(6px, env(safe-area-inset-top)) 14px 8px; }
+.cmb-entryhead .t { font-family: var(--serif, Georgia, "Times New Roman", serif);
+  font-style: italic; font-size: 15px; color: var(--text); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cmb-entryhead .n { margin-left: auto; flex: none; font-family: ui-monospace, Menlo, monospace;
+  font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+.cmb-tagline { flex: none; padding: 0 14px 8px; font-size: 10px; line-height: 1.5;
+  color: var(--subtext); }
+.cmb-tagline .fee { color: var(--overlay0); }
+.cmb-tagline .fee.unknown { color: var(--gold); }
+.cmb-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 14px 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  align-content: start; }
+button.cmb-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 8px; padding: 0;
+  overflow: hidden; cursor: pointer; border: 1px solid var(--surface1);
+  background: var(--surface0); }
+button.cmb-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+button.cmb-tile.on { border: 2px solid var(--lavender);
+  box-shadow: 0 0 10px rgba(182,146,230,.4); }
+button.cmb-tile:disabled { opacity: .45; cursor: not-allowed; }
+.cmb-tick { position: absolute; top: 4px; right: 4px; width: 15px; height: 15px;
+  border-radius: 5px; background: var(--lavender); color: #14102a; display: grid;
+  place-items: center; font-size: 9px; font-weight: 800; }
+.cmb-entrynote { flex: none; padding: 0 14px 10px; font-size: 10.5px; line-height: 1.55;
+  color: var(--subtext); }
+.cmb-entrynote b { color: var(--text); }
+.cmb-fail { flex: none; margin: 0 14px 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(243,139,168,.4); background: rgba(243,139,168,.1);
+  font-size: 10.5px; line-height: 1.5; color: var(--subtext); }
+.cmb-fail .t { font-weight: 700; color: var(--red, #f38ba8); }
+.cmb-confirmbar { flex: none; padding: 10px 14px max(18px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface1); background: var(--mantle); }
+.cmb-confirmbar .cmb-metal { font-size: 12px; padding: 12px 0; border-radius: 10px; }
+
+/* The contest chooser sheet's own note (the sheet chrome itself is MobileSheet's). */
+.cmb-choosernote { font-size: 11px; line-height: 1.6; color: var(--subtext);
+  padding-bottom: 8px; }

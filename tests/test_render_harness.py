@@ -1349,3 +1349,278 @@ def test_tracker_spin_ring_renders_as_a_true_circle_not_an_ellipse(logged_in_pag
     assert abs(geo["ring"]["w"] - geo["ring"]["h"]) < 0.5, (
         ".at-ring is not square ({!r}) -- it renders an ellipse, which bulges/narrows as it "
         "rotates instead of spinning cleanly".format(geo["ring"]))
+
+
+# ---------------------------------------------------------------------------
+# 9. Contests on the phone (Contest Mobile Handoff.dc.html, Session D 2026-09-04)
+# ---------------------------------------------------------------------------
+# 390x844 is the frame the handoff is drawn at (an iPhone-class CSS viewport) and it is
+# under useIsMobile.js's 430px breakpoint, so the REAL mobile build mounts -- these drive
+# AppMobile.jsx, not App.jsx behind a narrow window.
+MOBILE = {"width": 390, "height": 844}
+
+# Every contest read is fulfilled from here. Two reasons, and the second is the important
+# one: (a) the harness's PixAI key is a fake, so a real board read would soft-fail to an
+# empty board and there would be nothing to measure; (b) ENTERING A CONTEST IS AN
+# IRREVERSIBLE, PUBLIC ACCOUNT WRITE that PixAI offers no way to withdraw. Nothing here may
+# reach the real route even by accident, so /api/contest/enter is intercepted and the test
+# asserts that the only body it ever saw was the server's own unconfirmed preview.
+_MOBILE_BOARD = {
+    "contests": [
+        {"id": "c-off", "slug": "autumn-grimoire", "title": "Autumn Grimoire",
+         "type": "official", "status": "running", "active": True,
+         "vote_type": "creator_pick", "prize_amount": 1000000,
+         "prize_distribution": [{"rank": 1, "count": 1, "amount": 1000000}],
+         "cover_url": "", "start_at": "2026-08-01T00:00:00.000Z",
+         "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+         "url": "https://pixai.art/en/contest/autumn-grimoire",
+         "description": "Show us an autumn grimoire.", "rules": [],
+         "tack_name": "autumn", "desc_url": "", "result_url": ""},
+        {"id": "c-com", "slug": "jojo-pose", "title": "JoJo Pose",
+         "type": "community", "status": "running", "active": True,
+         "vote_type": "user_vote", "prize_amount": 500000,
+         "prize_distribution": [{"rank": 1, "count": 1, "amount": 200000},
+                                {"rank": 2, "count": 3, "amount": 50000},
+                                {"rank": 3, "count": 5, "amount": 30000}],
+         "cover_url": "", "start_at": "2026-08-01T00:00:00.000Z",
+         "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+         "url": "https://pixai.art/en/contest/jojo-pose",
+         "description": "Your coolest JoJo pose.", "rules": [],
+         "tack_name": "jojo", "desc_url": "", "result_url": ""},
+    ],
+    "official": 1, "community": 1,
+}
+_MOBILE_ART = {
+    "csrf": "harness-csrf",
+    "items": [
+        {"media_id": "a%d" % i, "artwork_id": "art%d" % i, "title": "Piece %d" % i,
+         "thumb": "/thumbs/a%d.jpg" % i, "is_video": False, "is_nsfw": False,
+         "date": "2026-08-20", "created_at": "2026-08-20T00:00:00", "tags": [],
+         "public": True, "sensitive": False, "likes": 0, "comments": 0}
+        for i in range(6)
+    ],
+}
+
+
+def _json_route(page, pattern, payload):
+    page.route(pattern, lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(payload)))
+
+
+def _open_contests_on_the_phone(page, entry_posts):
+    """Menu -> Contests, with every contest read stubbed and the entry POST captured."""
+    _json_route(page, "**/api/contests", _MOBILE_BOARD)
+    _json_route(page, "**/api/contest/mine",
+                {"contests": [], "total_entries": 0, "sync_running": False})
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/contest/sync", {"started": False, "skipped": "recent"})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART)
+
+    def _enter(route):
+        entry_posts.append(route.request.post_data or "")
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps({"preview": True, "spends_credits": None}))
+    page.route("**/api/contest/enter", _enter)
+
+    # Motion frozen BEFORE the Menu is opened: the pushed screen slides in over 220ms
+    # (glmScreenIn's translateX), and a screen measured mid-slide is a screen sitting
+    # partly off the right edge -- the exact "measured an interpolated value" trap this
+    # module's _FREEZE_MOTION_CSS exists for.
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-hero", timeout=10_000)
+    _settle(page)
+
+
+def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entries(
+        logged_in_page):
+    """Frame D1. The mobile build really mounts at 390pt, the official contest renders as a
+    16:9 hero carrying the handoff's LAVENDER official badge, community contests are list
+    cards below it, and "MY ENTRIES" is a real 44pt target rather than the 9px label the
+    frame draws (the handoff's own plumbing note asks for >=44pt, which a 9px line is not).
+
+    Measured, not read off the stylesheet: a 16/9 aspect-ratio declaration means nothing if
+    an ancestor's flex rules override the box, which is exactly the class of defect this
+    module exists for."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+
+    assert page.locator(".glm-screen").count() == 1, (
+        "the desktop shell mounted at 390pt -- this is not the mobile build")
+    geo = page.evaluate("""() => {
+        const r = (s) => { const el = document.querySelector(s); if (!el) return null;
+                           const b = el.getBoundingClientRect();
+                           return {w: b.width, h: b.height, top: b.top, bottom: b.bottom}; };
+        const badge = document.querySelector('.cmb-hero .cmb-badge');
+        return {hero: r('.cmb-hero'), door: r('.cmb-door'), card: r('.cmb-card'),
+                cards: document.querySelectorAll('.cmb-card').length,
+                badgeClass: badge ? badge.className : '',
+                badgeColor: badge ? getComputedStyle(badge).color : ''};
+    }""")
+    ratio = geo["hero"]["w"] / geo["hero"]["h"]
+    assert abs(ratio - 16 / 9) < 0.05, (
+        "the official hero renders {:.3f}:1, not the D1 frame's 16:9".format(ratio))
+    assert "official" in geo["badgeClass"], "the hero's badge is not the OFFICIAL one"
+    # The hue law, checked against the LIVE token rather than a hex written here: the
+    # handoff assigns OFFICIAL lavender on this surface (desktop paints it gold), and a
+    # regression to gold is the specific mistake worth catching.
+    lav, gold = page.evaluate("""() => {
+        const cs = getComputedStyle(document.documentElement);
+        const probe = (v) => { const el = document.createElement('span');
+            el.style.color = v; document.body.appendChild(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; };
+        return [probe(cs.getPropertyValue('--lavender').trim()),
+                probe(cs.getPropertyValue('--gold').trim())];
+    }""")
+    assert geo["badgeColor"] == lav and geo["badgeColor"] != gold, (
+        "the OFFICIAL badge is {} -- the handoff assigns it --lavender ({}) on the phone, "
+        "not --gold ({})".format(geo["badgeColor"], lav, gold))
+    assert geo["door"]["h"] >= 44, (
+        "MY ENTRIES is {:.1f}px tall -- under the handoff's 44pt floor".format(
+            geo["door"]["h"]))
+    assert geo["cards"] == 1 and geo["card"]["h"] >= 44, (
+        "community cards missing or under 44pt: {!r}".format(geo))
+
+
+def test_the_phone_contest_detail_folds_to_one_open_section_over_a_pinned_enter_bar(
+        logged_in_page):
+    """Frame D2. Three sections, the brief open on arrival, exactly ONE body rendered at a
+    time, and the Enter bar pinned INSIDE the viewport (sticky) rather than scrolled off the
+    bottom of a long brief -- which is the whole reason the handoff pins it."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    page.click(".cmb-hero")
+    page.wait_for_selector(".cmb-acc", timeout=10_000)
+    _settle(page)
+
+    read = """() => {
+        const heads = [...document.querySelectorAll('.cmb-sechead')];
+        const bar = document.querySelector('.cmb-enterbar').getBoundingClientRect();
+        const btn = document.querySelector('.cmb-enterbar .cmb-metal').getBoundingClientRect();
+        return {
+            sections: heads.length,
+            open: heads.map(h => h.parentElement.querySelector('.cmb-secbody') ? 1 : 0),
+            labels: heads.map(h => h.querySelector('.cmb-seclab').textContent.trim()),
+            shortest: Math.min(...heads.map(h => h.getBoundingClientRect().height)),
+            barBottom: bar.bottom, btnH: btn.height, vh: window.innerHeight,
+        };
+    }"""
+    before = page.evaluate(read)
+    assert before["sections"] == 3, (
+        "expected brief/prizes/requirements, got {!r}".format(before["labels"]))
+    assert sum(before["open"]) == 1 and before["open"][0] == 1, (
+        "the accordion is not one-open-at-a-time with the brief first: {!r}".format(before))
+    assert before["shortest"] >= 44, (
+        "an accordion row is {:.1f}px tall -- under 44pt".format(before["shortest"]))
+    assert before["barBottom"] <= before["vh"] + 0.5, (
+        "the Enter bar's bottom is at {:.1f} in an {:.0f}px viewport -- it is not pinned"
+        .format(before["barBottom"], before["vh"]))
+    assert before["btnH"] >= 44, (
+        "the Enter button is {:.1f}px tall -- under 44pt".format(before["btnH"]))
+
+    # Opening Prizes closes the brief: one section open, never two.
+    page.click(".cmb-acc .cmb-sec:nth-child(2) .cmb-sechead")
+    _settle(page)
+    after = page.evaluate(read)
+    assert sum(after["open"]) == 1 and after["open"][1] == 1, (
+        "opening a second section did not close the first: {!r}".format(after))
+
+
+def test_the_phone_entry_screen_never_enters_on_one_tap(logged_in_page):
+    """Frame D3, and the safety half of it. The confirm bar is DISABLED with nothing picked,
+    the tiles are real 44pt+ targets, picking two arms the bar with the count -- and no
+    confirmed POST ever leaves this test: the only /api/contest/enter body seen is the
+    server's own unconfirmed preview, which touches no account. Entering a contest is
+    irreversible and public; a rendering test must never fire one."""
+    posts = []
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, posts)
+    page.click(".cmb-hero")
+    page.wait_for_selector(".cmb-enterbar .cmb-metal", timeout=10_000)
+    page.click(".cmb-enterbar .cmb-metal")
+    page.wait_for_selector(".cmb-entry", timeout=10_000)
+    page.wait_for_selector(".cmb-tile", timeout=10_000)
+    _settle(page)
+
+    read = """() => {
+        const btn = document.querySelector('.cmb-confirmbar .cmb-metal');
+        const bar = document.querySelector('.cmb-confirmbar');
+        const tile = document.querySelector('.cmb-tile').getBoundingClientRect();
+        return {disabled: btn.disabled, label: btn.textContent.trim(),
+                tileW: tile.width, tileH: tile.height,
+                barPad: getComputedStyle(bar).paddingBottom,
+                count: document.querySelector('.cmb-entryhead .n').textContent.trim()};
+    }"""
+    idle = page.evaluate(read)
+    assert idle["disabled"] is True, "the confirm bar is armed with nothing picked"
+    assert "Pick at least one" in idle["label"], (
+        "the disabled bar dropped its reason: {!r}".format(idle["label"]))
+    assert idle["tileW"] >= 44 and idle["tileH"] >= 44, (
+        "picker tiles are {:.1f}x{:.1f} -- under 44pt".format(idle["tileW"], idle["tileH"]))
+    # >=18px of bottom padding: the handoff's own D3 value, and what
+    # max(18px, env(safe-area-inset-bottom)) resolves to on a browser reporting no inset
+    # (which headless chromium does) -- so this measures the max(), not the inset.
+    assert float(idle["barPad"].replace("px", "")) >= 18, (
+        "the confirm bar sits flush against the safe area: {}".format(idle["barPad"]))
+
+    page.click(".cmb-grid .cmb-tile:nth-child(1)")
+    page.click(".cmb-grid .cmb-tile:nth-child(2)")
+    _settle(page)
+    armed = page.evaluate(read)
+    assert armed["disabled"] is False, "two picks did not arm the confirm bar"
+    assert "2 images" in armed["label"], (
+        "the confirm bar does not count the picks: {!r}".format(armed["label"]))
+    assert armed["count"] == "2 selected", (
+        "the header counter reads {!r} -- the board row states no entry limit, so it must "
+        "not quote a '/ N max' the contest never published".format(armed["count"]))
+    assert all("confirm" not in p for p in posts), (
+        "a CONFIRMED entry left this test: {!r}".format(posts))
+
+
+def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line(
+        logged_in_page):
+    """The handoff's one door: "MY ENTRIES · n" does not open a second layout, it filters
+    THIS board to the contests this library has pieces in and adds ONE status line to the
+    same card. Asserted as rendered DOM -- same .cmb-card class, one row per entered
+    contest, a derived status (running / awaiting results / won / not placed), and no
+    official hero, because a filtered board is not the board plus a list."""
+    page = logged_in_page(**MOBILE)
+    _open_contests_on_the_phone(page, [])
+    # Re-answer /api/contest/mine with real rows, then reopen the screen so it re-reads.
+    _json_route(page, "**/api/contest/mine", {"sync_running": False, "total_entries": 3,
+        "contests": [
+            {"contest_id": "c-com", "slug": "jojo-pose", "title": "JoJo Pose",
+             "type": "community", "active": True, "won": False,
+             "end_at": "2099-01-01T00:00:00.000Z", "result_at": "2099-02-01T00:00:00.000Z",
+             "url": "", "entry_artwork_ids": ["art0", "art1"], "entries": []},
+            {"contest_id": "c-old", "slug": "spring-oath", "title": "Spring Oath",
+             "type": "official", "active": False, "won": True,
+             "end_at": "2026-08-20T00:00:00.000Z", "result_at": "2026-08-25T00:00:00.000Z",
+             "url": "", "entry_artwork_ids": ["art2"], "entries": []},
+        ]})
+    page.click(".glm-screen-back")
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("Contests")')
+    page.wait_for_selector(".cmb-door", timeout=10_000)
+    page.click(".cmb-door")
+    page.wait_for_selector(".cmb-cardstatus", timeout=10_000)
+    _settle(page)
+
+    got = page.evaluate("""() => [...document.querySelectorAll('.cmb-card')].map(c => ({
+        name: c.querySelector('.cmb-cardname').textContent.trim(),
+        status: (c.querySelector('.cmb-cardstatus') || {}).textContent || '',
+        cls: (c.querySelector('.cmb-cardstatus') || {}).className || '',
+    }))""")
+    assert len(got) == 2, (
+        "My entries is not the board filtered to entered contests: {!r}".format(got))
+    by = {g["name"]: g for g in got}
+    assert "RUNNING" in by["JoJo Pose"]["status"], by
+    assert "2 pieces" in by["JoJo Pose"]["status"], by
+    # An ENDED contest is not on the running board at all, so its card is rebuilt from the
+    # entries row itself -- the only way a finished contest can still be opened in-app.
+    assert "WON" in by["Spring Oath"]["status"] and "won" in by["Spring Oath"]["cls"], by
+    assert page.locator(".cmb-hero").count() == 0, (
+        "the official hero is still painted in the My-entries view")

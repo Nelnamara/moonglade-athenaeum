@@ -47,7 +47,10 @@ function Spans({ spans }) {
   );
 }
 
-function Markdown({ text }) {
+/* Exported since 2026-09-04: the phone's accordion (ContestDetailMobile.jsx) renders the
+   SAME brief, and a second markdown path would be a second set of escaping rules on
+   upstream text. Both hosts get this one -- no innerHTML on either. */
+export function Markdown({ text }) {
   const blocks = useMemo(() => parseMarkdownLite(text), [text]);
   if (!blocks.length) return null;
   return (

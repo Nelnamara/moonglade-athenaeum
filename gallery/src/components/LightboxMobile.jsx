@@ -93,6 +93,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, page, pages, loadPage, onOpenDetails,
+  onEnterContest,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -331,6 +332,17 @@ export default function LightboxMobile({
           <button type="button" className="lbm-chip"
             onClick={() => toast("Similar", "Its own mobile pass — coming later.")}>✧ Similar</button>
           <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
+          {/* One of the three entry points Contest Mobile Handoff.dc.html keeps -- "the
+              lightbox share row". It opens the choose-a-contest sheet, and the entry
+              screen behind it pre-selects THIS picture if it is eligible. Rendered
+              unconditionally, like every other chip on this row: a grid card carries no
+              published flag (moonglade_gallery.py's _card), so this row genuinely cannot
+              tell whether the picture can enter -- the entry screen reads the published
+              set and says so plainly when the source could not be pre-selected. */}
+          {onEnterContest && (
+            <button type="button" className="lbm-chip"
+              onClick={() => onEnterContest(it.media_id)}>★ Enter contest</button>
+          )}
           <button type="button" className="lbm-chip" onClick={() => onOpenDetails(it.media_id)}>Details ›</button>
           <button type="button" className="lbm-chip lbm-chip-metal" onClick={() => setSlideOn((v) => !v)}>
             {slideOn ? "⏸ Pause" : "▶ Slideshow"}

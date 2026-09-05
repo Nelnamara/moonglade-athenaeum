@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { countdown, dayOf } from "../hooks/useContests.js";
+import { classifyEntryError, entryCostFace } from "../lib/contestEntry.js";
 import { show as toast } from "../notify/toastStore.js";
 import "../styles/myart-contests.css";
 
@@ -13,35 +14,11 @@ import "../styles/myart-contests.css";
    Two POSTs, exactly as the server's contract asks: an unconfirmed one to /api/contest/
    enter that touches no account and answers what it WOULD do, then the confirmed one.
 
-   THE COST LINE IS ONE SLOT WITH THREE HONEST FACES, and never a fourth. The server
-   answers `spends_credits`: null means the fee is UNMEASURED — the contest contract
-   declares an INSUFFICIENT_CREDITS error and no entry has ever been fired to find out —
-   so the slot says so in words. false is emerald "Free"; a number is the mono-gold
-   amount. The DC's "♦ 500 CR" is a layout stand-in (its own annotation says so); a
-   number invented here would be a lie on the last screen before an irreversible act. */
-
-const NOT_ELIGIBLE = /not.?eligible/i;
-const CLOSED = /closed|ended|expired/i;
-
-function classify(msg) {
-  const m = String(msg || "");
-  if (NOT_ELIGIBLE.test(m)) {
-    return { icon: "⚠", title: "Not eligible",
-             copy: "PixAI refused this piece for this contest — usually because it was "
-                 + "published before the contest opened. Nothing was submitted." };
-  }
-  if (CLOSED.test(m)) {
-    return { icon: "🚫", title: "Contest closed",
-             copy: "Entries are closed for this contest. Nothing was submitted." };
-  }
-  // Deliberately NOT "nothing was submitted": a read timeout after PixAI accepted the
-  // entry looks identical from here, and telling someone their entry did not land when it
-  // may have is how they enter twice. Same shape gen/submitTask.js uses for the same
-  // ambiguity on the spend path.
-  return { icon: "⚠", title: "Something went wrong on PixAI's side",
-           copy: "The entry MAY still have been submitted — check My entries before "
-                 + "trying again. " + m };
-}
+   THE COST LINE and the refusal sentences moved to lib/contestEntry.js on 2026-09-04, when
+   the phone's entry screen (ContestEntryMobile.jsx) needed to say the same things about
+   the same irreversible act -- see that module's own header for why those two in
+   particular are shared rather than copied. The DC's "♦ 500 CR" remains a layout stand-in
+   (its own annotation says so); the number rendered here is always the server's answer. */
 
 export default function ContestConfirm({ contest, art, onClose, onEntered, onPickDifferent,
                                         csrfToken }) {
@@ -73,7 +50,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
     apiPost("/api/contest/enter", { slug: contest.slug, artwork_id: art.artwork_id, csrf })
       .then((d) => {
         if (dead) return;
-        if (d.error) setFail(classify(d.error)); else setAsk(d);
+        if (d.error) setFail(classifyEntryError(d.error)); else setAsk(d);
       });
     return () => { dead = true; };
   }, [csrf, contest, art]);
@@ -83,7 +60,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
     const d = await apiPost("/api/contest/enter",
                             { slug: contest.slug, artwork_id: art.artwork_id, csrf, confirm: true });
     setBusy(false);
-    if (d.error) { setFail(classify(d.error)); return; }
+    if (d.error) { setFail(classifyEntryError(d.error)); return; }
     // An entry lands in The Arena, which is an achievement metric -- the cached roster the
     // Folio and the Panel share is stale the moment this succeeds. (The entries list itself
     // is refreshed by the caller's onEntered -> reloadMine, which writes through.)
@@ -96,10 +73,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
 
   const left = countdown(contest.end_at);
   const official = (contest.type || "") === "official";
-  const cost = ask ? ask.spends_credits : undefined;
-  const costFace = cost === false ? { cls: "", text: "Free" }
-    : typeof cost === "number" ? { cls: "amount", text: "♦ " + Number(cost).toLocaleString() + " CR" }
-    : { cls: "unknown", text: "Entry fee unverified" };
+  const costFace = entryCostFace(ask ? ask.spends_credits : undefined);
 
   return (
     <>

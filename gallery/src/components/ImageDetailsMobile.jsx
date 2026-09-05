@@ -94,7 +94,7 @@ import "../styles/image-details-mobile.css";
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
-  onOpenLightbox, onPublish,
+  onOpenLightbox, onPublish, onEnterContest,
 }) {
   const [closing, setClosing] = useState(false);
   const [mediaOk, setMediaOk] = useState(true);
@@ -247,6 +247,15 @@ export default function ImageDetailsMobile({
           {(row.artwork_id || "").trim()
             ? <span className="idm-chip is-off" title="Already on your PixAI profile — manage it from My Art">☁ Published</span>
             : <button type="button" className="idm-chip" onClick={() => onPublish && onPublish(row.media_id)}>☁ Publish</button>}
+          {/* The third entry point Contest Mobile Handoff.dc.html keeps -- "Details'
+              contest chip". Gated on artwork_id, exactly the condition desktop's My Art
+              row uses for its own "★ Enter into contest…": only a PUBLISHED piece has an
+              artwork to enter, and this row (unlike a grid card) really does carry the
+              flag, so an offer that could only refuse is never made here. */}
+          {onEnterContest && (row.artwork_id || "").trim()
+            ? <button type="button" className="idm-chip"
+                onClick={() => onEnterContest(row.media_id)}>★ Enter contest</button>
+            : null}
           <button type="button" className="idm-chip" onClick={() => copy(promptText, "prompt")}>
             {copied === "prompt" ? "Copied!" : "⧉ Copy prompt"}
           </button>
