@@ -59,10 +59,10 @@
    pick, and masked to the art's silhouette (the masked-sweep recipe below) so it is
    light over the mark, never a glass pane over the empty square around it. */
 .mgx-mark .mgx-mark-sheen { display: none; }
-.mgx-mark.mark-anim-classic .mgx-mark-sheen { display: block; }
-.mgx-mark.mark-anim-classic .mgx-mark-sheenclip {
-  -webkit-mask: var(--mark-url) center / contain no-repeat;
-  mask: var(--mark-url) center / contain no-repeat; }
+/* Not even for classic (owner, 2026-09-04: "still a double animation on default"):
+   classic's OWN masked glint below IS the vanilla sheen, rebuilt for the board --
+   showing the legacy band under it played two sweeps at once. The element stays in
+   the markup (other surfaces share the structure); it just never paints. */
 
 /* The halo was the other piece of square furniture: a rounded-square box-shadow that
    read as a glass tile behind a transparent mark. A mask would erase an outer shadow
@@ -247,9 +247,14 @@
   0%, 100% { background-position: calc(50% - var(--ecl-x)) calc(50% + var(--ecl-y)); }
   50% { background-position: calc(50% + var(--ecl-x)) calc(50% - var(--ecl-y)); } }
 .mgx-mark.mark-anim-eclipse {
+  /* Travel stays box-relative (em already carries the size setting, so dividing it
+     back out pins the path to the box) -- but the RADIUS must NOT divide, or the
+     slider does nothing at all to this treatment (owner, 2026-09-04: "size slider
+     does not work on animations"). The disc grows and shrinks with the setting; its
+     crossing does not. */
   --ecl-x: calc(2.816em / var(--anim-scale));
   --ecl-y: calc(.352em / var(--anim-scale));
-  --ecl-r: calc(2.489em / var(--anim-scale)); }
+  --ecl-r: 2.489em; }
 .mgx-mark.mark-anim-eclipse::before {
   inset: 6%; border-radius: 50%;
   background: radial-gradient(circle var(--ecl-r) at center,
