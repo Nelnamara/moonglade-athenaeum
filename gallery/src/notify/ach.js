@@ -12,7 +12,9 @@
    renderRail/renderCarousel/card/buildLadderGroups/pick/setUnleash/poke and the .ach-modal/
    .hall-* CSS. No #ach-modal skeleton exists on any served page (the React Folio of Honors --
    FolioOverlay.jsx/useFolio.js -- replaced it), so every one of those paths was guarded
-   dead code on both hosts. The Escape listener existed only to close that modal; dead too.
+   dead code on both hosts. The vanilla's Escape listener existed only to close that modal and
+   went with it -- the Escape this module listens for TODAY is a different key on a different
+   layer (THE EXIT, further down: it ends a running flood parade and nothing else).
    unleashed() is KEPT (it gates the roast text on the live celebration; the React Folio manages
    the same localStorage key), as are syncSkin/applySkin (check() reconciles the active skin). */
 
@@ -277,7 +279,8 @@ const HOLD = { common: 4200, rare: 4800, epic: 5400, legendary: 6400, feat: 6400
    all pointer events; ~4 stay visible, older ones leave as the counter chip keeps score. */
 const FLOOD_DWELL_MS = 2400;   // flood cadence -- deliberately tunable in one place
 const _trail = [];
-let _chip = null;
+let _chip = null;              // the "×N earned" counter -- presented history, never clickable
+let _skip = null;              // the skip control beside it (see THE EXIT below)
 
 function _recede(m) {
   m.classList.add("trail");
@@ -298,14 +301,94 @@ function _recede(m) {
 // which then rips the replay's own trail and chip out of the DOM mid-moment.
 let _clearTimer = null;
 
+/* The LIVE parade, or null when none is on screen: {q, m, ended}. `q` is the flood's own
+   pending list (the moments not yet shown) and `m` the one currently front-and-center.
+   Holding that at module scope is what lets THE EXIT below reach a parade already in
+   flight -- the queue used to live only inside _floodParade's closure, where nothing
+   outside could stop it (not even replay()'s takeover, which cleared _q and the trail but
+   left the flood happily stepping on behind the replay's own moment). */
+let _parade = null;
+
+// THE ONE TEARDOWN. Natural end, replay()'s takeover and the exit all land here; nothing
+// else removes a trail layer or a chip, so there is no second path to race this one.
 function _clearParade() {
   _clearTimer = null;
+  _parade = null;
   _trail.splice(0).forEach((el) => {
     el.classList.add("out");
     setTimeout(() => { if (el.parentNode) el.remove(); }, 500);
   });
-  if (_chip) { _chip.classList.add("out"); const c = _chip; _chip = null;
-    setTimeout(() => { if (c.parentNode) c.remove(); }, 500); }
+  [_chip, _skip].forEach((c) => {
+    if (!c) return;
+    c.classList.add("out");
+    setTimeout(() => { if (c.parentNode) c.remove(); }, 500);
+  });
+  _chip = null; _skip = null;
+}
+
+/* ---- THE EXIT (owner ruling 2026-09-04, DECISIONS.md "The achievement parade gets an
+   exit"): a long parade is skippable -- Escape, or the skip chip beside the counter.
+
+   PRESENTATION ONLY. The earns were already recorded server-side by the
+   /api/achievements?mark=1 load that produced this list (load() -> toastNew()); a moment in
+   the step loop below is a chime plus DOM and nothing else -- it marks nothing, posts
+   nothing, grants nothing. The reward a badge announces (a skin, a banner) is granted with
+   the earn and applied from the same payload by syncSkin(), not by the moment. So an
+   achievement whose moment never played is earned exactly like one that was watched.
+
+   The moment on screen JOINS THE TRAIL rather than being ripped out of the DOM, which is
+   what makes it fade instead of vanishing mid-frame -- and it fades through the same .out
+   class, on the same 500ms, as the click-dismiss that has always shipped. Then _clearParade
+   takes the layer down. No second teardown, nothing new for the existing ones to race. */
+function _paradeUp() { return !!(_parade || _clearTimer || _trail.length); }
+
+function _endParade() {
+  const p = _parade;
+  if (p) {
+    p.ended = true;                 // the step loop is over, whatever timer fires next
+    p.q.length = 0;                 // the moments still queued: skipped, and already earned
+    const m = p.m;
+    // A false _adv is the tell that the front moment has NOT receded, so it is not in
+    // _trail yet and _clearParade would leave it stranded on screen.
+    if (m && !m._adv) { clearTimeout(m._t); m._adv = true; _trail.unshift(m); }
+  }
+  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  _clearParade();
+}
+
+/* The skip control: the counter chip's twin, one line above it. A SEPARATE element because
+   the counter is presented history and deliberately takes no pointer events -- making it
+   clickable would change what an approved surface means. It is a real <button> so touch and
+   assistive tech get the same exit the keyboard does. */
+function _mkSkipChip() {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "ach-trailchip ach-skipchip";
+  b.setAttribute("aria-label", "Skip the rest of the achievement parade");
+  b.addEventListener("click", (e) => { e.stopPropagation(); _endParade(); });
+  document.body.appendChild(b);
+  return b;
+}
+
+/* Escape ends the parade -- and ONLY while one is up. Registered at module load, in CAPTURE
+   on window, which puts it ahead of every Escape handler the React tree mounts afterwards
+   (App.jsx's overlay closer, useCommandPalette's one global listener, the drawer/picker/panel
+   ladders -- every one of them registers from an effect, and main.jsx calls installNotify()
+   before createRoot().render()). That ordering is the point: the parade layer is z-index 520,
+   above everything, so while it plays Escape is its key and is consumed here.
+
+   With no parade up the handler returns without touching the event at all -- the app's Escape
+   ladder behaves exactly as it did. A Folio replay is deliberately NOT a parade: Escape still
+   closes the Folio, which dismisses the moment through useFolio's unmount cleanup. */
+function _onKey(e) {
+  if (e.key !== "Escape" || !_paradeUp()) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  _endParade();
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("keydown", _onKey, true);
 }
 
 function _playFlood(built, after) {
@@ -325,18 +408,26 @@ function _playFlood(built, after) {
 
 function _floodParade(list) {
   const q = list.slice();
+  const p = { q, m: null, ended: false };
+  _parade = p;                                     // published so the exit can reach it
   let shown = 0;
   const step = () => {
+    if (p.ended) return;                           // skipped: this parade is finished
     if (!q.length) { _clearTimer = setTimeout(_clearParade, 3200); return; }  // lingers, then bows out
     const a = q.shift(); shown++;
     const tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, {});
     if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    p.m = built.m;
     _playFlood(built, step);
     if (shown > 1) {
       if (!_chip) { _chip = document.createElement("div"); _chip.className = "ach-trailchip"; document.body.appendChild(_chip); }
       _chip.textContent = "×" + shown + " earned";
+      // The skip chip arrives with the counter, i.e. once it is demonstrably a parade and
+      // not a single moment, and counts what SKIPPING would cost -- the pending queue.
+      if (!_skip) _skip = _mkSkipChip();
+      _skip.textContent = q.length ? ("skip ×" + q.length + " · Esc") : "skip · Esc";
     }
   };
   step();
@@ -375,10 +466,13 @@ export function replay(a, opts) {
   // the other's DOM. So the replay takes over instead of joining: any queued moments are
   // dropped, the parade's own teardown is cancelled, and its trail clears before this one
   // builds. Overlap is now impossible in either direction.
-  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  // The takeover is THE EXIT, run for a different reason (2026-09-04): _endParade cancels
+  // the linger timer and clears the trail exactly as the inline sequence here used to, and
+  // additionally stops a parade still in FLIGHT -- whose pending moments and front layer
+  // were out of this function's reach while they lived in _floodParade's closure.
   _q.length = 0;
   _playing = false;
-  _clearParade();
+  _endParade();
   const tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });

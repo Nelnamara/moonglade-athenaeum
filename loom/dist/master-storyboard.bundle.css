@@ -1617,6 +1617,25 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
 .ach-trailchip.out {
   opacity: 0;
 }
+.ach-skipchip {
+  bottom: calc(5vh + 27px);
+  z-index: 521;
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  line-height: 1.5;
+}
+.ach-skipchip:hover,
+.ach-skipchip:focus-visible {
+  border-color: rgba(212, 175, 55, .75);
+  background: rgba(10, 8, 24, .95);
+}
+.ach-skipchip:focus-visible {
+  outline: 2px solid rgba(212, 175, 55, .75);
+  outline-offset: 2px;
+}
 .ach-m2 .tstage {
   width: min(680px, 94vw);
 }
