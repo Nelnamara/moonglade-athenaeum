@@ -155,7 +155,10 @@
   90% { opacity: 0; transform: scale(.55) rotate(24deg); } }
 .mgx-mark.mark-anim-classic .mgx-mark-tilt img {
   animation: mgv2ClassicGlow calc(5.5s / var(--anim-speed)) ease-in-out infinite; }
-.mgx-mark.mark-anim-classic::before {
+/* SHEEN — the vanilla interface's glass sweep, its own selectable pick again
+   (owner, 2026-09-04: "star and glint should be separate. the star was the OG
+   classic"). This block was classic's ::before; classic keeps only its star. */
+.mgx-mark.mark-anim-sheen::before {
   background: linear-gradient(115deg, transparent 43%, rgba(255, 255, 255, .45) 49%,
     rgba(182, 146, 230, .3) 51%, transparent 57%);
   background-size: 340% 100%;

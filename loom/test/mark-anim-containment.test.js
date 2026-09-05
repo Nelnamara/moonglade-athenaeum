@@ -224,7 +224,7 @@ describe("the scan sees the roster at all", () => {
       ".mgx-mark.mark-anim-aurora::before",
       ".mgx-mark.mark-anim-mist::before",
       ".mgx-mark.mark-anim-mist::after",
-      ".mgx-mark.mark-anim-classic::before",
+      ".mgx-mark.mark-anim-sheen::before",
       ".mgx-mark.mark-anim-classic::after",
       ".mgx-mark.mark-anim-shoot::before",
       ".mgx-mark.mark-anim-eclipse::before",

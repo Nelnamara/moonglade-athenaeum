@@ -1883,7 +1883,10 @@ def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
 # The survivors keep their ORIGINAL ids on purpose -- "classic" is the modernized
 # classic, not a new id -- so an install that already stored a pick keeps wearing the
 # treatment it chose, now rebuilt. moondust is the promoted canvas demo.
-MARK_ANIMS = ["classic", "glow", "shine", "aurora", "twinkle", "shoot",
+# "sheen" split out of classic 2026-09-04 (owner: "star and glint should be
+# separate. the star was the OG classic") -- classic is the star alone; sheen is
+# the vanilla interface's selectable glass sweep, masked to the mark's silhouette.
+MARK_ANIMS = ["classic", "sheen", "glow", "shine", "aurora", "twinkle", "shoot",
               "eclipse", "mist", "prism", "moondust", "none"]
 # Retired by the same workshop. A stored pick of one of these is NOT an error: it
 # renders as classic (load_branding's own validation does that), the picker stops
