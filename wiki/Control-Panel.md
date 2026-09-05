@@ -165,6 +165,36 @@ restores the same blur — nothing else about how popups look or open changes ei
 
 The same switch is on the phone's **Control** screen.
 
+## Identity
+
+The **mark** beside the title and the **skin** the whole suite wears, in one strip at the
+foot of the Maintenance tab, with a small sample showing the two together — a mark and a
+palette are judged as a pair, so they are picked as one.
+
+Free marks and unlocked skins are one click each and apply everywhere immediately; the
+skin is saved to your account and follows you to every device. Anything still locked is
+shown rather than hidden — a gold 🔒 tile that names what unlocks it when you hover over
+it.
+
+Find **Under the Hood** and this strip is replaced by the full **✦ Branding** tab, which
+adds the mark's animation and its speed/size/glow controls, the banner slots, a mark of
+your own to upload, and the **Type** picker below.
+
+### Type
+
+Five curated pairs of faces — one for the italic display voice (titles, headings, the
+sample above) and one for everything else. Tap a pair and both change at once, everywhere.
+
+Both faces come off **your own machine**: nothing is downloaded and nothing is served, so
+the picker costs nothing to load and works with no network at all. A face a particular
+computer doesn't have falls back inside the same pair, which is why each one is a short
+list rather than a single name. Monospaced labels — the small uppercase kickers all over
+the app — never change; they are meant to read as machine type whatever else is on screen.
+
+Your pair is remembered **in this browser**, like the popup-blur switch above and unlike
+the skin: the same account can read Verdana on the phone and Palatino at the desk. It is
+applied before the page paints, so there is no flash of the old face on the way in.
+
 ## Live Mirror
 
 A status readout for the push connection that mirrors each generation the instant it

@@ -17,7 +17,7 @@
 .mgcp-head { flex: none; height: 64px; display: flex; align-items: center; gap: 14px; padding: 0 22px;
   background: linear-gradient(180deg, rgba(26,20,51,.72), rgba(11,9,24,.92));
   border-bottom: 1px solid rgba(255,255,255,.07); }
-.mgcp-title { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 18px; line-height: 1.1; }
+.mgcp-title { font-family: var(--font-hero); font-style: italic; font-size: 18px; line-height: 1.1; }
 .mgcp-titlesub { font-family: ui-monospace, Menlo, monospace; font-style: normal; font-weight: 600; font-size: 9px;
   letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0); margin-top: 3px; }
 .mgcp-headright { margin-left: auto; display: flex; align-items: center; gap: 16px; }
@@ -30,9 +30,9 @@
   display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
 .mgcp-sidekick { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
   letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0); }
-.mgcp-sidehead { font-family: Georgia, serif; font-style: italic; font-size: 15px; margin: 6px 0 10px; }
+.mgcp-sidehead { font-family: var(--font-hero); font-style: italic; font-size: 15px; margin: 6px 0 10px; }
 .mgcp-vital { display: flex; align-items: baseline; gap: 9px; padding: 6px 0; border-bottom: 1px dashed var(--surface0); flex-wrap: wrap; }
-.mgcp-vital b { font-family: Georgia, serif; font-weight: 400; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
+.mgcp-vital b { font-family: var(--font-hero); font-weight: 400; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
 .mgcp-vital span { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); }
 /* Paid/free split under the Credits vital (Account-detail design, drift §37). */
@@ -64,7 +64,7 @@
 
 .mgcp-console { border: 1px solid var(--surface1); border-radius: 14px; background: var(--mantle); padding: 18px 22px; }
 .mgcp-consolehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-.mgcp-consolehead h3 { font-family: Georgia, serif; font-style: italic; font-weight: 400; font-size: 19px; margin: 0; }
+.mgcp-consolehead h3 { font-family: var(--font-hero); font-style: italic; font-weight: 400; font-size: 19px; margin: 0; }
 .mgcp-consolehint { margin-left: auto; font-size: 11.5px; color: var(--subtext); }
 .mgcp-grid { display: grid; gap: 22px; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr) minmax(240px, 320px); align-items: start; }
 @media (max-width: 1000px) { .mgcp-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -139,7 +139,7 @@ button.mgcp-run { margin-left: auto; color: var(--accent); font-size: 11px; curs
 @media (max-width: 900px) { .mgcp-tile2, .mgcp-tile3, .mgcp-tile4, .mgcp-tile5, .mgcp-tile7 { grid-column: span 12; } }
 .mgcp-mkick { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px; letter-spacing: .18em;
   text-transform: uppercase; color: var(--overlay0); }
-.mgcp-tilebig { font-family: Georgia, serif; font-size: 23px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.mgcp-tilebig { font-family: var(--font-hero); font-size: 23px; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 6px; }
 .mgcp-tilesmall { font-size: 12px; color: var(--subtext); margin-top: 6px; }
 .mgcp-tilenote { font-size: 10.5px; margin-top: auto; padding-top: 8px; color: var(--overlay0); transition: color .3s; }
 .mgcp-tilenote.ok { color: var(--emerald); } .mgcp-tilenote.busy { color: var(--accent); }
@@ -186,7 +186,7 @@ button.mgcp-brandnav.on { background: rgba(182,146,230,.14); color: var(--text);
   font-size: 11.5px; color: var(--overlay0); line-height: 1.6; }
 .mgcp-sealed b { color: var(--subtext); }
 .mgcp-brandsec { display: flex; flex-direction: column; gap: 16px; }
-.mgcp-brandh { font-family: Georgia, serif; font-style: italic; font-weight: 400; font-size: 22px;
+.mgcp-brandh { font-family: var(--font-hero); font-style: italic; font-weight: 400; font-size: 22px;
   margin: 0; color: var(--text); }
 
 /* Marks section: the 168px live preview (DC:396) hosting the REAL header mark. It used
@@ -217,6 +217,76 @@ button.mgcp-markbig img { width: 100%; height: 100%; object-fit: cover; }
 label.mgcp-markbig.upload { border-style: dashed; color: var(--subtext); font-size: 18px; }
 label.mgcp-markbig.upload:hover { border-color: var(--accent); color: var(--text); }
 .mgcp-markreplace { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ---- The pre-unlock Identity strip (Identity Chrome handoff C3, #50) ----
+   Mark row + skin row on the left, the mark-on-skin sample on the right. Locked tiles wear
+   the same masking idiom the skin cards do -- gold 🔒, named on hover, never hidden. */
+.mgcp-idstrip { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 14px;
+  align-items: start; margin-top: 10px; }
+.mgcp-idrows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mgcp-idrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mgcp-idlab { flex: none; width: 38px; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .1em; color: var(--overlay0); }
+button.mgcp-idmark, .mgcp-idmark { position: relative; width: 34px; height: 34px; border-radius: 9px;
+  display: grid; place-items: center; overflow: hidden; padding: 0; font-size: 15px;
+  background: var(--surface0); border: 1px solid var(--surface1); color: var(--text);
+  font-family: inherit; cursor: pointer; }
+button.mgcp-idmark img { width: 100%; height: 100%; object-fit: cover; }
+button.mgcp-idmark.on { border-color: var(--gold); }
+button.mgcp-idmark:disabled { cursor: default; opacity: .7; }
+.mgcp-idmark.locked { cursor: not-allowed; font-size: 13px; opacity: .6;
+  border-color: color-mix(in oklab, var(--gold) 35%, transparent); color: var(--overlay0); }
+button.mgcp-idskin { position: relative; width: 38px; height: 26px; border-radius: 6px; padding: 0;
+  border: 1px solid var(--surface1); cursor: pointer; font-family: inherit; }
+/* Active swatch = the handoff's own lighter border, not a second gold cue: gold in this
+   strip means LOCKED (the note and the 🔒 both use it), and a gold ring on the applied
+   skin would be the one colour in the block that means two things. */
+button.mgcp-idskin.on { border-color: rgba(255,255,255,.45); }
+button.mgcp-idskin.locked { cursor: not-allowed; filter: grayscale(.55) brightness(.6); }
+.mgcp-idlock { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; }
+.mgcp-idnote { font-size: 10px; color: var(--gold); }
+.mgcp-idsample { border: 1px solid var(--surface1); border-radius: 11px; padding: 12px;
+  background: rgba(33,31,58,.4); display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 7px; }
+.mgcp-idsample-chip { width: 40px; height: 40px; border-radius: 11px; overflow: hidden;
+  display: grid; place-items: center; font-family: var(--font-hero); font-style: italic;
+  font-size: 20px; color: var(--mantle); }
+.mgcp-idsample-chip img { width: 100%; height: 100%; object-fit: cover; }
+.mgcp-idsample-cap { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+@media (max-width: 760px) {
+  .mgcp-idstrip { grid-template-columns: 1fr; }
+}
+
+/* ---- The type pairing (Identity Chrome handoff C1, "C1 - FONT PICKER") ----
+   Five cards in one row, each showing its own Hero face at 24px as the sample; the
+   selected card takes the lavender border + wash the handoff draws. Every colour is a
+   token. The card samples set font-family INLINE (each card must render in ITS OWN pair,
+   not the applied one), so only geometry lives here -- the same split the skin cards
+   already use. */
+.mgcp-fontrow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+button.mgcp-fontcard { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 6px; border-radius: 10px; cursor: pointer; text-align: center;
+  border: 1px solid var(--surface1); background: rgba(33,31,58,.3); font-family: inherit; }
+button.mgcp-fontcard:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+button.mgcp-fontcard.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: rgba(182,146,230,.1); }
+.mgcp-fontag { font-style: italic; font-size: 24px; line-height: 1; color: var(--text); }
+.mgcp-fontnm { font-size: 9.5px; font-weight: 700; color: var(--text); }
+.mgcp-fontsub { font-size: 8px; color: var(--overlay0); }
+/* The live sample: hero line + body line, both in whatever is APPLIED right now (so they
+   inherit rather than declaring a family), with the mono kicker proving it doesn't move. */
+.mgcp-fontprev { border: 1px solid var(--surface1); border-radius: 12px; padding: 14px 16px;
+  background: rgba(33,31,58,.35); }
+.mgcp-fontprev-hero { font-family: var(--font-hero); font-style: italic; font-size: 24px;
+  line-height: 1.15; color: var(--text); }
+.mgcp-fontprev-body { margin-top: 7px; font-size: 12.5px; line-height: 1.6; color: var(--subtext); }
+.mgcp-fontprev-body b { color: var(--text); }
+.mgcp-fontprev-mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+@media (max-width: 900px) {
+  .mgcp-fontrow { grid-template-columns: repeat(3, 1fr); }
+}
+
 /* DC:922-927 -- animation picker chips (real MARK_ANIMS values, chip form). */
 .mgcp-animchips { display: flex; gap: 8px; flex-wrap: wrap; }
 button.mgcp-animchip { padding: 8px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
@@ -365,7 +435,7 @@ html.mg-noblur .mgcp-sub-scrim { backdrop-filter: none !important; }
   box-shadow: 0 30px 90px rgba(0,0,0,.75); padding: 20px 24px; animation: cpModalIn .28s cubic-bezier(.2,.9,.24,1) both; }
 .mgcp-sub-slab.wide { width: min(940px, calc(100vw - 40px)); }
 .mgcp-sub-titlerow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 13px; }
-.mgcp-sub-titlerow h3 { font-family: Georgia, serif; font-style: italic; font-weight: 400; font-size: 20px; margin: 0; }
+.mgcp-sub-titlerow h3 { font-family: var(--font-hero); font-style: italic; font-weight: 400; font-size: 20px; margin: 0; }
 .mgcp-userrow { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--surface0);
   font-size: 13px; color: var(--subtext); }
 .mgcp-userrow b { color: var(--text); }
@@ -420,7 +490,7 @@ html.mg-noblur .mgcp-pwr-scrim { backdrop-filter: none !important; }
   background-position: center; background-repeat: no-repeat; }
 .mgcp-pwr-mascot.spin { animation: cpSpin 1.9s cubic-bezier(.6,.1,.4,.9) infinite; }
 .mgcp-pwr-mascot.off { filter: grayscale(.85) brightness(.72); }
-.mgcp-pwr-title { font-family: Georgia, "Times New Roman", serif; font-size: 18px; color: var(--text); margin-bottom: 6px; }
+.mgcp-pwr-title { font-family: var(--font-hero); font-size: 18px; color: var(--text); margin-bottom: 6px; }
 .mgcp-pwr-line { font-size: 12px; color: var(--subtext); line-height: 1.55; min-height: 19px; margin-bottom: 13px; }
 .mgcp-pwr-err { font-size: 12px; color: var(--red); margin-bottom: 12px; }
 button.mgcp-pwr-primary { display: inline-block; white-space: nowrap; font-size: 12px; font-weight: 800;
@@ -469,7 +539,7 @@ button.mgcp-pwr-ghost { display: inline-block; white-space: nowrap; margin-top: 
   place-items: center; color: var(--overlay0); border: 1px solid var(--surface1);
   background: linear-gradient(150deg, rgba(58, 52, 96, .5), rgba(10, 8, 24, .6));
   transition: color .5s, background .5s, border-color .5s; }
-.mgbr-glyph span { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 26px; font-style: italic; }
+.mgbr-glyph span { font-family: var(--font-hero); font-size: 26px; font-style: italic; }
 .mgbr-tile.armed .mgbr-glyph { color: var(--emerald); border-color: color-mix(in oklab, var(--emerald) 46%, var(--surface1));
   background: linear-gradient(150deg, rgba(79, 201, 154, .28), rgba(10, 8, 24, .6)); }
 .mgbr-dot { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%;
@@ -590,11 +660,51 @@ button.mgcp-verup:hover { text-decoration: underline; text-underline-offset: 2px
   text-underline-offset: 2px; }
 .mgcp-updwhat { margin: 12px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column;
   gap: 5px; font-size: 11.5px; line-height: 1.5; color: var(--subtext); }
-.mgcp-upderr { margin: 12px 0 0; padding: 9px 11px; border-radius: 9px; max-height: 190px;
-  overflow: auto; white-space: pre-wrap; word-break: break-word;
-  font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; line-height: 1.5;
-  color: var(--red, #f38ba8); background: rgba(243,139,168,.08);
-  border: 1px solid rgba(243,139,168,.35); }
+/* ---- The apply, in place (Identity Chrome handoff C2) ----
+   The same card the confirm was in: three phases, one meter, and -- when the answer is no
+   -- one refusal block where the meter would have been. Every hue below is a token. */
+.mgcp-updsub { font-size: 11.5px; color: var(--subtext); margin-top: 3px; }
+.mgcp-updphases { list-style: none; margin: 15px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.mgcp-updphase { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text); }
+.mgcp-updphase.wait { opacity: .5; }
+.mgcp-updphase-dot { flex: none; width: 16px; height: 16px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 9px; border: 1px solid var(--surface1); }
+.mgcp-updphase.done .mgcp-updphase-dot { color: var(--emerald); border-color: var(--emerald);
+  background: color-mix(in oklab, var(--emerald) 20%, transparent); }
+.mgcp-updphase.now .mgcp-updphase-dot { border-color: var(--lavender); }
+.mgcp-updphase.now .mgcp-updphase-dot i { width: 6px; height: 6px; border-radius: 50%;
+  background: var(--lavender); box-shadow: 0 0 8px var(--lavender);
+  animation: mgcpUpdPulse 1.4s ease-in-out infinite; }
+@keyframes mgcpUpdPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.mgcp-updphase.wait .mgcp-updphase-lab { color: var(--subtext); }
+.mgcp-updphase-t { margin-left: auto; font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+.mgcp-updphase.now .mgcp-updphase-t { color: var(--lavender); }
+/* The meter's width is a function of finished phases -- see UpdateModal. The transition is
+   the only animation here; nothing counts up on a timer. */
+.mgcp-updmeter { margin-top: 14px; height: 5px; border-radius: 3px; overflow: hidden;
+  background: var(--surface1); }
+.mgcp-updmeter i { display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--purple-bright), var(--lavender));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--lavender) 60%, transparent);
+  transition: width .5s cubic-bezier(.2,.9,.24,1); }
+.mgcp-updhold { margin-top: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 9.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+/* Three refusal presentations, one shape: gray offline · gold busy · ruby failed. */
+.mgcp-updrefusal { margin: 14px 0 0; padding: 10px 13px; border-radius: 11px;
+  display: flex; flex-direction: column; gap: 5px; background: rgba(12,10,28,.85);
+  border: 1px solid var(--surface1); max-height: 210px; overflow: auto; }
+.mgcp-updrefusal-kind { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
+.mgcp-updrefusal-line { font-size: 11.5px; line-height: 1.5; color: var(--subtext);
+  white-space: pre-wrap; word-break: break-word; }
+.mgcp-updrefusal-note { font-family: ui-monospace, Menlo, monospace; font-size: 9px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--overlay0); }
+.mgcp-updrefusal.busy { border-color: color-mix(in oklab, var(--gold) 35%, transparent); }
+.mgcp-updrefusal.busy .mgcp-updrefusal-kind { color: var(--gold); }
+.mgcp-updrefusal.failed { border-color: color-mix(in oklab, var(--ruby) 40%, transparent); }
+.mgcp-updrefusal.failed .mgcp-updrefusal-kind { color: var(--ruby); }
 .mgcp-updacts { display: flex; gap: 9px; justify-content: flex-end; padding-top: 16px; }
 button.mgcp-updgo { padding: 9px 18px; border-radius: 10px; font-size: 12.5px; font-weight: 800;
   cursor: pointer; font-family: inherit; color: #241a05; border: 1px solid rgba(212,175,55,.7);

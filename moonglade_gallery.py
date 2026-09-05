@@ -6363,6 +6363,34 @@ def _upscale_const_js():
 
 
 # ---------------------------------------------------------------------------
+# THE PRE-PAINT BOOT SCRIPT, injected into EVERY page head (the React shells and
+# _LOOM_SHELL), immediately before the 401 guard below.
+#
+# Two per-device looks are stored in localStorage and PAINT THE PAGE, so both have to be
+# applied in <head> before the first frame or the app renders in the wrong colours/face
+# and then visibly jumps:
+#   skin   -- html[data-skin], read by every skin rule in DESIGN_TOKENS_CSS.
+#   fonts  -- the System + Hero type pairing (2026-09-04, Identity Chrome handoff C1),
+#             written as inline --font-hero/--font-system custom properties on <html>.
+#             The stored record carries the STACKS themselves, not just an id, precisely
+#             so this script needs no copy of the pairing table -- swapping the
+#             (deliberately provisional) set in gallery/src/lib/fonts.js changes nothing
+#             here. gallery/src/lib/fonts.js reconciles the id against the current table
+#             once the bundle is up.
+# Both reads are wrapped: storage throws outright in private mode / with site data
+# blocked, and an unstyled page is a far better failure than a blank one.
+#
+# ONE COPY, three shells. The skin line used to be hand-pasted into APP_PAGE, LOGIN_PAGE
+# and _LOOM_SHELL separately; a second stored look would have made that three drifting
+# copies of two things instead of one.
+_PREPAINT_BOOT_JS = r"""<script>/* apply the saved skin + type pairing before first paint (no FOUC)
+   -- see _PREPAINT_BOOT_JS in moonglade_gallery.py. Same keys/origin the gallery writes,
+   so a change made there re-dresses the Loom too. */
+try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}
+try{var _ft=JSON.parse(localStorage.getItem('fonts')||'null');if(_ft&&typeof _ft==='object'){if(_ft.hero)document.documentElement.style.setProperty('--font-hero',_ft.hero);if(_ft.system)document.documentElement.style.setProperty('--font-system',_ft.system);}}catch(e){}</script>"""
+
+
+# ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (the React shells and _LOOM_SHELL).
 #
 # Why an interceptor and not a helper at each call site: there are ~90 fetch()
@@ -6419,9 +6447,7 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
-<script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
-   header writes, so switching skin there re-colors the Loom too */
-try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
 /* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
@@ -6430,7 +6456,7 @@ __DESIGN_TOKENS__
    system-ui, so the same components looked different on the two pages. notify.css now also
    states its own family (host-neutral by design), but the shell should not be handing
    anything an unstyled baseline. */
-body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
+body { background: var(--base); margin: 0; font-family: var(--font-system, system-ui, sans-serif); }
 /* The old #jobs-fab/#jobs-tray positioning overrides (bottom:88px to clear the Cast panel's
    own buttons; z-index:401/402 to climb over .lv-overlay's 400) were retired 2026-08-09
    (Claude Design handoff, drift item 39). The Activity control is no longer a body-portaled
@@ -9073,7 +9099,16 @@ def create_app(out_dir: Path):
         mutation off one web click, the same class as publish and the user-admin routes.
 
         Every refusal names its own reason, because "no" without a why is the thing that
-        makes a person start deleting files. The gates:
+        makes a person start deleting files. Each also carries a machine-readable `kind`
+        (2026-09-04, Identity Chrome handoff C2) so the modal can PRESENT it correctly
+        without guessing from the wording: "busy" means come back in a minute and nothing
+        is wrong (a job is running, or an apply already is); "failed" means this install
+        will refuse until something is changed. The third presentation the modal has --
+        offline -- is not a payload at all: it is the absence of one, decided client-side
+        when the request never reached this server. Adding the field rather than
+        string-matching the message is deliberate: the reasons below get reworded (three
+        of them did in v3.7.2), and a UI keyed to their prose would silently mis-colour
+        the next time one does. The gates:
           * confirm + CSRF          -- it was actually asked for, by this session
           * READ_ONLY               -- belt. Not a PixAI spend, but the owner's flag says
                                        "don't change my install", and this changes the
@@ -9105,40 +9140,47 @@ def create_app(out_dir: Path):
         reason: the person who can restart this server should be able to update it."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
-            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+            return jsonify({"error": "Your session expired. Reload the page and try again.",
+                            "kind": "failed"}), 400
         if not body.get("confirm"):
-            return jsonify({"error": "confirm required — the update is never applied silently"}), 400
+            return jsonify({"error": "confirm required — the update is never applied silently",
+                            "kind": "failed"}), 400
         import moonglade_backup as core
         if core.READ_ONLY or core._read_only_now():
             return jsonify({"error": "READ_ONLY is set in config.json — refusing to update "
                                      "this install. Remove it (or set it to false) to allow "
-                                     "this."}), 409
+                                     "this.", "kind": "failed"}), 409
         if not _supervised():
             return jsonify({"error": "Updating needs the managed launcher — start via "
                                      "'Serve Gallery'. (Without it the server would stop "
-                                     "instead of restarting into the new version.)"}), 409
+                                     "instead of restarting into the new version.)",
+                            "kind": "failed"}), 409
         busy = _job_busy()
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
-                                     "(the code can't change while it works).".format(busy)}), 409
+                                     "(the code can't change while it works).".format(busy),
+                            "kind": "busy"}), 409
         rc, branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
         branch = (branch or "").strip()
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's branch: "
-                                     + _redact_host_paths(branch)[:200]}), 409
+                                     + _redact_host_paths(branch)[:200],
+                            "kind": "failed"}), 409
         if branch != "master":
             return jsonify({"error": "this checkout is on '%s', not master — updating a "
                                      "feature branch is out of scope. Switch to master "
-                                     "first." % branch[:60]}), 409
+                                     "first." % branch[:60], "kind": "failed"}), 409
         rc, dirty = _git(["status", "--porcelain"])
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's state: "
-                                     + _redact_host_paths(dirty)[:200]}), 409
+                                     + _redact_host_paths(dirty)[:200],
+                            "kind": "failed"}), 409
         tracked, untracked = split_porcelain(dirty)
         if tracked:
             return jsonify({"error": "this checkout has uncommitted changes — the update "
                                      "would overwrite them. In the way: "
-                                     + _redact_host_paths(", ".join(tracked[:6]))}), 409
+                                     + _redact_host_paths(", ".join(tracked[:6])),
+                            "kind": "failed"}), 409
         # Untracked entries are judged against what the update actually brings, not
         # blocked on sight -- see split_porcelain and untracked_in_the_way. This costs a
         # fetch, but only on a checkout that HAS stray files, and only the fetch the pull
@@ -9150,17 +9192,19 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "couldn't work out what the update brings, so "
                                          "whether your untracked files are in its way is "
                                          "unknown — and this won't guess. git said: "
-                                         + _redact_host_paths(why)[:300]}), 409
+                                         + _redact_host_paths(why)[:300],
+                                "kind": "failed"}), 409
             clash = untracked_in_the_way(untracked, incoming)
             if clash:
                 return jsonify({"error": "an untracked file is where the update needs to "
                                          "write: "
                                          + _redact_host_paths(", ".join(clash[:6]))
-                                         + " — move or delete it, then try again."}), 409
+                                         + " — move or delete it, then try again.",
+                                "kind": "failed"}), 409
             ignored_untracked = len(untracked)
         with _update_lock:
             if _update_state["phase"] not in ("idle", "failed"):
-                return jsonify({"error": "an update is already running"}), 409
+                return jsonify({"error": "an update is already running", "kind": "busy"}), 409
             _update_state.update(phase="pulling", error="", at=time.time())
 
         def _restart():
@@ -14505,7 +14549,7 @@ def create_app(out_dir: Path):
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 {# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
    the tokens win any same-specificity :root collision. Same idiom BASE_HTML and
@@ -14563,7 +14607,7 @@ __UPSCALE_CONST__
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 <style>
 __DESIGN_TOKENS__

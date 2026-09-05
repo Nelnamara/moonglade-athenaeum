@@ -9,6 +9,7 @@ import SetupWizardMobile from "./components/SetupWizardMobile.jsx";
 import useIsMobile from "./hooks/useIsMobile.js";
 import { installNotify, NotifyRoot } from "./notify/index.jsx";
 import { syncBlurClass } from "./lib/blurPref.js";
+import { syncPairing } from "./lib/fonts.js";
 import "./styles.css";
 
 /* THE BLUR SWITCH, applied before anything can render (owner ruling 2026-09-04; see
@@ -21,6 +22,16 @@ import "./styles.css";
    Python shell (unlike the skin, which paints the page itself and so needs its own inline
    pre-paint script in APP_PAGE). */
 syncBlurClass(document.documentElement);
+
+/* THE TYPE PAIRING (2026-09-04, Identity Chrome handoff C1). Unlike the blur switch above,
+   this is a RECONCILE, not the first application: fonts paint the page, so both served
+   shells and the dev shell already applied the stored stacks in <head>
+   (moonglade_gallery.py's _PREPAINT_BOOT_JS, alongside data-skin). This pass exists for
+   the one thing that script deliberately cannot do -- judge the stored id against the
+   CURRENT pairing table, so a browser holding a pick this build has changed (or dropped;
+   the five-pairing set is explicitly provisional) lands on the table's stacks rather than
+   its own stale copy. See lib/fonts.js. */
+syncPairing(document.documentElement);
 
 const boot = window.MG_BOOT || {};
 // boot.authenticated is only ever false on /login's non-bootstrap render (see

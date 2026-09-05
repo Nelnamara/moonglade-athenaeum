@@ -16,7 +16,7 @@
   border-radius: 6px;
   background: var(--surface0, #211f3a);
   border: 1px solid var(--surface1, #3a3460);
-  font: 12.5px/1.4 system-ui, sans-serif;
+  font: 12.5px/1.4 var(--font-system, system-ui, sans-serif);
   color: var(--text, #d6d2e2);
 }
 .cost-badge[data-state="idle"],

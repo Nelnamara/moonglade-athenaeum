@@ -9,6 +9,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
+import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -295,7 +296,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
-    update, updOpen, setUpdOpen, updPhase, updErr, applyUpdate, closeUpdate,
+    update, updOpen, setUpdOpen, updPhase, updRefusal, updSteps, applyUpdate, closeUpdate,
   } = useControlPanel();
   // Console heart: pipelines (the run buttons) vs ledger (the run history) --
   // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented
@@ -331,7 +332,11 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
       // the update is running whatever this key does, and closing the one surface that
       // reports it would leave the user watching nothing.
       if (updOpen) {
-        if (updPhase !== "applying") closeUpdate();
+        // Inert from the moment the apply starts until the page reloads out from under it
+        // ("done" is the third ✓ still on screen): the update is running whatever this key
+        // does, and closing the one surface that reports it would leave the user watching
+        // nothing.
+        if (updPhase !== "applying" && updPhase !== "done") closeUpdate();
         return;
       }
       if (subOverlay) setSubOverlay(null);
@@ -503,7 +508,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                     title={"You are on " + (update.current || "?") + "; " + update.latest + " is out"}
                     onClick={() => setUpdOpen(true)}>
                     <span className="dot" aria-hidden="true">●</span>
-                    {updPhase === "applying" ? "updating…"
+                    {updPhase === "applying" || updPhase === "done" ? "updating…"
                       : update.latest + " available — view"}
                   </button>
                 ) : (boot?.build_stamp || "—")}
@@ -880,13 +885,11 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                         </button>
                       </div>
                     ) : (
-                      skins.length > 0 && (
-                        <div className="mgcp-tile mgcp-tile7" style={{ gridColumn: "span 12" }}>
-                          <div className="mgcp-mkick">Skins</div>
-                          <div className="mgcp-tilesmall">Cosmetic palette swaps for the whole suite — unlock more by earning epic achievements in the gallery (🏆).</div>
-                          <SkinsRow skins={skins} active={activeSkin} onPick={pickSkin} />
-                        </div>
-                      )
+                      <div className="mgcp-tile mgcp-tile7" style={{ gridColumn: "span 12" }}>
+                        <IdentityStrip summary={summary} onSaved={fetchSummary}
+                          skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin}
+                          achievements={achievements} />
+                      </div>
                     )}
                   </div>
                 </>
@@ -914,7 +917,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
       )}
       {updOpen && update && (
-        <UpdateModal update={update} phase={updPhase} error={updErr}
+        <UpdateModal update={update} phase={updPhase} refusal={updRefusal} steps={updSteps}
           onApply={applyUpdate} onClose={closeUpdate} />
       )}
     </>
@@ -949,6 +952,113 @@ const SKIN_SW = {
   ember: ["#160c0c", "#e8935f", "#e0a94b", "#ffcf7a"],
   verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
 };
+
+/* THE IDENTITY STRIP -- what a locked install gets instead of nothing (Identity Chrome
+   handoff C3, and the 2026-07-27 three-layers design behind it, #50).
+
+   Before "Under the Hood" is earned there is no Branding tab, and what stood here was a
+   lone Skins row: the mark -- the single most visible piece of the app's identity, and one
+   /api/branding has always let any logged-in session change -- was simply not offered
+   until an achievement landed. One strip now ships by default with BOTH, plus a sample
+   that paints them together, because a mark and a skin are judged as a pair and were being
+   chosen apart.
+
+   Nothing here is a new capability: the mark row POSTs the same /api/branding the Branding
+   tab's own picker does, and the skins come from the same roster with the same earned
+   flags. What is gated stays gated, in the SAME masking idiom the skin cards already use
+   -- 🔒 in gold, named on hover, not clickable, never hidden. Post-unlock this strip is
+   replaced (not supplemented) by the "Branding & skins" pointer tile above, so the full
+   tab is the one home for all of it. */
+function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achievements }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const marks = (summary.branding && summary.branding.marks) || [];
+  const curId = summary.branding && summary.branding.mark;
+  const cur = marks.find((m) => m.id === curId) || marks[0] || null;
+  // The one real gated mark this app has: the custom upload, behind The Great Library.
+  // Everything in `marks` is free (list_marks has no other gate) -- so the strip masks
+  // exactly what is masked, rather than inventing locked tiles to fill the row.
+  const greatLibrary = (achievements?.achievements || []).some(
+    (a) => a.id === "the-great-library" && a.earned
+  );
+  const customMark = marks.find((m) => m.kind === "upload") || null;
+  /* Swatch gradient = the skin's own accent -> its own highlight, straight out of SKIN_SW
+     (the classic Trophy Hall's relic-row table, already the one source for these five
+     palettes). ONE rule for all five rather than the handoff's five hand-picked pairs:
+     three of the comp's five ARE this rule, its nightfallen stop (#33236d) is in no
+     token table at all, and the house rule here is that a colour comes from the DS. The
+     one visible difference from the comp is moonglade's swatch, lavender->gold instead of
+     lavender->emerald. */
+  const sw = SKIN_SW[activeSkin] || SKIN_SW.moonglade;
+  const skinGrad = "linear-gradient(135deg, " + sw[1] + ", " + sw[3] + ")";
+
+  const pickMark = async (id) => {
+    if (busy) return;
+    setBusy(true); setErr("");
+    const d = await apiPost("/api/branding", { mark: id });
+    setBusy(false);
+    if (d.error) { setErr("⚠ " + d.error); return; }
+    onSaved();
+  };
+  const pickSkinHere = async (sk) => {
+    if (!sk.earned || busy) return;
+    setErr("");
+    const d = await onPickSkin(sk.id);
+    if (d && d.error) setErr("⚠ " + sk.name + ": " + d.error);
+  };
+
+  return (
+    <>
+      <div className="mgcp-mkick">Identity</div>
+      <div className="mgcp-idstrip">
+        <div className="mgcp-idrows">
+          <div className="mgcp-idrow">
+            <span className="mgcp-idlab">MARK</span>
+            {marks.map((m) => (
+              <button type="button" key={m.id} disabled={busy}
+                className={"mgcp-idmark" + (m.id === curId ? " on" : "")}
+                onClick={() => pickMark(m.id)} title={m.label || m.id}>
+                {m.png
+                  ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
+                  : (m.id === "logo" ? "🌙" : "◈")}
+              </button>
+            ))}
+            {!greatLibrary && !customMark && (
+              <span className="mgcp-idmark locked"
+                title="A mark of your own — unlocks with The Great Library">🔒</span>
+            )}
+          </div>
+          <div className="mgcp-idrow">
+            <span className="mgcp-idlab">SKIN</span>
+            {skins.map((sk) => {
+              const c = SKIN_SW[sk.id] || SKIN_SW.moonglade;
+              return (
+                <button type="button" key={sk.id}
+                  className={"mgcp-idskin" + (sk.id === activeSkin ? " on" : "") + (sk.earned ? "" : " locked")}
+                  style={{ background: "linear-gradient(135deg, " + c[1] + ", " + c[3] + ")" }}
+                  onClick={() => pickSkinHere(sk)}
+                  title={sk.earned ? sk.name : sk.name + " — 🔒 " + (sk.unlock || "locked")}>
+                  {!sk.earned && <span className="mgcp-idlock" aria-hidden="true">🔒</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mgcp-idnote">🔒 more of both unlock with achievements — masked here, named on hover</div>
+          {err && <div className="mgcp-usererr">{err}</div>}
+        </div>
+        {/* The pairing, judged together: this repaints on either row's click. */}
+        <div className="mgcp-idsample">
+          <span className="mgcp-idsample-chip" style={{ background: skinGrad }}>
+            {cur && cur.png
+              ? <img src={cur.png} alt="" onError={(e) => e.currentTarget.remove()} />
+              : "◈"}
+          </span>
+          <span className="mgcp-idsample-cap">live sample</span>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function SkinsRow({ skins, active, onPick }) {
   // Local, not lifted: the achievements fetch is a mount-time snapshot (see the "picking
@@ -1142,6 +1252,9 @@ function MarksSection({
           )}
         </div>
       </div>
+      {/* Identity Chrome handoff C1: the type pairing sits UNDER THE MARKS ROW, inside the
+          Branding tab, behind the same unlock -- one tap sets both faces. */}
+      <FontsRow />
       <div className="mgcp-mkick">Animation</div>
       <div className="mgcp-animchips">
         {anims.map((a) => (
@@ -1194,6 +1307,50 @@ function MarksSection({
       )}
       {msg && <div className="mgcp-tilenote">{msg}</div>}
     </div>
+  );
+}
+
+/* THE TYPE PAIRING (Identity Chrome handoff C1) -- five curated System+Hero pairs, one tap
+   sets both faces. Every stack is made of faces already on the machine: nothing downloads,
+   nothing is served, and each pairing IS its own fallback list. See lib/fonts.js for the
+   set (deliberately provisional -- the owner picked 1a as "a start") and for the storage /
+   pre-paint mechanics (which are not).
+
+   Local state, no fetch, no save button: this is a per-DEVICE preference in localStorage,
+   exactly like the blur switch below, so a click is the whole transaction. The preview
+   underneath renders in the CHOSEN pair rather than describing it -- and because the pick
+   also applies app-wide immediately, the panel around it re-dresses at the same moment. */
+function FontsRow() {
+  const [pairId, setPairId] = useState(() => (readPairing() || pairingById(DEFAULT_PAIRING_ID)).id);
+  const cur = pairingById(pairId) || pairingById(DEFAULT_PAIRING_ID);
+  const pick = (id) => setPairId(setPairing(id).id);
+  return (
+    <>
+      <div className="mgcp-mkick">Type</div>
+      <div className="mgcp-fontrow">
+        {PAIRINGS.map((p) => (
+          <button type="button" key={p.id}
+            className={"mgcp-fontcard" + (p.id === pairId ? " on" : "")}
+            onClick={() => pick(p.id)} title={p.name + " — " + p.sub}>
+            <span className="mgcp-fontag" style={{ fontFamily: p.hero }}>Ag</span>
+            <span className="mgcp-fontnm">{p.name}</span>
+            <span className="mgcp-fontsub">{p.sub}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mgcp-fontprev">
+        <div className="mgcp-fontprev-hero">The Athenaeum keeps the receipts</div>
+        <div className="mgcp-fontprev-body">
+          Body and controls render in the System face.{" "}
+          <b>Bold weights</b> and <span className="mgcp-fontprev-mono">mono kickers</span> are unaffected.
+        </div>
+      </div>
+      <div className="mgcp-tilesmall">
+        Both faces come from your own machine — nothing is downloaded, and a face this
+        computer doesn't have falls back inside the same pair. Remembered per device, like
+        the skin.
+      </div>
+    </>
   );
 }
 
@@ -1804,43 +1961,108 @@ export function TrashSubOverlay({ isLocal, onClose }) {
   );
 }
 
-/* The update confirm -- the one click that is never silent. Current -> new version, the
-   release's own title and notes link, and a plain account of what is about to happen,
-   because "Update now" on a server you are using deserves to say what it will do to it.
-   While applying, the buttons go quiet and the phase speaks; a failure holds the tool's
-   VERBATIM words (git's or pip's), which is the thing that actually tells you the fix. */
-export function UpdateModal({ update, phase, error, onApply, onClose }) {
-  const busy = phase === "applying";
+/* THE UPDATE MODAL -- the one click that is never silent, and (Identity Chrome handoff C2)
+   the one card that never hands off to another surface. It opens as the confirm: current
+   -> new version, the release's own title and notes link, and a plain account of what is
+   about to happen, because "Update now" on a server you are using deserves to say what it
+   will do to it. Pressing it MORPHS this same card in place -- the "what happens" list and
+   the buttons give way to three phases and one meter, and the card never closes, moves or
+   re-titles under the pointer that just pressed it.
+
+   The three phases advance on the server's REAL transitions (useControlPanel.js's
+   applyUpdate polls /api/update/status; each finished phase is stamped with the time it
+   actually took), and the meter is a function of how many have finished -- there is no
+   timed animation pretending to know how long a pull takes.
+
+   A refusal replaces the METER, not the modal, in one of exactly three presentations the
+   handoff draws: offline gray, busy gold, failed ruby. All three are tokens. The failed
+   one keeps the tool's VERBATIM words (git's or pip's), which is the thing that actually
+   tells you the fix. */
+const UPD_PHASE_HINT = {
+  offline: "nothing was touched",
+  busy: "nothing was touched — try again in a moment",
+  failed: "nothing was touched",
+};
+
+export function UpdateModal({ update, phase, refusal, steps, onApply, onClose }) {
+  const busy = phase === "applying" || phase === "done";
+  const running = !!steps && busy;
+  const doneCount = (steps || []).filter((s) => s.state === "done").length;
+  const title = phase === "done" ? "Updated to " + update.latest
+    : running ? "Applying " + update.latest
+      : "Update available";
   return (
     <>
       <div className="mgcp-pwr-scrim" onClick={busy ? undefined : onClose} />
       <div className="mgcp-pwr-host">
         <div className="mgcp-pwr-card" role="dialog" aria-label="Update available">
-          <div className="mgcp-pwr-title">Update available</div>
-          <div className="mgcp-updver">
-            <span className="cur">{update.current || "?"}</span>
-            <span className="arr" aria-hidden="true">→</span>
-            <span className="new">{update.latest}</span>
-          </div>
-          {update.title ? <div className="mgcp-updname">{update.title}</div> : null}
-          {update.notes_url ? (
+          <div className="mgcp-pwr-title">{title}</div>
+          {running ? (
+            <div className="mgcp-updsub">The library stays put; only the app restarts.</div>
+          ) : (
+            <div className="mgcp-updver">
+              <span className="cur">{update.current || "?"}</span>
+              <span className="arr" aria-hidden="true">→</span>
+              <span className="new">{update.latest}</span>
+            </div>
+          )}
+          {!running && update.title ? <div className="mgcp-updname">{update.title}</div> : null}
+          {!running && update.notes_url ? (
             <a className="mgcp-updnotes" href={update.notes_url} target="_blank"
               rel="noopener noreferrer">Release notes ↗</a>
           ) : null}
-          <ul className="mgcp-updwhat">
-            <li>The update is pulled atomically — if it can't apply cleanly, nothing changes.</li>
-            <li>Dependencies are installed only if they changed in this release.</li>
-            <li>The server restarts (~10 seconds). This tab reloads itself when it is back.</li>
-          </ul>
-          {error ? <pre className="mgcp-upderr">{error}</pre> : null}
-          <div className="mgcp-updacts">
-            <button type="button" className="mgcp-toolbtn" onClick={onClose} disabled={busy}>
-              {phase === "failed" ? "Close" : "Not now"}
-            </button>
-            <button type="button" className="mgcp-updgo" onClick={onApply} disabled={busy}>
-              {busy ? "updating…" : phase === "failed" ? "Try again" : "Update now"}
-            </button>
-          </div>
+
+          {running ? (
+            <>
+              <ol className="mgcp-updphases">
+                {steps.map((s) => (
+                  <li key={s.key} className={"mgcp-updphase " + s.state}>
+                    <span className="mgcp-updphase-dot" aria-hidden="true">
+                      {s.state === "done" ? "✓" : s.state === "now" ? <i /> : null}
+                    </span>
+                    <span className="mgcp-updphase-lab">{s.label}</span>
+                    <span className="mgcp-updphase-t">
+                      {s.state === "done"
+                        ? (s.note || (s.secs != null ? s.secs.toFixed(1) + "s" : "done"))
+                        : s.state === "now" ? "now" : s.note}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              {/* The meter is the phase count, not a clock: it can only move when a phase
+                  really finishes. CSS eases the width change so it reads as motion. */}
+              <div className="mgcp-updmeter">
+                <i style={{ width: [8, 38, 72, 100][doneCount] + "%" }} />
+              </div>
+              <div className="mgcp-updhold">
+                {phase === "done" ? "done · reloading into the new version"
+                  : "do not close · resumes on its own"}
+              </div>
+            </>
+          ) : refusal ? (
+            <div className={"mgcp-updrefusal " + refusal.kind}>
+              <span className="mgcp-updrefusal-kind">{refusal.kind}</span>
+              <span className="mgcp-updrefusal-line">{refusal.line}</span>
+              <span className="mgcp-updrefusal-note">{UPD_PHASE_HINT[refusal.kind]}</span>
+            </div>
+          ) : (
+            <ul className="mgcp-updwhat">
+              <li>The update is pulled atomically — if it can't apply cleanly, nothing changes.</li>
+              <li>Dependencies are installed only if they changed in this release.</li>
+              <li>The server restarts. This tab reloads itself when it is back.</li>
+            </ul>
+          )}
+
+          {!running && (
+            <div className="mgcp-updacts">
+              <button type="button" className="mgcp-toolbtn" onClick={onClose}>
+                {refusal ? "Close" : "Not now"}
+              </button>
+              <button type="button" className="mgcp-updgo" onClick={onApply}>
+                {refusal ? "Try again" : "Update now"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

@@ -19,7 +19,7 @@
 .ctm-statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 8px; }
 .ctm-statcard { border: 1px solid var(--surface1); border-radius: 12px; background: var(--mantle);
   padding: 12px 14px; }
-.ctm-statnum { font-family: Georgia, serif; font-size: 22px; line-height: 1.15;
+.ctm-statnum { font-family: var(--font-hero); font-size: 22px; line-height: 1.15;
   font-variant-numeric: tabular-nums; }
 .ctm-statlabel { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 3px; }

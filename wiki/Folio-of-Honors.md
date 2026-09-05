@@ -66,11 +66,16 @@ Three tabs across the top:
 
 - **Summary** — your six most recent unlocks with the date you earned them, plus a
   progress bar for the overall roster and for each category.
-- **All** — an auto-rotating showcase of your active ladder's tiers up top, a badge row
-  to switch between all 10 ladders, that ladder's tiers as cards, then every ladder in
-  turn under its own divider, then Milestones/Masteries/Feats the same way. Earned
-  cards light up and carry a one-line commentary from the narrator; locked ones show a
-  progress bar and `current / threshold`.
+- **All** — an auto-rotating showcase of your active ladder's rungs up top, then a badge
+  row to switch between all 10 ladders, then every ladder in turn under its own divider,
+  then Milestones/Masteries/Feats the same way. Earned cards light up and carry a one-line
+  commentary from the narrator; locked ones show a progress bar and `current / threshold`.
+  Each ladder's badge in that row wears **the art of the highest rung you have earned on
+  it**, ringed in that rung's rarity colour and marked with its number — so the row reads
+  as how far up each track you are, and a badge upgrades itself the moment a higher rung
+  lands. A track you have not started shows its first rung, dimmed. Every rung appears
+  exactly once on this tab, in *Every rung, every ladder*; the ladder you have selected is
+  detailed by the showcase at the top rather than repeated as a second grid.
 - **Statistics** — achieved/points/feats at a glance, plus breakdowns by category, by
   rarity, and by ladder completion, and underneath all the raw numbers behind the
   thresholds: images archived, videos, collections, models used, published works, tagged
@@ -102,10 +107,12 @@ and the void-touched **Nightfallen**) and three earned. A card tells you up fron
 unlocks one (**★ unlocks … skin**), so the Folio itself is the map — and unlocking all
 five earns **Skin-Changer**.
 
-Skins are applied from the **Control Panel** (⚙ Panel → **🎨 Skins**), not from the
-Hall — all the cosmetics live together. Your choice is saved server-side, so it follows
-you to every device and every page of the suite. Picking a locked skin is refused by the
-server, so there's nothing to cheat.
+Skins are applied from the **Control Panel**, in its **Identity** strip, not from the
+Hall — all the cosmetics live together, and the strip pairs the skins with the mark that
+sits beside the title so you can judge the two together. Your choice is saved server-side,
+so it follows you to every device and every page of the suite. Picking a locked skin is
+refused by the server, so there's nothing to cheat. Once **Under the Hood** is found, the
+strip gives way to the full **✦ Branding** tab.
 
 ## Where progress comes from
 

@@ -74,9 +74,9 @@ html.mg-noblur .mgclaim-scrim {
   border: 1.5px solid #fff3c4; box-shadow: inset 0 0 0 2px rgba(169,121,26,.6), 0 4px 10px rgba(0,0,0,.4);
   animation: mgclaimCoinJump .48s cubic-bezier(.25,.65,.35,1) both; }
 
-.mgclaim-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+.mgclaim-title { font-family: var(--font-hero); font-style: italic;
   font-size: 18px; color: var(--text); margin-bottom: 4px; }
-.mgclaim-amount { font-family: Georgia, serif; font-weight: 400; font-size: 34px;
+.mgclaim-amount { font-family: var(--font-hero); font-weight: 400; font-size: 34px;
   line-height: 1.1; color: var(--emerald); font-variant-numeric: tabular-nums; margin-bottom: 6px; }
 .mgclaim-line { font-size: 12px; color: var(--subtext); line-height: 1.5; margin-bottom: 18px; }
 .mgclaim-err { font-size: 12px; color: var(--red); margin-bottom: 12px; }

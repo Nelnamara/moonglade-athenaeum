@@ -7,8 +7,24 @@
    token here if the skin system genuinely has no equivalent -- and then expect
    skins not to touch it. */
 :root {
-  /* --serif is the only local token: DESIGN_TOKENS_CSS has no font stack. */
-  --serif: Georgia, "Times New Roman", serif;
+  /* THE TWO FACES (2026-09-04, Identity Chrome handoff C1). DESIGN_TOKENS_CSS has no font
+     stack, so the app's type lives here. --font-hero is the italic-serif display voice
+     (page titles, modal heads, plinths); --font-system is body text, controls and labels.
+     Mono kickers are deliberately outside the scheme -- they stay written out as
+     ui-monospace wherever they appear, because a kicker reads as machine type whatever
+     face the rest of the page wears.
+
+     These two values are the HOUSE pairing, byte-for-byte what shipped before the picker
+     existed, so an install that never touches it is unchanged. The Branding tab's font
+     picker overrides them as INLINE custom properties on <html> -- set before first paint
+     by the shells' own boot script (moonglade_gallery.py's _PREPAINT_BOOT_JS, the same
+     one that applies data-skin) and reconciled by gallery/src/lib/fonts.js. Inline wins
+     over :root, so the two can never disagree about which face is showing. */
+  --font-hero: Georgia, "Times New Roman", serif;
+  --font-system: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* --serif was the only local token before the pair above; it is kept as an alias so the
+     two rules already written against it follow the hero face for free. */
+  --serif: var(--font-hero);
   /* --cyan is the Loom colour's local alias; the app's token is --loomc. */
   --cyan: var(--loomc, #47cbc3);
 }
@@ -25,7 +41,7 @@
    effect, and it feature-detects rather than sniffing.) */
 html { color-scheme: dark; scrollbar-gutter: stable; }
 body { margin: 0; background: var(--mantle); color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  font: 14px/1.5 var(--font-system); }
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -171,7 +187,7 @@ button:disabled { cursor: default; }
    nothing rendered a .gd element any more. */
 .gd-lbl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
 .gd-prompt { min-height: 96px; background: rgba(20, 17, 40, .55); border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 10px; color: var(--text); font: 12.5px/1.5 system-ui; padding: 8px 10px;
+  border-radius: 10px; color: var(--text); font: 12.5px/1.5 var(--font-system); padding: 8px 10px;
   resize: vertical; }
 .gd-prompt:disabled { opacity: .45; }
 .gd-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; row-gap: 6px; }

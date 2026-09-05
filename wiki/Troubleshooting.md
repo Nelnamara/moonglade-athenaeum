@@ -88,7 +88,11 @@ worth an error banner on a Panel you opened to do something else. `git pull` by 
 works, and the Panel tries again the next time you open it.
 
 ## "Update now" is refused
-The modal names the reason. The usual ones:
+The refusal appears inside the update window itself, where the progress would have been,
+and it is colour-coded: **grey** means the request never reached the server at all (you are
+offline — nothing was attempted), **gold** means come back in a moment (something is still
+running), and **red** means this install will keep refusing until something is changed. The
+window names the reason either way. The usual ones:
 
 - **The server wasn't started through `Serve Gallery.pyw`.** Only the launcher relaunches the
   app after an update — without it the server would simply stop.

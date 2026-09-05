@@ -116,7 +116,7 @@
   letter-spacing: .2em; text-transform: uppercase; color: var(--overlay0);
 }
 .mgfo-h1 {
-  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;
+  font-family: var(--font-hero); font-style: italic; font-weight: 400;
   font-size: 32px; line-height: 1.12; color: var(--text); margin-top: 8px; text-wrap: balance;
 }
 .mgfo-rule {
@@ -136,7 +136,7 @@
 }
 .mgfo-stat-lab.feat { color: var(--gunmetal); }
 .mgfo-stat-val {
-  font-family: Georgia, serif; font-size: 22px; line-height: 1.1; color: var(--text);
+  font-family: var(--font-hero); font-size: 22px; line-height: 1.1; color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .mgfo-stat-val.gold { color: var(--gold); }
@@ -213,7 +213,7 @@
 .mgfo-recico img { width: 100%; height: 100%; object-fit: cover; }
 .mgfo-rectxt { flex: 1 1 auto; min-width: 0; }
 .mgfo-recnm {
-  font-family: Georgia, serif; font-size: 15px; color: var(--text);
+  font-family: var(--font-hero); font-size: 15px; color: var(--text);
 }
 .mgfo-recds {
   font-size: 11.5px; font-style: italic; color: var(--subtext); margin-top: 2px;
@@ -263,7 +263,7 @@
   border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(9, 7, 22, .6); padding: 11px 14px;
 }
 .mgfo-reachtop { display: flex; align-items: baseline; gap: 9px; }
-.mgfo-reachtop b { font-family: Georgia, serif; font-weight: 400; font-size: 14.5px; color: var(--text); white-space: nowrap; }
+.mgfo-reachtop b { font-family: var(--font-hero); font-weight: 400; font-size: 14.5px; color: var(--text); white-space: nowrap; }
 .mgfo-reachnote { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
 .mgfo-reachpts { font-size: 10.5px; color: var(--gold); }
 .mgfo-reachcard .mgfo-bar { margin-top: 8px; }
@@ -330,14 +330,25 @@
 }
 .mgfo-lb-img img { width: 100%; height: 100%; object-fit: cover; transition: transform .18s; }
 .mgfo-ladderbadge:hover .mgfo-lb-img img { transform: scale(1.08); }
-.mgfo-ladderbadge.zero .mgfo-lb-img { filter: grayscale(.75) brightness(.45); }
+/* THE FACE (handoff C4). A track with a rung earned wears that rung's own rarity colour as
+   its ring and glow (--tc, set by the mgfo-t-* class on the badge itself) and badges the
+   rung number; a track with nothing earned shows rung 1's art at the handoff's dim --
+   grayscale .6 / brightness .6, lighter than the old .75/.45 so the art still reads. */
+.mgfo-ladderbadge.zero .mgfo-lb-img { filter: grayscale(.6) brightness(.6); }
+.mgfo-ladderbadge.faced .mgfo-lb-img { outline-color: var(--tc);
+  box-shadow: 0 0 14px -1px color-mix(in srgb, var(--tc) 45%, transparent); }
+.mgfo-lb-rung { position: absolute; right: 5px; bottom: 5px; border-radius: 4px; padding: 1px 5px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 800;
+  color: var(--tc); background: rgba(5, 4, 13, .8); }
+/* Selection still wins over the rarity ring -- which track you are LOOKING at has to be
+   unambiguous, and it is the one state the rarity colour could otherwise be mistaken for. */
 .mgfo-ladderbadge.on .mgfo-lb-img { outline-color: var(--accent); box-shadow: 0 0 16px -2px var(--accent); }
 .mgfo-lb-pips { display: flex; gap: 2px; }
 .mgfo-lb-pips i { width: 5px; height: 5px; border-radius: 50%; background: var(--surface1); }
 .mgfo-lb-pips i.mgfo-t-common, .mgfo-lb-pips i.mgfo-t-rare, .mgfo-lb-pips i.mgfo-t-epic,
 .mgfo-lb-pips i.mgfo-t-legendary, .mgfo-lb-pips i.mgfo-t-feat { background: var(--tc); }
 .mgfo-lb-name {
-  margin: 0; font-family: Georgia, serif; font-size: 12.5px; text-align: center;
+  margin: 0; font-family: var(--font-hero); font-size: 12.5px; text-align: center;
   line-height: 1.25; width: 100%; color: var(--overlay0);
 }
 .mgfo-ladderbadge.on .mgfo-lb-name { color: var(--lavender); }
@@ -397,7 +408,7 @@
   text-transform: uppercase; color: var(--tc); transition: color .4s ease;
 }
 .mgfo-plinth-name {
-  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;
+  font-family: var(--font-hero); font-style: italic; font-weight: 400;
   font-size: 29px; line-height: 1.1; color: var(--text);
 }
 .mgfo-plinth-rule {
@@ -485,7 +496,7 @@
 .mgfo-card-badge { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
 .mgfo-card-body { flex: 1 1 auto; min-width: 0; }
 .mgfo-card-nm {
-  font-family: Georgia, serif; font-size: 15px; color: var(--text);
+  font-family: var(--font-hero); font-size: 15px; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mgfo-card-ds {

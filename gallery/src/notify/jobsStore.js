@@ -70,6 +70,16 @@ function toastTransitions(rows) {
     // credits" at the moment of the click, seconds before this poll. The tracker LINE is
     // what this feature adds; the toast was never missing.
     if (j.type === "claim") { last[j.job_id] = st; return; }
+    // THE OLD UPDATE SUCCESS TOAST, retired 2026-09-04 (Identity Chrome handoff C2: "the
+    // modal IS the receipt"). An update row is born terminal the same way a claim row is
+    // -- the server writes "Updated Moonglade / done" and only THEN restarts -- so the
+    // rule below read its first appearance as a just-finished job and fired
+    // "Updated Moonglade — done / Added to your gallery." Wrong twice over: nothing was
+    // added to the gallery, and the update modal was at that moment sitting right there
+    // showing its own three-phase account of the same event. The tracker LINE stays (the
+    // activity log is the only record of an update that failed while nobody was watching);
+    // the toast was the duplicate.
+    if (j.type === "update") { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";

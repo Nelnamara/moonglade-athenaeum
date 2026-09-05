@@ -33,7 +33,7 @@
 
 .glm-stage { position: fixed; inset: 0; display: flex; flex-direction: column;
   background: var(--base); color: var(--text); overflow: hidden;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  font-family: var(--font-system); }
 
 /* ---- hero (persistent chrome above every tab, DC lines 45-62) ---- */
 .glm-hero { position: relative; flex: none; height: 172px; overflow: hidden; }
@@ -93,7 +93,7 @@
   border: 1px solid color-mix(in srgb, var(--lavender) 42%, transparent); }
 .glm-hero-mark img { width: 100%; height: 100%; object-fit: cover; }
 .glm-hero-brandtext { min-width: 0; max-width: 195px; }
-.glm-hero-name { font-family: Georgia, "Times New Roman", serif; font-size: 15px; font-weight: 700;
+.glm-hero-name { font-family: var(--font-hero); font-size: 15px; font-weight: 700;
   line-height: 1.05; text-shadow: 0 2px 9px rgba(0,0,0,.8);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .glm-hero-flavour { font-size: 9px; font-style: italic; color: var(--subtext); cursor: pointer;
@@ -292,7 +292,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-screen-back { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
   font-size: 20px; line-height: 1; color: var(--overlay0); background: none; border: none;
   cursor: pointer; padding: 0; font-family: inherit; }
-.glm-screen-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px; color: var(--text); }
+.glm-screen-title { font-family: var(--font-hero); font-size: 15px; color: var(--text); }
 .glm-screen-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 13px; }
 
@@ -301,7 +301,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 10px; padding: 60px 28px; min-height: calc(100% - 120px); }
 .glm-placeholder-icon { font-size: 34px; color: var(--lavender); opacity: .7; }
-.glm-placeholder-title { font-family: Georgia, "Times New Roman", serif; font-size: 18px; color: var(--text); }
+.glm-placeholder-title { font-family: var(--font-hero); font-size: 18px; color: var(--text); }
 .glm-placeholder-note { font-size: 12px; line-height: 1.6; color: var(--subtext); max-width: 260px; }
 
 @media (prefers-reduced-motion: reduce) {

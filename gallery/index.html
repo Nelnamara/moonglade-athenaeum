@@ -18,6 +18,14 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Moonglade">
   <link rel="apple-touch-icon" href="/icon-180.png">
+  <!-- Dev twin of moonglade_gallery.py's _PREPAINT_BOOT_JS: the saved skin and the saved
+       type pairing both paint the page, so both are applied before the first frame here
+       too. Without it `npm run dev` renders the house look and then jumps to the stored
+       one the moment lib/fonts.js reconciles -- the exact flash production doesn't have. -->
+  <script>
+    try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}
+    try{var _ft=JSON.parse(localStorage.getItem('fonts')||'null');if(_ft&&typeof _ft==='object'){if(_ft.hero)document.documentElement.style.setProperty('--font-hero',_ft.hero);if(_ft.system)document.documentElement.style.setProperty('--font-system',_ft.system);}}catch(e){}
+  </script>
 </head>
 <body>
   <div id="root"></div>

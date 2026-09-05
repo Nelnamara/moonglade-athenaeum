@@ -210,7 +210,7 @@
    is a headline, not a placard line. The filename line is GONE (the
    word-salad "title" the review struck); .mgg-model/.mgg-date went with it. */
 .mgg-title {
-  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;
+  font-family: var(--font-hero); font-style: italic; font-weight: 400;
   font-size: 13px; line-height: 1.2; margin: 0 0 7px; color: #d6d2e2;
   overflow-wrap: anywhere; text-wrap: balance;
 }

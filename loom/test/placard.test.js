@@ -110,7 +110,13 @@ describe("grid.css: the artifact's stamp + strip rules; the filename rules are g
     assert.match(css, /\.mgg-stamp\.lead \{ color: rgba\(255, 255, 255, \.6\); \}/);
     const t = css.indexOf(".mgg-title {");
     const title = css.slice(t, css.indexOf("}", t));
-    assert.match(title, /font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400;/);
+    // The stack itself moved behind --font-hero on 2026-09-04 (Identity Chrome handoff
+    // C1): the app's italic-serif display voice is now one token every such rule reads,
+    // so the type picker can set it in one place. The DEFAULT value of --font-hero is
+    // this rule's own former literal, byte for byte -- what is pinned here is that the
+    // placard title is still the HERO face and still italic 400, which is what the
+    // placard artifact actually specified. A literal stack here would now be the drift.
+    assert.match(title, /font-family: var\(--font-hero\); font-style: italic; font-weight: 400;/);
     assert.match(title, /font-size: 13px; line-height: 1\.2; margin: 0 0 7px; color: #d6d2e2;/);
     assert.match(title, /overflow-wrap: anywhere; text-wrap: balance;/);
   });

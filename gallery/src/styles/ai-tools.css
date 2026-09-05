@@ -51,7 +51,7 @@ html.mg-noblur .mgai-scrim {
 .mgai-card:hover { border-color: var(--lavender); transform: translateY(-2px); }
 .mgai-thumb { position: relative; height: 94px; display: grid; place-items: center; overflow: hidden;
   background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
-.mgai-initial { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 34px; font-style: italic;
+.mgai-initial { font-family: var(--font-hero); font-size: 34px; font-style: italic;
   color: color-mix(in oklab, var(--lavender) 38%, transparent); }
 .mgai-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 8px;

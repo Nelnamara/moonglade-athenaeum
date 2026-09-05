@@ -16,7 +16,7 @@
 .mgcs-slab .mgv-x { margin-left: 0; }
 
 .mgcs-header { margin-top: 14px; }
-.mgcs-eyebrow { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+.mgcs-eyebrow { font-family: var(--font-hero); font-style: italic;
   font-size: 13px; color: var(--subtext); }
 .mgcs-headrow { display: flex; align-items: baseline; justify-content: space-between;
   gap: 12px; margin-top: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
@@ -25,7 +25,7 @@
 .mgcs-rule { height: 1px; margin-top: 10px;
   background: linear-gradient(90deg, var(--gold) 0%, transparent 70%); opacity: .55; }
 
-.mgcs-h1 { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+.mgcs-h1 { font-family: var(--font-hero); font-style: italic;
   font-size: 26px; margin: 16px 0 4px; letter-spacing: -.01em; }
 .mgcs-sub { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
   color: var(--subtext); margin-bottom: 18px; }
@@ -44,7 +44,7 @@
 .mgcs-img img { width: 100%; height: 100%; object-fit: cover; display: block; min-width: 0; }
 .mgcs-no { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--blue);
   margin-top: 4px; }
-.mgcs-cap-title { font-family: Georgia, "Times New Roman", serif; font-size: 12.5px;
+.mgcs-cap-title { font-family: var(--font-hero); font-size: 12.5px;
   color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mgcs-cap-sub { font-size: 10px; color: var(--subtext); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }

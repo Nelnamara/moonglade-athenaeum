@@ -39,7 +39,7 @@
 
 /* ---- title block ---- */
 .csm-titleblock { flex: none; padding: 16px; border-bottom: 1px solid var(--surface1); }
-.csm-title { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20px;
+.csm-title { font-family: var(--font-hero); font-style: italic; font-size: 20px;
   color: var(--text); margin-bottom: 4px; }
 .csm-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext); }
 
@@ -66,7 +66,7 @@
 .csm-row1 { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; min-width: 0; }
 .csm-no { font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 700;
   color: var(--blue); flex: none; }
-.csm-cardtitle { font-family: Georgia, "Times New Roman", serif; font-size: 13px; color: var(--text);
+.csm-cardtitle { font-family: var(--font-hero); font-size: 13px; color: var(--text);
   flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .csm-model { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

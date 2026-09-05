@@ -344,7 +344,7 @@
 .mgx-tiprow.head { margin-top: 5px; padding-top: 6px; border-top: 1px solid rgba(212, 175, 55, .22); }
 .mgx-tipk { font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; color: var(--overlay0); }
-.mgx-tipv { font-family: Georgia, serif; font-weight: 400; font-size: 15px; line-height: 1;
+.mgx-tipv { font-family: var(--font-hero); font-weight: 400; font-size: 15px; line-height: 1;
   font-variant-numeric: tabular-nums; color: var(--text); }
 .mgx-tipdim { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--overlay0);
   font-variant-numeric: tabular-nums; }

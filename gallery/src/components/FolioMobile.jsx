@@ -377,14 +377,21 @@ export default function FolioMobile({ onClose }) {
                 {folio.showLadders && vm.ladders.length > 0 && (
                   <>
                     <div className="fm-hscroll">
+                      {/* The FACE, same rule the desktop row now follows (2026-09-04
+                          handoff C4): the art of the highest EARNED rung, so this strip
+                          shows how far up each track you are rather than ten identical
+                          first rungs forever. Only the art changes here -- the tile's own
+                          chrome (and its existing .zero dim for an untouched track) is the
+                          mobile design's and is left exactly as it was. */}
                       {vm.ladders.map((l) => {
                         const on = activeLadder && l.id === activeLadder.id;
+                        const art = l.face ? l.face.tier : null;
                         return (
                           <button type="button" key={l.id} className={"fm-laddericon" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
                             onClick={() => selectLadder(l.id)}>
                             <div className="fm-laddericon-tile">
-                              <img src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""} alt="" loading="lazy"
-                                draggable={false} onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
+                              <img src={art ? badgeSrc(art.id) : ""} alt="" loading="lazy"
+                                draggable={false} onError={(e) => { if (!(art && badgeHop(e.currentTarget, art.id))) e.currentTarget.remove(); }} />
                             </div>
                             <div className="fm-laddericon-lab">{l.name}</div>
                           </button>

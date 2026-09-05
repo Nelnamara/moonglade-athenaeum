@@ -9,11 +9,11 @@
 /* Balance strip */
 .acct-balance { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-end;
   padding: 14px 2px; border-bottom: 1px solid var(--surface0); }
-.acct-bignum { font-family: Georgia, serif; font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.acct-bignum { font-family: var(--font-hero); font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
 .acct-bignum.accent { color: var(--accent); }
-.acct-splitnum { font-family: Georgia, serif; font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.acct-splitnum { font-family: var(--font-hero); font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
 .acct-splitnum.unknown { color: var(--overlay0); }
-.acct-midnum { font-family: Georgia, serif; font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.acct-midnum { font-family: var(--font-hero); font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
 .acct-kick { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 9.5px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--overlay0); margin-top: 5px; white-space: nowrap; }
 
@@ -62,7 +62,7 @@
 .acct-couphint { font-size: 11px; color: var(--overlay0); margin-bottom: 12px; }
 .acct-histchip { display: inline-flex; align-items: center; background: var(--surface0); border: 1px solid var(--surface1);
   border-radius: 8px; padding: 5px 10px; font-size: 11.5px; color: var(--text); cursor: pointer; font-family: inherit; }
-.acct-pct { flex: none; width: 52px; font-family: Georgia, serif; font-size: 19px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+.acct-pct { flex: none; width: 52px; font-family: var(--font-hero); font-size: 19px; font-variant-numeric: tabular-nums; color: var(--overlay0); }
 .acct-pct.avail { color: var(--gold); }
 .acct-status { flex: none; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
   color: var(--overlay0); background: var(--surface0); border: 1px solid var(--surface1); }

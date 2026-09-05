@@ -104,8 +104,16 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 **Open the Control Panel.** It checks for a new release when it opens, and if one is out the
 version stamp at the bottom of its sidebar turns gold: *"v3.7.0 available — view"*. Click it
 and the confirm tells you what will happen — the update is pulled atomically, dependencies
-install only if they changed, the server restarts (~10 seconds), and the tab reloads itself.
+install only if they changed, the server restarts, and the tab reloads itself.
 Nothing is applied until you press **Update now**; there is no silent update, ever.
+
+Press it and that same window turns into the progress of the update — **pull**, then
+**applying files**, then **restart** — ticking each one off as it really finishes, with how
+long it took. The restart is the one step nobody can watch (the server is away), so it
+shows what your machine's last restart took. When the third tick lands the window closes
+itself and the version at the foot of the sidebar is the new one. If the update is refused
+or fails, the refusal appears in the same window in place of the progress bar rather than
+as a message you might miss.
 
 The one-click path needs the managed launcher (**`Serve Gallery.pyw`**) — without it the
 server would stop instead of restarting into the new version — and a clean checkout on
