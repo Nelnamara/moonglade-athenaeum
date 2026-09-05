@@ -38,10 +38,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   safe buttons demote to "Run now." Nothing destructive ever automatic. Scope + owner calls:
   `../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md`. Builds after the 3.7.1 wave.
 
-- **Contests on the phone** *(design handoff pending — owner, 2026-09-04)*
-  The contest workbench shipped desktop-first ("the phone gets its pass next"). The mobile pass
-  waits on an owner Claude Design handoff in `../moonglade-internal/design/contest/`; nothing on
-  it is built from prose.
+- **The icon pass — the Glyph Ledger ballot, built.** *(owner's picks, 2026-09-05)* The owner
+  answered the full symbol workshop: seven spots move from typed characters to drawn icons
+  (glyphs.fyi set, MIT — files + the vote record in `../moonglade-internal/design/glyphs/`),
+  seven character swaps (✎ ⎙ purple-♛ ⚔ ❖/⚑ ⎌, keep ⟳), the Branding mark buttons render each
+  mark's own image instead of a placeholder glyph, and search unifies on the binoculars icon
+  everywhere. Mechanics: bake SVGs inline, one `currentColor` swap per file so every skin tints
+  them via its own tokens; carry the MIT notice. Builds on the post-3.8.0 tree.
 
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
@@ -52,18 +55,12 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The input for the call: `../moonglade-internal/QA_tablet-2026-08-23.md` — a targeted poke list
   built from the refit review's findings; which sections bite decides which answer.
 
-- **The dial-in series — facet chips (E) + optional local-VLM naming** ([#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
-  The series engine, **first-class grid stacking (B)**, the **Session** strip in Image Details, and
-  **prompt-derived series names** all shipped this cycle (see `CHANGELOG.md`, the 3.6.0 release); the
-  clustering rule (same model · ≤8h gap ·
-  clause-similarity ≥ 0.5) was **owner-validated on the Series Review Board** — 10/10 sample series accurate,
-  near-misses rightly apart — and is now the live foundation. What is left is the two parts #34 itself
-  scoped as follow-ons, not the base build: **E's facet chips** over a series, and the **optional
-  local-VLM module** (Provider Deck, rerolls only) that would name a series from the *image* rather than
-  the prompt. Design-level adversarial review before build; design sources are the two workshop artifacts
-  + the LINEAGE pattern on #34. **Walk input (2026-08-29):** the owner wants series stacks to open
-  in a MODAL (esc straight back to the gallery) instead of the current custom-search takeover that
-  needs a manual "clear" — fold into the same workshop.
+- **The dial-in series — optional local-VLM naming** (the last remnant of [#34](https://github.com/Nelnamara/moonglade-athenaeum/issues/34))
+  Everything else on this line shipped: the engine, grid stacking, the Session strip and
+  prompt-derived names in 3.6.0; the series MODAL with its runs rail and facet chips (E) in
+  3.8.0 (see `CHANGELOG.md`). What remains is only the **optional local-VLM module** (Provider
+  Deck era, rerolls only) that would name a series from the *image* rather than the prompt —
+  banked for when the Provider Deck seam exists.
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
@@ -72,17 +69,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
     candidate to drop at the next Loom pass.
-
-- **Gallery layout switcher — better layout option + location** *(owner, 2026-08-31; desktop base shipped 2026-08-19)*
-  The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`. Two
-  visual passes on the switcher surface were built and backed out (#41 — no design context); owner's
-  current framing: partially fixed, needs **a better layout option and a better location** — that is
-  the design step's question. **And it is still GIANT (owner, 2026-09-04)** — size joins
-  location and layout-option as the session's questions. The persona-sweep follow-on layouts (Group-by, Justified,
-  Filmstrip, density/proof, data-table) are **CUT** — not worth the payoff (owner, 2026-08-19). What
-  *may* remain is a **mobile** switcher (column density + per-device memory), but the owner is
-  skeptical these layouts are even viable on a phone — so this is a maybe pending a look, not a
-  committed build.
 
 - **Loom per-project spend ledger (historical)** *(scoped 2026-09-04)*
   The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
@@ -93,8 +79,9 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
   The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
   3.7.0. Left: sweep every surface that renders a mark for proportional scaling (marks-anims spec §1),
-  and get the owner's eight final animated .webp marks into the repo. The pre-unlock mark picker is
-  [#50](https://github.com/Nelnamara/moonglade-athenaeum/issues/50)'s home, not this line.
+  and get the owner's eight final animated .webp marks into the repo. (The pre-unlock mark
+  picker shipped in 3.8.0 as the Identity strip — #50 is closed; only the sweep and the marks
+  themselves remain here.)
 
 - **Gift icon on promo cards** *(the last slice of [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))*
   The icon on the claim chip shipped 2026-08-22 and the claimed-reward line in the activity tracker
@@ -112,13 +99,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
-- **The updater's apply flow — progress + toast styling.** *(owner, 2026-09-04, minutes after the
-  first live pull)* The apply worked end to end, but the ~10s pull/restart shows no progress
-  meter, and the success toast's colors and font usage look off — the confirm modal and toast
-  were built from the scope's prose (the design mock covered only the footer stamp), so this
-  surface never had its design step. Wants: a progress presentation for the apply, and the
-  toast brought onto the house type/palette.
-
 - **The restart card's mascot: kill the spin, keep the pulse.** *(owner, 2026-09-05)* "I don't
   want the mascot to spin anymore. it just looks wrong. I like the pulse, we can keep that and
   maybe think of a new effect instead of the spin... or not." The spin is
@@ -126,13 +106,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   the pulse halo beside it stays. Removing the spin is the decided part; whether a replacement
   effect exists at all is open — a quick workshop, not a full session.
 
-- **Branding unlock: a font picker for the System and Hero fonts.** *(owner, 2026-09-04)* The
-  unlock currently opens marks/skins/banners; it should also let the owner pick the app's two
-  type roles. Needs design (where it lives in the Branding tab, the offered set, preview) and
-  mechanics (how faces load/serve, fallbacks) before build.
-
-- **Ladder representative badges.** Ladders currently show their FIRST rung's art. A new design
-  pass on ladder badges is wanted.
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
   v3.0 — revisit what Moonglade should get now the React app is the whole front end.
 - **Sign-in ⇄ create-account toggle.** The login design showed a mode toggle that was
