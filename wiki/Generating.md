@@ -584,7 +584,12 @@ the button comes back — the app will tell you it doesn't know rather than leav
   delisted — the "↺ from #…" chip turns amber and says exactly what's missing, so review it
   before you spend. Desktop for now.
 - Results are downloaded and cataloged automatically (`source='api'`; videos into `videos/`),
-  so everything you make lands in your own library the moment it finishes.
+  so everything you make lands in your own library the moment it finishes. **It lands without
+  moving you.** If you are reading page 4 when a job completes, the page you are on, its
+  address, the pictures on it and your place among them all stay put — the finished picture
+  announces itself with a notice in the corner and a row in **Activity** whose thumbnail opens
+  it. On page 1 the library refreshes where it stands, because that is where the new picture
+  arrives anyway.
 - **Runs** — the strip across the top of the dock is *today's* runs: each finished picture is
   a tile as soon as it lands (blur → sharp), a batch still cooking shows as one 2×2 cluster,
   and a running tile carries the mascot and a moving bar rather than a made-up percentage

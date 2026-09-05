@@ -2409,3 +2409,191 @@ def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_pa
         "the reverted OFFICIAL badge still carries gold ({}) in its face {!r} -- the gold "
         "this test reads is coming from somewhere the ruling does not govern".format(
             ph["gold"], reverted["face"]))
+
+
+# ---------------------------------------------------------------------------
+# THE LIBRARY STANDS STILL (2026-09-05)
+# ---------------------------------------------------------------------------
+# Count the app's OWN calls, in the page, by wrapping window.fetch before any bundle runs.
+# api.js is the one request module (its own header: "nothing else under gallery/src calls
+# fetch" bar three named exemptions), so this sees every /api/ call the shell makes. Read
+# via page.evaluate rather than performance.getEntriesByType: a 100-card page pushes well
+# past the resource-timing buffer's default 250 entries, and dropped entries would make a
+# "no request was made" assertion pass for the wrong reason.
+_COUNT_FETCH_JS = """
+window.__mgCalls = { library: 0, account: 0 };
+const _f = window.fetch;
+window.fetch = function (...args) {
+  const u = String((args[0] && args[0].url) || args[0] || "");
+  if (u.indexOf("/api/next/library") >= 0) window.__mgCalls.library++;
+  else if (u.indexOf("/api/account") >= 0) window.__mgCalls.account++;
+  return _f.apply(this, args);
+};
+"""
+
+# The identity of what is on screen: every card's own thumbnail, in render order. Grid.jsx
+# hangs no media_id on the card element, and this is the value that would change if the
+# grid restacked -- which is the whole subject.
+_TILES_JS = ("() => Array.from(document.querySelectorAll('.mgg-card img.mgg-art'))"
+             ".map((el) => el.getAttribute('src'))")
+
+
+@pytest.fixture()
+def paged_library_server(tmp_path_factory, monkeypatch):
+    """An already-onboarded install with enough rows to actually PAGE -- its own server.
+
+    The module's shared `render_server` holds six rows, which is one page at every per-page
+    the UI offers (50/100/200 -- FiltersPanel.jsx's PER_CYCLE, GalleryMobile's
+    PER_PAGE_OPTS), and per-page is not addressable in the URL either (gen/urlState.js reads
+    page/image/series and nothing else). "Page 2" cannot be reached over there at all. So
+    this seeds 120 rows against a server of its own rather than reshaping the fixture the
+    other eighteen tests measure against -- the same call
+    `test_setup_wizard_onboards_a_genuinely_fresh_install` makes for the opposite state.
+    """
+    import datetime as _dt
+    import logging
+    from types import SimpleNamespace
+
+    from werkzeug.serving import make_server
+
+    wz_log = logging.getLogger("werkzeug")
+    wz_level = wz_log.level
+    wz_log.setLevel(logging.ERROR)
+
+    root = tmp_path_factory.mktemp("render-harness-paged")
+    config_path = root / "config.json"
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+    monkeypatch.setattr(core, "_config_path", lambda: config_path)
+    monkeypatch.setattr(core, "_cfg", {})
+    # 120 rows at the default 100 per page = exactly two pages, so page 2 is a real place
+    # with real cards on it (20 of them) rather than an empty edge case.
+    save_catalog(root / "catalog.db", [
+        {f: "" for f in CATALOG_FIELDS} | {
+            "media_id": str(1000 + i), "filename": "paged_%03d.png" % i,
+            "prompt_preview": "paged row %d" % i,
+            "created_at": "2025-02-01T%02d:%02d:00" % (i // 60, i % 60)}
+        for i in range(120)
+    ])
+    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    # Already onboarded, exactly as render_server is: a key, so app_page() serves the real
+    # gallery instead of the Setup Wizard...
+    cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
+    cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
+    config_path.write_text(json.dumps(cfg))
+    # ...and every earned achievement pre-marked seen, so no .ach-m2 celebration is up while
+    # the grid is being measured. window.Ach.check() runs on mg-gen-done (App.jsx, and now
+    # AppMobile.jsx too), which is precisely the event this test fires.
+    _telem = load_telemetry(root)
+    _metrics = achievement_metrics(root / "catalog.db")
+    _metrics.update(telemetry_metrics(root))
+    _ach = compute_achievements(_metrics, sets=_telem.get("sets", {}))
+    _today = _dt.date.today().isoformat()
+    _earned = [a["id"] for a in _ach["achievements"] if a["earned"]]
+    save_ach_state(root, {"seen": _earned, "earned_at": {i: _today for i in _earned}})
+
+    server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True,
+                              name="render-harness-paged-server")
+    thread.start()
+    try:
+        yield SimpleNamespace(base_url="http://127.0.0.1:%d" % server.server_port,
+                              config_path=config_path, root=root)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        wz_log.setLevel(wz_level)
+
+
+def test_a_finished_generation_never_moves_the_page_the_owner_is_reading(
+        paged_library_server, render_browser, monkeypatch):
+    """THE POLICY (owner, 2026-09-05): nothing moves the owner's view of the library except
+    his own hands. A generation finishing announces itself; it never restacks the grid.
+
+    App.jsx's completion handler used to be `const refresh = () => { load(1, true); ... }`
+    fired by mg-gen-done and mg-result -- i.e. by EVERY edit / enhance / fix / scene /
+    generate / upscale (gen/submitTask.js dispatches mg-gen-done for all six) and by the
+    video drawer. Read page 7 of your own library, have a job you queued ten minutes ago
+    land, and the grid you were reading was replaced by page 1 under your eyes.
+
+    Both halves are measured here on one real page with one instrument, and they are each
+    other's proof: on page 2 the dispatch must produce NO library request and no visible
+    change at all, and on page 1 the SAME dispatch must produce one. A "no request" that
+    could never have fired would pass the first half and fail the second.
+
+    The event is delivered by hand (`window.dispatchEvent(new CustomEvent("mg-gen-done"))`)
+    rather than by running a real generation, which would need a real PixAI account and
+    real credits -- this harness has neither. Everything downstream of the dispatch is the
+    real shipped shell against the real Flask app.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    assert core._config_path() == paged_library_server.config_path
+
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_COUNT_FETCH_JS)
+    try:
+        page = ctx.new_page()
+        _login(page)
+
+        # --- ON PAGE 2, where the owner put himself -----------------------------------
+        _visit(page, "/?page=2")
+        page.wait_for_selector(".mgg-card")
+        page.wait_for_selector(".pagebar .pg-num.current")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "2", (
+            "the harness never reached page 2, so nothing below is measuring the subject")
+        tiles_before = page.evaluate(_TILES_JS)
+        assert tiles_before, "page 2 rendered no cards"
+        before = page.evaluate("() => ({ ...window.__mgCalls })")
+        scroll_before = page.evaluate("() => window.scrollY")
+
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        # The credits chip is refreshed unconditionally, on every page -- so a fresh
+        # /api/account call is the proof the handler really ran, which is what stops the
+        # "no library request" assertion below from passing vacuously. /api/account is
+        # fetched exactly twice in this app (App.jsx's mount effect and this handler);
+        # nothing polls it.
+        page.wait_for_function(
+            "(n) => window.__mgCalls.account > n", arg=before["account"])
+        _settle(page)
+
+        after = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert after["library"] == before["library"], (
+            "a finished generation re-loaded the library from page 2 ({} -> {} calls) -- "
+            "the grid the owner was reading was thrown away".format(
+                before["library"], after["library"]))
+        assert "page=2" in page.url, (
+            "the address left page 2 on a completion: {}".format(page.url))
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "2", (
+            "the grid moved off page 2 on a completion")
+        assert page.evaluate(_TILES_JS) == tiles_before, (
+            "the visible tiles changed under the reader on a completion")
+        assert page.evaluate("() => window.scrollY") == scroll_before
+
+        # --- AND ON PAGE 1, the default perch, where a refresh moves nothing -----------
+        # A user's own hand on the pager: this one IS allowed to move everything.
+        page.click('.pagebar .pg-nav:has-text("Prev")')
+        page.wait_for_function(
+            "() => { const el = document.querySelector('.pagebar .pg-num.current');"
+            " return el && el.textContent.trim() === '1'; }")
+        _settle(page)
+        assert "page=" not in page.url, (
+            "page 1 is the address's default and omits the param (gen/urlState.js): {}"
+            .format(page.url))
+        one_before = page.evaluate("() => ({ ...window.__mgCalls })")
+
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        # Same instrument, opposite expectation: here the refresh IS the wanted behaviour
+        # (same page, same address, the new picture simply arrives at the top), so the
+        # library call must appear.
+        page.wait_for_function(
+            "(n) => window.__mgCalls.library > n", arg=one_before["library"])
+        _settle(page)
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "1"
+        assert "page=" not in page.url
+    finally:
+        ctx.close()

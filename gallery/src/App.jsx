@@ -32,7 +32,7 @@ import {
   fetchAccount, fetchCollections,
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
-import useLibrary, { filterQueryString } from "./hooks/useLibrary.js";
+import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
@@ -433,7 +433,8 @@ export default function App({ boot }) {
     openDetails(mid);
   }, [setUrl, closeSeries, openDetails]);
 
-  /* Generation completions refresh the library + credits chip.
+  /* Generation completions refresh the credits chip -- and the library, but only from
+     the perch where refreshing it moves nothing (see THE POLICY below).
      THREE channels, because there are three producers:
      - mg-gen-done: our own image submit path (useGenerate);
      - mg-submit:   the SHARED video drawer accepting a task;
@@ -441,12 +442,30 @@ export default function App({ boot }) {
      The same submit/result pair also ticks the shell's live-run counter.
      NO Jobs.register here (2026-08-23). This listener used to be what registered a
      video with the Job Tracker, which quietly made tracking a property of WHICH SHELL
-     the drawer happened to be mounted in -- and AppMobile.jsx has no such listener, so
-     a video started from the phone never reached /api/jobs, the Activity tray or the
-     orphan sweep. The drawer now submits through gen/submitTask.js, whose Jobs.track
-     registers on the way past; registration belongs to the submit road, not the shell. */
+     the drawer happened to be mounted in -- and AppMobile.jsx had no such listener at
+     all, so a video started from the phone never reached /api/jobs, the Activity tray or
+     the orphan sweep. The drawer now submits through gen/submitTask.js, whose Jobs.track
+     registers on the way past; registration belongs to the submit road, not the shell.
+     (The phone grew a completion listener of its own on 2026-09-05 -- announce-only, the
+     same policy, still no Jobs.register. See AppMobile.jsx.) */
+  /* THE POLICY (owner, 2026-09-05): nothing moves the owner's view of the library except
+     his own hands -- a finished generation announces itself, it never restacks the grid
+     under a reader. */
   useEffect(() => {
-    const refresh = () => { load(1, true); fetchAccount().then(setAccount); };
+    const refresh = () => {
+      fetchAccount().then(setAccount);
+      /* Page 1 is the default perch, and refreshing THERE moves nothing: same page, same
+         address, the new picture simply arrives at the top -- the living-library behaviour
+         this handler was born for. Anywhere deeper the grid, the page, the URL and the
+         scroll are left exactly as they are; the completion toast (notify/jobsStore.js's
+         done transition) and the Activity row -- whose thumbnail opens the new record
+         through the mg-open-details bus below -- are the announcement instead. */
+      if (pageRef.current !== 1) return;
+      load(1, true).then((data) => {
+        // undefined = a newer request superseded this one (useLibrary's reqSeq guard).
+        if (data) pruneSelected(setSelected, data.items);
+      });
+    };
     // mg-gen-done also nudges the Folio of Honors to check-and-celebrate any newly
     // earned achievement -- this is the only "a real action just completed" hook Ach
     // has outside a hard page load, so it belongs here alongside the grid/account
@@ -1163,7 +1182,21 @@ export default function App({ boot }) {
             <DetailsView
               mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
               onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
-              onDeleted={() => { closeDetails(); load(1, true); }}
+              /* Same policy as the completion handler: deleting the picture you were
+                 reading is not a reason to be thrown back to the top of the library, so
+                 the CURRENT page reloads in place. The one case that has to move is the
+                 one the owner's own hand made unavoidable -- the deleted item was the
+                 last on this page, so the fresh read comes back with no items at all;
+                 then, and only then, step down to the page below. Read honestly off
+                 useLibrary's own response shape (data.items), not inferred from a count. */
+              onDeleted={() => {
+                closeDetails();
+                const p = Math.max(1, pageRef.current);
+                load(p, true).then((data) => {
+                  if (!data) return;   // superseded by a newer request
+                  if (p > 1 && !(data.items || []).length) load(p - 1, true);
+                });
+              }}
               onFilterByModel={filterByModel} onFilterByBatch={filterByBatch}
               advParams={detailsAdvParams}
               items={items}

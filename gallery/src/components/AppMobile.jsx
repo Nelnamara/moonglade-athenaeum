@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import useLibrary from "../hooks/useLibrary.js";
+import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
@@ -542,6 +542,60 @@ export default function AppMobile({ boot }) {
   };
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
+
+  /* THE PHONE LEARNS COMPLETIONS EXIST (2026-09-05). This surface had NO listener for
+     mg-gen-done / mg-result at all -- so a generation finishing while the phone was in
+     front of you left the credits chip showing the pre-spend number and never nudged the
+     Folio, both of which the desktop shell has done since it was written. It gets the
+     announce half of that contract now, under the same policy the desktop just adopted:
+     nothing moves the owner's view of the library except his own hands.
+
+     WHAT "the default view" MEANS HERE, read off this surface rather than assumed:
+       - page 1. The phone has no URL page state at all -- GalleryMobile's pager just
+         calls load(page +/- 1) -- so the loaded page IS the whole of where you are, and
+         page 1 is the perch where a refresh moves nothing but the arrival of the new
+         picture at the top. Deeper in, the grid, the page and .glm-body's scroll are left
+         exactly as they are.
+       - NOT inside the ◈ Similar answer. There the library grid is not even rendered
+         (GalleryMobile swaps <SimilarResults> into its place), and the whole contract of
+         that view is that the library underneath is untouched so the token's ✕ restores
+         it without re-running anything. Reloading it under the token would break exactly
+         that promise, invisibly.
+     Either way the announcement is the same one the desktop leans on and this shell
+     already renders: notify/jobsStore.js's done-transition toast (main.jsx mounts
+     <NotifyRoot/> for the phone too), plus the row in the Activity sheet above.
+
+     Refs, because the listeners mount ONCE and load's identity follows the filters --
+     the same shape App.jsx's popstate handler uses for the same reason. */
+  const genPageRef = useRef(lib.page);
+  const genLoadRef = useRef(lib.load);
+  const genSimilarRef = useRef(similarFor);
+  useEffect(() => {
+    genPageRef.current = lib.page;
+    genLoadRef.current = lib.load;
+    genSimilarRef.current = similarFor;
+  });
+  const setLibSelected = lib.setSelected;   // a setState: stable, safe to close over once
+  useEffect(() => {
+    const onDone = () => {
+      fetchAccount().then(setAccount);
+      // Guarded exactly like App.jsx's own call -- notify/index.jsx publishes window.Ach
+      // for every authenticated render, phone included, but a page that never installed
+      // notify must not throw here.
+      if (window.Ach) window.Ach.check();
+      if (genPageRef.current !== 1 || genSimilarRef.current) return;
+      genLoadRef.current(1, true).then((data) => {
+        // undefined = a newer request superseded this one (useLibrary's reqSeq guard).
+        if (data) pruneSelected(setLibSelected, data.items);
+      });
+    };
+    window.addEventListener("mg-gen-done", onDone);
+    document.addEventListener("mg-result", onDone);
+    return () => {
+      window.removeEventListener("mg-gen-done", onDone);
+      document.removeEventListener("mg-result", onDone);
+    };
+  }, [setLibSelected]);
 
   const refreshCollections = async () => {
     const c = await fetchCollections();
