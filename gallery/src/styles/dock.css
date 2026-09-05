@@ -531,9 +531,10 @@ html.mg-noblur .mgdock-scrim {
    presets wide on the left, the Edit slab stack narrow on the right, CTA at its foot. ---- */
 
 /* the two-column re-cut, applied by the drawer only while the mirror is armed. The wide
-   left slab spans both rows, so the right column's CTA bottoms out level with the presets. */
+   left slab spans both rows, so the right column's CTA bottoms out level with the presets.
+   The 15px gutter is the comp's own (A2 line 117), not .mgdock-slabs' inherited 12px. */
 .mgdock-editslabs.enh { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-  align-items: stretch; }
+  gap: 15px; align-items: stretch; }
 .mgdock-editslabs.enh > .mgdock-enhslab { grid-column: 1; grid-row: 1 / span 2; }
 .mgdock-editslabs.enh > .mgdock-slab:first-child { grid-column: 2; grid-row: 1; }
 .mgdock-editslabs.enh > .mgdock-enhside { grid-column: 2; grid-row: 2; }
@@ -556,6 +557,18 @@ html.mg-noblur .mgdock-scrim {
 /* SELECTABLE preset grid, 3-up (comp A2 118-125) */
 .mgdock-aigrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
   align-content: start; }
+/* ...and back to the 2-up it was before the re-cut on a narrower drawer -- the handoff's
+   "3-up at >=1100px drawer width; falls back to the existing 2-up below" (comp A2 note,
+   line 136). The handoff measures the DRAWER; a stylesheet can only ask about the VIEWPORT,
+   so the threshold is translated through the dock's own width rule: .mgdock is
+   min(1180px, 100vw - 32px), which reaches 1100px at a 1132px viewport (below that the
+   32px inset governs, above 1212px the 1180px cap does). So >=1132px viewport IS >=1100px
+   drawer, and everything at 1131px and under -- the widest whole pixel still short of it --
+   takes the fallback. Written as a max-width override beside the rule it bends, the way the
+   Darkroom's own narrow-window @media does. */
+@media (max-width: 1131px) {
+  .mgdock-aigrid { grid-template-columns: repeat(2, 1fr); }
+}
 .mgdock-aitile { position: relative; display: flex; flex-direction: column; overflow: hidden;
   padding: 0; cursor: pointer;
   font-family: inherit; text-align: left; border-radius: 9px; border: 1px solid var(--surface1);

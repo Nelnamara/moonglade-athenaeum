@@ -116,13 +116,9 @@ export default function Darkroom({ open, onClose, source, onSendToEdit }) {
   // A new source clears the OUTCOME line (it described the old picture), never the pick.
   useEffect(() => { setMsg(""); }, [source]);
 
-  // Esc closes.
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Esc is NOT handled here: this room only ever mounts inside the Generate drawer, whose
+  // Escape ladder (GenerateDrawer.jsx, "Escape closes the TOPMOST layer only") already tests
+  // filtersOpen ahead of every other layer and closes exactly this. One owner, one listener.
 
   // (re)apply the live preview -- pure CSS overlays, no pixels copied
   useEffect(() => {
