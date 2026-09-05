@@ -931,6 +931,43 @@ def test_a_failed_background_check_announces_nothing(monkeypatch):
     assert g.update_notice() is None
 
 
+def test_a_blip_does_not_take_a_standing_announcement_off_every_tab(monkeypatch):
+    """The other half of "offline is not news", and the one that bites once a release IS
+    out: a failed check is the ABSENCE of an answer, not the answer "you are current".
+
+    It arrives as behind:false with a reason attached, so clearing on `behind` alone meant
+    one GitHub blip pulled the banner off every open tab and bumped the seq -- and the next
+    good tick an hour later announced the SAME version as if it were new. Two toasts for
+    one release, against a ruling that says one."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    g.run_update_tick("3.0.0", now=T0)
+    seq = g.update_notice()["seq"]
+
+    def _boom(**k):
+        raise OSError("getaddrinfo failed")
+    monkeypatch.setattr(g, "fetch_releases", _boom)
+    _fresh_cache(monkeypatch)                    # the blip really goes out and really fails
+    blip = g.run_update_tick("3.0.0", now=T0 + g.UPDATE_TICK_SECONDS)
+    assert "getaddrinfo failed" in blip["error"] and blip["behind"] is False
+    after = g.update_notice()
+    assert after is not None, "a blip must not take the standing announcement down"
+    assert after["latest"] == "v9.9.9" and after["title"] == "The Ninth"
+    assert after["seq"] == seq, "and must not move the counter the client dedupes on"
+
+    # ...so the good tick behind it is not a second announcement of the same release.
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    _fresh_cache(monkeypatch)
+    assert g.run_update_tick("3.0.0", now=T0 + 2 * g.UPDATE_TICK_SECONDS)["behind"] is True
+    assert g.update_notice()["seq"] == seq, "the same release must not re-announce"
+
+    # A GENUINE up-to-date answer -- no error, the update was applied -- still clears.
+    assert g.note_update_transition({"current": "9.9.9", "latest": "v9.9.9", "behind": False},
+                                    now=T0 + 3 * g.UPDATE_TICK_SECONDS) is False
+    assert g.update_notice() is None
+
+
 def test_a_panel_open_gets_a_fresh_answer_past_the_cache(monkeypatch):
     """The Panel is where a person goes to ASK, so it bypasses the 30-minute TTL the rest
     of the app reads -- otherwise "it checks when you open it" can be half an hour stale."""
@@ -996,16 +1033,30 @@ def test_the_jobs_poll_carries_the_announcement_and_never_fetches(tmp_path, monk
     assert calls["n"] == 1, "the jobs poll must never reach GitHub"
 
 
+# ONE set, read by both guards below. They were written with different ones -- the wired
+# closure's omitted _git, subprocess and api_update_apply -- which meant the function the
+# scheduler ACTUALLY calls every minute was held to a looser rule than the functions it
+# calls. A guard with a hole in it is worse than no guard, because it reads as cover.
+FORBIDDEN_APPLY_NAMES = {"run_update", "_panel_run", "_schedule_server_exit",
+                         "api_update_apply", "_git", "subprocess", "_set_update_state"}
+
+
 def test_the_background_path_has_no_route_into_applying_an_update():
     """THE GUARD. The owner rejected auto-apply in the same conversation that asked for the
     background check -- "I don't want that". So the tick, the announcement and the fresh
     Panel check are walked for anything that could start one. NAMES, not text: a docstring
-    in these functions legitimately says the words run_update and /api/update/apply."""
+    in these functions legitimately says the words run_update and /api/update/apply.
+
+    STRING CONSTANTS COUNT TOO, and this is why: a walk that collects only Name and
+    Attribute nodes sees `run_update()` but not `getattr(g, "run_update")()` or
+    `globals()["run_update"]()` -- the name arrives as a string and the guard waves it
+    through. So any string literal EQUAL to a forbidden name is flagged as well. Equality,
+    not substring, is the whole trick: the docstrings above say "run_update" inside a
+    sentence (saying it is how the rule is stated), and a sentence is never equal to it."""
     import ast
     import inspect
     import textwrap
-    forbidden = {"run_update", "_panel_run", "_schedule_server_exit", "api_update_apply",
-                 "_git", "subprocess", "_set_update_state"}
+    forbidden = FORBIDDEN_APPLY_NAMES
     for name in ("run_update_tick", "note_update_transition", "update_notice",
                  "check_for_update_fresh", "check_for_update"):
         tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(g, name))))
@@ -1015,6 +1066,9 @@ def test_the_background_path_has_no_route_into_applying_an_update():
                 used.add(node.id)
             elif isinstance(node, ast.Attribute):
                 used.add(node.attr)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value in forbidden:
+                    used.add(node.value)          # a name reached by string is still reached
         assert not (used & forbidden), \
             "%s can reach %s -- the background path must only ANNOUNCE" % (
                 name, sorted(used & forbidden))
@@ -1022,7 +1076,15 @@ def test_the_background_path_has_no_route_into_applying_an_update():
 
 def test_the_scheduler_tick_only_announces():
     """The same guard where the cadence actually fires: the closure the scheduler loop
-    calls every minute. Walked as source because it is a closure inside create_app."""
+    calls every minute. Walked as source because it is a closure inside create_app.
+
+    THE SAME forbidden set as its sibling above (FORBIDDEN_APPLY_NAMES) -- this one used to
+    carry a shorter one, so the function the scheduler really runs was allowed _git,
+    subprocess and api_update_apply that the functions it calls were not.
+
+    String constants are flagged as well as names, for the reason the sibling's docstring
+    gives: `getattr(g, "run_update")()` puts the name in a Constant, where a Name/Attribute
+    walk cannot see it."""
     import ast
     import inspect
     import textwrap
@@ -1037,6 +1099,7 @@ def test_the_scheduler_tick_only_announces():
     if (body.body and isinstance(body.body[0], ast.Expr)
             and isinstance(body.body[0].value, ast.Constant)):
         del body.body[0]                          # the docstring is prose, not a call
+    forbidden = FORBIDDEN_APPLY_NAMES
     used = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
@@ -1045,7 +1108,8 @@ def test_the_scheduler_tick_only_announces():
             used.add(node.attr)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             assert "update/apply" not in node.value, "the scheduler tick must not call apply"
-    forbidden = {"run_update", "_panel_run", "_schedule_server_exit", "_set_update_state"}
+            if node.value in forbidden:
+                used.add(node.value)              # reached by string is still reached
     assert not (used & forbidden), \
         "the scheduler tick can reach %s -- it must only ANNOUNCE" % sorted(used & forbidden)
 

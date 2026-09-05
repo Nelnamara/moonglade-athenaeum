@@ -30,14 +30,24 @@
 
 import { show as toastShow } from "./toastStore.js";
 
-// The last version this BROWSER was told about. Remembered rather than held in memory so a
-// reload cannot re-announce the same release: "one toast per new version" is a promise to
-// the person, not to the page. Per-browser, like the popup-blur switch and the restart
+// The last version this BROWSER was told about. Remembered in localStorage so a reload
+// cannot re-announce the same release: "one toast per new version" is a promise to the
+// person, not to the page. Per-browser, like the popup-blur switch and the restart
 // estimate -- there is nothing here worth putting in the account.
 const SEEN_KEY = "mg_update_announced";
 
 let current = null;         // the announcement payload, or null when nothing is out
 const subs = new Set();
+
+/* FAIL CLOSED, NOT OPEN. localStorage is the CROSS-RELOAD layer only; this variable is
+   the one that actually holds the promise. A browser with storage blocked (private mode,
+   "block third-party cookies" on an embedded view, a locked-down profile) throws on both
+   getItem and setItem -- and the guarded reads used to swallow that and answer "", which
+   read as "never announced". The poll behind this store runs every 2.5-7 seconds, so the
+   same release announced a fresh sticky toast on EVERY tick, stacking forever. Checked
+   and written FIRST, before storage is consulted at all: at most one announcement per
+   version per tab, whatever storage does. */
+let memSeen = "";
 
 function emit() { subs.forEach((fn) => fn(current)); }
 
@@ -49,11 +59,72 @@ export function subscribe(fn) {
 
 export function getUpdate() { return current; }
 
-function readSeen() {
+/* Versions COMPARED, not string-matched. A rollback -- the owner pulling a bad release, so
+   the hourly check answers v3.7.1 an hour after it answered v3.7.2 -- is not news, and
+   under plain inequality it both fired a second toast and wrote the LOWER version into the
+   seen key, which then made the real newer release look already-announced.
+
+   Returns 1/0/-1, or null when either side is not a plain dotted number (with an optional
+   leading v, which is how the tags are shaped). Null is answered CONSERVATIVELY by every
+   caller: no announcement, and nothing overwritten. */
+function parseVersion(v) {
+  const s = String(v == null ? "" : v).trim().replace(/^v/i, "");
+  if (!/^\d+(\.\d+)*$/.test(s)) return null;
+  return s.split(".").map(Number);
+}
+export function cmpVersions(a, b) {
+  const pa = parseVersion(a), pb = parseVersion(b);
+  if (!pa || !pb) return null;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+
+function readStored() {
   try { return localStorage.getItem(SEEN_KEY) || ""; } catch { return ""; }
 }
-function writeSeen(v) {
-  try { localStorage.setItem(SEEN_KEY, v); } catch { /* private mode */ }
+
+/* The highest version known to have been announced: memory OR storage, whichever is
+   higher. Memory is authoritative when storage is unreadable or holds something that does
+   not parse; storage wins when it is genuinely ahead (another tab got there first). */
+function highestSeen() {
+  const stored = readStored();
+  if (!memSeen) return stored;
+  if (!stored) return memSeen;
+  const c = cmpVersions(stored, memSeen);
+  if (c === null) return memSeen;
+  return c > 0 ? stored : memSeen;
+}
+
+/* Never downward. Memory first (it is the layer that cannot fail), storage after. */
+function markSeen(v) {
+  memSeen = v;
+  const stored = readStored();
+  if (stored) {
+    const c = cmpVersions(v, stored);
+    if (c === null || c <= 0) return;      // malformed, equal or older: leave storage alone
+  }
+  try { localStorage.setItem(SEEN_KEY, v); } catch { /* private mode: memory carries it */ }
+}
+
+/* CROSS-TAB. Two tabs both polling can each read "not announced" and each toast; the
+   `storage` event is how a browser tells the other tabs what one of them just wrote, so
+   the memory here follows it upward and the re-check immediately before toastShow (below)
+   catches the sibling that got there first. A millisecond-wide race survives -- two tabs
+   writing inside the same event-loop turn -- and is accepted: the cost is one duplicate
+   toast in a window narrower than the 2.5s poll that opens it, and closing it properly
+   would mean a lock this store has no business owning. */
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("storage", (e) => {
+    if (!e || e.key !== SEEN_KEY) return;
+    const v = String(e.newValue || "");
+    if (!v) return;
+    if (!memSeen) { memSeen = v; return; }
+    const c = cmpVersions(v, memSeen);
+    if (c !== null && c > 0) memSeen = v;
+  });
 }
 
 /* Hand the store an update payload -- from the /api/jobs poll's `update` field, or from the
@@ -61,7 +132,10 @@ function writeSeen(v) {
    answer (null, an offline check, an up-to-date one) CLEARS the announcement, so a stamp
    watching this store stops offering an update that has already been applied.
 
-   The toast fires on the TRANSITION to a version this browser has not been told about, once.
+   The toast fires on the TRANSITION to a version this browser has not been told about, once
+   -- and only ever FORWARD: a version equal to or lower than the highest already announced
+   (the hourly tick repeating itself, or a pulled release) is not news, and never overwrites
+   what has been announced.
    It is sticky on purpose: the hourly check can land while nobody is at the keyboard, and it
    only ever fires once for a given release -- a notice that auto-dismissed into an empty room
    would leave the Panel as the only place to learn about it, which is exactly the behaviour
@@ -72,8 +146,23 @@ export function note(payload) {
   const was = current ? String(current.latest) : "";
   current = next;
   if (version !== was) emit();
-  if (!version || readSeen() === version) return false;
-  writeSeen(version);
+  if (!version) return false;
+  // ONLY EVER FORWARD, and memory first because memory is the layer that cannot fail.
+  // Equal is the hourly tick finding what it found an hour ago; lower is a rollback;
+  // unparseable is something nobody should be toasted about either way.
+  if (memSeen) {
+    const m = cmpVersions(version, memSeen);
+    if (m === null || m <= 0) return false;
+  }
+  // Then the shared layer, read as late as possible -- immediately before the toast --
+  // because a sibling tab may have announced this version since this one last looked.
+  // (Nothing can interleave INSIDE this function, so "as late as possible" means since the
+  // previous turn; the residual millisecond race, two tabs passing this line before either
+  // writes, is accepted: one duplicate toast in a window far narrower than the poll that
+  // opens it, against a lock this store has no business owning.)
+  const c = cmpVersions(version, highestSeen() || "0");
+  if (c === null || c <= 0) return false;
+  markSeen(version);
   toastShow({
     sticky: true,
     title: "Moonglade " + version + " is ready",

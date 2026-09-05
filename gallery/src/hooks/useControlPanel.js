@@ -377,6 +377,15 @@ export default function useControlPanel() {
   // is a REAL measured duration once the phase has passed (never a decorative number), and
   // `note` carries the one case where a duration would lie (deps that never had to run).
   const [updSteps, setUpdSteps] = useState(null);
+  /* WHAT THE MODAL PROMISED, frozen at the confirm. `update` is live -- the hourly tick
+     announces through subscribeUpdate above and can land at any moment, including while an
+     apply is running. Bound reactively, the card that said "Update now → 3.7.2" could
+     finish reading "Updated to 3.7.3": a claim about which version was installed, changed
+     underneath by a check that had nothing to do with it. The phased UI reads this
+     snapshot instead; the pre-confirm card still reads the live payload, because before
+     you press the button the newest answer IS the right one. */
+  const [updTarget, setUpdTarget] = useState(null);
+  const updTargetRef = useRef(null);   // the same value, readable synchronously
   const updPollRef = useRef(null);
   const updClockRef = useRef(null);   // {at, sawDeps} -- when the current phase started
   useEffect(() => {
@@ -422,15 +431,20 @@ export default function useControlPanel() {
      reading as three instructions with ticks beside them. `doneLabel` is the same line in
      the tense it earns when advanceSteps() closes it; the live/pending wording is
      unchanged. */
-  const freshSteps = () => ([
-    { key: "pull", label: "Pull " + ((update && update.latest) || "the release") + " from the mirror",
-      doneLabel: "Pulled " + ((update && update.latest) || "the release") + " from the mirror",
+  const freshSteps = () => {
+    // The snapshot, never the live payload: these rows name a version, and a background
+    // announcement mid-apply must not rewrite what the pull was for.
+    const t = updTargetRef.current || update;
+    return ([
+    { key: "pull", label: "Pull " + ((t && t.latest) || "the release") + " from the mirror",
+      doneLabel: "Pulled " + ((t && t.latest) || "the release") + " from the mirror",
       state: "now", secs: null, note: "" },
     { key: "apply", label: "Applying files", doneLabel: "Applied files",
       state: "wait", secs: null, note: "" },
     { key: "restart", label: "Restart", doneLabel: "Restarted", state: "wait", secs: null,
       note: "~" + Math.round(lastRestartMs() / 1000) + "s" },
-  ]);
+    ]);
+  };
 
   /* Advance the list to `key`, closing every step before it and stamping the one that just
      ended with the time it REALLY took (measured between the two transitions this client
@@ -495,6 +509,11 @@ export default function useControlPanel() {
     // card, the buttons give way to three phases and one meter. Nothing new opens, and
     // nothing closes -- which is why the phases live in this hook's state rather than in a
     // second component that would have to be mounted over the first.
+    // FREEZE THE TARGET FIRST -- before the POST, before the steps are built, so every
+    // line the phased card draws from here on names the version the person confirmed.
+    const target = update ? { ...update } : null;
+    updTargetRef.current = target;
+    setUpdTarget(target);
     setUpdPhase("applying"); setUpdRefusal(null);
     updClockRef.current = { at: Date.now(), sawDeps: false };
     setUpdSteps(freshSteps());
@@ -577,7 +596,9 @@ export default function useControlPanel() {
     if (updPollRef.current) clearInterval(updPollRef.current);
     updPollRef.current = null;
     updClockRef.current = null;
+    updTargetRef.current = null;
     setUpdOpen(false); setUpdPhase(""); setUpdRefusal(null); setUpdSteps(null);
+    setUpdTarget(null);
   };
 
   // Sidebar chips arm on the first click ("Confirm -- Restart?") and only actually fire
@@ -679,6 +700,7 @@ export default function useControlPanel() {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
-    update, updOpen, setUpdOpen, updPhase, updRefusal, updSteps, applyUpdate, closeUpdate,
+    update, updTarget, updOpen, setUpdOpen, updPhase, updRefusal, updSteps,
+    applyUpdate, closeUpdate,
   };
 }

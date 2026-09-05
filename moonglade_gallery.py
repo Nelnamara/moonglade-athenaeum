@@ -6835,11 +6835,21 @@ def note_update_transition(payload, now=None):
     pulled) CLEARS the announcement, so the stamp stops offering an update that is not
     there any more.
 
+    A FAILED check says nothing at all. check_for_update answers `behind: False` with a
+    reason attached when GitHub is unreachable (an offline Panel must show a Panel, not a
+    stack trace) -- but that is the absence of an answer, not the answer "you are current".
+    Treating it as one meant a single network blip pulled the standing banner off every
+    open tab and bumped the seq, and the next good tick an hour later re-announced the SAME
+    version as if it were new: a second toast for one release, which is exactly the promise
+    the background cadence was built to keep. A blip now leaves the announcement untouched.
+
     Announce-only by construction: this records a version string and a payload the client
     reads. It has no call into run_update or the apply route, and cannot acquire one
     without failing the guard test."""
     now = time.time() if now is None else now
     payload = payload or {}
+    if payload.get("error"):
+        return False
     latest = str(payload.get("latest") or "")
     if not payload.get("behind"):
         if _update_notice["version"]:

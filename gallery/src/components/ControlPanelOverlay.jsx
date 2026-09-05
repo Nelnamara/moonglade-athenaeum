@@ -296,7 +296,8 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
-    update, updOpen, setUpdOpen, updPhase, updRefusal, updSteps, applyUpdate, closeUpdate,
+    update, updTarget, updOpen, setUpdOpen, updPhase, updRefusal, updSteps,
+    applyUpdate, closeUpdate,
   } = useControlPanel();
   // Console heart: pipelines (the run buttons) vs ledger (the run history) --
   // Control Panel.dc.html's own consoleHeart enum, surfaced as the same segmented
@@ -917,8 +918,8 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
         <PowerModal mode={power} phase={powerPhase} error={powerErr} onClose={closePower} />
       )}
       {updOpen && update && (
-        <UpdateModal update={update} phase={updPhase} refusal={updRefusal} steps={updSteps}
-          onApply={applyUpdate} onClose={closeUpdate} />
+        <UpdateModal update={update} target={updTarget} phase={updPhase} refusal={updRefusal}
+          steps={updSteps} onApply={applyUpdate} onClose={closeUpdate} />
       )}
     </>
   );
@@ -1987,12 +1988,19 @@ const UPD_PHASE_HINT = {
   failed: "nothing was touched",
 };
 
-export function UpdateModal({ update, phase, refusal, steps, onApply, onClose }) {
+/* `target` is the SNAPSHOT taken when the user pressed Update now (useControlPanel.js).
+   Once the apply is under way this card is making a claim about a specific version -- what
+   is being installed, and afterwards what WAS installed -- and the hourly background check
+   can land at any moment: bound to the live payload, a card that promised 3.7.2 could sign
+   off as "Updated to 3.7.3". Before the confirm there is nothing to protect and the live
+   answer is the right one, so the pre-confirm card still reads `update`. */
+export function UpdateModal({ update, target, phase, refusal, steps, onApply, onClose }) {
   const busy = phase === "applying" || phase === "done";
   const running = !!steps && busy;
+  const shown = (busy && target) ? target : update;
   const doneCount = (steps || []).filter((s) => s.state === "done").length;
-  const title = phase === "done" ? "Updated to " + update.latest
-    : running ? "Applying " + update.latest
+  const title = phase === "done" ? "Updated to " + shown.latest
+    : running ? "Applying " + shown.latest
       : "Update available";
   return (
     <>
@@ -2004,14 +2012,14 @@ export function UpdateModal({ update, phase, refusal, steps, onApply, onClose })
             <div className="mgcp-updsub">The library stays put; only the app restarts.</div>
           ) : (
             <div className="mgcp-updver">
-              <span className="cur">{update.current || "?"}</span>
+              <span className="cur">{shown.current || "?"}</span>
               <span className="arr" aria-hidden="true">→</span>
-              <span className="new">{update.latest}</span>
+              <span className="new">{shown.latest}</span>
             </div>
           )}
-          {!running && update.title ? <div className="mgcp-updname">{update.title}</div> : null}
-          {!running && update.notes_url ? (
-            <a className="mgcp-updnotes" href={update.notes_url} target="_blank"
+          {!running && shown.title ? <div className="mgcp-updname">{shown.title}</div> : null}
+          {!running && shown.notes_url ? (
+            <a className="mgcp-updnotes" href={shown.notes_url} target="_blank"
               rel="noopener noreferrer">Release notes ↗</a>
           ) : null}
 
