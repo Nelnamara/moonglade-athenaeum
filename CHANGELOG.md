@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-09-04 — The First Pull
+
 - Fixed: **the living mark shows one animation — yours.** The old glass-sheen effect (a selectable option back in the classic interface) had been welded onto the mark as permanent furniture, so it played under every treatment you picked — and with the treatment set to "none" it just sat there as a frozen pane of glass. It is a *selectable pick* again — **Sheen**, back on the roster beside Classic — and it sweeps across the art itself rather than lighting the empty square around a transparent mark. *Classic* returns to what it originally was: the star. The resting halo follows the art's own shape now too, instead of glowing as a rounded tile behind it. And the *Eclipse* shadow crosses **in front of** the mark again — the sideways-scroll fix had left it stranded behind the art, where an eclipse is invisible. (2026-09-04)
 
 - **The `/next` codename is retired.** The gallery lives at one address — `/` — and the version reveal on the sign-in page (click the tagline) now shows just the version and its build sha, with no "next" in front of it. A bookmark from the pilot era pointing at `/next` no longer resolves; use `/`. (#51) (2026-09-04)
