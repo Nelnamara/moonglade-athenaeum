@@ -11,6 +11,11 @@
    one is the live grid. Resting look unchanged (same rgba, same blur(4px)); only the timing of
    the blur moved. `forwards`, never `both` -- a backwards fill would defeat the delay. */
 @keyframes mgaiScrimBlur { to { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); } }
+/* The blur switch (Control Panel > This device > "Blur behind popups"). Canonical
+   explanation: overlays.css, "THE BLUR SWITCH". */
+html.mg-noblur .mgai-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
 .mgai-modal { width: min(980px, 100%); max-height: min(720px, 92vh); display: flex; flex-direction: column;
   border: 1px solid var(--surface1); border-radius: 16px; overflow: hidden; background: rgba(8, 6, 20, .98);
   box-shadow: 0 40px 100px rgba(0, 0, 0, .6); }

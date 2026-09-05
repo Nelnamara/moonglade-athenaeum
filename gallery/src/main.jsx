@@ -8,7 +8,19 @@ import SetupWizard from "./components/SetupWizard.jsx";
 import SetupWizardMobile from "./components/SetupWizardMobile.jsx";
 import useIsMobile from "./hooks/useIsMobile.js";
 import { installNotify, NotifyRoot } from "./notify/index.jsx";
+import { syncBlurClass } from "./lib/blurPref.js";
 import "./styles.css";
+
+/* THE BLUR SWITCH, applied before anything can render (owner ruling 2026-09-04; see
+   lib/blurPref.js and styles/overlays.css "THE BLUR SWITCH"). This runs at MODULE scope,
+   above createRoot -- and that ordering is the guarantee, not a hope: #root is served
+   empty by both shells (moonglade_gallery.py's APP_PAGE and gallery/index.html), so no
+   scrim exists in the document until React's first render, which cannot begin before this
+   statement has run. A popup opened on the very first frame therefore already honours the
+   preference; there is no flash to guard against and no second copy of the key in the
+   Python shell (unlike the skin, which paints the page itself and so needs its own inline
+   pre-paint script in APP_PAGE). */
+syncBlurClass(document.documentElement);
 
 const boot = window.MG_BOOT || {};
 // boot.authenticated is only ever false on /login's non-bootstrap render (see

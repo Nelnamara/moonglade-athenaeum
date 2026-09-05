@@ -14,6 +14,7 @@ import path from "node:path";
      · props that are still referentially stable (one inline arrow at the call site and the
        memo compares unequal every render -- strictly slower than no memo at all),
      · every full-viewport scrim's blur still applied AFTER its fade rather than during it,
+       and still switchable OFF wholesale by the Control Panel's per-device preference,
      · the reserved scrollbar gutter that stops the open from resizing the viewport,
      · the mutation seams that purge the read cache.
 
@@ -317,6 +318,72 @@ describe("every full-viewport scrim blurs AFTER its fade, not during it", () => 
           if (!/(?:^|[\s;])animation:/.test(r.body)) continue;
           assert.match(r.body, /backdrop-filter/,
                        file + " " + r.sel + " replaces the animation but drops the blur");
+        }
+      }
+    }
+  });
+
+  /* THE BLUR SWITCH (owner ruling 2026-09-04). Deferring the blur made the OPEN cheap; it
+     did not make the blur free, so it is now a per-device preference -- a class on <html>,
+     written by the Control Panel through gallery/src/lib/blurPref.js.
+
+     This belongs in THIS block, not in a file of its own, because it is the same contract
+     seen from the other side: every rule the assertions above force to defer a blur, the
+     assertion below forces to also be able to switch it OFF. A scrim that gains a deferred
+     blur and no override would pass every test above while leaving one popup permanently
+     blurred on the machine that most needs it not to be. The scan is the same structural
+     one -- no list of seven names to keep in sync, it reads whatever the scan found. */
+  test("each one can be switched OFF -- html.mg-noblur wins over every path the blur takes", () => {
+    for (const s of scrims) {
+      if (KNOWN_UNSPLIT.has(s.sel)) continue;
+      const overrides = [];
+      for (const { file, css } of sheets) {
+        for (const r of rules(css)) {
+          const listed = r.sel.split(",").map((x) => x.trim());
+          if (!listed.includes("html.mg-noblur " + s.sel)) continue;
+          overrides.push({ file, ...r });
+        }
+      }
+      assert.equal(overrides.length, 1,
+        s.file + " " + s.sel + ": expected exactly one `html.mg-noblur " + s.sel + "` rule, " +
+        "saw " + overrides.length + " -- the toggle cannot turn this scrim's blur off");
+      const o = overrides[0];
+      assert.equal(o.file, s.file,
+        s.sel + ": its override lives in " + o.file + ", not beside the rule it neutralises " +
+        "in " + s.file + " -- a stylesheet must not depend on another one shipping");
+      // `!important`, and the reason is not stylistic. The blur reaches these scrims from
+      // three places -- the deferred keyframe, the .closing/.exiting rules that re-state
+      // it, and the reduced-motion blocks that re-state it too. An author !important is
+      // the one declaration that outranks all three (CSS Cascading 4 sorts important-author
+      // above animation declarations); a plain `backdrop-filter: none` loses to the
+      // keyframe and the toggle would do nothing at all.
+      assert.match(o.body, /backdrop-filter:\s*none\s*!important/,
+        o.file + " " + o.sel + ": must be `backdrop-filter: none !important` -- without the " +
+        "!important the deferred keyframe still wins and the toggle is inert");
+      assert.match(o.body, /-webkit-backdrop-filter:\s*none\s*!important/,
+        o.file + " " + o.sel + ": the -webkit- pair is prefixed everywhere else here too");
+      // Off must change ONLY the blur. The dark scrim, its fade and its timing are the
+      // resting look either way -- the owner asked for a blur toggle, not a scrim toggle.
+      assert.doesNotMatch(o.body, /(?:^|[\s;])(background|animation|opacity|display|transition)\s*:/,
+        o.file + " " + o.sel + ": the override may only drop the blur -- the plain dark " +
+        "scrim and its fade stay exactly as they are");
+    }
+  });
+
+  test("the override reaches the state classes too, via the base selector", () => {
+    // `.mgclaim-scrim.exiting` and `.mgpal-scrim.closing` re-state the blur DIRECTLY in
+    // their own bodies. They are not separately overridden and must not need to be: an
+    // element carrying `.exiting` is still an `.mgclaim-scrim`, so the base override
+    // already matches it. What this pins is that nobody "fixes" that by narrowing the
+    // override to a selector the state rules would escape.
+    for (const { css } of sheets) {
+      for (const r of rules(css)) {
+        for (const sel of r.sel.split(",").map((x) => x.trim())) {
+          if (!sel.startsWith("html.mg-noblur ")) continue;
+          const target = sel.slice("html.mg-noblur ".length);
+          assert.ok(/^\.[\w-]+$/.test(target),
+            sel + ": the override must target the scrim's BASE class alone -- anything " +
+            "narrower leaves .closing/.exiting blurred with the preference off");
         }
       }
     }
