@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 /* Generic full-screen PUSH chrome -- the SECOND shared chrome primitive after
    MobileSheet.jsx (bottom sheet). Built for surfaces that replace the current
@@ -26,12 +26,33 @@ import React from "react";
    affordance (design_handoff's own note: no swipe-back, no X button, no tap-
    outside-to-close, no Escape handling in that mock) -- so unlike
    MobileSheet.jsx there is no scrim and no onClick-outside-to-close; `onClose`
-   fires from the chevron alone. */
+   fires from the chevron alone.
+
+   THE SCROLLER UNDERNEATH IS PARKED WHILE A SCREEN IS UP (2026-09-05). `.glm-screen` is
+   position:absolute inside `.glm-body`, and `.glm-body` is the TAB's scroller -- it still
+   holds the whole tab below the screen, so its scroll offset positions this screen too.
+   Two live consequences, both measured at 390x844 with the Control tab open: a screen
+   opened while that tab was scrolled to 996 rendered at top -824, entirely above the
+   viewport (the tap looked like it did nothing); and a flick that ran past the end of
+   this screen's own body chained out into that scroller and slid the whole screen off,
+   revealing the Control tab under it. gallery-mobile.css locks the scroller (`overflow:
+   hidden` while a screen is mounted, which does NOT by itself move an offset already
+   there), and this effect zeroes the offset on the way in and restores it on the way out,
+   so the tab keeps its place when the screen closes. */
 export default function MobileScreen({ open, closing, onClose, title, children }) {
+  const root = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const host = root.current && root.current.closest(".glm-body");
+    if (!host) return undefined;
+    const was = host.scrollTop;
+    host.scrollTop = 0;
+    return () => { host.scrollTop = was; };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className={"glm-screen" + (closing ? " closing" : "")} role="dialog" aria-modal="true"
-      aria-label={title || "Screen"}>
+    <div ref={root} className={"glm-screen" + (closing ? " closing" : "")} role="dialog"
+      aria-modal="true" aria-label={title || "Screen"}>
       <div className="glm-screen-head">
         <button type="button" className="glm-screen-back" onClick={onClose}
           aria-label="Back" title="Back">&lsaquo;</button>

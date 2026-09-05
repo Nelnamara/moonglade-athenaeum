@@ -182,7 +182,7 @@ function groupSeriesSteps(steps, currentTaskId) {
                          aspect-ratio W/H, centred), then the FILE ACTIONS row, then the
                          stars row with dims · date
      record (DC:73-140)  the only scroller: head (kicker / headline / rule), tags, the
-                         11-row ledger, the record actions, LINEAGE, ✧ SIMILAR
+                         11-row ledger, the record actions, LINEAGE, ◈ SIMILAR
 
    Gone with this rebuild: the branch that stacked landscape images over the record
    (an earlier implementer's invention, not in the design), the record-column
@@ -237,7 +237,7 @@ export default function DetailsView({
     handleRate,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
-  // ✧ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
+  // ◈ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
   // record's strip already uses (hooks/useSimilar.js). The first 8 render inline below;
   // "see all N" hands the full set to the gallery via onSimilar.
   const similar = useSimilar(row ? row.media_id : null);
@@ -537,10 +537,14 @@ export default function DetailsView({
           ) : null}
 
           {/* RECORD ACTIONS -- Image Details.dc.html:102-106 + :397-403 recordActions, the
-              second of the design's two groups, directly under the ledger. "Find similar
-              (model)" is the DC's "every image from this model" (onFilterByModel), the same
-              filter the kicker's "find more" link applies -- NOT visual similarity, which is
-              the ✧ SIMILAR strip below. */}
+              second of the design's two groups, directly under the ledger.
+
+              "Filter by model" was called "Find similar (model)" until B2 of the 2026-09-04
+              Gallery Chrome handoff renamed it. It never did anything similar: it applies the
+              model filter (onFilterByModel), exactly what the kicker's "find more" link
+              applies, and it always has. Sharing the word "similar" with the ◈ strip below --
+              which IS visual similarity -- made two unrelated controls read as a pair. The
+              button does the same thing it always did, now under its own name. */}
           <div className="p-actions p-actions-record">
             <button className="btn" onClick={() => setEditingPrompt((v) => !v)}>✎ Edit prompt</button>
             {/* Send to Video: an image sends ITSELF as the first frame; a video sends its
@@ -556,7 +560,7 @@ export default function DetailsView({
               ) : null;
             })()}
             {row.model_name ? <button className="btn" title="Every image from this model"
-              onClick={() => onFilterByModel(row.model_name)}>Find similar (model)</button> : null}
+              onClick={() => onFilterByModel(row.model_name)}>Filter by model</button> : null}
             {/* task_id, not the batch COLUMN: --organize blanks `batch`, so the old gate hid the
                 button (and its filter matched nothing) on every organized library. The server's
                 batch filter now matches either column (issue #30). */}
@@ -691,23 +695,30 @@ export default function DetailsView({
             </div>
           ) : null}
 
-          {/* ✧ SIMILAR (Image Details.dc.html:127-140) -- the eight closest by eye, INLINE
-              in the record: the LINEAGE header idiom, a lavender "see all N" pushed right,
-              then a horizontal strip of 78px tiles fading down the row as the DC draws
-              them. "see all" / the Lightbox's chip both NAVIGATE to the gallery's own
-              lookalike set ("Where the Refit Broke" #6). Gated on the route's own
-              availability signal (no CLIP index, empty index, no hits -> images: []): the
-              whole section goes, header included -- never an empty rail, same as .p-lineage. */}
+          {/* ◈ SIMILAR (Image Details.dc.html:127-140) -- the eight closest by eye, INLINE
+              in the record: the LINEAGE header idiom, a lavender door pushed right, then a
+              horizontal strip of 78px tiles fading down the row as the DC draws them.
+              Gated on the route's own availability signal (no CLIP index, empty index, no
+              hits -> images: []): the whole section goes, header included -- never an empty
+              rail, same as .p-lineage.
+
+              B2 (2026-09-04): the mark is ◈, matching the tile hover door, the right-click
+              row and the lightbox chip, and the door is ALWAYS offered when the strip
+              renders rather than only past eight results. It used to read "see all N",
+              which was only true when there were more than the eight shown; every door in
+              the app now says the same thing -- ◈ Similar -- and pushes the same token into
+              the library bar ("Where the Refit Broke" #6, finished). */}
           {similar.images.length ? (
             <div className="p-similar">
               <div className="p-similar-head">
-                <span className="k">✧ SIMILAR</span>
+                <span className="k">◈ SIMILAR</span>
                 <span className="s">the closest by eye, not by model</span>
                 <span className="sp" />
-                {onSimilar && similar.images.length > 8 ? (
-                  <button type="button" className="p-seeall" title="The 48 closest, over the gallery"
+                {onSimilar ? (
+                  <button type="button" className="p-seeall"
+                    title={"The " + similar.images.length + " closest, in the library"}
                     onClick={() => onSimilar(row.media_id)}>
-                    see all {similar.images.length}
+                    ◈ Similar
                   </button>
                 ) : null}
               </div>
@@ -715,7 +726,7 @@ export default function DetailsView({
                 {similar.images.slice(0, 8).map((it, k) => (
                   <button key={it.media_id} type="button" className="p-sim-tile"
                     style={{ "--sim-o": 0.9 - k * 0.06 }}
-                    title={it.score != null ? "✧ " + it.score : "Open"}
+                    title={it.score != null ? "◈ " + it.score : "Open"}
                     onClick={() => onNavigate(it.media_id)}>
                     <img src={it.thumb} alt="" loading="lazy" decoding="async" />
                     {it.is_video === "1" ? <span className="vbadge">▶</span> : null}

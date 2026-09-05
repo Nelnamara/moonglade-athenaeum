@@ -7,8 +7,35 @@
    token here if the skin system genuinely has no equivalent -- and then expect
    skins not to touch it. */
 :root {
-  /* --serif is the only local token: DESIGN_TOKENS_CSS has no font stack. */
-  --serif: Georgia, "Times New Roman", serif;
+  /* THE TWO FACES (2026-09-04, Identity Chrome handoff C1). DESIGN_TOKENS_CSS has no font
+     stack, so the app's type lives here. --font-hero is the italic-serif display voice
+     (page titles, modal heads, plinths); --font-system is body text, controls and labels.
+     Mono kickers are deliberately outside the scheme -- they stay written out as
+     ui-monospace wherever they appear, because a kicker reads as machine type whatever
+     face the rest of the page wears.
+
+     These two values are the HOUSE pairing -- what shipped before the picker existed, so
+     an install that never touches it is unchanged. The Branding tab's font picker
+     overrides them as INLINE custom properties on <html> -- set before first paint by the
+     shells' own boot script (moonglade_gallery.py's _PREPAINT_BOOT_JS, the same one that
+     applies data-skin) and reconciled by gallery/src/lib/fonts.js. Inline wins over
+     :root, so the two can never disagree about which face is showing.
+
+     WHY --font-system LEADS WITH ui-sans-serif, when the old body rule did not. Two mobile
+     surfaces (gallery-mobile.css's .glm-stage, lightbox-mobile.css's .lbm-root) had ALWAYS
+     written the longer `ui-sans-serif, system-ui, ...` stack, and tokenising them against a
+     default that dropped the first entry would have quietly shortened their font chain on
+     every install that never opens the picker -- a silent change, which is the one thing a
+     default must not make. Adding the entry here is not a change anywhere: a browser that
+     doesn't know ui-sans-serif skips it and lands on system-ui exactly as before, and one
+     that does resolves it to the same platform UI face system-ui names. It also moves the
+     house default CLOSER to the handoff's own house row (`ui-sans-serif, system-ui,
+     sans-serif`). Keep this in step with fonts.js's `house` pairing, which re-applies it. */
+  --font-hero: Georgia, "Times New Roman", serif;
+  --font-system: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* --serif was the only local token before the pair above; it is kept as an alias so the
+     two rules already written against it follow the hero face for free. */
+  --serif: var(--font-hero);
   /* --cyan is the Loom colour's local alias; the app's token is --loomc. */
   --cyan: var(--loomc, #47cbc3);
 }
@@ -25,7 +52,7 @@
    effect, and it feature-detects rather than sniffing.) */
 html { color-scheme: dark; scrollbar-gutter: stable; }
 body { margin: 0; background: var(--mantle); color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  font: 14px/1.5 var(--font-system); }
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -171,7 +198,7 @@ button:disabled { cursor: default; }
    nothing rendered a .gd element any more. */
 .gd-lbl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
 .gd-prompt { min-height: 96px; background: rgba(20, 17, 40, .55); border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 10px; color: var(--text); font: 12.5px/1.5 system-ui; padding: 8px 10px;
+  border-radius: 10px; color: var(--text); font: 12.5px/1.5 var(--font-system); padding: 8px 10px;
   resize: vertical; }
 .gd-prompt:disabled { opacity: .45; }
 .gd-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; row-gap: 6px; }
@@ -223,8 +250,9 @@ button:disabled { cursor: default; }
 /* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
    2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */
 
-/* (The art-filters compare panel's .af-* rules lived here until 2026-08-16; the panel
-   is FilterCompare.jsx now, styled in styles/dock.css as .mgfc-* to the DC's overlay.) */
+/* (The art-filters compare panel's .af-* rules lived here until 2026-08-16, moved to
+   styles/dock.css as .mgfc-*; the panel itself was replaced on 2026-09-04 by the
+   full-screen Darkroom -- Darkroom.jsx, styled in styles/dock.css as .mgdk-*.) */
 
 /* the model/LoRA browser panel, left of the drawer */
 .mfly { position: fixed; top: 0; right: var(--drawer-w); bottom: 0; z-index: 305;
@@ -362,25 +390,13 @@ button:disabled { cursor: default; }
 .lb { position: fixed; inset: 0; z-index: 315; display: grid; place-items: center;
   background: rgba(6, 4, 14, .88); backdrop-filter: blur(6px); }
 
-/* ---- similar-images modal (classic's #similar-scrim/#similar-modal, class-based) ---- */
-.similar-scrim { position: fixed; inset: 0; z-index: 414; /* above .lbx 400 -- see overlays.css ladder (#39) */ background: rgba(6, 4, 16, .6); }
-.similar-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 900px; max-width: 94vw; height: 84vh; max-height: 84vh; background: var(--mantle);
-  border: 1px solid var(--surface1); border-radius: 12px; z-index: 415; display: flex;
-  flex-direction: column; padding: 14px; }
-.pick-head { display: flex; align-items: center; margin-bottom: 10px; }
-.pick-head .t { font-size: 15px; font-weight: 600; color: var(--text); }
-.pick-head .x { margin-left: auto; background: none; border: none; color: var(--subtext);
-  font-size: 22px; cursor: pointer; }
-.pick-empty { color: var(--subtext); font-size: 12px; padding: 24px; text-align: center; }
-.similar-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  grid-auto-rows: 150px; gap: 10px; overflow-y: auto; flex: 1; min-height: 0;
-  align-content: start; padding: 4px; }
-.scard { position: relative; display: block; border-radius: 8px; overflow: hidden;
-  background: var(--surface0); }
-.scard img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.smeta { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 3px 7px;
-  font-size: 11px; color: var(--text); background: linear-gradient(transparent, rgba(0,0,0,.72)); }
+/* The similar-images MODAL's rules (.similar-scrim/.similar-modal/.pick-head/
+   .pick-empty/.similar-grid/.scard/.smeta) lived here until B2 of the 2026-09-04
+   Gallery Chrome handoff retired the modal itself: Similar is a state on the
+   library now -- the ◈ token in the search bar, results in the grid's place --
+   not a scrimmed layer over it. Nothing renders any of those classes any more,
+   so they go with the markup rather than sit here as orphans. The replacement
+   surface's rules are styles/similar.css (.simres-*). */
 
 /* ---- Details view -- "the layer deeper", classic's /image/<mid> page ----
    Rebuilt 2026-08-23 to the PIXEL source, design_handoff/design_handoff_moonglade_suite/

@@ -3,6 +3,7 @@ import * as toastStore from "./toastStore.js";
 import * as jobs from "./jobs.js";
 import * as jobsStore from "./jobsStore.js";
 import * as ach from "./ach.js";
+import { claimReceipt } from "./updateStore.js";
 import ToastHost from "./ToastHost.jsx";
 import "../styles/notify.css";
 
@@ -50,6 +51,15 @@ export function installNotify() {
 
   jobsStore.start();
   ach.check();
+  /* THE UPDATE'S RECEIPT (2026-09-05). An apply ends in a reload, and what comes back
+     looks exactly like what went away -- so the boot that follows one pays out the note
+     the vanished modal could not. Here rather than in a component because this is where
+     the update's OTHER piece of news already lives (jobsStore's poll feeds the
+     announcement), and because it must fire once per boot, not once per mount.
+     build_stamp is the version this process is really running; without it the receipt
+     waits rather than guessing. See notify/updateStore.js. */
+  const boot = (typeof window !== "undefined" && window.MG_BOOT) || {};
+  claimReceipt(boot.build_stamp || "");
 }
 
 export function NotifyRoot() {

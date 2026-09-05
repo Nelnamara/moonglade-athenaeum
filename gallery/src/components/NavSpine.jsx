@@ -107,7 +107,9 @@ export default function NavSpine({ boot, onOverlay }) {
           <span>AI Tools</span>
           {isNew ? <span className="mgx-nav-new">New</span> : null}
           <span className="mgx-nav-underline ai" aria-hidden="true" />
-          <span className="mgx-nav-tip" role="tooltip">PixAI tools — browse the 28, run in the drawer</span>
+          {/* no count here: the grid is live (#36), so a number baked into the door goes
+              stale the day PixAI adds a tool -- the footer's own tally is the honest one */}
+          <span className="mgx-nav-tip" role="tooltip">PixAI tools — browse the catalog, run in the drawer</span>
         </button>
       ) : null}
       {NAV.map((it) => {

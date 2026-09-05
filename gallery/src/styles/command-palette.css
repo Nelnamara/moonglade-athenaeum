@@ -176,7 +176,7 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
   pointer-events: none; }
 
 .mgks-titlerow { display: flex; align-items: baseline; gap: 10px; }
-.mgks-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
+.mgks-title { font-family: var(--font-hero); font-style: italic;
   font-size: 21px; color: var(--text); }
 .mgks-sub { font-size: 10.5px; color: var(--overlay0); }
 .mgks-x { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center;

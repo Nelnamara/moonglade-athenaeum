@@ -83,7 +83,7 @@ describe("the record group: the DC's recordActions, under the ledger, before lin
   test("(b) exactly the five designed labels, in the designed order", () => {
     // Suggest prompt's resting label (its busy text "Reading…" is the other branch)
     assert.deepEqual(labels(g).filter((l) => l !== "Reading…"), [
-      "✎ Edit prompt", "▶ Send to Video", "Find similar (model)", "View batch", "Suggest prompt",
+      "✎ Edit prompt", "▶ Send to Video", "Filter by model", "View batch", "Suggest prompt",
     ]);
   });
   test("it comes after the ledger and BEFORE lineage (DC:102-108)", () => {
@@ -93,8 +93,14 @@ describe("the record group: the DC's recordActions, under the ledger, before lin
     assert.ok(ledger >= 0 && record > ledger, "record actions come after the ledger");
     assert.ok(lineage > record, "record actions come before the lineage card");
   });
-  test("Find similar (model) is the DC's 'every image from this model' -- the model filter", () => {
-    assert.match(g, /onClick=\{\(\) => onFilterByModel\(row\.model_name\)\}>Find similar \(model\)<\/button>/);
+  // Renamed by B2 of the 2026-09-04 Gallery Chrome handoff. It was "Find similar (model)",
+  // which shared a word with the ◈ SIMILAR strip below it while doing something else
+  // entirely -- this button is, and always was, the DC's "every image from this model"
+  // filter (onFilterByModel), the same one the kicker's "find more" link applies. Same
+  // handler, honest name.
+  test("Filter by model is the DC's 'every image from this model' -- the model filter", () => {
+    assert.match(g, /onClick=\{\(\) => onFilterByModel\(row\.model_name\)\}>Filter by model<\/button>/);
+    assert.doesNotMatch(g, /Find similar/);
   });
   test("the record handlers are the real ones", () => {
     assert.match(g, /onClick=\{\(\) => setEditingPrompt\(\(v\) => !v\)\}>✎ Edit prompt<\/button>/);

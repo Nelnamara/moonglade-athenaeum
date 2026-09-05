@@ -121,7 +121,7 @@ images and videos with the arrow keys without leaving the overlay.
   end of a page and it loads the next one, continuing seamlessly. Closing leaves your
   scroll and selections intact.
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full
-  metadata (incl. negative + clip-skip), Copy Prompt, **Find Similar (model)** — a filter
+  metadata (incl. negative + clip-skip), Copy Prompt, **Filter by model** — a filter
   link to every image from the same model — View Batch, Edit Prompt. Keys: `←` `→`
   prev-next, **`Esc` / `↑` back to gallery**, `F` focus mode.
 
@@ -138,13 +138,35 @@ images and videos with the arrow keys without leaving the overlay.
   `--backfill-full-meta --with-surface` pass described in [Backing up](Backing-Up).
   **LINEAGE** shows where a derived picture came from — its source image and whether it
   was an edit, an upscale, or turned into a video.
-- **✧ Similar** — lookalikes by *eye* rather than by model, and a different control from
-  *Find Similar (model)* above: right-click any image card, or **✧ Similar** in the
-  lightbox, for the 48 closest images in your catalog. Images only. Needs the optional
-  CLIP index — `pip install pixeltable`, then build it once with
-  `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
+- **◈ Similar** — lookalikes by *eye* rather than by model, and a different control from
+  *Filter by model* above. **In the gallery on a computer, the ◈ mark is the door**: hover a
+  card in the grid and press the ◈ in its corner, right-click a card and pick *Find similar*,
+  press **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's SIMILAR
+  strip. All four do the same thing, and nowhere in the library does ◈ open a *second* kind of
+  Similar. (The mark does appear as a small decoration elsewhere in the app — beside a model's
+  use count in the picker, on a *USER LORA* badge — where it is punctuation, not a door.)
+
+  What you get is a **state on your library, not a popup**: a dismissible **◈ Similar to
+  [thumbnail]** token appears in the search bar with the match count beside it, and the 48
+  closest images take the grid's place underneath. **✕ on the token — or `Esc` — puts your
+  library back exactly as it was**, same search, same filters, same page, because none of
+  them were ever changed. Any result's own ◈ re-points the view at that picture, so you can
+  walk from one lookalike to the next.
+
+  **On a phone it works the same way, with the phone's own door.** Press **◈ Similar** on the
+  big viewer's button row and the lookalikes fill the library's own space back on the Gallery
+  tab, under the same **◈ Similar to [thumbnail]** token — in the search bar, on its own line
+  under the field so the field is still usable, with the match count beside it. **✕ on the
+  token, or the phone's Back gesture, puts your library back exactly as it was**, same search,
+  same filters, same page, same place on the page. The picture screen's own **◈ SIMILAR** row
+  and the **see all** sheet behind it read the same mark; that sheet stays a sheet, because
+  it is the phone's way of showing you the rest of something you are already looking at.
+  *Filter by model* is called that on the phone too.
+
+  Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
+  with `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't
   serving Similar queries — both use the same embedded database). To top up an existing index with only the images it lacks rather than rebuilding from scratch, use `--sync-similar` (the incremental counterpart). Without the index the
-  panel just tells you so; nothing else breaks.
+  view just tells you so; nothing else breaks.
 
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).

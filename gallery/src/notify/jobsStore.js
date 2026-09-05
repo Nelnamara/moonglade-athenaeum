@@ -16,6 +16,7 @@
 
 import { apiGet, apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
+import { note as noteUpdate } from "./updateStore.js";
 
 const LSK = "mg_jobs_open";
 
@@ -70,6 +71,23 @@ function toastTransitions(rows) {
     // credits" at the moment of the click, seconds before this poll. The tracker LINE is
     // what this feature adds; the toast was never missing.
     if (j.type === "claim") { last[j.job_id] = st; return; }
+    // THE OLD UPDATE SUCCESS TOAST, retired 2026-09-04 (Identity Chrome handoff C2: "the
+    // modal IS the receipt"). An update row is born terminal the same way a claim row is
+    // -- the server writes "Updated Moonglade / done" and only THEN restarts -- so the
+    // rule below read its first appearance as a just-finished job and fired
+    // "Updated Moonglade — done / Added to your gallery." Wrong twice over: nothing was
+    // added to the gallery, and the update modal was at that moment sitting right there
+    // showing its own three-phase account of the same event.
+    //
+    // SUCCESS ONLY. The handoff retires the success toast, not the failure one, and the
+    // two are not the same event: a success is watched (the modal is right there, and the
+    // reload that follows is itself the receipt), while a FAILURE routinely lands with
+    // nobody looking -- the modal closed, the tab moved on. Swallowing that one would make
+    // a failed update the single outcome that arrives in total silence, which is the exact
+    // hole `stale` was added to TERMINAL to close. So a failed / errored / stalled update
+    // falls through to the sticky "see the activity card" toast like any other job, and
+    // the tracker line stays either way.
+    if (j.type === "update" && st === "done") { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";
@@ -106,6 +124,15 @@ export function refresh() {
     .then((d) => {
       const rows = (d && d.jobs) || [];
       toastTransitions(rows);
+      // The release announcement rides this same poll -- it is the one server-truth channel
+      // every open tab already runs, so the background update check reaches a person wherever
+      // they are without a second loop. updateStore decides whether it is news; it announces
+      // and never applies. (Server: update_notice() in moonglade_gallery.py.)
+      //
+      // Only on a real answer. api.js turns a dropped read into {error}, which carries no
+      // `update` field -- passing that on would read as "nothing is out" and blank a standing
+      // notice over one blip, exactly the way the release check refuses to cache a failure.
+      if (d && !d.error) noteUpdate(d.update);
       jobs = rows;
       emit();
     })
