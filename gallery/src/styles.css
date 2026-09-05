@@ -14,14 +14,25 @@
      ui-monospace wherever they appear, because a kicker reads as machine type whatever
      face the rest of the page wears.
 
-     These two values are the HOUSE pairing, byte-for-byte what shipped before the picker
-     existed, so an install that never touches it is unchanged. The Branding tab's font
-     picker overrides them as INLINE custom properties on <html> -- set before first paint
-     by the shells' own boot script (moonglade_gallery.py's _PREPAINT_BOOT_JS, the same
-     one that applies data-skin) and reconciled by gallery/src/lib/fonts.js. Inline wins
-     over :root, so the two can never disagree about which face is showing. */
+     These two values are the HOUSE pairing -- what shipped before the picker existed, so
+     an install that never touches it is unchanged. The Branding tab's font picker
+     overrides them as INLINE custom properties on <html> -- set before first paint by the
+     shells' own boot script (moonglade_gallery.py's _PREPAINT_BOOT_JS, the same one that
+     applies data-skin) and reconciled by gallery/src/lib/fonts.js. Inline wins over
+     :root, so the two can never disagree about which face is showing.
+
+     WHY --font-system LEADS WITH ui-sans-serif, when the old body rule did not. Two mobile
+     surfaces (gallery-mobile.css's .glm-stage, lightbox-mobile.css's .lbm-root) had ALWAYS
+     written the longer `ui-sans-serif, system-ui, ...` stack, and tokenising them against a
+     default that dropped the first entry would have quietly shortened their font chain on
+     every install that never opens the picker -- a silent change, which is the one thing a
+     default must not make. Adding the entry here is not a change anywhere: a browser that
+     doesn't know ui-sans-serif skips it and lands on system-ui exactly as before, and one
+     that does resolves it to the same platform UI face system-ui names. It also moves the
+     house default CLOSER to the handoff's own house row (`ui-sans-serif, system-ui,
+     sans-serif`). Keep this in step with fonts.js's `house` pairing, which re-applies it. */
   --font-hero: Georgia, "Times New Roman", serif;
-  --font-system: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-system: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   /* --serif was the only local token before the pair above; it is kept as an alias so the
      two rules already written against it follow the hero face for free. */
   --serif: var(--font-hero);

@@ -397,11 +397,20 @@ export default function useControlPanel() {
     try { localStorage.setItem(RESTART_MS_KEY, String(Math.round(ms))); } catch { /* private mode */ }
   };
 
+  /* TWO LABELS PER PHASE, and why a finished row rewrites its own verb: the handoff's
+     done row reads "Pulled 3.7.2 from the mirror ✓ 2.1s" -- past tense, because by then it
+     is a record of something that happened, not an announcement of something about to.
+     Writing "Pull 3.7.2 from the mirror" once and leaving it there left the finished list
+     reading as three instructions with ticks beside them. `doneLabel` is the same line in
+     the tense it earns when advanceSteps() closes it; the live/pending wording is
+     unchanged. */
   const freshSteps = () => ([
     { key: "pull", label: "Pull " + ((update && update.latest) || "the release") + " from the mirror",
+      doneLabel: "Pulled " + ((update && update.latest) || "the release") + " from the mirror",
       state: "now", secs: null, note: "" },
-    { key: "apply", label: "Applying files", state: "wait", secs: null, note: "" },
-    { key: "restart", label: "Restart", state: "wait", secs: null,
+    { key: "apply", label: "Applying files", doneLabel: "Applied files",
+      state: "wait", secs: null, note: "" },
+    { key: "restart", label: "Restart", doneLabel: "Restarted", state: "wait", secs: null,
       note: "~" + Math.round(lastRestartMs() / 1000) + "s" },
   ]);
 
@@ -425,6 +434,8 @@ export default function useControlPanel() {
           if (steps[i].state !== "done") {
             steps[i].state = "done";
             steps[i].secs = (now - started) / 1000;
+            // Past tense the moment it IS past (handoff C2's done row).
+            if (steps[i].doneLabel) steps[i].label = steps[i].doneLabel;
           }
         } else if (i === idx) {
           steps[i].state = "now";

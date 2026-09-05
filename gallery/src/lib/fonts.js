@@ -20,14 +20,20 @@
    as "a start", neither option loved). PAIRINGS below is data: swapping, adding or
    removing an entry needs no change to the storage shape, the pre-paint script, the CSS
    variables or the picker. Only the DEFAULT id is special, and only because it must stay
-   byte-identical to what the app shipped before this existed.
+   VISUALLY identical to what the app shipped before this existed -- it is the pairing an
+   install that never opens this picker is already wearing.
 
    HOUSE DEFAULT IS THE APP'S OWN STACKS, not the handoff's shorthand for them. The comp
-   labels pairing 1 "Georgia + UI sans"; what actually ships today is `--serif` (Georgia,
-   "Times New Roman", serif) over body's own `system-ui, -apple-system, "Segoe UI",
-   sans-serif`. Writing the comp's slightly different sans list here would have quietly
-   restyled every install that never touches this picker, which is the one thing a
-   "default" must never do. The other four pairings are the handoff's stacks verbatim.
+   labels pairing 1 "Georgia + UI sans"; what ships is `--serif` (Georgia, "Times New
+   Roman", serif) over the app's own body sans, `ui-sans-serif, system-ui, -apple-system,
+   "Segoe UI", sans-serif`. Swapping in the comp's shorter list wholesale would have
+   quietly restyled every install that never touches this picker, which is the one thing a
+   "default" must never do -- so the app's list stays, with only ui-sans-serif taken from
+   the comp's, because two mobile surfaces already led with it and a browser that lacks it
+   simply skips to system-ui (styles.css's own note on the token). The house `system` here
+   must stay identical to that :root default, so picking "House default" after a detour
+   lands back on exactly what an untouched install shows. The other four pairings are the
+   handoff's stacks verbatim.
 
    WHY BROWSER STORAGE, and why a pre-paint script: same two answers the skin already
    gives. It is a property of the DEVICE (localStorage, no round trip, see
@@ -46,7 +52,7 @@ export const PAIRINGS = [
     name: "House default",
     sub: "Georgia + UI sans",
     hero: 'Georgia, "Times New Roman", serif',
-    system: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    system: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   },
   {
     id: "bookish",

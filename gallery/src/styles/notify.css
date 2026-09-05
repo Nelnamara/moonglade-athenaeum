@@ -102,7 +102,7 @@
 @keyframes m2flamewisp{0%{opacity:0;transform:translate(0,0) scale(.5) rotate(0deg);}18%{opacity:.57;}55%{opacity:.54;transform:translate(var(--sway,10px),-50px) scale(1.2) rotate(var(--rot,10deg));}100%{opacity:0;transform:translate(calc(var(--sway,10px) * 1.7),-104px) scale(.25) rotate(var(--rot,10deg));}}
 @media (prefers-reduced-motion: reduce){ .ach-m2 .m2-halo,.ach-m2 .m2-motewrap,.ach-m2 .m2-flameglow,.ach-m2 .m2-runeA,.ach-m2 .m2-runeB,.ach-m2 .m2-wisp{animation:none!important;} .ach-m2 .tw{transition:none!important;} }
 .ach-m2 .tbody{min-width:0;flex:1;}
-.ach-m2 .tbody .u{font:700 10px/1 sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
+.ach-m2 .tbody .u{font:700 10px/1 var(--font-system,system-ui,sans-serif);letter-spacing:.22em;text-transform:uppercase;color:var(--tc);opacity:0;}
 .ach-m2 .tw.go .tbody .u{animation:m2fade .4s ease .86s forwards;}
 .ach-m2 .tbody .n{font:700 22px/1.08 var(--font-hero,Georgia,serif);margin:3px 0 5px;opacity:0;color:var(--text);}
 .ach-m2 .tw.go .tbody .n{animation:m2fade .42s ease .98s forwards;}
@@ -117,7 +117,7 @@
 @keyframes m2fade{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
 .ach-m2 .tbody .r.glitch{font-family:ui-monospace,Menlo,monospace;letter-spacing:.01em;background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);text-shadow:0 0 10px rgba(243,139,168,.55);animation:m2fade .46s ease 1.1s forwards!important;}
 .ach-m2 .tbody .r.settled-nsfw{background:none;-webkit-text-fill-color:unset;color:var(--red,#f38ba8);animation:m2fade .46s ease 1.1s forwards!important;}
-.ach-m2 .tier-pill{position:relative;display:inline-block;margin-top:8px;font:800 9px/1 sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#241c10;padding:3px 11px;border-radius:999px;overflow:hidden;background:linear-gradient(180deg,var(--tcl),var(--tc) 46%,var(--tcd));border:1px solid var(--tcl);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);text-shadow:0 1px 0 rgba(255,255,255,.35);opacity:0;}
+.ach-m2 .tier-pill{position:relative;display:inline-block;margin-top:8px;font:800 9px/1 var(--font-system,system-ui,sans-serif);letter-spacing:.09em;text-transform:uppercase;color:#241c10;padding:3px 11px;border-radius:999px;overflow:hidden;background:linear-gradient(180deg,var(--tcl),var(--tc) 46%,var(--tcd));border:1px solid var(--tcl);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);text-shadow:0 1px 0 rgba(255,255,255,.35);opacity:0;}
 .ach-m2 .t-feat .tier-pill{background:linear-gradient(180deg,#c7ccd6,var(--gunmetal,#8a93a2) 46%,var(--gunmetal-deep,#4a515c));border-color:#c7ccd6;color:#171a20;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 0 11px -1px var(--tc);}
 .ach-m2 .tw.go .tier-pill{animation:m2fade .4s ease 1.22s forwards;}
 .ach-m2 .tier-pill::after{content:"";position:absolute;top:0;left:-60%;width:45%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.75),transparent);transform:skewX(-18deg);}
@@ -135,7 +135,7 @@
 @keyframes m2flash{0%{opacity:0;}20%{opacity:.92;}100%{opacity:0;}}
 @media (prefers-reduced-motion: reduce){ .ach-m2 *{animation:none!important;} .ach-m2 .toast,.ach-m2 .badge,.ach-m2 .mascot,.ach-m2 .mglow,.ach-m2 .tbody .u,.ach-m2 .tbody .n,.ach-m2 .tbody .r,.ach-m2 .tier-pill{opacity:1!important;transform:none!important;} }
 .ach-m2 .rwd .giftbox{display:inline-block;height:15px;width:15px;background:url(/branding/rewards/gift.png) center/contain no-repeat;vertical-align:-3px;margin-right:5px;}
-.ach-m2 .pts-pill{display:inline-block;margin:8px 0 0 8px;font:800 9px/1 sans-serif;letter-spacing:.06em;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.12);border-radius:999px;padding:3px 9px;vertical-align:middle;opacity:0;}
+.ach-m2 .pts-pill{display:inline-block;margin:8px 0 0 8px;font:800 9px/1 var(--font-system,system-ui,sans-serif);letter-spacing:.06em;color:var(--gold,#e0c268);border:1px solid #6b5330;background:rgba(230,200,120,.12);border-radius:999px;padding:3px 9px;vertical-align:middle;opacity:0;}
 .ach-m2 .tw.go .pts-pill{animation:m2fade .4s ease 1.26s forwards;}
 @media (prefers-reduced-motion: reduce){ .ach-m2 .pts-pill{opacity:1!important;} }
 /* The legendary/feat star-rain. The vanilla relied on the HOST page defining .ee-star (it lives

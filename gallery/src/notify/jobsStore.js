@@ -76,10 +76,17 @@ function toastTransitions(rows) {
     // rule below read its first appearance as a just-finished job and fired
     // "Updated Moonglade — done / Added to your gallery." Wrong twice over: nothing was
     // added to the gallery, and the update modal was at that moment sitting right there
-    // showing its own three-phase account of the same event. The tracker LINE stays (the
-    // activity log is the only record of an update that failed while nobody was watching);
-    // the toast was the duplicate.
-    if (j.type === "update") { last[j.job_id] = st; return; }
+    // showing its own three-phase account of the same event.
+    //
+    // SUCCESS ONLY. The handoff retires the success toast, not the failure one, and the
+    // two are not the same event: a success is watched (the modal is right there, and the
+    // reload that follows is itself the receipt), while a FAILURE routinely lands with
+    // nobody looking -- the modal closed, the tab moved on. Swallowing that one would make
+    // a failed update the single outcome that arrives in total silence, which is the exact
+    // hole `stale` was added to TERMINAL to close. So a failed / errored / stalled update
+    // falls through to the sticky "see the activity card" toast like any other job, and
+    // the tracker line stays either way.
+    if (j.type === "update" && st === "done") { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";

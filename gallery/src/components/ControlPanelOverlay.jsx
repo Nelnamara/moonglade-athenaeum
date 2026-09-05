@@ -985,10 +985,12 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
   /* Swatch gradient = the skin's own accent -> its own highlight, straight out of SKIN_SW
      (the classic Trophy Hall's relic-row table, already the one source for these five
      palettes). ONE rule for all five rather than the handoff's five hand-picked pairs:
-     three of the comp's five ARE this rule, its nightfallen stop (#33236d) is in no
-     token table at all, and the house rule here is that a colour comes from the DS. The
-     one visible difference from the comp is moonglade's swatch, lavender->gold instead of
-     lavender->emerald. */
+     three of the comp's five (moonlit, ember, verdant) ARE this rule already, and the
+     house rule here is that a colour comes from the DS. TWO of the five therefore differ
+     from the comp on screen: moonglade's is lavender->gold (#b692e6 -> #d4af37) where the
+     comp drew lavender->emerald, and nightfallen's ends on its own light-lavender
+     highlight (#d9b3ff) where the comp drew a dark plum (#33236d) that appears in no token
+     table at all. Both are the rule doing its job, not an oversight. */
   const sw = SKIN_SW[activeSkin] || SKIN_SW.moonglade;
   const skinGrad = "linear-gradient(135deg, " + sw[1] + ", " + sw[3] + ")";
 
@@ -1342,6 +1344,7 @@ function FontsRow() {
         <div className="mgcp-fontprev-hero">The Athenaeum keeps the receipts</div>
         <div className="mgcp-fontprev-body">
           Body and controls render in the System face.{" "}
+          1,024 images · 4 runs · the mirror does the waiting.{" "}
           <b>Bold weights</b> and <span className="mgcp-fontprev-mono">mono kickers</span> are unaffected.
         </div>
       </div>

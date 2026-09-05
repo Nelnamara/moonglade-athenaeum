@@ -7,6 +7,8 @@ paths and fake tools rather than the other way round.
 """
 import json
 
+import pytest
+
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
@@ -395,6 +397,112 @@ def test_apply_starts_the_update_when_every_gate_passes(tmp_path, monkeypatch):
     # single-flight: a second click while one runs is refused, not queued
     r2 = _apply(cli)
     assert r2.status_code == 409 and "already running" in r2.get_json()["error"]
+
+
+# ---- the refusal CONTRACT --------------------------------------------------
+#
+# Every test above pins one refusal's PROSE. This pins the machine-readable half the
+# 2026-09-04 update modal actually dispatches on: `kind`, which decides whether the
+# refusal is drawn gold ("busy" -- come back in a moment, nothing is wrong) or ruby
+# ("failed" -- this install keeps refusing until something changes). Before `kind` the
+# client string-matched those messages apart; a branch that forgets the field, or ships a
+# third value, now silently falls through to the client's own default instead of the
+# presentation the handoff drew. The prose is free to change; this contract is not.
+
+def _refuse_no_csrf(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    return _client(tmp_path).post("/api/update/apply", json={"confirm": True})
+
+
+def _refuse_no_confirm(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    cli = _client(tmp_path)
+    return cli.post("/api/update/apply", json={"csrf": _csrf(cli)})
+
+
+def _refuse_read_only(tmp_path, monkeypatch):
+    import moonglade_backup as core
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    _apply_ready(monkeypatch)
+    return _apply(_client(tmp_path))
+
+
+def _refuse_unsupervised(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch, supervised=False)
+    return _apply(_client(tmp_path))
+
+
+def _refuse_busy_job(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    save_catalog(tmp_path / "catalog.db", [
+        _row(media_id="1", filename="a_1.png", created_at="2025-01-01T00:00:00")])
+    app = create_app(tmp_path)
+    app.extensions["mg_panel_job"].update(status="running", label="Sync now")
+    return _apply(login_test_client(app))
+
+
+def _refuse_off_master(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch, branch="feat/something")
+    return _apply(_client(tmp_path))
+
+
+def _refuse_dirty_tracked(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch, dirty=" M moonglade_gallery.py\n",
+                 incoming=["moonglade_gallery.py"])
+    return _apply(_client(tmp_path))
+
+
+def _refuse_untracked_collision(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch, dirty="?? new_module.py\n",
+                 incoming=["new_module.py", "moonglade_gallery.py"])
+    return _apply(_client(tmp_path))
+
+
+def _refuse_already_running(tmp_path, monkeypatch):
+    _apply_ready(monkeypatch)
+    cli = _client(tmp_path)                 # built BEFORE the Thread patch, as above
+    _started(monkeypatch)
+    assert _apply(cli).status_code == 200   # the first click takes the single-flight slot
+    return _apply(cli)
+
+
+@pytest.mark.parametrize("setup, expected", [
+    (_refuse_no_csrf, "failed"),
+    (_refuse_no_confirm, "failed"),
+    (_refuse_read_only, "failed"),
+    (_refuse_unsupervised, "failed"),
+    (_refuse_busy_job, "busy"),
+    (_refuse_off_master, "failed"),
+    (_refuse_dirty_tracked, "failed"),
+    (_refuse_untracked_collision, "failed"),
+    (_refuse_already_running, "busy"),
+], ids=["no-csrf", "no-confirm", "read-only", "unsupervised", "busy-job",
+        "off-master", "dirty-tracked", "untracked-collision", "already-running"])
+def test_every_refusal_carries_a_kind_the_modal_can_dispatch_on(
+        tmp_path, monkeypatch, setup, expected):
+    """Each refusal /api/update/apply can reach names itself as "busy" or "failed".
+
+    COVERED, one case per refusal the route can be driven into with the fixtures this
+    file already has: no CSRF, no confirm, READ_ONLY, unsupervised, a panel job in the
+    way, off master, a tracked edit, an untracked file at an incoming path, and a second
+    apply while one is already running.
+
+    NOT COVERED here, because each needs a git seam that fails rather than answers and
+    the fixtures above have no shape for one: the three "couldn't read this checkout"
+    branches (rev-parse, status) and the unreadable-upstream branch, which
+    test_an_unreadable_upstream_refuses_rather_than_guessing drives for its prose. All
+    four are written "failed" alongside the ones below.
+
+    "offline" is deliberately absent: it is not a server refusal at all. The client owns
+    it (hooks/useControlPanel.js's classifyRefusal), for the case where no answer arrived."""
+    r = setup(tmp_path, monkeypatch)
+    assert r.status_code in (400, 409), "a refusal, not a start"
+    d = r.get_json()
+    assert d.get("error"), "a refusal always says why in words too"
+    assert d.get("kind") in ("busy", "failed"), (
+        "the modal dispatches on `kind` alone -- a missing or unknown value falls through "
+        "to the client's default presentation. Got: %r" % (d.get("kind"),))
+    assert d["kind"] == expected
 
 
 # ---- the apply sequence ----------------------------------------------------

@@ -155,13 +155,18 @@
 .fm-chip-ct { font-size: 9px; margin-left: 4px; color: var(--overlay0); }
 .fm-chip.on .fm-chip-ct { color: rgba(12,10,28,.6); }
 
-/* ---- ladder icon picker ---- */
+/* ---- ladder icon picker ----
+   The face rule, same as the desktop Folio's (handoff C4): a track wears the art of its
+   highest EARNED rung, and a track with nothing earned shows rung 1's art dimmed. The
+   handoff draws ONE dim for that state -- grayscale .6 / brightness .6 -- not one per
+   surface, so this matches folio-overlay.css's .mgfo-ladderbadge.zero exactly rather than
+   keeping the older, heavier .75/.45 that buried the art on the smaller tile. */
 .fm-laddericon { flex: none; width: 62px; display: flex; flex-direction: column; align-items: center; gap: 5px;
   cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
 .fm-laddericon-tile { width: 52px; height: 52px; border-radius: 11px; overflow: hidden; outline: 2px solid transparent;
   outline-offset: 2px; background: var(--base); }
 .fm-laddericon-tile img { width: 100%; height: 100%; object-fit: cover; }
-.fm-laddericon.zero .fm-laddericon-tile { filter: grayscale(.75) brightness(.45); }
+.fm-laddericon.zero .fm-laddericon-tile { filter: grayscale(.6) brightness(.6); }
 .fm-laddericon.on .fm-laddericon-tile { outline-color: var(--lavender); }
 .fm-laddericon-lab { font-size: 9px; text-align: center; color: var(--overlay0); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; width: 100%; }

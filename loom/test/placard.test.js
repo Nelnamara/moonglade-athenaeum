@@ -113,7 +113,8 @@ describe("grid.css: the artifact's stamp + strip rules; the filename rules are g
     // The stack itself moved behind --font-hero on 2026-09-04 (Identity Chrome handoff
     // C1): the app's italic-serif display voice is now one token every such rule reads,
     // so the type picker can set it in one place. The DEFAULT value of --font-hero is
-    // this rule's own former literal, byte for byte -- what is pinned here is that the
+    // functionally identical to this rule's own former literal (same three families in the
+    // same order; the quote style differs) -- what is pinned here is that the
     // placard title is still the HERO face and still italic 400, which is what the
     // placard artifact actually specified. A literal stack here would now be the drift.
     assert.match(title, /font-family: var\(--font-hero\); font-style: italic; font-weight: 400;/);
