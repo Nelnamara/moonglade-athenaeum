@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- Under the hood: **the classic interface's leftovers are gone from the stylesheet** (2026-09-04). The rebuilt gallery replaced the old collapsing banner, its living brand mark, the old lightbox chrome, the old Actions dropdown and the old Generate drawer shell one at a time, but every one of them left its styling behind — hundreds of rules for elements the app had stopped drawing years of releases ago, shipped to your browser on every page load. They were traced against both the source and the built bundle, confirmed to match nothing the app renders, and removed, so the stylesheet your browser downloads is smaller. One orphaned constant left over from the website mirror's cookie era went with them. Nothing you see changes.
+
 ## [3.7.1] - 2026-09-04 — The First Pull
 
 - Fixed: **the living mark shows one animation — yours.** The old glass-sheen effect (a selectable option back in the classic interface) had been welded onto the mark as permanent furniture, so it played under every treatment you picked — and with the treatment set to "none" it just sat there as a frozen pane of glass. It is a *selectable pick* again — **Sheen**, back on the roster beside Classic — and it sweeps across the art itself rather than lighting the empty square around a transparent mark. *Classic* returns to what it originally was: the star. The resting halo follows the art's own shape now too, instead of glowing as a rounded tile behind it. And the *Eclipse* shadow crosses **in front of** the mark again — the sideways-scroll fix had left it stranded behind the art, where an eclipse is invisible. (2026-09-04)
