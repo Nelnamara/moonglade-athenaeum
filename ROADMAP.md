@@ -70,7 +70,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The desktop switcher (**Masonry / Grid / Timeline**) shipped and moved to `CHANGELOG.md`. Two
   visual passes on the switcher surface were built and backed out (#41 — no design context); owner's
   current framing: partially fixed, needs **a better layout option and a better location** — that is
-  the design step's question. The persona-sweep follow-on layouts (Group-by, Justified,
+  the design step's question. **And it is still GIANT (owner, 2026-09-04)** — size joins
+  location and layout-option as the session's questions. The persona-sweep follow-on layouts (Group-by, Justified,
   Filmstrip, density/proof, data-table) are **CUT** — not worth the payoff (owner, 2026-08-19). What
   *may* remain is a **mobile** switcher (column density + per-device memory), but the owner is
   skeptical these layouts are even viable on a phone — so this is a maybe pending a look, not a
