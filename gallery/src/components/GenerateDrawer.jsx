@@ -15,6 +15,7 @@ import SceneTab from "./SceneTab.jsx";
 import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
+import { insertTriggerWords } from "../gen/loraTriggers.js";
 import FilterCompare from "./FilterCompare.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
@@ -531,7 +532,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
           // loom/test/mg-remix-lora-plan.test.js
           const plan = planLoraRestore(dt, hadLoras);
           for (const lr of plan.rows) {
-            await g.addLora(lr);          // exact version_id + weight ride the row itself
+            // exact version_id + weight ride the row itself. autoInsert:false because a
+            // remix REPRODUCES a recipe: the prompt set above is the one that actually
+            // rendered this artwork, and appending trigger words the original run did not
+            // use would rewrite the recipe under the owner before he re-pays for it
+            // (issue #45 -- auto-insert belongs to a PICK, not to a restore).
+            await g.addLora(lr, { autoInsert: false });
             if (!live()) return;
           }
           notes.push(...plan.notes);
@@ -840,12 +846,15 @@ function GenerateDrawer({ open, onClose, account, request }) {
                       {l.failed ? <span className="gd-warn">failed</span> :
                         !l.version_id ? <span className="gd-note">resolving…</span> : null}
                       {bad ? <span className="gd-warn">wrong architecture</span> : null}
+                      {/* The words go in BY THEMSELVES on pick now (issue #45, gen/
+                          loraTriggers.js). This button survives as the way BACK for words
+                          the user deleted on purpose -- and, because the rule dedupes, it
+                          is a no-op rather than a duplicator while they are still there. */}
                       {l.trigger_words ? (
-                        <button className="gd-mini" title={"Insert: " + l.trigger_words}
-                          onClick={() => set({
-                            prompt: (s.prompt.trim() ? s.prompt.trim().replace(/,\s*$/, "") + ", " : "")
-                                    + String(l.trigger_words).replace(/,\s*$/, ""),
-                          })}>
+                        <button className="gd-mini"
+                          title={"Re-insert this LoRA's trigger words if you deleted them: "
+                                 + l.trigger_words}
+                          onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
                           +words
                         </button>
                       ) : null}

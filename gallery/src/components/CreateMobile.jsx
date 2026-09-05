@@ -4,6 +4,7 @@ import {
   dims, goGate, loraIncompat, loraRange, loraStep,
 } from "../gen/genCore.js";
 import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
+import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import { askPicker } from "./PickerHost.jsx";
@@ -475,6 +476,20 @@ export default function CreateMobile({
                     <span key={l.model_id}
                       className={"glm-metal on cm-chip cm-lorachip" + ((bad || l.failed) ? " bad" : "")}>
                       {l.title} · {status}
+                      {/* Mobile's half of issue #45. The words are inserted automatically on
+                          pick (the shared useGenerate.addLora), exactly as on desktop; this
+                          is the same re-insert affordance the drawer's "+words" button is,
+                          in the chip row's own idiom, because until now this surface had no
+                          trigger-word control of any kind. Dedupe makes a stray tap a
+                          no-op rather than a duplicator. */}
+                      {l.trigger_words ? (
+                        <button type="button" className="cm-chipwords"
+                          title={"Re-insert this LoRA's trigger words if you deleted them: "
+                                 + l.trigger_words}
+                          onClick={() => set({ prompt: insertTriggerWords(s.prompt, l.trigger_words) })}>
+                          +words
+                        </button>
+                      ) : null}
                       <button type="button" className="cm-chipx" title="Remove this LoRA"
                         onClick={() => removeLoraChip(l.model_id)}>&times;</button>
                     </span>
