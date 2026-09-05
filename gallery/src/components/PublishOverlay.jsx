@@ -418,9 +418,8 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                     <div className="n">No credits are spent by publishing.</div>
                   </div>
                   {/* D1 -- when a contest is picked, the publish confirm gains the entry
-                      block and its cost line. This path really IS free: the entry rides
-                      the publish mutation, no separate charge exists to be unsure about
-                      (unlike a direct entry, whose fee is unmeasured). */}
+                      block: which contest this piece is about to go into, and when it
+                      closes. No cost line; there are no entry fees (owner, 2026-09-05). */}
                   {picked && (
                     <>
                       <div className={"mgctc-ct" + ((picked.type || "") === "official" ? " official" : "")}>
@@ -437,18 +436,6 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                         <span className={"mgct-badge " + ((picked.type || "") === "official" ? "official" : "community")}>
                           {(picked.type || "") === "official" ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
                         </span>
-                      </div>
-                      {/* HONEST COST, matching ContestConfirm's own wording. This used
-                          to read "Free — entered with publish", which was never verified:
-                          PixAI's contest contract declares an INSUFFICIENT_CREDITS error
-                          for entry and no entry has ever been fired to find out whether
-                          one is charged (contest_enter's docstring). And since the
-                          publish-and-enter fix this path makes the SAME entry call the
-                          direct path does, so there is not even a "the publish covers it"
-                          story left to tell. */}
-                      <div className="mgctc-cost">
-                        <div className="k">Entry cost</div>
-                        <div className="v unknown">Entry fee unverified</div>
                       </div>
                     </>
                   )}

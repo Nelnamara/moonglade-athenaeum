@@ -19,9 +19,10 @@ import "../styles/contest-mobile.css";
        back-row · banner · chips · accordion · Enter bar · footnote and nothing else. The
        entries COUNT is kept (it is a chip) so /api/contest/<slug>/artworks is still read;
        the winners route is not called at all from this surface.
-     - the desktop badge palette. The handoff assigns OFFICIAL lavender and COMMUNITY
-       gold, which is the opposite way round from myart-contests.css. The handoff is the
-       pixel source for this surface and wins; see ContestsMobile.jsx's header.
+
+   THE BADGE HUES on this banner -- OFFICIAL lavender, COMMUNITY gold -- are the handoff's,
+   and since 2026-09-05 the desktop board's too; that pair used to be the opposite way
+   round there. See ContestsMobile.jsx's header for the ruling.
 
    THE pixai.art LINK-OUT survives here and ONLY here, as the footnote the handoff writes
    ("view on pixai.art ↗"). Every other place the phone used to fling you at the website
@@ -93,110 +94,119 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
     </div>
   );
 
+  /* THE DETAIL IS ITS OWN SCROLL LAYER (2026-09-05). Everything above the Enter bar sits
+     in `.cmb-detailbody`, which owns the scrolling and latches it (`overscroll-behavior:
+     contain`); the bar and its reason line are the layer's own footer, not a sticky
+     passenger in the Contests screen's scroller. Before this the detail was a flat column
+     inside `.glm-screen-body`, so a flick that ran past the brief chained out of the
+     screen entirely and landed in the Control tab underneath -- the owner's own repro. */
   return (
     <div className="cmb-detail">
-      <button type="button" className="cmb-back" onClick={onBack}>
-        <span aria-hidden="true">‹</span> All contests
-      </button>
+      <div className="cmb-detailbody">
+        <button type="button" className="cmb-back" onClick={onBack}>
+          <span aria-hidden="true">‹</span> All contests
+        </button>
 
-      <div className="cmb-banner">
-        {contest.cover_url
-          ? <img src={contest.cover_url} alt="" loading="lazy" decoding="async" />
-          : null}
-        <span className={"cmb-badge " + (official ? "official" : "community")}>
-          {official ? "OFFICIAL" : "COMMUNITY"}
-        </span>
-        <div className="cmb-bannername">{contest.title}</div>
-      </div>
-
-      <div className="cmb-chips">
-        {contest.prize_amount > 0 && (
-          <span className="cmb-chip gold">◆ {fmt(contest.prize_amount)} CR</span>
-        )}
-        {winnersN > 0 && (
-          <span className="cmb-chip">{fmt(winnersN)} winner{winnersN === 1 ? "" : "s"}</span>
-        )}
-        {total > 0 && <span className="cmb-chip">{fmt(total)} entries</span>}
-        {!running && !decided && <span className="cmb-chip">AWAITING RESULTS</span>}
-        {entered > 0 && <span className="cmb-chip entered">★ Entered ×{entered}</span>}
-      </div>
-
-      <div className="cmb-acc">
-        {brief ? section("brief", "The brief", "", <Markdown text={brief} />) : null}
-
-        {prizes.length > 0 ? section("prizes", "Prizes",
-          (pool > 0 ? "◆ " + fmt(pool) + " CR" : "")
-            + (pool > 0 && winnersN > 0 ? " · " : "")
-            + (winnersN > 0 ? fmt(winnersN) + " winner" + (winnersN === 1 ? "" : "s") : ""),
-          <>
-            {prizes.map((p, i) => (
-              <div className="cmb-tier" key={p.rank || i}>
-                <span className="r">RANK {p.rank || i + 1}</span>
-                <span className="a">{fmt(p.amount)} CR{p.count > 1 ? " each" : ""}</span>
-                <span className="w">{fmt(p.count)} winner{p.count === 1 ? "" : "s"}</span>
-              </div>
-            ))}
-          </>) : null}
-
-        {section("reqs", "Requirements",
-          contest.tack_name ? "#" + contest.tack_name : (rules.length ? "" : "no restrictions"),
-          <>
-            {contest.tack_name ? (
-              <>
-                <span className="k">Tag</span>
-                <span className="cmb-tack">#{contest.tack_name}</span>
-              </>
-            ) : null}
-            <span className="k">Models</span>
-            {rules.length === 0 ? (
-              <span><span className="cmb-ok">✓</span> no model or LoRA restrictions</span>
-            ) : (
-              // The ids link out rather than resolving to names: nothing in this client
-              // turns a model id into its title, and inventing a lookup would be a new
-              // upstream call per id. Same call desktop's ContestDetail.jsx makes.
-              rules.map((r, i) => {
-                const lora = r.type === "required_lora_ids";
-                const ids = (lora ? r.lora_ids : r.model_ids) || [];
-                return (
-                  <span key={i}>
-                    {ids.length} required {lora ? "LoRA" : "model"}{ids.length === 1 ? "" : "s"}
-                    {ids.map((id) => (
-                      <span key={String(id)}>
-                        {" "}
-                        <a href={"https://pixai.art/model/" + encodeURIComponent(String(id))}
-                          target="_blank" rel="noopener noreferrer">{String(id)} ↗</a>
-                      </span>
-                    ))}
-                  </span>
-                );
-              })
-            )}
-            <span className="k">Rules doc</span>
-            {contest.desc_url ? (
-              <a href={contest.desc_url} target="_blank" rel="noopener noreferrer">read the rules ↗</a>
-            ) : (
-              <span>none published for this contest</span>
-            )}
-            {contest.vote_type ? (
-              <>
-                <span className="k">Votes</span>
-                <span>{voteWords(contest.vote_type)}</span>
-              </>
-            ) : null}
-          </>)}
-      </div>
-
-      {contest.url ? (
-        <div className="cmb-foot">
-          <a href={contest.url} target="_blank" rel="noopener noreferrer">view on pixai.art ↗</a>
+        <div className="cmb-banner">
+          {contest.cover_url
+            ? <img src={contest.cover_url} alt="" loading="lazy" decoding="async" />
+            : null}
+          <span className={"cmb-badge " + (official ? "official" : "community")}>
+            {official ? "OFFICIAL" : "COMMUNITY"}
+          </span>
+          <div className="cmb-bannername">{contest.title}</div>
         </div>
-      ) : null}
 
-      {/* §8.3 again: the reason sits ABOVE the bar, because the bar is the last thing on
-          the screen and anything after it would scroll off under the safe area. */}
+        <div className="cmb-chips">
+          {contest.prize_amount > 0 && (
+            <span className="cmb-chip gold">◆ {fmt(contest.prize_amount)} CR</span>
+          )}
+          {winnersN > 0 && (
+            <span className="cmb-chip">{fmt(winnersN)} winner{winnersN === 1 ? "" : "s"}</span>
+          )}
+          {total > 0 && <span className="cmb-chip">{fmt(total)} entries</span>}
+          {!running && !decided && <span className="cmb-chip">AWAITING RESULTS</span>}
+          {entered > 0 && <span className="cmb-chip entered">★ Entered ×{entered}</span>}
+        </div>
+
+        <div className="cmb-acc">
+          {brief ? section("brief", "The brief", "", <Markdown text={brief} />) : null}
+
+          {prizes.length > 0 ? section("prizes", "Prizes",
+            (pool > 0 ? "◆ " + fmt(pool) + " CR" : "")
+              + (pool > 0 && winnersN > 0 ? " · " : "")
+              + (winnersN > 0 ? fmt(winnersN) + " winner" + (winnersN === 1 ? "" : "s") : ""),
+            <>
+              {prizes.map((p, i) => (
+                <div className="cmb-tier" key={p.rank || i}>
+                  <span className="r">RANK {p.rank || i + 1}</span>
+                  <span className="a">{fmt(p.amount)} CR{p.count > 1 ? " each" : ""}</span>
+                  <span className="w">{fmt(p.count)} winner{p.count === 1 ? "" : "s"}</span>
+                </div>
+              ))}
+            </>) : null}
+
+          {section("reqs", "Requirements",
+            contest.tack_name ? "#" + contest.tack_name : (rules.length ? "" : "no restrictions"),
+            <>
+              {contest.tack_name ? (
+                <>
+                  <span className="k">Tag</span>
+                  <span className="cmb-tack">#{contest.tack_name}</span>
+                </>
+              ) : null}
+              <span className="k">Models</span>
+              {rules.length === 0 ? (
+                <span><span className="cmb-ok">✓</span> no model or LoRA restrictions</span>
+              ) : (
+                // The ids link out rather than resolving to names: nothing in this client
+                // turns a model id into its title, and inventing a lookup would be a new
+                // upstream call per id. Same call desktop's ContestDetail.jsx makes.
+                rules.map((r, i) => {
+                  const lora = r.type === "required_lora_ids";
+                  const ids = (lora ? r.lora_ids : r.model_ids) || [];
+                  return (
+                    <span key={i}>
+                      {ids.length} required {lora ? "LoRA" : "model"}{ids.length === 1 ? "" : "s"}
+                      {ids.map((id) => (
+                        <span key={String(id)}>
+                          {" "}
+                          <a href={"https://pixai.art/model/" + encodeURIComponent(String(id))}
+                            target="_blank" rel="noopener noreferrer">{String(id)} ↗</a>
+                        </span>
+                      ))}
+                    </span>
+                  );
+                })
+              )}
+              <span className="k">Rules doc</span>
+              {contest.desc_url ? (
+                <a href={contest.desc_url} target="_blank" rel="noopener noreferrer">read the rules ↗</a>
+              ) : (
+                <span>none published for this contest</span>
+              )}
+              {contest.vote_type ? (
+                <>
+                  <span className="k">Votes</span>
+                  <span>{voteWords(contest.vote_type)}</span>
+                </>
+              ) : null}
+            </>)}
+        </div>
+
+        {contest.url ? (
+          <div className="cmb-foot">
+            <a href={contest.url} target="_blank" rel="noopener noreferrer">view on pixai.art ↗</a>
+          </div>
+        ) : null}
+      </div>
+
+      {/* §8.3 again: the reason sits ABOVE the bar. Outside the scroller with it, so a
+          disabled bar and the sentence explaining it are never separated by a flick. */}
       {why ? <div className="cmb-why">{why}</div> : null}
 
-      {/* The Enter bar — sticky above the safe area, per the handoff's own plumbing note. */}
+      {/* The Enter bar — the layer's own footer, above the safe area, per the handoff's
+          own plumbing note. */}
       <div className="cmb-enterbar">
         <div className="cmb-when">
           <div className="cmb-whenk">{running ? "CLOSES" : "CLOSED"}</div>

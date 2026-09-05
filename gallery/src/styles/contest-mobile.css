@@ -5,10 +5,10 @@
    class. Where a number here differs from the frame it is because a hit target had to
    reach 44pt (the handoff's own plumbing note) — those are marked.
 
-   Every colour is a token. The two hues the handoff assigns to the badges are the
-   OPPOSITE way round from the desktop surface: OFFICIAL is lavender here and gold there,
-   COMMUNITY gold here and lavender-outlined there. The handoff is the pixel source and it
-   wins; ContestsMobile.jsx's header discloses the divergence in full.
+   Every colour is a token. The two hues the handoff assigns to the badges -- OFFICIAL
+   lavender, COMMUNITY gold -- are now the law on BOTH surfaces: the desktop board used to
+   paint them the other way round and was brought over to this one (owner ruling,
+   2026-09-05; myart-contests.css's .mgct-h block states it there).
 
    The metal keyframes are named cmbMetal/cmbSheen, NOT mgMetal: gen-drawer.css already
    defines a global `mgMetal` with different stops (a ping-pong, where the handoff's runs
@@ -77,7 +77,8 @@ button.cmb-hero { position: relative; display: block; width: 100%; padding: 0;
 .cmb-herometa { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
   font-variant-numeric: tabular-nums; color: rgba(255,255,255,.75); margin-top: 2px; }
 
-/* The badges. OFFICIAL lavender · COMMUNITY gold — the handoff's assignment. */
+/* The badges. OFFICIAL lavender · COMMUNITY gold — the handoff's assignment, and since
+   2026-09-05 the desktop board's too. */
 .cmb-badge { position: absolute; top: 9px; left: 10px; font-size: 8.5px; font-weight: 800;
   letter-spacing: .09em; padding: 3px 9px; border-radius: 999px;
   background: rgba(12,10,28,.78); }
@@ -115,7 +116,18 @@ button.cmb-card.ended { opacity: .8; }
 
 /* ---- D2 · DETAIL ----------------------------------------------------------------- */
 
-.cmb-detail { display: flex; flex-direction: column; gap: 9px; }
+/* THE DETAIL IS A LAYER, NOT A COLUMN (owner report 2026-09-05: "opening a contest the
+   enter button is a floating panel in front of the rest scrolling behind it. If you tap
+   back to the contest details and begin scrolling it leads into the CONTROL PANEL").
+   It fills the Contests screen's body exactly, `.cmb-detailbody` owns the scrolling and
+   latches it, and the Enter bar is this layer's footer -- so nothing behind the bar can
+   move and nothing can chain out of it. `height: 100%` is against .glm-screen-body's
+   content box, which is why the footer keeps the negative margins that reach back out to
+   that box's padding edges. */
+.cmb-detail { display: flex; flex-direction: column; height: 100%; }
+.cmb-detailbody { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 9px; }
 button.cmb-back { display: flex; align-items: center; gap: 5px; align-self: flex-start;
   min-height: 44px; padding: 0 2px; font-size: 11px; color: var(--lavender);
   background: none; border: none; cursor: pointer; font-family: inherit; }
@@ -171,11 +183,16 @@ button.cmb-sechead { display: flex; align-items: center; gap: 8px; width: 100%;
   color: var(--gold); }
 .cmb-tier .w { margin-left: auto; font-size: 10px; color: var(--overlay0); }
 
-/* The Enter bar — pinned above the safe area, the Moonglade Mobile bulk-bar idiom
-   (myart-mobile.css's .myam-bulkbar): sticky bottom, negative margins to reach the
-   scroller's edges, env(safe-area-inset-bottom) in the bottom pad. */
-.cmb-enterbar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center;
-  gap: 10px; margin: 4px -13px -13px; padding: 10px 13px calc(10px + env(safe-area-inset-bottom));
+/* The Enter bar — the detail layer's own footer, above the safe area. It was a sticky
+   passenger inside the Contests screen's scroller until 2026-09-05, which is what made it
+   read as "a floating panel in front of the rest scrolling behind it": what scrolled
+   behind it was not the detail but the whole screen, on its way out of view. Now it is
+   `flex: none` under `.cmb-detailbody`, the same shape D3's confirm bar has always had.
+   The negative margins reach out to the screen body's own padding edges (13px), so the
+   bar still spans the full width and sits flush on the bottom; the safe-area pad is the
+   Moonglade Mobile bulk-bar idiom (myart-mobile.css's .myam-bulkbar). */
+.cmb-enterbar { flex: none; display: flex; align-items: center;
+  gap: 10px; margin: 0 -13px -13px; padding: 10px 13px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--surface1); background: var(--mantle); }
 .cmb-enterbar .cmb-metal { flex: 1 1 auto; width: auto; }
 .cmb-when { flex: none; }
@@ -183,7 +200,7 @@ button.cmb-sechead { display: flex; align-items: center; gap: 8px; width: 100%;
 .cmb-whenv { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 600;
   font-variant-numeric: tabular-nums; color: var(--text); }
 .cmb-whenv.hot { color: var(--gold); }
-.cmb-why { font-size: 10px; color: var(--overlay0); padding: 0 0 4px; }
+.cmb-why { flex: none; font-size: 10px; color: var(--overlay0); padding: 4px 0; }
 
 /* ---- D3 · ENTRY ------------------------------------------------------------------ */
 
@@ -196,11 +213,14 @@ button.cmb-sechead { display: flex; align-items: center; gap: 8px; width: 100%;
   text-overflow: ellipsis; white-space: nowrap; }
 .cmb-entryhead .n { margin-left: auto; flex: none; font-family: ui-monospace, Menlo, monospace;
   font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--overlay0); }
+/* The tag line, and nothing about money: there are no entry fees, so the `.fee` slot that
+   sat at the end of this line is deleted (owner, 2026-09-05). */
 .cmb-tagline { flex: none; padding: 0 14px 8px; font-size: 10px; line-height: 1.5;
   color: var(--subtext); }
-.cmb-tagline .fee { color: var(--overlay0); }
-.cmb-tagline .fee.unknown { color: var(--gold); }
+/* The picker owns its scrolling too, and latches it: this screen is a fixed layer, so a
+   flick past the last row has nowhere legitimate to go. */
 .cmb-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 0 14px 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
   align-content: start; }
 button.cmb-tile { position: relative; aspect-ratio: 1 / 1; border-radius: 8px; padding: 0;

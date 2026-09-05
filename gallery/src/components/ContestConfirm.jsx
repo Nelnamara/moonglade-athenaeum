@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { countdown, dayOf } from "../hooks/useContests.js";
-import { classifyEntryError, entryCostFace } from "../lib/contestEntry.js";
+import { classifyEntryError } from "../lib/contestEntry.js";
 import { show as toast } from "../notify/toastStore.js";
 import "../styles/myart-contests.css";
 
@@ -12,13 +12,14 @@ import "../styles/myart-contests.css";
    rather than this route.
 
    Two POSTs, exactly as the server's contract asks: an unconfirmed one to /api/contest/
-   enter that touches no account and answers what it WOULD do, then the confirmed one.
+   enter that touches no account and answers what it WOULD do, then the confirmed one. The
+   unconfirmed one stays: it is what arms the Confirm button, and an upstream refusal
+   (not eligible, closed) is surfaced from it BEFORE anything irreversible can fire.
 
-   THE COST LINE and the refusal sentences moved to lib/contestEntry.js on 2026-09-04, when
-   the phone's entry screen (ContestEntryMobile.jsx) needed to say the same things about
-   the same irreversible act -- see that module's own header for why those two in
-   particular are shared rather than copied. The DC's "♦ 500 CR" remains a layout stand-in
-   (its own annotation says so); the number rendered here is always the server's answer. */
+   THERE ARE NO ENTRY FEES (owner, 2026-09-05). The cost line this dialog used to carry --
+   and the DC's own "♦ 500 CR" stand-in behind it -- are gone: entering a contest costs
+   nothing, so no contest surface states a price, a "Free" or an "unverified". The refusal
+   sentences still come from lib/contestEntry.js, shared with the phone's entry screen. */
 
 export default function ContestConfirm({ contest, art, onClose, onEntered, onPickDifferent,
                                         csrfToken }) {
@@ -73,7 +74,6 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
 
   const left = countdown(contest.end_at);
   const official = (contest.type || "") === "official";
-  const costFace = entryCostFace(ask ? ask.spends_credits : undefined);
 
   return (
     <>
@@ -149,10 +149,6 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
                     <span className={"mgct-badge " + (official ? "official" : "community")}>
                       {official ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
                     </span>
-                  </div>
-                  <div className="mgctc-cost">
-                    <div className="k">Entry cost</div>
-                    <div className={"v " + costFace.cls}>{costFace.text}</div>
                   </div>
                   <div className="mgctc-acts">
                     <button type="button" className="mgct-ghost" onClick={() => onClose()}

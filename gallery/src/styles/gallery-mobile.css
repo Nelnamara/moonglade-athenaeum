@@ -287,14 +287,28 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   display: flex; flex-direction: column;
   animation: glmScreenIn .22s ease both; }
 .glm-screen.closing { animation: glmScreenOut .22s ease both; }
+/* A SCREEN IS NOT PART OF THE TAB'S SCROLL (owner report 2026-09-05: "opening a contest
+   ... begin scrolling it leads into the CONTROL PANEL???!!!"). .glm-screen is absolutely
+   positioned INSIDE .glm-body, which is itself a scroller still holding the whole tab
+   underneath -- measured at 390x844 with the Control tab open: .glm-body scrolls 1579px
+   while the screen is only 600 tall, so a flick that reached the end of the screen's own
+   body chained straight out and slid the entire screen off the top (its top went +172 ->
+   -1407), leaving the Control tab's tiles on screen. Locking the scroller underneath is
+   what stops that; MobileScreen.jsx parks it at 0 on mount and puts it back on close, so
+   the screen can never open below the fold either. */
+.glm-body:has(.glm-screen) { overflow: hidden; }
 .glm-screen-head { flex: none; display: flex; align-items: center; gap: 8px;
   padding: 12px 13px; border-bottom: 1px solid var(--surface1); }
 .glm-screen-back { flex: none; width: 26px; height: 26px; display: grid; place-items: center;
   font-size: 20px; line-height: 1; color: var(--overlay0); background: none; border: none;
   cursor: pointer; padding: 0; font-family: inherit; }
 .glm-screen-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px; color: var(--text); }
+/* `contain` is the second half of the same fix and the one that survives a future
+   restructure: a screen's own scroll never chains to whatever is behind it. Verified in
+   the harness that it latches even when this body has NO scrollable range of its own,
+   which is the case a short screen presents and the case the lock above already covers. */
 .glm-screen-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 13px; }
+  overscroll-behavior: contain; padding: 13px; }
 
 /* ---- Create/Control placeholders (this increment's honest soon-state, matching
    the app's existing soon conventions rather than inventing a new one) ---- */

@@ -20,11 +20,11 @@ import "../styles/contest-mobile.css";
    entries -- and My entries is not a second layout, it is this same board filtered to the
    contests this library has pieces in, with one extra status line on each card.
 
-   THE BADGE HUES ARE THE HANDOFF'S, and they are the opposite way round from the desktop
-   surface: OFFICIAL is lavender here and gold in myart-contests.css; COMMUNITY is gold
-   here and lavender-outlined there. Both are existing tokens, no new hue enters the app.
-   The handoff is the pixel source for this surface and wins; disclosed rather than
-   quietly reconciled, because someone comparing the two screens will notice.
+   THE BADGE HUES ARE THE HANDOFF'S -- OFFICIAL lavender, COMMUNITY gold -- and as of
+   2026-09-05 they are the desktop board's too. The two surfaces used to paint those two
+   words the opposite way round from each other; the owner ruled one law for both and
+   myart-contests.css was brought over to this one. The render harness now pins the pair
+   on BOTH surfaces in a single test, so they cannot drift apart again.
 
    REAL-DATA DEVIATIONS from the frame, disclosed (the same duty every surface in this
    codebase's mobile pass carries, and the same list this file has always kept):

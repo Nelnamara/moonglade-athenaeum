@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { qualifies } from "../hooks/useContests.js";
-import { classifyEntryError, entryCostFace } from "../lib/contestEntry.js";
+import { classifyEntryError } from "../lib/contestEntry.js";
 import { show as toast } from "../notify/toastStore.js";
 import "../styles/contest-mobile.css";
 
@@ -15,8 +15,13 @@ import "../styles/contest-mobile.css";
    picks are made, then the bar at the bottom is pressed, and only then does anything
    POST with `confirm: true`. Desktop reaches that confirm as a second dialog; the handoff
    folds it into this screen's own bar, which is the same contract with one screen fewer —
-   the tag line, the fee, the contest and the count of what is about to be entered are all
-   in front of you when you press it.
+   the tag line, the contest and the count of what is about to be entered are all in front
+   of you when you press it.
+
+   THERE ARE NO ENTRY FEES (owner, 2026-09-05). Entering a contest costs nothing, so this
+   screen says nothing about cost — no "Free", no amount, no "unverified". The cost slot
+   and the unconfirmed preview POST that fed it are both gone from here; the ONE thing
+   this screen ever asked that route was the fee.
 
    MULTI-SELECT is what this screen adds over desktop's single-pick ContestPicker.jsx:
    PixAI takes one artwork per entry call, so N picks are N sequential POSTs of the SAME
@@ -51,7 +56,6 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
   const [items, setItems] = useState(null);
   const [csrf, setCsrf] = useState("");
   const [picked, setPicked] = useState([]);          // media_ids, in tap order
-  const [ask, setAsk] = useState(null);              // the server's unconfirmed preview
   const [busy, setBusy] = useState(false);
   const [fail, setFail] = useState(null);
   const seeded = useRef(false);
@@ -80,21 +84,6 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
     if (!preselectMediaId) return;
     if (eligible.some((it) => it.media_id === preselectMediaId)) setPicked([preselectMediaId]);
   }, [items, eligible, preselectMediaId]);
-
-  // The fee, from the server, through the same three-faced slot desktop renders. The
-  // unconfirmed POST performs NO network call upstream and touches no account (see
-  // api_contest_enter's own docstring) -- it answers what an entry WOULD do. One call, for
-  // the first pick: the answer is a property of the route's contract, not of the artwork.
-  const firstPick = picked[0] || "";
-  const firstArt = eligible.find((it) => it.media_id === firstPick) || null;
-  useEffect(() => {
-    if (!csrf || !firstArt) { setAsk(null); return undefined; }
-    let dead = false;
-    apiPost("/api/contest/enter",
-            { slug: contest.slug, artwork_id: firstArt.artwork_id, csrf })
-      .then((d) => { if (!dead && !d.error) setAsk(d); });
-    return () => { dead = true; };
-  }, [csrf, contest.slug, firstArt]);
 
   // See the header: a cap only when the row states one.
   const maxPicks = Number(contest.max_entries) > 0 ? Number(contest.max_entries) : 0;
@@ -148,7 +137,6 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
   const nothing = !loading && eligible.length === 0;
   const missedSource = !!preselectMediaId && !loading
     && !eligible.some((it) => it.media_id === preselectMediaId);
-  const cost = entryCostFace(ask ? ask.spends_credits : undefined);
 
   return (
     <div className="cmb-entry" role="dialog" aria-modal="true"
@@ -163,9 +151,8 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
         </span>
       </div>
 
-      {/* The handoff's own line, plus the fee the server actually answers — this is the
-          last screen before an irreversible, public account write, and desktop states the
-          fee here. Leaving it off the phone would be a quieter screen, not a truer one. */}
+      {/* The handoff's own line, and only it: the tag an entry carries and where the piece
+          goes. No cost slot — there are no entry fees. */}
       <div className="cmb-tagline">
         {contest.tack_name ? (
           <>
@@ -173,7 +160,7 @@ export default function ContestEntryMobile({ contest, preselectMediaId, onClose,
             {" added on entry · "}
           </>
         ) : null}
-        publishes to PixAI · <span className={"fee " + cost.cls}>{cost.text}</span>
+        publishes to PixAI
       </div>
 
       {loading && <div className="cmb-entrynote">reading your published art…</div>}

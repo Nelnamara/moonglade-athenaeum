@@ -1,16 +1,19 @@
-/* THE ENTRY ROAD'S TWO SENTENCES, in one place (2026-09-04, the mobile contest pass).
+/* THE ENTRY ROAD'S REFUSAL SENTENCES, in one place (2026-09-04, the mobile contest pass).
 
-   Both of these were written once inside ContestConfirm.jsx, for the desktop confirm
-   dialog. The phone's entry screen (ContestEntryMobile.jsx) is the SAME irreversible act
-   and has to say the same things about it, so they are lifted here rather than copied --
-   the same mechanical-lift precedent useContests.js set when the board's fetch had to
-   serve two surfaces. ContestConfirm.jsx is refactored to consume this module; there is
-   no second, drifting copy of either sentence.
+   These were written once inside ContestConfirm.jsx, for the desktop confirm dialog. The
+   phone's entry screen (ContestEntryMobile.jsx) is the SAME irreversible act and has to
+   say the same things about it, so they are lifted here rather than copied -- the same
+   mechanical-lift precedent useContests.js set when the board's fetch had to serve two
+   surfaces. ContestConfirm.jsx consumes this module; there is no second, drifting copy.
 
-   WHY THESE TWO IN PARTICULAR. They are the words a person reads immediately before an
-   entry fires, and PixAI offers no way to withdraw one. A wrong word here is not a
-   cosmetic bug -- it is a wrong statement on the last screen before an act that cannot be
-   taken back. */
+   WHY THESE IN PARTICULAR. They are the words a person reads immediately before or after
+   an entry fires, and PixAI offers no way to withdraw one. A wrong word here is not a
+   cosmetic bug -- it is a wrong statement about an act that cannot be taken back.
+
+   THE COST FACE THAT USED TO LIVE HERE IS GONE (owner, 2026-09-05): "THERE ARE NO ENTRY
+   FEES". `entryCostFace` rendered "Free" / an amount / "Entry fee unverified" into the
+   phone's entry screen, the desktop confirm dialog and the publish confirm; all three
+   slots are deleted, so no contest surface states, hedges at, or hints at a price. */
 
 const NOT_ELIGIBLE = /not.?eligible/i;
 const CLOSED = /closed|ended|expired/i;
@@ -33,17 +36,4 @@ export function classifyEntryError(msg) {
   return { icon: "⚠", title: "Something went wrong on PixAI's side",
            copy: "The entry MAY still have been submitted — check My entries before "
                + "trying again. " + m };
-}
-
-/* THE COST LINE IS ONE SLOT WITH THREE HONEST FACES, and never a fourth. The server
-   answers `spends_credits`: null means the fee is UNMEASURED -- the contest contract
-   declares an INSUFFICIENT_CREDITS error and no entry has ever been fired to find out --
-   so the slot says so in words. false is "Free"; a number is the mono-gold amount. A
-   number invented here would be a lie on the last screen before an irreversible act. */
-export function entryCostFace(spends) {
-  if (spends === false) return { cls: "", text: "Free" };
-  if (typeof spends === "number") {
-    return { cls: "amount", text: "♦ " + Number(spends).toLocaleString() + " CR" };
-  }
-  return { cls: "unknown", text: "Entry fee unverified" };
 }
