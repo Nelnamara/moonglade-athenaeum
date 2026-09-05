@@ -190,8 +190,13 @@ def test_fetch_releases_asks_github_for_the_list_not_latest(monkeypatch):
 
 # ---- the apply refusal matrix ----------------------------------------------
 
-def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True):
-    """A machine where an update WOULD be allowed: supervised, on a clean master."""
+def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True,
+                 incoming=(), fetch_rc=0, fetch_out=""):
+    """A machine where an update WOULD be allowed: supervised, on a clean master.
+
+    `incoming` is what the pending release touches -- the paths `git diff HEAD..@{u}`
+    would list -- which is what the untracked half of the dirty check is measured
+    against. `fetch_rc`/`fetch_out` stand in for a fetch that can't reach the remote."""
     _idle_state(monkeypatch)
     monkeypatch.setattr(g, "_supervised", lambda: supervised)
 
@@ -200,6 +205,10 @@ def _apply_ready(monkeypatch, branch="master", dirty="", supervised=True):
             return 0, branch
         if args[:1] == ["status"]:
             return 0, dirty
+        if args[:1] == ["fetch"]:
+            return fetch_rc, fetch_out
+        if args[:2] == ["diff", "--name-only"]:
+            return 0, "\n".join(incoming)
         if args[:1] == ["rev-parse"]:
             return 0, "abc123"
         return 0, ""
@@ -274,14 +283,102 @@ def test_apply_refuses_off_master(tmp_path, monkeypatch):
     assert "feat/something" in r.get_json()["error"] and "master" in r.get_json()["error"]
 
 
-def test_apply_refuses_a_dirty_tree_and_names_the_files(tmp_path, monkeypatch):
-    """--ff-only would refuse anyway; refusing here says WHICH files are in the way."""
-    _apply_ready(monkeypatch, dirty=" M moonglade_gallery.py\n?? notes.txt\n")
+def test_apply_refuses_a_tracked_edit_and_names_the_file(tmp_path, monkeypatch):
+    """--ff-only would refuse anyway; refusing here says WHICH files are in the way.
+
+    The untracked `notes.txt` alongside it is NOT named and NOT a reason: the update
+    doesn't write that path, so it was never endangered."""
+    _apply_ready(monkeypatch, dirty=" M moonglade_gallery.py\n?? notes.txt\n",
+                 incoming=["moonglade_gallery.py"])
     cli = _client(tmp_path)
     r = _apply(cli)
     assert r.status_code == 409
     err = r.get_json()["error"]
-    assert "uncommitted" in err and "moonglade_gallery.py" in err and "notes.txt" in err
+    assert "uncommitted" in err and "moonglade_gallery.py" in err
+    assert "notes.txt" not in err
+
+
+def _started(monkeypatch):
+    """Count the apply thread instead of running it -- 'it got as far as the pull' is
+    what every proceed-case below is actually asserting."""
+    seen = {"n": 0}
+    monkeypatch.setattr(g.threading, "Thread",
+                        lambda target=None, args=(), kwargs=None, daemon=None: type(
+                            "T", (), {"start": lambda self_: seen.update(n=seen["n"] + 1)})())
+    return seen
+
+
+def test_an_untracked_file_the_update_never_touches_does_not_stop_it(tmp_path, monkeypatch):
+    """A stray file is not an endangered file. Real installs collect them, so blocking on
+    sight refuses every real machine forever."""
+    _apply_ready(monkeypatch, dirty="?? notes.txt\n", incoming=["moonglade_gallery.py"])
+    cli = _client(tmp_path)
+    started = _started(monkeypatch)
+    r = _apply(cli)
+    assert r.status_code == 200 and started["n"] == 1
+
+
+def test_the_live_case_an_untracked_boop_folder_does_not_stop_the_update(tmp_path, monkeypatch):
+    """The FIRST live apply (v3.7.0 -> v3.7.1) was refused over a personal `boop/` the
+    release had never heard of, with the untrue claim that the update would overwrite it.
+    Nothing in the release lives under that path; the update proceeds."""
+    _apply_ready(monkeypatch, dirty="?? boop/\n",
+                 incoming=["moonglade_gallery.py", "static/app.js"])
+    cli = _client(tmp_path)
+    started = _started(monkeypatch)
+    r = _apply(cli)
+    assert r.status_code == 200 and started["n"] == 1
+
+
+def test_an_untracked_file_at_an_incoming_path_refuses_and_names_it(tmp_path, monkeypatch):
+    """The case the guard is FOR: git would refuse this pull too, so this says why in
+    words, and honestly -- 'where the update needs to write', not 'your changes'."""
+    _apply_ready(monkeypatch, dirty="?? new_module.py\n?? notes.txt\n",
+                 incoming=["new_module.py", "moonglade_gallery.py"])
+    cli = _client(tmp_path)
+    r = _apply(cli)
+    assert r.status_code == 409
+    err = r.get_json()["error"]
+    assert "untracked" in err and "new_module.py" in err
+    assert "notes.txt" not in err            # the innocent one is not dragged in
+
+
+def test_an_untracked_directory_containing_an_incoming_file_refuses(tmp_path, monkeypatch):
+    """porcelain prints an untracked DIRECTORY as one line, `d/`, standing for everything
+    beneath it -- so a plain equality check would miss the collision git itself refuses
+    on. Prefix matching is what keeps this guard from being LOOSER than git's own rule."""
+    _apply_ready(monkeypatch, dirty="?? d/\n", incoming=["d/x.py"])
+    cli = _client(tmp_path)
+    r = _apply(cli)
+    assert r.status_code == 409 and "d/" in r.get_json()["error"]
+    # ...and the mirror shape: an untracked FILE where the update needs a DIRECTORY
+    _apply_ready(monkeypatch, dirty="?? d\n", incoming=["d/x.py"])
+    r = _apply(_client(tmp_path))
+    assert r.status_code == 409 and "untracked" in r.get_json()["error"]
+
+
+def test_an_unreadable_upstream_refuses_rather_than_guessing(tmp_path, monkeypatch):
+    """If the fetch can't say what is coming, whether the stray files are in the way is
+    unknown -- and the safe unknown is 'no', in git's own words."""
+    _apply_ready(monkeypatch, dirty="?? notes.txt\n", fetch_rc=1,
+                 fetch_out="fatal: unable to access origin")
+    cli = _client(tmp_path)
+    r = _apply(cli)
+    assert r.status_code == 409
+    assert "unable to access origin" in r.get_json()["error"]
+
+
+def test_a_clean_tree_never_pays_for_the_fetch(tmp_path, monkeypatch):
+    """The common case is unchanged: with nothing stray there is nothing to compare, so
+    the pre-check asks the network nothing and the pull does its own fetch as before."""
+    calls = []
+    _apply_ready(monkeypatch, dirty="")
+    real = g._git
+    monkeypatch.setattr(g, "_git", lambda args, **k: (calls.append(args[0]), real(args, **k))[1])
+    cli = _client(tmp_path)
+    _started(monkeypatch)
+    assert _apply(cli).status_code == 200
+    assert "fetch" not in calls
 
 
 def test_apply_starts_the_update_when_every_gate_passes(tmp_path, monkeypatch):
@@ -526,6 +623,26 @@ def test_the_update_records_a_line_in_the_real_activity_log(tmp_path, monkeypatc
     rows = [j for j in core.read_jobs(tmp_path) if j.get("type") == "update"]
     assert len(rows) == 1 and rows[0]["status"] == "done"
     assert rows[0]["label"] == "Updated Moonglade"
+
+
+def test_the_log_line_records_the_untracked_files_the_update_stepped_around(
+        tmp_path, monkeypatch):
+    """The guard's decision has to leave a trace. Without it, "it updated OVER my files"
+    and "it updated BESIDE my files" look identical afterwards, and only one is a bug."""
+    import moonglade_backup as core
+    _apply_ready(monkeypatch, dirty="?? boop/\n?? notes.txt\n",
+                 incoming=["moonglade_gallery.py"])
+    cli = _client(tmp_path)
+    monkeypatch.setattr(g, "_schedule_server_exit", lambda code: None)
+    real_thread = g.threading.Thread
+
+    def _inline(target=None, args=(), kwargs=None, daemon=None):
+        return type("T", (), {"start": lambda self_: target(*args, **(kwargs or {}))})()
+    monkeypatch.setattr(g.threading, "Thread", _inline)
+    assert _apply(cli).status_code == 200
+    monkeypatch.setattr(g.threading, "Thread", real_thread)
+    rows = [j for j in core.read_jobs(tmp_path) if j.get("type") == "update"]
+    assert len(rows) == 1 and rows[0]["label"] == "Updated Moonglade (ignored untracked: 2)"
 
 
 # ---- mutual exclusion, both directions ---------------------------------------

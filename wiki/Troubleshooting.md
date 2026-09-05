@@ -96,8 +96,13 @@ The modal names the reason. The usual ones:
   under a running job is how you get half-old, half-new behavior.
 - **The checkout is on a branch other than `master`.** Updating somebody's work-in-progress
   branch is out of scope on purpose.
-- **The checkout has uncommitted local changes.** The update would overwrite them, so it
-  refuses and names the files in the way.
+- **You have edited a file the app ships.** The update writes that file, so it would
+  overwrite your edit — it refuses and names which files.
+- **A file of your own is sitting exactly where the update needs to write.** Only then:
+  files you have added yourself that the update doesn't touch — a notes file, a scratch
+  folder, a launcher you keep beside the app — are left alone and don't stop anything.
+  When one really is in the way the refusal says so and names it; move or delete it and
+  try again.
 - **`READ_ONLY` is set in `config.json`.** That flag means "don't change my install", and an
   update is the biggest change there is.
 
