@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
 import { buildPayload, clampLoras, GEN_DEFAULTS, goGate } from "./genCore.js";
+import { insertTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
 
@@ -145,14 +146,33 @@ export default function useGenerate({ costRef }) {
      The multi picker hands us the row itself plus its selected flag; it has
      ALREADY resolved version/architecture/trigger words, so this upserts from
      the row and only falls back to a fetch when a field is missing.
-     trigger_words is a comma-separated STRING server-side, not an array. */
-  const addLora = useCallback(async (row) => {
+     trigger_words is a comma-separated STRING server-side, not an array.
+
+     TRIGGER WORDS AUTO-INSERT (issue #45): picking a LoRA appends its activation
+     tokens to the prompt, matching PixAI's own composer -- a LoRA attached without
+     them is a silent no-op on a paid gen. The rule (formatting AND dedupe) lives in
+     gen/loraTriggers.js so both composers and the manual "+words" button share ONE
+     implementation; this is simply where the pick is observed. It has to happen in
+     BOTH state writes below, because a picker row already carrying trigger_words and
+     a row whose words only arrive with the /api/model-version resolve are two
+     different moments and only one of them fires per pick.
+
+     `opts.autoInsert === false` opts a caller out. Remix (GenerateDrawer's
+     prefillRun) is the one caller that passes it: a remix RESTORES a recipe, and the
+     prompt it just wrote is the one that actually rendered the artwork. Appending
+     tokens the original run did not use would quietly change the recipe the owner is
+     reading back before he pays for it. Picking a LoRA is a choice; restoring one is
+     a reproduction. */
+  const addLora = useCallback(async (row, opts) => {
+    const autoInsert = !(opts && opts.autoInsert === false);
     let present = false;
     setS((old) => {
       present = old.loras.some((l) => l.model_id === row.model_id);
       if (present) return old;
+      const words = typeof row.trigger_words === "string" ? row.trigger_words : "";
       return {
         ...old,
+        prompt: autoInsert ? insertTriggerWords(old.prompt, words) : old.prompt,
         loras: old.loras.concat([{
           model_id: row.model_id, title: row.title, preview_url: row.preview_url,
           // Remix (issue #4) hands rows carrying the task's EXACT weight; the
@@ -163,7 +183,7 @@ export default function useGenerate({ costRef }) {
           version_id: row.version_id || "",
           weight: Number.isFinite(+row.weight) ? +row.weight : 0.7,
           lora_base_type: row.lora_base_model_type || row.model_type || "",
-          trigger_words: typeof row.trigger_words === "string" ? row.trigger_words : "",
+          trigger_words: words,
           versions: [],
         }]),
       };
@@ -175,12 +195,17 @@ export default function useGenerate({ costRef }) {
       const versions = d.versions || [];
       const latest = versions.find((v) => v.is_latest) || versions[0];
       if (!latest || !latest.version_id) throw new Error("unresolved");
+      const words = typeof latest.trigger_words === "string" ? latest.trigger_words : "";
       setS((old) => ({
         ...old,
+        // The words arrived late (the picker row had none to hand over) -- insert them
+        // now, on the same dedupe rule, so a slow resolve is not a surface where the
+        // feature quietly does not happen.
+        prompt: autoInsert ? insertTriggerWords(old.prompt, words) : old.prompt,
         loras: old.loras.map((l) => l.model_id === row.model_id ? {
           ...l, version_id: latest.version_id,
           lora_base_type: latest.lora_base_model_type || "",
-          trigger_words: typeof latest.trigger_words === "string" ? latest.trigger_words : "",
+          trigger_words: words,
           versions,
         } : l),
       }));
