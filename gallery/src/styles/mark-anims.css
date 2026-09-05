@@ -50,9 +50,37 @@
 .mgx-mark::before, .mgx-mark::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; }
 
+/* THE SHEEN BELONGS TO CLASSIC, not to every pick (owner, 2026-09-04: "that effect
+   used to be a selectable option under the vanilla js interface" -- and the glass
+   band showing over eclipse/none was his "multiple animations running at once" and
+   "an additional glass effect over the mark"). The React header had welded the old
+   selectable sheen onto the mark as permanent furniture; every treatment then played
+   on top of it. It is now classic's own: hidden by default, shown by the classic
+   pick, and masked to the art's silhouette (the masked-sweep recipe below) so it is
+   light over the mark, never a glass pane over the empty square around it. */
+.mgx-mark .mgx-mark-sheen { display: none; }
+.mgx-mark.mark-anim-classic .mgx-mark-sheen { display: block; }
+.mgx-mark.mark-anim-classic .mgx-mark-sheenclip {
+  -webkit-mask: var(--mark-url) center / contain no-repeat;
+  mask: var(--mark-url) center / contain no-repeat; }
+
+/* The halo was the other piece of square furniture: a rounded-square box-shadow that
+   read as a glass tile behind a transparent mark. A mask would erase an outer shadow
+   outright, so it is a blurred copy of the art instead -- a resting glow the exact
+   shape of whatever mark is worn. Where --mark-url is unset it falls back to the old
+   box glow. */
+.mgx-mark .mgx-mark-halo {
+  box-shadow: none;
+  background: var(--mark-url) center / contain no-repeat;
+  filter: blur(12px);
+  opacity: .5; }
+
 /* ---- none: the pick that means stillness -------------------------------------- */
+/* (The sheen needs no line here any more -- it is classic-only above. It used to be
+   merely `animation: none`d, which left the band itself painted, parked at the left
+   edge of its clip box: the frozen pane of glass the owner screenshotted on this very
+   pick, 2026-09-04.) */
 .mgx-mark.mark-anim-none .mgx-mark-tilt,
-.mgx-mark.mark-anim-none .mgx-mark-sheen,
 .mgx-mark.mark-anim-none .mgx-mark-tilt img { animation: none; }
 .mgx-mark.mark-anim-none::before,
 .mgx-mark.mark-anim-none::after { display: none; }
@@ -229,6 +257,13 @@
     rgba(120, 90, 200, .34) 80%, rgba(120, 90, 200, 0) 92%);
   background-size: 300% 300%; background-repeat: no-repeat;
   background-position: 50% 50%;
+  /* ABOVE the art (.mgx-mark-tilt is z-index:1): an eclipse is a shadow crossing the
+     moon's FACE. The old moving-box umbra sat below the art too, but read fine because
+     most of its disc overshot the mark into empty space; contained to the circle, a
+     below-the-art umbra is simply invisible behind an opaque mark (owner, 2026-09-04:
+     "it's behind the mark") and its alpha-gap glimpses read as a stray extra
+     animation. */
+  z-index: 2;
   animation: mgv2Eclipse calc(5s / var(--anim-speed)) ease-in-out infinite; }
 
 /* ---- moondust: the canvas treatment -------------------------------------------- */
