@@ -44,9 +44,15 @@ export default function MarkDust({ size = 96, speed = 1 }) {
   if (field.current === null) field.current = buildField();
 
   // The field orbits wider than the mark, so the canvas is bigger than the mark box
-  // and centred on it (the CSS positions it; this just has to be big enough that a
-  // mote never clips at the edge).
-  const box = Math.round(size * 2.4);
+  // and centred on it. HOW MUCH bigger is a page-layout fact, not a taste one: the
+  // hero mark sits 22px from the window edge (.mgx-navcol's right padding,
+  // shell.css) and nothing clips the spill (.mgx-bnr is overflow:visible for the
+  // halo), so at the old 2.4x the canvas widened the DOCUMENT by ~30px and the page
+  // grew a permanent horizontal scrollbar. Owner ruling 2026-09-04: shrink the
+  // field. 1.45x overhangs the mark by 0.225x a side -- 21.6px at hero, inside the
+  // 22px budget -- and the orbit radius below is fitted to the box, so motes drift
+  // tighter rather than clipping at the new edge. The containment test pins both.
+  const box = Math.round(size * 1.45);
 
   useEffect(() => {
     const cv = ref.current;
@@ -60,7 +66,14 @@ export default function MarkDust({ size = 96, speed = 1 }) {
     ctx.scale(dpr, dpr);
 
     const P = field.current;
-    const R = Math.max(20, size * 0.32);       // the board's own radius rule
+    // The board's own radius rule, then clamped so the WIDEST orbit fits the box:
+    // draw() reaches x = (p.r/34)*R*1.35*1.25 + wobble(3)*1.25 + the mote's own
+    // radius. Solving that for R against box/2 (6px covers wobble + the largest
+    // mote) keeps every mote inside the shrunken canvas instead of popping out at
+    // its edge -- the field scales down with the field's new bounds.
+    const maxOrbit = Math.max(...P.map((p) => p.r)) / 34;
+    const R = Math.min(Math.max(20, size * 0.32),
+                       (box / 2 - 6) / (maxOrbit * 1.35 * 1.25));
     const cx = box / 2;
     const cy = box / 2;
     let t = 0;

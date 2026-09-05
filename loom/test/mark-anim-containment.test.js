@@ -203,15 +203,17 @@ const KNOWN_UNSIZED = new Map([
    "Measured 0px of document overflow across a full cycle, hero and slim."],
 ]);
 
-/* Not an `animation:` rule at all, so the scan above never sees it, but it is the one
-   part of the roster that DOES widen the document -- recorded here so the audit is not
-   lost. `.mgx-mark-dust` is a canvas MarkDust.jsx sizes at 2.4x the mark and centres on
-   it, i.e. 0.7x the mark (67px at hero) past every edge, animated or not. At hero that
-   is 30px of permanent horizontal document overflow with the scrollbar gutter reserved,
-   ~45px without; at slim (74px of navcol padding) it is 0. Every containment for it --
-   clipping the mark, or shrinking the field -- changes what the treatment looks like,
-   which is the owner's call, not a test's. Measured 2026-09-04. */
-const MOONDUST_OVERHANG_RATIO = 0.7;
+/* Not an `animation:` rule at all, so the scan above never sees it, but it was the one
+   part of the roster that DID widen the document: `.mgx-mark-dust` is a canvas
+   MarkDust.jsx sizes as a multiple of the mark and centres on it. At the audit's 2.4x
+   it overhung 0.7x the mark per side -- 67px at hero, 30px of PERMANENT horizontal
+   document overflow, animated or not. Owner ruling 2026-09-04: shrink the field. Now
+   1.45x, an overhang of 0.225x -- 21.6px at hero, inside .mgx-navcol's 22px right
+   padding, 0px of document overflow -- and MarkDust clamps its orbit radius to the box
+   so motes drift tighter instead of clipping at the new edge. This pin is what keeps a
+   future retune honest: grow the ratio past the navcol budget and this fails. */
+const MOONDUST_OVERHANG_RATIO = 0.225;
+const MOONDUST_HERO_BUDGET_PX = 22;   // .mgx-navcol right padding (shell.css)
 
 describe("the scan sees the roster at all", () => {
   test("every animated treatment rule is found", () => {
@@ -335,8 +337,16 @@ describe("the animated children this file cannot measure are known ones", () => 
     const m = dust.match(/const box = Math\.round\(size \* ([\d.]+)\)/);
     assert.ok(m, "MarkDust no longer sizes its canvas as a multiple of the mark");
     const ratio = (parseFloat(m[1]) - 1) / 2;
-    assert.equal(ratio.toFixed(2), MOONDUST_OVERHANG_RATIO.toFixed(2),
-      "the moondust canvas changed size. It is the one treatment that widens the " +
-      "document (measured 30px at hero); re-measure and update the note above.");
+    assert.ok(Math.abs(ratio - MOONDUST_OVERHANG_RATIO) < 0.001,
+      "the moondust canvas changed size; re-measure and update the note above.");
+    // The pin's teeth: the overhang must fit the header's real budget, or the page
+    // scrolls sideways again (the 2.4x era, measured 30px at hero).
+    assert.ok(ratio * 96 <= MOONDUST_HERO_BUDGET_PX,
+      `moondust overhangs ${(ratio * 96).toFixed(1)}px at hero -- past the ` +
+      `${MOONDUST_HERO_BUDGET_PX}px navcol budget; the page will scroll sideways`);
+    // And the orbit must be fitted to the box, not left at the board rule alone --
+    // otherwise motes clip at the shrunken canvas edge instead of drifting tighter.
+    assert.ok(/Math\.min\(Math\.max\(20, size \* 0\.32\)/.test(dust),
+      "MarkDust no longer clamps its orbit radius to the canvas");
   });
 });
