@@ -150,8 +150,9 @@ it tells you and links straight to it.
 One display setting, kept in **this browser** rather than in your settings file — so the
 same account can have it one way on the phone and another way at the desk.
 
-**Blur behind popups.** The gallery's popups — the Panel itself, the Folio, My Art,
-Contests, Publish, the command palette, the AI Tools catalog, the Generate dock's settings
+**Blur behind popups.** The gallery's popups — the Panel itself and its own sub-windows
+(Trash, the accounts pages, the Stop/Restart confirm), the Folio, My Art, Contests,
+Publish, the command palette, the AI Tools catalog, the Generate dock's settings
 — dim the gallery behind them and blur it. The blur is the expensive half: for as long as
 the popup is open the browser is
 re-blurring your whole library behind it, and on a phone or an older laptop that is the
