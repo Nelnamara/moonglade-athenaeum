@@ -445,7 +445,7 @@ export default function FolioOverlay({ onClose }) {
                         )}
 
                         <div className="mgfo-sec-h">
-                          <b>The ten tracks</b><span>pick a wing of the record</span>
+                          <b>The {vm.ladders.length} tracks</b><span>pick a wing of the record</span>
                           <i className="mgfo-flex1" />
                           <span className="mgfo-count">{fmt(vm.buckets.find((b) => b.key === "ladder").earned)}/{fmt(vm.buckets.find((b) => b.key === "ladder").total)} rungs</span>
                         </div>
