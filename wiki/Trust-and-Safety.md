@@ -7,9 +7,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
 - **Spend credits** — generating an image, video, edit, or reference-video, or running a
   hand/face fix. Every one of these is gated: on the CLI you must pass `--confirm`; in the web
   app, the button click you press *is* the confirmation (there's no extra network step hiding
-  behind it). Nothing spends silently in the background. (The **art filters** on the Edit tab are
-  not in this list: they are gradient composites applied in your own browser, and they make no
-  network request and cost nothing.)
+  behind it). Nothing spends silently in the background. (The **art filters** in the Darkroom
+  (Edit → Enhance → Open the Darkroom) are not in this list: they are gradient composites
+  applied in your own browser, and they make no network request and cost nothing.)
 
   **A free card is used when it covers the whole job, and the price you see is the price you
   pay.** Image and edit cards cover one generation each; a video card is a book of tickets and a

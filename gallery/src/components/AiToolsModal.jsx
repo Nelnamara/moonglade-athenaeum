@@ -18,11 +18,17 @@ import "../styles/ai-tools.css";
    gen/sceneCatalog.js holds the curated copy overlaid on those rows and the 28-tile OFFLINE
    FALLBACK, so the modal is never empty. Same tiles, same layout — only the source changed. */
 
+/* The control chip's five colours follow the HUE LAW (handoff comp A4, pick 1g, committed
+   2026-09-04): 1-Click emerald · Select lavender · Text gold · Language cyan · Dual mauve.
+   Three of them moved with that pass -- 1-Click was gunmetal (the dead-tier grey, which
+   read as "unavailable" on the tiles that need the least work), Text was peach and
+   Language sapphire, neither of which is a hue this app assigns meaning to. No new hues:
+   every value below is an existing token. */
 const SHAPE = {
-  click:  { label: "1-Click",  color: "#8a93a2" },
+  click:  { label: "1-Click",  color: "var(--emerald)" },
   select: { label: "Select",   color: "var(--lavender)" },
-  text:   { label: "Text",     color: "var(--peach)" },
-  lang:   { label: "Language", color: "var(--sapphire)" },
+  text:   { label: "Text",     color: "var(--gold)" },
+  lang:   { label: "Language", color: "var(--loomc, #47cbc3)" },
   dual:   { label: "Dual",     color: "var(--mauve)" },
 };
 
@@ -79,6 +85,10 @@ export default function AiToolsModal({ open, onClose, onPick }) {
           <button type="button" className="mgai-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
+        {/* the SCROLLER wraps the grid rather than being it -- see ai-tools.css's note on
+            .mgai-scroll: a grid that is also the scroll container sized its rows before the
+            track width was known, and every card came out 48px tall */}
+        <div className="mgai-scroll">
         <div className="mgai-grid">
           {shown.map((s) => {
             const m = SHAPE[s.shape] || SHAPE.click;
@@ -87,7 +97,11 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                 onClick={() => onPick && onPick({ name: s.name, slug: s.slug, shape: s.shape,
                                                   tier: s.tier, detail: s.detail })}
                 title={s.name}>
-                <div className="mgai-thumb">
+                {/* 16:10 art on top (handoff comp A4): the thumbnail is the card now, not a
+                    strip above the label. The fallback chain is unchanged and is the comp's
+                    own: curated local webp -> the catalog's PixAI demo image -> the gradient
+                    + serif-initial placeholder underneath. Never an empty strip. */}
+                <div className="mgai-art">
                   <span className="mgai-initial">{s.name[0]}</span>
                   <img src={"/branding/bridge/scene_" + s.slug + ".webp"} alt="" loading="lazy"
                     onError={(e) => {
@@ -98,17 +112,19 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                       el.style.display = "none";
                     }} />
                   {s.tier ? <span className="mgai-tierbadge">Tier 1</span> : null}
-                  <span className="mgai-shapedot" style={{ background: m.color }} />
+                  {/* the control chip is pinned top-right OVER the art, hue-law coloured --
+                      it says how much work the tool needs before you open it */}
+                  <span className="mgai-chip" style={{ color: m.color, borderColor: m.color }}>{m.label}</span>
                 </div>
                 <div className="mgai-meta">
                   <div className="mgai-name">{s.name}</div>
-                  <span className="mgai-chip" style={{ color: m.color, borderColor: m.color }}>{m.label}</span>
                   {s.detail ? <div className="mgai-detail">{s.detail}</div> : null}
                 </div>
               </button>
             );
           })}
           {shown.length === 0 ? <div className="mgai-empty">No tools match “{q}”.</div> : null}
+        </div>
         </div>
 
         <div className="mgai-foot">

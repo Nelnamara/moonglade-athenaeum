@@ -42,29 +42,44 @@ html.mg-noblur .mgai-scrim {
   transition: border-color .16s, color .16s; }
 .mgai-x:hover { border-color: var(--lavender); color: var(--text); }
 
-/* scene grid */
-.mgai-grid { flex: 1 1 auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 11px; overflow-y: auto; align-content: start; }
+/* scene grid -- IMAGE-LED CARDS (issue #53), rebuilt 2026-09-04 to
+   moonglade-internal/design/enhance/"Enhance Family Handoff.dc.html" comp A4 (pick 1g).
+   The cards used to be six-plus across at minmax(148px) with a 94px art strip: the
+   thumbnail was a garnish and every tile looked the same. 3-wide at the modal's width,
+   with 16:10 art on top, is the whole change -- the picture is what tells you what a
+   tool does. Every live tile renders from the same config, unchanged.
+
+   THE SCROLLER IS ITS OWN BOX, and that split is load-bearing. While the grid was ALSO the
+   scroll container, its rows were sized in a pass that did not yet know the 1fr track width,
+   so the art's `aspect-ratio` contributed nothing: every row came out 48px tall and every
+   card was clipped to its chip -- caught in the render harness, where any later relayout
+   produced the correct 243px rows, which is the signature of exactly that stale first pass.
+   Splitting the scroller off fixes it on first paint; the card's own display mode is not
+   what was wrong (flex column and block both render correctly once the split is in). */
+.mgai-scroll { flex: 1 1 auto; min-height: 0; padding: 16px; overflow-y: auto; }
+.mgai-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; align-content: start; }
 .mgai-card { display: flex; flex-direction: column; text-align: left; padding: 0; cursor: pointer; font-family: inherit;
-  border: 1px solid var(--surface1); border-radius: 12px; overflow: hidden; background: var(--surface0);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, .28); transition: border-color .16s, transform .16s; }
-.mgai-card:hover { border-color: var(--lavender); transform: translateY(-2px); }
-.mgai-thumb { position: relative; height: 94px; display: grid; place-items: center; overflow: hidden;
-  background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
+  border: 1px solid var(--surface1); border-radius: 11px; overflow: hidden; background: var(--surface0);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .28); transition: border-color .16s, transform .16s, box-shadow .16s; }
+.mgai-card:hover { border-color: color-mix(in oklab, var(--lavender) 55%, transparent);
+  transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0, 0, 0, .4); }
+.mgai-art { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center;
+  overflow: hidden; background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
 .mgai-initial { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 34px; font-style: italic;
   color: color-mix(in oklab, var(--lavender) 38%, transparent); }
-.mgai-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mgai-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 8px;
   font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--mauve);
   background: rgba(20, 14, 42, .85); border: 1px solid color-mix(in oklab, var(--mauve) 40%, transparent);
   border-radius: 5px; padding: 2px 6px; }
-.mgai-shapedot { position: absolute; bottom: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; }
-.mgai-meta { padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
-.mgai-name { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.2; }
-.mgai-chip { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 9px; font-weight: 800;
-  letter-spacing: .05em; text-transform: uppercase; padding: 3px 7px; border-radius: 5px;
-  background: color-mix(in oklab, currentColor 16%, transparent); border: 1px solid; }
-.mgai-detail { font-size: 9.5px; color: var(--overlay0); line-height: 1.3; }
+.mgai-meta { padding: 9px 11px; display: flex; flex-direction: column; gap: 3px; }
+.mgai-name { font-size: 12px; font-weight: 800; color: var(--text); line-height: 1.2; }
+/* the control chip, pinned top-right OVER the art (comp A4 181). Its colour is the hue
+   law for that control type -- set inline from SHAPE, so the border/tint follow it. */
+.mgai-chip { position: absolute; top: 7px; right: 7px; font-family: ui-monospace, monospace; font-size: 8px;
+  font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px;
+  white-space: nowrap; background: rgba(5, 4, 13, .72); border: 1px solid; }
+.mgai-detail { font-size: 10.5px; color: var(--subtext); line-height: 1.4; }
 .mgai-empty { grid-column: 1 / -1; text-align: center; color: var(--overlay0); font-size: 13px; padding: 40px 0; }
 
 /* tally footer */
