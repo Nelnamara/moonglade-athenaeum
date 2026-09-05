@@ -24,6 +24,7 @@ const src = (p) => readFileSync(path.join(here, "..", "..", p), "utf8");
 
 const grid = src("gallery/src/components/Grid.jsx");
 const app = src("gallery/src/App.jsx");
+const { buildUrl } = await import("../../gallery/src/gen/urlState.js");
 const useLib = src("gallery/src/hooks/useLibrary.js");
 const tray = src("gallery/src/components/FiltersPanel.jsx");
 const css = src("gallery/src/styles/grid.css");
@@ -143,6 +144,60 @@ describe("(c) opening a stack: series -> the B3 modal, batch -> View-batch", () 
     // now), so the chip leads the tray rather than following the picker.
     assert.ok(!tray.includes("<LayoutPicker"), "the layout picker left the tray in B1");
     assert.ok(!tray.includes("mgl-laybtn"));
+  });
+});
+
+describe("(c1) opening a picture from the stack leaves exactly ONE history entry", () => {
+  /* The shell's own history writer, reproduced from App.jsx (~L313) against the REAL
+     builder: one URL per write, and a write that would not change the address is
+     skipped. That skip is what makes the transition atomic -- the address is written
+     once with both keys, and the two verbs that follow re-assert an address that is
+     already correct, so neither of them pushes. */
+  const makeShell = (search) => {
+    const state = { path: "/", search };
+    const pushed = [];
+    const setUrl = (patch, replace) => {
+      const url = buildUrl(patch, state.search, state.path);
+      if (url === state.path + state.search) return;
+      const q = url.indexOf("?");
+      state.search = q < 0 ? "" : url.slice(q);
+      if (!replace) pushed.push(url);
+    };
+    return { state, pushed, setUrl };
+  };
+
+  test("openDetailsFromSeries: one push, and the address carries both changes", () => {
+    const { state, pushed, setUrl } = makeShell("?page=3&series=s7");
+    // App.jsx's openDetailsFromSeries, in its own order
+    setUrl({ series: null, image: "m9" });   // the ONE navigation
+    setUrl({ series: null });                // closeSeries's own write -> no-op
+    setUrl({ image: "m9" });                 // openDetails's own write -> no-op
+    assert.deepEqual(pushed, ["/?page=3&image=m9"]);
+    // ...and the page the library was on is still there, as ever
+    assert.equal(state.search, "?page=3&image=m9");
+  });
+
+  test("the retired two-step pushed TWICE, and the middle entry was a place nobody visited", () => {
+    // closeSeries() then openDetails(mid) -- what the modal used to be handed. Back from
+    // the record landed on the bare library, with neither the stack nor the picture up.
+    const { pushed, setUrl } = makeShell("?page=3&series=s7");
+    setUrl({ series: null });
+    setUrl({ image: "m9" });
+    assert.equal(pushed.length, 2);
+    assert.equal(pushed[0], "/?page=3");
+  });
+
+  test("App hands the modal the atomic handler, not the two-call arrow", () => {
+    assert.ok(app.includes("const openDetailsFromSeries = useCallback((mid) => {"));
+    assert.ok(app.includes("setUrl({ series: null, image: mid });"));
+    assert.ok(app.includes("onOpenDetails={openDetailsFromSeries}"));
+    assert.ok(!app.includes("onOpenDetails={(mid) => { closeSeries(); openDetails(mid); }}"),
+      "the two-push series -> details transition is gone");
+    // both verbs still run for their non-URL state work
+    const h = app.slice(app.indexOf("const openDetailsFromSeries = useCallback((mid) => {"));
+    const body = h.slice(0, h.indexOf("}, ["));
+    assert.ok(body.includes("closeSeries();"));
+    assert.ok(body.includes("openDetails(mid);"));
   });
 });
 

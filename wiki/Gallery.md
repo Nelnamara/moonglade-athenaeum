@@ -139,10 +139,18 @@ images and videos with the arrow keys without leaving the overlay.
   **LINEAGE** shows where a derived picture came from — its source image and whether it
   was an edit, an upscale, or turned into a video.
 - **◈ Similar** — lookalikes by *eye* rather than by model, and a different control from
-  *Filter by model* above. **The ◈ mark is the door, wherever you see it**: hover a card in
-  the grid and press the ◈ in its corner, right-click a card and pick *Find similar*, press
-  **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's SIMILAR strip.
-  All four do the same thing, and ◈ never means anything else.
+  *Filter by model* above. **In the gallery on a computer, the ◈ mark is the door**: hover a
+  card in the grid and press the ◈ in its corner, right-click a card and pick *Find similar*,
+  press **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's SIMILAR
+  strip. All four do the same thing, and nowhere in the library does ◈ open a *second* kind of
+  Similar. (The mark does appear as a small decoration elsewhere in the app — beside a model's
+  use count in the picker, on a *USER LORA* badge — where it is punctuation, not a door.)
+
+  **On a phone this pass hasn't happened yet, and Similar there is unchanged.** It keeps its
+  old **✧** mark: the picture screen's **✧ SIMILAR** row is real and shows you its lookalikes,
+  the big viewer's **✧ Similar** button is still a placeholder that tells you a mobile pass is
+  coming, and the model filter beside them is still labelled *Find similar (model)*. The phone
+  gets its own pass at all of this later.
 
   What you get is a **state on your library, not a popup**: a dismissible **◈ Similar to
   [thumbnail]** token appears in the search bar with the match count beside it, and the 48

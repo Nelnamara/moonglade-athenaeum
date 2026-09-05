@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
@@ -418,6 +418,20 @@ export default function App({ boot }) {
     setUrl({ series: null });
     setSeriesFor(null);
   }, [setUrl]);
+  /* Opening a picture from inside the stack is ONE navigation, so it must leave ONE
+     history entry. It used to be closeSeries() then openDetails(): two setUrl calls,
+     two pushStates, and a middle entry -- the bare library with neither the stack nor
+     the record -- that the owner never saw and that Back landed on. The address is
+     written ONCE here, with both keys in the same patch (buildUrl takes a multi-key
+     patch and only touches the keys it is handed); the two verbs then run for their
+     STATE work, and their own setUrl calls fall through setUrl's already-matches
+     guard because the address is by then exactly what they would have written. So
+     Back from the record goes straight to the stack that was open. */
+  const openDetailsFromSeries = useCallback((mid) => {
+    setUrl({ series: null, image: mid });
+    closeSeries();
+    openDetails(mid);
+  }, [setUrl, closeSeries, openDetails]);
 
   /* Generation completions refresh the library + credits chip.
      THREE channels, because there are three producers:
@@ -766,13 +780,15 @@ export default function App({ boot }) {
 
      ONE RESULT STATE. It is not a modal any more. The viewer and the record close,
      the ◈ token appears in the library bar carrying the source picture's own thumb,
-     and the lookalikes take the grid's place underneath it. Nothing about the library
-     is touched -- not the query, not the filters, not the page, not the scroll -- so
-     ✕ on the token or Escape restores the previous view EXACTLY, by having never
-     disturbed it. (Lightbox.dc.html:354 sends Similar to the gallery and Image
-     Details.dc.html:127-140 keeps only the inline strip in the record; the refit had
-     both stacking a modal on the open surface -- "Where the Refit Broke" #6. B2
-     finishes that repair by removing the modal itself.)
+     and the lookalikes take the grid's place underneath it. No library STATE is
+     touched -- not the query, not the filters, not the page -- so ✕ on the token or
+     Escape restores the previous view EXACTLY. The one thing "never disturbed it"
+     does not cover is the scroll offset, which the browser clamps against the
+     shorter results document; that is saved and put back below, and the two
+     together are what "exactly" means. (Lightbox.dc.html:354 sends Similar to the
+     gallery and Image Details.dc.html:127-140 keeps only the inline strip in the
+     record; the refit had both stacking a modal on the open surface -- "Where the
+     Refit Broke" #6. B2 finishes that repair by removing the modal itself.)
 
      The fetch lives here rather than in the results component because two surfaces
      read it: the results grid, and the library bar's match count beside the token.
@@ -785,12 +801,45 @@ export default function App({ boot }) {
      to call with no record open (setUrl no-ops when the address is already right,
      setDetailsFor(null) on null is a no-op), so the branch was doing nothing the
      unconditional call doesn't. */
+  /* "RESTORES THE PREVIOUS VIEW EXACTLY" INCLUDES WHERE YOU WERE ON THE PAGE.
+     The results take the grid's place inside the SAME <main>, and a lookalike set
+     (48 tiles at most, often far fewer) is shorter than the library page it
+     replaces -- so the browser clamps the scroll offset to the shorter document
+     the moment the swap commits, and the number is gone before any dismiss path
+     can read it. Nothing about the library moved, but the place in it did. So the
+     offset is saved on the way IN and put back on the way OUT.
+
+     It is the WINDOW's offset, not <main>'s: .mgx-main sets position/z-index only
+     (shell.css) -- the document is the scroller for masonry/grid/hero, which is
+     why Grid's own page-flip calls window.scrollTo. A body-overflow scroll lock
+     (useScrollLock, for a Details/lightbox layer above) leaves window.scrollY
+     reading the library's real offset, so entering Similar from those surfaces
+     saves the right number too.
+
+     ONLY THE FIRST ENTRY SAVES. Chaining ◈ from inside the results re-anchors the
+     set on a new picture without the library having moved, so a second save would
+     overwrite the library position with the (clamped) similar-view one. The null
+     sentinel is the "we are not in Similar" state; 0 is a real saved offset. */
+  const libScrollRef = useRef(null);
   const showSimilar = useCallback((mid) => {
+    if (libScrollRef.current === null) libScrollRef.current = window.scrollY || 0;
     setLbIndex(null);
     closeDetails();
     setSeriesFor(null);
     setSimilarFor(mid);
   }, [closeDetails]);
+  /* The other half, on EVERY dismiss path -- the token's ✕, Escape, and the empty
+     state's "Back to the library" all land here, because they all clear the one
+     state. Layout effect: the grid is back in the DOM and measured, but the frame
+     has not painted, so the library comes back already in place rather than
+     visibly jumping. */
+  useLayoutEffect(() => {
+    if (similarFor) return;
+    const y = libScrollRef.current;
+    if (y === null) return;
+    libScrollRef.current = null;
+    window.scrollTo(0, y);
+  }, [similarFor]);
   const similar = useSimilar(similarFor);
   const similarSource = useMemo(() => {
     if (!similarFor) return null;
@@ -1165,10 +1214,10 @@ export default function App({ boot }) {
       )}
       {/* B3: a series stack, over the gallery. Opening a picture from inside it closes
           the modal first -- the record is the deeper view, not a third layer stacked on
-          a second one. */}
+          a second one -- and does it as ONE history entry (openDetailsFromSeries). */}
       {seriesFor && (
         <SeriesModal sid={seriesFor} onClose={closeSeries}
-          onOpenDetails={(mid) => { closeSeries(); openDetails(mid); }} />
+          onOpenDetails={openDetailsFromSeries} />
       )}
 
       {/* the DC's veil: keeps the column bottom legible under the (future) dock */}

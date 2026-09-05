@@ -15,10 +15,16 @@ import "../styles/series-modal.css";
    and the stack opens over it. Esc goes straight back, because there is nothing
    to undo.
 
-   THE RAIL is #34's LINEAGE pattern. A dial-in series is a chain of RUNS (the
-   backend's `steps`: one task each, in order, with the prompt delta that made it
-   and how many images it produced). They draw as an indented descent line so the
-   chain reads as a chain, each with its own count, headed by "All runs".
+   THE RAIL IS THE HANDOFF'S OWN. Its pattern and its metrics -- the indented
+   descent line, the 8 + 7·n step, the "All runs" head, the per-run counts -- are
+   drawn in Gallery Chrome Handoff.dc.html, and that drawing is the source. #34 is
+   related HISTORY, not the pattern: what #34 shipped in the record is the
+   horizontal SESSION chip strip (DetailsView.jsx, styles.css's SESSION block), and
+   it scoped this rail and the facet chips OUT as follow-ons (ROADMAP.md). A
+   dial-in series is a chain of RUNS (the backend's `steps`: one task each, in
+   order, with the prompt delta that made it and how many images it produced). They
+   draw as an indented descent line so the chain reads as a chain, each with its
+   own count, headed by "All runs".
 
    FACET CHIPS sit in the rail's footer and AND with the run selection -- pick
    Run 3 and ★ and you get Run 3's rated pictures, not a union. All three facets
