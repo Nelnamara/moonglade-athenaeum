@@ -106,6 +106,19 @@
 .cm-chipx { background: none; border: none; color: inherit; cursor: pointer; font-size: 12px;
   line-height: 1; padding: 0; font-family: inherit; }
 
+/* The LoRA chip's trigger-word re-insert (issue #45). The words land in the prompt by
+   themselves on pick; this is the way BACK for words deleted on purpose, and mobile had no
+   trigger-word control at all before it. Deliberately quieter than the chip's own label --
+   it is a fallback, not the primary action -- but boxed and padded rather than bare like
+   .cm-chipx, because "+words" is a phrase to hit with a thumb, not a single glyph.
+   MEASURED against this committed file, not guessed: server-rendered at the 360px width
+   this screen lays out at, the box comes out 49x21 inside a 31px chip and does not
+   overflow it -- the padding stops there because more grows the chip, not the target. */
+.cm-chipwords { background: color-mix(in srgb, var(--lavender) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lavender) 40%, transparent);
+  color: var(--lavender); cursor: pointer; font-size: 9px; line-height: 1;
+  padding: 5px 8px; border-radius: 7px; font-family: inherit; white-space: nowrap; }
+
 /* Not in the DC's Image-mode markup (its only wired route to the LoRA pane is
    a button inside the deferred Advanced screen) -- added so LoRA add/remove
    is reachable this increment; see CreateMobile.jsx's header comment for the

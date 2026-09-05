@@ -6679,6 +6679,9 @@ UPDATE_CHECK_TTL = 1800          # 30 min: GitHub's unauthenticated budget is 60
 UPDATE_FAILURE_TTL = 90
 UPDATE_RESTART_DELAY = 2.0       # see run_update: the modal polls at 1.5s and must be able
                                  # to SEE "restarting" before the server stops answering
+UPDATE_FETCH_TIMEOUT = 60        # the apply route's pre-check fetch: it happens INSIDE a
+                                 # request, so it gets a shorter leash than _git's 180s
+                                 # default -- a stalled network must not hold the browser
 _VERSION_TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 _update_cache = {"at": 0.0, "payload": None, "ttl": UPDATE_CHECK_TTL}
 _update_state = {"phase": "idle", "error": "", "at": 0.0}
@@ -6807,6 +6810,73 @@ def _requirements_changed(old_head, new_head):
     return any(line.strip() == "requirements.txt" for line in out.splitlines())
 
 
+def split_porcelain(dirty):
+    """`git status --porcelain` output -> (tracked, untracked), each a list of paths.
+
+    The split is the whole point. A modified TRACKED file is genuinely endangered by a
+    pull -- the update owns that path and is about to write it. An UNTRACKED file is only
+    in the way if the update actually needs that path, and real installs accumulate stray
+    ones: a scratch folder, a note, a launcher somebody keeps beside the app. Refusing on
+    all of them refuses most real machines forever, which is exactly what happened on the
+    first live apply (a personal `boop/` the release had never heard of).
+
+    Untracked entries keep porcelain's own shape INCLUDING the trailing slash git puts on
+    a directory it is summarising as one line -- that slash is load-bearing below."""
+    tracked, untracked = [], []
+    for ln in (dirty or "").splitlines():
+        if not ln.strip():
+            continue
+        (untracked if ln[:2] == "??" else tracked).append(ln[3:].strip())
+    return tracked, untracked
+
+
+def incoming_paths():
+    """The paths the pending update would write: (set, "") or (None, why-not).
+
+    Measured against the SAME ref `git pull --ff-only` will merge -- the branch's
+    configured upstream, `@{u}` -- and only after FETCHING it, because an un-fetched
+    remote-tracking ref is a picture of whenever this checkout last looked. Reading a
+    stale one would answer "nothing is incoming" and make the untracked check below
+    silently permissive; a pre-check that exists to give a better answer than git's own
+    error has to be right about what is actually in the way.
+
+    The fetch writes nothing but remote-tracking refs -- precisely what the pull is about
+    to do anyway, one round trip earlier -- so it cannot change this install."""
+    rc, out = _git(["fetch", "--quiet"], timeout=UPDATE_FETCH_TIMEOUT)
+    if rc != 0:
+        return None, out
+    rc, out = _git(["diff", "--name-only", "HEAD..@{u}"])
+    if rc != 0:
+        return None, out
+    return {p.strip() for p in out.splitlines() if p.strip()}, ""
+
+
+def untracked_in_the_way(untracked, incoming):
+    """Which of `untracked` sit where the update needs to write.
+
+    Three shapes, and each is git's OWN rule restated rather than a stricter invention:
+    this pre-check exists to say it in better words than `git pull` would, so it must
+    never wave through something git will then refuse.
+      * an untracked FILE at an incoming path -- the checkout would overwrite it;
+      * an untracked DIRECTORY containing one -- porcelain prints `d/` as a single line
+        standing for everything beneath it, so an incoming `d/x.py` lands inside it and
+        git refuses on the directory it never tracked;
+      * an untracked FILE where the update needs a DIRECTORY (`d` here, `d/x.py` coming).
+    Anything else -- the scratch folder, the note, the personal launcher -- is not a path
+    this update touches, and so is none of the update's business."""
+    hits = []
+    for p in untracked:
+        if not p:
+            continue
+        if p.endswith("/"):
+            bare = p.rstrip("/")
+            if any(inc == bare or inc.startswith(p) for inc in incoming):
+                hits.append(p)
+        elif p in incoming or any(inc.startswith(p + "/") for inc in incoming):
+            hits.append(p)
+    return hits
+
+
 def run_update(restart_fn, pip_fn=None, log_fn=None):
     """Pull, install deps if they moved, then restart. Runs on its own thread, OFF the
     panel-job slot, so the restart it asks for is not refused by the job it is itself.
@@ -6816,10 +6886,12 @@ def run_update(restart_fn, pip_fn=None, log_fn=None):
     paraphrasing it would cost them the fix.
 
     A FAILED PULL changes nothing: --ff-only either fast-forwards or refuses. A FAILED
-    PIP is the dangerous one, and it ROLLS BACK: the tree was verified clean before the
-    pull (the apply route refuses a dirty one), so `git reset --hard <old head>` loses
-    nothing and returns the install to the code whose dependencies are actually
-    installed. Without it the install sat on new code with old deps -- and worse, a
+    PIP is the dangerous one, and it ROLLS BACK: the tree was verified free of TRACKED
+    edits before the pull (the apply route refuses those), and `reset --hard` does not
+    touch untracked files, so `git reset --hard <old head>` loses nothing and returns the
+    install to the code whose dependencies are actually installed -- a stray untracked
+    file the route allowed past is still sitting there afterwards, unread and unharmed.
+    Without the rollback the install sat on new code with old deps -- and worse, a
     "Try again" would have found the pull already applied, seen no requirements diff
     against the new HEAD, skipped pip entirely and declared success on a broken install.
     The rollback is what makes retry mean retry.
@@ -9014,8 +9086,14 @@ def create_app(out_dir: Path):
           * on master               -- the recovered scope's own out-of-scope rule: a
                                        feature branch is somebody mid-work, not a stale
                                        install
-          * clean tree              -- --ff-only would refuse anyway; refusing here says
-                                       WHICH files are in the way instead of a git error
+          * no tracked edits        -- the update owns those paths and is about to write
+                                       them; --ff-only would refuse anyway, and refusing
+                                       here says WHICH files instead of a git error
+          * no untracked file at a  -- and ONLY those. A stray folder the release has
+            path the update writes     never heard of is not a reason to refuse: real
+                                       installs collect them, and blocking on all of them
+                                       (as the first live apply did, over a personal
+                                       `boop/`) refuses every real machine forever
         The work itself runs off the panel-job slot on its own single-flight thread, so
         the restart it asks for cannot be refused by the job it is itself.
 
@@ -9056,11 +9134,30 @@ def create_app(out_dir: Path):
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's state: "
                                      + _redact_host_paths(dirty)[:200]}), 409
-        if dirty.strip():
-            names = [ln[3:].strip() for ln in dirty.splitlines() if ln.strip()][:6]
+        tracked, untracked = split_porcelain(dirty)
+        if tracked:
             return jsonify({"error": "this checkout has uncommitted changes — the update "
                                      "would overwrite them. In the way: "
-                                     + _redact_host_paths(", ".join(names))}), 409
+                                     + _redact_host_paths(", ".join(tracked[:6]))}), 409
+        # Untracked entries are judged against what the update actually brings, not
+        # blocked on sight -- see split_porcelain and untracked_in_the_way. This costs a
+        # fetch, but only on a checkout that HAS stray files, and only the fetch the pull
+        # was about to do regardless.
+        ignored_untracked = 0
+        if untracked:
+            incoming, why = incoming_paths()
+            if incoming is None:
+                return jsonify({"error": "couldn't work out what the update brings, so "
+                                         "whether your untracked files are in its way is "
+                                         "unknown — and this won't guess. git said: "
+                                         + _redact_host_paths(why)[:300]}), 409
+            clash = untracked_in_the_way(untracked, incoming)
+            if clash:
+                return jsonify({"error": "an untracked file is where the update needs to "
+                                         "write: "
+                                         + _redact_host_paths(", ".join(clash[:6]))
+                                         + " — move or delete it, then try again."}), 409
+            ignored_untracked = len(untracked)
         with _update_lock:
             if _update_state["phase"] not in ("idle", "failed"):
                 return jsonify({"error": "an update is already running"}), 409
@@ -9082,8 +9179,16 @@ def create_app(out_dir: Path):
         # nobody was watching the modal. Redacted like every other LAN-visible string.
         job_id = "update-" + secrets.token_hex(6)
 
+        # ...and if the tree had stray files this update deliberately left alone, the log
+        # line says how many. The record has to show that the guard chose to proceed --
+        # otherwise "it updated over my files" and "it updated beside my files" leave the
+        # same trace, and only one of those is a bug worth chasing.
+        label = "Updated Moonglade"
+        if ignored_untracked:
+            label += " (ignored untracked: %d)" % ignored_untracked
+
         def _log_update(status, error=""):
-            _log_job(job_id, status=status, type="update", label="Updated Moonglade",
+            _log_job(job_id, status=status, type="update", label=label,
                      error=(_redact_host_paths(error)[:600] or None))
 
         threading.Thread(target=run_update, args=(_restart,),

@@ -35,6 +35,14 @@
 .mgclaim-scrim.exiting { animation: mgclaimFadeOut .3s ease both;
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 
+/* The blur switch (Control Panel > This device > "Blur behind popups"). Canonical
+   explanation: overlays.css, "THE BLUR SWITCH". The base selector also matches
+   .mgclaim-scrim.exiting, and the !important outranks that rule's own blur, the deferred
+   keyframe above, AND the reduced-motion block at the foot of this file. */
+html.mg-noblur .mgclaim-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+
 .mgclaim-host { position: fixed; inset: 0; z-index: 441; /* above its own scrim (440) -- the pair moves together, overlays.css ladder */ display: grid; place-items: center;
   padding: 24px; pointer-events: none; }
 

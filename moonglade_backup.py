@@ -822,10 +822,6 @@ DELETE_OPERATION = "deleteGenerationTask"
 REFRESH_TOKEN_HASH = _cfg.get("REFRESH_TOKEN_HASH", "") or \
     "ad4ac2d62cbc5ab168a212594fb515c58cca1a101c60233a214fd7e037157546"
 PIXAI_COOKIE_DOMAIN = "pixai.art"
-# Short session cookies the server rolls forward via Set-Cookie on every response
-# (_udt IS the u3t value; ~60m / ~30m lifetimes). Read the whole jar so refreshToken
-# sees the same cookies the browser sends.
-SESSION_COOKIE_NAMES = ("_bsid", "_bsid.sig", "_udt", "_udt.sig")
 # Roll the ~27-day JWT once it drops under this many days left (a box that runs even
 # weekly never lapses).
 MIRROR_REFRESH_WHEN_DAYS_LEFT = 5

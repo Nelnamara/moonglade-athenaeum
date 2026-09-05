@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
+  BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import { apiGet } from "../api.js";
@@ -439,6 +440,15 @@ export default function ControlMobile({ account }) {
 
       <div className="ctm-sec">
         <a className="mgcp-smallchip" href="/export-csv" style={{ textDecoration: "none" }}>⬇ Download catalog (CSV)</a>
+      </div>
+
+      {/* The blur toggle, in its own ctm-sec exactly like Skins below -- the same shared
+          component the desktop Panel renders, so one flip means one behaviour on both.
+          This is the surface it matters MOST on: a phone is the machine the owner's
+          ruling names as wanting the blur off while the home desktop keeps it. The tile
+          takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
+      <div className="ctm-sec">
+        <BlurToggleTile className="mgcp-tile" />
       </div>
 
       {skins.length > 0 && (

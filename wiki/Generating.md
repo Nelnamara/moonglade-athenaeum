@@ -54,6 +54,28 @@ itself instead of a friendly message, see
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
 **LoRAs** row.
 
+### Trigger words go in by themselves
+Most LoRAs only wake up when their **activation words** are in the prompt — attach one
+without them and it quietly does nothing to a picture you paid for. So picking a LoRA
+writes its words into the prompt for you, on the desktop dock and on the phone alike, the
+same way PixAI's own composer does.
+
+It won't write a word that's already there, so picking, un-picking and re-picking a LoRA
+never leaves you with the same token three times. If you delete the words on purpose and
+want them back, the **+words** button on the LoRA's row (its chip, on the phone) puts them
+in again — and it's harmless to press when they're already in place.
+
+**Removing a LoRA takes its words back out**, the same way PixAI does — so un-picking one
+doesn't leave you generating against activation words for a LoRA that isn't attached any
+more. A word that a LoRA you're *still* using also needs is left alone: if two of them
+share an activation word, dropping one never disarms the other. Only the words themselves
+go; the rest of your prompt closes up around the gap and is otherwise untouched. If you'd
+reworded a word, or written it into a sentence of your own, that's your writing and it
+stays — and **+words** puts a LoRA's words back whenever you want them.
+
+One thing it deliberately doesn't do: **Remix doesn't add or remove anything** — restoring
+a recipe gives you the prompt that actually made the picture, word for word.
+
 ### Finding a model or LoRA
 The picker opens on **Market** — everything on PixAI. Two other places to look sit next
 to it:

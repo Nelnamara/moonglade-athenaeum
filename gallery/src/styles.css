@@ -30,192 +30,18 @@ button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ===== THE COLLAPSING BANNER — the strip SURVIVES the scroll ==================
-   This is the whole point of the surface and the pilot shipped without it.
-
-   Mechanism, 100% CSS and zero scroll JS: the header is sticky and TALL, with a
-   NEGATIVE sticky top of (slim - hero). The browser scrolls it up natively by
-   that difference -- nothing resizes, so there is no per-scroll layout thrash --
-   and then it pins with exactly the bottom --bnr-slim on screen. Everything
-   sorts into two persistence tiers: the art, the rail, the cluster and the stats
-   ride the banner away; .strip is bottom-anchored and is the ONLY thing left in
-   the pinned band. Do not "tidy" a control across that line -- the split IS the
-   design (docs/DECISIONS.md, "sort by persistence, not by available space").
-   Below 1024 the whole thing switches off to stacked flow. */
 /* Z-LADDER (one place, so nothing guesses): header 100 · drawer scrim 300 ·
    model flyout 305 · drawer 310 · lightbox + picker 400. Anything that must sit
    OVER the sticky header has to clear 100 -- the drawer sat at 90 and the header
    ate its top half. notify.css owns 234/235 (tray) and 510/520 (celebrations). */
 :root { --drawer-w: min(640px, 96vw); }   /* the drawer's one width */
-header.mg-head { position: sticky; z-index: 100; display: block; overflow: visible;
-  --bnr-hero: clamp(348px, 24vw, 370px); --bnr-slim: 76px;
-  height: var(--bnr-hero); top: calc(var(--bnr-slim) - var(--bnr-hero));
-  background: var(--mantle); }
-
-/* ---- art band: decoration + ONE anchored column (reflow-proof) ---- */
-.artband { position: absolute; inset: 0; overflow: hidden; background: var(--base); }
-.artband .artimg { position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; object-position: 50% var(--crop, 30%); clip-path: inset(0); }
-/* the scrim: darkens the bottom so the strip reads over any art */
-.artband::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(180deg, rgba(17,17,27,.04) 30%,
-    rgba(17,17,27,.4) 62%, rgba(17,17,27,.9) 88%); }
-/* TRANSIENT tier: rides the art away on scroll. */
-.rail { position: absolute; right: 20px; top: 18px; z-index: 3;
-  display: flex; flex-direction: column; gap: 11px; align-items: flex-end; }
-.rail a, .rail .railout button {
-  font-size: 12.5px; letter-spacing: .13em; text-transform: uppercase; color: #cfc9de;
-  text-decoration: none; white-space: nowrap; padding-bottom: 3px;
-  border: 0; border-bottom: 1px solid transparent; background: none;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, .85);
-  transition: color .15s, border-color .15s, letter-spacing .15s; }
-.rail a:hover, .rail .railout button:hover {
-  color: var(--accent); border-bottom-color: var(--accent); letter-spacing: .17em;
-  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 60%, transparent), 0 1px 8px rgba(0,0,0,.85); }
-.rail a.soon { opacity: .55; cursor: help; }
-@media (prefers-reduced-motion: reduce) { .rail a, .rail .railout button { transition: none; } }
-
-/* ---- the glass strip: PERSISTENT tier, bottom-anchored, height == --bnr-slim ---- */
-.strip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
-  height: var(--bnr-slim); padding: 6px 12px; display: flex; flex-direction: row;
-  align-items: center; gap: 14px;
-  background: linear-gradient(180deg, rgba(26,20,51,.72), rgba(11,9,24,.92));
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-top: 1px solid rgba(255, 255, 255, .07); }
-.strip .brand { align-self: center; }
-/* the two rows live in their own column beside the brand */
-.strip-rows { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;
-  justify-content: center; gap: 3px; }
+/* The classic collapsing banner (header.mg-head + .artband/.rail/.strip/.gt-stats
+   and the .mk brand-mark treatment) was removed by the 2026-09-04 dead-code sweep.
+   App.jsx retired mg-head for the explicit hero/slim <header className="mgx-hdr">,
+   and the mark is MarkAnimated.jsx driving .mgx-mark/.mark-anim-* from
+   styles/mark-anims.css. Nothing rendered any of those class names any more. */
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 5px; }
 .sp { flex: 1 1 auto; }
-.nb { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-/* stats ride the ART (transient), right-aligned just above the strip */
-.gt-stats { position: absolute; right: 14px; bottom: calc(var(--bnr-slim) + 8px);
-  z-index: 3; display: flex; gap: 17px; align-items: baseline; white-space: nowrap;
-  color: var(--subtext); text-shadow: 0 1px 8px rgba(0, 0, 0, .85); }
-.gt-stats b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
-.gt-stats i { font-style: normal; font-size: 9px; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--overlay0); margin-left: 4px; }
-
-/* ===== THE MARK — alive, and ENLARGED per the owner ==========================
-   Ported from the classic's brand mark: the tile pulses (mark-glow) with an
-   eclipse band sweeping across it; when a real cut mark resolves, the tile
-   dissolves and the MAGIC moves onto the art's own alpha -- a drop-shadow glow
-   that hugs the silhouette, a glint masked to the shape, and a gold twinkle.
-   The mask needs the mark's URL, which a built stylesheet cannot Jinja-inject,
-   so the element carries it as --mark-url (set inline from the boot payload).
-   Sizes are the owner's ask: 56px mark (was 42 classic / 38 pilot), 24px title. */
-.brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.mk {
-  /* The classic's shoot/twinkle effects were tuned in ABSOLUTE PIXELS against its
-     42px tile. This mark is 56px (the owner's enlarge request) -- the same raw
-     offsets now cover a smaller fraction of the box, which is exactly why shoot
-     read as "orbiting" instead of darting across and off (owner QA 2026-07-30).
-     One scale ratio, applied via calc() inside the two effects that use raw px
-     (mk-shoot's translate, mk-tw's position + shadow offset) -- everything else
-     (halo/eclipse/ripple/mist insets, shine/aurora's mask) is already
-     percentage- or contain-based and scales for free. */
-  --mk-scale: 1.333;
-  position: relative; width: 56px; height: 56px; border-radius: 13px; display: grid;
-  place-items: center; font-weight: 700; font-size: 30px; color: var(--base);
-  background: var(--accent); flex-shrink: 0; overflow: hidden;
-  box-shadow: 0 0 0 rgba(182, 146, 230, 0);
-  animation: mark-glow 5.5s ease-in-out infinite; }
-.mk::after { content: ""; position: absolute; top: 9px; right: 9px; width: 6px; height: 6px;
-  border-radius: 50%; background: var(--gold); z-index: 2; }
-.mk::before { content: ""; position: absolute; inset: 0; border-radius: 10px;
-  background: var(--mantle); transform: translateX(-108%);
-  animation: mark-eclipse 5.5s ease-in-out infinite; }
-.mk .mark-m { position: relative; z-index: 4; }
-.mk img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 5; }
-.mk.mk-tile img { border-radius: 13px; }
-/* a real cut mark: tile off, magic on the art's own shape */
-.mk:has(img) { background: transparent; box-shadow: none; animation: none; overflow: visible; }
-.mk:has(img) .mark-m { display: none; }
-.mk:has(img) img { animation: logo-glow 5.5s ease-in-out infinite; }
-.mk:has(img)::before { border-radius: 0; transform: none; z-index: 6; pointer-events: none;
-  background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,.6) 47%,
-    rgba(182,146,230,.4) 53%, transparent 68%);
-  background-size: 260% 100%; background-position: 200% 0; background-repeat: no-repeat;
-  -webkit-mask: var(--mark-url) center / contain no-repeat;
-  mask: var(--mark-url) center / contain no-repeat;
-  animation: logo-glint 5.5s ease-in-out infinite; }
-.mk:has(img)::after { content: "\2726"; width: auto; height: auto; top: -8px; right: -9px;
-  background: none; border-radius: 0; color: var(--gold); font-size: 13px; line-height: 1;
-  text-shadow: 0 0 6px rgba(212,175,55,.9); z-index: 7;
-  animation: logo-twinkle 5.5s ease-in-out infinite; }
-/* Panel-selectable effects: anything but 'classic' mutes the trio above and
-   drives its own. Same !important discipline as the classic, same reason. */
-.mk:not(.anim-classic):has(img) img { animation: none; }
-.mk:not(.anim-classic):has(img)::before { animation: none; background: none;
-  -webkit-mask: none; mask: none; }
-.mk:not(.anim-classic):has(img)::after { animation: none; opacity: 0; }
-.mk.anim-shine::before, .mk.anim-aurora::before {
-  background-size: 260% 100% !important; background-position: 200% 0 !important;
-  background-repeat: no-repeat !important;
-  -webkit-mask: var(--mark-url) center / contain no-repeat !important;
-  mask: var(--mark-url) center / contain no-repeat !important; }
-.mk.anim-shine::before { background: linear-gradient(115deg, transparent 32%,
-  rgba(255,255,255,.6) 47%, rgba(182,146,230,.4) 53%, transparent 68%) !important;
-  animation: logo-glint 2.2s linear infinite !important; }
-.mk.anim-aurora::before { background: linear-gradient(115deg, transparent 26%,
-  rgba(148,226,213,.6) 45%, rgba(182,146,230,.65) 55%, transparent 74%) !important;
-  animation: logo-glint 3s linear infinite !important; }
-.mk.anim-glow img { animation: mk-glow 2.6s ease-in-out infinite !important; }
-.mk.anim-glow::before { inset: -14%; border-radius: 50%; z-index: 3;
-  background: radial-gradient(circle, rgba(148,226,213,.5), rgba(148,226,213,0) 62%) !important;
-  animation: mk-bloom 2.6s ease-in-out infinite !important; }
-.mk.anim-twinkle::after { content: "\2726"; width: auto; height: auto;
-  top: calc(-7px * var(--mk-scale)); right: calc(-8px * var(--mk-scale));
-  background: none; border-radius: 0; color: var(--gold); font-size: 14.5px; line-height: 1;
-  text-shadow: calc(-32px * var(--mk-scale)) calc(28px * var(--mk-scale)) 0 rgba(212,175,55,.7),
-    0 0 6px rgba(212,175,55,.9); z-index: 7;
-  opacity: 1 !important; animation: mk-tw 1.7s ease-in-out infinite !important; }
-.mk.anim-shoot::after { content: ""; width: 15px; height: 2px; top: 2px; right: auto;
-  left: -4px; border-radius: 2px; opacity: 1 !important;
-  background: linear-gradient(90deg, rgba(255,255,255,0), #fff);
-  box-shadow: 0 0 7px 1px rgba(207,232,255,.9); z-index: 7;
-  animation: mk-shoot 2.7s ease-in-out infinite !important; }
-.mk.anim-eclipse::before { inset: 4%; border-radius: 50%; z-index: 6; opacity: .92;
-  background: radial-gradient(circle at 50% 46%, #10101a 60%, rgba(16,16,26,0) 70%) !important;
-  box-shadow: 0 0 10px 2px rgba(120,90,200,.45);
-  animation: mk-ecl 4s ease-in-out infinite !important; }
-.mk.anim-mist::before { inset: -20%; filter: blur(3px); mix-blend-mode: screen; z-index: 3;
-  background: radial-gradient(circle at 32% 38%, rgba(90,230,180,.5), transparent 46%),
-              radial-gradient(circle at 68% 62%, rgba(150,110,240,.5), transparent 46%) !important;
-  animation: mk-mist 6s ease-in-out infinite !important; }
-.mk.anim-prism img { animation: mk-prism 6s linear infinite !important; }
-/* halo / ripple / breathe / tilt / float / orbit were RETIRED by the 2026-08-31 marks
-   workshop (six killed across its two rounds). Their rules and keyframes are gone with
-   them; a stored pick of one now renders as classic (load_branding validates against
-   MARK_ANIMS, which no longer lists them). The survivors' rules below stay: this
-   stylesheet is the classic-chrome treatment, distinct from the React header engine in
-   styles/mark-anims.css. */
-@keyframes mark-eclipse { 0%,100% { transform: translateX(-108%); } 46%,54% { transform: translateX(0); } }
-@keyframes mark-glow { 0%,100% { box-shadow: 0 0 10px rgba(182,146,230,.55); } 50% { box-shadow: 0 0 3px rgba(182,146,230,.2); } }
-@keyframes logo-glow { 0%,100% { filter: drop-shadow(0 0 7px rgba(182,146,230,.65)); } 50% { filter: drop-shadow(0 0 2px rgba(182,146,230,.18)); } }
-@keyframes logo-glint { 0%, 58% { background-position: 200% 0; } 78%, 100% { background-position: -100% 0; } }
-@keyframes logo-twinkle { 0%, 40%, 100% { opacity: 0; transform: scale(.5) rotate(0deg); }
-  55% { opacity: 1; transform: scale(1.15) rotate(18deg); }
-  70% { opacity: .25; transform: scale(.8) rotate(36deg); } }
-@keyframes mk-glow { 0%,100% { filter: brightness(1) drop-shadow(0 0 2px rgba(148,226,213,.2)); } 50% { filter: brightness(1.15) drop-shadow(0 0 9px rgba(148,226,213,.8)); } }
-@keyframes mk-bloom { 0%,100% { opacity: .1; transform: scale(.85); } 50% { opacity: .8; transform: scale(1.05); } }
-@keyframes mk-tw { 0%,100% { opacity: 0; transform: scale(.3) rotate(0deg); } 50% { opacity: 1; transform: scale(1.1) rotate(20deg); } }
-@keyframes mk-shoot {
-  0% { opacity: 0; transform: translate(calc(-8px * var(--mk-scale)), calc(-4px * var(--mk-scale))) rotate(28deg); }
-  12% { opacity: 1; }
-  45% { opacity: 0; transform: translate(calc(46px * var(--mk-scale)), calc(26px * var(--mk-scale))) rotate(28deg); }
-  100% { opacity: 0; } }
-@keyframes mk-ecl { 0% { transform: translateX(-92%); } 50% { transform: translateX(0); } 100% { transform: translateX(92%); } }
-@keyframes mk-mist { 0%,100% { transform: translate(-6%,2%); } 50% { transform: translate(6%,-4%); } }
-@keyframes mk-prism { to { filter: hue-rotate(360deg); } }
-
-.bn { font-family: var(--serif); font-size: 24px; font-weight: 700; white-space: nowrap;
-  border-bottom: 2px solid var(--gold); padding-bottom: 1px; line-height: 1.1;
-  text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent); }
-.tg { font-size: 10.5px; color: var(--subtext); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
-.ver { font: 9.5px ui-monospace, Menlo, monospace; color: var(--overlay0);
-  border: 1px solid var(--surface1); border-radius: 8px; padding: 1px 7px; }
 
 .card { display: inline-flex; align-items: center; gap: 8px; border-radius: 18px;
   padding: 6px 13px; font-size: 11.5px; white-space: nowrap; color: var(--text);
@@ -310,19 +136,9 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .flysaved-save .card { flex: none; }
 .flysaved-msg { font-size: 9.5px; color: var(--red, #f38ba8); }
 
-/* ---- the Actions menu + the cloud-delete blast radius ---- */
-.am-wrap { position: relative; display: inline-flex; }
-.am-menu { position: absolute; left: 0; top: calc(100% + 8px); z-index: 70; min-width: 250px;
-  display: flex; flex-direction: column; padding: 6px;
-  background: var(--mantle); border: 1px solid rgba(255, 255, 255, .14); border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, .6); }
-.am-item { border: 0; background: none; text-align: left; font-size: 11.5px;
-  color: var(--text); padding: 7px 10px; border-radius: 6px; white-space: nowrap; }
-.am-item:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.am-item:disabled { opacity: .45; }
-.am-item.danger { color: var(--red); }
-.am-item.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 16%, transparent); }
-.am-div { height: 1px; background: var(--surface0); margin: 4px 2px; }
+/* ---- the cloud-delete blast radius ----
+   (.am-wrap/.am-menu/.am-item/.am-div, the classic Actions dropdown, went in the
+   2026-09-04 dead-code sweep: ActionsMenu.jsx renders the shared .mgl-item menu.) */
 .card.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); }
 .cd-inner { max-width: min(760px, 92vw); max-height: 90vh; overflow-y: auto;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--red) 50%, transparent);
@@ -347,37 +163,12 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .cd-vid { position: absolute; right: 3px; bottom: 3px; font-size: 9px; color: var(--cyan); }
 .cd-more { font-size: 11px; color: var(--peach); font-style: italic; padding: 2px 1px 4px; }
 
-/* ---- the Generate drawer (image tab React, video tab = shared component) ---- */
-/* The drawer SLIDES. A display:none toggle cannot transition, so both the drawer
-   and its scrim stay mounted and animate on transform/opacity -- compositor-only,
-   and it keeps the shared video component's poll alive across a close. */
-.gd-scrim { position: fixed; inset: 0; z-index: 300; background: rgba(6, 4, 14, .55);
-  opacity: 0; visibility: hidden; transition: opacity .18s ease, visibility .18s; }
-.gd-scrim.open { opacity: 1; visibility: visible; }
-.gd { position: fixed; top: 0; right: 0; bottom: 0; z-index: 310; width: var(--drawer-w);
-  overflow-y: auto; padding: 12px 14px 22px; display: flex; flex-direction: column; gap: 9px;
-  background: radial-gradient(140% 120% at 80% 0%, #1a1433 0%, #0b0918 60%);
-  border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: -18px 0 60px rgba(0, 0, 0, .65);
-  transform: translateX(100%); visibility: hidden;
-  transition: transform .2s ease, visibility .2s; }
-.gd.open { transform: none; visibility: visible; }
-/* the body's controls arrive staggered when a tab opens -- 400ms/power2-ish,
-   never more than eight children carry it (the rest simply appear) */
-.gd-body > * { animation: gd-rise .34s cubic-bezier(.2, .8, .3, 1) both; }
-.gd-body > *:nth-child(1) { animation-delay: .02s; }
-.gd-body > *:nth-child(2) { animation-delay: .05s; }
-.gd-body > *:nth-child(3) { animation-delay: .08s; }
-.gd-body > *:nth-child(4) { animation-delay: .11s; }
-.gd-body > *:nth-child(5) { animation-delay: .14s; }
-.gd-body > *:nth-child(6) { animation-delay: .17s; }
-.gd-body > *:nth-child(7) { animation-delay: .2s; }
-.gd-body > *:nth-child(n+8) { animation-delay: .22s; }
-@keyframes gd-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.gd-head { display: flex; align-items: center; gap: 8px; }
-.gd-tabs { display: flex; gap: 6px; }
-.gd-tabs button { padding: 7px 15px; font-size: 12.5px; }
-.gd-body { display: flex; flex-direction: column; gap: 9px; }
+/* ---- Generate-drawer CONTROLS (the label/prompt/row/select/number/chip vocabulary
+   the React tabs still wear inside the dock) ----
+   The classic drawer SHELL that used to hold them -- .gd, .gd.open, .gd-scrim,
+   .gd-body's staggered @keyframes gd-rise, .gd-head, .gd-tabs -- went in the
+   2026-09-04 dead-code sweep. The dock is styles/dock.css's .mgdock-* now, and
+   nothing rendered a .gd element any more. */
 .gd-lbl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--overlay0); }
 .gd-prompt { min-height: 96px; background: rgba(20, 17, 40, .55); border: 1px solid rgba(255, 255, 255, .16);
   border-radius: 10px; color: var(--text); font: 12.5px/1.5 system-ui; padding: 8px 10px;
@@ -395,12 +186,6 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   border-radius: 9px; font-size: 10.5px; padding: 3px 9px; white-space: nowrap; }
 .gd-mini.on { border-color: var(--accent); color: var(--text);
   background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.gd-chip { border-radius: 14px; font-size: 11px; padding: 5px 12px; white-space: nowrap;
-  color: var(--subtext); border: 1px solid rgba(255, 255, 255, .14);
-  background: rgba(33, 31, 58, .38); }
-.gd-chip.on { border-color: var(--accent); color: var(--text);
-  background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.gd-chip:disabled { opacity: .4; }
 .gd-note { font-size: 10.5px; color: var(--overlay0); font-style: italic; }
 .gd-warn { font-size: 10px; color: var(--red); }
 .gd-lora { display: flex; align-items: center; gap: 7px; border: 1px solid var(--surface0);
@@ -412,13 +197,8 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
 .gd-lora input[type=range] { flex: 1 1 60px; accent-color: var(--accent); min-width: 50px; }
 .gd-w { font: 11px ui-monospace, Menlo, monospace; color: var(--gold); min-width: 34px; }
 .gd-refthumb { width: 30px; height: 38px; object-fit: cover; border-radius: 5px; }
-.gd-modelbtn { display: inline-flex; align-items: center; gap: 8px; }
-.gd-modelthumb { width: 22px; height: 28px; object-fit: cover; border-radius: 4px; }
 .gd-go { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .gd-cost { min-height: 20px; }
-.gd-costfail { font-size: 11px; color: var(--red); max-width: 26ch; line-height: 1.4; }
-.gd-cb { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text); }
-.gd-cb input { accent-color: var(--accent); }
 .gd-results { display: flex; flex-direction: column; gap: 6px; }
 .gd-res { font-size: 11.5px; border-radius: 8px; padding: 6px 9px; border: 1px solid var(--surface0); }
 .gd-res.run { color: var(--subtext); }
@@ -567,38 +347,20 @@ header.mg-head { position: sticky; z-index: 100; display: block; overflow: visib
   font-weight: 600; }
 .pg-ellipsis { color: var(--overlay0); padding: 0 2px; }
 
-/* ---- lightbox ----
-   z-index 315, NOT the classic's 300: the pilot's own drawer sits at 310 (its
-   flyouts 305/306), and the lightbox must still cover an open drawer -- but
-   <UpscalePanel>'s flyout mode hardcodes z-index:320 internally (that
-   number clears the CLASSIC lightbox's 300; it does not know this pilot's
-   ladder exists), so this stays the one value that satisfies both: above 310,
-   below 320. */
+/* ---- .lb: the full-screen modal ground ----
+   Still live, and now used only by ActionsMenu.jsx's cloud-delete dialog.
+   z-index 315, NOT the classic's 300: the drawer sits at 310 (its flyouts
+   305/306), and this must still cover an open drawer -- but <UpscalePanel>'s
+   flyout mode hardcodes z-index:320 internally (that number clears the CLASSIC
+   lightbox's 300; it does not know this ladder exists), so this stays the one
+   value that satisfies both: above 310, below 320.
+
+   The classic lightbox CHROME that once sat inside it -- .lbinner, .lbstage,
+   .lbnav/.lbprev/.lbnext, .lbbar, .lbcap, .lbacts/.lbact, .lbprompt -- went in
+   the 2026-09-04 dead-code sweep: Lightbox.jsx renders .lbx-* (styles/lightbox.css)
+   and nothing rendered an .lb* element besides .lb itself. */
 .lb { position: fixed; inset: 0; z-index: 315; display: grid; place-items: center;
   background: rgba(6, 4, 14, .88); backdrop-filter: blur(6px); }
-.lbinner { max-width: 94vw; max-height: 94vh; display: flex; flex-direction: column; gap: 8px; }
-.lbstage { position: relative; display: flex; align-items: center; justify-content: center; }
-.lbstage img, .lbstage video { max-width: 94vw; max-height: 78vh; object-fit: contain;
-  border-radius: 10px; box-shadow: 0 24px 80px rgba(0, 0, 0, .8); }
-.lbnav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(10, 8, 24, .5);
-  color: var(--text); border: 1px solid var(--surface1); border-radius: 8px; font-size: 26px;
-  line-height: 1; padding: 8px 14px; cursor: pointer; }
-.lbnav:hover { background: var(--surface0); }
-.lbprev { left: -54px; } .lbnext { right: -54px; }
-@media (max-width: 900px) { .lbprev { left: 6px; } .lbnext { right: 6px; } }
-.lbbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; font-size: 12px;
-  color: var(--subtext); }
-.lbcap { color: var(--text); font-variant-numeric: tabular-nums; }
-.lbbar .model { color: var(--text); }
-.lbbar .dim { color: var(--overlay0); }
-.lbacts { display: flex; flex-wrap: wrap; gap: 6px; }
-.lbacts button, .lbact { border-radius: 12px; border: 1px solid var(--surface1); color: var(--text);
-  background: rgba(33, 31, 58, .5); padding: 4px 12px; font-size: 12px; text-decoration: none;
-  cursor: pointer; display: inline-flex; align-items: center; }
-.lbacts button:hover, .lbact:hover { background: var(--surface0); }
-.lbacts button:disabled { opacity: .35; }
-.lbprompt { max-width: 80ch; max-height: 12vh; overflow-y: auto; font-size: 11px;
-  color: var(--subtext); line-height: 1.6; }
 
 /* ---- similar-images modal (classic's #similar-scrim/#similar-modal, class-based) ---- */
 .similar-scrim { position: fixed; inset: 0; z-index: 414; /* above .lbx 400 -- see overlays.css ladder (#39) */ background: rgba(6, 4, 16, .6); }

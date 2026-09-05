@@ -69,6 +69,11 @@
   background: rgba(5, 4, 13, .52);
   animation: mgFade .35s ease both, mgdockScrimBlur .01s linear .35s forwards; }
 @keyframes mgdockScrimBlur { to { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); } }
+/* The blur switch (Control Panel > This device > "Blur behind popups"). Canonical
+   explanation: overlays.css, "THE BLUR SWITCH". */
+html.mg-noblur .mgdock-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
 
 /* ============================== HEADER ====================================== */
 .mgdock-head { position: relative; display: flex; align-items: center; gap: 11px;
