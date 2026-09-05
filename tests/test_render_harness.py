@@ -1005,6 +1005,121 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     assert ping_calls["n"] >= 3, "the reload fired before the down-then-up sequence completed"
 
 
+# ---------------------------------------------------------------------------
+# 7b. "Blur behind popups" -- the per-device toggle, measured as COMPUTED STYLE
+# ---------------------------------------------------------------------------
+# Owner ruling 2026-09-04 (docs/DECISIONS.md, "the popup blur gets a Control Panel
+# toggle"): the backdrop-filter every popup's scrim carries is the largest thing an OPEN
+# popup keeps paying for on a weak machine, so it becomes a preference in the browser's own
+# storage -- per device, never config.json.
+#
+# This is exactly the defect class this whole file exists for. loom/test/overlay-open-perf
+# .test.js already pins that the override rule EXISTS and is written `!important`; only a
+# real engine can answer whether the declaration actually WINS -- the blur reaches these
+# scrims from a keyframe, and an author !important outranking an animation is a cascade
+# rule, not something a substring search can verify. So the read below is
+# getComputedStyle on the live scrim, not the stylesheet text.
+#
+# _freeze_motion is deliberately NOT used here (same reasoning as the tray test above):
+# it sets `animation: none !important`, which would kill the deferred blur keyframe and
+# make "backdropFilter is none" trivially true in BOTH states -- the test would pass while
+# measuring nothing. Nothing sleeps either: every phase waits on the computed value itself.
+_READ_SCRIM_JS = """() => {
+  const s = document.querySelector('.mgv-scrim');
+  const cs = s ? getComputedStyle(s) : null;
+  return {
+    found: !!s,
+    blur: cs ? (cs.backdropFilter || cs.webkitBackdropFilter || 'none') : null,
+    background: cs ? cs.backgroundColor : null,
+    opacity: cs ? cs.opacity : null,
+    rootFlagged: document.documentElement.classList.contains('mg-noblur'),
+    stored: (() => { try { return localStorage.getItem('mg_noblur'); } catch (e) { return 'THREW'; } })(),
+  };
+}"""
+
+_SCRIM_BLURRED = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
+                  "/blur\\(/.test(getComputedStyle(s).backdropFilter || ''); }")
+_SCRIM_SHARP = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
+                "(getComputedStyle(s).backdropFilter || 'none') === 'none'; }")
+
+
+def _open_panel(page):
+    _dismiss_any_achievement_toast(page)
+    page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
+    page.wait_for_selector('[aria-label="Control Panel"]')
+
+
+def test_blur_behind_popups_toggles_the_real_backdrop_filter(logged_in_page):
+    """The Panel's own scrim is the subject AND the surface carrying the switch.
+
+    Four things get proved, in the order a person would meet them:
+      1. by default the scrim really is blurred (so step 2 is not vacuous),
+      2. flipping the toggle clears the blur on a popup that is ALREADY OPEN,
+      3. the dark scrim itself is untouched -- same colour, same opacity,
+      4. after a reload the class is on <html> before any popup exists, and the
+         scrim comes up sharp and STAYS sharp past the deferred keyframe's delay.
+    """
+    page = logged_in_page(**DESKTOP)
+    # Not _visit(): see the freeze-motion note above.
+    page.goto("/", wait_until="domcontentloaded")
+    _settle(page)
+    _open_panel(page)
+
+    # 1. THE DEFAULT. An install that has never touched this looks exactly as it always
+    #    has. The wait is on the blur landing, which also proves the deferred keyframe
+    #    (asserted structurally in loom/test/overlay-open-perf.test.js) really fires.
+    page.wait_for_function(_SCRIM_BLURRED)
+    before = page.evaluate(_READ_SCRIM_JS)
+    assert before["found"]
+    assert "blur(" in before["blur"], before
+    assert before["rootFlagged"] is False
+    assert before["stored"] in (None, ""), (
+        "a fresh browser context must carry no stored preference: {!r}".format(before["stored"]))
+
+    # 2. THE FLIP, on the open popup. No reload, no reopen -- the class lands on <html>
+    #    and the scrim under this very Panel goes sharp.
+    page.click('.mgcp-tile:has-text("Blur behind popups") button.mgcp-bjtoggle')
+    page.wait_for_function(_SCRIM_SHARP)
+    after = page.evaluate(_READ_SCRIM_JS)
+    assert after["blur"] == "none", after
+    assert after["rootFlagged"] is True
+    assert after["stored"] == "1", "the preference must persist to this browser's storage"
+
+    # 3. ONLY THE BLUR MOVED. The owner asked for a blur toggle, not a scrim toggle: the
+    #    popup still lands on the same dark layer, the gallery behind it is merely sharp.
+    assert after["background"] == before["background"], (
+        "the dark scrim changed colour: {!r} -> {!r}".format(before["background"], after["background"]))
+    assert after["opacity"] == before["opacity"]
+
+    # 4. THE BOOT ORDER, measured. main.jsx applies the class at module scope, above
+    #    createRoot -- so on a fresh load it is already on <html> with no popup open at
+    #    all, and the scrim that opens next is never blurred for a frame.
+    page.goto("/", wait_until="domcontentloaded")
+    _settle(page)
+    assert page.evaluate("() => document.documentElement.classList.contains('mg-noblur')"), (
+        "the preference was not applied at boot -- a popup opened on the first frame "
+        "would paint blurred")
+    assert not page.evaluate("() => !!document.querySelector('.mgv-scrim')"), (
+        "no scrim should exist yet; this assertion is what makes the one above a "
+        "statement about BOOT rather than about an already-open overlay")
+    _open_panel(page)
+    page.wait_for_function(_SCRIM_SHARP)
+    # ...and it stays sharp past the moment the deferred keyframe would otherwise have
+    # switched the blur on (.3s). Waiting for the OPPOSITE and requiring a timeout is what
+    # makes this a real assertion about the keyframe being overridden, not just about the
+    # first frame after open.
+    with pytest.raises(_PlaywrightTimeout):
+        page.wait_for_function(_SCRIM_BLURRED, timeout=1200)
+
+    # 5. AND BACK. A one-way switch would pass every assertion above.
+    page.click('.mgcp-tile:has-text("Blur behind popups") button.mgcp-bjtoggle')
+    page.wait_for_function(_SCRIM_BLURRED)
+    restored = page.evaluate(_READ_SCRIM_JS)
+    assert restored["rootFlagged"] is False
+    assert restored["stored"] == "", "on writes the empty string, never a stray '1'"
+    assert restored["blur"] == before["blur"], (
+        "turning it back on must restore the SAME blur, not a different radius")
+
 
 # ---------------------------------------------------------------------------
 # 8. Setup Wizard -- a genuinely fresh install, real key save, real needs_key flip,

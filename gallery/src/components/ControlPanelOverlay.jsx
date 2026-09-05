@@ -8,6 +8,7 @@ import MarkAnimated from "./MarkAnimated.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
+import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -188,6 +189,50 @@ function MirrorTile() {
         <div className="mgbr-verdict">{armed
           ? "Live now — 34 surfaces reachable through one engine."
           : "All hidden. The toggle is the only way anyone finds this — which is exactly what the discovery achievement will reward."}</div>
+      </div>
+    </div>
+  );
+}
+
+/* THIS DEVICE -- the one preference in this Panel that is NOT saved on the server.
+
+   "Blur behind popups" turns off the backdrop-filter every popup's dark scrim carries.
+   The dark layer itself stays; only the blur goes. It is the largest thing an open popup
+   keeps paying for on a weak machine, so turning it off is what makes the app usable
+   there (owner ruling, DECISIONS.md 2026-09-04, "the popup blur gets a Control Panel
+   toggle").
+
+   PER DEVICE BY DESIGN, which is why there is no apiPost here and no key in config.json:
+   the same account wants this off on a phone and on at the home desktop, and one
+   server-side value cannot be both. It is written to this browser's own storage and read
+   back at boot -- lib/blurPref.js is the only module that touches either half.
+
+   The flip is instant on a popup already on screen: the class lands on <html> and the
+   seven scrim rules answer it live (styles/overlays.css, "THE BLUR SWITCH"). Shared with
+   ControlMobile.jsx through this file's named exports, like ActionChip and SkinsRow -- one
+   toggle, one behaviour, both surfaces.
+
+   The pill is the Panel's own On/Off control (.mgcp-bjtoggle, from the Bonjour card).
+   Labelled by what it DOES, not by the class it sets: "on" here means the blur is on. */
+export function BlurToggleTile({ className = "mgcp-tile mgcp-tile4" }) {
+  const [blurOn, setBlurOn] = useState(() => !isBlurOff());
+  const flip = () => {
+    const nextOn = !blurOn;
+    setBlurOff(!nextOn);
+    applyBlurClass(document.documentElement, !nextOn);
+    setBlurOn(nextOn);
+  };
+  return (
+    <div className={className}>
+      <div className="mgcp-mkick">This device</div>
+      <div className="mgcp-devrow">
+        <span>Blur behind popups</span>
+        <button type="button" className={"mgcp-bjtoggle" + (blurOn ? " on" : "")}
+          aria-pressed={blurOn} onClick={flip}>{blurOn ? "On" : "Off"}</button>
+      </div>
+      <div className="mgcp-tilenote">
+        Turn it off if the gallery feels slow — popups keep their dark backdrop, the
+        pictures behind just stay sharp. Saved in this browser only, not for the account.
       </div>
     </div>
   );
@@ -812,6 +857,12 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                         isLocal && <div className="mgcp-ver" style={{ marginTop: "auto" }}>{summary.out_dir}</div>
                       )}
                     </div>
+
+                    {/* Display preferences for THIS browser (2026-09-04). Placed here, at
+                        the foot of the tile grid beside Catalog & files, because it is a
+                        machine-local setting rather than a library one -- and span 4
+                        completes that row exactly (3 + 4 + 5 with Branding unlocked). */}
+                    <BlurToggleTile />
 
                     {/* Control Panel.dc.html:250-286 -- once Branding is unlocked, the
                         mark/skins pickers LEAVE Maintenance: one pointer tile replaces

@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **You can turn off the blur behind popups.** The gallery's popups dim and blur the library behind them, and on a slower machine — a phone, an older laptop — that blur is the most expensive thing on screen for as long as the popup is open. The Control Panel now has a **This device** card with **Blur behind popups**; switch it off and popups keep their dark backdrop while the pictures behind simply stay sharp. It takes effect immediately, even on a popup already open, and it is remembered *per device*: turn it off on the phone and the desktop keeps its blur, because it lives in that browser rather than in your settings file. The same switch is on the phone's Control screen. (2026-09-04)
+
 ## [3.7.1] - 2026-09-04 — The First Pull
 
 - Fixed: **the living mark shows one animation — yours.** The old glass-sheen effect (a selectable option back in the classic interface) had been welded onto the mark as permanent furniture, so it played under every treatment you picked — and with the treatment set to "none" it just sat there as a frozen pane of glass. It is a *selectable pick* again — **Sheen**, back on the roster beside Classic — and it sweeps across the art itself rather than lighting the empty square around a transparent mark. *Classic* returns to what it originally was: the star. The resting halo follows the art's own shape now too, instead of glowing as a rounded tile behind it. And the *Eclipse* shadow crosses **in front of** the mark again — the sideways-scroll fix had left it stranded behind the art, where an eclipse is invisible. (2026-09-04)

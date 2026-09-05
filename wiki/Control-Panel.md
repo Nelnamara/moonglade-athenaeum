@@ -145,6 +145,25 @@ into your gallery. Handy for edits and anything in Favorites that the normal lis
 It downloads your own finished media and spends nothing; if the task is already catalogued
 it tells you and links straight to it.
 
+## This device
+
+One display setting, kept in **this browser** rather than in your settings file — so the
+same account can have it one way on the phone and another way at the desk.
+
+**Blur behind popups.** The gallery's popups — the Panel itself, the Folio, My Art,
+Contests, Publish, the command palette, the AI Tools catalog, the Generate dock's settings
+— dim the gallery behind them and blur it. The blur is the expensive half: for as long as
+the popup is open the browser is
+re-blurring your whole library behind it, and on a phone or an older laptop that is the
+single heaviest thing on screen.
+
+Switch it **Off** and popups keep the dark backdrop exactly as before; the pictures behind
+it just stay sharp. It applies the moment you click it, including to the Panel you clicked
+it in, and it is remembered for next time on this device only. Turning it back **On**
+restores the same blur — nothing else about how popups look or open changes either way.
+
+The same switch is on the phone's **Control** screen.
+
 ## Live Mirror
 
 A status readout for the push connection that mirrors each generation the instant it

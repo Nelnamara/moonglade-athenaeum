@@ -41,6 +41,14 @@
 .mgpal-scrim.closing { animation: mgpalFade .34s ease reverse both; pointer-events: none;
   -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 
+/* The blur switch (Control Panel > This device > "Blur behind popups"). Canonical
+   explanation: overlays.css, "THE BLUR SWITCH". Both palette scrims are listed together
+   because they share a keyframe; the base selectors also match their .closing states, and
+   the !important outranks those rules' own blur AND the reduced-motion block below. */
+html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+
 /* The host does the 12vh anchoring so the panel's own transform stays free for mgpalSlab
    (a translateX(-50%) centring trick would be clobbered by the animation's transform). */
 .mgpal-host { position: fixed; inset: 0; z-index: 461; display: flex;

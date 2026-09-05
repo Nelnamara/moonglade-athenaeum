@@ -457,6 +457,14 @@ button.mgct-enter.small { font-size: 12.5px; padding: 10px 20px; }
    the keyframe -- if one is ever added, it must state the blur directly (see overlays.css). */
 .mgct-subscrim { position: fixed; inset: 0; z-index: 424; background: rgba(5,4,13,.62);
   animation: mgvFade .3s ease both, mgvScrimBlur .01s linear .3s forwards; }
+/* The blur switch (Control Panel > This device > "Blur behind popups"). Canonical
+   explanation: overlays.css, "THE BLUR SWITCH". This scrim has no state or reduced-motion
+   rule of its own today; the !important is kept for the same reason as its siblings, so
+   adding one later cannot quietly reintroduce a blur this preference has turned off. */
+html.mg-noblur .mgct-subscrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+
 .mgct-subhost { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center;
   pointer-events: none; }
 .mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; overflow-y: auto;

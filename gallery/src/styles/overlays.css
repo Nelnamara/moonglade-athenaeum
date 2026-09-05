@@ -44,6 +44,33 @@
 @keyframes mgvScrimBlur {
   to { -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 }
+/* ================= THE BLUR SWITCH: html.mg-noblur (owner ruling, 2026-09-04) ==========
+   THE CANONICAL EXPLANATION LIVES HERE; the six sibling scrims each carry the same one
+   rule next to their own, pointing back at this block.
+
+   Deferring the blur made the OPEN cheap. It did not make the blur free: while a popup is
+   up, a `backdrop-filter` over a live 100-card grid keeps costing, and on a weak machine
+   (a phone, an old laptop) that is still the largest bill an overlay runs up. So the blur
+   is now a per-device display preference -- browser storage, never config.json, because
+   the same account wants it OFF on the phone and ON at the home desktop (DECISIONS.md,
+   "the popup blur gets a Control Panel toggle"). The Control Panel writes the class onto
+   <html>; gallery/src/lib/blurPref.js is the one place that reads and writes it.
+
+   WHY `!important`, which this file otherwise never reaches for. The blur arrives from
+   THREE different places on these scrims -- the deferred keyframe, the .closing/.exiting
+   rules that re-state it directly, and the reduced-motion blocks that also re-state it --
+   and an author `!important` is the one declaration that outranks all three, animations
+   included (CSS Cascading 4 §6.2 sorts important-author ABOVE animation declarations).
+   One rule per scrim therefore covers every path the blur can take, instead of five
+   overrides chasing five sources. The base selector also matches the state classes: an
+   .mgclaim-scrim.exiting element IS an .mgclaim-scrim.
+
+   What does NOT change: the dark scrim itself, its rgba, its fade, its timing, the slab.
+   Off, the popup still lands on the same dark layer -- the gallery behind it is merely
+   sharp. Nothing here touches motion, so the reduced-motion contract is untouched too. */
+html.mg-noblur .mgv-scrim {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
 .mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
