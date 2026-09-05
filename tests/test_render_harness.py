@@ -320,6 +320,92 @@ def logged_in_page(render_server, render_browser, monkeypatch):
             ctx.close()
 
 
+# The one route in this app that must never fire for real from a test. Named once so the
+# guard below and the contest helpers at the bottom of the file cannot drift apart.
+_CONTEST_ENTER_ROUTE = "**/api/contest/enter"
+
+
+def _is_confirmed_entry(body):
+    """Does this /api/contest/enter body ask the server to actually SUBMIT?
+
+    An unreadable body counts as confirmed on purpose: a guard whose whole job is to prove
+    that nothing irreversible happened must fail on anything it cannot prove is harmless.
+    """
+    try:
+        return bool((json.loads(body or "{}") or {}).get("confirm"))
+    except (TypeError, ValueError):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def no_confirmed_contest_entry(render_browser):
+    """MODULE-WIDE BACKSTOP: no test in this file may submit a CONFIRMED contest entry.
+
+    Entering a contest is an irreversible, PUBLIC account write and PixAI publishes no
+    un-enter route -- `moonglade_gallery.py::api_contest_enter` says exactly that in its own
+    docstring. Until this fixture existed, the only thing standing between this harness and
+    a real one was the `page.route` inside `_open_contests_on_the_phone`: a CONVENTION, not
+    a rule. Any test that reached the entry screen by another door -- the lightbox's
+    "Enter contest" chip, say, which is precisely what
+    `test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked` below now does --
+    would have had no interception at all, on a screen whose confirm bar is one click from
+    armed. This makes the guarantee structural.
+
+    It hangs off the ONE thing every page in this module has in common: `new_context` on the
+    module's single browser, which both page-creating sites (`logged_in_page`'s factory and
+    `test_setup_wizard_onboards_a_genuinely_fresh_install`'s own context) go through. So it
+    covers a test nobody has written yet, which is the point of a backstop. Each context
+    gets two halves, and they do different jobs -- proven against a live chromium, not
+    assumed from the docs:
+
+      * `ctx.route()` INTERCEPTS, so a page with no interception of its own can never reach
+        the real route. A test's own `page.route` still wins over it (page routes are
+        matched before context routes), which is why `_open_contests_on_the_phone`'s own
+        interception stays exactly as it was: this is the floor, not a replacement.
+      * `ctx.on("request")` RECORDS every body regardless of who fulfils it -- the request
+        event fires for intercepted requests too -- so the assertion below sees the helper's
+        traffic as well as its own.
+
+    TWO OTHER LAYERS EXIST and neither is a reason to drop this one. The entry screen POSTs
+    `confirm: true` only from a press of its confirm bar; and the server short-circuits an
+    unconfirmed body before any network call at all (`if not body.get("confirm"): return
+    jsonify({"preview": True, ...})` -- the same route's own preview contract, which is why
+    the unconfirmed previews these tests DO fire are safe). Both of those stop the
+    unconfirmed form. Nothing but this stops the confirmed one.
+    """
+    seen = []
+
+    def _arm(ctx):
+        def _record(req):
+            if req.method == "POST" and req.url.endswith("/api/contest/enter"):
+                seen.append(req.post_data or "")
+        ctx.on("request", _record)
+        # The same shape the real route answers an unconfirmed body with, so a page that
+        # falls through to here still renders a truthful fee slot instead of an error.
+        ctx.route(_CONTEST_ENTER_ROUTE, lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"preview": True, "spends_credits": None})))
+
+    real_new_context = render_browser.new_context
+
+    def _guarded(*args, **kwargs):
+        ctx = real_new_context(*args, **kwargs)
+        _arm(ctx)
+        return ctx
+
+    render_browser.new_context = _guarded
+    try:
+        yield seen
+    finally:
+        # Drop the instance attribute rather than re-assigning the bound method, so the
+        # shared module-scoped browser is left byte-for-byte as it was found.
+        del render_browser.new_context
+    confirmed = [b for b in seen if _is_confirmed_entry(b)]
+    assert not confirmed, (
+        "a CONFIRMED /api/contest/enter left this test: {!r} -- entering a contest is an "
+        "irreversible, public account write with no un-enter route".format(confirmed))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1400,6 +1486,25 @@ _MOBILE_ART = {
         for i in range(6)
     ],
 }
+# The SAME published-art shape, but keyed to the media_ids `render_server` actually writes
+# into the harness catalog (100..105). The image-side entry path needs that overlap and the
+# board-side path does not: pre-selection matches the media_id the LIBRARY grid handed down
+# against the eligible set read from /api/myart/items, so with `_MOBILE_ART`'s a0..a5 the
+# tick could never land and the test would pass for the wrong reason (an empty selection
+# looks identical to one the source picture was rightly refused from). Titles carry the
+# media_id because the picker's tile puts `title` on the button -- that attribute is the
+# only thing in the rendered DOM that says WHICH picture came back ticked.
+_MOBILE_ART_FROM_LIBRARY = {
+    "csrf": "harness-csrf",
+    "items": [
+        {"media_id": str(100 + i), "artwork_id": "art-lib-%d" % i,
+         "title": "Harness %d" % (100 + i),
+         "thumb": "/thumbs/%d.jpg" % (100 + i), "is_video": False, "is_nsfw": False,
+         "date": "2026-08-20", "created_at": "2026-08-20T00:00:00", "tags": [],
+         "public": True, "sensitive": False, "likes": 0, "comments": 0}
+        for i in range(6)
+    ],
+}
 
 
 def _json_route(page, pattern, payload):
@@ -1420,7 +1525,7 @@ def _open_contests_on_the_phone(page, entry_posts):
         entry_posts.append(route.request.post_data or "")
         route.fulfill(status=200, content_type="application/json",
                       body=json.dumps({"preview": True, "spends_credits": None}))
-    page.route("**/api/contest/enter", _enter)
+    page.route(_CONTEST_ENTER_ROUTE, _enter)
 
     # Motion frozen BEFORE the Menu is opened: the pushed screen slides in over 220ms
     # (glmScreenIn's translateX), and a screen measured mid-slide is a screen sitting
@@ -1483,6 +1588,49 @@ def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entrie
             geo["door"]["h"]))
     assert geo["cards"] == 1 and geo["card"]["h"] >= 44, (
         "community cards missing or under 44pt: {!r}".format(geo))
+
+    # THE COMMUNITY HALF OF THE SAME HUE LAW, which nothing guarded. The handoff swaps
+    # desktop's two colours on this surface -- OFFICIAL lavender, COMMUNITY gold -- and only
+    # the official half was asserted above, so a revert of the community half to what
+    # desktop paints (`.mgct-badge.community { color: var(--mauve) }`, myart-contests.css)
+    # would have gone through green.
+    #
+    # Read one tap OFF the board, and that is deliberate rather than a wander: the board's
+    # community CARD renders no badge at all. `.cmb-badge` is emitted in exactly two places
+    # in the whole gallery -- ContestsMobile's hero (always `official`) and
+    # ContestDetailMobile's banner (`official` or `community`) -- so the community hue's
+    # only live pixel anywhere is the detail banner of the very contest this card opens.
+    # Following the card there is the shortest honest path to the thing being guarded; a
+    # `.cmb-badge.community` probe synthesised on the board would assert a rule, not a
+    # rendering, which is the substring-in-a-blob habit this whole module exists to break.
+    page.click(".cmb-card")
+    page.wait_for_selector(".cmb-banner .cmb-badge", timeout=10_000)
+    _settle(page)
+    com = page.evaluate("""() => {
+        const badge = document.querySelector('.cmb-banner .cmb-badge');
+        const cs = getComputedStyle(document.documentElement);
+        // null (not a colour) for a token that does not resolve, so a vanished --mauve
+        // cannot make the "differs from mauve" assertion below quietly vacuous.
+        const probe = (name) => { const v = cs.getPropertyValue(name).trim();
+            if (!v) return null;
+            const el = document.createElement('span');
+            el.style.color = v; document.body.appendChild(el);
+            const c = getComputedStyle(el).color; el.remove(); return c; };
+        return {cls: badge.className, color: getComputedStyle(badge).color,
+                gold: probe('--gold'), lav: probe('--lavender'), mauve: probe('--mauve')};
+    }""")
+    assert "community" in com["cls"], (
+        "the community contest's banner badge is not the COMMUNITY one: {!r}".format(
+            com["cls"]))
+    assert None not in (com["gold"], com["lav"], com["mauve"]), (
+        "a token this assertion compares against no longer resolves: {!r}".format(com))
+    assert com["color"] == com["gold"], (
+        "the COMMUNITY badge is {} -- the handoff assigns it --gold ({}) on the phone"
+        .format(com["color"], com["gold"]))
+    assert com["color"] != com["lav"] and com["color"] != com["mauve"], (
+        "the COMMUNITY badge collapsed onto another hue (lavender {}, mauve {}) -- mauve is "
+        "what desktop's own .mgct-badge.community paints, which is the exact revert this "
+        "guards".format(com["lav"], com["mauve"]))
 
 
 def test_the_phone_contest_detail_folds_to_one_open_section_over_a_pinned_enter_bar(
@@ -1578,6 +1726,125 @@ def test_the_phone_entry_screen_never_enters_on_one_tap(logged_in_page):
         "not quote a '/ N max' the contest never published".format(armed["count"]))
     assert all("confirm" not in p for p in posts), (
         "a CONFIRMED entry left this test: {!r}".format(posts))
+
+
+def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
+        logged_in_page, no_confirmed_contest_entry):
+    """THE IMAGE-SIDE DOOR, and the half of D3 the board-side tests structurally cannot see.
+
+    The handoff keeps THREE entry points and only two of them start from a picture -- the
+    lightbox's action row and Image Details' chip -- and those two are exactly the two that
+    PRE-SELECT the picture they came from. Every test above drives the third (the board's
+    own Enter bar), which pre-selects nothing by design, so the whole pre-selection chain
+    shipped unmeasured: LightboxMobile's chip -> AppMobile's `openContestFor` -> the ENTER
+    INTO A CONTEST sheet -> `openContestEntry(contest, contestFor)` -> ContestEntryMobile's
+    one-shot `seeded` effect. Four hand-offs of one media_id, any of which can drop it, and
+    a dropped one fails SILENTLY: the screen simply opens with nothing ticked, which is also
+    what a legitimately ineligible source looks like.
+
+    Driven as a person drives it, at 390pt: tap a real grid tile, tap the chip, pick a
+    contest in the sheet, and land on the entry screen. The assertion is that the ticked
+    tile is THAT picture and no other, and that the confirm bar came up armed and counting
+    one. The bar is left unpressed -- this proves the screen opens ready, never that it
+    fires -- and the module-wide guard fixture is asserted for the same guarantee the
+    board-side test makes with its own `posts` list.
+    """
+    page = logged_in_page(**MOBILE)
+    _json_route(page, "**/api/contests", _MOBILE_BOARD)
+    _json_route(page, "**/api/contest/*/artworks", {"entries": [], "total_count": 104})
+    _json_route(page, "**/api/myart/items", _MOBILE_ART_FROM_LIBRARY)
+
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".glm-body", timeout=10_000)
+    _freeze_motion(page)                      # before the lightbox's own 280ms slide-in
+    page.wait_for_selector(".glm-tile", timeout=10_000)
+    # Catalog row 100 is the ONE row render_server gives a prompt_full to ("harness prompt"),
+    # so its caption is unique among the six -- rows 101..105 caption "harness row n". That
+    # makes this a deterministic handle on a known media_id without a data-* attribute the
+    # component does not ship.
+    page.click('.glm-tile:has-text("harness prompt")')
+    page.wait_for_selector(".lbm-root", timeout=10_000)
+    _settle(page)
+
+    page.click('.lbm-chip:has-text("Enter contest")')
+    page.wait_for_selector(".glm-sheet .mgctch-row", timeout=10_000)
+    _settle(page)
+    rows = page.locator(".glm-sheet .mgctch-row")
+    assert rows.count() == 2, (
+        "the chooser is not offering both running contests: {!r}".format(
+            rows.all_inner_texts()))
+
+    # dispatch_event, not click, and that is this test RECORDING A REAL DEFECT it found on
+    # its first run rather than papering over one. The sheet mounts and lays out correctly,
+    # but `.glm-sheet` paints at z-index 31 UNDER the opaque viewer that opened it
+    # (`.lbm-root`, z 55; `.idm-root`, the other image-side door, is z 50 and buries it just
+    # the same), so a person who taps the chip sees nothing happen at all. Measured here,
+    # not read off a stylesheet: an ordinary click was refused with "<button
+    # class='lbm-chip'>Similar</button> from .lbm-root subtree intercepts pointer events",
+    # and `force=True` fared no better -- forcing skips the check but still clicks the
+    # COORDINATES, which the lightbox owns, so the row's own handler never ran.
+    # dispatch_event fires the click on the node itself, which is the only way to drive a
+    # buried element. The wiring behind the sheet is this test's subject and it is sound;
+    # the surface in front of it is not. Driving it anyway is what keeps the pre-selection
+    # contract measured while that is fixed -- and this comment, not a silent pass, is the
+    # record of why. The day `.glm-sheet` clears the two viewers that open it, this line
+    # becomes an ordinary `page.click`.
+    #
+    # Picking the contest closes the sheet and mounts the entry screen at z 70, which IS
+    # genuinely above both viewers -- only the sheet in the middle of the path is buried.
+    page.locator('.glm-sheet .mgctch-row:has-text("JoJo Pose")').dispatch_event("click")
+    page.wait_for_selector(".cmb-entry .cmb-tile", timeout=10_000)
+    _settle(page)
+
+    got = page.evaluate("""() => {
+        const tiles = [...document.querySelectorAll('.cmb-entry .cmb-tile')];
+        const on = tiles.filter(t => t.classList.contains('on'));
+        const btn = document.querySelector('.cmb-confirmbar .cmb-metal');
+        return {
+            tiles: tiles.length,
+            ticked: on.map(t => t.getAttribute('title')),
+            pressed: on.map(t => t.getAttribute('aria-pressed')),
+            head: document.querySelector('.cmb-entryhead .t').textContent.trim(),
+            count: document.querySelector('.cmb-entryhead .n').textContent.trim(),
+            label: btn.textContent.trim(), disabled: btn.disabled,
+            notes: [...document.querySelectorAll('.cmb-entrynote')]
+                     .map(n => n.textContent.trim()),
+        };
+    }""")
+    assert got["head"] == "Enter JoJo Pose", (
+        "the sheet's pick did not carry into the entry screen: {!r}".format(got["head"]))
+    assert got["tiles"] == 6, (
+        "the picker is not showing the eligible library: {!r}".format(got))
+    assert got["ticked"] == ["Harness 100"], (
+        "the entry screen opened with {!r} ticked -- the lightbox's own picture (Harness "
+        "100) must arrive pre-selected, and nothing else may".format(got["ticked"]))
+    assert got["pressed"] == ["true"], (
+        "the ticked tile does not report aria-pressed -- a screen reader is told nothing "
+        "was pre-selected: {!r}".format(got["pressed"]))
+    assert got["notes"] == [], (
+        "the entry screen is explaining itself instead of pre-selecting: {!r}".format(
+            got["notes"]))
+    assert got["count"] == "1 selected", (
+        "the header counter reads {!r}".format(got["count"]))
+    assert got["disabled"] is False, "the pre-selection did not arm the confirm bar"
+    assert "1 image" in got["label"] and "1 images" not in got["label"], (
+        "the confirm bar mis-counts (or mis-pluralises) one pick: {!r}".format(got["label"]))
+    # Same guarantee the board-side test makes with its own `posts` list, read off the
+    # module-wide guard instead -- which is the whole reason that guard exists: this test
+    # reaches the armed confirm bar through a door `_open_contests_on_the_phone` never opens.
+    #
+    # The seeded pick makes the entry screen ask the route what an entry WOULD do, so a
+    # body is on the wire by now; waited for, never assumed, in the one case the event has
+    # not been dispatched yet. That non-empty list is what stops the "nothing confirmed"
+    # assertion under it from being a claim about an empty set.
+    if not no_confirmed_contest_entry:
+        page.wait_for_event("request", timeout=5_000,
+                            predicate=lambda r: r.url.endswith("/api/contest/enter"))
+    assert no_confirmed_contest_entry, (
+        "no /api/contest/enter body was recorded at all -- the guard is not armed on this "
+        "page, so its 'nothing confirmed' assertion would prove nothing")
+    assert all("confirm" not in b for b in no_confirmed_contest_entry), (
+        "a CONFIRMED entry left this test: {!r}".format(no_confirmed_contest_entry))
 
 
 def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line(
