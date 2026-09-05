@@ -175,13 +175,60 @@
 /* ---- eclipse (v2) -------------------------------------------------------------- */
 /* The umbra is proportional to the mark (the owner's "needs a control for size"
    note: it rides the size setting like everything else) and crosses on a shallow
-   orbit instead of sliding flat. */
+   orbit instead of sliding flat.
+
+   CONTAINED, 2026-09-04. This used to move the ::before BOX --
+   translate(-80%, 10%) <-> (80%, -10%) -- which at the far end put ~62px of dark
+   disc past the mark's right edge. The mark sits 22px from the window's right edge
+   and NOTHING clips it (`.mgx-bnr` is deliberately overflow:visible so the halo and
+   the moondust field can spill), so the DOCUMENT grew to fit the escaping box and
+   the whole page gained a horizontal scrollbar that oscillated in time with the
+   orbit. Measured live on the owner's install and on staging.
+
+   The rebuild keeps the disc, its path and its speed and moves the PAINT instead of
+   the box: the gradient tile is exactly the size of the (now static) box, and
+   `background-position` walks it across on the same shallow diagonal. Because a
+   background is clipped to its own padding box -- rounded here, `border-radius: 50%`
+   -- the umbra now enters and leaves along the mark's own circle instead of floating
+   free beyond it, and no part of this treatment can ever leave the mark's bounds.
+   CONTAINED-BY-DESIGN: paint-only travel, no box movement.
+
+   Three conversions, all exact (measured against the old rule frame by frame):
+   - the offsets. The box is inset 6%, so it measures 88% of a mark that is 4em wide
+     (font-size is mark/4 * --anim-scale, top of file); 80% of the box is therefore
+     2.816em and 10% is .352em -- divided by --anim-scale so the PATH stays
+     box-relative exactly as a percentage translate was, and the size setting keeps
+     growing the umbra rather than its travel.
+   - the umbra's radius. `radial-gradient(circle, ...)` sized itself to the box's
+     farthest corner, 3.52em * sqrt(2)/2 = 2.489em; stating that radius outright
+     keeps the disc the size it has always been while letting the TILE be bigger
+     than the box (300%), which is what keeps the gradient's transparent tail inside
+     the tile at every offset -- a tile the size of the box would cut the umbra's
+     own fade off at a visible straight edge as it crossed.
+   - the bloom. It was `box-shadow: 0 0 .5em rgba(120,90,200,.5)`, which rode the
+     moving box; on a static box it would have become a permanent ring around the
+     mark. It is now the gradient's outer stops, so it still travels with the umbra
+     and is clipped with it.
+
+   Positions are `calc(50% +/- offset)`: with a tile larger than the box, 50% is the
+   centred tile, so the offset IS the disc's displacement. The declared 50% 50% is
+   therefore the centred frame, which is what `transform: none` used to give -- under
+   prefers-reduced-motion (bottom of file) the umbra rests over the mark exactly as
+   it did before. */
 @keyframes mgv2Eclipse {
-  0%, 100% { transform: translate(-80%, 10%); } 50% { transform: translate(80%, -10%); } }
+  0%, 100% { background-position: calc(50% - var(--ecl-x)) calc(50% + var(--ecl-y)); }
+  50% { background-position: calc(50% + var(--ecl-x)) calc(50% - var(--ecl-y)); } }
+.mgx-mark.mark-anim-eclipse {
+  --ecl-x: calc(2.816em / var(--anim-scale));
+  --ecl-y: calc(.352em / var(--anim-scale));
+  --ecl-r: calc(2.489em / var(--anim-scale)); }
 .mgx-mark.mark-anim-eclipse::before {
   inset: 6%; border-radius: 50%;
-  background: radial-gradient(circle, #0f0e1c 55%, rgba(15, 14, 28, 0) 72%);
-  box-shadow: 0 0 .5em rgba(120, 90, 200, .5);
+  background: radial-gradient(circle var(--ecl-r) at center,
+    #0f0e1c 55%, rgba(15, 14, 28, 0) 72%,
+    rgba(120, 90, 200, .34) 80%, rgba(120, 90, 200, 0) 92%);
+  background-size: 300% 300%; background-repeat: no-repeat;
+  background-position: 50% 50%;
   animation: mgv2Eclipse calc(5s / var(--anim-speed)) ease-in-out infinite; }
 
 /* ---- moondust: the canvas treatment -------------------------------------------- */
