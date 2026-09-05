@@ -1346,3 +1346,26 @@ def test_train_recent_tasks_respects_limit(tmp_path):
     d = cli.get("/api/train/recent-tasks?limit=5").get_json()
     assert len(d["tasks"]) == 5
 
+
+def test_the_release_check_rides_the_schedulers_own_tick():
+    """The hourly update check does NOT get a timer thread of its own. This process already
+    has one periodic tick -- the automated-tasks scheduler -- so the check joins it, which is
+    the server-side reading of the standing "never add a second poll loop" rule
+    (../moonglade-internal/DECISIONS.md, 2026-07-24).
+
+    And it fires OUTSIDE the schedule's own try/continue chain: the very first thing that
+    chain does is `continue` when no automated task is enabled, which is the default on every
+    install -- inside it, the release check would never run for almost anybody."""
+    import inspect
+    src = inspect.getsource(g.create_app)
+    loop = src[src.index("def _scheduler_loop():"):]
+    loop = loop[:loop.index("def ", 40)]
+    body = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
+    assert "_update_check_tick()" in body, "the hourly release check must ride this tick"
+    # At the WHILE's own indent (12 spaces), not nested inside the try below it -- which is
+    # exactly what "outside the continue chain" means in code.
+    assert "\n            _update_check_tick()" in body
+    assert body.index("_update_check_tick()") < body.index("            try:")
+    # one tick, not two: no second thread or timer was started for the check
+    assert "threading.Timer" not in body
+    assert body.count("threading.Thread") == 0

@@ -815,3 +815,262 @@ def test_the_status_route_redacts_host_paths(tmp_path, monkeypatch):
     g._set_update_state("failed", "error: cannot open %s/thing" % str(tmp_path))
     d = cli.get("/api/update/status").get_json()
     assert str(tmp_path) not in d["error"] and "cannot open" in d["error"]
+
+
+# ---- the background cadence, and the guard that keeps it announce-only ---------
+#
+# Owner ruling 2026-09-04 (../moonglade-internal/DECISIONS.md, "The updater checks in the
+# background"): the app re-checks roughly hourly and ANNOUNCES what it finds, reversing his
+# own 2026-09-01 "no background tick anywhere". Clarified the same night, and the reason the
+# guard below exists: he first read "full background" as the app updating itself -- "I don't
+# want that". The chosen behaviour is check-and-announce ONLY. Applying is the Panel's Update
+# button and its confirm, always.
+#
+# T0 is a REAL-looking epoch on purpose: the tick and the floor both measure `now` against a
+# zero-initialized "last run", so a toy clock of 0/1/2 would read as "never due" and these
+# tests would pass while measuring nothing.
+T0 = 1800000000.0
+
+
+def _fresh_tick(monkeypatch, at=0.0, floor_at=0.0):
+    """Reset the background cadence's module singletons -- the same per-test isolation
+    _fresh_cache gives the check cache."""
+    monkeypatch.setattr(g, "_update_tick", {"at": at})
+    monkeypatch.setattr(g, "_update_floor", {"at": floor_at})
+    monkeypatch.setattr(g, "_update_notice",
+                        {"version": "", "seq": 0, "at": 0.0, "payload": None})
+
+
+def _counting_fetch(monkeypatch, releases):
+    """fetch_releases, counted."""
+    calls = {"n": 0}
+
+    def _fetch(**k):
+        calls["n"] += 1
+        return list(releases)
+    monkeypatch.setattr(g, "fetch_releases", _fetch)
+    return calls
+
+
+def test_the_background_tick_asks_about_once_an_hour(monkeypatch):
+    """The whole budget this feature is allowed to spend: 24 GitHub requests a day against
+    an unauthenticated allowance of 60 an HOUR. The clock is mocked -- nothing sleeps."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
+    assert g.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert calls["n"] == 1
+    # ...and no tick in the next hour is due at all
+    for minute in (1, 5, 30, 59):
+        assert g.run_update_tick("3.0.0", now=T0 + minute * 60) is None
+    assert calls["n"] == 1
+    # An hour on it runs again -- and the 30-minute TTL has long expired by then, so that
+    # run is a real request. One an hour, which is the number the budget was written for.
+    assert g.run_update_tick("3.0.0", now=T0 + g.UPDATE_TICK_SECONDS)["latest"] == "v9.9.9"
+    assert calls["n"] == 2
+    assert g.UPDATE_TICK_SECONDS >= 2 * g.UPDATE_CHECK_TTL   # the cache can never outlive a tick
+
+
+def test_the_tick_reuses_a_recent_panel_answer_rather_than_re_asking(monkeypatch):
+    """The tick is deliberately NOT forced: a Panel open five minutes ago already has the
+    answer, and asking again for it is a request spent on nothing."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
+    g._update_cache.update(at=T0 - 60, ttl=g.UPDATE_CHECK_TTL,
+                           payload={"current": "3.0.0", "latest": "v9.9.9",
+                                    "behind": True, "checked_at": T0 - 60})
+    assert g.run_update_tick("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert calls["n"] == 0                       # the cache answered
+
+
+def test_a_new_release_is_announced_once_not_on_every_tick(monkeypatch):
+    """A transition, not a heartbeat. The hourly check finds the same release every hour
+    once one is out; announcing that every hour is how you teach someone to ignore it."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9", "The Ninth")])
+    assert g.run_update_tick("3.0.0", now=T0) is not None
+    first = g.update_notice()
+    assert first["latest"] == "v9.9.9" and first["behind"] is True
+    assert first["title"] == "The Ninth"
+    seq = first["seq"]
+    for hour in (1, 2, 3):                       # three more hours of finding the same thing
+        _fresh_cache(monkeypatch)                # ...each one really asking
+        g.run_update_tick("3.0.0", now=T0 + hour * g.UPDATE_TICK_SECONDS)
+    assert g.update_notice()["seq"] == seq, "the same release must not re-announce"
+    _fresh_cache(monkeypatch)                    # a HIGHER release IS a new event
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.10.0")])
+    g.run_update_tick("3.0.0", now=T0 + 4 * g.UPDATE_TICK_SECONDS)
+    assert g.update_notice()["latest"] == "v9.10.0"
+    assert g.update_notice()["seq"] == seq + 1
+
+
+def test_the_announcement_clears_once_the_release_is_no_longer_newer(monkeypatch):
+    """After the update lands, the stamp must stop offering it."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
+    g.run_update_tick("3.0.0", now=T0)
+    assert g.update_notice()["latest"] == "v9.9.9"
+    _fresh_cache(monkeypatch)
+    assert g.run_update_tick("9.9.9", now=T0 + g.UPDATE_TICK_SECONDS)["behind"] is False
+    assert g.update_notice() is None
+
+
+def test_a_failed_background_check_announces_nothing(monkeypatch):
+    """Offline is not news. check_for_update answers behind:false with a reason attached,
+    and the announcement stays empty rather than carrying an error to a corner toast."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+
+    def _boom(**k):
+        raise OSError("getaddrinfo failed")
+    monkeypatch.setattr(g, "fetch_releases", _boom)
+    assert "getaddrinfo failed" in g.run_update_tick("3.0.0", now=T0)["error"]
+    assert g.update_notice() is None
+
+
+def test_a_panel_open_gets_a_fresh_answer_past_the_cache(monkeypatch):
+    """The Panel is where a person goes to ASK, so it bypasses the 30-minute TTL the rest
+    of the app reads -- otherwise "it checks when you open it" can be half an hour stale."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
+    assert g.check_for_update_fresh("3.0.0", now=T0)["latest"] == "v9.9.9"
+    assert calls["n"] == 1
+    # the cache is minutes old and answers a normal caller...
+    assert g.check_for_update("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
+    assert calls["n"] == 1
+    # ...but a Panel open past the floor asks again
+    assert g.check_for_update_fresh("3.0.0", now=T0 + 300)["latest"] == "v9.9.9"
+    assert calls["n"] == 2
+
+
+def test_rapid_panel_opens_cost_github_nothing(monkeypatch):
+    """The floor. Opening and closing the Panel is free -- it must not become a way to
+    spend the hourly allowance a keystroke at a time."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
+    g.check_for_update_fresh("3.0.0", now=T0)
+    for second in (1, 5, 20, 59):
+        assert g.check_for_update_fresh("3.0.0", now=T0 + second)["latest"] == "v9.9.9"
+    assert calls["n"] == 1, "inside the floor a Panel open reads the cache"
+    g.check_for_update_fresh("3.0.0", now=T0 + g.UPDATE_PANEL_FLOOR)
+    assert calls["n"] == 2
+    assert g.UPDATE_PANEL_FLOOR < g.UPDATE_CHECK_TTL          # ...and it IS the short one
+
+
+def test_the_check_route_asks_fresh_only_when_the_panel_says_so(tmp_path, monkeypatch):
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9")])
+    cli = _client(tmp_path)
+    assert cli.get("/api/update/check").get_json()["latest"] == "v9.9.9"
+    assert calls["n"] == 1
+    assert cli.get("/api/update/check").get_json()["latest"] == "v9.9.9"
+    assert calls["n"] == 1                       # a plain re-read inside the TTL, as before
+    g._update_floor["at"] -= (g.UPDATE_PANEL_FLOOR + 1)
+    assert cli.get("/api/update/check?fresh=1").get_json()["latest"] == "v9.9.9"
+    assert calls["n"] == 2                       # the Panel open is the one that goes back
+
+
+def test_the_jobs_poll_carries_the_announcement_and_never_fetches(tmp_path, monkeypatch):
+    """How the news reaches a person who is nowhere near the Control Panel: it rides the
+    one server-truth poll every open tab already runs. That poll must never ask GitHub
+    itself -- it reports what the hourly tick found."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    calls = _counting_fetch(monkeypatch, [_rel("v9.9.9", "The Ninth")])
+    cli = _client(tmp_path)
+    assert cli.get("/api/jobs").get_json()["update"] is None      # nothing found yet
+    assert calls["n"] == 0
+    g.run_update_tick("3.0.0", now=T0)
+    assert calls["n"] == 1
+    for _ in range(5):
+        d = cli.get("/api/jobs").get_json()
+        assert d["update"]["latest"] == "v9.9.9"
+        assert d["update"]["title"] == "The Ninth"
+        assert "jobs" in d                        # the card's own payload is untouched
+    assert calls["n"] == 1, "the jobs poll must never reach GitHub"
+
+
+def test_the_background_path_has_no_route_into_applying_an_update():
+    """THE GUARD. The owner rejected auto-apply in the same conversation that asked for the
+    background check -- "I don't want that". So the tick, the announcement and the fresh
+    Panel check are walked for anything that could start one. NAMES, not text: a docstring
+    in these functions legitimately says the words run_update and /api/update/apply."""
+    import ast
+    import inspect
+    import textwrap
+    forbidden = {"run_update", "_panel_run", "_schedule_server_exit", "api_update_apply",
+                 "_git", "subprocess", "_set_update_state"}
+    for name in ("run_update_tick", "note_update_transition", "update_notice",
+                 "check_for_update_fresh", "check_for_update"):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(g, name))))
+        used = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                used.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                used.add(node.attr)
+        assert not (used & forbidden), \
+            "%s can reach %s -- the background path must only ANNOUNCE" % (
+                name, sorted(used & forbidden))
+
+
+def test_the_scheduler_tick_only_announces():
+    """The same guard where the cadence actually fires: the closure the scheduler loop
+    calls every minute. Walked as source because it is a closure inside create_app."""
+    import ast
+    import inspect
+    import textwrap
+    src = inspect.getsource(g.create_app)
+    fn = src[src.index("def _update_check_tick():"):]
+    fn = fn[:fn.index("def ", 40)]
+    assert "run_update_tick" in fn, "the hourly check must actually be wired to the loop"
+    # NAMES and real strings, never the raw text: this function's own docstring says the
+    # words /api/update/apply and run_update, because saying them is how the rule is stated.
+    tree = ast.parse(textwrap.dedent(fn))
+    body = tree.body[0]
+    if (body.body and isinstance(body.body[0], ast.Expr)
+            and isinstance(body.body[0].value, ast.Constant)):
+        del body.body[0]                          # the docstring is prose, not a call
+    used = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            used.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            used.add(node.attr)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            assert "update/apply" not in node.value, "the scheduler tick must not call apply"
+    forbidden = {"run_update", "_panel_run", "_schedule_server_exit", "_set_update_state"}
+    assert not (used & forbidden), \
+        "the scheduler tick can reach %s -- it must only ANNOUNCE" % sorted(used & forbidden)
+
+    # ...and it rides the suite's own network gate, so create_app() in a test never asks
+    # GitHub anything (the same reason the live-mirror watcher and contest sweep ride it).
+    # Sampled ONCE at create_app time, not re-read every minute: this tick lives in a daemon
+    # thread that outlives the test that made it, and conftest sets the flag per test -- a
+    # re-reading gate could fire in the gap between two of them and hit the real API.
+    assert "if not _bg_release_check" in fn
+    assert '_bg_release_check = os.environ.get("MOONGLADE_DISABLE_WATCH") != "1"' in src
+
+
+def test_a_tick_that_finds_a_release_does_not_touch_the_updater(monkeypatch):
+    """Behaviour, not just shape: the real tick against a release it has never seen, with
+    every apply-side entry point booby-trapped."""
+    _fresh_cache(monkeypatch)
+    _fresh_tick(monkeypatch)
+    _idle_state(monkeypatch)
+
+    def _never(*a, **k):
+        raise AssertionError("the background check applied an update")
+    monkeypatch.setattr(g, "run_update", _never)
+    monkeypatch.setattr(g, "_git", _never)
+    monkeypatch.setattr(g, "_schedule_server_exit", _never)
+    monkeypatch.setattr(g, "fetch_releases", lambda **k: [_rel("v9.9.9")])
+    assert g.run_update_tick("3.0.0", now=T0)["behind"] is True
+    assert g.update_notice()["latest"] == "v9.9.9"
+    assert g.update_state()["phase"] == "idle"        # nothing ever started

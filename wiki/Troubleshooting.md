@@ -80,12 +80,17 @@ updated **by hand** with `git pull`, **restart the gallery server** so it loads 
 still looks stale, **hard-refresh the browser (Ctrl+F5)** to clear the cached front-end (or
 the service worker).
 
-## The version stamp never turns gold
+## The version stamp never turns gold, and no notice ever appears
 That is the quiet, normal state: either you are already on the newest release, or the check
 could not reach GitHub (no network, a firewall, or GitHub's hourly limit for anonymous
 callers). The check is deliberately silent about its own failures — an update notice is not
 worth an error banner on a Panel you opened to do something else. `git pull` by hand always
-works, and the Panel tries again the next time you open it.
+works; the app tries again about an hour later, and opening the Panel asks straight away.
+
+The corner notice is shown **once per version** on purpose, so if you dismissed it, it will
+not come back for that release — the gold stamp in the Panel's sidebar is the standing
+reminder. And the hourly check only runs while the app is **running**: a machine that was
+switched off for a week hears about the release when you start it up again, not before.
 
 ## "Update now" is refused
 The refusal appears inside the update window itself, where the progress would have been,

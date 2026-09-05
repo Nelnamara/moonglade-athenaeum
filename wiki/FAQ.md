@@ -101,11 +101,15 @@ No. Lookups are by `media_id`, so files can live in any subfolder.
 [Collections](Collections) are catalog-based and survive Organize too.
 
 **How do I update?**
-**Open the Control Panel.** It checks for a new release when it opens, and if one is out the
-version stamp at the bottom of its sidebar turns gold: *"v3.7.0 available — view"*. Click it
-and the confirm tells you what will happen — the update is pulled atomically, dependencies
-install only if they changed, the server restarts, and the tab reloads itself.
-Nothing is applied until you press **Update now**; there is no silent update, ever.
+**Moonglade tells you when there is something to update to.** While it runs it checks for a
+new release about once an hour, and when one turns up a notice appears in the corner —
+*"Moonglade v3.7.3 is ready — open the Control Panel to update"* — once per version, wherever
+in the app you are. **Open the Control Panel** (it re-checks on the spot) and the version
+stamp at the bottom of its sidebar is gold: *"v3.7.3 available — view"*. Click it and the
+confirm tells you what will happen — the update is pulled atomically, dependencies install
+only if they changed, the server restarts, and the tab reloads itself.
+Nothing is applied until you press **Update now**; there is no silent update, ever. The app
+notices releases by itself; it never installs one by itself.
 
 Press it and that same window turns into the progress of the update — **pull**, then
 **applying files**, then **restart** — ticking each one off as it really finishes, with how

@@ -243,6 +243,26 @@ Things worth knowing:
 Both are available to any signed-in session. A reconnect overlay waits for the server to
 come back after a restart.
 
+## Updates
+
+Moonglade watches for new releases **while it is running** — it asks about once an hour, so
+you find out that a version is out without having to come and look. When one turns up it
+says so in three places at once: the **version stamp** at the foot of this sidebar turns
+gold and reads *"v3.7.3 available — view"*, a single notice appears in the corner of
+whatever screen you are on, and the stamp opens the update window when you click it.
+
+**It never installs anything by itself.** The check tells you a release exists and stops
+there; the update is pulled, applied and restarted only when you press **Update now** in
+that window and confirm it. There is no silent update and no automatic one — see
+[FAQ](FAQ) for what pressing it actually does.
+
+The corner notice appears **once per version** — not once an hour, and not again the next
+time you load the page. Opening this Panel asks GitHub for a fresh answer rather than
+showing you one that could be half an hour old; opening and closing it repeatedly costs
+nothing, and neither does the hourly check (roughly two dozen requests a day against an
+allowance of sixty an hour). A machine that is offline simply doesn't hear anything — the
+check is deliberately quiet about its own failures.
+
 ## Users
 
 The **Users** tab lists your gallery login accounts.

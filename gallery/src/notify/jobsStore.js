@@ -16,6 +16,7 @@
 
 import { apiGet, apiPost } from "../api.js";
 import { show as toastShow } from "./toastStore.js";
+import { note as noteUpdate } from "./updateStore.js";
 
 const LSK = "mg_jobs_open";
 
@@ -123,6 +124,15 @@ export function refresh() {
     .then((d) => {
       const rows = (d && d.jobs) || [];
       toastTransitions(rows);
+      // The release announcement rides this same poll -- it is the one server-truth channel
+      // every open tab already runs, so the background update check reaches a person wherever
+      // they are without a second loop. updateStore decides whether it is news; it announces
+      // and never applies. (Server: update_notice() in moonglade_gallery.py.)
+      //
+      // Only on a real answer. api.js turns a dropped read into {error}, which carries no
+      // `update` field -- passing that on would read as "nothing is out" and blank a standing
+      // notice over one blip, exactly the way the release check refuses to cache a failure.
+      if (d && !d.error) noteUpdate(d.update);
       jobs = rows;
       emit();
     })

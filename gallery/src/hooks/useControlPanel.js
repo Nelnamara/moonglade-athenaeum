@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { note as noteUpdate, subscribe as subscribeUpdate } from "../notify/updateStore.js";
 import { invalidate, peek, put } from "./swrCache.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
@@ -354,10 +355,18 @@ export default function useControlPanel() {
   };
 
   /* ---- the auto-updater (P4) --------------------------------------------------
-     ON DEMAND, once per Panel open (owner ruling, 2026-09-01: no background tick
-     anywhere). The server caches for its own TTL, so opening the Panel repeatedly
-     costs GitHub nothing. A failed check answers behind:false with a reason and is
-     simply not shown -- an offline machine gets a Panel, not an error. */
+     TWO CADENCES, one answer (owner ruling 2026-09-04, reversing his own 2026-09-01
+     "no background tick anywhere"). The server re-checks roughly hourly on its own and
+     announces what it finds through notify/updateStore.js, so the news reaches whoever
+     is looking at the gallery; opening the Panel asks for a FRESH answer on top of that
+     -- `?fresh=1` bypasses the server's 30-minute cache, floored server-side at a minute,
+     so opening and closing the Panel repeatedly still costs GitHub one request.
+
+     A failed check answers behind:false with a reason and is simply not shown -- an
+     offline machine gets a Panel, not an error.
+
+     Nothing changed about APPLYING: it is still this modal's explicit confirm and
+     nothing else. The background half only ever announces. */
   const [update, setUpdate] = useState(null);      // the check payload
   const [updOpen, setUpdOpen] = useState(false);   // the confirm modal
   const [updPhase, setUpdPhase] = useState("");    // "" | applying | done | refused
@@ -372,9 +381,18 @@ export default function useControlPanel() {
   const updClockRef = useRef(null);   // {at, sawDeps} -- when the current phase started
   useEffect(() => {
     let dead = false;
-    apiGet("/api/update/check").then((d) => { if (!dead && d && !d.error) setUpdate(d); });
+    // The stamp starts from what the background check already knows, so a Panel opened
+    // straight after a toast is never briefly blank while the fresh check flies; the
+    // subscription then keeps it live if the hourly tick lands while the Panel is open.
+    const stop = subscribeUpdate((u) => { if (!dead && u) setUpdate(u); });
+    apiGet("/api/update/check?fresh=1").then((d) => {
+      if (dead || !d || d.error) return;
+      setUpdate(d);
+      noteUpdate(d);          // announce it once if this open is what found it
+    });
     return () => {
       dead = true;
+      stop();
       if (updPollRef.current) clearInterval(updPollRef.current);
       if (pingRef.current) clearInterval(pingRef.current);
     };

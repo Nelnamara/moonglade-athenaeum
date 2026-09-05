@@ -6798,6 +6798,107 @@ def check_for_update(current, opener=None, now=None, force=False):
     return payload
 
 
+# ---------------------------------------------------------------------------
+# The background cadence (owner ruling 2026-09-04, REVERSING 2026-09-01's "no
+# background tick anywhere" -- ../moonglade-internal/DECISIONS.md, "The updater
+# checks in the background").
+#
+# CHECK AND ANNOUNCE, NEVER APPLY. The running app asks GitHub roughly hourly
+# whether a newer release is out and SAYS SO wherever the user is; applying one
+# is still and only the person clicking Update in the Control Panel and
+# confirming. The owner read "full background" as the app updating itself and
+# said "I don't want that" -- auto-apply is explicitly rejected and no future
+# scope may add it under this label. Nothing in this section, and nothing the
+# scheduler tick below reaches, may touch run_update or /api/update/apply;
+# tests/test_updater.py pins that by walking the source.
+# ---------------------------------------------------------------------------
+UPDATE_TICK_SECONDS = 3600       # ~1 GitHub request an hour from the tick -- 24 a day,
+                                 # against an unauthenticated budget of 60 an HOUR
+UPDATE_PANEL_FLOOR = 60          # a Panel open gets a FRESH answer (it bypasses the
+                                 # 30-minute TTL every other caller reads) but no oftener
+                                 # than this, so opening and closing the Panel ten times
+                                 # in a minute still costs GitHub one request
+_update_tick = {"at": 0.0}       # when the hourly background check last ran
+_update_floor = {"at": 0.0}      # when a Panel-open check last actually went to GitHub
+# THE ANNOUNCEMENT: the newest version this server has discovered, and a counter that moves
+# only on a TRANSITION -- the first time a given version is seen. Every hourly tick returns
+# the same answer once a release is out; only a CHANGE is an event, which is what keeps the
+# client's one-toast-per-version promise a property of the server rather than of luck.
+_update_notice = {"version": "", "seq": 0, "at": 0.0, "payload": None}
+
+
+def note_update_transition(payload, now=None):
+    """Record a check's answer as the standing announcement. True only if it is NEW.
+
+    An hourly tick that finds the release it already found an hour ago is not an event.
+    An answer that is no longer `behind` (the update was applied, or the release was
+    pulled) CLEARS the announcement, so the stamp stops offering an update that is not
+    there any more.
+
+    Announce-only by construction: this records a version string and a payload the client
+    reads. It has no call into run_update or the apply route, and cannot acquire one
+    without failing the guard test."""
+    now = time.time() if now is None else now
+    payload = payload or {}
+    latest = str(payload.get("latest") or "")
+    if not payload.get("behind"):
+        if _update_notice["version"]:
+            _update_notice.update(version="", at=now, payload=None)
+            _update_notice["seq"] += 1
+        return False
+    if latest == _update_notice["version"]:
+        _update_notice["at"] = now
+        return False
+    _update_notice.update(version=latest, at=now, payload=dict(payload))
+    _update_notice["seq"] += 1
+    return True
+
+
+def update_notice():
+    """The standing announcement for the live-events payload, or None when nothing is
+    out. READ ONLY -- it reports what the last check already found and never fetches, so
+    riding it on the /api/jobs poll every open tab already runs costs GitHub nothing."""
+    if not _update_notice.get("version"):
+        return None
+    p = dict(_update_notice.get("payload") or {})
+    p["seq"] = _update_notice.get("seq", 0)
+    return p
+
+
+def run_update_tick(current, opener=None, now=None):
+    """The background check. Returns the payload if it RAN, None if an hour has not passed.
+
+    Deliberately NOT forced: check_for_update's own 30-minute TTL still applies, so a Panel
+    open five minutes ago is reused rather than re-fetched. An hourly cadence against a
+    half-hour cache settles at one GitHub request an hour, which is the whole budget this
+    feature is allowed to spend.
+
+    It checks and announces. It does not apply -- see this section's header."""
+    now = time.time() if now is None else now
+    if (now - _update_tick.get("at", 0)) < UPDATE_TICK_SECONDS:
+        return None
+    _update_tick["at"] = now
+    payload = check_for_update(current, opener=opener, now=now)
+    note_update_transition(payload, now=now)
+    return payload
+
+
+def check_for_update_fresh(current, opener=None, now=None):
+    """A Control Panel open: a FRESH answer, floored.
+
+    The Panel is where a person goes to ask, so it is the one caller that bypasses the
+    30-minute cache -- but not oftener than UPDATE_PANEL_FLOOR seconds, so opening and
+    closing it repeatedly cannot become a way to spend the hourly GitHub budget. Inside
+    the floor it falls back to exactly what every other caller reads: the cache."""
+    now = time.time() if now is None else now
+    force = (now - _update_floor.get("at", 0)) >= UPDATE_PANEL_FLOOR
+    if force:
+        _update_floor["at"] = now
+    payload = check_for_update(current, opener=opener, now=now, force=force)
+    note_update_transition(payload, now=now)
+    return payload
+
+
 def _git(args, timeout=180):
     """Run one git command in THIS checkout (the app's own directory, never a cwd the
     request could influence). Returns (returncode, combined output). Never raises: a
@@ -7854,10 +7955,44 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
+    # Read ONCE, here, exactly as the live-mirror gate is read once further down: a daemon
+    # that re-read the environment every minute could catch the instant BETWEEN two tests
+    # (the suite sets this flag per-test) and make a real GitHub request out of a run that
+    # must never touch the network.
+    _bg_release_check = os.environ.get("MOONGLADE_DISABLE_WATCH") != "1"
+
+    def _update_check_tick():
+        """The updater's background cadence, riding the scheduler's existing 60-second
+        heartbeat rather than a timer thread of its own. The standing rule -- "web surfaces
+        register jobs, they never add a second poll loop" (DECISIONS.md 2026-07-24) -- reads
+        just as literally on this side of the wire: there is already one periodic tick in
+        this process, so the hourly check joins it instead of becoming a second one.
+        run_update_tick owns the hour; this is only the heartbeat that asks it.
+
+        CHECK AND ANNOUNCE. There is no path from here to run_update or /api/update/apply,
+        and a test walks this function's source to keep it that way.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check, sampled above) for the same
+        reason the live-mirror watcher and the contest sweep do: it is background work that
+        reaches the network, and the suite's conftest sets that flag precisely so
+        create_app() cannot make a real request."""
+        if not _bg_release_check:
+            return
+        try:
+            import moonglade_backup as _core
+            run_update_tick(_core.__version__)
+        except Exception:              # noqa: BLE001 -- a check must never kill the loop
+            pass
+
     def _scheduler_loop():
         import time as _time
         while True:
             _time.sleep(60)
+            # Outside the schedule's own try/continue chain below: whether an AUTOMATED
+            # TASK is due has nothing to do with whether the release check is, and the
+            # first `continue` down there (schedule disabled -- the default) would
+            # otherwise skip the update tick on every install that never set one up.
+            _update_check_tick()
             try:
                 # Same lock /api/panel/schedule writes under -- reading the file while a
                 # save is mid-write otherwise hands this loop a truncated (or stale) copy.
@@ -9068,14 +9203,26 @@ def create_app(out_dir: Path):
     @app.route("/api/update/check")
     @tier(LOGIN)
     def api_update_check():
-        """Is a newer release out? Fired ON DEMAND when the Control Panel opens (owner
-        ruling, 2026-09-01: no background tick anywhere) and cached server-side for
-        UPDATE_CHECK_TTL, so opening the Panel ten times costs GitHub one request.
+        """Is a newer release out?
+
+        Two cadences, one answer. In the background the server re-checks roughly hourly
+        and announces what it finds (run_update_tick, off the scheduler's existing tick --
+        owner ruling 2026-09-04, reversing 2026-09-01's "no background tick anywhere").
+        Here, `?fresh=1` is the Control Panel OPENING: it bypasses the 30-minute cache,
+        floored at UPDATE_PANEL_FLOOR seconds, so ten opens in a minute still cost GitHub
+        one request. Any other caller reads the cache exactly as before.
 
         Never fails the Panel: an offline machine gets behind:false with the reason
-        attached, at 200. See check_for_update for why the failure is not cached."""
+        attached, at 200. See check_for_update for why the failure is not cached.
+
+        This route only ever ANSWERS. Applying an update is /api/update/apply, behind the
+        modal's explicit confirm -- nothing here can reach it."""
         import moonglade_backup as core
-        return jsonify(check_for_update(core.__version__))
+        if str(request.args.get("fresh") or "").lower() in ("1", "true", "yes"):
+            return jsonify(check_for_update_fresh(core.__version__))
+        payload = check_for_update(core.__version__)
+        note_update_transition(payload)
+        return jsonify(payload)
 
     @app.route("/api/update/status")
     @tier(LOGIN)
@@ -16337,7 +16484,17 @@ __DESIGN_TOKENS__
         sweep only fires once, at startup) -- e.g. the browser tab polling
         /api/task-status was closed, or the live-mirror watcher missed the WS event, and
         the task finished on PixAI's side with nothing here ever the wiser. Fails soft
-        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card."""
+        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card.
+
+        `update` rides along: the standing release announcement (update_notice), or null.
+        This poll is the app's ONE always-running server-truth channel -- every open tab
+        runs it, on every screen, and gallery/src/notify/jobsStore.js already turns a
+        transition in this payload into a toast. So the background release check announces
+        through it rather than opening a loop of its own, which is the same rule the web
+        surfaces follow for jobs. It costs GitHub nothing: update_notice only REPORTS what
+        the hourly tick already found, and never fetches. Announce-only -- a client reading
+        it can light the version stamp and say so, and applying is still the Panel's
+        Update button and its confirm."""
         import moonglade_backup as core
         try:
             _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
@@ -16345,7 +16502,7 @@ __DESIGN_TOKENS__
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
-        return jsonify({"jobs": jobs})
+        return jsonify({"jobs": jobs, "update": update_notice()})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)
