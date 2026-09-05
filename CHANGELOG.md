@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **A long run of achievement unlocks can be ended early.** When a wave of them plays one after another, **Esc** — or the **skip** chip that appears beside the running count — ends the run: the moment on screen fades out as if you had clicked it, and the ones still waiting are passed over. Every achievement is earned and recorded either way; this skips the show, never the reward. Esc belongs to the parade only while one is actually playing — with nothing celebrating it closes whatever it always closed. (2026-09-04)
+
 ## [3.7.1] - 2026-09-04 — The First Pull
 
 - Fixed: **the living mark shows one animation — yours.** The old glass-sheen effect (a selectable option back in the classic interface) had been welded onto the mark as permanent furniture, so it played under every treatment you picked — and with the treatment set to "none" it just sat there as a frozen pane of glass. It is a *selectable pick* again — **Sheen**, back on the roster beside Classic — and it sweeps across the art itself rather than lighting the empty square around a transparent mark. *Classic* returns to what it originally was: the star. The resting halo follows the art's own shape now too, instead of glowing as a rounded tile behind it. And the *Eclipse* shadow crosses **in front of** the mark again — the sideways-scroll fix had left it stranded behind the art, where an eclipse is invisible. (2026-09-04)

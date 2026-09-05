@@ -17,8 +17,10 @@
    screenshots, 2026-07-21).
 
    z-index contract (raised to clear the Loom's own full-screen overlays): celebrations
-   .ach-m2=520, toasts #mg-toasts=510. The Activity panel (.at-panel, z-index:60) only ever
-   needs to clear its own host's local header content now, not the Loom's overlay bands --
+   .ach-m2=520, toasts #mg-toasts=510. The parade's two chips bracket the celebration: the
+   counter .ach-trailchip=519 sits behind it (it is never clicked), the skip control
+   .ach-skipchip=521 in front of it (it must be). The Activity panel (.at-panel, z-index:60)
+   only ever needs to clear its own host's local header content now, not the Loom's bands --
    it lives inside the header, not body-level. */
 
 /* ---- achievement celebration (the locked 335ef4e7 toast-v2 moment) ---- */
@@ -41,6 +43,17 @@
   background:rgba(10,8,24,.85);border:1px solid rgba(212,175,55,.4);border-radius:999px;
   padding:3px 11px;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1;transition:opacity .5s;}
 .ach-trailchip.out{opacity:0;}
+/* The parade's SKIP control (owner ruling 2026-09-04, "the achievement parade gets an exit"):
+   the counter chip's twin, one line above it, borrowing .ach-trailchip whole so this stays one
+   pill family rather than two that drift. Only what a <button> genuinely needs is added here --
+   the UA appearance reset, the pointer events the counter deliberately refuses, and a z-index
+   ABOVE .ach-m2's 520: at the counter's 519 the click would land on the moment's own
+   full-screen layer in front of it and merely advance to the next one. Hover/focus move colour
+   only, never transform, so the reduced-motion block below has nothing here to switch off. */
+.ach-skipchip{bottom:calc(5vh + 27px);z-index:521;pointer-events:auto;cursor:pointer;
+  -webkit-appearance:none;appearance:none;margin:0;line-height:1.5;}
+.ach-skipchip:hover,.ach-skipchip:focus-visible{border-color:rgba(212,175,55,.75);background:rgba(10,8,24,.95);}
+.ach-skipchip:focus-visible{outline:2px solid rgba(212,175,55,.75);outline-offset:2px;}
 .ach-m2 .tstage{width:min(680px,94vw);}
 .ach-m2 .tw{position:relative;padding-top:158px;cursor:pointer;transition:transform .45s cubic-bezier(.2,.9,.24,1),filter .45s,opacity .45s;}
 .ach-m2 .t-common{--tc:#9fbad6;--tcl:#dbe8f5;--tcd:#5f7c9e;}

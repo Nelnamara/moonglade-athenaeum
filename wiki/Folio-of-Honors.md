@@ -87,8 +87,12 @@ your active one checked). Picking a skin still only happens from the Control Pan
 
 Unlocks announce themselves with a mid-screen moment — badge, chime, and flair that
 scales with rarity. If a whole stack lands at once (a first run over an existing
-library, say) you get one summary toast instead of a barrage. **Click any earned card
-to replay its celebration.**
+library, say) they play as a parade: each takes the middle of the screen in turn, then
+recedes down behind the next, with a running count of how many you have earned. Click
+the moment to move straight to the next one — or press **Esc**, or the **skip** chip
+beside the count, to end the parade there and then. Every achievement is recorded as
+earned whether or not its moment played. **Click any earned card to replay its
+celebration.**
 
 ## Skins
 

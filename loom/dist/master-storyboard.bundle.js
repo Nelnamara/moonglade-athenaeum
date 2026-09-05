@@ -4053,6 +4053,7 @@ ${"=".repeat(48)}
   var FLOOD_DWELL_MS = 2400;
   var _trail = [];
   var _chip = null;
+  var _skip = null;
   function _recede(m) {
     m.classList.add("trail");
     _trail.unshift(m);
@@ -4069,22 +4070,68 @@ ${"=".repeat(48)}
     }
   }
   var _clearTimer = null;
+  var _parade = null;
   function _clearParade() {
     _clearTimer = null;
+    _parade = null;
     _trail.splice(0).forEach((el) => {
       el.classList.add("out");
       setTimeout(() => {
         if (el.parentNode) el.remove();
       }, 500);
     });
-    if (_chip) {
-      _chip.classList.add("out");
-      const c = _chip;
-      _chip = null;
+    [_chip, _skip].forEach((c) => {
+      if (!c) return;
+      c.classList.add("out");
       setTimeout(() => {
         if (c.parentNode) c.remove();
       }, 500);
+    });
+    _chip = null;
+    _skip = null;
+  }
+  function _paradeUp() {
+    return !!(_parade || _clearTimer || _trail.length);
+  }
+  function _endParade() {
+    const p = _parade;
+    if (p) {
+      p.ended = true;
+      p.q.length = 0;
+      const m = p.m;
+      if (m && !m._adv) {
+        clearTimeout(m._t);
+        m._adv = true;
+        _trail.unshift(m);
+      }
     }
+    if (_clearTimer) {
+      clearTimeout(_clearTimer);
+      _clearTimer = null;
+    }
+    _clearParade();
+  }
+  function _mkSkipChip() {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ach-trailchip ach-skipchip";
+    b.setAttribute("aria-label", "Skip the rest of the achievement parade");
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      _endParade();
+    });
+    document.body.appendChild(b);
+    return b;
+  }
+  function _onKey(e) {
+    if (e.key !== "Escape" || !_paradeUp()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    _endParade();
+  }
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("keydown", _onKey, true);
   }
   function _playFlood(built, after) {
     const m = built.m, tw = built.tw;
@@ -4106,8 +4153,11 @@ ${"=".repeat(48)}
   }
   function _floodParade(list) {
     const q = list.slice();
+    const p = { q, m: null, ended: false };
+    _parade = p;
     let shown = 0;
     const step = () => {
+      if (p.ended) return;
       if (!q.length) {
         _clearTimer = setTimeout(_clearParade, 3200);
         return;
@@ -4118,6 +4168,7 @@ ${"=".repeat(48)}
       _chime(tier);
       const built = _mkMoment(a, {});
       if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+      p.m = built.m;
       _playFlood(built, step);
       if (shown > 1) {
         if (!_chip) {
@@ -4126,6 +4177,8 @@ ${"=".repeat(48)}
           document.body.appendChild(_chip);
         }
         _chip.textContent = "\xD7" + shown + " earned";
+        if (!_skip) _skip = _mkSkipChip();
+        _skip.textContent = q.length ? "skip \xD7" + q.length + " \xB7 Esc" : "skip \xB7 Esc";
       }
     };
     step();
@@ -4154,13 +4207,9 @@ ${"=".repeat(48)}
   function replay(a, opts) {
     if (!a || !a.id) return {};
     opts = opts || {};
-    if (_clearTimer) {
-      clearTimeout(_clearTimer);
-      _clearTimer = null;
-    }
     _q.length = 0;
     _playing = false;
-    _clearParade();
+    _endParade();
     const tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });
