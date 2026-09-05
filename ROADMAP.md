@@ -62,6 +62,14 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   Deck era, rerolls only) that would name a series from the *image* rather than the prompt —
   banked for when the Provider Deck seam exists.
 
+- **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself is
+  `fix/gallery-stands-still`)* Two era-mismatches the census surfaced, both design-adjacent:
+  a **batch** card still takes over the whole library the way series cards did before the 3.8.0
+  series modal (asymmetric siblings; likely wants the same modal treatment), and the viewer's
+  page-stepping and its scroll-lock came from different months — stepping past a page boundary
+  swaps the grid behind the viewer while scroll is frozen, not remembered, so closing it can
+  strand the reader. Diagnosis + full 23-trigger census in the 2026-09-05 session record.
+
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
   - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
