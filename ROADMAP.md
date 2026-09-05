@@ -112,6 +112,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   surface never had its design step. Wants: a progress presentation for the apply, and the
   toast brought onto the house type/palette.
 
+- **The restart card's mascot: kill the spin, keep the pulse.** *(owner, 2026-09-05)* "I don't
+  want the mascot to spin anymore. it just looks wrong. I like the pulse, we can keep that and
+  maybe think of a new effect instead of the spin... or not." The spin is
+  `.mgcp-pwr-mascot.spin` (`cpSpin`, 1.9s infinite) in `gallery/src/styles/control-panel.css`;
+  the pulse halo beside it stays. Removing the spin is the decided part; whether a replacement
+  effect exists at all is open — a quick workshop, not a full session.
+
 - **Branding unlock: a font picker for the System and Hero fonts.** *(owner, 2026-09-04)* The
   unlock currently opens marks/skins/banners; it should also let the owner pick the app's two
   type roles. Needs design (where it lives in the Branding tab, the offered set, preview) and
