@@ -1544,9 +1544,9 @@ def _open_contests_on_the_phone(page, entry_posts):
 def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entries(
         logged_in_page):
     """Frame D1. The mobile build really mounts at 390pt, the official contest renders as a
-    16:9 hero carrying the handoff's LAVENDER official badge, community contests are list
-    cards below it, and "MY ENTRIES" is a real 44pt target rather than the 9px label the
-    frame draws (the handoff's own plumbing note asks for >=44pt, which a 9px line is not).
+    16:9 hero carrying the GOLD METAL official badge, community contests are list cards
+    below it, and "MY ENTRIES" is a real 44pt target rather than the 9px label the frame
+    draws (the handoff's own plumbing note asks for >=44pt, which a 9px line is not).
 
     Measured, not read off the stylesheet: a 16/9 aspect-ratio declaration means nothing if
     an ancestor's flex rules override the box, which is exactly the class of defect this
@@ -1561,18 +1561,25 @@ def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entrie
                            const b = el.getBoundingClientRect();
                            return {w: b.width, h: b.height, top: b.top, bottom: b.bottom}; };
         const badge = document.querySelector('.cmb-hero .cmb-badge');
+        const bcs = badge ? getComputedStyle(badge) : null;
         return {hero: r('.cmb-hero'), door: r('.cmb-door'), card: r('.cmb-card'),
                 cards: document.querySelectorAll('.cmb-card').length,
                 badgeClass: badge ? badge.className : '',
-                badgeColor: badge ? getComputedStyle(badge).color : ''};
+                badgeColor: bcs ? bcs.color : '',
+                badgeFill: bcs ? bcs.backgroundImage : '',
+                badgeBg: bcs ? bcs.backgroundColor : ''};
     }""")
     ratio = geo["hero"]["w"] / geo["hero"]["h"]
     assert abs(ratio - 16 / 9) < 0.05, (
         "the official hero renders {:.3f}:1, not the D1 frame's 16:9".format(ratio))
     assert "official" in geo["badgeClass"], "the hero's badge is not the OFFICIAL one"
     # The hue law, checked against the LIVE token rather than a hex written here: OFFICIAL
-    # is lavender, and a regression to gold -- which is what the desktop board painted it
-    # until the one-law ruling of 2026-09-05 -- is the specific mistake worth catching.
+    # is GOLD AND METALLIC (owner ruling, 2026-09-05), and a regression to the flat lavender
+    # this surface wore earlier that same day is the specific mistake worth catching.
+    # Because the badge is metal, its gold is in the FACE, not in the text: the ink is dark
+    # for contrast and --gold is the gradient's dominant stop. Reading backgroundImage is
+    # therefore reading the badge's colour, not a detail of how it is built -- a flat gold
+    # fill would fail here too, and it should: the ruling says metallic.
     # The desktop half of the same law is driven by
     # test_official_and_community_wear_one_badge_law_on_both_surfaces below.
     lav, gold = page.evaluate("""() => {
@@ -1583,9 +1590,12 @@ def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entrie
         return [probe(cs.getPropertyValue('--lavender').trim()),
                 probe(cs.getPropertyValue('--gold').trim())];
     }""")
-    assert geo["badgeColor"] == lav and geo["badgeColor"] != gold, (
-        "the OFFICIAL badge is {} -- the handoff assigns it --lavender ({}) on the phone, "
-        "not --gold ({})".format(geo["badgeColor"], lav, gold))
+    assert "gradient" in geo["badgeFill"] and gold in geo["badgeFill"], (
+        "the OFFICIAL badge's face is {!r} -- the law is the house gold metal, a gradient "
+        "whose dominant stop is the live --gold ({})".format(geo["badgeFill"], gold))
+    assert lav not in geo["badgeFill"] and geo["badgeBg"] != lav, (
+        "the OFFICIAL badge is painted lavender ({}) -- that was this surface's pre-ruling "
+        "state and is the exact revert this pins: {!r}".format(lav, geo))
     assert geo["door"]["h"] >= 44, (
         "MY ENTRIES is {:.1f}px tall -- under the handoff's 44pt floor".format(
             geo["door"]["h"]))
@@ -1593,9 +1603,9 @@ def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entrie
         "community cards missing or under 44pt: {!r}".format(geo))
 
     # THE COMMUNITY HALF OF THE SAME HUE LAW, which nothing guarded. Only the official half
-    # was asserted above, so a revert of the community half to the mauve the desktop board
-    # used to paint (`.mgct-badge.community { color: var(--mauve) }`, myart-contests.css
-    # before 2026-09-05) would have gone through green.
+    # is asserted above, so a revert of the community half -- to the gold it wore before the
+    # ruling moved gold to OFFICIAL, or to the mauve the desktop board painted before that
+    # -- would have gone through green.
     #
     # Read one tap OFF the board, and that is deliberate rather than a wander: the board's
     # community CARD renders no badge at all. `.cmb-badge` is emitted in exactly two places
@@ -1626,13 +1636,14 @@ def test_the_phone_contest_board_is_a_hero_over_cards_with_one_door_to_my_entrie
             com["cls"]))
     assert None not in (com["gold"], com["lav"], com["mauve"]), (
         "a token this assertion compares against no longer resolves: {!r}".format(com))
-    assert com["color"] == com["gold"], (
-        "the COMMUNITY badge is {} -- the handoff assigns it --gold ({}) on the phone"
-        .format(com["color"], com["gold"]))
-    assert com["color"] != com["lav"] and com["color"] != com["mauve"], (
-        "the COMMUNITY badge collapsed onto another hue (lavender {}, mauve {}) -- mauve is "
-        "what desktop's .mgct-badge.community used to paint, which is the exact revert "
-        "this guards".format(com["lav"], com["mauve"]))
+    assert com["color"] == com["lav"], (
+        "the COMMUNITY badge is {} -- the 2026-09-05 ruling assigns it --lavender ({})"
+        .format(com["color"], com["lav"]))
+    assert com["color"] != com["gold"] and com["color"] != com["mauve"], (
+        "the COMMUNITY badge collapsed onto another hue (gold {}, mauve {}) -- gold is what "
+        "this badge wore before the ruling handed gold to OFFICIAL, and mauve is what "
+        "desktop's .mgct-badge.community painted before that; both are the reverts this "
+        "guards".format(com["gold"], com["mauve"]))
 
 
 def test_the_phone_contest_detail_folds_to_one_open_section_over_a_pinned_enter_bar(
@@ -2083,14 +2094,19 @@ def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under
 
 def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_page):
     """ONE BADGE LAW, PINNED ON BOTH SURFACES AT ONCE (owner ruling, 2026-09-05): OFFICIAL
-    is lavender, COMMUNITY is gold, on the phone AND on the desktop board.
+    is GOLD AND METALLIC, COMMUNITY is LAVENDER, on the phone AND on the desktop board.
 
-    They disagreed until now -- the phone followed Contest Mobile Handoff.dc.html while
-    myart-contests.css painted official gold and community mauve -- so the same two words
-    meant a different colour depending on which screen you were holding. Both halves are
-    read in ONE test, from REAL renders in two viewports, and asserted equal to each other
-    as well as to the law: a drift on either surface fails here, which is the only way two
-    stylesheets stay in step.
+    The ruling was given at the desktop board, whose official contest is already framed in
+    gold -- "I think the official contest badge should be gold too. and metallic IMO" -- and
+    it supersedes the same day's earlier alignment, which had made official lavender on both
+    surfaces. Lavender, the pair's other hue, moves to COMMUNITY.
+
+    Both halves are read in ONE test, from REAL renders in two viewports, and asserted equal
+    to each other as well as to the law: a drift on either surface fails here, which is the
+    only way two stylesheets stay in step. Because OFFICIAL is metal, its gold lives in the
+    FACE and its text is dark ink, so the official half is read off backgroundImage -- the
+    gradient must carry the live --gold as its dominant stop, and a FLAT gold fill fails
+    here too, which is the "and metallic" half of the ruling.
 
     The desktop pair is read where each word actually renders: the board's own section
     headers (.mgct-h.official / .mgct-h.community) and the detail banner's badge, which
@@ -2114,9 +2130,11 @@ def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_pa
     phone.click(".cmb-back")
     phone.wait_for_selector(".cmb-hero .cmb-badge.official", timeout=10_000)
     _settle(phone)
-    ph["official"] = phone.evaluate(
-        "() => getComputedStyle(document.querySelector('.cmb-hero .cmb-badge.official'))"
-        ".color")
+    ph["official"] = phone.evaluate("""() => {
+        const cs = getComputedStyle(
+            document.querySelector('.cmb-hero .cmb-badge.official'));
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
+    }""")
 
     desk = logged_in_page(**DESKTOP)
     _json_route(desk, "**/api/contests", _MOBILE_BOARD)
@@ -2135,51 +2153,78 @@ def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_pa
                            return el ? getComputedStyle(el).color : null; };
         return {hOfficial: c('.mgct-h.official'), hCommunity: c('.mgct-h.community')};
     }""")
+    desk.click(".mgct-card")                       # the community contest's own detail
+    desk.wait_for_selector(".mgct-badge.community", timeout=10_000)
+    _settle(desk)
+    dk["badgeCommunity"] = desk.evaluate(
+        "() => getComputedStyle(document.querySelector('.mgct-badge.community')).color")
+    # The OFFICIAL badge is read LAST so it is the one still on screen for the proof phase
+    # below -- it is the half the ruling actually moved.
+    desk.click(".mgct-back")
+    desk.wait_for_selector(".mgct-official", timeout=10_000)
     desk.click(".mgct-official")                   # the featured official contest
     desk.wait_for_selector(".mgct-badge.official", timeout=10_000)
     _settle(desk)
     dk["badgeOfficial"] = desk.evaluate("""() => {
         const cs = getComputedStyle(document.querySelector('.mgct-badge.official'));
-        return {color: cs.color, background: cs.backgroundColor};
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
     }""")
-    desk.click(".mgct-back")
-    desk.wait_for_selector(".mgct-card", timeout=10_000)
-    desk.click(".mgct-card")
-    desk.wait_for_selector(".mgct-badge.community", timeout=10_000)
-    _settle(desk)
-    dk["badgeCommunity"] = desk.evaluate(
-        "() => getComputedStyle(document.querySelector('.mgct-badge.community')).color")
 
     assert None not in (ph["lav"], ph["gold"], ph["mauve"]), (
         "a token this test compares against no longer resolves: {!r}".format(ph))
-    # The phone half of the law.
-    assert ph["official"] == ph["lav"] and ph["community"] == ph["gold"], (
-        "the phone broke the law: OFFICIAL {} (lavender is {}), COMMUNITY {} (gold is {})"
-        .format(ph["official"], ph["lav"], ph["community"], ph["gold"]))
+    # The phone half of the law. OFFICIAL is metal, so its gold is the gradient's dominant
+    # stop rather than its text colour; COMMUNITY is a plain lavender word.
+    assert "gradient" in ph["official"]["face"] and ph["gold"] in ph["official"]["face"], (
+        "the phone's OFFICIAL badge face is {!r} -- the law is gold metal, a gradient whose "
+        "dominant stop is --gold ({})".format(ph["official"]["face"], ph["gold"]))
+    assert ph["community"] == ph["lav"], (
+        "the phone's COMMUNITY badge is {} -- the law is lavender ({})".format(
+            ph["community"], ph["lav"]))
     # The desktop half, and the two words wherever desktop writes them.
-    assert dk["hOfficial"] == ph["lav"], (
-        "the desktop board's 'Official' header is {} -- the law is lavender ({}), which is "
-        "what the phone paints".format(dk["hOfficial"], ph["lav"]))
-    assert dk["hCommunity"] == ph["gold"], (
-        "the desktop board's 'Community' header is {} -- the law is gold ({}), which is "
-        "what the phone paints".format(dk["hCommunity"], ph["gold"]))
-    assert dk["badgeOfficial"]["background"] == ph["lav"], (
-        "the desktop OFFICIAL badge is filled {} -- gold here was the pre-2026-09-05 state "
-        "and is the exact revert this pins".format(dk["badgeOfficial"]["background"]))
-    assert dk["badgeCommunity"] == ph["gold"], (
-        "the desktop COMMUNITY badge is {} -- mauve here was the pre-2026-09-05 state"
-        .format(dk["badgeCommunity"]))
+    assert dk["hOfficial"] == ph["gold"], (
+        "the desktop board's 'Official' header is {} -- the law is gold ({}), which is "
+        "what the phone's official badge is made of".format(dk["hOfficial"], ph["gold"]))
+    assert dk["hCommunity"] == ph["lav"], (
+        "the desktop board's 'Community' header is {} -- the law is lavender ({}), which is "
+        "what the phone paints".format(dk["hCommunity"], ph["lav"]))
+    # ZERO DRIFT, asserted between the two REAL renders rather than between two stylesheets:
+    # the same face, the same ink, on a 1280pt window and a 390pt one.
+    assert dk["badgeOfficial"]["face"] == ph["official"]["face"], (
+        "the OFFICIAL badge wears a different face on each surface --\n  desktop {!r}\n  "
+        "phone   {!r}".format(dk["badgeOfficial"]["face"], ph["official"]["face"]))
+    assert dk["badgeOfficial"]["ink"] == ph["official"]["ink"], (
+        "the OFFICIAL badge's ink differs: desktop {}, phone {}".format(
+            dk["badgeOfficial"]["ink"], ph["official"]["ink"]))
+    assert ph["lav"] not in dk["badgeOfficial"]["face"] and (
+        dk["badgeOfficial"]["bg"] != ph["lav"]), (
+        "the desktop OFFICIAL badge is filled lavender ({}) -- that was the state between "
+        "the two 2026-09-05 rulings and is the exact revert this pins: {!r}".format(
+            ph["lav"], dk["badgeOfficial"]))
+    assert dk["badgeCommunity"] == ph["lav"], (
+        "the desktop COMMUNITY badge is {} -- the law is lavender ({})".format(
+            dk["badgeCommunity"], ph["lav"]))
     assert ph["mauve"] not in (dk["hCommunity"], dk["badgeCommunity"]), (
         "the desktop community word fell back onto mauve: {!r}".format(dk))
+    assert dk["badgeCommunity"] != ph["gold"], (
+        "the desktop COMMUNITY badge is gold -- gold belongs to OFFICIAL since the ruling")
 
-    # PROVE IT. The desktop rules exactly as they read before the ruling, applied as an
-    # in-page override (never a committed revert) on the community badge that is on screen
-    # right now: the equality above has to break, or it was never measuring the hue.
-    desk.add_style_tag(content=".mgct-badge.community { color: var(--mauve) !important; }")
+    # PROVE IT. The OFFICIAL badge exactly as it read between the two 2026-09-05 rulings --
+    # a FLAT lavender fill with pale ink -- applied as an in-page override (never a
+    # committed revert) to the badge on screen right now. Every official assertion above
+    # has to flip: no gradient, no gold, and the fill back on lavender.
+    desk.add_style_tag(content=(
+        ".mgct-badge.official { background: var(--lavender) !important;"
+        " color: #14102a !important; }"))
     _settle(desk)
-    reverted = desk.evaluate(
-        "() => getComputedStyle(document.querySelector('.mgct-badge.community')).color")
-    assert reverted == ph["mauve"] and reverted != ph["gold"], (
-        "the pre-ruling rule no longer changes what the COMMUNITY badge paints ({} vs "
-        "mauve {}) -- this guard is reading something other than that badge's hue".format(
-            reverted, ph["mauve"]))
+    reverted = desk.evaluate("""() => {
+        const cs = getComputedStyle(document.querySelector('.mgct-badge.official'));
+        return {face: cs.backgroundImage, ink: cs.color, bg: cs.backgroundColor};
+    }""")
+    assert reverted["bg"] == ph["lav"] and "gradient" not in reverted["face"], (
+        "the pre-ruling rule no longer changes what the OFFICIAL badge paints ({!r} vs "
+        "lavender {}) -- this guard is reading something other than that badge's face"
+        .format(reverted, ph["lav"]))
+    assert ph["gold"] not in reverted["face"], (
+        "the reverted OFFICIAL badge still carries gold ({}) in its face {!r} -- the gold "
+        "this test reads is coming from somewhere the ruling does not govern".format(
+            ph["gold"], reverted["face"]))

@@ -5,10 +5,10 @@
    class. Where a number here differs from the frame it is because a hit target had to
    reach 44pt (the handoff's own plumbing note) — those are marked.
 
-   Every colour is a token. The two hues the handoff assigns to the badges -- OFFICIAL
-   lavender, COMMUNITY gold -- are now the law on BOTH surfaces: the desktop board used to
-   paint them the other way round and was brought over to this one (owner ruling,
-   2026-09-05; myart-contests.css's .mgct-h block states it there).
+   Every colour is a token. The badge pair is the one place this file departs from the
+   handoff: OFFICIAL is GOLD AND METALLIC and COMMUNITY is LAVENDER, on BOTH surfaces
+   (owner ruling, 2026-09-05; myart-contests.css's .mgct-h block states it there, with the
+   reasoning). The handoff draws that pair the other way round.
 
    The metal keyframes are named cmbMetal/cmbSheen, NOT mgMetal: gen-drawer.css already
    defines a global `mgMetal` with different stops (a ping-pong, where the handoff's runs
@@ -77,13 +77,36 @@ button.cmb-hero { position: relative; display: block; width: 100%; padding: 0;
 .cmb-herometa { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 9px;
   font-variant-numeric: tabular-nums; color: rgba(255,255,255,.75); margin-top: 2px; }
 
-/* The badges. OFFICIAL lavender · COMMUNITY gold — the handoff's assignment, and since
-   2026-09-05 the desktop board's too. */
+/* The badges. OFFICIAL gold and metallic · COMMUNITY lavender — the owner's 2026-09-05
+   ruling, which is the law on the desktop board too (myart-contests.css's .mgct-h block
+   states it there, with the reasoning). It overrides the handoff's own assignment, which
+   read the pair the other way round.
+
+   The official face is the metal recipe of .cmb-metal above in the house's gold stops
+   (shell.css .mgx-metal-folio), shrunk to badge size. Its gradient is written stop-for-stop
+   identically to myart-contests.css's .mgct-badge.official, so the two surfaces paint the
+   same face -- that equality is asserted from real renders, not read off either file. Only
+   the keyframe NAME differs, for the reason given at the top of this file, so the drift is
+   this file's linear 0->220% rather than the desktop's ping-pong; both take 7s. */
 .cmb-badge { position: absolute; top: 9px; left: 10px; font-size: 8.5px; font-weight: 800;
   letter-spacing: .09em; padding: 3px 9px; border-radius: 999px;
   background: rgba(12,10,28,.78); }
-.cmb-badge.official { color: var(--lavender); border: 1px solid rgba(182,146,230,.4); }
-.cmb-badge.community { color: var(--gold); border: 1px solid rgba(212,175,55,.4); }
+.cmb-badge.official { color: #2a1f06; border: 1px solid rgba(255,255,255,.28);
+  text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background: linear-gradient(100deg, #7a5f1c 0%, var(--gold) 18%, #fff3cd 34%,
+    var(--gold) 50%, #9c7d24 68%, #fff3cd 84%, #7a5f1c 100%);
+  background-size: 220% 100%; animation: cmbMetal 7s linear infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 3px rgba(42,31,6,.4),
+    0 2px 7px rgba(0,0,0,.4); }
+.cmb-badge.community { color: var(--lavender); border: 1px solid rgba(182,146,230,.4); }
+/* The badge's own reduced-motion guard, and it has to live HERE rather than in the metal
+   block at the top of this file: that block's `.cmb-badge.official` would carry the same
+   specificity as the rule above and lose to it on source order, so the guard would be dead
+   and this file would claim a stillness it does not deliver. Only the DRIFT stops -- the
+   brushed gold face stays. */
+@media (prefers-reduced-motion: reduce) {
+  .cmb-badge.official { animation: none; }
+}
 
 /* Community list cards. */
 .cmb-list { display: flex; flex-direction: column; gap: 8px; }

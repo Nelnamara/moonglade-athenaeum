@@ -190,17 +190,23 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
 .mgct-slab { width: min(980px, calc(100vw - 48px)); }
 .mgct-summary { font-size: 11.5px; color: var(--subtext); padding: 3px 0 14px; }
 .mgct-summary b { color: var(--text); }
-/* ONE BADGE LAW, BOTH SURFACES: OFFICIAL is lavender, COMMUNITY is gold (owner ruling,
-   2026-09-05). This board shipped them the other way round -- official gold, community
-   mauve -- while the phone followed Contest Mobile Handoff.dc.html's assignment, so the
-   same two words meant a different colour depending on which screen you were holding.
-   The handoff's law wins on both. It is the WORDS this governs: gold stays the colour of
-   a prize, of ★ Entered and of a win, on either surface.
+/* ONE BADGE LAW, BOTH SURFACES: OFFICIAL is GOLD AND METALLIC, COMMUNITY is LAVENDER
+   (owner ruling, 2026-09-05, given at this very board: "I think the official contest
+   badge should be gold too. and metallic IMO").
+
+   It supersedes the same day's earlier alignment, which made official lavender on both
+   surfaces. The reason it lost: this board already frames an official contest in gold --
+   the banner border, the card border, the prize chip -- and a lavender badge sat inside a
+   gold frame arguing with it. The badge now matches the frame it lives in, and lavender,
+   the pair's other hue, moves to COMMUNITY (it was gold, which OFFICIAL now takes).
+
+   It is the WORDS this governs: gold stays the colour of a prize, of ★ Entered and of a
+   win, on either surface.
    Pinned on both surfaces at once by test_render_harness.py's badge-hue test. */
 .mgct-h { font-size: 11px; font-weight: 700; padding-bottom: 8px; }
 .mgct-h .n { color: var(--overlay0); font-weight: 600; }
-.mgct-h.official { color: var(--lavender); }
-.mgct-h.community { color: var(--gold); }
+.mgct-h.official { color: var(--gold); }
+.mgct-h.community { color: var(--lavender); }
 
 /* Official banner -- gallery-era correction (Frontend Gallery.dc.html ovContests,
    2026-08-06): FULL width, 3:1, radius 14, info overlaid on a bottom gradient scrim. */
@@ -262,8 +268,8 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
    own; the fixed hues follow its law -- gold = prize/entered/won, --accent = selection,
    --red = errors only, emerald = success -- and every count, date and countdown is
    ui-monospace + tabular-nums. The one place this no longer follows the DC is the
-   OFFICIAL/COMMUNITY pair: those two words are lavender and gold on BOTH surfaces now,
-   per the owner's 2026-09-05 ruling (see .mgct-h above). */
+   OFFICIAL/COMMUNITY pair: OFFICIAL is gold and metallic and COMMUNITY is lavender, on
+   BOTH surfaces, per the owner's 2026-09-05 ruling (see .mgct-h above). */
 
 /* ---- A · header tab pair + the Entered chip ---- */
 .mgct-tabs { display: flex; gap: 4px; padding: 3px; border-radius: 999px;
@@ -294,15 +300,32 @@ button.mgct-back:hover { color: var(--text); }
 .mgct-bannerart .mgct-scrim {
   background: linear-gradient(to top, rgba(8,6,20,.94) 0%, rgba(8,6,20,.4) 45%, rgba(8,6,20,0) 75%); }
 .mgct-badges { display: flex; gap: 6px; padding-bottom: 7px; }
-/* The badge pair, under the one law stated at .mgct-h above: the FILLED badge is the
-   official one and it is lavender (#14102a is the app's own ink on lavender, the same
-   pairing the phone's pick tick uses); the outlined one is community and it is gold, in
-   the same rgba(212,175,55,…) numbers every other gold chip on this surface carries. */
+/* The badge pair, under the one law stated at .mgct-h above.
+
+   OFFICIAL wears the house metal face, shrunk to badge size: shell.css's
+   .mgx-metal-folio gold stops (#7a5f1c dark · var(--gold) mid · #fff3cd light ·
+   #9c7d24 mid2, ink #2a1f06) poured into .mgx-metal's own 7-stop 100deg gradient and
+   drifted by the shared mgMetal keyframes, which is what makes the sheen -- the bright
+   #fff3cd stop travelling across the face, exactly as it does on the Enter button below.
+   Only the SCALE changes: a thinner highlight rim and a shorter drop than a 24px-padded
+   button, because a button's shadow numbers on a 17px pill read as grime, not as metal.
+   var(--gold) is the dominant stop, so a skin that retunes gold retunes the badge with it.
+   The drift stops under prefers-reduced-motion at the foot of this file; the gradient
+   stays, because the gradient IS the badge's face.
+
+   COMMUNITY is lavender, outlined in the same rgba(182,146,230,…) numbers every other
+   lavender chip on this surface carries. */
 .mgct-badge { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 3px 9px;
   border-radius: 999px; white-space: nowrap; }
-.mgct-badge.official { background: var(--lavender); color: #14102a; }
-.mgct-badge.community { font-weight: 700; border: 1px solid rgba(212,175,55,.5);
-  background: rgba(212,175,55,.16); color: var(--gold); }
+.mgct-badge.official { color: #2a1f06; border: 1px solid rgba(255,255,255,.28);
+  text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  background: linear-gradient(100deg, #7a5f1c 0%, var(--gold) 18%, #fff3cd 34%,
+    var(--gold) 50%, #9c7d24 68%, #fff3cd 84%, #7a5f1c 100%);
+  background-size: 220% 100%; animation: mgMetal 7s ease-in-out infinite;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 3px rgba(42,31,6,.4),
+    0 2px 7px rgba(0,0,0,.4); }
+.mgct-badge.community { font-weight: 700; border: 1px solid rgba(182,146,230,.45);
+  background: rgba(182,146,230,.14); color: var(--lavender); }
 .mgct-dtitle { font-size: 17px; font-weight: 700; line-height: 1.3; }
 .mgct-chips { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; padding: 13px 0 11px; }
 .mgct-chip { font-size: 10.5px; font-weight: 600; padding: 4px 11px; border-radius: 999px;
@@ -705,3 +728,11 @@ button.mgpub-ctclear { flex: none; width: 20px; height: 20px; display: grid; pla
   border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(24,18,50,.99), rgba(14,11,32,.99));
   box-shadow: 0 18px 44px rgba(0,0,0,.6); }
+
+/* ============================ reduced motion =============================== */
+/* The OFFICIAL badge's metal, held still -- the same guard shell.css gives .mgx-metal and
+   contest-mobile.css gives .cmb-metal. Only the DRIFT stops: the brushed gradient stays
+   put and the badge still reads as gold metal, it just no longer travels. */
+@media (prefers-reduced-motion: reduce) {
+  .mgct-badge.official { animation: none; }
+}
