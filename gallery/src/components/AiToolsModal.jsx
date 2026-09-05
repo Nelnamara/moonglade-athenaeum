@@ -100,10 +100,21 @@ export default function AiToolsModal({ open, onClose, onPick }) {
                 {/* 16:10 art on top (handoff comp A4): the thumbnail is the card now, not a
                     strip above the label. The fallback chain is unchanged and is the comp's
                     own: curated local webp -> the catalog's PixAI demo image -> the gradient
-                    + serif-initial placeholder underneath. Never an empty strip. */}
+                    + serif-initial placeholder underneath. Never an empty strip.
+                    The art is shown WHOLE, never cropped (ai-tools.css carries the why); the
+                    two lines below are what that costs -- on load, the art box learns that it
+                    has a picture (so the initial steps aside) and which URL actually won (so
+                    the blurred backdrop behind the picture is that same image). */}
                 <div className="mgai-art">
                   <span className="mgai-initial">{s.name[0]}</span>
                   <img src={"/branding/bridge/scene_" + s.slug + ".webp"} alt="" loading="lazy"
+                    onLoad={(e) => {
+                      const el = e.currentTarget;
+                      const box = el.parentNode;
+                      if (!box) return;
+                      box.style.setProperty("--mgai-art", 'url("' + (el.currentSrc || el.src) + '")');
+                      box.classList.add("has-art");
+                    }}
                     onError={(e) => {
                       // No local art for this scene -> try the catalog's own thumbnail once,
                       // then give up and let the initial show through.

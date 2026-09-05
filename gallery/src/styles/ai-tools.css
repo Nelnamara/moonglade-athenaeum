@@ -67,7 +67,25 @@ html.mg-noblur .mgai-scrim {
   overflow: hidden; background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
 .mgai-initial { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 34px; font-style: italic;
   color: color-mix(in oklab, var(--lavender) 38%, transparent); }
-.mgai-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* THE THUMB IS NEVER CROPPED (owner, 2026-09-05: "I don't like the way the thumbs are
+   cropped"). It used to be object-fit: cover, so a portrait demo image lost both edges and
+   a centred subject could lose its face to the 16:10 box. The comp (A4 179-182) draws its
+   art as a flat gradient with no <img> in it at all, so it never settled cover vs contain --
+   nothing is being overruled here. `contain` shows each tool's whole demo image; the card
+   geometry, the chip and the tier badge are untouched.
+   The BACKDROP is what stops contain from reading as a picture stranded in a dark box: the
+   same image, blown past the edges and blurred down to a wash, painted behind it. Its URL
+   arrives as --mgai-art, set on this element by the <img>'s own onLoad (AiToolsModal.jsx),
+   so it is always the source that actually resolved -- local webp or the catalog's demo
+   thumbnail -- and it is the same request the browser has already cached, not a second
+   fetch. No image, no wash: the gradient and the serif initial stand as they always did. */
+.mgai-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mgai-art.has-art::before { content: ""; position: absolute; inset: -10%;
+  background-image: var(--mgai-art); background-size: cover; background-position: center;
+  filter: blur(16px) saturate(.75) brightness(.5); opacity: .7; }
+/* the initial is the FALLBACK, so it steps aside the moment real art lands -- with contain
+   it would otherwise show through the letterbox margins beside the picture */
+.mgai-art.has-art .mgai-initial { display: none; }
 .mgai-tierbadge { position: absolute; top: 7px; left: 7px; font-family: ui-monospace, monospace; font-size: 8px;
   font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--mauve);
   background: rgba(20, 14, 42, .85); border: 1px solid color-mix(in oklab, var(--mauve) 40%, transparent);

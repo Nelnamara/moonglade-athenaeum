@@ -1028,12 +1028,76 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
 .mgdk-note { font-size: 10.5px; color: var(--overlay0); font-style: italic; text-align: right; }
 .mgdk-note.say { color: var(--subtext); font-style: normal; }
 
-/* one column on a narrow window: the rail becomes a scrolling strip above the stage */
+/* ---- ONE COLUMN, on a window too narrow for the comp's 180px rail + stage ----
+   The same four parts in the same order, each turned on its side rather than
+   redrawn: the rail lies down into a filmstrip, the panes stack, and both
+   control rows read label · track · readout the way the comp writes them. The
+   comp's own values throughout, one notch smaller.
+
+   The first cut of this fold only re-flowed the grid, and every piece of it went
+   wrong (owner: "it looks terrible but you have the right idea"): the rail kept
+   its column direction, so twelve full-width rows ate a third of the screen; the
+   4:3 panes kept sizing themselves off the WIDTH and overflowed a box that had
+   only the leftover height, and since a grid's overflow paints rather than
+   clips, the filtered pane covered the sliders and the actions completely; the
+   third action wrapped to a line of its own with the note stranded beside it.
+   Below, the panes' rows are minmax(0, 1fr) -- they can no longer overflow at
+   all -- and the pair's WIDTH carries the proportion instead. */
 @media (max-width: 720px) {
   .mgdk-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .mgdk-rail { border-right: none; border-bottom: 1px solid var(--surface1); max-height: 34vh; }
-  .mgdk-panes { grid-template-columns: 1fr; max-width: none; }
-  .mgdk-acts { flex-wrap: wrap; }
+
+  /* the rail, lying down: one row of tiles that scrolls sideways. Tiles are a
+     fixed width and never shrink, so the strip slides cleanly instead of
+     re-flowing into ragged rows as the window moves. */
+  .mgdk-rail { flex-direction: row; align-items: stretch; gap: 8px;
+    border-right: none; border-bottom: 1px solid var(--surface1);
+    max-height: none; padding: 10px 12px;
+    overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    scrollbar-width: thin; }
+  /* the group kicker keeps its voice (9px mono, tracked) and takes two short
+     lines rather than 90px of strip */
+  .mgdk-grp { flex: none; align-self: center; max-width: 56px; padding: 0;
+    line-height: 1.35; }
+  .mgdk-rows { flex-direction: row; gap: 8px; }
+  .mgdk-row { flex: 0 0 138px; }
+  /* the divider between the two groups turns with them */
+  .mgdk-rows + .mgdk-grp { border-top: none; border-left: 1px solid var(--surface1);
+    padding-top: 0; padding-left: 12px; }
+
+  .mgdk-stage { padding: 14px 16px; gap: 12px; }
+
+  /* source over filtered. Each row is minmax(0, 1fr) of the height the stage has
+     left, so the pair ALWAYS fits and can never paint over the controls; the
+     width cap is what keeps them near the comp's 4:3 instead of two letterbox
+     strips. 288px is everything above and below the pair (head, strip, the two
+     control rows, padding and gaps) measured in this fold, so the cap resolves
+     to the width two 4:3 panes plus their gap can actually use. It is a
+     proportion HINT, not a constraint -- the 1fr rows already guarantee the fit,
+     so a drift in that number makes the panes a little tall or a little wide,
+     never broken. The 200px floor is for a SHORT narrow window, where holding
+     4:3 exactly would shrink the pair to a postage stamp: below that the panes
+     letterbox a little instead of vanishing. */
+  .mgdk-panes { grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 10px;
+    min-height: 190px;
+    max-width: min(100%, max(200px, calc((100vh - 288px) / 1.5))); }
+  .mgdk-pane { aspect-ratio: auto; min-height: 0; }
+
+  /* strength on one line, angle on the next -- label · track · readout each time */
+  .mgdk-ctl { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 9px 10px; }
+  .mgdk-ctllbl.gap { margin-left: 0; }
+  .mgdk-track.short { flex: none; }
+  .mgdk-ctlval, .mgdk-ctlval.wide { width: auto; min-width: 32px; }
+
+  /* all three actions on one row, sharing the width equally and none of them
+     clipped; the note drops to its own line under them */
+  .mgdk-acts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px; }
+  .mgdk-acts .sp { display: none; }
+  .mgdk-acts .mgdk-save, .mgdk-send, .mgdk-reset { padding-inline: 10px;
+    text-align: center; white-space: nowrap; }
+  .mgdk-note { grid-column: 1 / -1; text-align: center; }
 }
 
 /* ============================== PEEK PILL =================================== */
