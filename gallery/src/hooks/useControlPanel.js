@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
+import { note as noteUpdate, subscribe as subscribeUpdate,
+         armReceipt as armUpdateReceipt } from "../notify/updateStore.js";
 import { invalidate, peek, put } from "./swrCache.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
@@ -354,24 +356,149 @@ export default function useControlPanel() {
   };
 
   /* ---- the auto-updater (P4) --------------------------------------------------
-     ON DEMAND, once per Panel open (owner ruling, 2026-09-01: no background tick
-     anywhere). The server caches for its own TTL, so opening the Panel repeatedly
-     costs GitHub nothing. A failed check answers behind:false with a reason and is
-     simply not shown -- an offline machine gets a Panel, not an error. */
+     TWO CADENCES, one answer (owner ruling 2026-09-04, reversing his own 2026-09-01
+     "no background tick anywhere"). The server re-checks roughly hourly on its own and
+     announces what it finds through notify/updateStore.js, so the news reaches whoever
+     is looking at the gallery; opening the Panel asks for a FRESH answer on top of that
+     -- `?fresh=1` bypasses the server's 30-minute cache, floored server-side at a minute,
+     so opening and closing the Panel repeatedly still costs GitHub one request.
+
+     A failed check answers behind:false with a reason and is simply not shown -- an
+     offline machine gets a Panel, not an error.
+
+     Nothing changed about APPLYING: it is still this modal's explicit confirm and
+     nothing else. The background half only ever announces. */
   const [update, setUpdate] = useState(null);      // the check payload
   const [updOpen, setUpdOpen] = useState(false);   // the confirm modal
-  const [updPhase, setUpdPhase] = useState("");    // "" | applying | failed
-  const [updErr, setUpdErr] = useState("");
+  const [updPhase, setUpdPhase] = useState("");    // "" | applying | done | refused
+  // The refusal currently replacing the meter: {kind: offline|busy|failed, line}. One of
+  // exactly three presentations (Identity Chrome handoff C2) -- see classifyRefusal below.
+  const [updRefusal, setUpdRefusal] = useState(null);
+  // The three phases, in order, as the modal draws them. `state` is done|now|wait; `secs`
+  // is a REAL measured duration once the phase has passed (never a decorative number), and
+  // `note` carries the one case where a duration would lie (deps that never had to run).
+  const [updSteps, setUpdSteps] = useState(null);
+  /* WHAT THE MODAL PROMISED, frozen at the confirm. `update` is live -- the hourly tick
+     announces through subscribeUpdate above and can land at any moment, including while an
+     apply is running. Bound reactively, the card that said "Update now → 3.7.2" could
+     finish reading "Updated to 3.7.3": a claim about which version was installed, changed
+     underneath by a check that had nothing to do with it. The phased UI reads this
+     snapshot instead; the pre-confirm card still reads the live payload, because before
+     you press the button the newest answer IS the right one. */
+  const [updTarget, setUpdTarget] = useState(null);
+  const updTargetRef = useRef(null);   // the same value, readable synchronously
   const updPollRef = useRef(null);
+  const updClockRef = useRef(null);   // {at, sawDeps} -- when the current phase started
   useEffect(() => {
     let dead = false;
-    apiGet("/api/update/check").then((d) => { if (!dead && d && !d.error) setUpdate(d); });
+    // The stamp starts from what the background check already knows, so a Panel opened
+    // straight after a toast is never briefly blank while the fresh check flies; the
+    // subscription then keeps it live if the hourly tick lands while the Panel is open.
+    const stop = subscribeUpdate((u) => { if (!dead && u) setUpdate(u); });
+    apiGet("/api/update/check?fresh=1").then((d) => {
+      if (dead || !d || d.error) return;
+      setUpdate(d);
+      noteUpdate(d);          // announce it once if this open is what found it
+    });
     return () => {
       dead = true;
+      stop();
       if (updPollRef.current) clearInterval(updPollRef.current);
       if (pingRef.current) clearInterval(pingRef.current);
     };
   }, []);
+
+  /* THE RESTART ESTIMATE, and why it is a memory rather than a constant: the third phase
+     is the only one nobody can measure while it happens (the server is not answering, so
+     there is nothing to ask). What CAN be honest is what this machine's own last restart
+     actually took, so that is what is shown -- written on the way out of a successful
+     apply, read on the way into the next one. With no memory yet it falls back to the ten
+     seconds the modal's own "what will happen" list has always quoted. */
+  const RESTART_MS_KEY = "mg_update_restart_ms";
+  const lastRestartMs = () => {
+    let v = 0;
+    try { v = Number(localStorage.getItem(RESTART_MS_KEY)) || 0; } catch { v = 0; }
+    return v > 500 && v < 600000 ? v : 10000;
+  };
+  const rememberRestartMs = (ms) => {
+    if (!(ms > 500 && ms < 600000)) return;
+    try { localStorage.setItem(RESTART_MS_KEY, String(Math.round(ms))); } catch { /* private mode */ }
+  };
+
+  /* TWO LABELS PER PHASE, and why a finished row rewrites its own verb: the handoff's
+     done row reads "Pulled 3.7.2 from the mirror ✓ 2.1s" -- past tense, because by then it
+     is a record of something that happened, not an announcement of something about to.
+     Writing "Pull 3.7.2 from the mirror" once and leaving it there left the finished list
+     reading as three instructions with ticks beside them. `doneLabel` is the same line in
+     the tense it earns when advanceSteps() closes it; the live/pending wording is
+     unchanged. */
+  const freshSteps = () => {
+    // The snapshot, never the live payload: these rows name a version, and a background
+    // announcement mid-apply must not rewrite what the pull was for.
+    const t = updTargetRef.current || update;
+    return ([
+    { key: "pull", label: "Pull " + ((t && t.latest) || "the release") + " from the mirror",
+      doneLabel: "Pulled " + ((t && t.latest) || "the release") + " from the mirror",
+      state: "now", secs: null, note: "" },
+    { key: "apply", label: "Applying files", doneLabel: "Applied files",
+      state: "wait", secs: null, note: "" },
+    { key: "restart", label: "Restart", doneLabel: "Restarted", state: "wait", secs: null,
+      note: "~" + Math.round(lastRestartMs() / 1000) + "s" },
+    ]);
+  };
+
+  /* Advance the list to `key`, closing every step before it and stamping the one that just
+     ended with the time it REALLY took (measured between the two transitions this client
+     observed, not a figure the server invents). `key` of null closes all three.
+
+     ONE HONEST LIMIT, stated rather than hidden: the transitions are seen by a 1.5s poll,
+     so a duration is real to about a second and a half -- a 2.2s pull can print 3.0s. That
+     is a measurement of something that happened, which is the property that matters here;
+     the alternative on offer was a fixed animation that measures nothing at all. */
+  const advanceSteps = (key, extra) => {
+    const now = Date.now();
+    const started = (updClockRef.current && updClockRef.current.at) || now;
+    updClockRef.current = { at: now, sawDeps: !!(updClockRef.current && updClockRef.current.sawDeps) };
+    setUpdSteps((prev) => {
+      const steps = (prev || freshSteps()).map((s) => ({ ...s }));
+      const idx = key == null ? steps.length : steps.findIndex((s) => s.key === key);
+      for (let i = 0; i < steps.length; i++) {
+        if (i < idx) {
+          if (steps[i].state !== "done") {
+            steps[i].state = "done";
+            steps[i].secs = (now - started) / 1000;
+            // Past tense the moment it IS past (handoff C2's done row).
+            if (steps[i].doneLabel) steps[i].label = steps[i].doneLabel;
+          }
+        } else if (i === idx) {
+          steps[i].state = "now";
+        }
+      }
+      // The one duration that would be a lie: with no dependency change the server goes
+      // straight from pulling to restarting, so "Applying files" is measured at ~0s. Say
+      // what actually happened instead of printing a stopwatch reading of nothing.
+      const apply = steps.find((s) => s.key === "apply");
+      if (apply && apply.state === "done" && !(extra && extra.sawDeps) && !updClockRef.current.sawDeps) {
+        apply.secs = null;
+        apply.note = "no new dependencies";
+      }
+      return steps;
+    });
+  };
+
+  /* Which of the three presentations a refusal wears. The SERVER decides between busy and
+     failed (its `kind`, added 2026-09-04) -- this never reads its prose. Offline is the
+     one this side owns, because it is the case where no answer arrived at all: api.js
+     turns a transport failure into "network error: ...", and that is not the server
+     saying no, it is the server not being there. */
+  const classifyRefusal = (d, fallback) => {
+    if (!d) return { kind: "offline", line: "The mirror is dark — connect it before pulling an update." };
+    const msg = d.error || fallback || "The update failed.";
+    if (/^network error/i.test(msg)) {
+      return { kind: "offline", line: "The mirror is dark — connect it before pulling an update." };
+    }
+    return { kind: d.kind === "busy" ? "busy" : "failed", line: msg };
+  };
 
   /* Apply: one POST behind the modal's explicit yes, then WATCH. The server does the
      work off the panel-job slot and reports its phase; when it reaches `restarting` we
@@ -379,12 +506,26 @@ export default function useControlPanel() {
      stop answering, so the update's own status route cannot be what tells us it worked.
      A failure keeps the tool's verbatim words: that text is the fix. */
   const applyUpdate = async () => {
-    setUpdPhase("applying"); setUpdErr("");
+    // The confirm MORPHS into the progress list in place (handoff C2): same modal, same
+    // card, the buttons give way to three phases and one meter. Nothing new opens, and
+    // nothing closes -- which is why the phases live in this hook's state rather than in a
+    // second component that would have to be mounted over the first.
+    // FREEZE THE TARGET FIRST -- before the POST, before the steps are built, so every
+    // line the phased card draws from here on names the version the person confirmed.
+    const target = update ? { ...update } : null;
+    updTargetRef.current = target;
+    setUpdTarget(target);
+    setUpdPhase("applying"); setUpdRefusal(null);
+    updClockRef.current = { at: Date.now(), sawDeps: false };
+    setUpdSteps(freshSteps());
     const d = await apiPost("/api/update/apply",
                             { confirm: true, csrf: summary?.csrf || "" }).catch(() => null);
     if (!d || d.error) {
-      setUpdPhase("failed");
-      setUpdErr((d && d.error) || "Network error — try again.");
+      // A refusal arriving here means the work never started: the meter must not have
+      // moved at all, so the phase list is dropped rather than left frozen mid-pull.
+      setUpdSteps(null);
+      setUpdPhase("refused");
+      setUpdRefusal(classifyRefusal(d, "Network error — try again."));
       return;
     }
     // THE HANDOVER, on any of three signals -- because the server is about to stop
@@ -398,10 +539,37 @@ export default function useControlPanel() {
     // Only (1) was handled before, and only (1) is a timing assumption, which is exactly
     // why the happy path used to strand on "updating…".
     let sawWork = false;
+    let sawDeps = false;
     const handover = () => {
       clearInterval(updPollRef.current);
       updPollRef.current = null;
-      _watch(true, (msg) => { setUpdPhase("failed"); setUpdErr(msg); });
+      // Third phase begins here, and it is the one nobody can watch: the server is going
+      // away. Its clock starts now so the ping-watch below can record what the restart
+      // really took and hand the NEXT apply a true estimate instead of a guess.
+      advanceSteps("restart", { sawDeps });
+      const restartAt = Date.now();
+      _watch(true, (msg) => { setUpdPhase("refused"); setUpdRefusal({ kind: "failed", line: msg }); },
+             () => {
+               rememberRestartMs(Date.now() - restartAt);
+               // THE THIRD ✓. The modal closes itself and the sidebar's version stamp
+               // updates -- and on this surface both of those ARE the reload: the bundle
+               // still running is the code that was just replaced, so the only honest way
+               // to show the new version stamp is to load the new build. The hold is what
+               // makes the completed list legible before the page goes; the old
+               // "Updated Moonglade — done" toast that used to be the receipt is retired
+               // (notify/jobsStore.js), because this list is the receipt now.
+               advanceSteps(null, { sawDeps });
+               setUpdPhase("done");
+               // WRITE THE RECEIPT before the page goes. The reload takes the modal, its
+               // three ticks and its meter with it, and what comes back is the gallery
+               // looking exactly as it did before -- "a restart with no endpoint tells the
+               // user that nothing happened unless they go BACK to the panel" (owner,
+               // 2026-09-05). This records the version that was promised; the next boot
+               // shows a note only if that is the version it is really running. See
+               // notify/updateStore.js and notify/index.jsx.
+               armUpdateReceipt((updTargetRef.current && updTargetRef.current.latest) || "");
+               setTimeout(() => window.location.reload(), 900);
+             });
     };
     updPollRef.current = setInterval(() => {
       apiGet("/api/update/status", null, { cache: "no-store" })
@@ -410,7 +578,8 @@ export default function useControlPanel() {
           if (st.phase === "failed") {
             clearInterval(updPollRef.current);
             updPollRef.current = null;
-            setUpdPhase("failed"); setUpdErr(st.error || "The update failed.");
+            setUpdPhase("refused");
+            setUpdRefusal({ kind: "failed", line: st.error || "The update failed." });
           } else if (st.phase === "restarting") {
             sawWork = true;
             handover();
@@ -418,6 +587,15 @@ export default function useControlPanel() {
             if (sawWork) handover();
           } else {
             sawWork = true;                                // pulling | deps
+            // `deps` is the server saying the pull is finished and dependencies are
+            // installing -- the real boundary between phase one and phase two. Without a
+            // requirements change it never arrives at all, and the list says so rather
+            // than timing an event that did not happen.
+            if (st.phase === "deps" && !sawDeps) {
+              sawDeps = true;
+              if (updClockRef.current) updClockRef.current.sawDeps = true;
+              advanceSteps("apply", { sawDeps: true });
+            }
           }
         })
         .catch(() => { if (sawWork) handover(); });
@@ -425,7 +603,11 @@ export default function useControlPanel() {
   };
   const closeUpdate = () => {
     if (updPollRef.current) clearInterval(updPollRef.current);
-    setUpdOpen(false); setUpdPhase(""); setUpdErr("");
+    updPollRef.current = null;
+    updClockRef.current = null;
+    updTargetRef.current = null;
+    setUpdOpen(false); setUpdPhase(""); setUpdRefusal(null); setUpdSteps(null);
+    setUpdTarget(null);
   };
 
   // Sidebar chips arm on the first click ("Confirm -- Restart?") and only actually fire
@@ -456,8 +638,19 @@ export default function useControlPanel() {
   // Ported verbatim from classic's own _watchServer() (moonglade_gallery.py) -- the REAL
   // mechanism the Stop/Restart reconnect overlay has used for a long time. Restart: poll
   // until it goes down, THEN comes back -> reload. Stop: poll until it stops answering.
-  const _watch = (comeBack, onFail) => {
+  const _watch = (comeBack, onFail, onBack) => {
     let tries = 0, sawDown = false;
+    // `onBack` exists for the same reason `onFail` does: the updater rides this same loop
+    // while ITS modal is the one on screen, and "the server answered again" is the moment
+    // that modal has to record (how long the restart took) and show (its third ✓) before
+    // the page goes. Without it the reload fired from in here, mid-list, and the completed
+    // phase list was never on screen for a single frame. The power modal passes nothing
+    // and keeps the straight reload it has always had.
+    const back = () => {
+      clearInterval(pingRef.current);
+      if (onBack) onBack();
+      else window.location.reload();
+    };
     pingRef.current = setInterval(() => {
       tries++;
       // A refused ping is a refused ping: a dropped connection AND an error status both mean
@@ -465,8 +658,8 @@ export default function useControlPanel() {
       // transport rejection -- a 5xx from a half-down server read as "still up".)
       apiGet("/api/ping", null, { cache: "no-store" }).then((d) => {
         const ok = !d.error;
-        if (comeBack && ok && sawDown) { clearInterval(pingRef.current); window.location.reload(); }
-        if (comeBack && ok && tries >= 8 && !sawDown) { clearInterval(pingRef.current); window.location.reload(); }
+        if (comeBack && ok && sawDown) { back(); return; }
+        if (comeBack && ok && tries >= 8 && !sawDown) { back(); return; }
         if (!ok) {
           sawDown = true;
           if (!comeBack) { clearInterval(pingRef.current); setPowerPhase("done"); }
@@ -516,6 +709,7 @@ export default function useControlPanel() {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
-    update, updOpen, setUpdOpen, updPhase, updErr, applyUpdate, closeUpdate,
+    update, updTarget, updOpen, setUpdOpen, updPhase, updRefusal, updSteps,
+    applyUpdate, closeUpdate,
   };
 }

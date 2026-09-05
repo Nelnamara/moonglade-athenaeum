@@ -71,7 +71,7 @@
 .idm-head { display: flex; flex-direction: column; gap: 7px; }
 .idm-kicker { font-size: 9.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
   color: var(--lavender); display: flex; align-items: center; gap: 8px; }
-.idm-title { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 20px; line-height: 1.28;
+.idm-title { font-family: var(--font-hero); font-style: italic; font-size: 20px; line-height: 1.28;
   color: var(--text); margin: 0; animation: idmInscribe .5s cubic-bezier(.2,.9,.24,1) .08s both; }
 .idm-rule { height: 2px; overflow: hidden; }
 .idm-rule > span { display: block; height: 100%; transform-origin: left center; border-radius: 2px;

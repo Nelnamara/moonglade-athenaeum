@@ -6363,6 +6363,34 @@ def _upscale_const_js():
 
 
 # ---------------------------------------------------------------------------
+# THE PRE-PAINT BOOT SCRIPT, injected into EVERY page head (the React shells and
+# _LOOM_SHELL), immediately before the 401 guard below.
+#
+# Two per-device looks are stored in localStorage and PAINT THE PAGE, so both have to be
+# applied in <head> before the first frame or the app renders in the wrong colours/face
+# and then visibly jumps:
+#   skin   -- html[data-skin], read by every skin rule in DESIGN_TOKENS_CSS.
+#   fonts  -- the System + Hero type pairing (2026-09-04, Identity Chrome handoff C1),
+#             written as inline --font-hero/--font-system custom properties on <html>.
+#             The stored record carries the STACKS themselves, not just an id, precisely
+#             so this script needs no copy of the pairing table -- swapping the
+#             (deliberately provisional) set in gallery/src/lib/fonts.js changes nothing
+#             here. gallery/src/lib/fonts.js reconciles the id against the current table
+#             once the bundle is up.
+# Both reads are wrapped: storage throws outright in private mode / with site data
+# blocked, and an unstyled page is a far better failure than a blank one.
+#
+# ONE COPY, three shells. The skin line used to be hand-pasted into APP_PAGE, LOGIN_PAGE
+# and _LOOM_SHELL separately; a second stored look would have made that three drifting
+# copies of two things instead of one.
+_PREPAINT_BOOT_JS = r"""<script>/* apply the saved skin + type pairing before first paint (no FOUC)
+   -- see _PREPAINT_BOOT_JS in moonglade_gallery.py. Same keys/origin the gallery writes,
+   so a change made there re-dresses the Loom too. */
+try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}
+try{var _ft=JSON.parse(localStorage.getItem('fonts')||'null');if(_ft&&typeof _ft==='object'){if(_ft.hero)document.documentElement.style.setProperty('--font-hero',_ft.hero);if(_ft.system)document.documentElement.style.setProperty('--font-system',_ft.system);}}catch(e){}</script>"""
+
+
+# ---------------------------------------------------------------------------
 # Global 401 guard, injected into EVERY page head (the React shells and _LOOM_SHELL).
 #
 # Why an interceptor and not a helper at each call site: there are ~90 fetch()
@@ -6419,9 +6447,7 @@ _LOOM_SHELL = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Loom - Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
-<script>/* apply saved skin before first paint (no FOUC) -- same key/origin the gallery
-   header writes, so switching skin there re-colors the Loom too */
-try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + r"""
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + r"""
 <style>
 __DESIGN_TOKENS__
 /* font-family here, not just in .sb-root: anything mounted OUTSIDE #root inherits from
@@ -6430,7 +6456,7 @@ __DESIGN_TOKENS__
    system-ui, so the same components looked different on the two pages. notify.css now also
    states its own family (host-neutral by design), but the shell should not be handing
    anything an unstyled baseline. */
-body { background: var(--base); margin: 0; font-family: system-ui, sans-serif; }
+body { background: var(--base); margin: 0; font-family: var(--font-system, system-ui, sans-serif); }
 /* The old #jobs-fab/#jobs-tray positioning overrides (bottom:88px to clear the Cast panel's
    own buttons; z-index:401/402 to climb over .lv-overlay's 400) were retired 2026-08-09
    (Claude Design handoff, drift item 39). The Activity control is no longer a body-portaled
@@ -6769,6 +6795,117 @@ def check_for_update(current, opener=None, now=None, force=False):
         "notes_url": str(rel.get("html_url") or ""),
     })
     _update_cache.update(at=now, payload=payload, ttl=UPDATE_CHECK_TTL)
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# The background cadence (owner ruling 2026-09-04, REVERSING 2026-09-01's "no
+# background tick anywhere" -- ../moonglade-internal/DECISIONS.md, "The updater
+# checks in the background").
+#
+# CHECK AND ANNOUNCE, NEVER APPLY. The running app asks GitHub roughly hourly
+# whether a newer release is out and SAYS SO wherever the user is; applying one
+# is still and only the person clicking Update in the Control Panel and
+# confirming. The owner read "full background" as the app updating itself and
+# said "I don't want that" -- auto-apply is explicitly rejected and no future
+# scope may add it under this label. Nothing in this section, and nothing the
+# scheduler tick below reaches, may touch run_update or /api/update/apply;
+# tests/test_updater.py pins that by walking the source.
+# ---------------------------------------------------------------------------
+UPDATE_TICK_SECONDS = 3600       # ~1 GitHub request an hour from the tick -- 24 a day,
+                                 # against an unauthenticated budget of 60 an HOUR
+UPDATE_PANEL_FLOOR = 60          # a Panel open gets a FRESH answer (it bypasses the
+                                 # 30-minute TTL every other caller reads) but no oftener
+                                 # than this, so opening and closing the Panel ten times
+                                 # in a minute still costs GitHub one request
+_update_tick = {"at": 0.0}       # when the hourly background check last ran
+_update_floor = {"at": 0.0}      # when a Panel-open check last actually went to GitHub
+# THE ANNOUNCEMENT: the newest version this server has discovered, and a counter that moves
+# only on a TRANSITION -- the first time a given version is seen. Every hourly tick returns
+# the same answer once a release is out; only a CHANGE is an event, which is what keeps the
+# client's one-toast-per-version promise a property of the server rather than of luck.
+_update_notice = {"version": "", "seq": 0, "at": 0.0, "payload": None}
+
+
+def note_update_transition(payload, now=None):
+    """Record a check's answer as the standing announcement. True only if it is NEW.
+
+    An hourly tick that finds the release it already found an hour ago is not an event.
+    An answer that is no longer `behind` (the update was applied, or the release was
+    pulled) CLEARS the announcement, so the stamp stops offering an update that is not
+    there any more.
+
+    A FAILED check says nothing at all. check_for_update answers `behind: False` with a
+    reason attached when GitHub is unreachable (an offline Panel must show a Panel, not a
+    stack trace) -- but that is the absence of an answer, not the answer "you are current".
+    Treating it as one meant a single network blip pulled the standing banner off every
+    open tab and bumped the seq, and the next good tick an hour later re-announced the SAME
+    version as if it were new: a second toast for one release, which is exactly the promise
+    the background cadence was built to keep. A blip now leaves the announcement untouched.
+
+    Announce-only by construction: this records a version string and a payload the client
+    reads. It has no call into run_update or the apply route, and cannot acquire one
+    without failing the guard test."""
+    now = time.time() if now is None else now
+    payload = payload or {}
+    if payload.get("error"):
+        return False
+    latest = str(payload.get("latest") or "")
+    if not payload.get("behind"):
+        if _update_notice["version"]:
+            _update_notice.update(version="", at=now, payload=None)
+            _update_notice["seq"] += 1
+        return False
+    if latest == _update_notice["version"]:
+        _update_notice["at"] = now
+        return False
+    _update_notice.update(version=latest, at=now, payload=dict(payload))
+    _update_notice["seq"] += 1
+    return True
+
+
+def update_notice():
+    """The standing announcement for the live-events payload, or None when nothing is
+    out. READ ONLY -- it reports what the last check already found and never fetches, so
+    riding it on the /api/jobs poll every open tab already runs costs GitHub nothing."""
+    if not _update_notice.get("version"):
+        return None
+    p = dict(_update_notice.get("payload") or {})
+    p["seq"] = _update_notice.get("seq", 0)
+    return p
+
+
+def run_update_tick(current, opener=None, now=None):
+    """The background check. Returns the payload if it RAN, None if an hour has not passed.
+
+    Deliberately NOT forced: check_for_update's own 30-minute TTL still applies, so a Panel
+    open five minutes ago is reused rather than re-fetched. An hourly cadence against a
+    half-hour cache settles at one GitHub request an hour, which is the whole budget this
+    feature is allowed to spend.
+
+    It checks and announces. It does not apply -- see this section's header."""
+    now = time.time() if now is None else now
+    if (now - _update_tick.get("at", 0)) < UPDATE_TICK_SECONDS:
+        return None
+    _update_tick["at"] = now
+    payload = check_for_update(current, opener=opener, now=now)
+    note_update_transition(payload, now=now)
+    return payload
+
+
+def check_for_update_fresh(current, opener=None, now=None):
+    """A Control Panel open: a FRESH answer, floored.
+
+    The Panel is where a person goes to ask, so it is the one caller that bypasses the
+    30-minute cache -- but not oftener than UPDATE_PANEL_FLOOR seconds, so opening and
+    closing it repeatedly cannot become a way to spend the hourly GitHub budget. Inside
+    the floor it falls back to exactly what every other caller reads: the cache."""
+    now = time.time() if now is None else now
+    force = (now - _update_floor.get("at", 0)) >= UPDATE_PANEL_FLOOR
+    if force:
+        _update_floor["at"] = now
+    payload = check_for_update(current, opener=opener, now=now, force=force)
+    note_update_transition(payload, now=now)
     return payload
 
 
@@ -7828,10 +7965,44 @@ def create_app(out_dir: Path):
         except OSError:
             pass
 
+    # Read ONCE, here, exactly as the live-mirror gate is read once further down: a daemon
+    # that re-read the environment every minute could catch the instant BETWEEN two tests
+    # (the suite sets this flag per-test) and make a real GitHub request out of a run that
+    # must never touch the network.
+    _bg_release_check = os.environ.get("MOONGLADE_DISABLE_WATCH") != "1"
+
+    def _update_check_tick():
+        """The updater's background cadence, riding the scheduler's existing 60-second
+        heartbeat rather than a timer thread of its own. The standing rule -- "web surfaces
+        register jobs, they never add a second poll loop" (DECISIONS.md 2026-07-24) -- reads
+        just as literally on this side of the wire: there is already one periodic tick in
+        this process, so the hourly check joins it instead of becoming a second one.
+        run_update_tick owns the hour; this is only the heartbeat that asks it.
+
+        CHECK AND ANNOUNCE. There is no path from here to run_update or /api/update/apply,
+        and a test walks this function's source to keep it that way.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check, sampled above) for the same
+        reason the live-mirror watcher and the contest sweep do: it is background work that
+        reaches the network, and the suite's conftest sets that flag precisely so
+        create_app() cannot make a real request."""
+        if not _bg_release_check:
+            return
+        try:
+            import moonglade_backup as _core
+            run_update_tick(_core.__version__)
+        except Exception:              # noqa: BLE001 -- a check must never kill the loop
+            pass
+
     def _scheduler_loop():
         import time as _time
         while True:
             _time.sleep(60)
+            # Outside the schedule's own try/continue chain below: whether an AUTOMATED
+            # TASK is due has nothing to do with whether the release check is, and the
+            # first `continue` down there (schedule disabled -- the default) would
+            # otherwise skip the update tick on every install that never set one up.
+            _update_check_tick()
             try:
                 # Same lock /api/panel/schedule writes under -- reading the file while a
                 # save is mid-write otherwise hands this loop a truncated (or stale) copy.
@@ -9042,14 +9213,26 @@ def create_app(out_dir: Path):
     @app.route("/api/update/check")
     @tier(LOGIN)
     def api_update_check():
-        """Is a newer release out? Fired ON DEMAND when the Control Panel opens (owner
-        ruling, 2026-09-01: no background tick anywhere) and cached server-side for
-        UPDATE_CHECK_TTL, so opening the Panel ten times costs GitHub one request.
+        """Is a newer release out?
+
+        Two cadences, one answer. In the background the server re-checks roughly hourly
+        and announces what it finds (run_update_tick, off the scheduler's existing tick --
+        owner ruling 2026-09-04, reversing 2026-09-01's "no background tick anywhere").
+        Here, `?fresh=1` is the Control Panel OPENING: it bypasses the 30-minute cache,
+        floored at UPDATE_PANEL_FLOOR seconds, so ten opens in a minute still cost GitHub
+        one request. Any other caller reads the cache exactly as before.
 
         Never fails the Panel: an offline machine gets behind:false with the reason
-        attached, at 200. See check_for_update for why the failure is not cached."""
+        attached, at 200. See check_for_update for why the failure is not cached.
+
+        This route only ever ANSWERS. Applying an update is /api/update/apply, behind the
+        modal's explicit confirm -- nothing here can reach it."""
         import moonglade_backup as core
-        return jsonify(check_for_update(core.__version__))
+        if str(request.args.get("fresh") or "").lower() in ("1", "true", "yes"):
+            return jsonify(check_for_update_fresh(core.__version__))
+        payload = check_for_update(core.__version__)
+        note_update_transition(payload)
+        return jsonify(payload)
 
     @app.route("/api/update/status")
     @tier(LOGIN)
@@ -9073,7 +9256,16 @@ def create_app(out_dir: Path):
         mutation off one web click, the same class as publish and the user-admin routes.
 
         Every refusal names its own reason, because "no" without a why is the thing that
-        makes a person start deleting files. The gates:
+        makes a person start deleting files. Each also carries a machine-readable `kind`
+        (2026-09-04, Identity Chrome handoff C2) so the modal can PRESENT it correctly
+        without guessing from the wording: "busy" means come back in a minute and nothing
+        is wrong (a job is running, or an apply already is); "failed" means this install
+        will refuse until something is changed. The third presentation the modal has --
+        offline -- is not a payload at all: it is the absence of one, decided client-side
+        when the request never reached this server. Adding the field rather than
+        string-matching the message is deliberate: the reasons below get reworded (three
+        of them did in v3.7.2), and a UI keyed to their prose would silently mis-colour
+        the next time one does. The gates:
           * confirm + CSRF          -- it was actually asked for, by this session
           * READ_ONLY               -- belt. Not a PixAI spend, but the owner's flag says
                                        "don't change my install", and this changes the
@@ -9105,40 +9297,47 @@ def create_app(out_dir: Path):
         reason: the person who can restart this server should be able to update it."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
-            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+            return jsonify({"error": "Your session expired. Reload the page and try again.",
+                            "kind": "failed"}), 400
         if not body.get("confirm"):
-            return jsonify({"error": "confirm required — the update is never applied silently"}), 400
+            return jsonify({"error": "confirm required — the update is never applied silently",
+                            "kind": "failed"}), 400
         import moonglade_backup as core
         if core.READ_ONLY or core._read_only_now():
             return jsonify({"error": "READ_ONLY is set in config.json — refusing to update "
                                      "this install. Remove it (or set it to false) to allow "
-                                     "this."}), 409
+                                     "this.", "kind": "failed"}), 409
         if not _supervised():
             return jsonify({"error": "Updating needs the managed launcher — start via "
                                      "'Serve Gallery'. (Without it the server would stop "
-                                     "instead of restarting into the new version.)"}), 409
+                                     "instead of restarting into the new version.)",
+                            "kind": "failed"}), 409
         busy = _job_busy()
         if busy:
             return jsonify({"error": "\"{}\" is still running — stop that job first "
-                                     "(the code can't change while it works).".format(busy)}), 409
+                                     "(the code can't change while it works).".format(busy),
+                            "kind": "busy"}), 409
         rc, branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
         branch = (branch or "").strip()
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's branch: "
-                                     + _redact_host_paths(branch)[:200]}), 409
+                                     + _redact_host_paths(branch)[:200],
+                            "kind": "failed"}), 409
         if branch != "master":
             return jsonify({"error": "this checkout is on '%s', not master — updating a "
                                      "feature branch is out of scope. Switch to master "
-                                     "first." % branch[:60]}), 409
+                                     "first." % branch[:60], "kind": "failed"}), 409
         rc, dirty = _git(["status", "--porcelain"])
         if rc != 0:
             return jsonify({"error": "couldn't read this checkout's state: "
-                                     + _redact_host_paths(dirty)[:200]}), 409
+                                     + _redact_host_paths(dirty)[:200],
+                            "kind": "failed"}), 409
         tracked, untracked = split_porcelain(dirty)
         if tracked:
             return jsonify({"error": "this checkout has uncommitted changes — the update "
                                      "would overwrite them. In the way: "
-                                     + _redact_host_paths(", ".join(tracked[:6]))}), 409
+                                     + _redact_host_paths(", ".join(tracked[:6])),
+                            "kind": "failed"}), 409
         # Untracked entries are judged against what the update actually brings, not
         # blocked on sight -- see split_porcelain and untracked_in_the_way. This costs a
         # fetch, but only on a checkout that HAS stray files, and only the fetch the pull
@@ -9150,17 +9349,19 @@ def create_app(out_dir: Path):
                 return jsonify({"error": "couldn't work out what the update brings, so "
                                          "whether your untracked files are in its way is "
                                          "unknown — and this won't guess. git said: "
-                                         + _redact_host_paths(why)[:300]}), 409
+                                         + _redact_host_paths(why)[:300],
+                                "kind": "failed"}), 409
             clash = untracked_in_the_way(untracked, incoming)
             if clash:
                 return jsonify({"error": "an untracked file is where the update needs to "
                                          "write: "
                                          + _redact_host_paths(", ".join(clash[:6]))
-                                         + " — move or delete it, then try again."}), 409
+                                         + " — move or delete it, then try again.",
+                                "kind": "failed"}), 409
             ignored_untracked = len(untracked)
         with _update_lock:
             if _update_state["phase"] not in ("idle", "failed"):
-                return jsonify({"error": "an update is already running"}), 409
+                return jsonify({"error": "an update is already running", "kind": "busy"}), 409
             _update_state.update(phase="pulling", error="", at=time.time())
 
         def _restart():
@@ -14505,7 +14706,7 @@ def create_app(out_dir: Path):
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 {# The app's ONE palette + every skin override, AFTER the bundle's stylesheet so
    the tokens win any same-specificity :root collision. Same idiom BASE_HTML and
@@ -14563,7 +14764,7 @@ __UPSCALE_CONST__
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Moonglade">
 <link rel="apple-touch-icon" href="/next/assets/icon-180.png">
-<script>/* apply saved skin before first paint (no FOUC) */try{var _sk=localStorage.getItem('skin');if(_sk&&_sk!=='moonglade')document.documentElement.setAttribute('data-skin',_sk);}catch(e){}</script>""" + _AUTH_401_GUARD_JS + """
+""" + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + """
 <link rel="stylesheet" href="/next/assets/app.css">
 <style>
 __DESIGN_TOKENS__
@@ -16293,7 +16494,17 @@ __DESIGN_TOKENS__
         sweep only fires once, at startup) -- e.g. the browser tab polling
         /api/task-status was closed, or the live-mirror watcher missed the WS event, and
         the task finished on PixAI's side with nothing here ever the wiser. Fails soft
-        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card."""
+        (see _reconcile_orphan_jobs); a reconciliation problem must never break the card.
+
+        `update` rides along: the standing release announcement (update_notice), or null.
+        This poll is the app's ONE always-running server-truth channel -- every open tab
+        runs it, on every screen, and gallery/src/notify/jobsStore.js already turns a
+        transition in this payload into a toast. So the background release check announces
+        through it rather than opening a loop of its own, which is the same rule the web
+        surfaces follow for jobs. It costs GitHub nothing: update_notice only REPORTS what
+        the hourly tick already found, and never fetches. Announce-only -- a client reading
+        it can light the version stamp and say so, and applying is still the Panel's
+        Update button and its confirm."""
         import moonglade_backup as core
         try:
             _reconcile_orphan_jobs(min_age=core.JOBS_ORPHAN_SWEEP_AGE)
@@ -16301,7 +16512,7 @@ __DESIGN_TOKENS__
             core.maybe_compact_jobs(out_dir)   # keep the append-only log bounded
         except Exception:
             jobs = []
-        return jsonify({"jobs": jobs})
+        return jsonify({"jobs": jobs, "update": update_notice()})
 
     @app.route("/api/jobs", methods=["POST"])
     @tier(LOGIN)

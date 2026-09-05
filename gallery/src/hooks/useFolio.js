@@ -122,6 +122,33 @@ export function revealMod(a, reveal) {
   return "";
 }
 
+/* THE LADDER'S FACE (2026-09-04, Identity Chrome handoff C4): the art of the HIGHEST
+   EARNED rung, not rung 1's.
+
+   A ten-track badge row that always showed each track's FIRST rung showed the same ten
+   pictures on day one and after a year of collecting -- the one place a glance could have
+   told you how far up each track you are, and it said nothing. The face is now the rung
+   you actually reached, so it upgrades itself the moment a higher one lands and the row
+   becomes a record rather than a menu.
+
+   `tiers` arrives sorted by rung (buildViewModel sorts it), so the LAST earned entry is
+   the highest -- found by scanning from the end rather than trusting a max(), because a
+   roster where two rungs share a threshold must still resolve to one face.
+
+   Pre-earn there is no face to show, so rung 1 stands in DIMMED (grayscale .6 ·
+   brightness .6, per the handoff) -- the track is legible, and legibly untouched. `rung`
+   is 1-based for the r№ badge; `earned` is what tells a renderer which of the two states
+   it is drawing. */
+export function ladderFace(tiers) {
+  if (!tiers || !tiers.length) return null;
+  for (let i = tiers.length - 1; i >= 0; i--) {
+    if (tiers[i].earned) {
+      return { tier: tiers[i], rung: i + 1, rarity: tiers[i].tier || "common", earned: true };
+    }
+  }
+  return { tier: tiers[0], rung: 1, rarity: tiers[0].tier || "common", earned: false };
+}
+
 /* Pure: flat achievements[] + ladders[] (the 10 track defs) + skin/earned_at ->
    the grouped shape the Folio's three tabs actually render from. Kept as one
    small pure function on purpose (per the task brief) so the next stage can
@@ -156,6 +183,7 @@ export function buildViewModel(data) {
       const tiers = byTrack[t.id] || [];
       return {
         id: t.id, name: t.name, metric: t.metric, tiers,
+        face: ladderFace(tiers),
         earnedCount: tiers.filter((x) => x.earned).length,
         totalCount: tiers.length,
       };
@@ -485,8 +513,14 @@ export default function useFolio() {
   const groupedTierCount = filteredLadderGroups.reduce((n, l) => n + l.filteredTiers.length, 0);
   const showGroups = groupedTierCount > 0;
 
+  // groupedTierCount, not filteredActiveTiers: since the ALL tab stopped rendering the
+  // active ladder's own grid (handoff C4 -- "Every rung, every ladder" is the single
+  // census), the question "did the search find any rung at all" is a question about the
+  // census. Asking the old one meant a search that matched a rung on some OTHER track
+  // still counted as nothing found, and the "Nothing in the record" panel printed above a
+  // census full of hits.
   const nothingFound = !!qlc && (
-    (!showLadders || filteredActiveTiers.length === 0) &&
+    (!showLadders || groupedTierCount === 0) &&
     (!showMilestones || filteredMilestones.length === 0) &&
     (!showMasteries || filteredMasteries.length === 0) &&
     (!showFeats || filteredFeats.length === 0)

@@ -64,7 +64,7 @@
    REAL, deliberate mobile-only gate -- desktop's own per-group Resolve has NO
    extra confirm (see DuplicateReviewOverlay.jsx's header comment for why that's
    right there); mobile gets this one per the design + this build's own brief. ---- */
-.mgdrm-confirm-title { font-family: Georgia, "Times New Roman", serif; font-size: 15px;
+.mgdrm-confirm-title { font-family: var(--font-hero); font-size: 15px;
   color: var(--text); text-align: center; }
 .mgdrm-confirm-body { font-size: 12px; color: var(--subtext); text-align: center;
   line-height: 1.55; margin-top: 6px; }

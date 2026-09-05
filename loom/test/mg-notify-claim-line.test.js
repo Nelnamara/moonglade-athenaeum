@@ -50,4 +50,28 @@ describe("the claim line in the activity tracker", () => {
     assert.match(guard.slice(0, 120), /last\[j\.job_id\]\s*=\s*st/,
       "the claim short-circuit must still remember the row's status");
   });
+
+  test("an update row swallows only its SUCCESS toast, never its failure", () => {
+    // The Identity Chrome handoff (C2) retires the "Updated Moonglade — done / Added to
+    // your gallery" toast because the update modal is the receipt for a success you were
+    // watching. It retires nothing about a FAILURE, which is the outcome that routinely
+    // lands with the modal closed and the tab moved on -- swallowing that one would make a
+    // failed update the only job in the app that fails in silence. Same source-structure
+    // check as the claim row above, and the same reason for it.
+    const i = store.indexOf("function toastTransitions(");
+    const body = store.slice(i, store.indexOf("\n}", i) + 2);
+    const at = body.indexOf('j.type === "update"');
+    assert.ok(at >= 0, "toastTransitions must special-case update rows");
+    const guard = body.slice(at, at + 120);
+    // The status test is what makes it success-only: an unqualified type check would take
+    // the failure with it.
+    assert.match(guard, /j\.type === "update"\s*&&\s*st\s*===\s*["']done["']/,
+      "the update short-circuit must be conditioned on the successful terminal state");
+    assert.match(guard, /last\[j\.job_id\]\s*=\s*st/,
+      "the update short-circuit must still remember the row's status");
+    // ...and the fall-through it leaves open is the generic sticky failure toast, which
+    // only fires for a row this map calls terminal.
+    assert.match(body, /TERMINAL\[st\]/,
+      "a failed update must reach the shared terminal-transition rule");
+  });
 });

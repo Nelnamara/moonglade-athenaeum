@@ -65,7 +65,7 @@ html.mg-noblur .mgai-scrim {
   transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0, 0, 0, .4); }
 .mgai-art { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center;
   overflow: hidden; background: linear-gradient(160deg, var(--surface0), var(--mantle)); }
-.mgai-initial { font-family: var(--serif, Georgia, "Times New Roman", serif); font-size: 34px; font-style: italic;
+.mgai-initial { font-family: var(--font-hero); font-size: 34px; font-style: italic;
   color: color-mix(in oklab, var(--lavender) 38%, transparent); }
 /* THE THUMB IS NEVER CROPPED (owner, 2026-09-05: "I don't like the way the thumbs are
    cropped"). It used to be object-fit: cover, so a portrait demo image lost both edges and

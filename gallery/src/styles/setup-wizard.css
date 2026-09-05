@@ -47,7 +47,7 @@
 .wz-slidewrap { text-align: center; padding: 4px 6px 8px; animation: wzFade .35s ease both; }
 .wz-mascotbox { height: 120px; margin-bottom: 6px; background-size: contain; background-position: center;
   background-repeat: no-repeat; filter: drop-shadow(0 10px 24px rgba(0,0,0,.5)); }
-.wz-slidehead { font-family: Georgia, "Times New Roman", serif; font-size: 22px; color: #efecf8;
+.wz-slidehead { font-family: var(--font-hero); font-size: 22px; color: #efecf8;
   margin-bottom: 10px; }
 .wz-slidebody { font-size: 13.5px; line-height: 1.6; color: var(--subtext); max-width: 420px; margin: 0 auto; }
 .wz-navrow { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
@@ -73,7 +73,7 @@
 /* ---- key entry ---- */
 .wz-stepkicker { font-size: 9.5px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
   color: var(--lavender); margin-bottom: 8px; }
-.wz-stephead { font-family: Georgia, serif; font-size: 19px; color: #efecf8; margin-bottom: 16px; }
+.wz-stephead { font-family: var(--font-hero); font-size: 19px; color: #efecf8; margin-bottom: 16px; }
 .wz-stepslist { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .wz-steprow { display: flex; align-items: flex-start; gap: 10px; }
 .wz-stepnum { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--surface0);
@@ -146,7 +146,7 @@
 /* Only the download halo surges purple with the steam; the plain .wz-synchalo (narrator
    screen) is left alone. Restates the animation list to add the surge alongside wzHalo. */
 .wz-synchalo-steam { animation: wzHalo 1.8s ease-in-out infinite, wzHaloSurge 9.1s ease-in-out infinite; }
-.wz-synchead { font-family: Georgia, serif; font-size: 17px; color: #efecf8; margin-bottom: 16px;
+.wz-synchead { font-family: var(--font-hero); font-size: 17px; color: #efecf8; margin-bottom: 16px;
   min-height: 24px; }
 .wz-synctrack { height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden;
   margin-bottom: 18px; }
@@ -173,7 +173,7 @@
 .wz-readymark { position: relative; font-size: 34px; color: var(--gold); margin: 0 auto 8px;
   animation: wzPulse 2.4s ease-in-out infinite; border-radius: 50%; display: grid; place-items: center;
   width: 64px; height: 64px; }
-.wz-readyhead { position: relative; font-family: Georgia, serif; font-size: 23px; color: #efecf8;
+.wz-readyhead { position: relative; font-family: var(--font-hero); font-size: 23px; color: #efecf8;
   margin-bottom: 8px; }
 .wz-readybody { position: relative; font-size: 12.5px; color: var(--subtext); margin-bottom: 20px; }
 .wz-enterbtn { position: relative; display: inline-block; font-size: 13.5px; font-weight: 700;

@@ -24,7 +24,7 @@
 @keyframes lbmSlide { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 .lbm-root { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column;
-  background: #05040d; color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #05040d; color: var(--text); font-family: var(--font-system);
   animation: lbmIn .28s cubic-bezier(.2,.9,.24,1) both; }
 .lbm-root.closing { animation: lbmOut .22s ease both; pointer-events: none; }
 

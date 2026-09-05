@@ -157,7 +157,10 @@ export default function FolioOverlay({ onClose }) {
     reveal,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
-    filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
+    // filteredActiveTiers is deliberately NOT destructured here any more: the ALL tab
+    // stopped rendering the active ladder's own grid (handoff C4). It stays on the hook
+    // for FolioMobile, whose ladder screen IS that per-ladder detail view.
+    filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
     filteredLadderGroups, showGroups, groupedTierCount,
   } = useFolio();
 
@@ -446,15 +449,31 @@ export default function FolioOverlay({ onClose }) {
                           <i className="mgfo-flex1" />
                           <span className="mgfo-count">{fmt(vm.buckets.find((b) => b.key === "ladder").earned)}/{fmt(vm.buckets.find((b) => b.key === "ladder").total)} rungs</span>
                         </div>
+                        {/* THE LADDER FACES (handoff C4). Each tile wears the art of the
+                            track's HIGHEST EARNED rung, bordered in that rung's own rarity
+                            colour and badged with its number, so the row reads as a record
+                            of how far up each track you are. Nothing earned yet: the SAME
+                            drawing, showing rung 1 and dimmed -- the number included, which
+                            is how the handoff draws an untouched track (it was left off
+                            here, so a track you had not started showed no rung at all while
+                            every other tile named one). */}
                         <div className="mgfo-laddergrid">
                           {vm.ladders.map((l) => {
                             const on = activeLadder && l.id === activeLadder.id;
+                            const face = l.face;
+                            const art = face ? face.tier : null;
                             return (
-                              <div key={l.id} className={"mgfo-ladderbadge" + (on ? " on" : "") + (l.earnedCount ? "" : " zero")}
-                                onClick={() => selectLadder(l.id)}>
+                              <div key={l.id}
+                                className={"mgfo-ladderbadge mgfo-t-" + ((face && face.rarity) || "common")
+                                  + (on ? " on" : "") + (face && face.earned ? "" : " zero")}
+                                onClick={() => selectLadder(l.id)}
+                                title={l.name + (face && face.earned
+                                  ? " — rung " + face.rung + " of " + l.totalCount
+                                  : " — nothing earned yet")}>
                                 <div className="mgfo-lb-img">
-                                  <img src={l.tiers[0] ? badgeSrc(l.tiers[0].id) : ""} alt="" loading="lazy"
-                                    onError={(e) => { if (!(l.tiers[0] && badgeHop(e.currentTarget, l.tiers[0].id))) e.currentTarget.remove(); }} />
+                                  <img src={art ? badgeSrc(art.id) : ""} alt="" loading="lazy"
+                                    onError={(e) => { if (!(art && badgeHop(e.currentTarget, art.id))) e.currentTarget.remove(); }} />
+                                  {face && <span className="mgfo-lb-rung">r{face.rung}</span>}
                                 </div>
                                 <div className="mgfo-lb-pips">
                                   {l.tiers.map((t) => <i key={t.id} className={t.earned ? "mgfo-t-" + t.tier : ""} />)}
@@ -465,20 +484,13 @@ export default function FolioOverlay({ onClose }) {
                           })}
                         </div>
 
-                        {activeLadder && (
-                          <>
-                            <div className="mgfo-sec-h">
-                              <b>{activeLadder.name}</b><span>measured in {activeLadder.metric}</span>
-                              <i className="mgfo-flex1" />
-                              <span className="mgfo-count">{activeLadder.earnedCount}/{activeLadder.totalCount}</span>
-                            </div>
-                            <CardGrid items={filteredActiveTiers} ladderName={activeLadder.name}
-                              earnedAt={earnedAt} skinsById={vm.skinsById}
-                              emptyLabel="No rung on this track answers the search."
-                              reveal={reveal} onReplay={replayToast} />
-                          </>
-                        )}
-
+                        {/* The active ladder's OWN grid used to render here, above a census
+                            that already contains every one of its rungs -- so on the ALL
+                            tab each of those rungs was drawn twice, in two different
+                            sections, a few hundred pixels apart. Deleted rather than
+                            deduped (handoff C4): "Every rung, every ladder" below is the
+                            single census, and the per-ladder view is the plinth directly
+                            above this row, which is where a track's own detail belongs. */}
                         {showGroups && (
                           <>
                             <div className="mgfo-sec-h">
