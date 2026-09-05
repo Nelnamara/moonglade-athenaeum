@@ -126,22 +126,35 @@ import "../styles/create-mobile.css";
    two-way Edit/Fixer control, not the design's literal three-way
    Edit/Fixer/Enhance -- see the ENHANCE paragraph directly below for why.
 
-   ENHANCE stays dead. Re-verified 2026-08-03: tests/test_enhance.py is
-   still 6/6 passing; there is still no /api/enhance or /api/workflows route,
-   no ENHANCE_PLUGINS/build_panelplugin_parameters/workflow_catalog anywhere
-   in the server. The two things still named "Enhance" in current code are
-   NOT that dead surface -- desktop's Edit-tab "Enhance" sub-tab
-   (GenerateDrawer.jsx) is the free, client-side Art Filters panel
-   (the art-filter engine, gallery/src/art/artFilters.js: nothing generated, nothing
-   spent, works offline), and Image mode's "Enhance Details" booster chip
-   (genCore.js's MG_HIRES) is an ordinary field of the Image payload (PixAI's
-   own hires-fix pass), not a separate dispatch. Neither is built here: this
-   increment's mobile Edit mode ships ONLY the real Edit sub-tab and Fixer's
-   honest placeholder -- no Art Filters mount, no hires booster UI, no
-   "Enhance" label anywhere in this file. If a later increment ever adds a
-   mobile Enhance surface, it must be the free client-side filters panel,
-   never a server dispatch -- the same rule the desktop research already
-   established.
+   ENHANCE is not built here. The server half of this paragraph said the
+   surface was dead everywhere; that stopped being true and is corrected
+   2026-09-04. /api/enhance, /api/enhance/presets, /api/enhance/emotions and
+   /api/workflows are all real routes (moonglade_gallery.py), and they dispatch
+   PixAI panelplugin workflows through build_panelplugin_parameters /
+   workflow_catalog (moonglade_backup.py): real generations that spend real
+   credits, refused unless the PixAI mirror is armed. tests/test_enhance.py
+   pins that restored surface now rather than its absence (run it for the
+   count). The one thing still gone for good is ENHANCE_PLUGINS -- the dead
+   "detail-fix"/"hand-fix"/"face-fix" dict, which that file also pins as
+   absent. Desktop's Edit-tab "Enhance" sub-tab is that paid dispatch:
+   EnhanceTab.jsx, mounted by GenerateDrawer.jsx only while the mirror is
+   armed, prices each preset off /api/enhance/presets, confirms the spend and
+   posts to /api/enhance. It is no longer the free filters panel -- the free,
+   client-side art filters (gallery/src/art/artFilters.js: nothing generated,
+   nothing spent, works offline) live in the Darkroom (Darkroom.jsx) now, which
+   that sub-tab merely opens a door to. Image mode's "Enhance Details" booster
+   chip (genCore.js's MG_HIRES) is unchanged and was never a dispatch: an
+   ordinary field of the Image payload, PixAI's own hires-fix pass.
+
+   None of that is built here, which has not changed: this increment's mobile
+   Edit mode ships ONLY the real Edit sub-tab and Fixer's honest placeholder --
+   no Art Filters mount, no hires booster UI, no "Enhance" label anywhere in
+   this file. The rule this paragraph used to close with -- that a mobile
+   Enhance surface "must be the free client-side filters panel, never a server
+   dispatch" -- rested entirely on the server having no such route. It has one,
+   so that rule is void as written and a mobile Enhance surface is simply
+   unscoped: whichever shape it takes is a decision still to be made, not one
+   this comment can claim was already settled.
 
    VIDEO MODE (this increment) is the shared <mg-generate-drawer> web
    component (static/mg-generate-drawer.js) -- the SAME element desktop's

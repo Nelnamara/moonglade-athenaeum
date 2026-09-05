@@ -305,15 +305,17 @@ same as any other generation.
 > That is PixAI's Hires applied to the image you are about to make — the same family of
 > settings, but part of the generation rather than something you do to a finished picture.
 
-## Art filters — free, in your browser
+## Art filters — the Darkroom, free and in your browser
 
 **Art filters** are not generations. Each one is two or three gradient overlays with a blend mode
 and an opacity, plus an optional brightness/contrast/saturation trim. PixAI's seven come from a
 public config endpoint that their own site reads and composites in the browser — which is why
 their Filters tab has no Generate button and never quotes a price.
 
-Moonglade does the same thing locally, and adds five of its own. Open the Generate drawer →
-**Edit** → **Enhance** → **Open filters**:
+Moonglade does the same thing locally, and adds five of its own. They live in **the Darkroom**, a
+full-screen room of their own: open the Generate drawer → **Edit** → **Enhance** →
+**Open the Darkroom ▸**. **Esc** closes it, and it remembers your filter and strength for the rest
+of the session.
 
 | Set | Filters |
 |---|---|
@@ -326,20 +328,20 @@ and they stay matched to the skins they came from, because a retinted skin fails
 pins them to it. They are also **exact-only**: every blend mode they use has a real CSS and canvas
 equivalent, so the saved PNG is the preview, pixel for pixel.
 
-The panel is a comparison. The **original** sits on the left, the **filtered preview** beside it,
-and the swatch rail with the strength and angle sliders on the right — judging a filter means
-seeing both at once, not toggling one image back and forth. Picking a filter costs **nothing** and
-makes **no network request at all**; it works with the connection down.
+The Darkroom is a comparison. The filter rail runs down the left — ours first, then PixAI's, each
+row showing that filter's own gradients as its swatch — and the stage holds two panes: your
+**source** and the **filtered** version beside it. Judging a filter means seeing both at once, not
+toggling one image back and forth. **Strength** and **angle** sit under the panes. Picking a filter
+costs **nothing** and makes **no network request at all**; it works with the connection down.
 
-Four actions sit under the rail:
+Three actions sit under the stage:
 
-- **No filter** — clear the preview back to the original.
 - **Save to library** — bake the result at full resolution into `imported/`, with a thumbnail and
   a catalog row, exactly as importing any local file does. Nothing is uploaded to PixAI.
-- **Send to image gen** — upload the filtered image to PixAI (free, the same handshake as
+- **Send to Edit** — upload the filtered image to PixAI (free, the same handshake as
   **↑ Import**) and load it straight into the Edit tab as the source, so you can generate *from*
   the filtered version. The upload spends nothing; only the generation you then run costs.
-- **Publish** — not built yet, and shown disabled with that reason.
+- **Reset to source** — clear the filter. Your strength and angle stay where you set them.
 
 Two of the eight blend modes PixAI uses are Photoshop's whole-colour *Darker Color* / *Lighter
 Color*, which have no CSS or canvas equivalent; they are rendered with `darken` / `lighten`
@@ -359,7 +361,10 @@ pixels.
 > selectable presets that run **only while _Mirror to PixAI_ is turned on** (Control Panel →
 > Maintenance) — with the mirror off, the sub-tab says so and points you at the toggle. Each
 > spends credits and **no free card covers a panelplugin task**, so the price shows before you
-> generate. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
+> generate. **Change Emotion** asks which expression you want, sorted into five families —
+> Bright, Soft, Dark, Startled, Playful — one family on screen at a time, so you pick from a
+> handful rather than scrolling every expression PixAI ships. A ★ means that expression needs
+> a PixAI membership. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
 > Separately, the box-coordinate hand/face **Fixer** (Edit → Fix) works on any credential and
 > always has, and plain **Upscale** and **Hires** are ordinary generation settings on the
 > Generate tab, not workflows.
@@ -527,9 +532,9 @@ the button comes back — the app will tell you it doesn't know rather than leav
   rather than letting you submit over it), aspect/mode/count, live credit cost with the
   free-card check up front.
 - **Edit** — instruct edits ("make it night") and the drag-a-box hand/face **Fixer**, in
-  sub-tabs over one source image. The third sub-tab, **Enhance**, is where PixAI's seven
-  **art filters** live: gradient overlays applied right in your browser, so they cost nothing,
-  make no request, and work offline.
+  sub-tabs over one source image. The **Enhance** sub-tab holds PixAI's one-click presets and
+  the door to **the Darkroom**, where the **art filters** live: gradient overlays applied right
+  in your browser, so they cost nothing, make no request, and work offline.
   The Fixer shows its live credit cost as soon as you mark a region, and always asks before
   it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
   it always spends. Fixed images are filed under the name of the image they repaired plus a

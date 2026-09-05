@@ -223,8 +223,9 @@ button:disabled { cursor: default; }
 /* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
    2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */
 
-/* (The art-filters compare panel's .af-* rules lived here until 2026-08-16; the panel
-   is FilterCompare.jsx now, styled in styles/dock.css as .mgfc-* to the DC's overlay.) */
+/* (The art-filters compare panel's .af-* rules lived here until 2026-08-16, moved to
+   styles/dock.css as .mgfc-*; the panel itself was replaced on 2026-09-04 by the
+   full-screen Darkroom -- Darkroom.jsx, styled in styles/dock.css as .mgdk-*.) */
 
 /* the model/LoRA browser panel, left of the drawer */
 .mfly { position: fixed; top: 0; right: var(--drawer-w); bottom: 0; z-index: 305;

@@ -25,7 +25,8 @@
         {error, ...extras} keeps its extras.
      2. A non-2xx with no body error becomes {error: "<status> <statusText>"}. Either way a
         non-2xx answer carries `http_status`, for the one caller that must say something
-        different about a 403 (components/FilterCompare.jsx -- the localhost-only import gate).
+        different about a 403 (components/Darkroom.jsx -- the localhost-only import gate;
+        it inherited the check from FilterCompare.jsx, the overlay it replaced).
      3. A transport failure (offline, dropped Wi-Fi, a hung socket) becomes
         {error: "network error: <message>"} -- the wording two of the four copies already used.
 

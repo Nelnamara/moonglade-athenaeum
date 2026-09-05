@@ -16,7 +16,7 @@ import { EDIT_DEFAULTS } from "../gen/editCore.js";
 import { videoRemixFromRow } from "../gen/videoRemixCore.js";
 import { dockLayout } from "../gen/dockLayout.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
-import FilterCompare from "./FilterCompare.jsx";
+import Darkroom from "./Darkroom.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
@@ -1044,7 +1044,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
                result lines render OUTSIDE the grid so a submit from the collapsed footer
                can still answer. */}
           <div className="mgdock-edithost" style={{ display: tab === "edit" ? "" : "none" }}>
-            <div className={"mgdock-slabs mgdock-editslabs" + (expanded ? "" : " collapsed")}>
+            {/* `.enh` re-cuts the three equal slab columns into the handoff's balanced TWO
+                (#48): presets wide on the left, the Edit slab stack narrow on the right with
+                the CTA at its foot. Only while the mirror is ARMED -- unarmed there are no
+                presets to balance, and the sub-tab is one quiet slab in the normal grid. */}
+            <div className={"mgdock-slabs mgdock-editslabs" + (expanded ? "" : " collapsed")
+              + (tab === "edit" && sub === "enhance" && mirrorArmed ? " enh" : "")}>
               {/* SLAB 1 -- SOURCE, for every sub-tab (the sub-tab strip lives inside it) */}
               <SourceSlab s={editS} setS={setEditS} sub={sub} onSub={setSub}
                 droppedNote={droppedNote} onDroppedNote={setDroppedNote} />
@@ -1054,11 +1059,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 onDroppedNote={setDroppedNote} dock={editDock} />
               <FixTab visible={tab === "edit" && sub === "fixer"} dock={editDock}
                 source={editS.source} />
-              {/* The Bridge §3 "Enhance — home, in the drawer" (The Bridge.dc.html 192-235):
-                  EnhanceTab is the WHOLE Enhance sub-tab. Armed, it stacks the 6 AI presets, the
-                  Change Emotion thumbnail control, the "dispatches in seconds" note, then the free
-                  art-filter swatches + compare button; off, only the free filters (§2, "as today").
-                  Shares slab 1's source; onOpenFilters opens the existing FilterCompare overlay. */}
+              {/* Enhance, rebuilt 2026-09-04 to the handoff's comp A2 (issue #48). EnhanceTab
+                  returns TWO slabs armed -- the preset grid + Change Emotion picker on the
+                  left, the Darkroom door + Generate CTA on the right, under this grid's own
+                  SOURCE slab -- and ONE quiet slab unarmed (the Bridge's §2 OFF rule: with the
+                  mirror off there are no presets, only the free filters). Shares slab 1's
+                  source; onOpenFilters opens the Darkroom. */}
               {tab === "edit" && sub === "enhance" && (
                 <EnhanceTab source={editS.source} armed={mirrorArmed} onOpenFilters={toggleFilters} />
               )}
@@ -1158,7 +1164,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
             <div ref={setEditPromptEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
               <div className="mgdock-composer-msg">
-                Filters need no prompt — open the panel, compare against the original, then save to your library.
+                Filters need no prompt — open the Darkroom, compare against the source, then save to your library.
               </div>
             )}
 
@@ -1241,9 +1247,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
             <div ref={setVideoGoEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
             <div ref={setEditGoEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "contents" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
-              /* Enhance's actions live in the slab now (EnhanceTab): the preset "Generate ✦ cost"
-                 button and the art-filters "Open compare view". The footer just carries the balance. */
-              <CostBadge stack balance={balance} hint="Pick a preset above, or open the filters to compare." />
+              /* Enhance's actions live in the slabs (EnhanceTab): the preset "✦ Enhance <cost>"
+                 button and "Open the Darkroom ▸". The footer just carries the balance. */
+              <CostBadge stack balance={balance} hint="Pick a preset above, or open the Darkroom for the free filters." />
             )}
           </div>
         </div>
@@ -1261,11 +1267,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
         onBasePick={onBasePick} onLoraPick={onLoraPick}
         onClose={() => setFlyOpen(false)}
       />
-      {/* The art-filters compare overlay (DC 591-658): a full-viewport scrim + centred
-          panel, so it no longer needs the dock's rect. It reads slab 1's SOURCE (DC 1513
-          'Pick a source image above' -- the same editS.source Edit and the Fixer use; the
-          overlay has no picker of its own). */}
-      <FilterCompare open={filtersOpen} onClose={() => setFiltersOpen(false)}
+      {/* THE DARKROOM (issue #48, handoff comp A1): the full-screen art-filters room that
+          replaced the centred compare overlay. It reads slab 1's SOURCE (the same
+          editS.source Edit uses; the room has no picker of its own) and hands a filtered
+          composite back through sendToEdit -- which is exactly where its "Send to Edit"
+          button has always gone, now under a name that says so. */}
+      <Darkroom open={filtersOpen} onClose={() => setFiltersOpen(false)}
         source={editS.source} onSendToEdit={sendToEdit} />
       {/* The run tooltip (DC 1594-1605): a SIBLING of the dock, never inside it -- the
           aside's transform: translateX(-50%) (+ the mgDockIn/Out transforms) would make
