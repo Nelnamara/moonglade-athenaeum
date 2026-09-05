@@ -26,21 +26,29 @@ import "../styles/shell.css";
 /* B1 -- the layout switcher, shrunk (Gallery Chrome Handoff.dc.html, 2026-09-04).
    It used to be four labelled buttons on their own full-width row at the head of
    the Filters tray (FiltersPanel's LayoutPicker); the handoff draws it instead as
-   an inline glyph trio sitting in this bar's SIZE group -- 92px all in: three
-   28x28 cells, 2px gaps, 2px padding, no text (each cell's tooltip carries its
-   name). Two earlier passes at this control were built from prose and backed out
-   (#41), which is why the .dc.html is the pixel source and these three glyphs are
-   ITS three, not the old row's (masonry and grid swap marks: ▤ is masonry now).
+   an inline glyph strip sitting in this bar's SIZE group -- 28x28 cells, 2px
+   gaps, 2px padding, no text (each cell's tooltip carries its name). Two earlier
+   passes at this control were built from prose and backed out (#41), which is why
+   the .dc.html is the pixel source and masonry/grid/timeline wear ITS marks, not
+   the old row's (masonry and grid swap marks: ▤ is masonry now).
 
-   HERO is deliberately absent. The handoff's trio is masonry/grid/timeline and
-   its 92px is exactly three cells wide, so Hero has no cell -- but it is not
-   deleted: it stays a valid stored `mg_gallery_layout` value and keeps its
-   command-palette row (App.jsx), so a library already in Hero renders in Hero
-   and nothing that could reach it lost the ability. With Hero active no cell
-   lights, which is honest; clicking any of the three moves out of it. */
-const LAYOUT_TRIO = [
+   HERO HAS A CELL (2026-09-05, owner). The first build of this control shipped
+   the handoff's three and left Hero reachable only from the command palette --
+   which quietly retired a layout the app had gained weeks earlier. The owner
+   said to add the button, so the strip is FOUR cells: 122px all in (four 28px
+   cells, three 2px gaps, 2px padding a side). The handoff drew three because it
+   drew three; nothing in it rules a fourth out, and a layout the gallery renders
+   must be switchable from the switcher.
+
+   ▣ IS PROVISIONAL. It was picked to sit with ▤ ▦ ≡ -- same Geometric Shapes
+   box, same stroke weight, same 11.7px advance as ▤/▦ in the app's own font
+   stack (measured in Chromium at 14px, not assumed), and it reads as one picture
+   featured inside the frame, which is what Hero lays out. It stands until the
+   owner's glyph workshop rules on the set. */
+const LAYOUT_CELLS = [
   ["masonry", "▤", "Masonry — aspect-true, no crop"],
   ["grid", "▦", "Grid — 4:3, smart-cropped"],
+  ["hero", "▣", "Hero — a large feature, the rest in a grid"],
   ["timeline", "≡", "Timeline — date-banded, newest first"],
 ];
 
@@ -160,14 +168,14 @@ export default function SeparatorBar({
           </svg>
         </button>
 
-        {/* B1 layout trio — beside SIZE, per the handoff. Persisted in
+        {/* B1 layout strip — beside SIZE, per the handoff. Persisted in
             mg_gallery_layout alongside the size value's mg_gallery_density
             (both are App state, both localStorage-backed). Hidden below the
             desktop breakpoint in shell.css: mobile is masonry only, so there
             is nothing there to switch between. */}
         {setLayout ? (
           <div className="mgx-lay" role="group" aria-label="Gallery layout">
-            {LAYOUT_TRIO.map(([key, glyph, title]) => (
+            {LAYOUT_CELLS.map(([key, glyph, title]) => (
               <button
                 key={key}
                 type="button"

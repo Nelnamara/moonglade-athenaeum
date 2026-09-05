@@ -999,14 +999,13 @@ export default function App({ boot }) {
     // The layout picker's own modes and its own exact glyphs, active one marked with the
     // emerald ✓. §8.2's ruling is "the layout picker's exact glyphs", so these follow the
     // picker wherever it lives -- and since B1 (2026-09-04) it is SeparatorBar's
-    // LAYOUT_TRIO, whose handoff-sourced marks are ▤ masonry · ▦ grid · ≡ timeline (the
-    // first two swapped against the old tray row's, the third a lighter mark).
-    // HERO keeps its row for the same reason it always had one: the trio has no cell for
-    // it, so the palette is the one place that can still reach it, and a layout the app
-    // still renders must stay reachable. Its ▧ is unchanged.
+    // LAYOUT_CELLS, whose marks are ▤ masonry · ▦ grid · ▣ hero · ≡ timeline. Masonry and
+    // grid swapped against the old tray row's, timeline took a lighter mark, and Hero's
+    // ▧ became ▣ when it got its own cell back (2026-09-05) -- the palette follows the
+    // picker rather than keeping a second, private mark for the same layout.
     for (const [key, label, glyph] of [
       ["masonry", "Masonry", "▤"], ["grid", "Grid", "▦"],
-      ["hero", "Hero", "▧"], ["timeline", "Timeline", "≡"],
+      ["hero", "Hero", "▣"], ["timeline", "Timeline", "≡"],
     ]) {
       list.push({
         id: "layout." + key, group: "Layout", icon: glyph, label,

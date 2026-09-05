@@ -37,9 +37,10 @@ const PER_CYCLE = [50, 100, 200];
 
 /* The LAYOUT icon picker (drift §46) used to live here: its own full-width row at
    the head of this tray, four labelled glyph buttons. B1 of the 2026-09-04
-   Gallery Chrome handoff shrank it to an inline 28×28 glyph trio beside the SIZE
-   control -- it is SeparatorBar.jsx's LAYOUT_TRIO now, and this tray no longer
-   takes `layout`/`setLayout` at all. */
+   Gallery Chrome handoff shrank it to an inline strip of 28×28 glyph cells beside
+   the SIZE control -- it is SeparatorBar.jsx's LAYOUT_CELLS now (all four layouts,
+   Hero included since 2026-09-05), and this tray no longer takes
+   `layout`/`setLayout` at all. */
 
 function Chip({ label, active, onClick, title }) {
   return (

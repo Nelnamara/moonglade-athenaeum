@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import useLibrary from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
+import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
@@ -225,6 +226,40 @@ import "../styles/create-mobile.css";
    lib.pages/lib.load this component already threads through for other
    purposes -- no second pagination copy.
 
+   ◈ SIMILAR ON THE PHONE (2026-09-05) -- the phone half of B2's one-system
+   Similar, built to the same shape App.jsx holds on the desktop rather than a
+   second, drifting mobile mechanism. `similarFor` is lifted HERE for the exact
+   reason detailsFor/lbIndex/folioOpen are: a door can be pressed from the
+   full-screen viewer, which covers the whole shell, and the answer has to land
+   on the Gallery tab underneath it.
+     - ONE VERB. showSimilar() below is the phone's whole similarity path, and
+       every door calls it: the viewer's ◈ Similar chip, and every result tile's
+       own ◈ (which re-anchors the set on that picture). It closes the viewer and
+       the record, lands on the Gallery tab, and sets the id -- the same
+       "close whatever is stacked on top of the library first" the desktop verb
+       does, plus the tab switch the phone needs and the desktop has no equivalent
+       of.
+     - ONE DATA PATH. useSimilar(similarFor) -- GET /api/similar/<mid>?k=48, the
+       same hook the phone's picture screen strip and both desktop surfaces read.
+       No second fetch anywhere.
+     - ONE RESULT STATE, and no library state touched. The ◈ token rides in the
+       Gallery tab's own search bar (GalleryMobile.jsx) and <SimilarResults> --
+       the SAME component the desktop renders, not a mobile fork -- takes the
+       grid's place under it. The query, the filters and the page are all left
+       exactly as they were, so ✕ on the token puts the library back without
+       re-running anything.
+     - WHERE THE PHONE DIFFERS, and only where it has to: the scroll offset that
+       has to be saved and put back is .glm-body's (the phone's real scroller --
+       gallery-mobile.css gives it overflow-y:auto), not the window's, which is
+       what the desktop saves; and the phone has no Escape, so the hardware/
+       browser Back gesture is wired as the second dismiss in its place (a
+       same-address history entry pushed when Similar opens, consumed again when
+       the token's ✕ closes it). That entry is the ONLY history AppMobile writes;
+       nothing else here is URL-synced, so it can never be stranded under a
+       later push. The phone's picture screen keeps its "see all" SHEET rather
+       than growing a door of its own -- a sheet is the phone's own idiom for
+       "the rest of these", and it was already real.
+
    CONTACT SHEET MOBILE (2026-08-03) -- the Gallery tab's Actions sheet
    (ActionsMenu.jsx, mounted "as-is" inside GalleryMobile.jsx) has a real
    "▤ Print sheet" item that, on mobile, previously fell through to
@@ -346,6 +381,63 @@ export default function AppMobile({ boot }) {
     setContactSheetTarget({ ids: ids || [], collectionName: collectionName || "" });
   };
   const closeContactSheet = () => setContactSheetTarget(null);
+
+  /* ◈ Similar -- see this component's own header comment for the full account of
+     why it is lifted here and where the phone deliberately differs from desktop. */
+  const [similarFor, setSimilarFor] = useState(null); // media_id | null
+  const bodyRef = useRef(null);          // .glm-body -- the phone's real scroller
+  const libScrollRef = useRef(null);     // saved on the way IN, put back on the way OUT
+  const showSimilar = (mid) => {
+    // Only the FIRST entry saves: chaining ◈ from inside the results re-anchors the set
+    // without the library having moved, and a second save would overwrite the library's
+    // offset with the (already clamped) similar one. null is "not in Similar"; 0 is real.
+    if (libScrollRef.current === null) {
+      libScrollRef.current = bodyRef.current ? bodyRef.current.scrollTop : 0;
+    }
+    setLbIndex(null);
+    setDetailsFor(null);
+    setTab("gallery");
+    setSimilarFor(mid);
+  };
+  const clearSimilar = () => setSimilarFor(null);
+  // The other half of the offset save. Layout effect: the grid is back in the DOM and
+  // measured but the frame has not painted, so the library returns already in place
+  // rather than visibly jumping.
+  useLayoutEffect(() => {
+    if (similarFor) return;
+    const y = libScrollRef.current;
+    if (y === null) return;
+    libScrollRef.current = null;
+    if (bodyRef.current) bodyRef.current.scrollTop = y;
+  }, [similarFor]);
+  const similar = useSimilar(similarFor);
+  const similarSource = useMemo(() => (similarFor ? {
+    media_id: similarFor,
+    thumb: (lib.items.find((it) => it.media_id === similarFor) || {}).thumb
+      || ("/thumbs/" + encodeURIComponent(similarFor) + ".jpg"),
+  } : null), [similarFor, lib.items]);
+  const similarToken = useMemo(() => (similarFor ? {
+    mid: similarFor, thumb: similarSource.thumb,
+    loading: similar.loading, count: similar.images.length,
+  } : null), [similarFor, similarSource, similar.loading, similar.images.length]);
+  /* The phone's second dismiss, standing in for the desktop's Escape: one history entry
+     pushed at the SAME address when Similar opens, so the Back gesture pops it and lands
+     back on the library instead of leaving the app. Keyed on the BOOLEAN, so re-anchoring
+     the set on another picture never churns history. If the token's ✕ closed it instead,
+     the cleanup consumes the entry we pushed so Back keeps meaning what it meant before. */
+  const simOn = !!similarFor;
+  useEffect(() => {
+    if (!simOn) return undefined;
+    let popped = false;
+    const onPop = () => { popped = true; setSimilarFor(null); };
+    window.history.pushState({ mgSimilar: 1 }, "");
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (!popped) window.history.back();
+    };
+  }, [simOn]);
+
   const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
     if (idx < 0) {
@@ -371,8 +463,8 @@ export default function AppMobile({ boot }) {
   };
 
   // Same advParams shape App.jsx's own DetailsView mount builds (mirrors
-  // /api/next/library's own filter params) -- so Prev/Next and "Find similar
-  // (model)"/"View batch" walk the SAME filtered/sorted set the lifted
+  // /api/next/library's own filter params) -- so Prev/Next and "Filter by
+  // model"/"View batch" walk the SAME filtered/sorted set the lifted
   // useLibrary() instance is currently showing, exactly like desktop.
   //
   // BUG FIX 2026-08-04 (same root cause found and fixed in App.jsx): this
@@ -405,7 +497,7 @@ export default function AppMobile({ boot }) {
     }
   };
 
-  // Details' "Find similar (model)"/"View batch" chips -- App.jsx's own
+  // Details' "Filter by model"/"View batch" chips -- App.jsx's own
   // filterByModel/filterByBatch, ported: close Details, land on the Gallery
   // tab (so the filtered result is actually visible), apply through the SAME
   // lifted useLibrary() instance every other mobile filter control uses.
@@ -548,10 +640,12 @@ export default function AppMobile({ boot }) {
         ) : null}
       </header>
 
-      <div className="glm-body">
+      <div className="glm-body" ref={bodyRef}>
         {tab === "gallery" && (
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
-            onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet} />
+            onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet}
+            similar={similarToken} similarState={similar} similarSource={similarSource}
+            onSimilar={showSimilar} onClearSimilar={clearSimilar} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
@@ -647,6 +741,7 @@ export default function AppMobile({ boot }) {
           onClose={closeLightbox} onRate={rate}
           page={lib.page} pages={lib.pages} loadPage={lib.load}
           onOpenDetails={openDetailsFromLightbox}
+          onSimilar={showSimilar}
         />
       )}
 

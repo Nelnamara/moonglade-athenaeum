@@ -201,19 +201,32 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
   });
 });
 
-describe("(c2) B1: the layout switcher is the separator bar's glyph trio", () => {
+describe("(c2) B1: the layout switcher is the separator bar's glyph strip", () => {
   const sep = src("gallery/src/components/SeparatorBar.jsx");
   const shell = src("gallery/src/styles/shell.css");
-  test("three 28x28 cells, the handoff's own glyphs, no labels, beside SIZE", () => {
+  test("four 28x28 cells, the handoff's own glyphs plus Hero's, no labels, beside SIZE", () => {
     assert.ok(sep.includes('["masonry", "\u25a4", "Masonry \u2014 aspect-true, no crop"]'));
     assert.ok(sep.includes('["grid", "\u25a6", "Grid \u2014 4:3, smart-cropped"]'));
+    assert.ok(sep.includes('["hero", "\u25a3", "Hero \u2014 a large feature, the rest in a grid"]'));
     assert.ok(sep.includes('["timeline", "\u2261", "Timeline \u2014 date-banded, newest first"]'));
     assert.ok(sep.includes('className="mgx-lay"'));
     // it sits immediately before the SIZE pill
     assert.ok(sep.indexOf('className="mgx-lay"') < sep.indexOf('className="mgx-size"'));
-    // 92px all in: 3 x 28 cells + 2px gaps + 2px padding
+    // 122px all in: 4 x 28 cells + three 2px gaps + 2px padding a side
     assert.match(shell, /\.mgx-laycell \{[^}]*width: 28px; height: 28px;/);
     assert.match(shell, /\.mgx-lay \{[^}]*gap: 2px; padding: 2px;/);
+  });
+  test("Hero is a CELL, not palette-only -- and the palette wears the cell's mark", () => {
+    // 2026-09-05 (owner): the first B1 build shipped three cells and left Hero reachable
+    // only from the command palette. Every layout the gallery renders is in the strip now.
+    const cells = sep.slice(sep.indexOf("const LAYOUT_CELLS = ["), sep.indexOf("];", sep.indexOf("const LAYOUT_CELLS = [")));
+    for (const key of ["masonry", "grid", "hero", "timeline"]) {
+      assert.ok(cells.includes('"' + key + '"'), key + " has a cell in the strip");
+    }
+    assert.ok(!sep.includes("LAYOUT_TRIO"), "the trio is a quartet now");
+    // the palette's Hero row carries the SAME glyph the cell does (\u25a3, not the old \u25a7)
+    assert.ok(app.includes('["hero", "Hero", "\u25a3"]'));
+    assert.ok(!app.includes('["hero", "Hero", "\u25a7"]'));
   });
   test("NO mobile switcher -- the control does not render below the desktop breakpoint", () => {
     assert.match(shell, /@media \(max-width: 860px\) \{ \.mgx-lay \{ display: none; \} \}/);

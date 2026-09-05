@@ -146,18 +146,22 @@ images and videos with the arrow keys without leaving the overlay.
   Similar. (The mark does appear as a small decoration elsewhere in the app — beside a model's
   use count in the picker, on a *USER LORA* badge — where it is punctuation, not a door.)
 
-  **On a phone this pass hasn't happened yet, and Similar there is unchanged.** It keeps its
-  old **✧** mark: the picture screen's **✧ SIMILAR** row is real and shows you its lookalikes,
-  the big viewer's **✧ Similar** button is still a placeholder that tells you a mobile pass is
-  coming, and the model filter beside them is still labelled *Find similar (model)*. The phone
-  gets its own pass at all of this later.
-
   What you get is a **state on your library, not a popup**: a dismissible **◈ Similar to
   [thumbnail]** token appears in the search bar with the match count beside it, and the 48
   closest images take the grid's place underneath. **✕ on the token — or `Esc` — puts your
   library back exactly as it was**, same search, same filters, same page, because none of
   them were ever changed. Any result's own ◈ re-points the view at that picture, so you can
   walk from one lookalike to the next.
+
+  **On a phone it works the same way, with the phone's own door.** Press **◈ Similar** on the
+  big viewer's button row and the lookalikes fill the library's own space back on the Gallery
+  tab, under the same **◈ Similar to [thumbnail]** token — in the search bar, on its own line
+  under the field so the field is still usable, with the match count beside it. **✕ on the
+  token, or the phone's Back gesture, puts your library back exactly as it was**, same search,
+  same filters, same page, same place on the page. The picture screen's own **◈ SIMILAR** row
+  and the **see all** sheet behind it read the same mark; that sheet stays a sheet, because
+  it is the phone's way of showing you the rest of something you are already looking at.
+  *Filter by model* is called that on the phone too.
 
   Images only. Needs the optional CLIP index — `pip install pixeltable`, then build it once
   with `python moonglade_backup.py --rebuild-similar` (run that while the gallery isn't

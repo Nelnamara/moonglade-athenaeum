@@ -78,12 +78,22 @@ import "../styles/lightbox-mobile.css";
    gone: <UpscalePanel> is now plain JSX, so React remounts it automatically the
    moment `it` is valid again -- no mount effect, no host-div-teardown race.)
 
-   EDIT / TO VIDEO / SIMILAR -- the design file's own mock ships these three
-   as literal no-op `onClick:()=>{}` stubs. Left as honest, disclosing toasts
-   here (this codebase's own established convention for an undone surface --
-   see CreateMobile.jsx's Video mode, ImageDetailsMobile.jsx's "Send to
-   Video"), not silent dead taps and not newly-invented functionality outside
-   this build's brief. Upscale/Details/Slideshow are all real. */
+   EDIT / TO VIDEO -- the design file's own mock ships these as literal no-op
+   `onClick:()=>{}` stubs. Left as honest, disclosing toasts here (this
+   codebase's own established convention for an undone surface -- see
+   CreateMobile.jsx's Video mode, ImageDetailsMobile.jsx's "Send to Video"),
+   not silent dead taps and not newly-invented functionality outside this
+   build's brief. Upscale/Details/Slideshow are all real.
+
+   ◈ SIMILAR IS REAL NOW (2026-09-05). It was the third of those stubs -- a
+   toast saying its own mobile pass was coming. It is a DOOR: `onSimilar` is
+   the same one verb every Similar entry point on the phone calls (AppMobile's
+   showSimilar), so pressing it closes this viewer, lands on the Gallery tab,
+   and shows the lookalikes there under the ◈ token -- exactly what the desktop
+   Lightbox's own ◈ Similar chip does, and reading the SAME
+   GET /api/similar/<mid>?k=48 the phone's picture screen already read. The
+   mark, the word and the lavender face are the desktop chip's, so the two
+   read as one control rather than two cousins. */
 
 const SLIDE_MS = 4200;
 
@@ -92,7 +102,7 @@ function toast(title, msg) {
 }
 
 export default function LightboxMobile({
-  items, index, setIndex, onClose, onRate, page, pages, loadPage, onOpenDetails,
+  items, index, setIndex, onClose, onRate, page, pages, loadPage, onOpenDetails, onSimilar,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -328,8 +338,9 @@ export default function LightboxMobile({
             onClick={() => toast("Edit", "Its own mobile wiring — coming later.")}>✎ Edit</button>
           <button type="button" className="lbm-chip"
             onClick={() => toast("Send to Video", "Its own mobile wiring — coming later.")}>▶ To Video</button>
-          <button type="button" className="lbm-chip"
-            onClick={() => toast("Similar", "Its own mobile pass — coming later.")}>✧ Similar</button>
+          <button type="button" className="lbm-chip lbm-similar"
+            title="Find what looks like this one"
+            onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
           <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
           <button type="button" className="lbm-chip" onClick={() => onOpenDetails(it.media_id)}>Details ›</button>
           <button type="button" className="lbm-chip lbm-chip-metal" onClick={() => setSlideOn((v) => !v)}>

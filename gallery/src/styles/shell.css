@@ -281,12 +281,17 @@
   background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
 
 /* ---- SIZE pill ---- */
-/* ---- B1: the layout trio (Gallery Chrome Handoff.dc.html, 2026-09-04) --------
-   92px the way the handoff measures it: three 28×28 glyph cells + two 2px gaps +
-   2px padding a side = 92px of content, gaps and padding. The rendered box is
-   94px, because the 1px border rides outside that sum -- the handoff's own div
-   carries the same `border: 1px solid var(--surface1)`, so 92 is its number for
-   the same construction rather than a target this misses by two. It sits in the
+/* ---- B1: the layout strip (Gallery Chrome Handoff.dc.html, 2026-09-04) -------
+   The handoff measures its three cells at 92px: three 28×28 glyph cells + two
+   2px gaps + 2px padding a side = 92px of content, gaps and padding, with the
+   1px border riding outside that sum (the handoff's own div carries the same
+   `border: 1px solid var(--surface1)`, so 92 is its number for the same
+   construction, and the rendered box is 94px).
+
+   HERO'S CELL (2026-09-05, owner) makes it FOUR cells on the same construction:
+   4 × 28 + 3 × 2 + 2 × 2 = 122px of content, gaps and padding, a 124px rendered
+   box. Nothing else about the control changes -- the extra 30px sits in the
+   separator bar's left group, which is flex and has the room. It sits in the
    SIZE group. No labels -- each cell's title
    attribute (and aria-label) carries its name. The active cell fills lavender
    with a dark glyph, the handoff's one selection idiom for this control.

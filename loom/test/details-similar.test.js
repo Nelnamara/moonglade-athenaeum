@@ -194,6 +194,97 @@ test("E: vt-reveal is unique per view -- Details drops the name while the Lightb
   for (const f of others) assert.doesNotMatch(src(f), /vt-reveal/, f + " must not carry vt-reveal");
 });
 
+// ---------------------------------------------------------------- F. the phone half
+
+// 2026-09-05 (owner). B2 shipped the desktop and wrote a carve-out saying the phone had
+// nowhere to put the token. The phone has a search field -- GalleryMobile.jsx's
+// .glm-search -- so the carve-out was wrong and is gone. These pin the phone half's
+// wiring; tests/test_render_harness.py drives the whole round trip at a real 390px
+// viewport (door -> results -> token -> the library back).
+const appMobile = src("components/AppMobile.jsx");
+const lbMobile = src("components/LightboxMobile.jsx");
+const galleryMobile = src("components/GalleryMobile.jsx");
+
+test("F: the phone viewer's Similar is a DOOR, not a toast, and wears ◈", () => {
+  assert.match(lbMobile, /className="lbm-chip lbm-similar"[\s\S]{0,160}◈ Similar</);
+  assert.match(lbMobile, /onClick=\{\(\) => onSimilar && onSimilar\(it\.media_id\)\}/);
+  assert.doesNotMatch(lbMobile, /✧ Similar/);
+  assert.doesNotMatch(lbMobile, /toast\("Similar"/);          // the stub is gone
+  assert.match(lbMobile, /onOpenDetails, onSimilar,/);        // a real prop, not a global
+  assert.match(src("styles/lightbox-mobile.css"), /\.lbm-similar \{[^}]*var\(--lavender/);
+  // Edit / To Video are still honest toasts -- this pass fixed Similar, not those
+  assert.match(lbMobile, /toast\("Send to Video"/);
+});
+
+test("F: AppMobile owns one verb and one data path, exactly like App.jsx does", () => {
+  assert.match(appMobile, /import useSimilar from "\.\.\/hooks\/useSimilar\.js"/);
+  assert.match(appMobile, /const similar = useSimilar\(similarFor\)/);
+  const verb = appMobile.match(/const showSimilar = \(mid\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(verb, "AppMobile defines showSimilar");
+  assert.match(verb[1], /setLbIndex\(null\)/);        // the viewer closes
+  assert.match(verb[1], /setDetailsFor\(null\)/);     // the record closes
+  assert.match(verb[1], /setTab\("gallery"\)/);       // the answer has to be visible
+  assert.match(verb[1], /setSimilarFor\(mid\)/);
+  // the viewer gets the verb, and so does the gallery tab (its results re-anchor on it)
+  assert.match(appMobile, /<LightboxMobile[\s\S]{0,400}onSimilar=\{showSimilar\}/);
+  assert.match(appMobile, /<GalleryMobile[\s\S]{0,400}onSimilar=\{showSimilar\}/);
+});
+
+test("F: the phone restores the library exactly -- its OWN scroller, and Back as the second dismiss", () => {
+  // .glm-body is the phone's scroller (gallery-mobile.css: overflow-y:auto), not the
+  // window the desktop saves -- so the offset save/restore reads that element.
+  assert.match(appMobile, /libScrollRef\.current = bodyRef\.current \? bodyRef\.current\.scrollTop : 0;/);
+  assert.match(appMobile, /if \(bodyRef\.current\) bodyRef\.current\.scrollTop = y;/);
+  assert.match(appMobile, /className="glm-body" ref=\{bodyRef\}/);
+  // only the FIRST entry saves, so chaining ◈ can't overwrite the library's own offset
+  assert.match(appMobile, /if \(libScrollRef\.current === null\) \{/);
+  // no Escape on a phone: ONE same-address history entry stands in for it, keyed on the
+  // boolean so re-anchoring the set never churns history
+  assert.match(appMobile, /const simOn = !!similarFor;/);
+  assert.match(appMobile, /window\.history\.pushState\(\{ mgSimilar: 1 \}, ""\);/);
+  assert.match(appMobile, /if \(!popped\) window\.history\.back\(\);/);
+});
+
+test("F: the ◈ token rides the phone's own search bar, and the results take the grid's place", () => {
+  assert.match(galleryMobile, /className="glm-simtok"/);
+  assert.match(galleryMobile, /className="glm-simtok-th"/);      // the source picture's thumb
+  assert.match(galleryMobile, /◈ Similar to this/);
+  assert.match(galleryMobile, /className="glm-simtok-x"/);       // ✕ dismisses
+  assert.match(galleryMobile, /className="glm-simcount"/);
+  assert.match(galleryMobile, /by likeness/);
+  // it is INSIDE .glm-bar, the row that holds the search field
+  const bar = galleryMobile.slice(galleryMobile.indexOf('className="glm-bar"'),
+    galleryMobile.indexOf('className="glm-bar2"'));
+  assert.match(bar, /className="glm-simrow"/);
+  assert.match(bar, /className="glm-search"/);
+  // the SHARED results component, not a mobile fork, and it replaces the grid + pager
+  assert.match(galleryMobile, /import SimilarResults from "\.\/SimilarResults\.jsx"/);
+  assert.match(galleryMobile, /\{similar \? \([\s\S]{0,700}<SimilarResults/);
+  assert.match(galleryMobile, /\{!similar && !loading && pages > 1 && \(/);
+  // and the phone's own layout overrides for it (the desktop track is one column at 390px,
+  // and there is no hover to reveal a result's door with)
+  const gmCss = src("styles/gallery-mobile.css");
+  assert.match(gmCss, /\.glm-tab-gallery \.simres-grid \{[^}]*grid-template-columns: 1fr 1fr;/);
+  assert.match(gmCss, /\.glm-tab-gallery \.simres-door \{[^}]*opacity: 1;/);
+});
+
+test("F: ✧ is gone from the phone, and its model filter says what it does", () => {
+  // Comments are stripped first: the files still SAY the old mark where they record what
+  // it used to be, and that history is worth keeping. What must not survive is a ✧ the
+  // phone actually draws.
+  const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const [name, file] of [["picture screen", mobile], ["viewer", lbMobile],
+    ["gallery tab", galleryMobile], ["shell", appMobile]]) {
+    assert.doesNotMatch(code(file), /✧/, "✧ is still drawn by the phone's " + name);
+  }
+  assert.match(mobile, />◈ SIMILAR</);                    // the strip head
+  assert.match(mobile, /title="◈ SIMILAR"/);              // the "see all" sheet
+  assert.match(code(mobile), />\s*Filter by model\s*</);
+  assert.doesNotMatch(code(mobile), /Find similar \(model\)/);
+  // the sheet stays a SHEET -- the phone's own idiom for "the rest of these"
+  assert.match(mobile, /<MobileSheet open=\{simSheetOpen\}/);
+});
+
 test("useSimilar consumes apiGet's parsed body directly -- never double-parses (#31 Similar strip)", () => {
   const hook = src("hooks/useSimilar.js");
   assert.match(hook, /apiGet\(/, "useSimilar must call apiGet (the one request module), not raw fetch");
