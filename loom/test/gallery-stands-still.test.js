@@ -17,11 +17,15 @@ import path from "node:path";
 
    tests/test_render_harness.py::test_a_finished_generation_never_moves_the_page_the_owner_
    is_reading measures the DESKTOP behaviour in a real browser: page 2 stays, page 1
-   refreshes. These are the source-structure guards for the parts that harness cannot see --
-   the phone shell (no rendering test drives a phone completion), the selection prune, and
-   the third hard-coded jump the same policy governs (Details' onDeleted). Same pattern and
-   same reason as loom/test/overlay-open-perf.test.js: no React test renderer here, so what
-   can be pinned is the structure the behaviour rests on. */
+   refreshes. The completion-vs-navigation RACE is measured in that same real browser on
+   both shells -- ..._never_out_races_the_owners_own_page_change on the desktop and
+   ..._on_the_phone at a real 390px viewport, each holding the owner's page-2 request
+   mid-flight and firing the completion into that window. These are the source-structure
+   guards for what those cannot see -- the phone's announce-only half, the selection prune,
+   and the third hard-coded jump the same policy governs (Details' onDeleted) -- plus the
+   shape of the intent ref on both shells, so the two stay one idiom. Same pattern and same
+   reason as loom/test/overlay-open-perf.test.js: no React test renderer here, so what can
+   be pinned is the structure the behaviour rests on. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Line endings normalized on read, as everywhere in this suite: the repo stores LF
@@ -170,20 +174,70 @@ describe("the phone learns completions exist -- announce-only", () => {
 
   test("the library moves only from the phone's own default view: page 1, and not under ◈ Similar", () => {
     const onDone = bodyOf(mobile, "const onDone = () => {", "    };");
-    assert.match(onDone, /if \(genPageRef\.current !== 1 \|\| genSimilarRef\.current\) return;/);
-    assert.ok(onDone.indexOf("genPageRef.current !== 1") < onDone.indexOf("genLoadRef.current(1, true)"),
+    // Read off what the owner ASKED for, exactly as the desktop's guard is.
+    assert.match(onDone, /const nav = navRef\.current;/);
+    assert.match(onDone, /if \(nav\.inFlight \|\| nav\.want !== 1\) return;/);
+    assert.match(onDone, /if \(genSimilarRef\.current\) return;/);
+    assert.ok(onDone.indexOf("nav.want !== 1") < onDone.indexOf("genLoadRef.current(1, true)"),
       "the default-view guard must precede the load it guards");
+    assert.ok(onDone.indexOf("genSimilarRef.current) return") < onDone.indexOf("genLoadRef.current(1, true)"),
+      "the ◈ guard must precede the load it guards");
     assert.match(onDone, /genLoadRef\.current\(1, true\)\.then\(/);
     assert.match(onDone, /if \(data\) pruneSelected\(setLibSelected, data\.items\);/);
+    // The stale-page read this replaced: `lib.page` only becomes the page the owner
+    // tapped for when the SERVER answers, so a completion landing mid-flight read the
+    // page he was leaving, passed, and won the reqSeq race against his own request.
+    assert.doesNotMatch(mobile, /genPageRef/);
   });
 
   test("refs, because the listeners mount once and load's identity follows the filters", () => {
-    assert.match(mobile, /const genPageRef = useRef\(lib\.page\);/);
     assert.match(mobile, /const genLoadRef = useRef\(lib\.load\);/);
     assert.match(mobile, /const genSimilarRef = useRef\(similarFor\);/);
-    assert.match(mobile, /genPageRef\.current = lib\.page;/);
     assert.match(mobile, /genLoadRef\.current = lib\.load;/);
     assert.match(mobile, /genSimilarRef\.current = similarFor;/);
+  });
+
+  test("the phone's intent ref is written synchronously by every hand that asks for a page", () => {
+    // `want` starts at 1 and not at anything address-derived, because this shell keeps NO
+    // page in the URL at all -- page 1 is where it always opens. That absence is also why
+    // there is no Back/Forward hand to cover the way App.jsx's popstate is.
+    assert.match(mobile, /const navRef = useRef\(\{ want: 1, inFlight: 0 \}\);/);
+    // userLoad: intent + in-flight count written BEFORE the request leaves, and the same
+    // promise handed back -- LightboxMobile's page-boundary step reads data.items off it.
+    const userLoad = bodyOf(mobile, "const userLoad = useCallback((p, replace) => {", "  }, [lib.load]);");
+    assert.match(userLoad, /navRef\.current\.want = p;/);
+    assert.match(userLoad, /navRef\.current\.inFlight \+= 1;/);
+    assert.match(userLoad, /navRef\.current\.inFlight = Math\.max\(0, navRef\.current\.inFlight - 1\);/);
+    assert.match(userLoad, /return lib\.load\(p, replace\)\.then\(\(d\) => \{ settle\(\); return d; \}, \(e\) => \{ settle\(\); throw e; \}\);/);
+    assert.ok(userLoad.indexOf("navRef.current.want = p") < userLoad.indexOf("return lib.load(p, replace)"),
+      "the intent must be on the record before the request leaves");
+    // The two hands this surface has. The pager takes `load` as a prop out of the {...lib}
+    // spread, so userLoad has to be passed AFTER the spread to win it.
+    assert.match(mobile, /\{\.\.\.lib\}\n\s+load=\{userLoad\}/);
+    assert.match(mobile, /page=\{lib\.page\} pages=\{lib\.pages\} loadPage=\{userLoad\}/);
+    // ...and neither may reach the raw load any more.
+    assert.doesNotMatch(mobile, /loadPage=\{lib\.load\}/);
+    // GalleryMobile's pager is the ONE thing that prop drives, and it still calls it.
+    const grid = src("components/GalleryMobile.jsx");
+    assert.match(grid, /onClick=\{\(\) => load\(page - 1, true\)\}/);
+    assert.match(grid, /onClick=\{\(\) => load\(page \+ 1, true\)\}/);
+  });
+
+  test("`page` reconciles the intent only when nothing of the owner's is still in the air", () => {
+    const mirror = bodyOf(mobile, "  useEffect(() => {\n    genLoadRef.current = lib.load;", "  });");
+    assert.match(mirror, /genSimilarRef\.current = similarFor;/);
+    // The same rule the desktop reconciles by, so a filter / per-page / collection change
+    // resetting the grid to page 1 hands the perch back.
+    assert.match(mirror, /if \(!navRef\.current\.inFlight && lib\.total != null\) navRef\.current\.want = lib\.page;/);
+  });
+
+  test("the mutation reloads stay on the RAW load, exactly as the desktop's afterMutation does", () => {
+    // afterImported / afterDuplicatesResolved / afterPublishOrTrain / Details' onDeleted
+    // are aftermaths, not the owner asking for a page: they jump to 1 on their own and the
+    // reconciliation rule hands the perch back when they land. userLoad would claim an
+    // intent he never expressed.
+    assert.match(mobile, /const afterPublishOrTrain = async \(\) => \{ lib\.load\(1, true\); \};/);
+    assert.match(mobile, /onDeleted=\{\(\) => \{ closeDetails\(\); lib\.load\(1, true\); \}\}/);
   });
 
   test("STILL no Jobs.register on the phone shell -- registration belongs to the submit road", () => {

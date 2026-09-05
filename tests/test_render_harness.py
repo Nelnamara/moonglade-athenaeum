@@ -2813,3 +2813,125 @@ def test_a_completion_never_out_races_the_owners_own_page_change(
                 before["library"], after["library"]))
     finally:
         ctx.close()
+
+
+# The phone's own two reads, for the test below. The grid is a two-COLUMN masonry
+# (GalleryGridMobile.jsx's .glm-col / .glm-col-off), so DOM order is not visual order --
+# it is still deterministic for the same page, which is all "are these page 2's cards?"
+# needs. And the page number lives in prose ("Page 2 of 2 · 120 matches",
+# GalleryMobile.jsx's .glm-pager-info) because the phone has no numbered pagebar and no
+# ?page= to read it off instead.
+_PHONE_TILES_JS = ("() => Array.from(document.querySelectorAll('.glm-grid .glm-tile-img'))"
+                   ".map((el) => el.getAttribute('src'))")
+_PHONE_PAGE_JS = ("() => { const el = document.querySelector('.glm-pager-info');"
+                  " if (!el) return 0;"
+                  " const m = /Page\\s+(\\d+)\\s+of/.exec(el.textContent);"
+                  " return m ? Number(m[1]) : 0; }")
+
+
+def _phone_on_page(page, n):
+    """Wait until the phone's pager says page `n` -- which it only does once the load has
+    landed, because GalleryMobile renders the pager under `!loading`."""
+    page.wait_for_function(
+        "(n) => { const el = document.querySelector('.glm-pager-info');"
+        " if (!el) return false;"
+        " const m = /Page\\s+(\\d+)\\s+of/.exec(el.textContent);"
+        " return !!m && Number(m[1]) === n; }", arg=n)
+
+
+def test_a_completion_never_out_races_the_owners_own_page_change_on_the_phone(
+        paged_library_server, render_browser, monkeypatch):
+    """The same race, the same rule, at 390px -- the phone's own hand on its own pager.
+
+    The desktop's pass closed this on App.jsx (the test above). The phone carried the
+    identical shape for the identical reason and was NOT covered by it: GalleryMobile's
+    pager calls `load(page + 1, true)` straight through, and AppMobile's completion guard
+    read `genPageRef` -- a mirror of `lib.page`, which only becomes 2 when the SERVER
+    answers. A completion landing in that window read the page he was LEAVING, found 1,
+    passed the perch guard and fired its own load(1, true), whose newer reqSeq
+    (useLibrary.js) discarded the page-2 answer he was waiting on. On the phone there is no
+    ?page= for that to drag back -- the loaded page IS the whole of where you are -- so the
+    only symptom is the one that matters: the tap simply does not happen.
+
+    Same instrument as the desktop's: the page-2 request is HELD in the page
+    (_COUNT_FETCH_JS's __mgHold), which is exactly the mid-flight moment, and the
+    completion is fired while it hangs there. Everything else is the real shipped mobile
+    shell against the real Flask app -- the real pager button, the real request.
+
+    Page 2 is reached by the pager rather than by an address, because this shell keeps no
+    page in the URL at all; that absence is the reason the intent ref has to carry it.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_COUNT_FETCH_JS)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        page.wait_for_selector(".glm-pager")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        assert page.evaluate(_PHONE_PAGE_JS) == 1, "the phone did not open at page 1"
+
+        # What page 2 actually looks like, read once by the only route this shell offers,
+        # so "his response rendered" is an assertion about real cards, not a page number.
+        page.click('.glm-pager button:has-text("Next")')
+        _phone_on_page(page, 2)
+        _settle(page)
+        page_two_tiles = page.evaluate(_PHONE_TILES_JS)
+        assert page_two_tiles, "page 2 rendered no tiles"
+
+        # Back to the perch, by the pager's own Prev.
+        page.click('.glm-pager button:has-text("Prev")')
+        _phone_on_page(page, 1)
+        _settle(page)
+        page_one_tiles = page.evaluate(_PHONE_TILES_JS)
+        assert page_one_tiles != page_two_tiles, (
+            "pages 1 and 2 render identical tiles -- nothing below could tell them apart")
+
+        # Park the page-2 request the moment it is made. `page=2&` is unambiguous in the
+        # query api.js builds (`?page=2&page_size=100`) -- per_page is 100, not 2.
+        page.evaluate("() => { window.__mgHold.pattern = 'page=2&'; }")
+        before = page.evaluate("() => ({ ...window.__mgCalls })")
+
+        # The owner's own hand on the pager -- and then, mid-flight, the completion.
+        page.click('.glm-pager button:has-text("Next")')
+        page.wait_for_function("() => window.__mgHold.started > 0")
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        # The credits half of the handler is unconditional, so this is how we know the
+        # completion really ran and did not simply lose a race with the assertion.
+        page.wait_for_function("(n) => window.__mgCalls.account > n", arg=before["account"])
+        _settle(page)
+
+        held = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert held["library"] == before["library"] + 1, (
+            "the completion fired a library load of its own while the owner's page-2 "
+            "request was still in the air ({} -> {} calls, only the held one is his) -- "
+            "that load wins the reqSeq race and his answer is thrown away".format(
+                before["library"], held["library"]))
+
+        # Let his request land.
+        page.evaluate("() => window.__mgHold.release()")
+        try:
+            _phone_on_page(page, 2)
+        except _PlaywrightTimeout:
+            raise AssertionError(
+                "the owner tapped for page 2 and the grid is on page {} -- a completion "
+                "landing mid-flight took the navigation away from him".format(
+                    page.evaluate(_PHONE_PAGE_JS)))
+        _settle(page)
+
+        assert page.evaluate(_PHONE_TILES_JS) == page_two_tiles, (
+            "page 2's own cards are not what rendered -- his response was discarded and "
+            "something else answered for it")
+        after = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert after["library"] == before["library"] + 1, (
+            "a second library load arrived after the owner's own ({} -> {} calls)".format(
+                before["library"], after["library"]))
+    finally:
+        ctx.close()
