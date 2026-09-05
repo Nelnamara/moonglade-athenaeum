@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
 import { buildPayload, clampLoras, GEN_DEFAULTS, goGate } from "./genCore.js";
-import { insertTriggerWords } from "./loraTriggers.js";
+import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
 
@@ -217,8 +217,27 @@ export default function useGenerate({ costRef }) {
     }
   }, []);
 
+  /* UN-PICKING a LoRA takes its trigger words back out again (owner, from live use
+     2026-09-04: "Removing a Lora on pixai DOES remove words" -- the ruling on #45 is
+     "matches PixAI behavior", and leaving dead activation tokens in the box does not).
+     The rule is gen/loraTriggers.js's, the same matching the insert and the dedupe use;
+     this is only where the un-pick is observed -- and it is the ONE place, so the desktop
+     drawer's x, the mobile chip's x and either picker's un-toggle all get it, because
+     every one of them calls this. keepWords is the union of the trigger words of the
+     LoRAs that REMAIN: a token two LoRAs share is still arming the other one and must
+     survive. */
   const removeLora = useCallback((modelId) => {
-    setS((old) => ({ ...old, loras: old.loras.filter((l) => l.model_id !== modelId) }));
+    setS((old) => {
+      const gone = old.loras.find((l) => l.model_id === modelId);
+      if (!gone) return old;
+      const loras = old.loras.filter((l) => l.model_id !== modelId);
+      return {
+        ...old,
+        prompt: removeTriggerWords(old.prompt, gone.trigger_words,
+                                   loras.map((l) => l.trigger_words)),
+        loras,
+      };
+    });
   }, []);
 
   const setLora = useCallback((modelId, patch) => {

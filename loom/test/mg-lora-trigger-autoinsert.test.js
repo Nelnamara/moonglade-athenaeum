@@ -6,6 +6,7 @@ import path from "path";
 
 import {
   insertTriggerWords, missingTriggerWords, promptHasTrigger, splitTriggerWords,
+  removeTriggerWords, removableTriggerWords, triggerOccurrences, triggerWordSet,
 } from "../../gallery/src/gen/loraTriggers.js";
 
 /* Issue #45 -- "LoRA trigger words: no auto-insert anywhere; mobile lacks even the manual
@@ -22,7 +23,14 @@ import {
    text lands in the prompt lives in gallery/src/gen/loraTriggers.js -- the same reason
    gen/queueWait.js exists -- and is asserted here by calling the real functions. The source
    greps at the bottom pin the other half: that both surfaces, and the manual button, go
-   through that one rule instead of growing a second formatter that drifts. */
+   through that one rule instead of growing a second formatter that drifts.
+
+   CORRECTION 2026-09-04. The first cut of this feature ruled that removing a LoRA leaves
+   its words in the prompt, and pinned that with a test asserting removeLora never mentions
+   the prompt. The owner, from live use: "Removing a Lora on pixai DOES remove words." The
+   ruling on #45 is "matches PixAI behavior", so that was a bug with a test holding it in
+   place; the un-pick now strips, on the SAME matching rule, sparing any word a still-picked
+   LoRA also owns. That old test is replaced -- not deleted quietly -- by the block below. */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(path.join(__dirname, "../../", p), "utf8");
@@ -173,7 +181,7 @@ describe("both composers reach the prompt through that ONE rule", () => {
     // with the /api/model-version resolve are two different moments, and exactly one of
     // them fires per pick. Insert in only one and the feature silently does not happen
     // for half the LoRAs in the catalog.
-    assert.match(hook, /import \{ insertTriggerWords \} from "\.\/loraTriggers\.js";/);
+    assert.match(hook, /import \{ insertTriggerWords, removeTriggerWords \} from "\.\/loraTriggers\.js";/);
     const writes = hook.match(/prompt: autoInsert \? insertTriggerWords\(old\.prompt, words\) : old\.prompt,/g);
     assert.equal(writes && writes.length, 2,
       "addLora must insert on the picker-row path AND on the late version-resolve path");
@@ -223,13 +231,184 @@ describe("both composers reach the prompt through that ONE rule", () => {
     }
   });
 
-  test("removing a LoRA does NOT strip its words back out of the prompt", () => {
-    // PixAI does not strip either, and by then the prompt is the user's -- they may have
-    // reworded around the tokens or reweighted them by hand. removeLora stays a pure
-    // filter over s.loras and touches no other field.
+  test("removing a LoRA strips its words back out, through that same one rule", () => {
+    // CORRECTED 2026-09-04. The first cut of #45 asserted the opposite here -- "removing a
+    // LoRA does NOT strip its words, PixAI does not strip either" -- and pinned it by
+    // asserting removeLora never mentions the prompt. The owner, from live use: "Removing
+    // a Lora on pixai DOES remove words." The ruling on #45 is "matches PixAI behavior",
+    // so his observation IS the contract and that old assertion was pinning a bug.
     const removeLora = hook.match(/const removeLora = useCallback\([\s\S]*?\n  \}, \[\]\);/);
     assert.ok(removeLora, "removeLora not found in useGenerate.js");
-    assert.equal(/prompt/.test(removeLora[0]), false,
-      "removeLora must not touch the prompt");
+    assert.match(hook, /import \{ insertTriggerWords, removeTriggerWords \} from "\.\/loraTriggers\.js";/);
+    assert.match(removeLora[0], /prompt: removeTriggerWords\(old\.prompt, gone\.trigger_words,/,
+      "removeLora must strip the removed row's words through the shared rule");
+    // keepWords is built from what SURVIVES the filter, never from the pre-removal list --
+    // pass old.loras and the LoRA being removed would keep its own words alive forever.
+    assert.match(removeLora[0], /loras\.map\(\(l\) => l\.trigger_words\)/,
+      "keepWords must come from the REMAINING loras");
+    assert.match(removeLora[0], /const loras = old\.loras\.filter\(\(l\) => l\.model_id !== modelId\);/);
+    // No second formatter: the hook must not hand-roll a strip of its own.
+    assert.equal(/replace\(/.test(removeLora[0]), false,
+      "removeLora must not format the prompt itself; loraTriggers.js owns the rule");
+  });
+
+  test("ONE remove path serves both composers and every control that reaches it", () => {
+    // The desktop x, the mobile chip x, and either picker's un-toggle all call the shared
+    // hook's removeLora -- so wiring the strip there is what makes it happen on the phone
+    // as well. If a surface ever grows its own filter over s.loras, this catches it.
+    for (const [name, src] of [["GenerateDrawer.jsx", drawer], ["CreateMobile.jsx", mobile]]) {
+      assert.equal(/loras\.filter\(/.test(src), false,
+        name + " must not remove LoRAs itself -- it goes through useGenerate.removeLora");
+      assert.match(src, /removeLora\(model\.model_id\)/,
+        name + "'s picker un-toggle must call the shared removeLora");
+    }
+    // ...and the mobile chip's own x, which is the surface #45 added.
+    assert.match(mobile, /onClick=\{\(\) => removeLoraChip\(l\.model_id\)\}/);
+    assert.match(mobile, /const removeLoraChip = \(modelId\) => \{\s*\/\/[^\n]*\n\s*removeLora\(modelId\);/);
+  });
+});
+
+describe("un-picking a LoRA takes its trigger words back out", () => {
+  // The correction of 2026-09-04. GROUNDING: private/GENERATOR_SURFACE.md documents where
+  // the tokens COME from (`latestVersion.extra.triggerWords`) but is silent on what the
+  // site does when you drop a LoRA; the owner's live observation -- "Removing a Lora on
+  // pixai DOES remove words" -- is the standard, and whole-token removal is the shape.
+
+  test("the words a LoRA brought in leave with it", () => {
+    assert.equal(removeTriggerWords("a knight, 1stasc, 2ndasc, 3rdasc", TRISTAN, ""),
+                 "a knight");
+    // ...and the same for the <lora:name:weight> style token, which no \b regex survives.
+    assert.equal(removeTriggerWords("portrait, Eris_Adult, <lora:ErisV14:1>, soft light", ERIS, ""),
+                 "portrait, soft light");
+    assert.equal(removeTriggerWords("portrait, <lora:ErisV14:1>", "<lora:ErisV14:1>", ""),
+                 "portrait");
+    assert.equal(removeTriggerWords("<lora:ErisV14:1>, portrait", "<lora:ErisV14:1>", ""),
+                 "portrait");
+  });
+
+  test("a word another picked LoRA still owns SURVIVES the removal", () => {
+    // The guard the whole keepWords argument exists for: two LoRAs can share an activation
+    // token, and dropping one of them must not silently disarm the other. "2ndasc" is
+    // still arming the LoRA that stayed, so only the unshared tokens go.
+    assert.equal(removeTriggerWords("a knight, 1stasc, 2ndasc, 3rdasc", TRISTAN, "2ndasc, glow"),
+                 "a knight, 2ndasc");
+    // keepWords takes the caller's own shape -- an ARRAY of the remaining rows' strings.
+    assert.equal(
+      removeTriggerWords("a knight, 1stasc, 2ndasc, 3rdasc", TRISTAN, ["2ndasc, x", "3rdasc"]),
+      "a knight, 2ndasc, 3rdasc");
+    // Sharing is matched case-insensitively, like everything else in this module.
+    assert.equal(removeTriggerWords("portrait, Eris_Adult", ERIS, "ERIS_ADULT"),
+                 "portrait, Eris_Adult");
+    // Nothing shared -> everything the LoRA owns goes.
+    assert.equal(removeTriggerWords("a knight, 1stasc", TRISTAN, ["", null, undefined]),
+                 "a knight");
+  });
+
+  test("the seams close up -- start, middle and end alike", () => {
+    // Cutting out of the MIDDLE is the "a, , b" case the tidy exists for.
+    assert.equal(removeTriggerWords("a, 1stasc, b", "1stasc", ""), "a, b");
+    // Cutting off the FRONT must not leave a leading ", ".
+    assert.equal(removeTriggerWords("1stasc, a, b", "1stasc", ""), "a, b");
+    // Cutting off the END must not leave a trailing ", ".
+    assert.equal(removeTriggerWords("a, b, 1stasc", "1stasc", ""), "a, b");
+    // Every token gone at once leaves an empty prompt, not a heap of punctuation.
+    assert.equal(removeTriggerWords("1stasc, 2ndasc, 3rdasc", TRISTAN, ""), "");
+    // Adjacent removals collapse to ONE separator, not one per token.
+    assert.equal(removeTriggerWords("a, 1stasc, 2ndasc, b", TRISTAN, ""), "a, b");
+    // Sloppy author spacing around the cut is normalised to the list's own ", ".
+    assert.equal(removeTriggerWords("a,  1stasc  , b", "1stasc", ""), "a, b");
+    assert.equal(removeTriggerWords("a , 1stasc,b", "1stasc", ""), "a, b");
+    // A token space-separated rather than comma-separated leaves a space, not a comma --
+    // the tidy repairs the seam it found, it does not impose a list on prose.
+    assert.equal(removeTriggerWords("a 1stasc b", "1stasc", ""), "a b");
+  });
+
+  test("a prompt carrying none of the words comes back BYTE-identical", () => {
+    // Same contract as the insert's no-op: this fires on every un-pick, including LoRAs
+    // with no triggers at all, and normalising a prompt someone is mid-sentence in would
+    // eat the space they just typed. Not "equal after trimming" -- identical.
+    const midSentence = "  a knight standing in ";
+    for (const words of [TRISTAN, ERIS, "", "   ", ",", undefined, null, 0, [], ["a"], {}]) {
+      assert.equal(removeTriggerWords(midSentence, words, ""), midSentence);
+    }
+    // Boundary-aware, so a prompt word that merely CONTAINS a token is not butchered.
+    assert.equal(removeTriggerWords("1stascension, my1stasc", TRISTAN, ""),
+                 "1stascension, my1stasc");
+    // Every word kept = nothing to cut = byte-identical, even though the words ARE there.
+    const p = "a knight, 1stasc, 2ndasc, 3rdasc";
+    assert.equal(removeTriggerWords(p, TRISTAN, TRISTAN), p);
+    // A non-string prompt is treated as empty rather than throwing.
+    assert.equal(removeTriggerWords(undefined, TRISTAN, ""), "");
+    assert.equal(removeTriggerWords(null, TRISTAN, ""), "");
+  });
+
+  test("pick -> un-pick -> re-pick restores the words", () => {
+    // The round trip, which is what an accidental un-pick costs the user: nothing.
+    for (const p of ["", "a knight", "a knight, ", "1stascension", "  a knight standing in "]) {
+      for (const w of [TRISTAN, ERIS, "Fairy Knight Tristan", ""]) {
+        const added = insertTriggerWords(p, w);
+        const back = removeTriggerWords(added, w, "");
+        const again = insertTriggerWords(back, w);
+        assert.equal(again, added,
+          `round trip broke for prompt ${JSON.stringify(p)} + words ${JSON.stringify(w)}`);
+        // The user's own writing survives the excursion -- what comes back is exactly the
+        // head the insert built from (trimmed, trailing comma absorbed), nothing less. A
+        // LoRA with NO triggers never touched the prompt at all, so it comes back raw.
+        const expected = splitTriggerWords(w).length ? p.trim().replace(/,\s*$/, "") : p;
+        assert.equal(back, expected,
+          `user text lost for prompt ${JSON.stringify(p)} + words ${JSON.stringify(w)}`);
+      }
+    }
+  });
+
+  test("the guarantee is by CONTENT, not by byte, when the user typed a token first", () => {
+    // Nothing records who typed which token -- PixAI records no such thing either -- so an
+    // exact occurrence goes even if the user wrote it before ever picking the LoRA, and
+    // re-picking brings it back in this module's canonical order rather than the user's.
+    // Documented rather than fudged: inventing provenance would be the worse lie.
+    const added = insertTriggerWords("2ndasc, a knight", TRISTAN);
+    assert.equal(added, "2ndasc, a knight, 1stasc, 3rdasc");
+    const back = removeTriggerWords(added, TRISTAN, "");
+    assert.equal(back, "a knight");
+    assert.equal(insertTriggerWords(back, TRISTAN), "a knight, 1stasc, 2ndasc, 3rdasc");
+    // Removal is idempotent for the same reason the insert is: a second pass finds nothing.
+    assert.equal(removeTriggerWords(back, TRISTAN, ""), back);
+  });
+
+  test("removableTriggerWords is exactly the set the removal cuts", () => {
+    assert.deepEqual(removableTriggerWords("a, 1stasc, 2ndasc", TRISTAN, ""),
+                     ["1stasc", "2ndasc"]);          // 3rdasc is not in the prompt
+    assert.deepEqual(removableTriggerWords("a, 1stasc, 2ndasc", TRISTAN, "2ndasc"),
+                     ["1stasc"]);                     // 2ndasc is still arming another LoRA
+    assert.deepEqual(removableTriggerWords("a knight", TRISTAN, ""), []);
+    assert.deepEqual(removableTriggerWords("a, 1stasc", undefined, ""), []);
+  });
+
+  test("triggerWordSet unions the remaining rows' strings, case-folded", () => {
+    assert.deepEqual([...triggerWordSet(["1stasc, 2ndasc", "2ndasc, ERIS_Adult"])],
+                     ["1stasc", "2ndasc", "eris_adult"]);
+    assert.deepEqual([...triggerWordSet(TRISTAN)], ["1stasc", "2ndasc", "3rdasc"]);
+    for (const bad of ["", null, undefined, [], [null, ""], 0, {}]) {
+      assert.deepEqual([...triggerWordSet(bad)], []);
+    }
+  });
+
+  test("the insert and the removal match on ONE rule, not two", () => {
+    // promptHasTrigger is now the occurrence finder asked as a yes/no -- the dedupe and
+    // the strip cannot disagree about what counts as a match, which is the whole reason
+    // this module exists. Assert they answer together on the awkward cases.
+    for (const [p, t] of [["epic, 1stasc", "1stasc"], ["epic, 1stascension", "1stasc"],
+                          ["a<lora:ErisV14:1>b", "<lora:ErisV14:1>"],
+                          ["a fairy knight tristan", "Fairy Knight Tristan"],
+                          ["my1stasc", "1stasc"], ["epic", "1stasc"]]) {
+      assert.equal(promptHasTrigger(p, t), triggerOccurrences(p, t).length > 0);
+      // Present <=> the removal changes something; absent <=> byte-identical.
+      assert.equal(removeTriggerWords(p, t, "") !== p, promptHasTrigger(p, t),
+        `insert and removal disagree on ${JSON.stringify(p)} / ${JSON.stringify(t)}`);
+    }
+    assert.deepEqual(triggerOccurrences("epic, 1stasc, 1stasc", "1stasc"), [[6, 12], [14, 20]]);
+    assert.deepEqual(triggerOccurrences("epic, 1stascension", "1stasc"), []);
+    // EVERY occurrence goes, not just the first.
+    assert.equal(removeTriggerWords("epic, 1stasc, glow, 1stasc", "1stasc", ""), "epic, glow");
   });
 });

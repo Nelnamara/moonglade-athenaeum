@@ -65,10 +65,16 @@ never leaves you with the same token three times. If you delete the words on pur
 want them back, the **+words** button on the LoRA's row (its chip, on the phone) puts them
 in again — and it's harmless to press when they're already in place.
 
-Two things it deliberately doesn't do. **Removing a LoRA leaves your prompt alone**: by
-then it's your writing, and you may have reworded around those tokens, so nothing is cut
-out from under you. And **Remix doesn't add anything** — restoring a recipe gives you the
-prompt that actually made the picture, word for word.
+**Removing a LoRA takes its words back out**, the same way PixAI does — so un-picking one
+doesn't leave you generating against activation words for a LoRA that isn't attached any
+more. A word that a LoRA you're *still* using also needs is left alone: if two of them
+share an activation word, dropping one never disarms the other. Only the words themselves
+go; the rest of your prompt closes up around the gap and is otherwise untouched. If you'd
+reworded a word, or written it into a sentence of your own, that's your writing and it
+stays — and **+words** puts a LoRA's words back whenever you want them.
+
+One thing it deliberately doesn't do: **Remix doesn't add or remove anything** — restoring
+a recipe gives you the prompt that actually made the picture, word for word.
 
 ### Finding a model or LoRA
 The picker opens on **Market** — everything on PixAI. Two other places to look sit next
