@@ -227,3 +227,29 @@ button.cmb-tile:disabled { opacity: .45; cursor: not-allowed; }
 /* The contest chooser sheet's own note (the sheet chrome itself is MobileSheet's). */
 .cmb-choosernote { font-size: 11px; line-height: 1.6; color: var(--subtext);
   padding-bottom: 8px; }
+
+/* ---- THE PHONE'S CONTEST LADDER -------------------------------------------------------
+   The one rung MobileSheet's shared 30/31 cannot supply, and the reason the class exists.
+
+   The chooser is the middle step of the image-side door: a viewer is already up when it
+   opens, and both viewers are OPAQUE full-viewport slabs. AppMobile mounts this sheet as
+   their SIBLING (see its own header comment on why contestEntry/contestFor are lifted to
+   the app root), so the shared 30/31 put it behind the thing that opened it -- the tap
+   read as nothing happening at all. Every other MobileSheet caller mounts inside its own
+   root, where 30/31 is correct, so the shared class stays where it is and this pair alone
+   is re-rung. The scrim moves with the slab: left at 30 it would dim nothing and the
+   tap-outside would land on the viewer instead of closing the sheet.
+
+   The phone's own ladder, in the order a person walks it -- change a number, keep the ORDER
+   (the same law overlays.css states for the desktop band, which this is NOT part of; that
+   band starts at .lbx 400 and none of it is reachable from these surfaces):
+     .idm-root 50 < .lbm-root 55                      the two viewers the chip sits on
+       < .idm-sheet-scrim/-slab 60/61                 Image Details' own Upscale sheet
+       < .lbm-sheet-scrim/-slab 65/66                 the lightbox's own Upscale sheet
+       < .glm-scrim/.glm-sheet .cmb-choosersheet 67/68   ENTER INTO A CONTEST (here)
+       < .cmb-entry 70                                the entry screen the chooser opens
+   67/68 clears both viewers AND both of their always-mounted Upscale sheets, so the pair
+   is above everything either door can already have on screen, and stays under the entry
+   screen it hands off to. Scrim under its own slab, never level with it or over it. */
+.glm-scrim.cmb-choosersheet { z-index: 67; }
+.glm-sheet.cmb-choosersheet { z-index: 68; }

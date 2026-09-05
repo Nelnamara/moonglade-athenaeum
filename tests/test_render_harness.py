@@ -1743,11 +1743,25 @@ def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
     what a legitimately ineligible source looks like.
 
     Driven as a person drives it, at 390pt: tap a real grid tile, tap the chip, pick a
-    contest in the sheet, and land on the entry screen. The assertion is that the ticked
-    tile is THAT picture and no other, and that the confirm bar came up armed and counting
-    one. The bar is left unpressed -- this proves the screen opens ready, never that it
-    fires -- and the module-wide guard fixture is asserted for the same guarantee the
-    board-side test makes with its own `posts` list.
+    contest in the sheet, and land on the entry screen. Every one of those is an ordinary
+    `page.click`, which makes this test ALSO the standing guard on the chooser sheet's
+    z-index: Playwright refuses a click on a covered element, so if the sheet ever slips
+    back under the viewer that opened it (the 2026-09-04 defect -- MobileSheet's shared
+    30/31 behind .lbm-root's 55) the row click fails outright with the intercepting
+    element named. The assertion is that the ticked tile is THAT picture and no other, and
+    that the confirm bar came up armed and counting one. The bar is left unpressed -- this
+    proves the screen opens ready, never that it fires -- and the module-wide guard fixture
+    is asserted for the same guarantee the board-side test makes with its own `posts` list.
+
+    ONE of the two image-side doors is driven here, not both: the lightbox's. Image
+    Details' chip is gated on `row.artwork_id` (ImageDetailsMobile.jsx) and `render_server`
+    seeds all six catalog rows from a blank CATALOG_FIELDS template, so artwork_id is ""
+    for every one of them and that chip does not render on this fixture at all. Reaching it
+    would mean stubbing /api/next/detail with an invented published row -- a fixture this
+    module does not have and this test is not the place to invent. The z-index half is
+    covered regardless, and by the HARDER of the two: .idm-root is 50 and .lbm-root is 55,
+    so a chooser that clears the lightbox clears Image Details by construction. What stays
+    unmeasured is Details' own chip wiring, not the layer it opens onto.
     """
     page = logged_in_page(**MOBILE)
     _json_route(page, "**/api/contests", _MOBILE_BOARD)
@@ -1774,25 +1788,15 @@ def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
         "the chooser is not offering both running contests: {!r}".format(
             rows.all_inner_texts()))
 
-    # dispatch_event, not click, and that is this test RECORDING A REAL DEFECT it found on
-    # its first run rather than papering over one. The sheet mounts and lays out correctly,
-    # but `.glm-sheet` paints at z-index 31 UNDER the opaque viewer that opened it
-    # (`.lbm-root`, z 55; `.idm-root`, the other image-side door, is z 50 and buries it just
-    # the same), so a person who taps the chip sees nothing happen at all. Measured here,
-    # not read off a stylesheet: an ordinary click was refused with "<button
-    # class='lbm-chip'>Similar</button> from .lbm-root subtree intercepts pointer events",
-    # and `force=True` fared no better -- forcing skips the check but still clicks the
-    # COORDINATES, which the lightbox owns, so the row's own handler never ran.
-    # dispatch_event fires the click on the node itself, which is the only way to drive a
-    # buried element. The wiring behind the sheet is this test's subject and it is sound;
-    # the surface in front of it is not. Driving it anyway is what keeps the pre-selection
-    # contract measured while that is fixed -- and this comment, not a silent pass, is the
-    # record of why. The day `.glm-sheet` clears the two viewers that open it, this line
-    # becomes an ordinary `page.click`.
-    #
-    # Picking the contest closes the sheet and mounts the entry screen at z 70, which IS
-    # genuinely above both viewers -- only the sheet in the middle of the path is buried.
-    page.locator('.glm-sheet .mgctch-row:has-text("JoJo Pose")').dispatch_event("click")
+    # A REAL click, and the load-bearing one. Playwright's actionability check refuses a
+    # click on a covered element and names the element doing the covering, so this single
+    # line is what holds the chooser above the viewer that opened it: when the sheet rode
+    # MobileSheet's shared 30/31 it failed here with "<button class='lbm-chip'>Similar
+    # </button> from .lbm-root subtree intercepts pointer events" -- .lbm-root is z 55 and
+    # opaque. It now sits on contest-mobile.css's own rung (.cmb-choosersheet, 67/68), the
+    # tap lands on the row itself, and picking the contest closes the sheet and mounts the
+    # entry screen at z 70.
+    page.click('.glm-sheet .mgctch-row:has-text("JoJo Pose")')
     page.wait_for_selector(".cmb-entry .cmb-tile", timeout=10_000)
     _settle(page)
 
@@ -1834,9 +1838,9 @@ def test_the_phone_enters_from_a_picture_with_that_picture_pre_ticked(
     # reaches the armed confirm bar through a door `_open_contests_on_the_phone` never opens.
     #
     # The seeded pick makes the entry screen ask the route what an entry WOULD do, so a
-    # body is on the wire by now; waited for, never assumed, in the one case the event has
-    # not been dispatched yet. That non-empty list is what stops the "nothing confirmed"
-    # assertion under it from being a claim about an empty set.
+    # body is on the wire by now; waited for, never assumed, in the one case the request has
+    # not landed yet. That non-empty list is what stops the "nothing confirmed" assertion
+    # under it from being a claim about an empty set.
     if not no_confirmed_contest_entry:
         page.wait_for_event("request", timeout=5_000,
                             predicate=lambda r: r.url.endswith("/api/contest/enter"))

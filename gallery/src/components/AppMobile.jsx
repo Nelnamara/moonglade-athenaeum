@@ -714,9 +714,15 @@ export default function AppMobile({ boot }) {
       )}
 
       {/* "Enter into a contest…" -- the choose-a-contest step for the two image-side
-          entry points. The board's own Enter bar skips it: the contest is already known. */}
+          entry points. The board's own Enter bar skips it: the contest is already known.
+          `cmb-choosersheet` is the ONLY sheet on this screen that carries a class, and it
+          is carrying a z-index: this one mounts while a viewer is up, so MobileSheet's
+          shared 30/31 put its scrim and slab BEHIND the opaque .lbm-root/.idm-root that
+          opened it and the chip read as dead. contest-mobile.css's rung (67/68) states the
+          whole phone ladder; the other three sheets here open over the app shell only and
+          stay on the shared rung. */}
       <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
-        title="ENTER INTO A CONTEST">
+        className="cmb-choosersheet" title="ENTER INTO A CONTEST">
         <ContestChooserMobile onPick={(c) => openContestEntry(c, contestFor)} />
       </MobileSheet>
 
