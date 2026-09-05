@@ -2420,13 +2420,28 @@ def test_official_and_community_wear_one_badge_law_on_both_surfaces(logged_in_pa
 # via page.evaluate rather than performance.getEntriesByType: a 100-card page pushes well
 # past the resource-timing buffer's default 250 entries, and dropped entries would make a
 # "no request was made" assertion pass for the wrong reason.
+#
+# The same wrapper also owns the HOLD, which is how the race below is made observable. A
+# route handler cannot do this job: Playwright's sync API dispatches route handlers on the
+# calling thread, so a handler that slept would also block the very page.evaluate that has to
+# fire the completion event MID-flight. Held in the page instead -- the first request whose
+# URL contains `__mgHold.pattern` is parked on a promise until the test releases it, and the
+# real fetch then runs untouched. One request only (the pattern is cleared as it matches), so
+# whatever the app does next is unimpeded and countable.
 _COUNT_FETCH_JS = """
 window.__mgCalls = { library: 0, account: 0 };
+window.__mgHold = { pattern: null, started: 0, release: null };
 const _f = window.fetch;
 window.fetch = function (...args) {
   const u = String((args[0] && args[0].url) || args[0] || "");
   if (u.indexOf("/api/next/library") >= 0) window.__mgCalls.library++;
   else if (u.indexOf("/api/account") >= 0) window.__mgCalls.account++;
+  const h = window.__mgHold;
+  if (h.pattern && u.indexOf(h.pattern) >= 0) {
+    h.pattern = null;
+    h.started++;
+    return new Promise((go) => { h.release = go; }).then(() => _f.apply(window, args));
+  }
   return _f.apply(this, args);
 };
 """
@@ -2474,6 +2489,13 @@ def paged_library_server(tmp_path_factory, monkeypatch):
             "created_at": "2025-02-01T%02d:%02d:00" % (i // 60, i % 60)}
         for i in range(120)
     ])
+    # A REAL bitmap for the NEWEST row (media_id 1119, the first card on page 1 under the
+    # default newest-first sort), for the same reason render_server writes harness_0.png:
+    # /api/similar refuses before it ever reaches the CLIP sidecar unless find_image_file
+    # resolves an actual file ("image file not found", 200). The ◈ test below needs the
+    # answering half of that route, not its refusal.
+    from PIL import Image
+    Image.new("RGB", (900, 600), (120, 90, 180)).save(root / "paged_119.png")
     core.add_or_update_web_user(_USERNAME, _PASSWORD)
     # Already onboarded, exactly as render_server is: a key, so app_page() serves the real
     # gallery instead of the Setup Wizard...
@@ -2595,5 +2617,199 @@ def test_a_finished_generation_never_moves_the_page_the_owner_is_reading(
         _settle(page)
         assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "1"
         assert "page=" not in page.url
+    finally:
+        ctx.close()
+
+
+def test_a_completion_leaves_the_similar_view_alone_even_at_page_1(
+        paged_library_server, render_browser, monkeypatch):
+    """The perch is not the whole rule: at page 1, ◈ Similar still refuses.
+
+    The first pass guarded only the page number, so at page 1 -- the default perch, where a
+    refresh was reasoned to move nothing -- a completion reloaded the library underneath an
+    open ◈ Similar view. The grid is not even mounted there (SimilarResults takes its place)
+    and the whole contract of the token is that the library beneath it is UNTOUCHED, so ✕
+    puts back exactly what was there without re-running anything. Reloading it under the
+    token breaks that promise invisibly: nothing on screen moves, and then the ✕ hands back
+    a different library. The phone refused under its own Similar from the start
+    (AppMobile.jsx's genSimilarRef); this is the desktop catching up.
+
+    Both halves again, one instrument: with the token up the SAME dispatch must produce no
+    library request at all, and with it dismissed -- same page, same everything else -- it
+    must produce one. Only the CLIP maths is stubbed (see _fake_similar_module); the route,
+    the door, the token and the results are the real shipped ones.
+    """
+    import sys
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    # Neighbours that really exist in this catalog, so api_similar's own get_row lookups
+    # resolve and real result tiles render.
+    monkeypatch.setitem(sys.modules, "moonglade_similar",
+                        _fake_similar_module([("1118", 0.93), ("1117", 0.87)]))
+
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_COUNT_FETCH_JS)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        assert "page=" not in page.url, "the harness did not start on the default perch"
+
+        # The ◈ door on the newest card -- the one row with a real bitmap on disk, so the
+        # route answers with neighbours instead of "image file not found".
+        page.locator(".mgg-card").first.locator(".mgg-door").click()
+        page.wait_for_selector(".simres")
+        page.wait_for_selector(".simres-grid .simres-card")
+        assert page.locator(".mgg-card").count() == 0, (
+            "the library grid is still mounted under the ◈ view -- this test is not in the "
+            "state it claims to be measuring")
+        assert page.locator(".mgl-simtok").count() == 1, "no ◈ token in the library bar"
+        _settle(page)
+
+        cards_before = page.evaluate(
+            "() => Array.from(document.querySelectorAll('.simres-card img'))"
+            ".map((el) => el.getAttribute('src'))")
+        assert len(cards_before) == 3, (
+            "expected the source tile plus two lookalikes, got {}".format(cards_before))
+        token_before = page.locator(".mgl-simcount").inner_text().strip()
+        assert "match" in token_before
+        before = page.evaluate("() => ({ ...window.__mgCalls })")
+
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        # Same proof-of-life as the page-2 half above: the credits chip is refreshed on
+        # every completion whatever the shell is showing, so a fresh /api/account call is
+        # what stops the "no library request" assertion from passing vacuously.
+        page.wait_for_function("(n) => window.__mgCalls.account > n", arg=before["account"])
+        _settle(page)
+
+        after = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert after["library"] == before["library"], (
+            "a finished generation re-loaded the library underneath the ◈ token ({} -> {} "
+            "calls) -- the ✕ no longer restores what was there".format(
+                before["library"], after["library"]))
+        assert page.locator(".mgl-simtok").count() == 1, "the ◈ token went away on a completion"
+        assert page.locator(".mgl-simcount").inner_text().strip() == token_before
+        assert page.evaluate(
+            "() => Array.from(document.querySelectorAll('.simres-card img'))"
+            ".map((el) => el.getAttribute('src'))") == cards_before, (
+            "the lookalikes changed under the reader on a completion")
+        assert page.locator(".mgg-card").count() == 0, (
+            "the library grid came back over the ◈ results on a completion")
+
+        # --- and the other half: dismiss the token, and the SAME dispatch does refresh ----
+        _dismiss_any_achievement_toast(page)
+        page.locator(".mgl-simtok-x").click()
+        page.wait_for_selector(".mgg-card")
+        _settle(page)
+        cleared = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert cleared["library"] == before["library"], (
+            "dismissing the ◈ token re-fetched the library -- it is supposed to restore "
+            "the page that was never touched")
+
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        page.wait_for_function("(n) => window.__mgCalls.library > n", arg=cleared["library"])
+        _settle(page)
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "1"
+    finally:
+        ctx.close()
+
+
+def test_a_completion_never_out_races_the_owners_own_page_change(
+        paged_library_server, render_browser, monkeypatch):
+    """The page the owner ASKS for is the page he gets, whenever the completion lands.
+
+    The window this measures: goToPage writes ?page=2 and calls load(2, true), but the
+    shell's own `page` only becomes 2 when the SERVER answers. A completion landing in
+    between read the page he was LEAVING, decided it was at the page-1 perch, and fired its
+    own load(1, true) -- whose newer reqSeq (useLibrary.js) then discarded the page-2
+    response the owner was waiting on, and whose settled page dragged the address back to
+    the front of the library. The rule held; the race beat it.
+
+    Made observable by holding the page-2 request itself in the page (see _COUNT_FETCH_JS's
+    __mgHold), which is exactly the mid-flight moment, and firing the completion while it
+    hangs there. Everything else is the real shipped shell against the real Flask app: the
+    real pager button, the real request, the real address.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_COUNT_FETCH_JS)
+    try:
+        page = ctx.new_page()
+        _login(page)
+
+        # What page 2 actually looks like, read once from a plain visit, so "his response
+        # rendered" is an assertion about real cards and not about a page number alone.
+        _visit(page, "/?page=2")
+        page.wait_for_selector(".mgg-card")
+        page.wait_for_selector(".pagebar .pg-num.current")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        page_two_tiles = page.evaluate(_TILES_JS)
+        assert page_two_tiles, "page 2 rendered no cards"
+
+        # Back to the perch, by a fresh load (which re-arms the counters and the hold).
+        _visit(page, "/")
+        page.wait_for_selector(".mgg-card")
+        page.wait_for_selector(".pagebar .pg-num.current")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        page_one_tiles = page.evaluate(_TILES_JS)
+        assert page_one_tiles != page_two_tiles, (
+            "pages 1 and 2 render identical tiles -- nothing below could tell them apart")
+        assert page.locator(".pagebar .pg-num.current").inner_text().strip() == "1"
+
+        # Park the page-2 request the moment it is made. `page=2&` is unambiguous in the
+        # query api.js builds (`?page=2&page_size=100`) -- per_page is 100, not 2.
+        page.evaluate("() => { window.__mgHold.pattern = 'page=2&'; }")
+        before = page.evaluate("() => ({ ...window.__mgCalls })")
+
+        # The owner's own hand on the pager -- and then, mid-flight, the completion.
+        page.click('.pagebar .pg-nav:has-text("Next")')
+        page.wait_for_function("() => window.__mgHold.started > 0")
+        assert "page=2" in page.url, (
+            "goToPage's pushState is what makes this the owner's navigation; without it "
+            "there is no intent for a completion to out-race: {}".format(page.url))
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        page.wait_for_function("(n) => window.__mgCalls.account > n", arg=before["account"])
+        _settle(page)
+
+        held = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert held["library"] == before["library"] + 1, (
+            "the completion fired a library load of its own while the owner's page-2 "
+            "request was still in the air ({} -> {} calls, only the held one is his) -- "
+            "that load wins the reqSeq race and his answer is thrown away".format(
+                before["library"], held["library"]))
+
+        # Let his request land.
+        page.evaluate("() => window.__mgHold.release()")
+        try:
+            page.wait_for_function(
+                "() => { const el = document.querySelector('.pagebar .pg-num.current');"
+                " return el && el.textContent.trim() === '2'; }")
+        except _PlaywrightTimeout:
+            raise AssertionError(
+                "the owner asked for page 2 and the grid is on page {} -- a completion "
+                "landing mid-flight took the navigation away from him".format(
+                    page.locator(".pagebar .pg-num.current").inner_text().strip()))
+        _settle(page)
+
+        assert "page=2" in page.url, (
+            "the owner is on page 2 but the address was dragged back: {}".format(page.url))
+        assert page.evaluate(_TILES_JS) == page_two_tiles, (
+            "page 2's own cards are not what rendered -- his response was discarded and "
+            "something else answered for it")
+        after = page.evaluate("() => ({ ...window.__mgCalls })")
+        assert after["library"] == before["library"] + 1, (
+            "a second library load arrived after the owner's own ({} -> {} calls)".format(
+                before["library"], after["library"]))
     finally:
         ctx.close()

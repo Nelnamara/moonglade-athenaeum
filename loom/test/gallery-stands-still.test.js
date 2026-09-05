@@ -52,14 +52,63 @@ describe("the desktop shell: a completion refreshes only from the default perch"
     assert.doesNotMatch(app, /const refresh = \(\) => \{ load\(1, true\); fetchAccount\(\)/);
   });
 
-  test("page 1 is the gate, read off the ref that already tracks the loaded page", () => {
-    assert.match(refresh, /if \(pageRef\.current !== 1\) return;/);
+  test("page 1 is the gate, read off what the owner ASKED for", () => {
+    assert.match(refresh, /const nav = navRef\.current;/);
+    assert.match(refresh, /if \(nav\.inFlight \|\| nav\.want !== 1\) return;/);
     // ...and the gate comes BEFORE the load, not after it.
-    assert.ok(refresh.indexOf("pageRef.current !== 1") < refresh.indexOf("load(1, true)"),
+    assert.ok(refresh.indexOf("nav.want !== 1") < refresh.indexOf("load(1, true)"),
       "the page-1 guard must precede the load it guards");
     assert.match(refresh, /load\(1, true\)\.then\(/);
-    // pageRef is kept fresh by the same effect the popstate handler relies on.
-    assert.match(app, /useEffect\(\(\) => \{ pageRef\.current = page; loadRef\.current = load; \}\);/);
+    // The stale-page read this replaced: `page` only becomes the page the owner asked for
+    // when the SERVER answers, so a completion landing mid-flight read the page he was
+    // leaving, passed, and won the reqSeq race against his own request.
+    assert.doesNotMatch(refresh, /if \(pageRef\.current !== 1\) return;/);
+  });
+
+  test("the intent ref is written synchronously by every hand that asks for a page", () => {
+    // navRef.want starts at the page the ADDRESS asked for, so a fresh ?page=3 visit is
+    // not mistaken for page 1 for the whole of its opening request.
+    assert.match(app, /const navRef = useRef\(\{ want: Math\.max\(1, initialPage \| 0\), inFlight: 0 \}\);/);
+    // userLoad: intent + in-flight count written BEFORE the request leaves, and the same
+    // promise handed back so every caller reads the answer exactly as before.
+    const userLoad = bodyOf(app, "const userLoad = useCallback((p, replace) => {", "  }, [load]);");
+    assert.match(userLoad, /navRef\.current\.want = p;/);
+    assert.match(userLoad, /navRef\.current\.inFlight \+= 1;/);
+    assert.match(userLoad, /navRef\.current\.inFlight = Math\.max\(0, navRef\.current\.inFlight - 1\);/);
+    assert.match(userLoad, /return load\(p, replace\)\.then\(\(d\) => \{ settle\(\); return d; \}, \(e\) => \{ settle\(\); throw e; \}\);/);
+    assert.ok(userLoad.indexOf("navRef.current.want = p") < userLoad.indexOf("return load(p, replace)"),
+      "the intent must be on the record before the request leaves");
+    // The three hands: the pager/arrow-key flip (goToPage), Back/Forward, and the viewer
+    // stepping across a page boundary. None of them may call the raw load any more.
+    const goTo = bodyOf(app, "const goToPage = useCallback((p) => {", "  }, [setUrl, userLoad]);");
+    assert.match(goTo, /setUrl\(\{ page: p \}\);/);
+    assert.match(goTo, /userLoad\(p, true\);/);
+    assert.doesNotMatch(app, /const goToPage = useCallback\(\(p\) => \{\n    setUrl\(\{ page: p \}\);\n    load\(p, true\);/);
+    const pop = bodyOf(app, "const onPop = () => {", "    };");
+    assert.match(pop, /navRef\.current\.want = p;/);
+    assert.match(pop, /if \(p !== pageRef\.current\) userLoadRef\.current\(p, true\);/);
+    assert.match(app, /page=\{page\} pages=\{pages\} loadPage=\{userLoad\}/);
+  });
+
+  test("`page` reconciles the intent only when nothing of the owner's is still in the air", () => {
+    const mirror = bodyOf(app, "  useEffect(() => {\n    pageRef.current = page;", "  });");
+    assert.match(mirror, /loadRef\.current = load;/);
+    assert.match(mirror, /userLoadRef\.current = userLoad;/);
+    assert.match(mirror, /if \(!navRef\.current\.inFlight && total != null\) navRef\.current\.want = page;/);
+    assert.match(mirror, /viewRef\.current = \{ similar: similarFor, series: seriesFor, lb: lbIndex \};/);
+  });
+
+  test("the three untouched-library surfaces refuse the refresh, at page 1 as much as anywhere", () => {
+    assert.match(app, /const viewRef = useRef\(\{ similar: null, series: null, lb: null \}\);/);
+    assert.match(refresh, /const view = viewRef\.current;/);
+    // lbIndex 0 is a real open viewer: `!= null`, never a truthiness test.
+    assert.match(refresh, /if \(view\.similar \|\| view\.series \|\| view\.lb != null\) return;/);
+    assert.ok(refresh.indexOf("view.lb != null") < refresh.indexOf("load(1, true)"),
+      "the overlay guard must precede the load it guards");
+    // WHY the viewer is in that list: it reads `items` POSITIONALLY, so a swap at page 1 --
+    // where the new picture arrives at the TOP -- slides every index by one.
+    const lightbox = src("components/Lightbox.jsx");
+    assert.match(lightbox, /const it = items\[index\];/);
   });
 
   test("both completion channels ride the one refresh, and the dep array is intact", () => {
@@ -88,9 +137,20 @@ describe("Details' delete reloads the page it was opened from", () => {
   });
 
   test("an emptied page steps DOWN one, and emptiness is read off the response", () => {
-    assert.match(deleted, /if \(p > 1 && !\(data\.items \|\| \[\]\)\.length\) load\(p - 1, true\);/);
+    assert.match(deleted, /if \(p > 1 && !\(data\.items \|\| \[\]\)\.length\) \{/);
+    assert.match(deleted, /load\(p - 1, true\)\.then\(/);
     // never below page 1
     assert.doesNotMatch(deleted, /load\(0, true\)/);
+  });
+
+  test("and it prunes the selection against whichever page actually lands", () => {
+    // The third items swap the policy governs. Without this a tick left pointing at the
+    // picture just deleted -- or at anything the reflow pushed off the end -- stays armed
+    // for the next bulk action while being nowhere on screen.
+    assert.match(deleted, /pruneSelected\(setSelected, data\.items\);/);
+    assert.match(deleted, /if \(down\) pruneSelected\(setSelected, down\.items\);/);
+    assert.ok(deleted.indexOf("if (down) pruneSelected") < deleted.indexOf("pruneSelected(setSelected, data.items);"),
+      "the stepped-down page prunes against ITS OWN response, not the empty one above it");
   });
 });
 
