@@ -73,8 +73,8 @@ leaves that file and its catalog row exactly where they are, and the dialog says
 Two more answers you may get instead of a dialog:
 
 - **"This image is already deleted on PixAI."** Nothing is sent and nothing local is
-  touched — your copy is now the only one. The row is marked so the library stops offering
-  the button for it.
+  touched — your copy is now the only one, and it stays. The catalog row records the date
+  PixAI dropped it, so the app stops treating it as an image PixAI still holds.
 - **"Video clips are deleted from the task's page on PixAI."** Deleting a clip is not
   something this app does yet; do it on PixAI's own page for that generation.
 
