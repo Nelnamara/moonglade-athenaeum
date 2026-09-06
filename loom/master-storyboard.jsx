@@ -361,16 +361,33 @@ const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // A choice, once made, wins forever and in BOTH directions -- neither switch can become a
 // one-way trap, which is the same reason LoomMobile carries its own reciprocal chip. Only
 // the AUTO half is new; the switches themselves are untouched.
+//
+// DECIDED ONCE, ON MOUNT -- and this is the difference between a default and a live
+// reading. `isPhone` arrives from the app's one phone rule, which is deliberately
+// reactive: it subscribes to matchMedia, resize and orientationchange precisely so the
+// app's presentation flips with the device. Re-deriving the view from it every render made
+// ordinary ROTATION a full
+// unmount/remount between LoomMobile and LoomV2 -- not a CSS reflow, a whole subtree swap
+// -- so a phone user watching a clip in Review & trim who turned the phone to see it wider
+// had the review close under them: that state is LoomMobile's own and dies with the
+// subtree. Rotating a phone is not a request to change tools.
+//
+// So the phone rule decides the OPENING view, and after that only a real flip of either
+// switch changes it. The state seeded here is the answer itself rather than the stored
+// string, because "what did the browser say" and "what are we showing" stop being the same
+// question the moment the second one is not re-derived.
 function useLoomView(isPhone) {
-  const [stored, setStored] = useState(() => {
-    try { return readStoredView(window.localStorage); } catch (e) { return null; }
+  const [mobileUI, setView] = useState(() => {
+    let stored = null;
+    try { stored = readStoredView(window.localStorage); } catch (e) { stored = null; }
+    return resolveLoomView(stored, isPhone);
   });
   const setMobileUI = useCallback((v) => {
     const next = !!v;
-    setStored(next ? "mobile" : "desktop");
+    setView(next);
     try { window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop"); } catch (e) {}
   }, []);
-  return [resolveLoomView(stored, isPhone), setMobileUI];
+  return [mobileUI, setMobileUI];
 }
 
 // WHERE "← GALLERY" GOES (2026-09-06, owner call 2: "YESSS").
