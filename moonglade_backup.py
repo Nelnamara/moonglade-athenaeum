@@ -2699,6 +2699,77 @@ def delete_task_gql(session, task_id):
     return result
 
 
+#: What one routed image delete decided and did. `plan` is the branch that FIRED --
+#: "per-image", "whole-task", or "refuse" when nothing was sent -- so a caller never has to
+#: work the branch out again from its own catalog. `keep_media` names the task's images PixAI
+#: had ALREADY deleted before this call; their local copies are the only ones left anywhere,
+#: so a whole-task purge must leave them alone. `cloud_deleted_at` is the target's own
+#: deletedAt stamp when it turned out to be one of those.
+ImageDeletePlan = namedtuple(
+    "ImageDeletePlan", "plan reason live_siblings keep_media cloud_deleted_at")
+
+
+def _image_delete_plan(task, media_id):
+    """Turn one routing decision into the plan a caller acts on (pure)."""
+    plan, reason, live_siblings, entry = route_image_delete(task, media_id)
+    batch = ((task or {}).get("outputs") or {}).get("batch")
+    return ImageDeletePlan(plan, reason, live_siblings,
+                           tuple(deleted_batch_media(batch)),
+                           str((entry or {}).get("deletedAt") or ""))
+
+
+def plan_image_delete(session, task_id, media_id):
+    """What deleting ONE image would do, without deleting anything.
+
+    Reads the task back from PixAI (`task_detail_gql`, read-only, retried, fails SOFT to
+    None) and routes it. The read is not optional and cannot be replaced by the local
+    catalog: which members of a batch PixAI still has is a fact only PixAI holds, and the
+    catalog knows nothing about a sibling deleted from the website.
+
+    This is the half the confirm dialog is worded from, so it must be safe to call on a
+    click: no mutation is sent on any road out of here."""
+    return _image_delete_plan(task_detail_gql(session, str(task_id or "").strip()), media_id)
+
+
+def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
+    """Delete ONE image from PixAI through whichever mutation PixAI accepts for it.
+
+    IRREVERSIBLE on their side. Returns the `ImageDeletePlan` that fired, so the caller
+    reads the branch off this answer instead of re-deriving it from its own row counts --
+    the local catalog cannot see a sibling deleted from the website, which is exactly how
+    the old code came to send the wrong mutation.
+
+    Order, and why:
+      1. READ_ONLY first, before even the read. The two primitives below each check it
+         too, but checking here means a read-only install makes NO network call at all for
+         a delete, rather than quietly reading and then refusing.
+      2. Read and route (`plan_image_delete`). A refusal returns here with nothing sent.
+      3. `confirmed_plan`, when given, is the plan the user was shown. If the fresh route
+         disagrees, the task changed underneath the dialog and this refuses rather than
+         doing something the user did not agree to.
+      4. Fire exactly one branch. No loop wraps either call: a destructive mutation
+         re-sent after a lost response can fire again against a task that has already
+         changed (tests/test_delete_routing.py pins this structurally, and
+         tests/test_spend_no_retry.py pins the primitives).
+    """
+    _check_read_only("delete an image from your PixAI account")
+    task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    plan = plan_image_delete(session, task_id, media_id)
+    if plan.plan == "refuse":
+        return plan
+    if confirmed_plan and str(confirmed_plan) != plan.plan:
+        return ImageDeletePlan(
+            "refuse",
+            "What this delete would do changed while the dialog was open, so nothing was "
+            "deleted. Open it again to see where the image stands now.",
+            plan.live_siblings, plan.keep_media, plan.cloud_deleted_at)
+    if plan.plan == "per-image":
+        delete_batch_media_gql(session, task_id, media_id)
+    else:
+        delete_task_gql(session, task_id)
+    return plan
+
+
 def gql_adhoc(session, query, variables=None, retries=None):
     """Run an ad-hoc (non-persisted) GraphQL operation by POSTing the full query
     document. PixAI's endpoint accepts these under Bearer auth (the API key has

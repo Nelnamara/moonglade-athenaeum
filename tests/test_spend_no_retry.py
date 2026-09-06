@@ -22,8 +22,10 @@ of it:
 Nothing here spends anything: every test asserts on the recorded call arguments or on the
 POST count against a mock session. No generation is ever run.
 """
+import ast
 import inspect
 import re
+import textwrap
 from types import SimpleNamespace
 
 import pytest
@@ -38,6 +40,10 @@ import moonglade_backup as core
 SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                "run_reference_video", "run_edit_image", "upload_media",
                "delete_batch_media_gql",
+               # The per-image delete's router (2026-09-06): it fires one of the two
+               # delete mutations after reading the live task, so it is an
+               # account-mutating path in its own right.
+               "delete_image_routed",
                # LoRA training: spends real credits once the free-training quota is
                # gone, and a re-POST would start a SECOND training (2026-08-06).
                "submit_training",
@@ -338,6 +344,23 @@ class TestRestSpendPathsAreSingleAttempt:
                             lambda s, p, b, **k: posts.append((p, b)) or {"success": True})
         assert core.contest_enter(mock_session, "slug1", "art1") == {"success": True}
         assert posts == [("/contest/slug1/artwork", {"artworkId": "art1"})]
+
+    def test_the_routed_image_delete_has_no_retry_loop(self):
+        """The per-image delete's WHOLE-TASK branch calls delete_task_gql, which hand-rolls
+        one session.post rather than riding gql_mutate -- so the no-retry rule cannot be
+        inherited from the helper there. Read as structure, the same way _rest_post is
+        above: neither the router nor the function it calls may put a loop around the post.
+
+        Parsed rather than string-scanned, so prose in the docstrings ("for it", "wait for")
+        cannot make this pass or fail by accident."""
+        for fn, name in ((core.delete_image_routed, "delete_image_routed"),
+                         (core.delete_task_gql, "delete_task_gql")):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+            loops = [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.For, ast.AsyncFor, ast.While))]
+            assert not loops, (
+                "{} grew a loop around a destructive delete -- a re-sent deleteGeneration"
+                "Task can fire again against a task that already changed".format(name))
 
     def test_rest_post_has_no_retry_loop(self):
         """Read the IMPLEMENTATION, not the delegate. `core._rest_post` is now one line

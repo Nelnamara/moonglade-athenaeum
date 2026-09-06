@@ -206,3 +206,146 @@ def test_it_never_reads_updated_at():
     keyed on it would silently decide the wrong way."""
     import inspect
     assert "updatedAt" not in inspect.getsource(core.route_image_delete)
+
+
+# ---------------------------------------------------------------------------
+# The delete that USES the decision: read the live task, then fire one branch
+# ---------------------------------------------------------------------------
+
+class _Double:
+    """Stands in for the PixAI client on both roads a delete can take: `persisted` answers
+    the getTaskById read, `mutate` takes the per-image mutation, `post` takes the whole-task
+    one (which hand-rolls its own request). Every call is recorded, so "nothing was sent"
+    is checkable rather than assumed."""
+
+    _is_pixai_client = True
+
+    def __init__(self, task):
+        self.task = task
+        self.reads, self.mutations, self.posts = [], [], []
+
+    def persisted(self, op_name, variables=None, sha256=None, retries=4, **kw):
+        self.reads.append((op_name, dict(variables or {})))
+        return {"task": self.task}
+
+    def mutate(self, document, variables=None):
+        self.mutations.append((document, dict(variables or {})))
+        return {"updateGenerationTask": {"id": "TASK-BATCH"}}
+
+    def post(self, url, params=None, json=None, timeout=None, **kw):
+        self.posts.append(dict(json or {}))
+
+        class _Resp:
+            status_code = 200
+            text = "{}"
+
+            @staticmethod
+            def json():
+                return {"data": {"deleteGenerationTask": None}}
+
+        return _Resp()
+
+    def sent(self):
+        return len(self.mutations) + len(self.posts)
+
+
+def test_the_plan_reads_the_live_task_and_sends_nothing():
+    """The preview half of the two-phase delete. It has to READ -- the local catalog cannot
+    know which of a batch's members PixAI still has -- and it must send no mutation at all,
+    because the dialog it feeds has not been agreed to yet."""
+    dbl = _Double(_batch_task(False, True, False, False))
+    plan = core.plan_image_delete(dbl, "TASK-BATCH", "m0")
+    assert plan.plan == "per-image"
+    assert plan.live_siblings == 2, "the deleted member was counted as a survivor"
+    assert dbl.reads and dbl.reads[0][0] == "getTaskById"
+    assert dbl.sent() == 0, "the preview sent a mutation"
+
+
+def test_the_plan_reports_what_pixai_already_deleted():
+    """The whole-task branch purges the task's local rows, and the local copy of a member
+    PixAI already dropped is the only copy left anywhere -- so the plan has to name those
+    rows before anything is quarantined."""
+    dbl = _Double(_batch_task(True, True, False, True))
+    plan = core.plan_image_delete(dbl, "TASK-BATCH", "m2")
+    assert plan.plan == "whole-task"
+    assert sorted(plan.keep_media) == ["m0", "m1", "m3"]
+
+
+def test_the_plan_carries_the_deleted_stamp_of_an_already_deleted_image():
+    """So the caller can mark its own catalog row with the date PixAI dropped it, instead of
+    leaving a row that looks live forever."""
+    plan = core.plan_image_delete(_Double(_batch_task(True, False)), "TASK-BATCH", "m0")
+    assert plan.plan == "refuse"
+    assert plan.cloud_deleted_at == DELETED_AT
+
+
+def test_a_read_that_fails_plans_a_refusal_and_sends_nothing(monkeypatch):
+    """task_detail_gql fails SOFT to None on a network blip. The delete must come to a stop
+    there and say so -- never fall through to a mutation on a task it could not see."""
+    monkeypatch.setattr(core, "task_detail_gql", lambda *a, **k: None)
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(None)
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0")
+    assert plan.plan == "refuse"
+    assert "nothing was deleted" in plan.reason.lower()
+    assert dbl.sent() == 0, "it deleted something after a failed read"
+
+
+def test_the_per_image_branch_sends_delete_batch_media(monkeypatch):
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(_batch_task(False, False, False))
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1")
+    assert plan.plan == "per-image"
+    assert len(dbl.mutations) == 1 and not dbl.posts
+    doc, variables = dbl.mutations[0]
+    assert "updateGenerationTask" in doc
+    assert variables["input"] == {"deleteBatchMedia": {"mediaId": "m1"}}
+
+
+def test_the_whole_task_branch_sends_delete_generation_task(monkeypatch):
+    """The case that was broken: a task that made one image. The old code sent
+    deleteBatchMedia here and PixAI answered 403."""
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(_lone_task())
+    plan = core.delete_image_routed(dbl, "TASK-LONE", "solo1")
+    assert plan.plan == "whole-task"
+    assert len(dbl.posts) == 1 and not dbl.mutations, "the per-image mutation fired anyway"
+    assert dbl.posts[0]["variables"] == {"taskId": "TASK-LONE"}
+
+
+def test_a_stale_confirmed_plan_is_refused(monkeypatch):
+    """The dialog said one thing, the task changed underneath it, and the confirm arrives for
+    a plan that is no longer true. Sending the old plan would delete a whole generation the
+    user was told would keep three images."""
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(_batch_task(True, False, True, True))     # only m1 is live now
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m1", confirmed_plan="per-image")
+    assert plan.plan == "refuse"
+    assert "changed" in plan.reason.lower(), plan.reason
+    assert dbl.sent() == 0, "it deleted on a plan the user never agreed to"
+
+
+def test_a_matching_confirmed_plan_goes_through(monkeypatch):
+    monkeypatch.setattr(core, "READ_ONLY", False)
+    dbl = _Double(_batch_task(False, False))
+    plan = core.delete_image_routed(dbl, "TASK-BATCH", "m0", confirmed_plan="per-image")
+    assert plan.plan == "per-image"
+    assert len(dbl.mutations) == 1
+
+
+def test_the_routed_delete_fires_at_most_one_mutation():
+    """Structural, so a branch nobody drove is covered too: no loop may wrap the delete.
+    A destructive mutation retried after a lost response can fire twice against a task that
+    has already changed. delete_task_gql hand-rolls a single post and delete_batch_media_gql
+    rides gql_mutate; the function that picks between them must not put a loop around
+    either."""
+    import ast
+    import inspect
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(core.delete_image_routed)))
+    loops = [n for n in ast.walk(tree)
+             if isinstance(n, (ast.For, ast.AsyncFor, ast.While, ast.ListComp,
+                               ast.SetComp, ast.DictComp, ast.GeneratorExp))]
+    assert not loops, (
+        "delete_image_routed grew a loop around a destructive delete -- it must fire once")
+

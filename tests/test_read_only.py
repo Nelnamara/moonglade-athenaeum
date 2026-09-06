@@ -70,6 +70,48 @@ class TestDeleteTaskGqlReadOnly:
         assert pixai.calls == []
 
 
+class TestRoutedImageDeleteReadOnly:
+    """The per-image delete picks between the two mutations above by READING the task first
+    (2026-09-06). READ_ONLY has to refuse before even that read, so a read-only install makes
+    no network call at all for a delete -- and it has to hold on BOTH branches, since the
+    branch is chosen after the guard would otherwise have run."""
+
+    @pytest.mark.parametrize("outputs, branch", [
+        ({"mediaId": "GRID", "batch": [{"mediaId": "m0"}, {"mediaId": "m1"}]}, "per-image"),
+        ({"mediaId": "solo1"}, "whole-task"),
+    ])
+    def test_both_branches_blocked_before_any_network_call(
+            self, mock_session, monkeypatch, outputs, branch):
+        monkeypatch.setattr(core, "READ_ONLY", True)
+        monkeypatch.setattr(core, "DELETE_TASK_HASH", "deadbeef")
+        reads = []
+        monkeypatch.setattr(core, "task_detail_gql",
+                            lambda *a, **k: reads.append(1) or {"outputs": outputs})
+        target = "m0" if branch == "per-image" else "solo1"
+        with pytest.raises(core.PixAIError, match="READ_ONLY"):
+            core.delete_image_routed(mock_session, "T1", target)
+        mock_session.post.assert_not_called()
+        assert reads == [], (
+            "it read the task from PixAI before refusing -- READ_ONLY must stop the delete "
+            "before any call at all")
+
+    def test_the_guard_is_the_first_statement(self):
+        """Placement, not just presence: a guard that ran after the read would already have
+        made a network call, and one that ran after the routing would have to be repeated on
+        every branch that gets added later."""
+        import ast
+        import inspect
+        import textwrap
+        fn = ast.parse(textwrap.dedent(
+            inspect.getsource(core.delete_image_routed))).body[0]
+        body = [n for n in fn.body if not (isinstance(n, ast.Expr)
+                                           and isinstance(n.value, ast.Constant))]
+        first = body[0]
+        assert (isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
+                and getattr(first.value.func, "id", "") == "_check_read_only"), (
+            "_check_read_only is not the first thing delete_image_routed does")
+
+
 class TestClaimReward:
     def test_blocked_when_read_only(self, mock_session, monkeypatch):
         monkeypatch.setattr(core, "READ_ONLY", True)
