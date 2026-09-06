@@ -64,7 +64,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
-  - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
+  - ~~Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.~~
+    **Fixed 2026-09-06.** The banner's `height` is `auto` as a hero and `auto` cannot be
+    interpolated, so the snap landed in the expand's first frame while the `min-height` that
+    *can* animate was left sliding the remainder. Banner.jsx now pins the height at the slim
+    62px for the length of the expand; `gallery/src/styles/shell.css`'s `.mgx-bnr.expanding`
+    block holds the measurements and the one case it does not reach (a viewport under ~780px,
+    where the content is taller than the clamp and the last stretch still settles at the end).
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
@@ -99,12 +105,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
-- **The restart card's mascot: kill the spin, keep the pulse.** *(owner, 2026-09-05)* "I don't
-  want the mascot to spin anymore. it just looks wrong. I like the pulse, we can keep that and
-  maybe think of a new effect instead of the spin... or not." The spin is
-  `.mgcp-pwr-mascot.spin` (`cpSpin`, 1.9s infinite) in `gallery/src/styles/control-panel.css`;
-  the pulse halo beside it stays. Removing the spin is the decided part; whether a replacement
-  effect exists at all is open — a quick workshop, not a full session.
+- **The restart card's mascot: does anything replace the spin?** *(owner, 2026-09-05; the spin
+  itself came out 2026-09-06)* The decided half shipped — `.mgcp-pwr-mascot.spin` is gone and the
+  pulse halo beside it stays. What is left is only the open half of the ruling: "maybe think of a
+  new effect instead of the spin… or not." A quick workshop, not a full session, and *no effect*
+  is a real answer.
 
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
   v3.0 — revisit what Moonglade should get now the React app is the whole front end.

@@ -1003,6 +1003,35 @@ def test_myart_items_returns_card_ready_artwork_rows(tmp_path):
     assert items["m2"]["title"].startswith("fallback prompt")   # title falls back
     assert items["m3"]["is_video"] is True
     assert [it["media_id"] for it in d["items"]] == ["m3", "m2", "m1"]   # newest first
+    # #42: the counts the empty state reads its own cause off. Three artworks out of four
+    # rows here, so this library is synced and My Art has every right to be full.
+    assert d["coverage"] == {"media": 4, "artworks": 3}
+
+def test_myart_coverage_separates_never_synced_from_never_published(tmp_path):
+    """#42. My Art is a pure catalog read of the rows --sync-artworks wrote, so a library
+    that has never run that sync and one that has genuinely published nothing hand the
+    overlay the SAME zero items. `coverage` is the only thing that tells them apart, and
+    the empty state's whole honesty rests on it (gallery/src/hooks/useMyArt.js's
+    artworksNeverSynced), so the two cases are asserted apart rather than assumed."""
+    # NEVER SYNCED: real pictures in the catalog, not one artwork_id among them.
+    unsynced = tmp_path / "unsynced"
+    unsynced.mkdir()
+    save_catalog(unsynced / "catalog.db", [
+        _row(media_id="m1", created_at="2026-07-01T10:00:00", filename="x_m1.png"),
+        _row(media_id="m2", created_at="2026-07-02T10:00:00", filename="x_m2.png"),
+    ])
+    d = login_test_client(create_app(unsynced)).get("/api/myart/items").get_json()
+    assert d["items"] == []
+    assert d["coverage"] == {"media": 2, "artworks": 0}
+
+    # NOTHING TO SHOW AT ALL: an empty catalog. Same empty items, and `media` 0 is what
+    # stops the surface blaming a sync for a library that has nothing in it.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    save_catalog(empty / "catalog.db", [])
+    d = login_test_client(create_app(empty)).get("/api/myart/items").get_json()
+    assert d["items"] == []
+    assert d["coverage"] == {"media": 0, "artworks": 0}
 
 def _publish_setup(tmp_path, monkeypatch):
     """Logged-in client with every PixAI call stubbed AT THE CORE MODULE -- these tests

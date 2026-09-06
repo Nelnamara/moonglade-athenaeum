@@ -142,6 +142,10 @@ python moonglade_backup.py --sync-artworks        # published titles/tags/likes/
 python moonglade_backup.py --sync-artworks --with-videos
 ```
 
+`--sync-artworks` is what fills **📈 My Art** — until it has run once, that screen has nothing
+to list and tells you so. The Panel has the same job under Maintenance as **Sync
+published-artwork metadata**, if you would rather not use a terminal.
+
 ## Converting formats (`--convert`)
 
 PixAI serves `.webp`; if you'd rather keep `.png` or `.jpeg` on disk (needs Pillow):

@@ -1149,6 +1149,32 @@ def myart_items(db_path):
         return [dict(r) for r in rows]
 
 
+def myart_coverage(db_path):
+    """WHY My Art is empty, when it is (#42) -- the two counts that tell "you have
+    published nothing" apart from "--sync-artworks has never run on this library".
+
+    `artworks` is the population myart_items() returns: catalog rows carrying an
+    artwork_id. `media` is the whole catalog. artwork_id and is_published are written
+    EXCLUSIVELY by --sync-artworks (moonglade_backup.py's run_sync_artworks), so a
+    catalog holding media with zero artworks has simply never been synced -- a state the
+    rows alone cannot distinguish from a genuinely unpublished library, which is exactly
+    the silence the empty state used to answer with.
+
+    Two counts and not one because the pair is what makes the claim honest: `media` alone
+    would have the surface blame a sync on an empty library, and `artworks` alone cannot
+    tell an unsynced library from an unpopulated one. Fails soft to zeros -- an empty
+    state that cannot explain itself is only the state it already had."""
+    with catalog(db_path) as con:
+        try:
+            r = con.execute(
+                "SELECT COUNT(*) AS media,"
+                " COALESCE(SUM(CASE WHEN COALESCE(artwork_id,'') != '' THEN 1 ELSE 0 END),0)"
+                " AS artworks FROM catalog").fetchone()
+            return {"media": int(r["media"] or 0), "artworks": int(r["artworks"] or 0)}
+        except sqlite3.Error:
+            return {"media": 0, "artworks": 0}
+
+
 def artwork_media_ids(db_path, artwork_ids):
     """{artwork_id: media_id} for the ids the catalog knows, skipping the ones it does
     not. Cheap by construction: --sync-artworks writes artwork_id onto the SAME row as
@@ -12668,7 +12694,12 @@ def create_app(out_dir: Path):
         Visibility filter distinguishes them ('everything you've made, published or
         held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
         arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
-        already serves. The Artworks/Animations tab split is the is_video flag."""
+        already serves. The Artworks/Animations tab split is the is_video flag.
+
+        `coverage` rides along (#42) so the overlay's empty state can say WHY it is
+        empty: an unsynced library and a genuinely unpublished one produce the same
+        zero rows here, and only the catalog-wide counts separate them. See
+        myart_coverage()."""
         items = []
         for r in myart_items(db_path):
             mid, title, preview = r["media_id"], r["title"], r["prompt_preview"]
@@ -12688,7 +12719,8 @@ def create_app(out_dir: Path):
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
         # than making the overlay fetch the whole Control Panel summary for one field.
-        return jsonify({"items": items, "csrf": session.get("csrf", "")})
+        return jsonify({"items": items, "csrf": session.get("csrf", ""),
+                        "coverage": myart_coverage(db_path)})
 
     @app.route("/api/myart/publish", methods=["POST"])
     @tier(LOGIN)

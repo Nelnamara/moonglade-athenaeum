@@ -27,6 +27,10 @@ A row of frosted glow-pill buttons, one hue per destination:
 - **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
   flagged it, so a moderated work is no longer shown as a plain "Public".
+  My Art reads your local catalog, and the titles, tags and like counts it lists arrive with
+  **Sync published-artwork metadata** (Panel → Maintenance, or `--sync-artworks` — see
+  [Backing Up](Backing-Up)). On a library where that has never run there is nothing for it to
+  list, and it now says so and points at the sync instead of showing a bare "Nothing here yet."
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.

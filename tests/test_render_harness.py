@@ -1128,8 +1128,32 @@ _READ_SCRIM_JS = """() => {
   };
 }"""
 
-_SCRIM_BLURRED = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
-                  "/blur\\(/.test(getComputedStyle(s).backdropFilter || ''); }")
+# WAIT FOR THE SETTLED VALUE, NOT THE FIRST FRAME THAT HAS ONE (#54, 2026-09-06).
+# The blur reaches this scrim from a KEYFRAME -- `mgvScrimBlur .01s linear .3s forwards`
+# (overlays.css) -- so "is it blurred yet" and "has the blur ARRIVED" are two different
+# questions, and this predicate only ever asked the first: /blur\(/ matches the interpolated
+# blur(0.042px) exactly as happily as the final blur(7px). Both reads below (`before` in
+# phase 1, `restored` in phase 5) are taken the instant it goes true, so a read that landed
+# inside those 10ms carried a half-grown radius and phase 5's restored == before comparison
+# failed on a value that was merely measured too early -- twice on 2026-09-05, in two
+# independent full-module runs, green in isolation every time.
+# The gate is now the element's OWN animation clock: every CSS animation on the scrim
+# reporting `finished`. That is the settled-value poll in its exact form -- an answer from
+# the engine rather than a sample-it-twice heuristic that a fast raf could still fool -- and
+# it is the same discipline _freeze_motion() enforces for the geometry reads elsewhere in
+# this file, applied where freezing is not allowed (the note above: `animation: none` would
+# kill the very keyframe under test).
+# Strengthening it does not weaken phase 4, which requires this predicate to TIME OUT: the
+# same predicate has to have gone true in phase 1 before phase 4 is reached, so it cannot
+# quietly become unsatisfiable and pass that step vacuously.
+# An engine without getAnimations() reads an empty list and falls back to the plain check.
+_SCRIM_BLURRED = ("() => { const s = document.querySelector('.mgv-scrim'); if (!s) return false; "
+                  "const a = s.getAnimations ? s.getAnimations() : []; "
+                  "if (a.some((x) => x.playState !== 'finished')) return false; "
+                  "return /blur\\(/.test(getComputedStyle(s).backdropFilter || ''); }")
+# No settle gate on this one, and none needed: `none` here is the author !important of
+# html.mg-noblur (overlays.css), which outranks the keyframe outright -- there is no
+# interpolation to catch it mid-way, at any moment of the animation's life.
 _SCRIM_SHARP = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
                 "(getComputedStyle(s).backdropFilter || 'none') === 'none'; }")
 
