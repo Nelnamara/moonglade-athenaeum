@@ -362,7 +362,7 @@ var LoomBundle = (() => {
   };
   var mediaRefIndex = (project) => {
     const ids = {};
-    const note2 = (mid, where) => {
+    const note3 = (mid, where) => {
       const k = String(mid);
       (ids[k] = ids[k] || []).push(where);
     };
@@ -370,15 +370,15 @@ var LoomBundle = (() => {
       (act.cards || []).forEach((c, ci) => {
         const title = (c.title || "").trim();
         const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
-        if (c.resultMid) note2(c.resultMid, `${code} (shot result)`);
+        if (c.resultMid) note3(c.resultMid, `${code} (shot result)`);
         ["openFrame", "closeFrame"].forEach((slot) => {
           const f = c[slot] || {};
-          if (f.mediaId) note2(f.mediaId, `${code} (${slot})`);
+          if (f.mediaId) note3(f.mediaId, `${code} (${slot})`);
         });
       });
     });
     ((project || {}).assets || []).forEach((a) => {
-      if (a.mediaId) note2(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+      if (a.mediaId) note3(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
     });
     return ids;
   };
@@ -2365,7 +2365,7 @@ ${"=".repeat(48)}
     return { state: "error", note: "", msg: "", raw: d };
   }
   function build(view, props) {
-    const { state, note: note2, msg, raw } = view;
+    const { state, note: note3, msg, raw } = view;
     const d = raw || {};
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
@@ -2404,7 +2404,7 @@ ${"=".repeat(48)}
     } else if (state === "checking") {
       main = "Checking cost\u2026";
     } else {
-      main = note2 || (props.hint || "").trim() || DEFAULT_HINT;
+      main = note3 || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
     const stack = !!props.stack;
@@ -2815,7 +2815,7 @@ ${"=".repeat(48)}
     const seq2 = useRef(0);
     const timer2 = useRef(0);
     const ctrl = useRef(null);
-    const put = useCallback((v) => {
+    const put2 = useCallback((v) => {
       live.current = v;
       setVerdict(v);
     }, []);
@@ -2832,7 +2832,7 @@ ${"=".repeat(48)}
       }
     }, []);
     const fire = useCallback(() => {
-      put(fired());
+      put2(fired());
       const badge = costRef.current;
       if (!badge) return;
       const built2 = buildRef.current() || {};
@@ -2843,7 +2843,7 @@ ${"=".repeat(48)}
         if (built2.idle === true) badge.clear();
         else badge.clear(String(built2.idle));
         setResponse(null);
-        put(settledFor(key));
+        put2(settledFor(key));
         return;
       }
       badge.setChecking();
@@ -2856,15 +2856,15 @@ ${"=".repeat(48)}
         if (failed) {
           costRef.current.setPrice(null);
           setResponse(null);
-          put(settledFor(key));
+          put2(settledFor(key));
           return;
         }
         const d = response2;
         costRef.current.setPrice(d);
         setResponse(d);
-        put(settledFor(key));
+        put2(settledFor(key));
       });
-    }, [costRef, put]);
+    }, [costRef, put2]);
     const refresh2 = useCallback((opts) => {
       if (!enabledRef.current) return;
       const force = !!(opts && opts.force);
@@ -2872,11 +2872,11 @@ ${"=".repeat(48)}
       if (shouldShortCircuit(live.current, built2.payload, force, skipRef.current)) return;
       const badge = costRef.current;
       if (badge && badge.setChecking) badge.setChecking();
-      put(scheduled());
+      put2(scheduled());
       seq2.current++;
       clearTimeout(timer2.current);
       timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
-    }, [costRef, fire, put]);
+    }, [costRef, fire, put2]);
     useEffect(() => {
       if (!enabled) {
         stop();
@@ -3783,6 +3783,17 @@ ${"=".repeat(48)}
 
   // ../gallery/src/hooks/swrStore.js
   var _store = /* @__PURE__ */ new Map();
+  var _isPlainPayload = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  function put(path, data2) {
+    if (!path || !_isPlainPayload(data2) || data2.error) return false;
+    let keep = data2;
+    if ("csrf" in data2) {
+      keep = { ...data2 };
+      delete keep.csrf;
+    }
+    _store.set(String(path), keep);
+    return true;
+  }
   function invalidate(prefix) {
     const list = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean).map(String);
     if (!list.length) return 0;
@@ -4624,6 +4635,79 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/notify/spikeStore.js
+  var SEEN_KEY2 = "mg_spike_announced";
+  var memSeen2 = "";
+  var asked = false;
+  function readStored2() {
+    try {
+      return localStorage.getItem(SEEN_KEY2) || "";
+    } catch {
+      return "";
+    }
+  }
+  function markSeen2(at) {
+    memSeen2 = at;
+    try {
+      localStorage.setItem(SEEN_KEY2, at);
+    } catch {
+    }
+  }
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("storage", (e) => {
+      if (!e || e.key !== SEEN_KEY2) return;
+      const v = String(e.newValue || "");
+      if (v && v > memSeen2) memSeen2 = v;
+    });
+  }
+  function spikeMessage(spikes) {
+    const list = spikes || [];
+    if (!list.length) return null;
+    const top = list[0];
+    const name = (top.title || "").trim() || "One of your works";
+    const others = list.length - 1;
+    return {
+      title: "\u25C8 " + name + " is taking off",
+      msg: "+" + Number(top.gained).toLocaleString() + " views in the last " + top.window_hours + "h \u2014 about " + top.multiple + "\xD7 its usual pace" + (others ? " (and " + others + " more picking up)" : "") + "."
+    };
+  }
+  function note2(payload) {
+    const d = payload || {};
+    const at = String(d.views_at || "");
+    const spikes = d.spikes || [];
+    if (!at || !spikes.length) return false;
+    if (at <= memSeen2) return false;
+    const stored = readStored2();
+    if (stored && at <= stored) {
+      memSeen2 = stored;
+      return false;
+    }
+    const words = spikeMessage(spikes);
+    if (!words) return false;
+    markSeen2(at);
+    show({
+      kind: "ok",
+      sticky: true,
+      // a sweep can finish with nobody at the keyboard; see updateStore
+      icon: "\u25C8",
+      title: words.title,
+      msg: words.msg
+    });
+    return true;
+  }
+  function checkSpikes() {
+    if (asked) return Promise.resolve(false);
+    asked = true;
+    return apiGet("/api/your-art").then((d) => {
+      if (!d || d.error) return false;
+      try {
+        put("/api/your-art", d);
+      } catch {
+      }
+      return note2(d);
+    }).catch(() => false);
+  }
+
   // ../gallery/src/notify/ToastHost.jsx
   function ToastHost() {
     const [toasts2, setToasts] = useState([]);
@@ -4653,6 +4737,7 @@ ${"=".repeat(48)}
     check();
     const boot = typeof window !== "undefined" && window.MG_BOOT || {};
     claimReceipt(boot.build_stamp || "");
+    checkSpikes();
   }
   function NotifyRoot() {
     return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);

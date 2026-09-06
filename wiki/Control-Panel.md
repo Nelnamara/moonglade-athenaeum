@@ -15,9 +15,13 @@ they are simply no longer the only way anything happens. See
 page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
 **Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
-The **Runs itself** list heads the job console; the older single **⏱ Standing order** still
-lives in that console's **Ledger** view. (The old separate `/panel` page retired with the
-classic interface, 2026-08-08.)
+**PixAI account** opens on a strip of figures — credits, how much of that is paid and how
+much free, free cards on hand, coupons, and your **followers** and **following** — above
+tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+the window never spends, redeems, purchases, follows or unfollows anything.
+The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
+auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
+`/panel` page retired with the classic interface, 2026-08-08.)
 
 Like every page in the gallery, it needs a login (see [Setup](Setup)).
 

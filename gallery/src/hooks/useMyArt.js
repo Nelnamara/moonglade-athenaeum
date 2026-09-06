@@ -25,16 +25,35 @@ export default function useMyArt() {
 
   const totals = d ? d.totals || {} : {};
   const items = d ? d.items || [] : [];
+
+  // THE VIEWS STAT IS A REAL LIFETIME TOTAL AS OF 2026-09-06. It used to read
+  // "VIEWS (TOP 12)" because that is genuinely all it could say: views were fetched live,
+  // twelve calls per open, so there was no number for the other ninety-odd works. Views
+  // now ride --sync-artworks into a catalog column, so the sum is the whole published
+  // library. The label still carries the caveat when there is one -- a partly-swept
+  // library says so in the label rather than presenting a subtotal as a total, which is
+  // exactly the job the old "(TOP 12)" was doing.
+  const swept = totals.views_rows || 0;
+  const published = totals.count || 0;
+  const viewsLabel = !d || !d.views_synced ? "TOTAL VIEWS"
+    : swept < published ? "VIEWS (" + swept + " OF " + published + ")"
+      : "TOTAL VIEWS";
   // Frontend Gallery.dc.html:2425-2426 -- design order is PUBLISHED, VIEWS (accent-
   // highlighted), LIKES, COMMENTS; was PUBLISHED, LIKES, COMMENTS, VIEWS with no accent.
   const stats = d ? [
     { value: fmt(totals.count), label: "PUBLISHED" },
-    { value: d.views_synced ? fmt(totals.views_top) : "—", label: "VIEWS (TOP " + items.length + ")", accent: true },
+    { value: d.views_synced ? fmt(totals.views) : "—", label: viewsLabel, accent: true },
     { value: fmt(totals.likes), label: "TOTAL LIKES" },
     { value: fmt(totals.comments), label: "COMMENTS" },
   ] : [];
 
+  // The comparison bar's denominator. Unchanged in shape from the original ranked list
+  // (commit cecdd91f) -- what changed is that `items` is no longer a hardcoded twelve, so
+  // the bar is now relative to the owner's real best rather than to the best of a dozen.
   const maxViews = items.length ? Math.max(1, ...items.map((r) => r.views || 0)) : 1;
 
-  return { d, err, totals, items, stats, maxViews };
+  return { d, err, totals, items, stats, maxViews,
+           viewsSynced: !!(d && d.views_synced),
+           spikes: (d && d.spikes) || [],
+           viewsAt: (d && d.views_at) || "" };
 }

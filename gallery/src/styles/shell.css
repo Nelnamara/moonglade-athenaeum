@@ -361,6 +361,13 @@
   color: rgba(255, 255, 255, .62); }
 .mgx-credlab.cards { color: rgba(220, 255, 238, .6); }
 .mgx-creddiv { width: 1px; height: 12px; background: rgba(255, 255, 255, .2); }
+/* Followers / following (2026-09-06). The credits chip's own shell with the affordance
+   taken back off: no pointer, no hover lift, no tooltip drop -- it reports, it does not
+   act. Slightly smaller numerals so the balance stays the loudest thing in the row, since
+   that is the one a click can spend. */
+.mgx-social { cursor: default; padding: 5px 13px; }
+.mgx-social:hover, .mgx-social:focus-visible { z-index: 1; filter: none; }
+.mgx-social .mgx-credval { font-size: 12px; }
 .mgx-warndot { flex: none; width: 15px; height: 15px; display: grid; place-items: center;
   border-radius: 50%; font-size: 10px; font-weight: 800; color: #2a1f06;
   border: 1px solid rgba(255, 255, 255, .4);

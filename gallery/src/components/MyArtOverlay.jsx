@@ -19,9 +19,20 @@ import ContestConfirm from "./ContestConfirm.jsx";
 
    Real local data throughout: GET /api/myart/items (every catalog row with an
    artwork_id, public and private, card-ready — thumbs are the local
-   /thumbs/<mid>.jpg). The stat row keeps /api/your-art's LIVE view counts.
+   /thumbs/<mid>.jpg). The stat row reads /api/your-art.
    The heart-color rule, badge colors, tab pills, and grid geometry are the
    DC's literal values (heartCol: >10 mauve, >0 subtext, else overlay0).
+
+   VIEWS ARE LOCAL NOW (2026-09-06). This panel's view counts used to be LIVE — twelve
+   GraphQL calls fired on every open, six at a time, summed into one "VIEWS (TOP 12)"
+   stat and then thrown away. PROBE_2026-09-06 found that the ad-hoc bulk artworks query
+   accepts `views` (the persisted listArtworks cannot be edited to carry it), so
+   --sync-artworks sweeps them into a catalog column and everything here is a local read.
+   That is what pays for the three things the live design never could: a real LIFETIME
+   total, a count and comparison bar on EVERY published card rather than a hardcoded
+   twelve, and a Most-viewed sort. The same probe also measured that reading a view count
+   REGISTERS one — so the old design inflated the owner's twelve most-watched works by
+   twelve views every time he opened this panel to watch them.
 
    Per-card actions (publish-toggle/edit-tags/delete) and bulk Manage all run
    through the SAME real /api/myart/publish pipeline, preview-then-confirm --
@@ -33,7 +44,12 @@ import ContestConfirm from "./ContestConfirm.jsx";
    the design's own "Nothing here yet." empty state plus a one-line why. */
 
 const VIS_OPTS = [["all", "All"], ["public", "Public"], ["private", "Private"]];
-const SORT_OPTS = [["latest", "Latest"], ["oldest", "Oldest"], ["liked", "Most liked"]];
+// "Most viewed" joined the list on 2026-09-06: views are a catalog column now
+// (--sync-artworks sweeps them), so sorting the whole library by them is a local
+// comparison like "Most liked" beside it -- not the fan-out of live calls the scope's
+// own "do not build" line rules out until that column existed. It does.
+const SORT_OPTS = [["latest", "Latest"], ["oldest", "Oldest"],
+  ["liked", "Most liked"], ["viewed", "Most viewed"]];
 const TABS = [
   { key: "artworks", label: "Artworks" },
   { key: "animations", label: "Animations" },
@@ -63,6 +79,12 @@ function Dropdown({ kick, value, opts, onPick }) {
 
 // DC:2324 verbatim -- the heart color scales with the like count.
 const heartCol = (n) => (n > 10 ? "var(--mauve)" : n > 0 ? "var(--subtext)" : "var(--overlay0)");
+// The comment badge, added 2026-09-06 (owner: "same idiom as likes"). It takes the BOTTOM
+// TWO rungs of the heart's own three-rung scale and invents no third: comments are an order
+// of magnitude rarer than likes here, so a ">10 becomes mauve" threshold copied across
+// would be a colour nothing in this library ever reaches. Same glyph the app already uses
+// for a comment count everywhere else (DetailsView, ImageDetailsMobile, ModelPicker).
+const commentCol = (n) => (n > 0 ? "var(--subtext)" : "var(--overlay0)");
 
 // DC's BASE_TINT (L2393): named colors for the three architectures it called out by
 // name; anything else falls to its own fallback (subtext on surface0) rather than a
@@ -254,8 +276,23 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     if (vis !== "all") list = list.filter((r) => (vis === "public" ? r.public : !r.public));
     if (sort === "oldest") list = [...list].reverse();          // base order is latest-first
     else if (sort === "liked") list = [...list].sort((a, b) => b.likes - a.likes);
+    // A never-swept row sorts as -1, not 0, so it lands BELOW a work that really was
+    // looked at zero times rather than tying with it. Blank and zero stay different
+    // answers all the way to the bottom of the list.
+    else if (sort === "viewed") {
+      list = [...list].sort((a, b) => (b.views == null ? -1 : b.views) - (a.views == null ? -1 : a.views));
+    }
     return list;
   }, [rows, tab, vis, sort]);
+
+  /* The comparison bar's denominator, over WHAT IS ON SCREEN. useMyArt's own maxViews
+     measures /api/your-art's ranked page; this grid is the whole library through the
+     Visibility filter, so a bar drawn against the other list's maximum would be
+     systematically wrong on every card. Same derivation, its own population. */
+  const gridMaxViews = useMemo(() => {
+    const vs = media.map((r) => r.views).filter((v) => v != null);
+    return vs.length ? Math.max(1, ...vs) : 1;
+  }, [media]);
 
   const counts = useMemo(() => {
     const all = rows || [];
@@ -506,7 +543,33 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                         <span className="mgma2-ftitle" title={it.title}>{it.title}</span>
                         <span className="mgma2-fdate">{dateLabel(it.date)}</span>
                         <span className="mgma2-likes" style={{ color: heartCol(it.likes) }}>♥ {fmt(it.likes)}</span>
+                        {/* Owner, 2026-09-06: comment badges on the cards, same idiom as
+                            likes. The count was already fetched for every card and already
+                            summed into the COMMENTS stat -- it simply never reached a card. */}
+                        <span className="mgma2-likes" title={fmt(it.comments) + " comments"}
+                          style={{ color: commentCol(it.comments) }}>💬 {fmt(it.comments)}</span>
                       </div>
+                      {/* PER-CARD VIEWS + THE COMPARISON BAR (owner, 2026-09-06 -- on EVERY
+                          published card, explicitly not a hardcoded twelve).
+
+                          The bar is not a new visual: .mgma-barwrap/.mgma-bar are the
+                          Frontend Gallery DC's own ranked-list bar, shipped in cecdd91f and
+                          left orphaned in myart-contests.css when Stage 2A replaced that
+                          list with this card grid. Same 4px track, same accent fill, same
+                          "width is this work's share of the best one, floor 2%" rule.
+
+                          Drawn only for a PUBLISHED work that has actually been swept.
+                          views == null is "--sync-artworks has never read this", which is a
+                          different fact from a real zero and must not be painted as one. */}
+                      {it.public && it.views != null && (
+                        <div className="mgma2-fviews">
+                          <span className="n">{fmt(it.views)} views</span>
+                          <div className="mgma-barwrap">
+                            <div className="mgma-bar"
+                              style={{ width: Math.max(2, (it.views / gridMaxViews) * 100) + "%" }} />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     );
                   })}

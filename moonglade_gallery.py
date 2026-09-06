@@ -128,6 +128,27 @@ CATALOG_FIELDS = [
     # is true) and NEVER inferred from media_id order (which can swap outputs). Blank
     # means "not a batch output" (edits, upscales, videos, imports) -- not "unknown".
     "batch_index", "batch_size",
+    # VIEWS, SYNCED (2026-09-06). Views used to be LIVE-only: twelve GraphQL calls on
+    # every My Art open, thrown away after summing. PROBE_2026-09-06 settled that the
+    # ad-hoc bulk `artworks(authorId, first:N)` form accepts a `views` field (the
+    # persisted listArtworks cannot be edited), so views now ride --sync-artworks in a
+    # handful of paced calls and land here like liked_count does.
+    #
+    # FOUR columns, not one, and the reason is the spike rule: a single `views` number
+    # can only ever say "how many", never "is this taking off". The previous sweep's
+    # reading and BOTH timestamps are what make a rate comparable to the work's own
+    # normal rate. See views_spike().
+    #
+    # THE READ COSTS A VIEW. The same probe measured it: selecting `views` increments
+    # the counter for EVERY artwork the query returns (a page of 40 moves all 40 by
+    # one; a read that does not select `views` costs nothing). So consecutive sweep
+    # readings always carry exactly +1 of our own making, and views_spike() subtracts
+    # it. This is also why the sweep is bounded to --sync-artworks and never runs per
+    # page-open.
+    "views",           # latest swept count, '' = never swept (NOT zero)
+    "views_prev",      # the sweep before that -- the spike baseline
+    "views_at",        # ISO timestamp of the sweep that wrote `views`
+    "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -198,7 +219,11 @@ CREATE TABLE IF NOT EXISTS catalog (
     video_mode        TEXT DEFAULT '',
     video_model       TEXT DEFAULT '',
     batch_index       TEXT DEFAULT '',
-    batch_size        TEXT DEFAULT ''
+    batch_size        TEXT DEFAULT '',
+    views             TEXT DEFAULT '',
+    views_prev        TEXT DEFAULT '',
+    views_at          TEXT DEFAULT '',
+    views_prev_at     TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -307,6 +332,12 @@ _MIGRATIONS = [
     # listArtworks node, distinct from the binary is_nsfw (a work can be sensitive but not
     # nsfw). Already on the wire; the app just never read it. Blank until a --sync-artworks.
     "ALTER TABLE catalog ADD COLUMN is_sensitive TEXT DEFAULT ''",
+    # SYNCED VIEWS (2026-09-06) -- see CATALOG_FIELDS for why this is four columns and
+    # why the reading is self-inflating. Blank until a --sync-artworks sweeps them.
+    "ALTER TABLE catalog ADD COLUMN views TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_prev TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_at TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_prev_at TEXT DEFAULT ''",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1137,13 +1168,21 @@ def myart_items(db_path):
     --sync-artworks), public AND private -- the My Art gallery's whole population,
     newest first. Pure catalog read: title/likes/comments/tags/nsfw all arrive via
     --sync-artworks, so nothing here touches the network. `likes` and `comments` come
-    back as ints (the columns are TEXT and blank means zero)."""
+    back as ints (the columns are TEXT and blank means zero).
+
+    `views` joins them as of 2026-09-06 and is the reason My Art can now draw a real
+    number on EVERY card rather than a summed twelve. It keeps its raw text alongside
+    (`views_raw`) precisely because blank and zero are different answers here: '' is "this
+    library has never been swept", 0 is "swept, and nobody has looked at it". A card must
+    be able to say the first without drawing the second."""
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
             " is_sensitive, created_at, art_tags, is_published,"
             " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
-            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments,"
+            " CAST(COALESCE(NULLIF(views,''),'0') AS INTEGER) AS views,"
+            " views AS views_raw"
             " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
             " ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
@@ -1256,6 +1295,71 @@ def apply_artwork_meta(db_path, metas):
             cur = con.execute(sql, [str(m.get(f, "") or "") for f in ARTWORK_META_FIELDS]
                               + [str(m["media_id"])])
             changed += cur.rowcount or 0
+        con.commit()
+    return changed
+
+
+# The four view columns, folded by their own verb rather than by ARTWORK_META_FIELDS.
+# Deliberately NOT part of the meta list: the meta fields ride the fifteen-minute
+# living-library sweep, and reading a view count on PixAI ADDS one to it (PROBE_2026-09-06
+# measured it: a page that selects `views` moves every row it returns by +1). So views are
+# read ONCE per deliberate --sync-artworks and never on the sweep's cadence -- a rule that
+# only holds while the two writes stay two separate statements.
+ARTWORK_VIEW_FIELDS = ("views", "views_prev", "views_at", "views_prev_at")
+
+
+def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
+    """Fold a bulk views sweep onto the catalog rows it names, one narrow UPDATE each,
+    keyed by artwork_id (the id the sweep returns; media_id is what the row is keyed by).
+
+    The row-level twin of apply_artwork_meta for the four view columns, and it exists for
+    the same reason: run_sync_artworks used to fold views inside a whole-catalog
+    `load_catalog -> save_catalog` round trip, which reverted every write that landed
+    while the walk was running. This touches only the rows the sweep actually saw and only
+    the four columns above, in ONE transaction, so nothing else in the table can be
+    reached.
+
+    The per-row semantics are moonglade_backup.fold_views', exactly: a reading only slides
+    down into `views_prev` when a genuinely new one arrives to replace it, so `views_prev`
+    always holds THE PREVIOUS SWEEP's number and the spike rule's window keeps its meaning.
+    A row whose `views` is still blank has nothing to slide, and keeps its (blank) baseline.
+    Rows the sweep missed are not in the map and are not written at all, so a partial sweep
+    leaves the last reading anyone actually took.
+
+    Returns the number of rows actually changed."""
+    fresh_by_aid = {}
+    for aid, fresh in (views_by_artwork_id or {}).items():
+        aid = str(aid or "")
+        if aid and fresh is not None:
+            fresh_by_aid[aid] = fresh
+    if not fresh_by_aid:
+        return 0
+    ids = list(fresh_by_aid)
+    changed = 0
+    with catalog(db_path) as con:
+        # Chunked so a library-sized sweep cannot walk into SQLite's bound-parameter
+        # limit; idx_artwork_id makes each chunk an index lookup, never a table scan.
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            rows = con.execute(
+                "SELECT media_id, artwork_id, views, views_at, views_prev, views_prev_at "
+                "FROM catalog WHERE artwork_id IN ({})".format(
+                    ", ".join("?" for _ in chunk)), chunk).fetchall()
+            for r in rows:
+                fresh = fresh_by_aid.get(str(r["artwork_id"] or ""))
+                if fresh is None:
+                    continue
+                cur = str(r["views"] or "")
+                prev = str(r["views_prev"] or "")
+                prev_at = str(r["views_prev_at"] or "")
+                if cur != "":
+                    prev = cur
+                    prev_at = str(r["views_at"] or "")
+                upd = con.execute(
+                    "UPDATE catalog SET views=?, views_prev=?, views_at=?,"
+                    " views_prev_at=? WHERE media_id=?",
+                    (str(int(fresh)), prev, now_iso, prev_at, str(r["media_id"])))
+                changed += upd.rowcount or 0
         con.commit()
     return changed
 
@@ -4744,34 +4848,155 @@ def living_due(jobs, now, torch=None, is_runnable=None):
     return due, baselined
 
 
-def top_published_rows(db_path, limit=12):
-    """The owner's top published artworks by likes -> rows with artwork_id + engagement.
-    Feeds the 'Your Art' panel (live views are fetched per artwork_id on top of this)."""
+# --- THE BLOW-UP RULE (owner's addition to the community scope, 2026-09-06) -------------
+#
+# The ask, verbatim: "if something BLOWS up can there be a trigger or metric for that?"
+#
+# What makes this answerable honestly rather than decoratively is that a raw view count
+# cannot say it. 40 new views is enormous for a work that has sat at 3/day for a month and
+# unremarkable for one pulling 200/day. So the rule compares a work's RECENT PACE against
+# ITS OWN lifetime pace, and gates that ratio behind an absolute floor so a quiet work
+# going from 1 view to 4 does not get to shout.
+#
+# THE SELF-READ SUBTRACTION is the part that keeps it from lying. PROBE_2026-09-06 measured
+# that selecting `views` increments the counter for every artwork the query returns -- so
+# two consecutive sweeps ALWAYS differ by at least one view that the sweep itself caused.
+# Without SPIKE_SELF_READ every single work in the library shows a permanent +1 trickle,
+# and any threshold low enough to be sensitive would fire on the owner's own looking.
+#
+# Every constant here is a judgement call, deliberately conservative, and meant to be
+# tuned once the owner has watched it against a real week.
+SPIKE_MIN_GAIN = 25            # real new views in the window, below which nothing is a spike
+SPIKE_RATE_MULTIPLE = 3.0      # the window's pace must beat the work's lifetime pace by this
+SPIKE_MIN_WINDOW_H = 1.0       # floor on the window, so a double-sync minutes apart can't divide by ~0
+SPIKE_MIN_LIFETIME_H = 24.0    # floor on the work's age, so a day-old work has no absurd baseline
+SPIKE_SELF_READ = 1            # views the sweep's own read added -- measured, not assumed
+
+
+def views_spike(row):
+    """Is this published work blowing up? -> a dict describing the spike, or None.
+
+    Pure and side-effect free: it reads one catalog row's four view columns plus
+    created_at and answers from those alone, so it unit-tests without a database and
+    without a network. Callers decide what to do about a spike; this only names one.
+
+    Returns None -- deliberately, and these are the cases that matter most:
+      * never swept, or swept only ONCE (no `views_prev`). A first sweep has nothing to
+        compare against and must announce nothing. This is the no-announce baseline case.
+      * the window's real gain (after SPIKE_SELF_READ) is under SPIKE_MIN_GAIN.
+      * the work's own lifetime pace is >= a third of the window's pace -- i.e. it is
+        simply popular, not blowing up.
+      * a counter that went DOWN or sideways (PixAI recount, a work re-published):
+        clamped to zero gain, never a negative "spike".
+    """
+    def _int(v):
+        try:
+            return int(str(v).strip() or "")
+        except (TypeError, ValueError):
+            return None
+
+    now_v, prev_v = _int(row.get("views")), _int(row.get("views_prev"))
+    if now_v is None or prev_v is None:
+        return None                                  # never swept, or only once: silence
+    gained = max(0, now_v - prev_v - SPIKE_SELF_READ)
+    if gained < SPIKE_MIN_GAIN:
+        return None
+
+    t_now, t_prev = _series_ts(row.get("views_at")), _series_ts(row.get("views_prev_at"))
+    if t_now is None or t_prev is None or t_now <= t_prev:
+        return None                                  # unusable window; never guess one
+    window_h = max(SPIKE_MIN_WINDOW_H, (t_now - t_prev) / 3600.0)
+    rate = gained / window_h                         # real views per hour, this window
+
+    t_made = _series_ts(row.get("created_at"))
+    if t_made is None or prev_v <= 0:
+        return None                                  # no baseline to beat: never a spike
+    lifetime_h = max(SPIKE_MIN_LIFETIME_H, (t_prev - t_made) / 3600.0)
+    baseline = prev_v / lifetime_h                   # the work's own all-time views/hour
+    if baseline <= 0 or rate < baseline * SPIKE_RATE_MULTIPLE:
+        return None
+
+    return {
+        "media_id": row.get("media_id") or "",
+        "artwork_id": row.get("artwork_id") or "",
+        "title": (row.get("title") or "").strip(),
+        "views": now_v,
+        "gained": gained,
+        "window_hours": round(window_h, 1),
+        "rate_per_hour": round(rate, 2),
+        "baseline_per_hour": round(baseline, 3),
+        "multiple": round(rate / baseline, 1),
+    }
+
+
+def top_published_rows(db_path, limit=12, order="likes"):
+    """The owner's top published artworks -> rows with artwork_id + engagement + views.
+
+    `order` is "likes" (the historical default) or "views". Views are now a CATALOG
+    column filled by --sync-artworks, not twelve live calls made while the panel opens;
+    a library that has never been swept simply reads views=0 with views_at blank, which
+    is what lets the panel say "not swept yet" instead of drawing a bar of zeroes."""
+    col = "views" if order == "views" else "likes"
     with catalog(db_path) as con:
         try:
             rows = con.execute(
-                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, "
+                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, created_at, "
                 "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
-                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments "
+                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments, "
+                "CAST(COALESCE(NULLIF(views,''),'0') AS INTEGER) AS views, "
+                "views AS views_raw, views_prev, views_at, views_prev_at "
                 "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
-                "ORDER BY likes DESC, comments DESC LIMIT ?", (int(limit),)).fetchall()
+                "ORDER BY {} DESC, likes DESC, comments DESC LIMIT ?".format(col),
+                (int(limit),)).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.Error:
             return []
 
 
 def published_totals(db_path):
-    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks)."""
+    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks).
+
+    `views` here is the real LIFETIME total across the whole published library -- the
+    thing the panel could not show while views were fetched live for a top twelve. It
+    sums only rows that have actually been swept; `views_rows` says how many that was,
+    so a partially-swept library reports an honest subtotal rather than a total that
+    silently counts blanks as zero."""
     with catalog(db_path) as con:
         try:
             r = con.execute(
                 "SELECT COUNT(*) AS c, "
                 "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
-                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments "
+                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments, "
+                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' "
+                "                  THEN CAST(views AS INTEGER) ELSE 0 END),0) AS views, "
+                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' THEN 1 ELSE 0 END),0) AS views_rows, "
+                "MAX(COALESCE(views_at,'')) AS views_at "
                 "FROM catalog WHERE is_published = '1'").fetchone()
-            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0)}
+            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0),
+                    "views": int(r[3] or 0), "views_rows": int(r[4] or 0),
+                    "views_at": r[5] or ""}
         except sqlite3.Error:
-            return {"count": 0, "likes": 0, "comments": 0}
+            return {"count": 0, "likes": 0, "comments": 0,
+                    "views": 0, "views_rows": 0, "views_at": ""}
+
+
+def published_spikes(db_path, limit=5):
+    """Every published work that views_spike() calls a blow-up, hottest first.
+
+    A pure catalog read over the swept rows -- no network, no live call. Capped because
+    this feeds a corner note, not a feed: the owner asked to be TOLD when something takes
+    off, and a note naming twenty works tells him nothing."""
+    with catalog(db_path) as con:
+        try:
+            rows = con.execute(
+                "SELECT media_id, artwork_id, title, created_at, views, views_prev, "
+                "views_at, views_prev_at FROM catalog "
+                "WHERE is_published = '1' AND COALESCE(views_prev,'') != ''").fetchall()
+        except sqlite3.Error:
+            return []
+    hits = [s for s in (views_spike(dict(r)) for r in rows) if s]
+    hits.sort(key=lambda s: (s["multiple"], s["gained"]), reverse=True)
+    return hits[:int(limit)]
 
 
 def distinct_task_count(db_path):
@@ -13519,32 +13744,50 @@ def create_app(out_dir: Path):
     @app.route("/api/your-art")
     @tier(LOGIN)
     def api_your_art():
-        """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
-        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
-        owner's key -- same trust level as /api/artwork-views, which this loop is really just a
-        batched version of). Read-only, no spend.
+        """'Your Art' panel: the owner's top published works plus the library's real
+        lifetime totals. Pure CATALOG read -- no network, no spend, works over LAN.
+
+        THIS ROUTE USED TO MAKE TWELVE LIVE GRAPHQL CALLS ON EVERY OPEN, six at a time,
+        to fetch view counts that no column existed for -- the lag saga, and the reason the
+        panel could only ever report a "top 12" subtotal. PROBE_2026-09-06 established that
+        the ad-hoc bulk `artworks(authorId, first:N)` query accepts `views`, so
+        --sync-artworks now sweeps them into the catalog in a handful of paced calls and
+        this route reads a column like every other number on the panel.
+
+        That is not merely faster, it is more HONEST in two ways. The totals are now
+        lifetime sums over the whole published library rather than a dozen rows. And the
+        same probe measured that reading a view count COSTS a view -- so the old design
+        inflated the owner's own twelve most-looked-at works by twelve views every single
+        time he opened the panel to look at them. A sweep he runs deliberately still costs
+        one view per work, but bounded to that sweep instead of to his curiosity.
+
+        `views_synced` now means "the catalog has been swept", not "the live calls
+        happened to succeed"; `?order=views` ranks by views instead of likes.
 
         No `_is_authorized_request()` conjunct here: this whole route is now covered by the
         global front-door hook (see _enforce_front_door()'s docstring), so reaching this line
         already guarantees it -- an explicit re-check here would be dead-always-true, the same
         class of redundant check removed from the 43 individually-gated routes."""
-        top = top_published_rows(db_path, 12)
+        order = "views" if (request.args.get("order") or "") == "views" else "likes"
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 12), 200))
+        except (TypeError, ValueError):
+            limit = 12
         totals = published_totals(db_path)
-        views_synced = False
-        if top:
-            try:
-                core, session = _gen_session()
-                import concurrent.futures as _cf
-                with _cf.ThreadPoolExecutor(max_workers=6) as ex:
-                    vs = list(ex.map(lambda r: core.artwork_views(session, r["artwork_id"]), top))
-                for r, v in zip(top, vs):
-                    r["views"] = v
-                top.sort(key=lambda r: (r.get("views") or 0, r.get("likes") or 0), reverse=True)
-                totals["views_top"] = sum(vs)
-                views_synced = True
-            except Exception:
-                pass
-        return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
+        top = top_published_rows(db_path, limit, order=order)
+        views_synced = totals.get("views_rows", 0) > 0
+        for r in top:
+            # '' and 0 are different answers (see myart_items): a never-swept row must not
+            # render as a real zero, so it goes to the client as null.
+            swept = (r.pop("views_raw", "") or "") != ""
+            r["views"] = r["views"] if swept else None
+            for k in ("views_prev", "views_at", "views_prev_at"):
+                r.pop(k, None)
+        return jsonify({"items": top, "totals": totals, "views_synced": views_synced,
+                        "views_at": totals.get("views_at", ""),
+                        # The blow-up note's payload. A LIST, capped, never a feed --
+                        # see published_spikes() and views_spike().
+                        "spikes": published_spikes(db_path)})
 
     @app.route("/api/myart/items")
     @tier(LOGIN)
@@ -13571,6 +13814,9 @@ def create_app(out_dir: Path):
                 "public": r["is_published"] == "1",
                 "sensitive": r["is_sensitive"] == "1",
                 "likes": r["likes"], "comments": r["comments"],
+                # null (never swept) vs 0 (swept, nobody looked) -- the card draws a
+                # dash for the first and a real 0 for the second.
+                "views": r["views"] if (r["views_raw"] or "") != "" else None,
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather

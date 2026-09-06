@@ -678,6 +678,18 @@ def test_the_panels_runs_itself_block_never_reloads_the_gallery():
 # 8. THE FULL --sync-artworks WALK -- narrow now too, so nothing round-trips the table
 # =====================================================================================
 
+def _sync_fake():
+    """The transport a full --sync-artworks run talks to here.
+
+    Beyond the listing (monkeypatched per test), the run makes ONE other read: the ad-hoc
+    bulk `artworks(authorId, first:N)` views sweep, which is keyed by the fake under
+    `artworks`. It answers with an empty page -- these tests are about the WRITE SHAPE of
+    the merge, not about views -- and registering it is what keeps the fake's refuse-by-name
+    contract honest rather than letting an unregistered operation stand in for one."""
+    return FakePixAI(user_id="u").on(
+        "artworks", {"artworks": {"edges": [], "pageInfo": {"hasNextPage": False}}})
+
+
 def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         tmp_path, monkeypatch):
     """THE LOST-UPDATE RACE, closed at the root (adversarial review, 2026-09-06).
@@ -725,7 +737,7 @@ def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
         return page
 
     monkeypatch.setattr(core, "artwork_list_gql", _list)
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
     # The old shape's window was everything between its whole-table read and its
     # whole-table save, so put a writer there too. Wrapping the REAL load and the REAL
     # save (never stubbing them) is what makes this test bite: if the round trip ever
@@ -774,7 +786,7 @@ def test_the_full_sync_still_tags_an_animation_through_its_video_media_id(
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="vid1", filename="v.mp4", is_video="1"),
                       _row(media_id="poster1", filename="p.png")])
-    monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _sync_fake())
     monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: {
         "edges": [{"node": _node("poster1", "aw9", video_mid="vid1")}],
         "pageInfo": {"hasPreviousPage": False}})

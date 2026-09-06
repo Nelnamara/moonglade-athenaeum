@@ -668,6 +668,25 @@ def test_extract_artwork_meta_no_extra():
     assert m["blurhash"] == "" and m["nsfw_scores"] == "" and m["is_published"] == "0" and m["is_sensitive"] == "0"
 
 
+def _views_sweep(pixai, views=None):
+    """Register the VIEW SWEEP --sync-artworks has made since 2026-09-06.
+
+    The sync is two passes now, not one: the persisted `listArtworks` for metadata, and an
+    ad-hoc bulk `artworks(authorId, first:N)` for view counts -- which is the only form
+    that accepts a `views` field (PROBE_2026-09-06; the persisted query's selection set is
+    a fixed hash and cannot be edited).
+
+    Registered EXPLICITLY here rather than swallowed, because that is the whole point of
+    the `pixai` fixture: an operation nobody anticipated fails by name instead of reaching
+    the network. These four tests predate the sweep, so each one now says out loud that the
+    second pass happens. `views=None` registers an empty library -- enough to satisfy the
+    call without changing what the test is about."""
+    pixai.on("artworks", {"artworks": {
+        "edges": [{"node": {"id": aid, "views": v}} for aid, v in (views or {}).items()],
+        "pageInfo": {"hasNextPage": False, "endCursor": ""}}})
+    return pixai
+
+
 def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
     from moonglade_gallery import save_catalog, CATALOG_FIELDS, load_catalog
     db = tmp_path / "catalog.db"
@@ -680,10 +699,12 @@ def test_sync_artworks_merges_by_media_id(tmp_path, mocker, pixai):
                                 "aesScore": 6.0, "tacks": []}}],
             "pageInfo": {"hasPreviousPage": False}}
     mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    _views_sweep(pixai, {"aw1": 412})
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
     assert res["artworks"] == 1 and res["matched"] == 1
+    assert res["views"] == 1                       # the sweep landed on the matched row
     row = {r["media_id"]: r for r in load_catalog(db)}["m1"]
     assert row["title"] == "My Art" and row["liked_count"] == "3"
     assert row["is_published"] == "1" and row["artwork_id"] == "aw1"
@@ -706,6 +727,7 @@ def test_sync_artworks_tags_the_animation_video_row(tmp_path, mocker, pixai):
                                 "aesScore": 6.0, "tacks": []}}],
             "pageInfo": {"hasPreviousPage": False}}
     mocker.patch.object(core, "artwork_list_gql", return_value=conn)
+    _views_sweep(pixai, {"aw9": 77})
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -804,6 +826,7 @@ def test_sync_artworks_flags_incomplete_pagination_as_a_failure(tmp_path, mocker
              "pageInfo": {"hasPreviousPage": True, "startCursor": "cursor2"}}
     # Page 1 succeeds; page 2's fetch "fails" (artwork_list_gql's own failure mode: None).
     mocker.patch.object(core, "artwork_list_gql", side_effect=[page1, None])
+    _views_sweep(pixai, {"aw1": 5})
 
     res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
 
@@ -833,6 +856,7 @@ def test_sync_artworks_counts_failed_video_downloads_as_a_failure(tmp_path, mock
     mocker.patch.object(core, "already_downloaded_video", return_value=None)
     mocker.patch.object(core, "resolve_media", return_value=("https://x/vid1.mp4", {}))
     mocker.patch.object(core, "download", return_value=("fail", None))
+    _views_sweep(pixai, {"aw1": 5})
 
     res = core.run_sync_artworks(SimpleNamespace(
         out=str(tmp_path), token=None, delay=0, with_videos=True, workers=1))
