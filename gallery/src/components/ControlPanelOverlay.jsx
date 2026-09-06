@@ -651,11 +651,23 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                                          "Top up Similar" needs the ML stack installed. */
                                       <>{" · "}<span>needs the ML stack (torch) installed</span></>
                                     )}
+                                    {c.deferred && (
+                                      /* Same honesty, the other collision: the standing
+                                         order below owns this action, so the scheduler
+                                         skips this row rather than have two paths take
+                                         turns losing the one job slot. Without this the
+                                         row went on showing a cadence and a "next in 3h"
+                                         it was not running. */
+                                      <>{" · "}<span>the standing order below runs this one — this row waits</span></>
+                                    )}
                                     {" · last ran "}
                                     <b className={last && ledgerResult(last).good ? "ok" : ""}>
                                       {last ? fmtWhen(last.ts) : "—"}</b>
                                   </span>
-                                  <span className="mgcp-standing-next">{fmtNextRun(row)}</span>
+                                  {/* No "next in 3h" on a deferred row: this scheduler is
+                                      not the one running it, so it has no next. */}
+                                  <span className="mgcp-standing-next">
+                                    {c.deferred ? "" : fmtNextRun(row)}</span>
                                   {!running && (
                                     <button type="button" className="mgcp-run"
                                       onClick={() => runLiving(c.action)}>Run now ▸</button>

@@ -16,7 +16,9 @@ NO REAL PIXAI. The sweep talks to the transport seam, so it is driven here by a 
 answering `listArtworks`, exactly as tests/test_pixai_client.py drives the real client.
 """
 import inspect
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -670,6 +672,321 @@ def test_the_panels_runs_itself_block_never_reloads_the_gallery():
         assert name not in block, "the Runs-itself block reaches for %s" % name
     # and it is drawn with the vocabulary that already existed -- no new visual language
     assert "mgcp-standing" in block and "mgcp-run" in block and "mgcp-grp" in block
+
+
+# =====================================================================================
+# 8. THE FULL --sync-artworks WALK -- narrow now too, so nothing round-trips the table
+# =====================================================================================
+
+def test_the_full_sync_cannot_revert_a_write_that_lands_while_it_is_running(
+        tmp_path, monkeypatch):
+    """THE LOST-UPDATE RACE, closed at the root (adversarial review, 2026-09-06).
+
+    run_sync_artworks used to persist by `load_catalog -> merge in memory -> save_catalog`:
+    read the whole table, then upsert EVERY column of EVERY row from a snapshot taken after
+    a walk that can run for minutes. Correct while this was the library's only writer, and a
+    silent revert the moment it was not -- and this branch makes it not, by construction: the
+    artworks sweep writes these same rows every fifteen minutes, on every publish and at
+    boot, and the owner's ratings and collections land from the browser at any time.
+
+    Writer A here is exactly that kind of writer -- one narrow UPDATE, the shape
+    apply_artwork_meta, publish_state and the rating route all use -- and it fires from two
+    places: mid-walk, and inside the read->save window the OLD shape had (through the
+    load_catalog seam that shape used, which this one no longer calls at all). It touches
+      * an owner-authored column on a row the sync really does merge (a rating), and
+      * a row the sync NEVER SAW -- the collateral only a whole-table rewrite can cause.
+    Both must survive. Under the old shape neither did."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="m1", filename="one.png", rating="1", created_at=_iso(10)),
+        _row(media_id="untouched", filename="two.png", rating="4",
+             collections="Favourites", liked_count="7", created_at=_iso(10)),
+    ])
+    writer = {"n": 0}
+
+    def writer_a():
+        """The living library's own writer, in miniature: narrow UPDATEs of rows it names.
+
+        Each call writes a DIFFERENT value, so "the last write wins" is a real assertion
+        rather than one two identical writes would satisfy by accident."""
+        writer["n"] += 1
+        n = writer["n"]
+        with g.catalog(db) as con:
+            con.execute("UPDATE catalog SET rating=? WHERE media_id='m1'", (str(n),))
+            con.execute("UPDATE catalog SET liked_count=?, collections=?"
+                        " WHERE media_id='untouched'", (str(90 + n), "Keepers%d" % n))
+            con.commit()
+
+    page = {"edges": [{"node": _node("m1", "aw1", likes=3)}],
+            "pageInfo": {"hasPreviousPage": False}}
+
+    def _list(*_a, **_k):
+        writer_a()                       # a writer landing DURING the walk
+        return page
+
+    monkeypatch.setattr(core, "artwork_list_gql", _list)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
+    # The old shape's window was everything between its whole-table read and its
+    # whole-table save, so put a writer there too. Wrapping the REAL load and the REAL
+    # save (never stubbing them) is what makes this test bite: if the round trip ever
+    # comes back, it really runs, and it really reverts.
+    real_load, real_save = core.load_catalog, core.save_catalog
+    saved = []
+
+    def _load_then_write(path, *a, **k):
+        rows = real_load(path, *a, **k)
+        writer_a()
+        return rows
+
+    def _record_save(path, rows, *a, **k):
+        saved.append(len(rows))
+        return real_save(path, rows, *a, **k)
+
+    monkeypatch.setattr(core, "load_catalog", _load_then_write)
+    monkeypatch.setattr(core, "save_catalog", _record_save)
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    last = writer["n"]
+    assert last >= 1, "writer A never ran -- this test would pass vacuously"
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["m1"]["rating"] == str(last), \
+        "the walk reverted a rating written while it was running"
+    assert rows["untouched"]["liked_count"] == str(90 + last), \
+        "the walk rewrote a row it never even saw"
+    assert rows["untouched"]["collections"] == "Keepers%d" % last
+    # ...and it still did its own job: the eleven PixAI-owned columns landed
+    assert res["matched"] == 1
+    assert rows["m1"]["artwork_id"] == "aw1" and rows["m1"]["liked_count"] == "3"
+    # THE ROUND TRIP ITSELF IS GONE -- no whole-table read, no whole-table save
+    assert saved == [], "run_sync_artworks still upserts the whole catalog"
+    src = inspect.getsource(core.run_sync_artworks)
+    assert "save_catalog(" not in src and "load_catalog(" not in src
+    assert "apply_artwork_meta(" in src
+
+
+def test_the_full_sync_still_tags_an_animation_through_its_video_media_id(
+        tmp_path, monkeypatch):
+    """#20 survives the narrow rework: an animation's row is keyed by its MP4's media_id,
+    not the poster `mediaId` the node carries, so the meta has to be re-keyed rather than
+    merged onto whatever row happens to match. Kept here beside the rework because that
+    re-keying is the one thing the old in-memory merge got for free."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="vid1", filename="v.mp4", is_video="1"),
+                      _row(media_id="poster1", filename="p.png")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: FakePixAI(user_id="u"))
+    monkeypatch.setattr(core, "artwork_list_gql", lambda *a, **k: {
+        "edges": [{"node": _node("poster1", "aw9", video_mid="vid1")}],
+        "pageInfo": {"hasPreviousPage": False}})
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert res["matched"] == 2
+    assert rows["vid1"]["artwork_id"] == "aw9" and rows["vid1"]["is_video"] == "1"
+    assert rows["poster1"]["artwork_id"] == "aw9"
+
+
+def test_the_sweep_defers_to_a_catalog_writing_panel_job(tmp_path):
+    """BELT AND BRACES around the one thing the sweep's own lock cannot see: a SUBPROCESS.
+
+    _artworks_lock is a threading.Lock in the server process, and every Panel action runs as
+    its own interpreter (_panel_run -> subprocess.Popen of the CLI) with its own SQLite
+    connection. So a sweep and a `--sync` can write the same rows at the same moment and
+    neither lock will ever notice -- SQLite serialises the two STATEMENTS, which is a much
+    weaker promise than serialising the two JOBS. The sweep therefore reads the one piece of
+    state that does cross the boundary: the Panel's single job slot."""
+    cli = _client(tmp_path)
+    slot = cli.application.extensions["mg_panel_job"]
+    # a catalog-writing job in the slot: the sweep stands down, and says which job did it
+    slot.update(status="running", action="sync", label="Sync now")
+    d = cli.post("/api/panel/sweep", json={}).get_json()
+    assert d["deferred"] == "sync" and d["ok"] is False
+    # a job that writes no catalog rows is no reason to wait
+    slot.update(status="running", action="audit", label="Duplicate audit")
+    assert cli.post("/api/panel/sweep", json={}).get_json()["deferred"] == ""
+    slot.update(status="idle", action="", label="")
+    assert cli.post("/api/panel/sweep", json={}).get_json()["deferred"] == ""
+    # the set is the writers, and nothing destructive is (or can become) one
+    assert {"sync", "resync-full", "test-pull", "sync-videos",
+            "sync-artworks"} == set(g.ARTWORKS_TOUCHING_ACTIONS)
+    assert not (g.ARTWORKS_TOUCHING_ACTIONS
+                & {"organize", "undo-organize", "dedup-apply", "dedup-delete",
+                   "restore-orphans", "rebuild-thumbs"})
+    # every trigger defers, the publish kick included -- the gate is in the shared kick
+    src = inspect.getsource(g.create_app)
+    kick = src[src.index("def _artworks_kick(force=False):"):]
+    kick = kick[:kick.index("def _living_run(action):")]
+    assert "if _artworks_job_busy():\n            return False" in kick
+    tick = src[src.index("def _living_tick():"):]
+    tick = tick[:tick.index("def _scheduler_loop():")]
+    assert "if _artworks_job_busy():\n                        continue" in tick, \
+        "a deferred tick must skip and retry, never stamp last_run and go quiet"
+
+
+def test_the_ticks_first_kick_does_not_repeat_the_boot_sweep():
+    """The boot kick fires 25s after start; the first tick lands 35s after THAT with the
+    sweep row's last_run still unset -- so it read as due, and a forced kick re-ran the
+    whole first-boot deep walk twice inside a minute. Freshness, not force."""
+    now = NOW
+    g._artworks_state["at"] = now - 30.0             # the boot kick just finished
+    assert g.artworks_sweep_fresh(g.ARTWORKS_SWEEP_S, now) is True
+    assert g.artworks_sweep_fresh(g.ARTWORKS_SWEEP_S, now + 900) is False
+    # a shorter cadence the owner set is honoured -- freshness reads the ROW's interval,
+    # not the sweep's own fifteen-minute recent-guard
+    g._artworks_state["at"] = now - 301.0
+    assert g.artworks_sweep_fresh(300, now) is False
+    # only a CLEAN finish stamps `at`, so a run of failing sweeps can never read as fresh
+    g._artworks_state["at"] = 0.0
+    assert g.artworks_sweep_fresh(g.ARTWORKS_SWEEP_S, now) is False
+    tick = inspect.getsource(g.create_app)
+    tick = tick[tick.index("def _living_tick():"):]
+    tick = tick[:tick.index("def _scheduler_loop():")]
+    # ...and it SKIPS rather than stamps: last_run must keep meaning "when this job last
+    # ran", so a deferred tick retries in sixty seconds instead of buying a whole cadence
+    # of silence. _living_stamp is only ever reached through a _living_run that returned.
+    assert ('if artworks_sweep_fresh((row or {}).get("interval_s"), now):\n'
+            "                        continue") in tick
+
+
+def test_one_malformed_artwork_node_is_skipped_not_the_whole_sweep(tmp_path, monkeypatch):
+    """extract_artwork_meta reads a dict PixAI sent, in a shape this app does not control
+    and has already watched change (isSensitive and the nsfwPredict block both arrived
+    unannounced). One node raising used to abort the walk through artworks_sweep_kick's
+    catch-all -- throwing away every meta collected before it AND leaving the run unstamped,
+    which means it did that again fifteen minutes later, forever."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="good1", filename="a.png", created_at=_iso(400)),
+                      _row(media_id="good2", filename="b.png", created_at=_iso(400))])
+    real = core.extract_artwork_meta
+
+    def _extract(node):
+        if node.get("mediaId") == "bad":
+            raise TypeError("a shape this build has never seen")
+        return real(node)
+
+    monkeypatch.setattr(core, "extract_artwork_meta", _extract)
+    _sweep_env(monkeypatch, [[_node("good1", "aG1"), _node("bad", "aBad"),
+                              _node("good2", "aG2")]])
+    res = g.artworks_sweep(tmp_path, db, force=True, now=NOW)
+    assert res["changed"] == 2, "one bad node threw away everything the run had gathered"
+    assert res["incomplete"] is False           # a skipped row is not a broken walk
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["good1"]["artwork_id"] == "aG1" and rows["good2"]["artwork_id"] == "aG2"
+
+
+def test_an_interrupted_thumbnail_never_lands_on_the_real_name(tmp_path, monkeypatch):
+    """make_thumbnail saved straight onto the final path, so a kill, a crash or a full disk
+    part-way through left a TRUNCATED .jpg at the real name -- and every "is it built yet?"
+    check in this app is thumb_path.exists(), which reads that as done. Survivable while a
+    thumbnail pass was a button someone watched; not survivable now that --rebuild-thumbs
+    is on the sixty-day staleness backstop and starts by itself. Sixty days is how long a
+    corrupt thumbnail would have sat there."""
+    PILImage = pytest.importorskip("PIL.Image")
+    src = tmp_path / "src.png"
+    PILImage.new("RGB", (40, 30), "red").save(src)
+    thumb = tmp_path / "thumbs" / "m1.jpg"
+    assert g.make_thumbnail(src, thumb) is True
+    good = thumb.read_bytes()
+
+    real_save = PILImage.Image.save
+
+    def _torn_save(self, fp, *a, **k):
+        """A write that dies part-way: bytes on disk, then the failure."""
+        real_save(self, fp, *a, **k)
+        with open(fp, "r+b") as fh:
+            fh.truncate(12)
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(PILImage.Image, "save", _torn_save)
+    assert g.make_thumbnail(src, thumb) is False
+    assert thumb.read_bytes() == good, \
+        "an interrupted rebuild overwrote the live thumbnail with a torn file"
+    # no debris, and nothing --rebuild-thumbs' orphan sweep (glob '*.jpg') could confuse
+    assert [p.name for p in thumb.parent.iterdir()] == ["m1.jpg"]
+    assert "_atomic_replace" in inspect.getsource(g.make_thumbnail)
+    # ...and the docstring that promised "overwritten in place" is now true
+    assert "os.replace" in (inspect.getdoc(core.run_rebuild_thumbs) or "")
+
+
+def test_the_sixty_day_floor_is_enforced_by_the_server_not_by_a_missing_selector(tmp_path):
+    """The Panel renders no cadence selector for a staleness job -- but that is a drawing
+    decision, not an enforcement. schedule.json is a plain file the owner can open and
+    /api/panel/schedule takes a jobs patch; either could ask for a full re-walk, every
+    embedding and every thumbnail on a ONE-MINUTE timer, and before this the server wrote
+    it down and the tick obeyed."""
+    cli = _client(tmp_path)
+    d = cli.post("/api/panel/schedule", json={"jobs": [
+        {"action": "rebuild-thumbs", "interval_s": 60},
+        {"action": "resync-full", "interval_s": 3600},
+        {"action": "rebuild-similar", "interval_s": 0},
+    ]}).get_json()
+    by = {r["action"]: r for r in d["jobs"]}
+    for action in ("rebuild-thumbs", "resync-full", "rebuild-similar"):
+        assert by[action]["interval_s"] == g.STALE_BACKSTOP_S, \
+            "%s took a cadence below the sixty-day floor" % action
+    # answered clamped AND persisted clamped -- a re-read is the tick's own source
+    again = {r["action"]: r for r in cli.get("/api/panel/schedule").get_json()["jobs"]}
+    assert again["rebuild-thumbs"]["interval_s"] == g.STALE_BACKSTOP_S
+    # the floor is a floor, not a pin: a LONGER interval is still the owner's to set
+    d = cli.post("/api/panel/schedule",
+                 json={"jobs": [{"action": "resync-full", "interval_s": 90 * DAY}]}).get_json()
+    assert {r["action"]: r for r in d["jobs"]}["resync-full"]["interval_s"] == 90 * DAY
+    # and a job that is NOT on the backstop keeps its own, much lower floor
+    d = cli.post("/api/panel/schedule",
+                 json={"jobs": [{"action": "artworks-sweep", "interval_s": 300}]}).get_json()
+    assert {r["action"]: r for r in d["jobs"]}["artworks-sweep"]["interval_s"] == 300
+
+
+def test_a_hand_edited_schedule_cannot_lower_the_floor_either(tmp_path):
+    """The other way in. living_merge normalizes whatever is in the file on EVERY read, so
+    the floor has to live there too -- a file that says sixty seconds must not become a
+    sixty-second full re-walk just because nobody went through the route."""
+    (tmp_path / "schedule.json").write_text(json.dumps({
+        "enabled": False, "action": "sync", "interval_hours": 6, "workers": 4,
+        "jobs": [{"action": "resync-full", "enabled": True, "interval_s": 60,
+                  "last_run": 1000.0}]}), encoding="utf-8")
+    cli = _client(tmp_path)
+    by = {r["action"]: r for r in cli.get("/api/panel/schedule").get_json()["jobs"]}
+    assert by["resync-full"]["interval_s"] == g.STALE_BACKSTOP_S
+    # ...and the cadence function agrees: not due a minute later, due after sixty days
+    jobs = g.living_merge([{"action": "resync-full", "enabled": True,
+                            "interval_s": 60, "last_run": 1000.0}])
+    due, _ = living_due_all(jobs, 1000.0 + 61)
+    assert "resync-full" not in due
+    due, _ = living_due_all(jobs, 1000.0 + g.STALE_BACKSTOP_S)
+    assert "resync-full" in due
+
+
+def test_a_row_the_standing_order_owns_says_so_instead_of_a_cadence_it_is_not_running(
+        tmp_path):
+    """_living_tick has always skipped the action the legacy standing order names -- rightly,
+    since two paths starting one job would just take turns losing the single Panel slot. But
+    the row went on drawing its own cadence and its own "next in 3h", which is a schedule it
+    is not running and the owner has no way to catch. The skip stays; the row now says why."""
+    cli = _client(tmp_path)
+    assert all(c["deferred"] is False
+               for c in cli.get("/api/panel/schedule").get_json()["catalog"])
+    cli.post("/api/panel/schedule",
+             json={"enabled": True, "action": "sync", "interval_hours": 6})
+    cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
+    assert cat["sync"]["deferred"] is True
+    assert cat["sync-videos"]["deferred"] is False
+    # a DISABLED standing order owns nothing -- the flag is the tick's own condition
+    cli.post("/api/panel/schedule", json={"enabled": False})
+    cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
+    assert cat["sync"]["deferred"] is False
+    tick = inspect.getsource(g.create_app)
+    tick = tick[tick.index("def _living_tick():"):]
+    tick = tick[:tick.index("def _scheduler_loop():")]
+    assert 'standing = s.get("action") if s.get("enabled") else None' in tick
+    assert "if action == standing:" in tick, "the skip itself must not change"
+    # the browser half: the row's own note line, in the vocabulary already there
+    jsx = (SRC / "gallery/src/components/ControlPanelOverlay.jsx").read_text(encoding="utf-8")
+    block = jsx[jsx.index("---- RUNS ITSELF: the living library"):]
+    block = block[:block.index('<div className="mgcp-grid">')]
+    assert "c.deferred" in block
+    assert "the standing order below runs this one" in block
+    assert "{c.deferred ? \"\" : fmtNextRun(row)}" in block, \
+        "a deferred row must not show a next-run it is not going to keep"
 
 
 def test_the_built_bundle_carries_the_runs_itself_surface():

@@ -4443,17 +4443,28 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
         if artworks_page_needed(nodes, index, now, deep):
             spent = 0
             for node in nodes:
-                meta = core.extract_artwork_meta(node)
-                if meta.get("media_id"):
-                    metas.append(meta)
-                    artworks += 1
-                vmid = str(node.get("videoMediaId") or "")
-                if vmid:
-                    # The animation's own row is keyed by its mp4's media_id (#20), so it
-                    # wants the same metadata under that key.
-                    vmeta = dict(meta)
-                    vmeta["media_id"] = vmid
-                    metas.append(vmeta)
+                # PER NODE, not per page or per run. extract_artwork_meta reads a dict PixAI
+                # sent us -- a shape this app does not control and has already seen change
+                # (isSensitive and the nsfwPredict block both arrived without notice). One
+                # malformed node raising here used to abort the whole walk through
+                # artworks_sweep_kick's catch-all, discarding every meta collected so far
+                # AND leaving the run unstamped. A skip costs one row until the next sweep;
+                # the alternative costs the entire pass, every fifteen minutes, forever.
+                try:
+                    meta = core.extract_artwork_meta(node)
+                    if meta.get("media_id"):
+                        metas.append(meta)
+                        artworks += 1
+                    vmid = str(node.get("videoMediaId") or "")
+                    if vmid:
+                        # The animation's own row is keyed by its mp4's media_id (#20), so
+                        # it wants the same metadata under that key.
+                        vmeta = dict(meta)
+                        vmeta["media_id"] = vmid
+                        metas.append(vmeta)
+                except Exception as e:                       # noqa: BLE001
+                    log.warning("artworks sweep: skipping a malformed artwork node: %s: %s",
+                                type(e).__name__, str(e)[:160])
         else:
             spent += 1
             if spent >= ARTWORKS_GRACE:
@@ -4500,6 +4511,25 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
             pass
     return {"changed": changed, "pages": pages, "artworks": artworks, "deep": deep,
             "incomplete": incomplete}
+
+
+def artworks_sweep_fresh(interval_s, now):
+    """Has a sweep COMPLETED inside this cadence already? The boot kick's answer to the
+    tick, and the reason the tick's kick is not unconditionally forced.
+
+    THE BOOT DOUBLE-SWEEP this closes: the boot kick fires 25 seconds after start
+    (ARTWORKS_STARTUP_DELAY) and the first tick lands 35 seconds after that, with the sweep
+    row's last_run still unset -- so it read as due, and a forced kick re-ran the whole
+    thing. On a fresh install that is the FIRST-BOOT DEEP WALK (every page of the published
+    history, 0.4s apiece) twice inside one minute, over a library that could not have
+    changed in between.
+
+    Measured against _artworks_state["at"], which ONLY A CLEAN FINISH stamps -- so a run of
+    failing sweeps can never read as fresh, and the retry keeps its cadence. Module-level
+    and a plain function of (interval, now) for the same reason living_due and
+    artworks_page_needed are: a timer that cannot be read on a mock clock cannot be
+    proven."""
+    return (now - _artworks_state["at"]) < max(1.0, float(interval_s or ARTWORKS_SWEEP_S))
 
 
 def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None):
@@ -4572,6 +4602,24 @@ LIVING_STALE_JOBS = (
 )
 LIVING_ALL = LIVING_JOBS + LIVING_STALE_JOBS
 LIVING_BY_ACTION = {j["action"]: j for j in LIVING_ALL}
+LIVING_STALE_ACTIONS = frozenset(j["action"] for j in LIVING_STALE_JOBS)
+# THE ONE THING AN IN-PROCESS LOCK CANNOT COVER: a SUBPROCESS. Every Panel action runs as
+# its own interpreter (_panel_run -> subprocess.Popen of the CLI) with its own SQLite
+# connection, so _artworks_lock -- a threading.Lock in the server process -- is invisible to
+# it. These are the actions whose subprocess writes the same catalog rows the sweep writes:
+#
+#   sync / resync-full / test-pull -> run_download, which builds rows and save_catalog()s
+#                                     them (carry-protected, but a carry still restores from
+#                                     a snapshot taken when the job STARTED)
+#   sync-videos                    -> run_sync_videos, same shape
+#   sync-artworks                  -> run_sync_artworks, the sweep's own full re-walk
+#
+# The sweep defers to any of them rather than trying to interleave narrow UPDATEs with a
+# job that is rebuilding rows from its own older snapshot. Deferring costs at most one
+# cadence; the alternative costs whichever writer lost the race. Nothing DESTRUCTIVE is in
+# here, because nothing destructive is reachable from the tick in the first place.
+ARTWORKS_TOUCHING_ACTIONS = frozenset({"sync", "resync-full", "test-pull",
+                                       "sync-videos", "sync-artworks"})
 # The sweep is not a PANEL_ACTIONS key -- it is in-process, and the CLI has no
 # short-circuiting equivalent to spawn. Named here so every caller agrees.
 LIVING_SWEEP_ACTION = "artworks-sweep"
@@ -4590,6 +4638,31 @@ def _torch_present():
         return False
 
 
+def living_clamp_interval(action, value, default=None):
+    """One job's cadence, clamped to what this build actually allows. The ONE place that
+    rule lives, so the settings route and the schedule-file normalizer cannot disagree.
+
+    THE SIXTY-DAY FLOOR IS SERVER-SIDE, and that is the whole point of this function. The
+    staleness backstop (full re-walk, rebuild Similar, rebuild ALL thumbnails) is a floor
+    under a job with no incremental form -- the price of running one is the whole library,
+    every time -- so it is not a dial. The Panel renders no cadence selector for those rows
+    for exactly that reason. But "the client draws no control" has never been an
+    enforcement: schedule.json is a plain file the owner can open, and /api/panel/schedule
+    takes a jobs patch. Either could ask for a full re-walk every sixty SECONDS, and before
+    this the server would have written it down and the tick would have obeyed. So the floor
+    lives here, where a hand-edited file and a hand-rolled POST both have to pass through
+    it, rather than in the UI that happens not to offer it."""
+    spec = LIVING_BY_ACTION.get(action) or {}
+    if default is None:
+        default = spec.get("interval_s", LIVING_MIN_INTERVAL_S)
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = float(default)
+    floor = STALE_BACKSTOP_S if action in LIVING_STALE_ACTIONS else LIVING_MIN_INTERVAL_S
+    return max(floor, min(v, LIVING_MAX_INTERVAL_S))
+
+
 def living_defaults():
     """The shipped job list as plain, saveable dicts (action / enabled / interval_s /
     last_run). Static defaults are a tuple of frozen specs; this is the mutable copy
@@ -4604,9 +4677,11 @@ def living_merge(saved):
 
     Unknown actions are DROPPED (a hand-edited or downgraded file must not be able to name
     a job this build does not have), missing ones are added at their defaults, intervals
-    are clamped, and the shipped order is what comes back so the Panel's rows never
-    reshuffle under the owner. This is the same discipline the legacy pair already had --
-    the loop re-checks PANEL_ACTIONS rather than trusting the file."""
+    are clamped THROUGH living_clamp_interval (so a hand-edited file cannot put a full
+    re-walk on a one-minute timer any more than a POST can), and the shipped order is what
+    comes back so the Panel's rows never reshuffle under the owner. This is the same
+    discipline the legacy pair already had -- the loop re-checks PANEL_ACTIONS rather than
+    trusting the file."""
     by_action = {}
     for row in (saved or []):
         if not isinstance(row, dict):
@@ -4617,11 +4692,10 @@ def living_merge(saved):
     out = []
     for spec in LIVING_ALL:
         row = by_action.get(spec["action"]) or {}
-        try:
-            interval = float(row.get("interval_s") if row.get("interval_s") is not None
-                             else spec["interval_s"])
-        except (TypeError, ValueError):
-            interval = float(spec["interval_s"])
+        interval = living_clamp_interval(
+            spec["action"],
+            row.get("interval_s") if row.get("interval_s") is not None else spec["interval_s"],
+            default=spec["interval_s"])
         try:
             last = None if row.get("last_run") in (None, "") else float(row["last_run"])
         except (TypeError, ValueError):
@@ -4629,7 +4703,7 @@ def living_merge(saved):
         out.append({
             "action": spec["action"],
             "enabled": bool(row["enabled"]) if "enabled" in row else bool(spec["enabled"]),
-            "interval_s": max(LIVING_MIN_INTERVAL_S, min(interval, LIVING_MAX_INTERVAL_S)),
+            "interval_s": interval,
             "last_run": last,
         })
     return out
@@ -5907,16 +5981,48 @@ def compute_dhash(img_path, hash_size=DHASH_SIZE):
 
 
 def make_thumbnail(img_path, thumb_path):
+    """Render one gallery thumbnail. ATOMIC: Pillow writes a same-directory temp file and
+    the finished JPEG is os.replace()d into position -- the idiom download's own `.part`
+    file, the telemetry ledger and every other persistence path in this app already use.
+
+    Saving straight onto the final path was the bug. A kill, a crash or a full disk part-way
+    through `im.save` left a TRUNCATED .jpg sitting at the real name, and every "is it built
+    yet?" check in this app is `thumb_path.exists()` -- so a half-written thumbnail is
+    treated as done and never rebuilt. That was survivable while the only way to run a
+    thumbnail pass was to press a button and watch it; it stopped being survivable when
+    --rebuild-thumbs joined the sixty-day staleness backstop (2026-09-06) and became
+    something that starts by itself, unattended, with nobody to notice a torn file. Sixty
+    days is now how long a corrupt thumbnail can sit there.
+
+    The swap also keeps the OLD thumbnail readable until the new one is complete, which is
+    what makes --rebuild-thumbs' "the gallery never goes blank mid-run" literally true
+    rather than nearly true."""
     if Image is None:
         return False
+    tmp = None
     try:
+        import moonglade_backup as core
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        # Same directory (os.replace is only atomic within one filesystem) and pid-tagged,
+        # so two processes rebuilding the same library cannot collide on one temp name.
+        # It does not end in .jpg, so --rebuild-thumbs' orphan sweep (thumb_dir.glob
+        # ("*.jpg")) cannot mistake a live temp file for a stale thumbnail.
+        tmp = thumb_path.with_name(thumb_path.name + ".tmp-%d" % os.getpid())
         with Image.open(img_path) as im:
             im = im.convert("RGB")
             im.thumbnail(THUMB_SIZE, Image.LANCZOS)
-            im.save(thumb_path, "JPEG", quality=THUMB_QUALITY)
+            im.save(tmp, "JPEG", quality=THUMB_QUALITY)
+        # _atomic_replace, not a bare os.replace: on Windows an antivirus or the Search
+        # Indexer briefly opens a file the instant it is created, and renaming it then
+        # raises PermissionError for a few hundred ms. Same helper download() uses.
+        core._atomic_replace(tmp, thumb_path)
         return True
     except Exception:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         return False
 
 
@@ -8490,7 +8596,7 @@ def create_app(out_dir: Path):
     #         scope's automation classification differ, and this comment is the whole of
     #         that difference -- the four jobs that can really lose the owner's data are
     #         still unreachable from here by construction.
-    _LIVING_STALE_ACTIONS = frozenset(j["action"] for j in LIVING_STALE_JOBS)
+    _LIVING_STALE_ACTIONS = LIVING_STALE_ACTIONS      # the module-level literal, verbatim
 
     def _living_runnable(action):
         if action == LIVING_SWEEP_ACTION:
@@ -8501,6 +8607,31 @@ def create_app(out_dir: Path):
             return True
         spec = PANEL_ACTIONS[action]
         return not spec["destructive"] and not spec.get("advanced")
+
+    def _artworks_job_busy():
+        """The artworks-touching Panel job in the slot right now, or "" when there is none.
+
+        WHY THE IN-PROCESS LOCK IS NOT ENOUGH, and why this exists beside it. _artworks_lock
+        makes the sweep single-flight within THIS process, which is all a threading.Lock can
+        ever do. Every Panel action, though, runs as a SUBPROCESS: _panel_run spawns the CLI
+        with subprocess.Popen, so it is a separate interpreter with its own SQLite connection
+        and no possible knowledge of a lock object living in the server's memory. A sweep and
+        a `--sync` can therefore be writing the same rows at the same instant and neither
+        lock will notice; SQLite's own file locking serialises the two STATEMENTS, which is a
+        different and much weaker promise than serialising the two JOBS.
+
+        So the sweep defers, by looking at the one piece of shared state that does cross the
+        boundary: the Panel's single job slot, which this process owns and fills before it
+        spawns anything (_panel_run claims it under _panel_lock, before Popen). Reading it is
+        the whole mechanism -- there is no new lock, no new file, and no new state.
+
+        Returns the action name (so a refusal can say what is in the way) rather than a
+        bool, exactly as _job_busy and _update_busy already do."""
+        with _panel_lock:
+            if _panel_job["status"] != "running":
+                return ""
+            action = _panel_job.get("action") or ""
+        return action if action in ARTWORKS_TOUCHING_ACTIONS else ""
 
     def _artworks_kick(force=False):
         """Fire one published-artwork sweep OFF-THREAD -- the one entry point all four
@@ -8520,8 +8651,16 @@ def create_app(out_dir: Path):
         reaches PixAI with whatever real credentials this machine's config.json holds, and
         the suite's conftest sets that flag precisely so no test can make that request.
 
+        DEFERS to a catalog-writing Panel job (see _artworks_job_busy for why the sweep's
+        own lock cannot see one). ALL FOUR triggers defer, the publish kick included: the
+        job in the slot is itself re-reading PixAI into these rows, so the kick would be
+        racing a writer to publish the same truth. Nothing is lost by waiting -- the next
+        tick sweeps, and a `--sync` or a `--sync-artworks` writes the publish back itself.
+
         Returns whether a sweep was actually started."""
         if not _bg_release_check:
+            return False
+        if _artworks_job_busy():
             return False
 
         def _go():
@@ -8546,8 +8685,11 @@ def create_app(out_dir: Path):
         if action == LIVING_SWEEP_ACTION:
             # ALWAYS "started": the tick's own fifteen-minute cadence is the authority
             # here, so a sweep that declines (one already in flight, no resolvable account)
-            # must not make the loop retry every sixty seconds forever. `force` for the same
-            # reason -- the sweep's own recent-guard is for the boot kick, not for this.
+            # must not make the loop retry every sixty seconds forever. Forced past the
+            # sweep's OWN fifteen-minute recent-guard, because the cadence the owner set on
+            # this row is the one that governs here and it may be shorter than that guard --
+            # the tick decides freshness itself, in artworks_sweep_fresh, before it gets
+            # here (and that is what stops the first tick repeating the boot kick).
             _artworks_kick(force=True)
             return True
         return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"))
@@ -8623,11 +8765,25 @@ def create_app(out_dir: Path):
                 return                          # an update is mid-flight -- next tick
             # The legacy standing order still owns whatever action it names, so the list
             # never doubles up on it: two paths starting the same job would just take
-            # turns losing the single slot.
+            # turns losing the single slot. The row is NOT silently skipped on screen --
+            # /api/panel/schedule marks it `deferred` and the Panel says so in the row's
+            # own note line, because a row displaying a cadence it is not running is a lie
+            # the owner has no way to catch.
             standing = s.get("action") if s.get("enabled") else None
             for action in due:
                 if action == standing:
                     continue
+                if action == LIVING_SWEEP_ACTION:
+                    # Belt and braces around the subprocess the sweep's own lock cannot
+                    # see, and around the boot kick it would otherwise repeat. Neither is
+                    # stamped: last_run must keep meaning "when this job last ran", so a
+                    # deferral retries on the next tick instead of buying a whole cadence
+                    # of silence.
+                    if _artworks_job_busy():
+                        continue
+                    row = next((r for r in s["jobs"] if r.get("action") == action), None)
+                    if artworks_sweep_fresh((row or {}).get("interval_s"), now):
+                        continue
                 if _living_run(action):
                     _living_stamp(action, now)
                     return                      # one job per tick
@@ -10425,23 +10581,35 @@ def create_app(out_dir: Path):
                         if "enabled" in patch:
                             row["enabled"] = bool(patch.get("enabled"))
                         if "interval_s" in patch:
-                            try:
-                                row["interval_s"] = max(
-                                    LIVING_MIN_INTERVAL_S,
-                                    min(float(patch["interval_s"]), LIVING_MAX_INTERVAL_S))
-                            except (TypeError, ValueError):
-                                pass
+                            # THE FLOOR IS ENFORCED HERE, not in the browser. The Panel
+                            # renders no cadence selector for a staleness job -- but a
+                            # POST is not the Panel, and living_clamp_interval is the one
+                            # place that knows sixty days is a floor rather than a
+                            # default. A patch asking for a full re-walk every minute
+                            # comes back clamped, saved clamped, and answered clamped.
+                            row["interval_s"] = living_clamp_interval(
+                                row["action"], patch["interval_s"],
+                                default=row.get("interval_s"))
                 if s.get("action") not in PANEL_ACTIONS or PANEL_ACTIONS[s["action"]]["destructive"]:
                     return jsonify({"error": "only safe jobs can be scheduled"}), 400
                 _save_sched(s)
             # `catalog` is what the Panel draws the "runs itself" rows from: the shipped
             # label, note and cadence beside each saved row, so the client never has to
             # keep its own copy of the job list (and never disagrees with the server's).
+            #
+            # `deferred` is the honest half of a collision the tick has always handled
+            # silently: the legacy standing order still owns whatever action it names, so
+            # _living_tick skips that action's row -- correctly, since two paths starting
+            # one job would just take turns losing the single Panel slot. But the row went
+            # on displaying its own cadence and its own "next in 3h", which is a schedule
+            # it is NOT running. The skip stays; the row now says why.
+            standing = s.get("action") if s.get("enabled") else None
             return jsonify(dict(s, catalog=[
                 {"action": j["action"], "label": j["label"], "note": j["note"],
                  "default_interval_s": j["interval_s"],
                  "stale": j["action"] in _LIVING_STALE_ACTIONS,
                  "needs_torch": j.get("needs") == "torch",
+                 "deferred": j["action"] == standing,
                  "available": _living_runnable(j["action"])
                               and (j.get("needs") != "torch" or _torch_present())}
                 for j in LIVING_ALL]))
@@ -10460,8 +10628,13 @@ def create_app(out_dir: Path):
 
         Answers immediately; the sweep runs off-thread and announces itself through the
         Activity ledger if it changed anything. It never touches the page the owner is
-        looking at."""
+        looking at.
+
+        `deferred` names the catalog-writing Panel job that held the sweep off, when one
+        did (_artworks_job_busy) -- so an ok:false is never a silent nothing."""
+        deferred = _artworks_job_busy()
         return jsonify({"ok": bool(_artworks_kick(force=True)),
+                        "deferred": deferred,
                         "action": LIVING_SWEEP_ACTION})
 
     def _batch_sibling_count(task_id):

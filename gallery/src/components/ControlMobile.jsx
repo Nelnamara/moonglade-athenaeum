@@ -401,6 +401,10 @@ export default function ControlMobile({ account }) {
                       {c.stale ? "only if idle " : "every "}
                       <b>{fmtEvery(row.interval_s)}</b>
                       {" — "}<b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
+                      {/* The standing order above owns this action, so this row is not the
+                          one running it — say so here too rather than show a cadence the
+                          phone's owner would take for the truth. */}
+                      {c.deferred && " · the standing order runs this one"}
                     </div>
                   );
                 })}
