@@ -1140,6 +1140,80 @@ def _open_panel(page):
     page.wait_for_selector('[aria-label="Control Panel"]')
 
 
+def test_the_living_librarys_runs_itself_block_renders_and_really_toggles(logged_in_page):
+    """The living library on the Panel, in a real browser (2026-09-06).
+
+    Four things, in the order the owner meets them:
+      1. the "Runs itself" block exists and leads -- it sits ABOVE the manual grid, which
+         is the demotion the scope asked for ("the manual-jobs block shrinks");
+      2. every shipped job has a row, each saying how often it runs, when it last ran,
+         when it next will, and carrying its own Run now;
+      3. a toggle is a REAL round trip to /api/panel/schedule and it sticks across a
+         reopen -- not local component state that evaporates;
+      4. the rows are the vocabulary that already existed (.mgcp-standing), and none of
+         them is wider than the console that holds them -- an element-level assertion
+         cannot see a row that has silently overflowed its container, and that is exactly
+         the class of break this harness exists for.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-living")
+
+    # 1. it leads: the block's bottom edge is above the manual grid's top edge.
+    box = page.locator(".mgcp-living").bounding_box()
+    grid = page.locator(".mgcp-grid").bounding_box()
+    assert box["y"] + box["height"] <= grid["y"] + 1, (
+        "the Runs-itself block must sit above the manual grid -- that ordering IS the "
+        "Control Panel demoting (block {}, grid {})".format(box, grid))
+
+    # 2. a row per shipped job, each with a Run now
+    text = page.inner_text(".mgcp-living")
+    for label in ("Published-artwork sweep", "Sync now", "Sync i2v videos",
+                  "Reconcile deleted", "Top up Similar", "Full re-walk",
+                  "Rebuild ALL thumbnails"):
+        assert label in text, "%r has no row in the Runs-itself block" % label
+    assert "last ran" in text and "60 days" in text     # the staleness backstop, in words
+    rows = page.locator(".mgcp-living .mgcp-standing")
+    assert rows.count() >= 7
+    assert page.locator('.mgcp-living button.mgcp-run:has-text("Run now")').count() >= 7
+
+    # 3. a REAL toggle: flip the sweep off, and it is still off after closing and
+    #    reopening the Panel (i.e. it went to the server, not to component state).
+    sweep = page.locator('.mgcp-living .mgcp-standing:has-text("Published-artwork sweep")')
+    assert sweep.locator("button.mgcp-standing-toggle").inner_text().strip() == "on"
+    sweep.locator("button.mgcp-standing-toggle").click()
+    page.wait_for_function(
+        "() => { const r = [...document.querySelectorAll('.mgcp-living .mgcp-standing')]"
+        ".find((e) => e.textContent.includes('Published-artwork sweep')); "
+        "const b = r && r.querySelector('button.mgcp-standing-toggle'); "
+        "return b && b.textContent.trim() === 'off'; }")
+    page.click('[aria-label="Control Panel"] button[aria-label="Close"]')
+    page.wait_for_selector('[aria-label="Control Panel"]', state="detached")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-living")
+    assert page.locator(
+        '.mgcp-living .mgcp-standing:has-text("Published-artwork sweep") '
+        "button.mgcp-standing-toggle").inner_text().strip() == "off"
+    # put it back, so this test leaves the harness's shared server as it found it
+    page.locator('.mgcp-living .mgcp-standing:has-text("Published-artwork sweep") '
+                 "button.mgcp-standing-toggle").click()
+    page.wait_for_function(
+        "() => { const r = [...document.querySelectorAll('.mgcp-living .mgcp-standing')]"
+        ".find((e) => e.textContent.includes('Published-artwork sweep')); "
+        "const b = r && r.querySelector('button.mgcp-standing-toggle'); "
+        "return b && b.textContent.trim() === 'on'; }")
+
+    # 4. no row overflows the console that holds it
+    overflow = page.evaluate(
+        "() => { const host = document.querySelector('.mgcp-living'); "
+        "const w = host.getBoundingClientRect().width; "
+        "return [...host.querySelectorAll('.mgcp-standing')]"
+        ".filter((r) => r.scrollWidth > Math.ceil(w) + 1).length; }")
+    assert overflow == 0, "%d Runs-itself row(s) overflow the block" % overflow
+
+
 def test_blur_behind_popups_toggles_the_real_backdrop_filter(logged_in_page):
     """The Panel's own scrim is the subject AND the surface carrying the switch.
 

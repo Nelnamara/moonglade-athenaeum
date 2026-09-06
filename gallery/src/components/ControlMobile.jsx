@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
-  MarkArt, BlurToggleTile,
+  MarkArt, BlurToggleTile, fmtEvery,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import { apiGet } from "../api.js";
@@ -388,6 +388,22 @@ export default function ControlMobile({ account }) {
                     {" · "}{schedule.workers || 4} workers
                   </div>
                 )}
+                {/* Runs itself — the living library (2026-09-06). READ-ONLY here, exactly
+                    as the standing order above it is: every write on this surface is
+                    localhost-only server-side, and the phone is a LAN session by
+                    definition. What it owes the owner is the answer to "is it keeping
+                    itself up to date?", and that is what it gives. */}
+                {schedule && (schedule.catalog || []).map((c) => {
+                  const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
+                  return (
+                    <div className="ctm-standing" key={c.action}>
+                      <b>{c.label}</b>{" "}
+                      {c.stale ? "only if idle " : "every "}
+                      <b>{fmtEvery(row.interval_s)}</b>
+                      {" — "}<b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
+                    </div>
+                  );
+                })}
                 {panelHistory.length === 0 && (
                   <div className="ctm-ledgernote">
                     No maintenance runs recorded yet — jobs land here as they finish.

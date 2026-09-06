@@ -204,6 +204,11 @@ TIER_SNAPSHOT = [
     "/api/panel/schedule [POST] LOCALHOST",
     "/api/panel/status [GET] LOGIN",
     "/api/panel/summary [GET] LOGIN",
+    # The living library's one non-PANEL_ACTIONS job: the published-artwork sweep runs
+    # in-process, so "Run now" needs its own route. LOCALHOST for the same reason
+    # /api/panel/schedule's writes are -- it starts real PixAI traffic on the owner's
+    # credentials, and a LAN session unlocks browsing, not background work on his account.
+    "/api/panel/sweep [POST] LOCALHOST",
     "/api/ping [GET] LOGIN",
     "/api/pixai-cdn/thumb [GET] LOGIN",
     "/api/presets [GET] LOGIN",

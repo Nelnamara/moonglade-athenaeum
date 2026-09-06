@@ -30,14 +30,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   against its design source and the desktop behavior it mirrors, screen by screen, in a
   driven browser at phone size. The design-queue wave has merged, so nothing gates this.
 
-- **The living library — maintenance runs itself** *(scoped 2026-09-04; owner's ask that day)*
-  "It's not just a backup dump. It's a living library that should update itself and its data
-  without my need to clicky click." The artworks sync gets the contest sweep's triggers (publish
-  kick, boot kick, periodic sweep with a ran-recently guard) plus the image pull's stop-when-known
-  short-circuit; the scheduler becomes a small list of safe jobs on their own cadences; the Panel's
-  safe buttons demote to "Run now." Nothing destructive ever automatic. Scope + owner calls:
-  `../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md`. Builds after the 3.7.1 wave.
-
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
