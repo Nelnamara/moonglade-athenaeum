@@ -6015,28 +6015,6 @@ def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
     return views, False               # ran out of pages: partial, and says so
 
 
-def fold_views(row, fresh, now_iso):
-    """Fold one fresh sweep reading into a catalog row's four view columns, in place.
-
-    The whole point of the shuffle: `views_prev` must hold the reading from the PREVIOUS
-    SWEEP, not from some arbitrary earlier moment, or the spike rule's window has no
-    meaning. So the current reading only slides down to `views_prev` when a genuinely new
-    one arrives to replace it.
-
-    Re-running --sync-artworks twice in a row is therefore not destructive of history in
-    the way it looks: the second run does overwrite the baseline, which is correct -- the
-    baseline is "last time we looked", and we just looked."""
-    if fresh is None:
-        return row
-    cur = str(row.get("views") or "")
-    if cur != "":
-        row["views_prev"] = cur
-        row["views_prev_at"] = row.get("views_at") or ""
-    row["views"] = str(int(fresh))
-    row["views_at"] = now_iso
-    return row
-
-
 def extract_artwork_meta(node):
     """Pull the published-artwork fields we store from a listArtworks node.
     Keyed by media_id so it merges onto the existing catalog row.

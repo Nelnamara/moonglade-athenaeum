@@ -324,13 +324,36 @@ def test_the_view_sweep_asks_the_transport_for_no_retries_at_all(mocker):
     assert seen["retries"] == 0
 
 
-def test_fold_views_leaves_a_row_alone_when_the_sweep_missed_it(tmp_path):
-    """A partial sweep must not blank the rows it did not reach. fold_views is only ever
-    called for a work the sweep actually returned; handed None it is a no-op, so a row
-    keeps the last reading anyone actually took."""
-    row = {"views": "300", "views_at": "2026-09-01T00:00:00Z",
-           "views_prev": "250", "views_prev_at": "2026-08-01T00:00:00Z"}
-    assert core.fold_views(dict(row), None, "2026-09-06T00:00:00Z") == row
+def test_the_views_merge_leaves_a_row_alone_when_the_sweep_missed_it(tmp_path):
+    """A partial sweep must not blank the rows it did not reach.
+
+    Aimed at apply_artwork_views, which is the function run_sync_artworks actually calls.
+    It used to test moonglade_backup.fold_views -- the same rule, in a function nothing
+    had called since the merge became a set of narrow UPDATEs, so a bug in the real
+    row-skipping logic would have gone straight past it. fold_views is deleted with this
+    change; grep found no other caller.
+
+    Three cases in one row each: a work the sweep saw (folded, the old reading slides down
+    into views_prev), a work it did not name (untouched, keeps the last reading anyone
+    took), and a work it named with no number (also untouched)."""
+    db = tmp_path / "catalog.db"
+    before = dict(views="300", views_at="2026-09-01T00:00:00Z",
+                  views_prev="250", views_prev_at="2026-08-01T00:00:00Z")
+    save_catalog(db, [
+        _row(media_id="seen", artwork_id="aw1", **before),
+        _row(media_id="missed", artwork_id="aw2", **before),
+        _row(media_id="blank", artwork_id="aw3", **before),
+    ])
+    changed = g.apply_artwork_views(db, {"aw1": 500, "aw3": None},
+                                    "2026-09-06T00:00:00Z")
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert changed == 1
+    assert rows["seen"]["views"] == "500"
+    assert rows["seen"]["views_prev"] == "300"                     # slid down, once
+    assert rows["seen"]["views_prev_at"] == "2026-09-01T00:00:00Z"
+    assert rows["seen"]["views_at"] == "2026-09-06T00:00:00Z"
+    for untouched in ("missed", "blank"):
+        assert {k: rows[untouched][k] for k in before} == before, untouched
 
 
 # ---------------------------------------------------------------------------

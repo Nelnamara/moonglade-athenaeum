@@ -1345,7 +1345,7 @@ def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
     the four columns above, in ONE transaction, so nothing else in the table can be
     reached.
 
-    The per-row semantics are moonglade_backup.fold_views', exactly: a reading only slides
+    The per-row rule, and the whole of it: a reading only slides
     down into `views_prev` when a genuinely new one arrives to replace it, so `views_prev`
     always holds THE PREVIOUS SWEEP's number and the spike rule's window keeps its meaning.
     A row whose `views` is still blank has nothing to slide, and keeps its (blank) baseline.
