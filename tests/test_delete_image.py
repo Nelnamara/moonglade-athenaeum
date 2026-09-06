@@ -271,6 +271,38 @@ def test_the_whole_task_branch_keeps_what_pixai_already_deleted(tmp_path, monkey
     assert (tmp_path / "_deleted" / "c.png").exists()
 
 
+def test_every_image_pixai_already_deleted_is_kept_back_not_just_one(tmp_path, monkeypatch):
+    """How MANY files a whole-generation delete keeps back is however many the owner had
+    already deleted on PixAI -- there is nothing in the rule that stops at one, and a
+    four-picture batch you culled down to one on PixAI's website keeps three.
+
+    Pinned because the docs said "one local file is deliberately kept back" and the number
+    is not one: a promise about your own files has to match what the code does."""
+    fired = {}
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    # PixAI kept `c` only; `a` and `b` were both deleted from its website earlier.
+    _reads(monkeypatch, _live_task(("a", True), ("b", True), ("c", False)))
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.update(task=tid))
+    for f in ("a.png", "b.png", "c.png"):
+        (tmp_path / f).write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "c", "confirm": False}).get_json()
+    assert d["plan"] == "whole-task"
+    assert d["local_rows"] == ["c"], d["local_rows"]
+    assert "2 images of this generation you already deleted" in d["message"], d["message"]
+
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "c", "confirm": True, "plan": "whole-task"}).get_json()
+    assert d.get("ok") is True and fired == {"task": "T1"}
+    assert (tmp_path / "a.png").exists() and (tmp_path / "b.png").exists(), (
+        "only one of the two last-copies-anywhere was kept back")
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        left = sorted(r[0] for r in con.execute("SELECT media_id FROM catalog"))
+    assert left == ["a", "b", "z"]
+
+
 def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     """The bug this whole change exists for. A task that made ONE image has no batch for
     `deleteBatchMedia` to delete from, and PixAI answers 403 -- so the button had never once

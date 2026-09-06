@@ -73,9 +73,11 @@ Then it asks you to type `DELETE`, the same gate the bulk action uses. If the ge
 changes between the dialog appearing and you typing, the delete is refused rather than
 doing the other thing — open it again to see where the image stands.
 
-**One local file is deliberately kept back.** If an image of that generation was already
-deleted on PixAI, your copy of it is the only copy left anywhere. A whole-generation delete
-leaves that file and its catalog row exactly where they are, and the dialog says so.
+**Any images of that generation you had already deleted on PixAI are left alone** — their
+files and catalog rows stay exactly where they are. PixAI has no copy of those, so yours are
+the only ones left anywhere, and a whole-generation delete does not change that. It can be
+one file or several — however many you had already deleted there — and the dialog says how
+many.
 
 Two more answers you may get instead of a dialog:
 
