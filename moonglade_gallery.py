@@ -7241,9 +7241,13 @@ _AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS i
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
 # of per-browser localStorage.
+# viewport-fit=cover for the same reason APP_PAGE carries it (2026-09-06): the Loom is
+# reachable from the phone (AppMobile's Loom sheet links straight here) and
+# master-storyboard.jsx's own chrome reads env(safe-area-inset-top/bottom) in five places,
+# every one of which resolved to 0 while this meta stayed narrow.
 _LOOM_SHELL = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>The Loom - Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 """ + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + r"""
@@ -15874,9 +15878,18 @@ def create_app(out_dir: Path):
     # carries no <script src="/static/mg-*.js"> tags and no anchors.
     # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
     # same idiom as the classic pages.
+    # viewport-fit=cover (2026-09-06, the phone audit's foundational finding). Without it a
+    # notched phone lays the page out INSIDE the safe area and every
+    # env(safe-area-inset-*) resolves to 0 -- so the tab bar's home-indicator gutter, the
+    # sheets' footer padding, the hero's notch guard and every other inset the mobile
+    # stylesheets carry were quietly doing nothing on exactly the hardware they were
+    # written for. It is inert everywhere else: a browser reporting no insets resolves the
+    # same env() to 0 with or without it, which is what the desktop shell has always
+    # measured. The same line rides LOGIN_PAGE and _LOOM_SHELL, the other two shells a
+    # phone reaches, and gallery/index.html, the dev twin of this one.
     APP_PAGE = """<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
@@ -15932,9 +15945,12 @@ __UPSCALE_CONST__
     #      both App and LoginPage, so Vite ships one file) -- only the SHELL
     #      differs, and the shell is what decides which one actually needs to
     #      reach an unauthenticated browser.
+    # viewport-fit=cover, same reason as APP_PAGE's own note above: this shell serves
+    # LoginPageMobile.jsx on a phone, and login-mobile.css cannot read an inset the
+    # viewport never opened.
     LOGIN_PAGE = """<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">

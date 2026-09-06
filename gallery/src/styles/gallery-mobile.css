@@ -35,13 +35,27 @@
   background: var(--base); color: var(--text); overflow: hidden;
   font-family: var(--font-system); }
 
-/* ---- hero (persistent chrome above every tab, DC lines 45-62) ---- */
-.glm-hero { position: relative; flex: none; height: 172px; overflow: hidden; }
+/* ---- hero (persistent chrome above every tab, DC lines 45-62) ----
+   THE TOP EDGE IS GUARDED TOO (phone audit, 2026-09-06). This file has read
+   env(safe-area-inset-bottom) since it was written -- the tab bar's gutter, the sheets'
+   footer -- and never the top one, because until the served shell asked for
+   `viewport-fit=cover` (moonglade_gallery.py's APP_PAGE) every inset resolved to 0 and
+   there was nothing to read. With cover in place the notch is real, and the row this hero
+   puts closest to it is its four icon buttons at top:12px -- straight under the sensor
+   housing on a notched phone. The hero grows by exactly what the inset asks for beyond
+   that 12px and the two top-anchored rows ride down with it; the brand block and the
+   credits chip are anchored to the BOTTOM and never move. With no inset --- a desktop
+   window, the harness, any phone without one --- every one of these resolves to the number
+   that was already here: 0px of growth, 12px and 57px unchanged. */
+.glm-hero { position: relative; flex: none; overflow: hidden;
+  --glm-safetop: max(0px, calc(env(safe-area-inset-top) - 12px));
+  height: calc(172px + var(--glm-safetop)); }
 .glm-hero-bg { position: absolute; inset: 0;
   background: radial-gradient(120% 140% at 18% 0%, color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
 .glm-hero-scrim { position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(to top, var(--base) 6%, transparent 64%); }
-.glm-hero-icons { position: absolute; right: 11px; top: 12px; z-index: 3; display: flex; gap: 8px; }
+.glm-hero-icons { position: absolute; right: 11px; top: max(12px, env(safe-area-inset-top));
+  z-index: 3; display: flex; gap: 8px; }
 .glm-iconbtn { width: 31px; height: 31px; border-radius: 50%; display: grid; place-items: center;
   font-size: 13px; cursor: pointer; border: 1px solid rgba(255,255,255,.4);
   background-size: 220% 100%; animation: glmMetal 7s ease-in-out infinite;
@@ -81,7 +95,8 @@
     color-mix(in oklab, var(--lavender) 55%, #050308) 100%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 -2px 3px rgba(5,3,8,.5),
     0 6px 16px -2px rgba(0,0,0,.55), 0 0 16px -3px color-mix(in oklab, var(--lavender) 65%, transparent); }
-.glm-hero-stats { position: absolute; right: 11px; top: 57px; z-index: 2; display: flex; gap: 10px;
+.glm-hero-stats { position: absolute; right: 11px; top: calc(57px + var(--glm-safetop, 0px));
+  z-index: 2; display: flex; gap: 10px;
   font-size: 9.5px; color: var(--subtext); text-shadow: 0 1px 6px rgba(0,0,0,.9); }
 .glm-hero-brand { position: absolute; left: 12px; bottom: 9px; z-index: 2;
   display: flex; align-items: flex-end; gap: 8px; max-width: calc(100% - 90px); }
@@ -251,8 +266,32 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
   padding: 12px 13px max(22px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
   animation: glmSheetUp .28s cubic-bezier(.2,.9,.24,1) both; }
 .glm-sheet.closing { animation: glmSheetDown .28s cubic-bezier(.4,0,.2,1) both; }
+/* A SHEET IS NOT PART OF THE TAB'S SCROLL EITHER (phone audit, 2026-09-06). The same two
+   latches the screens above took on 2026-09-05, applied one layer shallower to the sheets:
+   the tab's scroller is locked while a sheet is up, and the sheet's own list contains its
+   scroll rather than passing the overflow on. `overflow: hidden` does not move an offset
+   already there, so the library holds its place under the dim and has it back when the
+   sheet goes.
+
+   WHAT WAS AND WAS NOT MEASURED, stated plainly because the audit's report and the
+   measurement disagree. The report was that a wheel or flick over an open Sort / Advanced
+   Search / Actions sheet scrolled the library behind it. Driven at 390x844 in the render
+   harness, with a wheel burst AND a real touch drag, over the scrim and over the slab, on
+   a 120-row library with 9057px of range: the library did not move -- with these rules in
+   place OR with them overridden back off. The reason is visible in the same probe: every
+   one of these surfaces is position:fixed with no containing-block ancestor
+   (`sheet.offsetParent === null`), so it scroll-chains to the document, not to .glm-body,
+   even though it IS a DOM descendant of it. That path cannot leak here.
+   So these rules are kept as the SECOND HALF of the fix rather than the first -- the same
+   standing .glm-screen-body's own `contain` was added on ("the one that survives a future
+   restructure"): the day a sheet stops being fixed, or an ancestor grows a filter and
+   becomes its containing block, the chain appears and these already refuse it. The lock is
+   also worth having on its own terms, and is what the phone shows now: a modal question
+   does not let the page behind it slide around while it is being asked. */
+.glm-body:has(.glm-sheet) { overflow: hidden; }
 .glm-sheet-title { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
   color: var(--lavender); margin-bottom: 10px; }
 
