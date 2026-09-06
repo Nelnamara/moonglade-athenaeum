@@ -404,6 +404,20 @@ function useLoomView(isPhone) {
 // straight onto /loom from a bookmark has no snapshot and falls back to "/", which is
 // exactly what the link used to say and still means.
 //
+// THE PROMISE IS FOR A SAME-TAB CROSSING, and that is a deliberate limit rather than an
+// oversight. The snapshot is written on the library tab's own `pagehide` (main.jsx) --
+// which is exactly the event a same-tab navigation fires. Open the Loom in a NEW tab
+// instead (ctrl/cmd/middle-click on the header's ▰ The Loom, a plain <a href="/loom">)
+// and the library tab stays open and never fires it: sessionStorage for the new tab was
+// copied from the opener at creation time, so "← Gallery" there carries whatever snapshot
+// the opener happened to be holding, which can predate where the owner actually is.
+//
+// The alternative is writing the snapshot far more often -- every visibilitychange, every
+// in-library navigation -- so the library pays a storage write on ordinary browsing to
+// serve an auxiliary tab it does not know exists. Not worth it: the auxiliary tab was
+// deliberately opened BESIDE the library, so its owner still has the library open to go
+// back to. The narrower promise is what the wiki states (wiki/The-Loom.md).
+//
 // The link's WORDING AND LOOK are untouched, and deliberately so: the crossing chrome
 // belongs to the Design Handoff (../design/BRIEF_2026-09-06_loom-arena.md). Only where it
 // lands is this pass's business.

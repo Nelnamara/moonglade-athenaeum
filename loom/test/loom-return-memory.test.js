@@ -140,6 +140,23 @@ describe("the wiring (source structure)", () => {
     assert.match(loom, /const GALLERY_HREF = readLibraryReturn\(/);
   });
 
+  test("the promise is stated as a SAME-TAB one, in the code and in the wiki", () => {
+    /* The snapshot is written on the library tab's own pagehide -- the event a same-tab
+       navigation fires. A Loom opened in a NEW tab (ctrl/cmd/middle-click on a plain <a
+       href="/loom">) leaves the library tab open and never firing it, so that tab's
+       "← Gallery" carries whatever snapshot the opener happened to hold. Writing the
+       snapshot far more often would make ordinary browsing pay for an auxiliary tab the
+       library does not know exists, and the owner still has the library open beside it --
+       so the promise is narrowed and SAID, rather than widened. */
+    const idx = loom.indexOf("const GALLERY_HREF = readLibraryReturn(");
+    const note = loom.slice(Math.max(0, idx - 2200), idx);
+    assert.match(note, /SAME-TAB CROSSING/);
+    assert.match(note, /pagehide/);
+    const wiki = rd("../wiki/The-Loom.md");
+    assert.match(wiki, /same tab/);
+    assert.match(wiki, /new tab/);
+  });
+
   test("all three ways out of the Loom use it -- desktop, phone, and the crash screen", () => {
     const backLinks = loom.match(/<a className="l[vm]-(?:close|back)"[^>]*>\s*(?:&larr;|←)[^<]*<\/a>/g) || [];
     assert.equal(backLinks.length, 3,

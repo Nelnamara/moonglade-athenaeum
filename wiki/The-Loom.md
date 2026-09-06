@@ -23,6 +23,13 @@ picture you had open, and how far down you had scrolled. (Your search and filter
 carried across; the library clears those on any reload, as it always has.) A `/loom` opened
 straight from a bookmark, in a tab that was never in the library, goes to the front door.
 
+That promise is for the **same tab** — the ordinary case, where you leave the library and
+the Loom takes its place. If you open the Loom in a **new tab** instead (middle-click, or
+ctrl/cmd-click the header button), the library tab never leaves, so it never records where
+you got to: **← Gallery** in that new tab lands on whatever the library was showing when
+the tab was opened. You still have the library itself sitting in the other tab, which is
+why it works this way rather than the library writing a note on every scroll.
+
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a
 tablet on your LAN too, and signing back in returns you to the exact storyboard you asked
 for. The header button is there at every screen width, phones included.
