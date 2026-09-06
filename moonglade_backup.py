@@ -51,7 +51,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections import defaultdict, Counter
+from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2447,6 +2447,156 @@ def task_detail_gql(session, task_id, retries=3):
               "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
         return None
     return (data or {}).get("task")
+
+
+# ---------------------------------------------------------------------------
+# DELETING ONE IMAGE -- read the task, then pick the mutation PixAI will accept
+#
+# There are two delete mutations and they are not interchangeable:
+#
+#   deleteBatchMedia (inside updateGenerationTask)  drops ONE member out of a task's
+#       outputs.batch[]. PixAI accepts it only while the task would still have an output
+#       left afterwards.
+#   deleteGenerationTask                            removes the whole generation record.
+#
+# From v2.5.0 until 2026-09-06 the gallery's single-image "Delete from PixAI" sent the
+# first one every time. For a task that made ONE image (no `batch` key -- the picture is
+# outputs.mediaId) and for the LAST live member of a batch, PixAI answers 403 "task outputs
+# does not include any media with mediaId". Their own site routes those two cases to the
+# whole-task mutation. Nothing changed on their side; the app was wrong from the start.
+#
+# What a read-only probe of the owner's own tasks established on 2026-09-06, and what this
+# code is therefore allowed to rely on:
+#   * a deleted batch member KEEPS its place in outputs.batch[] and gains `deletedAt`
+#     (an ISO string). Untouched members carry no such key. So the array's LENGTH and a
+#     member's POSITION say nothing about how many images are still live.
+#   * outputs.mediaId on a batch task is the combined preview picture PixAI renders of the
+#     whole batch. It is never one of outputs.batch[]; the two sets are disjoint.
+#   * the task's `updatedAt` does NOT move on a per-image delete -- nothing may key on it.
+#   * getTaskById still resolves a whole-task-deleted task, so it cannot be used to ask
+#     whether a task is gone.
+# ---------------------------------------------------------------------------
+
+#: What `route_image_delete` decided: which mutation to send ("per-image" / "whole-task"),
+#: or "refuse" to send anything; a plain-words `reason`; how many OTHER images of the batch
+#: would still be live on PixAI afterwards; and the target's own outputs.batch[] entry (None
+#: when the task has no batch, or does not list this image at all).
+ImageDeleteRoute = namedtuple("ImageDeleteRoute", "plan reason live_siblings entry")
+
+
+def batch_entry(batch, media_id):
+    """One media's own entry in a task's `outputs.batch` array, or None.
+
+    The single place that decides which array entry belongs to which image, so the router,
+    the output enumerator and the per-row batch position cannot drift on it."""
+    if not isinstance(batch, list):
+        return None
+    mid = str(media_id or "")
+    if not mid:
+        return None
+    for entry in batch:
+        if isinstance(entry, dict) and str(entry.get("mediaId") or "") == mid:
+            return entry
+    return None
+
+
+def live_batch_media(batch):
+    """The media ids of a task's batch that PixAI still has, newest-first order kept.
+
+    A member with a `deletedAt` is not one of them -- it is a tombstone PixAI leaves in
+    place, which is why counting the array itself overcounts."""
+    if not isinstance(batch, list):
+        return []
+    return [str(e.get("mediaId") or "") for e in batch
+            if isinstance(e, dict) and e.get("mediaId") and not e.get("deletedAt")]
+
+
+def deleted_batch_media(batch):
+    """The mirror of `live_batch_media`: members PixAI has already dropped (they carry a
+    `deletedAt`). The local copies of these are the only ones left anywhere, so a whole-task
+    delete must leave their catalog rows and their files alone."""
+    if not isinstance(batch, list):
+        return []
+    return [str(e.get("mediaId") or "") for e in batch
+            if isinstance(e, dict) and e.get("mediaId") and e.get("deletedAt")]
+
+
+def route_image_delete(task, media_id):
+    """Decide, from a task record PixAI just answered with, which delete to send for ONE
+    image -- or that nothing may be sent. Returns an `ImageDeleteRoute`.
+
+    Pure: a record in, a decision out. It reads nothing live and deletes nothing, so every
+    shape below is exercisable offline (tests/test_delete_routing.py).
+
+    The rows, in the order they are checked:
+
+      refuse      the record is missing -- the read failed. The fail-safe direction is
+                  ALWAYS refuse: answering "I could not look" with the whole-task mutation
+                  would delete a whole generation off a dropped packet.
+      refuse      a video task (its clips hang off outputs.videos). Out of scope; guessing a
+                  destructive mutation is not an option.
+      refuse      the id is the batch's combined preview picture, not one of its images.
+      refuse      the task does not list this image at all -- a stale row or a rotated id.
+      refuse      this image's own entry already carries `deletedAt`.
+      per-image   the image is a batch member and at least one OTHER member is still live,
+                  so the task keeps an output and PixAI accepts deleteBatchMedia.
+      whole-task  the image is the last live member of its batch, or the task has no batch
+                  and this image IS its output. Either way the delete would leave the task
+                  with nothing, which is the case PixAI's own site sends
+                  deleteGenerationTask for.
+    """
+    mid = str(media_id or "").strip()
+    if not mid:
+        return ImageDeleteRoute(
+            "refuse", "There is no image id to delete; nothing was deleted.", 0, None)
+    if not isinstance(task, dict) or not task:
+        return ImageDeleteRoute(
+            "refuse",
+            "Couldn't read the task from PixAI; nothing was deleted, try again.", 0, None)
+
+    outputs = task.get("outputs") or {}
+    videos = outputs.get("videos")
+    if isinstance(videos, list) and videos:
+        # Checked BEFORE the lone-image row on purpose: a video task also carries an
+        # outputs.mediaId (its poster still), so the lone-image rule would happily route it
+        # into a whole-task delete.
+        return ImageDeleteRoute(
+            "refuse", "Video clips are deleted from the task's page on PixAI.", 0, None)
+
+    batch = outputs.get("batch")
+    if isinstance(batch, list) and batch:
+        entry = batch_entry(batch, mid)
+        if entry is None:
+            if str(outputs.get("mediaId") or "") == mid:
+                return ImageDeleteRoute(
+                    "refuse",
+                    "That is the combined preview picture PixAI makes for a batch, not one "
+                    "of the images in it.", len(live_batch_media(batch)), None)
+            return ImageDeleteRoute(
+                "refuse", "PixAI's copy of this task no longer lists this image.", 0, None)
+        if entry.get("deletedAt"):
+            return ImageDeleteRoute(
+                "refuse", "This image is already deleted on PixAI.",
+                len(live_batch_media(batch)), entry)
+        others = [m for m in live_batch_media(batch) if m != mid]
+        if others:
+            return ImageDeleteRoute(
+                "per-image",
+                "{} other image{} in this batch stay on PixAI.".format(
+                    len(others), "" if len(others) == 1 else "s"),
+                len(others), entry)
+        return ImageDeleteRoute(
+            "whole-task",
+            "This is the last image of its generation still on PixAI, so PixAI removes the "
+            "whole generation record.", 0, entry)
+
+    if str(outputs.get("mediaId") or "") == mid:
+        return ImageDeleteRoute(
+            "whole-task",
+            "This generation made only this one image, so PixAI removes the whole "
+            "generation record.", 0, None)
+    return ImageDeleteRoute(
+        "refuse", "PixAI's copy of this task no longer lists this image.", 0, None)
 
 
 _DELETE_BATCH_MEDIA_MUT = """
