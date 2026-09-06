@@ -51,7 +51,7 @@ That's the whole setup. Your `USER_ID` is auto-resolved from the key, and everyt
 > **This is a personal-use tool for your *own* PixAI account.** It is built to *preserve and organize what you made* — not to game the platform. It defaults to **cheaper generation priority**, has **no credit-buying or farming automation**, and every destructive action touches **only your own account**. Please keep it that way.
 
 > [!WARNING]
-> **"Delete from PixAI" is irreversible.** It deletes the whole task from your cloud account *and* locally. It's gated behind a confirm dialog and typing `DELETE`, but there is no undo on PixAI's side.
+> **"Delete from PixAI" is irreversible.** From the Actions dropdown it deletes the whole task from your cloud account *and* locally. On a single image it asks PixAI what it still has of that generation and tells you before you commit which of two things the click does: remove just that picture, or — when it is the last one PixAI still has of that generation — remove the whole generation record. Both are gated behind a confirm dialog and typing `DELETE`, and there is no undo on PixAI's side.
 
 > [!NOTE]
 > **Your credentials never leave your machine.** `config.json`, `token.txt`, and your backup are git-ignored and local-only. Nothing phones home.

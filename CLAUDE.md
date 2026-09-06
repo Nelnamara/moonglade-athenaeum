@@ -217,12 +217,33 @@ shipped bug.
 
 ---
 
-## Deleting tasks from your account (`--delete-task`)
+## Deleting from your account
 
-- `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response. `getTaskById` is NOT a valid post-delete existence check — it still resolves deleted tasks.)
-- Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards below (`--apply` + the typed confirm) are what stand between you and a real delete.
-- Guards: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin). Single-attempt per task.
-- Deletes ONLY the cloud generation; local image files + `catalog.db` are left intact.
+**There are two delete mutations and they are NOT interchangeable.** `deleteBatchMedia`
+(inside `updateGenerationTask`) drops ONE member of a task's `outputs.batch[]`, and PixAI
+accepts it only while the task would still have an output left afterwards. For a lone-image
+task (no `batch` key — the picture is `outputs.mediaId`) and for the LAST live member of a
+batch, PixAI answers 403 `task outputs does not include any media with mediaId`; their own
+site sends `deleteGenerationTask` for those two cases. The gallery's single-image delete sent
+`deleteBatchMedia` unconditionally from v2.5.0 to 2026-09-06 and had never once worked on a
+single-image generation.
+
+- **Read, then route.** `route_image_delete(task, media_id)` (pure) decides from a live
+  `task_detail_gql` read; `delete_image_routed()` fires the branch it names and RETURNS
+  which one fired. Never re-derive the branch from local row counts — the catalog cannot see
+  a sibling deleted from PixAI's own website.
+- **Facts a 2026-09-06 read-only probe established** (do not re-derive them by guessing): a
+  deleted batch member keeps its place in `outputs.batch[]` and gains `deletedAt`, so array
+  length and position say nothing about how many images are live; `outputs.mediaId` on a
+  batch task is the combined preview picture and is never one of `outputs.batch[]`; the
+  task's `updatedAt` does NOT move on a per-image delete; `getTaskById` still resolves a
+  whole-task-deleted task, so it cannot be used as an existence check.
+- **The fail-safe direction is always refuse.** A read that failed, a media id the task does
+  not list, an already-deleted member, a video task: no mutation, a plain-words message.
+- `deleteGenerationTask` is a persisted **mutation** sent by POST (Apollo blocks mutations over GET), unlike the GET listing/query path. It is a **void mutation: it returns `null` on success** — the meaningful signal is the ABSENCE of a GraphQL error, NOT the payload. (Verified against a real task via the site, which shows a "Task has been deleted" toast off that same null/no-error response.)
+- Hash ships with a **built-in default** — no manual capture step. `DELETE_TASK_HASH` in `config.json` only *overrides* it if the hash rotates. Deletion is NOT gated by the hash being absent; the guards are what stand between you and a real delete.
+- **`--delete-task` is DEPRECATED (2026-09-06)** — still working this release, printing its own notice, and its `--help` says so. The maintained roads are the gallery's per-image delete (`/api/delete-image`, two-phase: preview then confirm) and the bulk task delete (`/api/delete-tasks`). Its guards are unchanged while it lasts: dry-run by default; `--apply` to perform; typed `delete` confirmation unless `--yes` (refused on non-interactive stdin); single-attempt per task; cloud-only, so it leaves local rows behind for `--reconcile-deleted`.
+- `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
 
 > **Reverse-engineering detail (frontend handler flow, sibling mutations, hash-capture
 > method) lives in `private/RE_NOTES.md`** — git-ignored, not public. Read it there when
@@ -319,8 +340,8 @@ python moonglade_backup.py --dedup --apply            # quarantine redundant cop
 python moonglade_backup.py --dedup --apply --dedup-delete  # delete instead of quarantine
 python moonglade_backup.py --verify-dupes             # confirm _duplicates/ is safe to delete
 python moonglade_gallery.py --out pixai_backup                # launch gallery at :5000 (+ /health dashboard)
-python moonglade_backup.py --delete-task <id> [<id> ...]        # DRY-RUN: list what would be deleted (nothing happens)
-python moonglade_backup.py --delete-task <id> --apply --yes     # actually delete from your account (irreversible; null=success)
+python moonglade_backup.py --delete-task <id> [<id> ...]        # DEPRECATED (use the gallery's Delete from PixAI). DRY-RUN: list what would be deleted
+python moonglade_backup.py --delete-task <id> --apply --yes     # DEPRECATED. Actually delete from your account (irreversible; null=success)
 python moonglade_backup.py -v --update                # verbose: per-page / per-image timing diagnostics
 python moonglade_backup.py --watch                    # live event stream (WS push): watch tasks complete
 python moonglade_backup.py --watch --watch-backup     # + auto-collect each finished gen as it completes

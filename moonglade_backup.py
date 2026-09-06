@@ -6038,8 +6038,25 @@ def run_probe(args):
             print("\nCouldn't find a URL in the media object -- paste this back.")
 
 
+#: Printed by every --delete-task run (2026-09-06). Deletion converged on the per-image
+#: path: the gallery reads the task back and sends whichever mutation PixAI accepts, and its
+#: Actions dropdown still takes whole tasks in bulk. This flag is a third road to the same
+#: place with none of the reading, so it is deprecated -- still working this release, but no
+#: longer the answer.
+_DELETE_TASK_DEPRECATED = (
+    "NOTE: --delete-task is DEPRECATED and will be removed in a later release.\n"
+    "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
+    "  with PixAI first and removes just that image when the rest of its batch is still\n"
+    "  there. To delete whole generations, select them in the gallery and use Delete from\n"
+    "  PixAI in the Actions dropdown. Both remove the local copy to your trash folder too,\n"
+    "  so your library and your account stay in step; this flag never touches local files.")
+
+
 def run_delete_tasks(args):
     """Delete one or more generation tasks from your PixAI account (IRREVERSIBLE).
+
+    DEPRECATED 2026-09-06 -- see `_DELETE_TASK_DEPRECATED`, printed on every run. It still
+    works exactly as it did; it is simply no longer the road deletion is maintained on.
 
     Guards, in order:
       1. Dry-run by default -- prints the target list and stops. Requires --apply.
@@ -6049,6 +6066,7 @@ def run_delete_tasks(args):
     Local backups (image files + catalog.db) are NOT touched -- this only removes
     the generation from your account on PixAI's servers.
     """
+    print(_DELETE_TASK_DEPRECATED)
     raw = getattr(args, "delete_task", None) or []
     seen, ids = set(), []
     for t in raw:
@@ -13777,10 +13795,12 @@ def main():
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
     ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DELETE the given generation task id(s) from your PixAI account "
-                         "(irreversible). Dry-run unless --apply is also given; then asks "
-                         "for typed confirmation unless --yes. Local backups are untouched. "
-                         "(DELETE_TASK_HASH ships with a working default; no config.json setup needed.)")
+                    help="DEPRECATED (use the gallery's Delete from PixAI, on one image or "
+                         "on a selection). DELETE the given generation task id(s) from your "
+                         "PixAI account (irreversible). Dry-run unless --apply is also "
+                         "given; then asks for typed confirmation unless --yes. Local "
+                         "backups are untouched. (DELETE_TASK_HASH ships with a working "
+                         "default; no config.json setup needed.)")
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
