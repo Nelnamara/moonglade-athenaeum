@@ -147,18 +147,32 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     } finally { setBusy(false); }
   };
 
+  // Two phases, and the dialog's words come from the FIRST one. It asks the server what
+  // this delete would actually do -- the server reads the task back from PixAI to answer --
+  // and then repeats that answer to the user. The old dialog worded itself from
+  // `state.data.siblings`, a count of LOCAL rows, which cannot see a sibling deleted from
+  // PixAI's own website: it promised "the rest of its batch stays" on deletes that took the
+  // whole generation, and on a single-image generation it promised a delete that PixAI had
+  // been refusing outright since v2.5.0. The plan goes back with the confirm so the server
+  // can refuse if the task changed while the dialog sat open.
   const deleteCloud = async () => {
-    const sibs = state.data.siblings || 1;
-    const what = sibs > 1
-      ? "This deletes ONLY this image from PixAI.\n\nThe other " + (sibs - 1) +
-        " image" + (sibs - 1 === 1 ? "" : "s") + " in its batch stay on your account."
-      : "This deletes this image from PixAI. It is the only image its task made.";
-    if (!window.confirm(what + "\n\nIt is also removed from your local library. This cannot be undone.")) return;
+    let plan;
+    setBusy(true);
+    try {
+      plan = await apiPost("/api/delete-image", { media_id: mediaId, confirm: false });
+    } finally { setBusy(false); }
+    if (!plan || plan.error) {
+      window.alert((plan && plan.error) || "Could not check this image on PixAI.");
+      return;
+    }
+    if (plan.plan === "refuse") { window.alert(plan.message || "Nothing was deleted."); return; }
+    if (!window.confirm(plan.message + "\n\nThis cannot be undone.")) return;
     const typed = window.prompt("This permanently deletes from PixAI. Type DELETE to confirm:");
     if (typed !== "DELETE") { window.alert("Cancelled."); return; }
     setBusy(true);
     try {
-      const d = await apiPost("/api/delete-image", { media_id: mediaId, confirm: true });
+      const d = await apiPost("/api/delete-image",
+                              { media_id: mediaId, confirm: true, plan: plan.plan });
       if (!d || d.error) { window.alert((d && d.error) || "Could not delete it."); return; }
       onDeleted();
     } finally { setBusy(false); }
