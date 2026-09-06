@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useContests, { fmt } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
@@ -36,7 +37,8 @@ import ContestConfirm from "./ContestConfirm.jsx";
    verbatim -- extended, not replaced, exactly as the handoff anchors it. What grew
    around it:
      A  the header tab pair (Contests / My entries, with a count badge), an
-        ★ Entered ×N chip on cards this library has entries in, and cards that now
+        "Entered ×N" chip on cards this library has entries in (the check-badge icon
+        since the 2026-09-05 Glyph Ledger; ★ before it), and cards that now
         open the IN-APP detail; the pixai.art link-out moved into that detail, where
         the DC puts it ("view all N on PixAI").
      B  ContestDetail replaces the list INSIDE this slab (§8.1) with ‹ All contests back.
@@ -174,7 +176,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                             ) : null}
                             {/* list-level deadline awareness: this library's own count */}
                             {enteredCount(featured) > 0 && (
-                              <span className="mgct-entered">★ Entered ×{enteredCount(featured)}</span>
+                              <span className="mgct-entered"><Icon name="entered" />Entered ×{enteredCount(featured)}</span>
                             )}
                             <span className="mgct-dates dim">{dateWithLeft(featured)}</span>
                           </div>
@@ -204,7 +206,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                           <div className="mgct-tags">
                             {c.prize_amount > 0 && <span className="mgct-prize">♦ {fmt(c.prize_amount)} CR</span>}
                             {enteredCount(c) > 0 && (
-                              <span className="mgct-entered">★ Entered ×{enteredCount(c)}</span>
+                              <span className="mgct-entered"><Icon name="entered" />Entered ×{enteredCount(c)}</span>
                             )}
                           </div>
                           <div className="mgct-dates">{dateWithLeft(c)}</div>
@@ -231,7 +233,7 @@ export default function ContestsOverlay({ onClose, onShortlist, selectedCount = 
                               </span>
                             ) : null}
                             {enteredCount(c) > 0 && (
-                              <span className="mgct-entered">★ Entered ×{enteredCount(c)}</span>
+                              <span className="mgct-entered"><Icon name="entered" />Entered ×{enteredCount(c)}</span>
                             )}
                           </div>
                           <div className="mgct-dates">{dateWithLeft(c)}</div>

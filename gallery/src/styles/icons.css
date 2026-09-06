@@ -1,0 +1,84 @@
+/* THE DRAWN ICONS (Glyph Ledger, 2026-09-05) -- how they sit in a line of text, and how
+   big each one is where it lands.
+
+   The art itself is in gallery/src/icons/ (nine .svg files from the Glyphs set, MIT --
+   see the NOTICE beside them), transcribed into gallery/src/icons/Icons.jsx by
+   tools/build_icons.py. Every icon draws in `currentColor`, so the only thing that
+   colours one is the `color` of whatever it sits in -- a skin change, a hover, a
+   disabled state and a metal button face all just work, with nothing here to say so.
+
+   WHY THE SIZES LIVE HERE. The component defaults to 1em, which is right when an icon
+   replaces a text glyph in ordinary copy. But this app's badges run 9-10px, and a duo
+   icon (a soft 25% body inside a hairline outline) needs a little more room than its
+   label to stay readable at that size, while a bold one does not. Rather than sprinkle
+   `size=` through nine components, the ratio per surface is set once, here, beside the
+   note that explains it. Measured in driven Chromium at each site's real size. */
+
+.mgico {
+  display: inline-block;
+  vertical-align: -0.15em;   /* sits on the text's optical baseline, not its box's */
+  flex: none;                /* never squeezed by a flex row it shares with a label */
+}
+
+/* ---- badges and chips: 9-10px labels, so the icon runs ~1.3em to stay legible ---- */
+.mgma2-lorabadge .mgico,          /* My Art -- USER LORA */
+.mgct-entered .mgico,             /* contests (desktop) -- Entered xN */
+.cmb-chip .mgico,                 /* contests (phone) -- the same chip */
+.cmb-entered-inline .mgico {      /* contests (phone list) -- the same words, no chip */
+  width: 1.3em; height: 1.3em;
+  margin-right: 0.15em;
+}
+
+/* ---- the model picker's preview line: 11px, a bold icon, so a lighter bump ---- */
+.mp-sub .mgico { width: 1.15em; height: 1.15em; margin-right: 0.1em; }
+
+/* ---- the composer's Snippets toggle: a 10px button ---- */
+button.mgdock-snipbtn .mgico { width: 1.25em; height: 1.25em; margin-right: 0.25em; }
+
+/* ---- SEARCH, every surface. The field glyphs are 10-15px depending on the host; the
+       binoculars are bold art, so they hold up small, but the smallest hosts get the
+       bump so the two barrels stay separate. ---- */
+.mgl-sglyph .mgico,               /* the desktop library bar */
+.mgdr-search-icon .mgico,         /* Duplicate Review's filename filter */
+.mgfo-search-ic .mgico {          /* the Folio's "search the record" */
+  width: 1.3em; height: 1.3em;
+}
+.glm-search-icon .mgico { width: 1.25em; height: 1.25em; }   /* the phone's field */
+/* the command palette's own field (15px) and AI Tools' (13px) are already big enough */
+
+/* ---- the phone's hero buttons: a 31px metal disc, 13px type. The icon wants more of
+       the disc than a text glyph did. Its colour comes from the button's own `color`
+       (a dark tint over the metal face), so it reads as struck INTO the metal. ---- */
+.glm-iconbtn .mgico { width: 16px; height: 16px; vertical-align: middle; }
+
+/* ---- the phone's tab bar: the Control Panel's door ---- */
+.glm-navicon .mgico { width: 1em; height: 1em; vertical-align: middle; }
+
+/* ---- the command palette's row icons: a 20px column, 13px type. Two icons ride this
+       rule now -- the Panel's laptop-cog and, since the post-audit rulings, the books on
+       every "Collection: <name>" row. The books are the more inset drawing of the two, and
+       still read at 1.15em (14.9px): measured at 13/15/17/19px, the two upright volumes and
+       the leaning one are separable from 13px up. ---- */
+.mgpal-ico .mgico { width: 1.15em; height: 1.15em; vertical-align: -0.2em; }
+
+/* ---- UNDO, all three of its button shapes. The history dial is a _path icon: the duo
+       grammar with the 25% companion fill left off, so the hairline is the WHOLE drawing
+       and there is no soft body underneath to carry it at a small size. It is also the
+       most inset drawing of the nine -- measured off getBBox() in driven Chromium, it inks
+       65% of its own 80-box where the duos ink 69-71% and the bold/poly ones 89-90%.
+
+       So it needs the biggest ratio in this file, and these are the smallest buttons any
+       of these icons sit in (10-12px). Measured in driven Chromium at 13/15/17/19px: at
+       13px the arrowhead and the clock's two hands blur into one another and it reads as a
+       smudged circle; from 15px it reads as what it is -- an arrow curling back into a
+       clock face. Each of the three lands at ~15.5px, from a different label size. ---- */
+.mgdr-undo .mgico {            /* Duplicate Review, desktop AND phone: 11.5px */
+  width: 1.35em; height: 1.35em; margin-right: 0.2em;
+}
+button.mgdock-snip .mgico {    /* the composer's "Undo delete" snippet chip: 10px, gap 0 */
+  width: 1.5em; height: 1.5em; margin-right: 0.25em;
+}
+button.mgcp-chip .mgico {      /* the Panel's "Reset crop": 12px, and the row's own 6px
+                                  gap already spaces it, so no margin here */
+  width: 1.3em; height: 1.3em;
+}

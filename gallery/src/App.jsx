@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Icon from "./icons/Icons.jsx";
 import { createPortal, flushSync } from "react-dom";
 import Banner from "./components/Banner.jsx";
 import SeparatorBar from "./components/SeparatorBar.jsx";
@@ -714,7 +715,7 @@ export default function App({ boot }) {
     // print) -- NOT a hand-off to the classic /contact-sheet page. That route
     // stays for classic's own use only; the new front door never opens it.
     printSheet: () => openContactSheet(selIds),
-    // Advanced flyout's "🖶 Contact sheet" -- prints the current collection
+    // Advanced flyout's "⎙ Contact sheet" -- prints the current collection
     // view rather than an explicit selection; falls back to /api/contact-
     // sheet's own "Recent" default when not viewing a collection.
     printCollection: () => openContactSheet(null, shelf),
@@ -1065,7 +1066,11 @@ export default function App({ boot }) {
 
     go("goto.library", "⌂", "Library", goLibrary, ["G", "L"], "g l");
     go("goto.loom", "▮", "Storyboard (the Loom)", () => { window.location.href = "/loom"; }, ["G", "S"], "g s");
-    go("goto.panel", "⛭", "Control Panel", () => openOverlay("panel"), ["G", "C"], "g c");
+    // The Panel's two doors wear ONE mark since the 2026-09-05 Glyph Ledger: this row
+    // and the phone tab bar's Control tab (TabBarMobile.jsx) both draw the laptop-cog.
+    // A gear before it -- which the app also spends on ordinary settings rows, so it
+    // never said "the Panel" the way this does.
+    go("goto.panel", <Icon name="panel" />, "Control Panel", () => openOverlay("panel"), ["G", "C"], "g c");
     // The four nav destinations NOTES §1 flagged as missing, cleared to ship 2026-08-31 --
     // each trivially removable at branch review. Glyphs are the app's own destination
     // marks (AppMobile's MENU_ITEMS table; Folio's is the banner's).
@@ -1077,11 +1082,16 @@ export default function App({ boot }) {
     // /api/collections via unique_collections). "Collection:" is matchable text like any
     // other label. No count sub: no route in this app reports a per-collection image
     // count, and inventing 40 count queries for a palette row is not a trade worth making.
+    //
+    // The books, since the 2026-09-05 post-audit rulings. These rows had borrowed ❖ --
+    // which the same Ledger had just given to the Folio's "unlocks a skin" flag, so one
+    // mark was naming two unrelated things a keystroke apart. ❖ means the skin flag and
+    // nothing else now; a shelf of books means a collection.
     for (const name of collections || []) {
       list.push({
         id: "collection:" + name,
         group: "Go to",
-        icon: "❖",
+        icon: <Icon name="collection" />,
         label: "Collection: " + name,
         run: () => { goLibrary(); applyAdvanced({ shelf: name }); },
         keys: [],
@@ -1115,8 +1125,10 @@ export default function App({ boot }) {
       id: "do.generate", group: "Do", icon: "✦", label: "New generation",
       sub: "Generate dock", keys: ["N"], hotkey: "n", run: openDock,
     });
+    // Search wears the binoculars everywhere it appears (Glyph Ledger, owner: "All
+    // search surfaces"), and this row is a door to the search field, so it follows.
     list.push({
-      id: "do.search", group: "Do", icon: "⌕", label: "Jump to Search",
+      id: "do.search", group: "Do", icon: <Icon name="search" />, label: "Jump to Search",
       keys: ["/"], hotkey: "/", run: jumpToSearch,
     });
     list.push({ id: "do.sync", group: "Do", icon: "⟳", label: "Sync now", keys: [], run: syncNow });

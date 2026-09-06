@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import Flyout from "./Flyout.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import "../styles/librarybar.css";
@@ -268,7 +269,7 @@ export function LibraryBar({
                 onClick={onClearSimilar}>✕</button>
             </span>
           ) : null}
-          <i className="mgl-sglyph" onClick={() => submitQuery()} title="Search">⌕</i>
+          <i className="mgl-sglyph" onClick={() => submitQuery()} title="Search"><Icon name="search" /></i>
           <input
             value={query}
             placeholder="search the library — night*, an id, model:tsubaki…"

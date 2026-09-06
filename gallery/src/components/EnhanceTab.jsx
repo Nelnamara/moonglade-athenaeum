@@ -207,7 +207,7 @@ export default function EnhanceTab({ source, armed, onOpenFilters }) {
                       <span className="mgdock-emoglyph" style={{ color: openFam.color }}
                         aria-hidden="true">{openFam.glyph}</span>
                       <span className="mgdock-emoname">{e.label}</span>
-                      {e.membership && <span className="mgdock-aigate" title="Membership required">★</span>}
+                      {e.membership && <span className="mgdock-aigate" title="Membership required">♛</span>}
                     </button>
                   ))}
                 </div>

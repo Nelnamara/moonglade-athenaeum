@@ -45,7 +45,7 @@ export default function ContactSheetOverlay({ ids, collectionName, onClose }) {
             <div className="mgv-title">Contact Sheet</div>
             <button type="button" className="mgcs-print" disabled={!data}
               title="Print this sheet" onClick={() => window.print()}>
-              🖶 Print
+              ⎙ Print
             </button>
             <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
           </div>

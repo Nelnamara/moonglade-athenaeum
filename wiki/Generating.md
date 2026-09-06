@@ -363,8 +363,8 @@ pixels.
 > spends credits and **no free card covers a panelplugin task**, so the price shows before you
 > generate. **Change Emotion** asks which expression you want, sorted into five families —
 > Bright, Soft, Dark, Startled, Playful — one family on screen at a time, so you pick from a
-> handful rather than scrolling every expression PixAI ships. A ★ means that expression needs
-> a PixAI membership. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
+> handful rather than scrolling every expression PixAI ships. A purple ♛ means that expression
+> needs a PixAI membership. There is still no CLI `--workflow-id`: these are web-only and mirror-gated.
 > Separately, the box-coordinate hand/face **Fixer** (Edit → Fix) works on any credential and
 > always has, and plain **Upscale** and **Hires** are ordinary generation settings on the
 > Generate tab, not workflows.

@@ -184,7 +184,7 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
         {onPrintCollection && (
           <button className="card" onClick={onPrintCollection}
             title="Print a contact sheet of the current view">
-            🖶 Contact sheet
+            ⎙ Contact sheet
           </button>
         )}
         {exportHref && (

@@ -143,8 +143,9 @@ images and videos with the arrow keys without leaving the overlay.
   card in the grid and press the ◈ in its corner, right-click a card and pick *Find similar*,
   press **◈ Similar** in the lightbox, or press **◈ Similar** on the detail page's SIMILAR
   strip. All four do the same thing, and nowhere in the library does ◈ open a *second* kind of
-  Similar. (The mark does appear as a small decoration elsewhere in the app — beside a model's
-  use count in the picker, on a *USER LORA* badge — where it is punctuation, not a door.)
+  Similar. **The mark means only this now**: the two places it used to sit as decoration — a
+  model's use count in the picker, the *USER LORA* badge — wear their own drawn icons since
+  2026-09-05, so seeing ◈ anywhere always means lookalikes.
 
   What you get is a **state on your library, not a popup**: a dismissible **◈ Similar to
   [thumbnail]** token appears in the search bar with the match count beside it, and the 48
@@ -188,7 +189,8 @@ back (even via the browser Back button).
 
 ### Saved prompt snippets
 
-The **★ Snippets** button beside a prompt box stores fragments you reuse. Deleting one used
+The **Snippets** button beside a prompt box — the one with the quote-marks icon — stores
+fragments you reuse. Deleting one used
 to fire the moment you *pressed* the × — which sits a few pixels from Insert, in a popover
 only 220–340px wide — with nothing to catch a slip and nothing to undo it. Now it fires on
 **release**, so sliding off the button cancels the way it does everywhere else, and the

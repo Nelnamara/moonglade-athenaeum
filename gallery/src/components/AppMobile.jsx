@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import useSimilar from "../hooks/useSimilar.js";
@@ -114,7 +115,8 @@ import "../styles/create-mobile.css";
        deferred there and why. (Create's own Video mode is NOT a placeholder --
        it shipped for real the same day, see the VideoMode paragraph above.)
 
-   FOLIO MOBILE (2026-08-03) -- the hero's gold "🌙 Folio of Honors" icon now
+   FOLIO MOBILE (2026-08-03) -- the hero's gold Folio of Honors button (a drawn
+   trophy since the 2026-09-05 Glyph Ledger; 🌙 before it) now
    opens the real FolioMobile.jsx full-page destination instead of the
    disclosing "coming later" toast it showed before this pass. `folioOpen`
    is lifted HERE for the identical reason detailsFor/lbIndex/cmode/VideoMode
@@ -270,7 +272,7 @@ import "../styles/create-mobile.css";
 
    CONTACT SHEET MOBILE (2026-08-03) -- the Gallery tab's Actions sheet
    (ActionsMenu.jsx, mounted "as-is" inside GalleryMobile.jsx) has a real
-   "▤ Print sheet" item that, on mobile, previously fell through to
+   "⎙ Print sheet" item that, on mobile, previously fell through to
    ActionsMenu's own desktop-shaped fallback (a bare window.open of the
    classic print page). `contactSheetTarget`/openContactSheet/
    closeContactSheet are lifted HERE for the identical reason detailsFor/
@@ -287,7 +289,11 @@ import "../styles/create-mobile.css";
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
-  { icon: "✎", label: "Publish", screen: "publish" },
+  // ☁ since the 2026-09-05 post-audit rulings: Publish wears the cloud on every OTHER
+  // surface that offers it (the desktop record, the Lightbox, this phone's own picture
+  // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
+  // Edit, which is a different verb one row away from this one.
+  { icon: "☁", label: "Publish", screen: "publish" },
   { icon: "⚗", label: "Train a LoRA", screen: "train" },
   { icon: "⬆", label: "Import", screen: "import" },
   { icon: "🏅", label: "Contests", screen: "contests" },
@@ -728,7 +734,7 @@ export default function AppMobile({ boot }) {
         <div className="glm-hero-scrim" aria-hidden="true" />
         <div className="glm-hero-icons">
           <button type="button" className="glm-iconbtn glm-iconbtn-gold" title="Folio of Honors"
-            onClick={openFolio}>🌙</button>
+            onClick={openFolio}><Icon name="folio" /></button>
           <button type="button" className="glm-iconbtn glm-iconbtn-teal" title="The Loom — video storyboard"
             onClick={() => openSheet("loom")}>▮</button>
           <button type="button" className="glm-iconbtn glm-iconbtn-lav" title="Activity"

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate } from "../hooks/swrCache.js";
 import { countdown, dayOf } from "../hooks/useContests.js";
@@ -90,7 +91,7 @@ export default function ContestConfirm({ contest, art, onClose, onEntered, onPic
                 track it under My entries.
               </div>
               <div className="chip">
-                <span className="mgct-entered strong">★ Entered</span>
+                <span className="mgct-entered strong"><Icon name="entered" />Entered</span>
               </div>
               <div className="a">
                 <button type="button" className="mgct-ghost" onClick={onClose}>Done</button>

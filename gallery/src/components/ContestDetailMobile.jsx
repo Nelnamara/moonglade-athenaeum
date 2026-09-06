@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { Markdown } from "./ContestDetail.jsx";
@@ -126,7 +127,7 @@ export default function ContestDetailMobile({ contest, mineRow, onBack, onEnter 
           )}
           {total > 0 && <span className="cmb-chip">{fmt(total)} entries</span>}
           {!running && !decided && <span className="cmb-chip">AWAITING RESULTS</span>}
-          {entered > 0 && <span className="cmb-chip entered">★ Entered ×{entered}</span>}
+          {entered > 0 && <span className="cmb-chip entered"><Icon name="entered" />Entered ×{entered}</span>}
         </div>
 
         <div className="cmb-acc">
