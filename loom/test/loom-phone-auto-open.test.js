@@ -59,10 +59,33 @@ describe("readStoredView -- what counts as an answer", () => {
     assert.equal(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "1" })), "mobile");
   });
 
-  test("the legacy '0' is discarded -- the old hook wrote it on mount, nobody chose it", () => {
-    // This is the whole reason the key changed: gated on the old value, the auto-open could
-    // never fire on a phone that had ever opened the Loom.
-    assert.equal(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "0" })), null);
+  test("a legacy '0' is an answer too -- the browser had it, so nobody is switched under them", () => {
+    /* The migration's original premise was "the old hook wrote 0 on mount, so nobody chose
+       it". True for a browser that never touched the switch -- but that hook wrote on EVERY
+       change of the value, so a real, deliberate uncheck of the old "Mobile view" box wrote
+       exactly the same 0. The two are indistinguishable in the stored data, so discarding
+       it silently reversed the choice of everyone who had turned the old switch back to
+       desktop: the one-way trap this feature's own comments say it avoids.
+
+       Presence of the legacy key, at ANY value, is therefore treated as "this browser has
+       been here and has an answer". Only a browser with NEITHER key gets the auto-open. */
+    assert.equal(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "0" })), "desktop");
+    assert.equal(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "" })), "desktop");
+    assert.equal(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "junk" })), "desktop");
+    // and that answer really holds the phone on the desktop build
+    assert.equal(resolveLoomView(readStoredView(store({ [LEGACY_MOBILE_UI_KEY]: "0" })), true),
+      false);
+    // a browser with neither key is the only one the auto-open speaks for
+    assert.equal(resolveLoomView(readStoredView(store({})), true), true);
+  });
+
+  test("a new flip still outranks the legacy answer, in both directions", () => {
+    assert.equal(readStoredView(store({
+      [LOOM_VIEW_KEY]: "mobile", [LEGACY_MOBILE_UI_KEY]: "0",
+    })), "mobile");
+    assert.equal(readStoredView(store({
+      [LOOM_VIEW_KEY]: "desktop", [LEGACY_MOBILE_UI_KEY]: "1",
+    })), "desktop");
   });
 
   test("the new key outranks the legacy one", () => {
@@ -113,6 +136,34 @@ describe("both manual switches survive the auto-open", () => {
 
   test("LoomMobile's reciprocal 'Desktop' chip still writes one too", () => {
     assert.match(loom, /onClick=\{\(\) => setMobileUI\(false\)\}/);
+  });
+
+  test("the auto-open is decided ONCE, so a rotation cannot swap the whole shell mid-session", () => {
+    /* useIsMobile is deliberately live: it subscribes to matchMedia, resize and
+       orientationchange so the presentation flips with the device. Re-deriving the Loom's
+       view from it on every render made ordinary ROTATION a full unmount/remount between
+       LoomMobile and LoomV2 -- a phone user watching a clip in Review & trim turns the
+       phone to see it wider and the review closes, because that state is LoomMobile's own
+       and dies with the subtree.
+
+       The decision is a default, not a live reading: taken once, on mount, and changed
+       after that only by a switch the owner actually flips. */
+    const idx = loom.indexOf("function useLoomView(isPhone)");
+    const hook = loom.slice(idx, loom.indexOf("\n}\n", idx));
+    // the rule is consulted exactly once, and it is inside the state initializer
+    assert.equal((hook.match(/resolveLoomView\(/g) || []).length, 1,
+      "a second call is a second, live decision -- which is the remount-on-rotate bug");
+    const init = hook.slice(hook.indexOf("useState("), hook.indexOf("const setMobileUI"));
+    assert.match(init, /resolveLoomView\(/,
+      "the resolved view must be SEEDED once, not recomputed every render");
+    assert.match(hook, /return \[mobileUI, setMobileUI\];/,
+      "the hook returns the state it holds, not a value re-derived from a live isPhone");
+  });
+
+  test("the same phone rule still decides that one-time default", () => {
+    // Rotation must not RE-decide, but the first answer is still the app's one phone rule.
+    assert.equal(resolveLoomView(null, true), true);
+    assert.equal(resolveLoomView(null, false), false);
   });
 
   test("the key is written ONLY by a flip -- never on mount, or absent stops meaning 'not asked'", () => {

@@ -75,12 +75,19 @@ export function buildLoomUrl(patch, search, pathname) {
 
    Why a NEW key rather than reading the old one: the old toggle rode useLocalToggle, which
    writes its value in an effect on mount. Every browser that has ever opened the Loom
-   therefore already holds "mg_loom_mobile_ui" = "0" -- a stored answer nobody ever gave.
-   Auto-open gated on that key would silently never fire on exactly the phones it is for.
-   "mg_loom_view" is only ever written by a real flip, so ABSENT honestly means "not asked
-   yet, follow the phone rule". The legacy "1" is the one old value that could only have
-   come from a deliberate tick, so it is honoured as a choice; a legacy "0" is discarded as
-   the non-answer it was. */
+   therefore already holds "mg_loom_mobile_ui" = "0", and a NEW key is the only way to tell
+   a browser that has never been asked from one that has. "mg_loom_view" is written only by
+   a real flip, so absent honestly means "not asked yet".
+
+   THE LEGACY KEY'S PRESENCE IS THE ANSWER, whatever its value -- and this is the part that
+   was wrong at first. The migration read a legacy "0" as "the old hook wrote it on mount,
+   nobody chose it" and let the auto-open override it. But that hook wrote on EVERY change
+   of the value, so a real, deliberate uncheck of the old "Mobile view" box wrote exactly
+   the same "0". The two cases are indistinguishable in the stored data, so discarding it
+   silently reversed the choice of everyone who had ever switched the old toggle back to
+   desktop -- the one-way trap this feature exists to avoid, pointed the other way. A
+   browser that has the old key has been here and has an answer; only a browser with
+   NEITHER key gets the auto-open. */
 export const LOOM_VIEW_KEY = "mg_loom_view";           // "mobile" | "desktop"; absent = auto
 export const LEGACY_MOBILE_UI_KEY = "mg_loom_mobile_ui";
 
@@ -92,7 +99,8 @@ export function readStoredView(store) {
   if (v === "mobile" || v === "desktop") return v;
   let legacy = null;
   try { legacy = store.getItem(LEGACY_MOBILE_UI_KEY); } catch (e) { return null; }
-  return legacy === "1" ? "mobile" : null;
+  if (legacy == null) return null;          // never been here: the auto-open speaks
+  return legacy === "1" ? "mobile" : "desktop";
 }
 
 /* The one decision: an explicit choice wins; otherwise follow the phone rule. */
