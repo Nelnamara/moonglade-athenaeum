@@ -99,6 +99,27 @@ The cloud call happens first and the local copy is only removed once it succeeds
 refuses or the network drops, the image is left exactly where it was on both sides, and you
 can try again.
 
+### When your library finds out PixAI dropped an image
+
+The date PixAI dropped an image lands on that image's catalog row at one of exactly two
+moments — worth knowing which, because nothing running in the background will do it for you:
+
+- **When the app reads that generation from PixAI for a delete.** All three reads count: the
+  question the confirm dialog asks before you commit, the delete itself, and the Actions
+  dropdown's **Delete from PixAI**. Each records the date for *every* image of that
+  generation PixAI no longer has — not only the one you clicked — off the answer it was
+  reading anyway. Nothing is removed by it: a row carrying that date is one whose local copy
+  is the only copy left anywhere.
+- **When `--backfill-full-meta` re-fetches that row** — which it only does for rows still
+  missing their prompt or their model/steps/sampler/CFG (or when you widen it with
+  `--with-loras`, `--with-credit` or `--with-surface`). A row that already holds all of that
+  is never revisited, so on a catalog you have already filled in this pass records nothing,
+  and the date comes from a delete instead.
+
+`--reconcile-deleted` does *not* record it: that one works on whole generations that have
+left your feed, and never looks at the individual images inside one. Neither does anything
+on a timer — the app runs no background pass that checks this.
+
 ## Reconcile — clean up what you deleted on the website
 
 Deleting a task on PixAI doesn't touch your local backup (by design). To find and

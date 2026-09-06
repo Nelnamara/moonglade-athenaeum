@@ -9900,12 +9900,17 @@ def create_app(out_dir: Path):
         except Exception as e:                        # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
 
+        # The read this plan was made from is the only place the app learns that PixAI has
+        # dropped an image, so every row it names is marked here -- on the preview as much as
+        # on the confirm, and whichever branch the plan took. Nothing local is removed by it:
+        # a marked row is one whose local copy is now the only copy anywhere, and it stays.
+        # It cannot be left to --backfill-full-meta, which only re-fetches a row missing its
+        # prompt or model detail: a complete row is never revisited, so in the ordinary case
+        # that pass would never set this at all.
+        for gone_media, when in plan.keep_media_deleted_at:
+            mark_cloud_deleted(db_path, gone_media, when)
+
         if plan.plan == "refuse":
-            if plan.cloud_deleted_at:
-                # PixAI dropped this image already. Nothing was sent, and nothing local is
-                # touched -- this copy is the only one left anywhere now -- but the row
-                # stops claiming PixAI still has it.
-                mark_cloud_deleted(db_path, mid, plan.cloud_deleted_at)
             answer = {"plan": "refuse", "reason": plan.reason, "live_siblings": 0,
                       "local_rows": [], "message": plan.reason}
             if not preview:

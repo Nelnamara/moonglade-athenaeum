@@ -359,6 +359,38 @@ def test_an_image_pixai_already_deleted_says_so_and_marks_the_row(tmp_path, monk
     assert stamp == GONE, "the row still claims PixAI has this image"
 
 
+def test_a_preview_read_marks_every_sibling_pixai_has_already_deleted(tmp_path, monkeypatch):
+    """The marker is written by a read the app was ALREADY making. Asking what deleting `b`
+    would do reads the whole task back, and PixAI's answer says it dropped `a` -- so `a`'s
+    row records that here, on the preview, with no second network call.
+
+    It cannot wait for `--backfill-full-meta`: that pass only re-fetches a row missing its
+    prompt or model detail, so a row that already has both is never revisited and the marker
+    would never be set at all in the ordinary case.
+
+    Nothing else moves: no mutation fires, no file is touched, and the rows of the images
+    PixAI still has keep their blank marker rather than being swept along with it."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _live_task(("a", True), ("b", False), ("c", False)))
+    _nothing_deletes(monkeypatch)
+    for f in ("a.png", "b.png", "c.png"):
+        (tmp_path / f).write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": False}).get_json()
+    assert d["plan"] == "per-image", d
+
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        marks = dict(con.execute("SELECT media_id, cloud_deleted_at FROM catalog"))
+    assert marks["a"] == GONE, (
+        "a sibling PixAI has deleted still looks live in the catalog after the app read it")
+    assert marks["b"] == "" and marks["c"] == "" and marks["z"] == "", (
+        "a row PixAI still has was marked as deleted: {}".format(marks))
+    for f in ("a.png", "b.png", "c.png"):
+        assert (tmp_path / f).exists(), "the preview touched a file"
+    assert not (tmp_path / "_deleted").exists()
+
+
 def test_a_video_clip_is_refused_rather_than_guessed_at(tmp_path, monkeypatch):
     """Video outputs hang off outputs.videos and neither mutation is known to be the right
     one for them. Say where to do it instead of firing a destructive guess."""

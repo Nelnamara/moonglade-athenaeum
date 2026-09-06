@@ -2708,18 +2708,24 @@ def delete_task_gql(session, task_id):
 #: work the branch out again from its own catalog. `keep_media` names the task's images PixAI
 #: had ALREADY deleted before this call; their local copies are the only ones left anywhere,
 #: so a whole-task purge must leave them alone. `cloud_deleted_at` is the target's own
-#: deletedAt stamp when it turned out to be one of those.
+#: deletedAt stamp when it turned out to be one of those. `keep_media_deleted_at` carries WHEN
+#: PixAI deleted each of `keep_media`, as (media_id, deletedAt) pairs -- so a caller holding a
+#: catalog can record the fact off the read this plan already made, rather than making a
+#: second one (moonglade_gallery's /api/delete-image does exactly that).
 ImageDeletePlan = namedtuple(
-    "ImageDeletePlan", "plan reason live_siblings keep_media cloud_deleted_at")
+    "ImageDeletePlan",
+    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at")
 
 
 def _image_delete_plan(task, media_id):
     """Turn one routing decision into the plan a caller acts on (pure)."""
     plan, reason, live_siblings, entry = route_image_delete(task, media_id)
     batch = ((task or {}).get("outputs") or {}).get("batch")
-    return ImageDeletePlan(plan, reason, live_siblings,
-                           tuple(deleted_batch_media(batch)),
-                           str((entry or {}).get("deletedAt") or ""))
+    gone = tuple(deleted_batch_media(batch))
+    return ImageDeletePlan(plan, reason, live_siblings, gone,
+                           str((entry or {}).get("deletedAt") or ""),
+                           tuple((m, str((batch_entry(batch, m) or {}).get("deletedAt") or ""))
+                                 for m in gone))
 
 
 def plan_image_delete(session, task_id, media_id):
@@ -2766,7 +2772,8 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
             "refuse",
             "What this delete would do changed while the dialog was open, so nothing was "
             "deleted. Open it again to see where the image stands now.",
-            plan.live_siblings, plan.keep_media, plan.cloud_deleted_at)
+            plan.live_siblings, plan.keep_media, plan.cloud_deleted_at,
+            plan.keep_media_deleted_at)
     if plan.plan == "per-image":
         delete_batch_media_gql(session, task_id, media_id)
     else:
@@ -4117,9 +4124,19 @@ def _with_batch_position(fm, media_id):
 
     `cloud_deleted_at` is the third per-row field and rides here for the same reason
     (2026-09-06): whether PixAI still has THIS image is a per-output fact the task-level
-    meta cannot hold. It is what makes --backfill-full-meta -- the pass that walks existing
-    catalog rows task by task -- mark the local row of an image deleted from PixAI's own
-    website, instead of leaving it looking live forever."""
+    meta cannot hold.
+
+    WHEN THE MARKER IS ACTUALLY SET -- this path is the quieter of its two writers, and on
+    a settled catalog it never fires at all. --backfill-full-meta re-fetches a row only when
+    that row is missing its prompt or all of model/steps/sampler/CFG (or when --with-loras /
+    --with-credit / --with-surface widen the net), so a row that already carries its detail
+    is never revisited and never reaches this line. The writer that does the work in the
+    ordinary case is the DELETE path: whenever the app reads a task back from PixAI for a
+    delete -- the confirm dialog's question, the delete itself, and the Actions dropdown's
+    bulk delete -- it stamps the row of every batch member that answer reports deleted
+    (moonglade_gallery's /api/delete-image, and _rows_the_bulk_purge_must_keep). Those two
+    are the whole list: --reconcile-deleted writes the task-level `deleted_remote` advisory
+    and never looks inside a batch, and no background sweep writes this at all."""
     batch = (fm or {}).get("_batch")
     bi, bs = batch_position(batch, media_id)
     gone = str((batch_entry(batch, media_id) or {}).get("deletedAt") or "")

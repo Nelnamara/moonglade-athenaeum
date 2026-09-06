@@ -330,6 +330,25 @@ def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypa
     assert "kept 1" in (job.get("label") or ""), job.get("label")
 
 
+def test_bulk_delete_marks_the_row_it_kept(tmp_path, monkeypatch, pixai):
+    """The same read that decides what to keep is what teaches the catalog why. Without it
+    the kept row goes on claiming PixAI still has that image forever: a bare
+    `--backfill-full-meta` only re-fetches rows missing their prompt or model detail, so a
+    complete row is never revisited and nothing else would ever write this."""
+    db = _keepback_batch(tmp_path)
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda sess, tid, **k: _live_task_with_one_deleted())
+
+    cli = login_client(tmp_path)
+    cli.post("/api/delete-tasks", json={"task_ids": ["T1"]})
+    assert _wait_for_delete_job(cli)["status"] == "done"
+
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["gone"]["cloud_deleted_at"] == GONE, (
+        "the kept row still claims PixAI has this image")
+
+
 def test_bulk_delete_keeps_a_marked_row_when_the_live_read_fails(tmp_path, monkeypatch, pixai):
     """The read fails soft, and a read that could not be made must never WIDEN what a purge
     takes. The catalog's own cloud_deleted_at stands on its own for exactly that case: it
