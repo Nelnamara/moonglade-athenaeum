@@ -20,6 +20,7 @@ import path from "node:path";
 import {
   RETURN_KEY, safeLibraryPath, packReturn, unpackReturn,
   rememberLibrary, readLibraryReturn, cameFromLoom,
+  setLibraryPlace, libraryPlace,
 } from "../../gallery/src/lib/loomCrossing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -127,8 +128,14 @@ describe("cameFromLoom -- the scroll restore fires on the return trip only", () 
 
 describe("the wiring (source structure)", () => {
   test("the library records where it was on the way out -- ONE listener, every door", () => {
-    assert.match(mainJsx, /import \{ rememberLibrary \} from "\.\/lib\/loomCrossing\.js";/);
-    assert.match(mainJsx, /window\.addEventListener\("pagehide", \(\) => \{\s*\n\s*rememberLibrary\(window\.location\.pathname \+ window\.location\.search,\s*\n\s*window\.scrollY \|\| 0, window\.sessionStorage\);/);
+    assert.match(mainJsx, /import \{ rememberLibrary, libraryPlace \} from "\.\/lib\/loomCrossing\.js";/);
+    assert.equal((mainJsx.match(/addEventListener\("pagehide"/g) || []).length, 1,
+      "one listener is what covers all four doors without touching any of them");
+    // the window's own address and offset are still the default answer (the desktop's),
+    // and libraryPlace is what lets a shell that knows better say so -- see #9 below
+    assert.match(mainJsx, /url: window\.location\.pathname \+ window\.location\.search,/);
+    assert.match(mainJsx, /scrollY: window\.scrollY \|\| 0,/);
+    assert.match(mainJsx, /rememberLibrary\(place\.url, place\.scrollY, window\.sessionStorage\);/);
   });
 
   test("only the REAL library records -- not /login, not the first-run wizard", () => {
@@ -138,6 +145,72 @@ describe("the wiring (source structure)", () => {
   test("the Loom reads it back once, at module scope, into one constant", () => {
     assert.match(loom, /import \{ readLibraryReturn \} from "\.\.\/gallery\/src\/lib\/loomCrossing\.js";/);
     assert.match(loom, /const GALLERY_HREF = readLibraryReturn\(/);
+  });
+
+  test("the phone shell answers where it is, so the snapshot is not a desktop-only fact", () => {
+    /* THE PHONE DOOR RESTORED NOTHING. The CHANGELOG names the phone's own "Open The Loom"
+       by name, but AppMobile never imported any of this: it always opened page 1 with
+       nothing selected, and its real scroller is .glm-body, not the window -- so even the
+       offset main.jsx recorded was a window scrollY of 0.
+
+       The register is what closes it without inventing URL sync on a shell that
+       deliberately has none: the phone shell says where it is, and the ONE pagehide
+       listener still does the recording. */
+    let asked = 0;
+    const dispose = setLibraryPlace(() => { asked += 1; return { url: "/?page=7&image=m9", scrollY: 640 }; });
+    assert.deepEqual(libraryPlace({ url: "/", scrollY: 0 }),
+      { url: "/?page=7&image=m9", scrollY: 640 });
+    assert.equal(asked, 1);
+    dispose();
+    assert.deepEqual(libraryPlace({ url: "/?page=2", scrollY: 12 }),
+      { url: "/?page=2", scrollY: 12 }, "with nothing registered the window's own answer stands");
+  });
+
+  test("a phone shell that throws or answers nothing falls back, never breaks the crossing", () => {
+    const fallback = { url: "/?page=3", scrollY: 5 };
+    let dispose = setLibraryPlace(() => { throw new Error("unmounted mid-hide"); });
+    assert.deepEqual(libraryPlace(fallback), fallback);
+    dispose();
+    dispose = setLibraryPlace(() => null);
+    assert.deepEqual(libraryPlace(fallback), fallback);
+    dispose();
+  });
+
+  test("a later register replaces the earlier one, and disposing the OLD one does not unhook it", () => {
+    const first = setLibraryPlace(() => ({ url: "/?page=1", scrollY: 1 }));
+    const second = setLibraryPlace(() => ({ url: "/?page=2", scrollY: 2 }));
+    first();                                    // a stale cleanup must not silence the live one
+    assert.deepEqual(libraryPlace({ url: "/", scrollY: 0 }), { url: "/?page=2", scrollY: 2 });
+    second();
+    assert.deepEqual(libraryPlace({ url: "/", scrollY: 0 }), { url: "/", scrollY: 0 });
+  });
+
+  test("main.jsx's one listener asks the register, and the phone shell answers it", () => {
+    assert.match(mainJsx, /libraryPlace\(/);
+    const mobileApp = rd("../gallery/src/components/AppMobile.jsx");
+    assert.match(mobileApp, /import \{[^}]*cameFromLoom[^}]*\} from "\.\.\/lib\/loomCrossing\.js";/s);
+    assert.match(mobileApp, /setLibraryPlace\(\(\) => \(\{/);
+    // the page and the open picture ride the SAME builder the desktop address uses
+    assert.match(mobileApp, /buildUrl\(\{ page: [^}]*image: /);
+  });
+
+  test("the phone opens the page and the picture the return address names", () => {
+    const mobileApp = rd("../gallery/src/components/AppMobile.jsx");
+    // gated on the return trip: the phone has no URL sync of its own and keeps none
+    assert.match(mobileApp, /const \[loomReturn\] = useState\(\(\) =>[\s\S]{0,80}cameFromLoom\(document\.referrer, window\.location\.origin\)/);
+    assert.match(mobileApp, /useLibrary\(\{ initialPage: /);
+    assert.match(mobileApp, /useState\(loomReturn \? readImage\(window\.location\.search\) : null\)/);
+    // ...and the scroller it restores into is the phone's own, not the window
+    const blk = mobileApp.slice(mobileApp.indexOf("const loomReturnY = useRef("));
+    const restore = blk.slice(0, 1400);
+    assert.match(restore, /el\.scrollTop = y;/,
+      "the phone restores into .glm-body, its real scroller -- not the window");
+    assert.doesNotMatch(restore, /window\.scrollTo\(/);
+    // ...and it yields the instant the owner's own hands arrive
+    for (const ev of ["touchstart", "wheel", "keydown"]) {
+      assert.ok(restore.includes('addEventListener("' + ev + '", stop'), ev);
+    }
+    assert.match(restore, /\+\+frames < 30/, "the retry must be capped, not open-ended");
   });
 
   test("the promise is stated as a SAME-TAB one, in the code and in the wiki", () => {

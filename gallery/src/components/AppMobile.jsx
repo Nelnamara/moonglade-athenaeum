@@ -8,6 +8,8 @@ import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
 import { apiPost, fetchAccount, fetchCollections, rateImage } from "../api.js";
+import { buildUrl, readPage, readImage } from "../gen/urlState.js";
+import { cameFromLoom, readLibraryReturn, setLibraryPlace } from "../lib/loomCrossing.js";
 import GalleryMobile from "./GalleryMobile.jsx";
 import ImageDetailsMobile from "./ImageDetailsMobile.jsx";
 import LightboxMobile from "./LightboxMobile.jsx";
@@ -391,7 +393,20 @@ export default function AppMobile({ boot }) {
   const [jobExpandedId, setJobExpandedId] = useState(null);
   const toggleJobRow = (jid) => setJobExpandedId((cur) => (cur === jid ? null : jid));
   const fl = useFlavour(undefined, boot.build_stamp);
-  const lib = useLibrary();
+  /* THE SAME PROMISE, ACROSS THE CROSSING -- the phone half (red team #9, 2026-09-06).
+     "← Gallery puts you back exactly where you were" names the phone's own Open The Loom
+     door by name, and the phone restored none of it: this shell always opened page 1 with
+     nothing selected, and its real scroller is .glm-body, so even the offset the library
+     recorded was a window scrollY of 0.
+
+     ONLY ON THE RETURN TRIP, and that gate is what keeps this from becoming URL sync. The
+     phone deliberately has none (see the detailsFor note below), so an address carrying
+     ?page= or ?image= can only have come from the Loom's own back link -- and
+     document.referrer being the Loom is what says so. On every other load, including an
+     ordinary reload, the address is ignored exactly as it always was. */
+  const [loomReturn] = useState(() =>
+    cameFromLoom(document.referrer, window.location.origin));
+  const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
   const costRef = useRef(null);
   const gen = useGenerate({ costRef });
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
@@ -406,7 +421,10 @@ export default function AppMobile({ boot }) {
   // (unlike desktop's bookmarkable /?image=<mid>) -- see
   // ImageDetailsMobile.jsx's own header comment for why that's a deliberate,
   // separate scope call, not an oversight.
-  const [detailsFor, setDetailsFor] = useState(null);
+  // ...with ONE exception, and it is the crossing above: a return trip from the Loom opens
+  // the picture the return address names. That is not URL sync -- nothing here ever WRITES
+  // the address -- it is reading the one address the Loom hands back, once, at mount.
+  const [detailsFor, setDetailsFor] = useState(loomReturn ? readImage(window.location.search) : null);
   const openDetails = (mid) => setDetailsFor(mid);
   const closeDetails = () => setDetailsFor(null);
 
@@ -553,6 +571,56 @@ export default function AppMobile({ boot }) {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+
+  /* THE SAME PROMISE, ACROSS THE CROSSING -- the phone's two halves (red team #9).
+
+     ON THE WAY OUT: the library's one pagehide listener (main.jsx) records where it was,
+     and its default answer -- the address bar plus window.scrollY -- is the DESKTOP's
+     answer. This shell has no URL sync and scrolls .glm-body, so left to that default the
+     phone's return trip recorded "/" at offset 0. Registering says where the phone really
+     is, through the SAME builder the desktop address uses, so the two shells put the same
+     shape of thing in the snapshot and the Loom's link needs to know nothing about which
+     one wrote it. The refs are what keep the answer current without re-registering on every
+     page turn -- pagehide reads it once, at the last possible moment.
+
+     ON THE WAY BACK: the offset. The page and the picture come back from the address itself
+     (see loomReturn above); how far down .glm-body you were cannot ride an address, so it
+     rides the snapshot. Re-asked across a few frames because the grid grows as thumbnails
+     resolve -- and abandoned the instant the owner's own hands arrive, which is the standing
+     rule: the only thing allowed to move his view is him, and here he is the one who asked. */
+  const placeRef = useRef({ page: 1, image: null });
+  useEffect(() => { placeRef.current = { page: lib.page, image: detailsFor }; });
+  useEffect(() => setLibraryPlace(() => ({
+    url: buildUrl({ page: placeRef.current.page, image: placeRef.current.image }, "", "/"),
+    scrollY: bodyRef.current ? bodyRef.current.scrollTop : 0,
+  })), []);
+  const loomReturnY = useRef(
+    loomReturn ? readLibraryReturn(window.sessionStorage).scrollY : 0);
+  useEffect(() => {
+    const y = loomReturnY.current;
+    if (!y || !lib.items.length) return undefined;
+    loomReturnY.current = 0;         // one restore per load, whatever happens below
+    let stopped = false, frames = 0, raf = 0;
+    const stop = () => { stopped = true; };
+    const step = () => {
+      if (stopped) return;
+      const el = bodyRef.current;
+      if (!el) return;
+      el.scrollTop = y;
+      if (Math.abs(el.scrollTop - y) > 2 && ++frames < 30) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    const el = bodyRef.current;
+    if (el) el.addEventListener("touchstart", stop, { passive: true });
+    window.addEventListener("wheel", stop, { passive: true });
+    window.addEventListener("keydown", stop);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (el) el.removeEventListener("touchstart", stop);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("keydown", stop);
+    };
+  }, [lib.items.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);

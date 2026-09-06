@@ -10,7 +10,7 @@ import useIsMobile from "./hooks/useIsMobile.js";
 import { installNotify, NotifyRoot } from "./notify/index.jsx";
 import { syncBlurClass } from "./lib/blurPref.js";
 import { syncPairing } from "./lib/fonts.js";
-import { rememberLibrary } from "./lib/loomCrossing.js";
+import { rememberLibrary, libraryPlace } from "./lib/loomCrossing.js";
 import "./styles.css";
 
 /* THE BLUR SWITCH, applied before anything can render (owner ruling 2026-09-04; see
@@ -95,8 +95,16 @@ if (boot.authenticated !== false) installNotify();
 if (boot.authenticated !== false
     && !(boot.needs_key || boot.catalog_empty || boot.needs_assets)) {
   window.addEventListener("pagehide", () => {
-    rememberLibrary(window.location.pathname + window.location.search,
-      window.scrollY || 0, window.sessionStorage);
+    // The window's own answer is the DEFAULT, not the only one. It is right for the
+    // desktop shell, which syncs ?page=/?image= into the address and scrolls the document
+    // -- and wrong for the phone shell, which has no URL sync at all and scrolls an
+    // element. AppMobile registers its own answer (setLibraryPlace); with nothing
+    // registered, or a source that throws, this is what stands.
+    const place = libraryPlace({
+      url: window.location.pathname + window.location.search,
+      scrollY: window.scrollY || 0,
+    });
+    rememberLibrary(place.url, place.scrollY, window.sessionStorage);
   });
 }
 

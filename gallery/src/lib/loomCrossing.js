@@ -78,6 +78,46 @@ export function unpackReturn(raw) {
   return { url, scrollY: Number.isFinite(y) && y > 0 ? Math.round(y) : 0 };
 }
 
+/* WHERE THE LIBRARY IS, when the window cannot answer it.
+
+   The pagehide listener's default answer is the window's own -- the address bar plus
+   window.scrollY -- and on the desktop shell that IS where the library is, because the
+   desktop syncs ?page= and ?image= into the address and scrolls the document.
+
+   THE PHONE SHELL IS NEITHER. AppMobile deliberately has no URL sync (its own header
+   comment calls that a separate scope call, not an oversight), so its address never says
+   which page or picture is open; and its real scroller is `.glm-body`, an element, so
+   window.scrollY is always 0 there. Left to the default, the phone's "← Gallery" carried
+   "/" and an offset of zero -- the CHANGELOG's promise named the phone's own door and the
+   phone restored none of it.
+
+   So the shell that knows says so, and the ONE listener still does the recording -- rather
+   than the phone growing a second pagehide listener, or the crossing growing a branch on
+   which shell is mounted. Registering returns a disposer; a later register replaces the
+   earlier one, and disposing a stale registration cannot silence the live one. A source
+   that throws or answers nothing falls back to the window's answer: a shell unmounting
+   mid-hide must not be able to break the crossing.
+
+   No DOM here on purpose -- the caller passes its own fallback -- so this stays a module
+   the tests drive with plain objects. */
+let placeSource = null;
+
+export function setLibraryPlace(fn) {
+  const mine = typeof fn === "function" ? fn : null;
+  placeSource = mine;
+  return () => { if (placeSource === mine) placeSource = null; };
+}
+
+export function libraryPlace(fallback) {
+  if (placeSource) {
+    try {
+      const p = placeSource();
+      if (p && p.url) return p;
+    } catch (e) { /* fall through to the window's own answer */ }
+  }
+  return fallback;
+}
+
 /* Record where the library was. Called once, from main.jsx's pagehide handler, so it
    covers every way out of the library -- including doors this module does not own. */
 export function rememberLibrary(url, scrollY, store) {
