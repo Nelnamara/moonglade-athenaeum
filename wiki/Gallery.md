@@ -37,6 +37,17 @@ A row of frosted glow-pill buttons, one hue per destination:
   **Sync published-artwork metadata** (Panel → Maintenance, or `--sync-artworks` — see
   [Backing Up](Backing-Up)). On a library where that has never run there is nothing for it to
   list, and it now says so and points at the sync instead of showing a bare "Nothing here yet."
+
+  **When something takes off, Moonglade tells you.** After a run that reads view counts, if
+  a published work's recent pace has left its own normal well behind, a notice appears in the
+  corner — *"◈ <title> is taking off"* — with how many views it gained, over how long, and
+  roughly how many times its usual pace that is. A work that had **no views at all** before
+  says *"up from nothing"* instead, because there is no usual pace to compare against.
+  The rule is deliberately quiet: it wants a real number of new views, not just a big-looking
+  ratio on a work with three, and it subtracts the one view the reading itself adds. It fires
+  **once per sweep** and names **one** work, counting any others rather than listing them —
+  it is a note, not a feed. It is **announce-only**: nothing is published, changed, sorted or
+  moved, and the page you are reading stays exactly where it is.
 - **Followers and following** sit beside the credits figure in the header, and again in the
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows, likes or comments on your behalf.
