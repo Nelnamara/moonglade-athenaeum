@@ -33,6 +33,13 @@ task, with the ones you actually selected outlined in gold. Anything you importe
 PixAI task) is listed separately as a local-only removal, so the count adds up. Nothing is
 sent until you press **Continue…** and type `DELETE`.
 
+**Images you had already deleted on PixAI are left alone.** Before it removes anything
+locally, this reads each generation back from PixAI. Any image of that generation PixAI has
+already dropped keeps its file and its catalog row exactly where they are — PixAI has no copy
+of it, so yours is the only one left anywhere. The Activity card says how many were kept. If
+that read can't be made, nothing is removed that your library already records as dropped by
+PixAI.
+
 ## Deleting just one image from a batch
 
 The gallery's bulk action takes whole tasks. When you want to remove **one** picture from a

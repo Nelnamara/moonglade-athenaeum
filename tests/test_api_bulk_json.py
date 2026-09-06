@@ -278,6 +278,99 @@ def test_delete_tasks_purge_local_false_leaves_the_library_alone(tmp_path, monke
     assert not (tmp_path / g.DELETED_DIRNAME).exists()
 
 
+# ---- the only copy left anywhere survives a bulk delete too (2026-09-06) ------------
+
+GONE = "2026-09-06T11:22:33.000Z"
+
+
+def _keepback_batch(tmp_path, **extra_on_gone):
+    """One task of three images, one of which the owner already deleted on PixAI's own
+    website -- so the local file of `gone` is the only copy of it left anywhere."""
+    return _seed(tmp_path, [
+        _row(media_id="m1", task_id="T1", filename="m1.png"),
+        _row(media_id="m2", task_id="T1", filename="m2.png"),
+        _row(media_id="gone", task_id="T1", filename="gone.png", **extra_on_gone),
+    ], {"m1.png": b"a", "m2.png": b"b", "gone.png": b"c"})
+
+
+def _live_task_with_one_deleted():
+    return {"id": "T1", "status": "completed", "outputs": {
+        "mediaId": "GRID-COMBINED", "seed": "1", "batch": [
+            {"mediaId": "m1", "seed": "1"}, {"mediaId": "m2", "seed": "2"},
+            {"mediaId": "gone", "seed": "3", "deletedAt": GONE}]}}
+
+
+def test_bulk_delete_leaves_the_only_copy_left_anywhere_alone(tmp_path, monkeypatch, pixai):
+    """The single-image path already refuses to take these (ImageDeletePlan.keep_media):
+    PixAI removing the generation record does not change the fact that its copy of `gone`
+    was deleted long before, so this library holds the last one in existence. The Actions
+    dropdown's task-level delete purged every row of the task regardless -- so deleting the
+    siblings quarantined the one file nothing could bring back.
+
+    The worker reads the live task once before it purges and walks around those rows."""
+    db = _keepback_batch(tmp_path)
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda sess, tid, **k: _live_task_with_one_deleted())
+
+    cli = login_client(tmp_path)
+    assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"] is True
+    job = _wait_for_delete_job(cli)
+    assert job is not None and job["status"] == "done", job
+
+    assert (tmp_path / "images" / "gone.png").exists(), (
+        "the only copy left anywhere was quarantined by a delete of its siblings")
+    assert {r["media_id"] for r in load_catalog(db)} == {"gone"}, (
+        "the row of an image PixAI had already deleted was purged with the task")
+    deleted = tmp_path / g.DELETED_DIRNAME
+    assert (deleted / "m1.png").exists() and (deleted / "m2.png").exists(), (
+        "the images PixAI really did delete were not quarantined")
+    assert job.get("kept_media") == ["gone"], (
+        "the ledger never named the row it kept: {}".format(job))
+    assert "kept 1" in (job.get("label") or ""), job.get("label")
+
+
+def test_bulk_delete_keeps_a_marked_row_when_the_live_read_fails(tmp_path, monkeypatch, pixai):
+    """The read fails soft, and a read that could not be made must never WIDEN what a purge
+    takes. The catalog's own cloud_deleted_at stands on its own for exactly that case: it
+    was written the last time the app read this task, and it still means the same thing."""
+    db = _keepback_batch(tmp_path, cloud_deleted_at=GONE)
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+
+    def _blip(sess, tid, **k):
+        raise core.PixAIError("network error reading task")
+
+    monkeypatch.setattr(core, "task_detail_gql", _blip)
+
+    cli = login_client(tmp_path)
+    assert cli.post("/api/delete-tasks", json={"task_ids": ["T1"]}).get_json()["ok"] is True
+    job = _wait_for_delete_job(cli)
+    assert job is not None and job["status"] == "done", job
+
+    assert (tmp_path / "images" / "gone.png").exists()
+    assert {r["media_id"] for r in load_catalog(db)} == {"gone"}
+    assert job.get("kept_media") == ["gone"]
+
+
+def test_bulk_delete_still_takes_the_whole_task_when_nothing_was_deleted_on_pixai(
+        tmp_path, monkeypatch, pixai):
+    """The keep-back is narrow. A task PixAI still holds in full is purged exactly as it
+    always was -- cloud and catalog stay in step, and the Activity card says nothing about
+    rows kept, because none were."""
+    db = _keepback_batch(tmp_path)
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+    monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: {
+        "id": "T1", "outputs": {"batch": [{"mediaId": m} for m in ("m1", "m2", "gone")]}})
+
+    cli = login_client(tmp_path)
+    cli.post("/api/delete-tasks", json={"task_ids": ["T1"]})
+    job = _wait_for_delete_job(cli)
+    assert job is not None and job["status"] == "done", job
+    assert load_catalog(db) == []
+    assert not job.get("kept_media")
+    assert "kept" not in (job.get("label") or "")
+
+
 def test_delete_tasks_read_only_refuses_before_the_job_starts(tmp_path, monkeypatch):
     """READ_ONLY is the Trust & Safety promise: one clean 403 up front, no job on
     the Activity card, and the cloud mutation is never reached."""

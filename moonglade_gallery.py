@@ -1044,10 +1044,15 @@ def task_media(db_path, task_id):
     query -- the live-mirror's "a concurrent collect already finished, read the
     result back" path, /api/import-task's already-catalogued precheck, and the bulk
     delete's per-task local purge -- so they share one verb and one column list.
-    Empty list for a task this library never downloaded."""
+    Empty list for a task this library never downloaded.
+
+    `cloud_deleted_at` rides along for the third caller: a row carrying it is one
+    whose local copy is the only copy left anywhere, so the bulk purge has to know
+    which rows to walk around before it takes the rest."""
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id, is_video, filename FROM catalog WHERE task_id=?",
+            "SELECT media_id, is_video, filename, cloud_deleted_at "
+            "FROM catalog WHERE task_id=?",
             (str(task_id),)).fetchall()
         return [dict(r) for r in rows]
 
@@ -9977,6 +9982,43 @@ def create_app(out_dir: Path):
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
 
+    def _rows_the_bulk_purge_must_keep(session, task_id, rows):
+        """Which of one task's local rows the bulk delete must leave exactly where they are.
+
+        The same rule the single-image path follows through ImageDeletePlan.keep_media, and
+        it is here for the same reason: an image the owner deleted on PixAI's own website is
+        gone THERE, so this library's copy is the only one left anywhere. PixAI removing the
+        generation record does not change that, and neither does deleting its siblings --
+        so those rows and their files stay, and the whole-task purge walks around them.
+
+        Two sources, deliberately both:
+          * the live task, read once here. It fails SOFT: a read that could not be made must
+            never WIDEN what a purge takes, so a blip leaves the catalog's own answer standing
+            rather than replacing it with silence.
+          * `cloud_deleted_at` on the rows themselves, which stands whether or not the read
+            worked -- it was written the last time the app read this task.
+
+        The read is also where the marker gets WRITTEN: every member PixAI reports deleted
+        has its own row stamped here, so the catalog learns it from the read the delete was
+        making anyway rather than from a network call of its own.
+
+        Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
+        generation record is gone and there is nothing left to read."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        keep = {str(r["media_id"]) for r in rows
+                if str(r.get("cloud_deleted_at") or "").strip()}
+        try:
+            task = core.task_detail_gql(session, str(task_id)) if session is not None else None
+        except Exception:                            # noqa: BLE001 -- fail soft, see above
+            task = None
+        batch = ((task or {}).get("outputs") or {}).get("batch")
+        for mid in core.deleted_batch_media(batch):
+            keep.add(str(mid))
+            stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+            if stamp:
+                mark_cloud_deleted(db_path, mid, stamp)
+        return keep
+
     def _preview_entry(row, selected_ids):
         """One /api/delete-preview media entry: what it is, whether the user actually
         picked it, and the media_id whose thumbnail exists on disk -- or None for
@@ -10095,6 +10137,7 @@ def create_app(out_dir: Path):
 
         def _work():
             deleted = failed = removed = done = 0
+            kept = []
             step = max(1, total // 50)          # throttle progress writes (~every 2%)
             def _tick():
                 if done % step == 0 or done == total:
@@ -10102,6 +10145,12 @@ def create_app(out_dir: Path):
             try:
                 session = core._make_session(None) if task_ids else None
                 for tid in task_ids:
+                    # BEFORE the cloud delete: once the generation record is gone there is
+                    # nothing left to read, and this is the read that says which local rows
+                    # hold the only copy of their image left anywhere.
+                    rows = task_media(db_path, tid) if purge_local else []
+                    keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
+                            if purge_local else set())
                     try:
                         core.delete_task_gql(session, tid)      # cloud delete (irreversible)
                         deleted += 1
@@ -10109,7 +10158,12 @@ def create_app(out_dir: Path):
                         failed += 1
                         done += 1; _tick(); continue
                     if purge_local:
-                        for m in task_media(db_path, tid):
+                        for m in rows:
+                            if str(m["media_id"]) in keep:
+                                # PixAI had already deleted this one; this library holds the
+                                # last copy in existence. Named on the card, never purged.
+                                kept.append(str(m["media_id"]))
+                                continue
                             try:
                                 _purge_local(m["media_id"], m["filename"]); removed += 1
                             except OSError:
@@ -10126,10 +10180,16 @@ def create_app(out_dir: Path):
                         failed += 1
                     done += 1; _tick()
                 summary = "Deleted {} · purged {} local · {} failed".format(deleted, removed, failed)
+                if kept:
+                    # Said out loud rather than left as a silent difference in the numbers:
+                    # these files are still in the library on purpose.
+                    summary += " · kept {} file{} PixAI had already deleted".format(
+                        len(kept), "" if len(kept) == 1 else "s")
                 # ANY failure is a non-clean result -- surface it RED on the card. Don't bury
                 # "3 failed" inside a green 'done': those tasks still exist on PixAI (drift).
                 status = "failed" if failed else "done"
                 _log_job(job_id, status=status, label=summary, done=total, total=total,
+                         kept_media=(kept or None),
                          error=(summary if failed else None))
             except Exception as e:                               # noqa: BLE001
                 _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
