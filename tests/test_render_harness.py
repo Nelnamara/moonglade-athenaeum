@@ -2935,3 +2935,428 @@ def test_a_completion_never_out_races_the_owners_own_page_change_on_the_phone(
                 before["library"], after["library"]))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# THE PHONE'S FOUNDATIONS (2026-09-06) -- the mobile audit's four confirmed defects
+# ---------------------------------------------------------------------------
+# Each of the four below was independently re-reproduced on a driven 390x844 chromium
+# before it was fixed, and each fails on the pre-fix source. The source-shape guards for
+# the wiring these rest on are loom/test/phone-back-layers.test.js.
+
+# What the phone's own scroller is doing, in one read. .glm-body is the tab's scroller
+# (gallery-mobile.css gives it overflow-y:auto) and the ONE element every finding here
+# turns on -- the pager's landing, the sheet's containment and the per-tab memory are all
+# statements about this number.
+_BODY_SCROLL_JS = """() => {
+    const el = document.querySelector('.glm-body');
+    if (!el) return null;
+    return { top: el.scrollTop, range: el.scrollHeight - el.clientHeight };
+}"""
+
+
+def _body_top(page):
+    return page.evaluate(_BODY_SCROLL_JS)["top"]
+
+
+def _wheel_over(page, x, y, times=8, dy=600):
+    """A real wheel burst, well past the end of anything under the pointer."""
+    page.mouse.move(x, y)
+    for _ in range(times):
+        page.mouse.wheel(0, dy)
+    _settle(page)
+
+
+# HOW DEEP THE BACK LEDGER IS, read off the browser rather than off the app. Each entry the
+# layer manager pushes carries its own depth in the history state ({mgLayer: n} --
+# gallery/src/hooks/useLayerHistory.js), so the current entry's number IS the number of open
+# layers, and the base entry the shell opened on carries none at all.
+#   Not `history.length`: that is a high-water mark. It never shrinks on a back, and a
+# pushState after one overwrites the forward entry rather than adding to the count -- so a
+# second layer opened after any earlier back reads as no growth at all. Measured, not
+# assumed: this test's own two-deep stack read 5 against a 4 that had already been reached.
+_LAYER_DEPTH_JS = ("() => (window.history.state && window.history.state.mgLayer) || 0")
+
+
+def _layer_depth(page):
+    return page.evaluate(_LAYER_DEPTH_JS)
+
+
+def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
+        logged_in_page):
+    """THE 2026-09-06 AUDIT'S FIRST FINDING, and an app-wide one.
+
+    The phone half of Similar was the only surface on this shell that guarded the Back
+    gesture (AppMobile pushed one same-address entry when it opened). Every OTHER layer it
+    stacks over the library -- the full-screen viewer, the picture screen, all six Menu
+    destinations, the Folio, the contact sheet, the contest entry screen, and the three
+    local drill-ins -- consumed zero history depth, so the phone's own "go up one" walked
+    past all of them and straight out of Moonglade.
+
+    Three shapes, in the order a person meets them: one layer, a SWAP of two mutually
+    exclusive ones (the viewer and the picture screen null each other, mirroring App.jsx's
+    own pairing -- so "Details" trades one layer for another and the depth never moves),
+    and a genuine two-deep stack (the Folio opened over a pushed Menu screen: the hero is
+    still reachable above .glm-body while a screen is up). The ledger's own depth is read
+    at each step, because the defect was never visible in the DOM -- the layers always
+    rendered, they simply held no entry to consume.
+    """
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    home = page.url
+    assert _layer_depth(page) == 0, "the bare gallery is holding a layer entry"
+
+    # --- one layer: the full-screen viewer -----------------------------------------
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    _settle(page)
+    assert _layer_depth(page) == 1, (
+        "the viewer took no history entry -- Back will walk past it and out of the app")
+    page.go_back()
+    page.wait_for_selector(".lbm-root", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "Back left the app instead of closing the viewer"
+    _settle(page)
+    assert _layer_depth(page) == 0, "the viewer's entry outlived the viewer"
+
+    # --- a SWAP: viewer -> picture screen is one layer the whole way through --------
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    page.click(".lbm-actsrow >> text=Details")
+    page.wait_for_selector(".idm-root")
+    _settle(page)
+    assert _layer_depth(page) == 1, (
+        "the viewer and the picture screen are mutually exclusive, so trading one for the "
+        "other must not stack a second entry -- the depth is {}".format(_layer_depth(page)))
+    page.go_back()
+    page.wait_for_selector(".idm-root", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "Back left the app instead of closing the picture screen"
+    assert page.locator(".lbm-root").count() == 0, (
+        "closing the picture screen re-opened the viewer -- the two are mutually "
+        "exclusive, so the trade was one layer and Back lands on the library")
+
+    # --- a genuine two-deep stack: the Folio over a pushed Menu screen --------------
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("My Art")')
+    page.wait_for_selector(".glm-screen")
+    _settle(page)
+    assert _layer_depth(page) == 1, "the pushed Menu screen took no history entry"
+    page.click('button[title="Folio of Honors"]')
+    page.wait_for_selector(".fm-root")
+    _settle(page)
+    assert _layer_depth(page) == 2, (
+        "two stacked layers did not take two entries -- one Back would close both, or "
+        "neither")
+
+    page.go_back()
+    page.wait_for_selector(".fm-root", state="detached")
+    assert page.locator(".glm-screen").count() == 1, (
+        "Back closed the Folio AND the screen underneath it -- one press, one layer")
+    assert page.url == home
+    _settle(page)
+    assert _layer_depth(page) == 1, "the ledger did not come down with the Folio"
+
+    page.go_back()
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "the second Back left the app instead of closing the screen"
+    _settle(page)
+    assert _layer_depth(page) == 0
+
+    # --- and the bare gallery is exactly as it was: no trap ------------------------
+    # With nothing open the manager holds no entries, so a Back here does what it always
+    # did -- leaves. Proven by landing back on the login page the harness came in through,
+    # which is the entry immediately before this one.
+    page.go_back()
+    page.wait_for_load_state("domcontentloaded")
+    assert "/login" in page.url, (
+        "Back on the bare gallery did not leave the app -- the manager is holding an "
+        "entry for a layer that is not open, which is a trap: {}".format(page.url))
+
+
+def test_the_pager_lands_each_page_at_its_top(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S SECOND FINDING: tap Next from halfway down page 1 and page 2
+    opened already halfway down -- the search field, the media pills and the whole first row
+    of pictures scrolled away above a page not one word of which had been read.
+
+    GalleryMobile's Prev/Next just calls load(page +/- 1, true); nothing ever touched
+    .glm-body's offset, so the scroller kept whatever the READER had left it at while the
+    tiles under it were replaced wholesale. The fix rides the owner's own load (AppMobile's
+    userLoad, the intent path the library-stands-still policy already runs everything
+    through), so a background refresh is untouched -- and it fires only when the page really
+    changed.
+
+    Needs a library that pages, so it takes `paged_library_server`'s 120 rows rather than
+    the module fixture's six.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        page.wait_for_selector(".glm-pager")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        assert page.evaluate(_PHONE_PAGE_JS) == 1, "the phone did not open at page 1"
+
+        start = page.evaluate(_BODY_SCROLL_JS)
+        assert start["range"] > 400, (
+            "the phone's library has only {:.0f}px of scroll range at 390x844 -- there is "
+            "no 'halfway down' for this test to leave the reader at".format(start["range"]))
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 400; }")
+        _settle(page)
+        assert _body_top(page) == 400, (
+            "the library scroller would not take a test offset -- nothing below measures "
+            "anything")
+        # ...and from there the pill row really is scrolled away, which is the complaint.
+        away = page.evaluate("""() => {
+            const body = document.querySelector('.glm-body').getBoundingClientRect();
+            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
+            return pills.bottom <= body.top;
+        }""")
+        assert away, (
+            "the media pills are still on screen at 400px down, so 'the pill row scrolled "
+            "away' is not the state this test starts from")
+
+        page.click('.glm-pager button:has-text("Next")')
+        _phone_on_page(page, 2)
+        _settle(page)
+
+        landed = _body_top(page)
+        assert landed == 0, (
+            "page 2 opened {:.0f}px down -- the reader lands mid-page on a page they have "
+            "not read".format(landed))
+        geo = page.evaluate("""() => {
+            const body = document.querySelector('.glm-body').getBoundingClientRect();
+            const bar = document.querySelector('.glm-bar').getBoundingClientRect();
+            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
+            return {bodyTop: body.top, barTop: bar.top, pillsTop: pills.top,
+                    pillsBottom: pills.bottom};
+        }""")
+        assert geo["barTop"] >= geo["bodyTop"] - 1 and geo["pillsBottom"] > geo["bodyTop"], (
+            "the search bar and the media pills are not on screen on the page that just "
+            "landed: {!r}".format(geo))
+
+        # Prev, the other direction, is the same hand and lands the same way.
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 300; }")
+        _settle(page)
+        page.click('.glm-pager button:has-text("Prev")')
+        _phone_on_page(page, 1)
+        _settle(page)
+        assert _body_top(page) == 0, (
+            "Prev kept the offset -- the landing is the owner's page change, either way "
+            "he asked for it")
+    finally:
+        ctx.close()
+
+
+def test_an_open_sheet_holds_the_library_still_behind_it(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S THIRD FINDING, and the one the measurement does not agree
+    with -- recorded here rather than quietly dressed up, because a guard that claims a bite
+    it does not have is worse than no guard.
+
+    THE REPORT: a wheel or flick over an open Sort / Advanced Search / Actions sheet
+    scrolled the library GRID behind the dim, because the 2026-09-05 pass latched the pushed
+    SCREENS (`.glm-body:has(.glm-screen)` + `overscroll-behavior: contain`) and left the
+    sheets one layer shallower.
+
+    WHAT THIS BROWSER DOES, probed before the fix was written and again after: the library
+    does not move. Wheel burst and real CDP touch drag, over the scrim and over the slab, on
+    a 120-row library with 9057px of range, with the new rules in place and with them
+    overridden back off -- 200px in, 200px out, every time. The reason is in the same probe:
+    every sheet surface is position:fixed with no containing-block ancestor
+    (`sheet.offsetParent === null`), so it scroll-chains to the document and never to
+    .glm-body, DOM descendant or not. So the leak is not reproducible from here, and this
+    test does not pretend otherwise -- there is no revert phase, because nothing flips.
+
+    WHAT IT DOES PIN, all of it real and all of it new: the sheet does not move the reader
+    on its way up, the tab's scroller is genuinely latched while the sheet is up (the
+    `:has(.glm-sheet)` rule -- without it that read is "auto"), the sheet contains its own
+    overscroll, and the latch comes off with the sheet leaving the library exactly where it
+    was. gallery-mobile.css's own block states the same thing in full.
+
+    Measured on the paged fixture because the module's six rows do not fill a 390x844 phone,
+    and a containment test on a surface with nothing to scroll proves nothing.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+
+        assert page.evaluate(_BODY_SCROLL_JS)["range"] > 400, (
+            "the library does not scroll at 390x844 here -- nothing could leak")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 200; }")
+        _settle(page)
+        held = _body_top(page)
+        assert held == 200
+
+        # Advanced Search rather than Sort, and for a reason worth stating: the Sort pill
+        # lives in .glm-bar2, which has scrolled away by 200px, so driving it would make
+        # Playwright scroll it into view and move the very number this test is watching.
+        # "Advanced" sits in .glm-bar, which is position:sticky and always on screen. All
+        # three sheets are the same shared .glm-sheet chrome (MobileSheet.jsx) mounted in
+        # the same place (inside .glm-tab-gallery), so the containment measured on one is
+        # the containment all three have.
+        page.click(".glm-search-adv")
+        page.wait_for_selector(".glm-sheet")
+        _settle(page)
+        # The sheet must not have moved the reader on its way up, either.
+        assert _body_top(page) == held, "opening the sheet moved the library by itself"
+
+        # A burst over the dim, where the grid is showing through...
+        _wheel_over(page, 195, 200)
+        assert _body_top(page) == held, (
+            "a flick over the scrim scrolled the library behind it")
+        # ...and one over the sheet's own body, which is where a thumb actually lands.
+        sheet_y = page.evaluate(
+            "() => { const r = document.querySelector('.glm-sheet').getBoundingClientRect();"
+            " return Math.round(r.top + Math.min(60, r.height / 2)); }")
+        _wheel_over(page, 195, sheet_y)
+        assert _body_top(page) == held, (
+            "a flick over the sheet chained out into the library behind it")
+        assert page.locator(".glm-sheet").count() == 1, "the sheet closed under the wheel"
+
+        # THE LOCK IS REAL, and this is what CAN be proven from here: while the sheet is up
+        # the tab's scroller is latched, and the moment it closes the library is both
+        # scrollable again AND exactly where it was left. Without the `:has(.glm-sheet)`
+        # rule the first read below is "auto" and the assertion fails.
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-body')).overflowY"
+        ) == "hidden", "the tab's scroller is not latched while a sheet is up"
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-sheet')).overscrollBehaviorY"
+        ) == "contain", "the sheet does not contain its own overscroll"
+        page.keyboard.press("Escape")            # no-op; the scrim is the real dismiss
+        page.click(".glm-scrim", position={"x": 195, "y": 60}, force=True)
+        page.wait_for_selector(".glm-sheet", state="detached")
+        _settle(page)
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-body')).overflowY"
+        ) == "auto", "the latch outlived the sheet -- the library can no longer be scrolled"
+        assert _body_top(page) == held, (
+            "the library did not come back to where the reader left it: {:.0f} vs {:.0f}"
+            .format(_body_top(page), held))
+    finally:
+        ctx.close()
+
+
+def test_each_tab_keeps_its_own_scroll(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S FOURTH FINDING: all three tabs share ONE scroller (.glm-body),
+    so a deep read of the library opened the Create tab a thousand pixels down its own
+    composer, and coming back put you somewhere neither tab had chosen.
+
+    The shell keeps a per-tab memory now: leaving a tab records its offset, entering one
+    puts it back. Driven as a person drives it -- the real bottom nav, a real round trip --
+    on the paged fixture, because the module's six rows do not give the Gallery tab enough
+    range for "deep" to mean anything (with 120 it has 8682px of it).
+
+    The BLEED half is measured on the pair the report named, Gallery -> Create. The
+    KEEPS-ITS-OWN half is measured on Gallery <-> Control instead, and that is a fixture
+    fact rather than a scope call: measured at 390x844, the composer runs 30px past the
+    frame and Control 984, so Create has no offset of its own to hold and Control does. The
+    memory itself is per-tab and keyed on nothing but the tab name.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+
+        assert page.evaluate(_BODY_SCROLL_JS)["range"] > 500, (
+            "the library does not run deep enough at 390x844 for this to mean anything")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 500; }")
+        _settle(page)
+        assert _body_top(page) == 500
+
+        # Over to Create -- the exact bleed the report named: it opens at ITS top, not
+        # 500px down someone else's tab.
+        page.click('.glm-navitem:has-text("Create")')
+        page.wait_for_selector(".cm-pad", timeout=10_000)
+        _settle(page)
+        assert _body_top(page) == 0, (
+            "the Create tab opened {:.0f}px down -- the Gallery's depth bled into it"
+            .format(_body_top(page)))
+
+        # Control is the tab deep enough to hold a place of its own (see the docstring).
+        page.click('.glm-navitem:has-text("Control")')
+        page.wait_for_selector(".ctm-statcard", timeout=10_000)
+        _settle(page)
+        arrived = page.evaluate(_BODY_SCROLL_JS)
+        assert arrived["top"] == 0, (
+            "the Control tab opened {:.0f}px down".format(arrived["top"]))
+        assert arrived["range"] > 300, (
+            "the Control panel has only {:.0f}px of range here, so 'Control keeps its own "
+            "place' cannot be measured".format(arrived["range"]))
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 300; }")
+        _settle(page)
+        assert _body_top(page) == 300
+
+        # Back to the library: deep stays deep.
+        page.click('.glm-navitem:has-text("Gallery")')
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _settle(page)
+        assert _body_top(page) == 500, (
+            "the library came back at {:.0f} instead of the 500 it was left at"
+            .format(_body_top(page)))
+
+        # ...and Control kept its own, separately.
+        page.click('.glm-navitem:has-text("Control")')
+        page.wait_for_selector(".ctm-statcard")
+        _settle(page)
+        assert _body_top(page) == 300, (
+            "Control came back at {:.0f} instead of the 300 it was left at"
+            .format(_body_top(page)))
+
+        # A PUSHED SCREEN PARKS THIS SCROLLER, and the memory stands down while it does --
+        # MobileScreen.jsx has held .glm-body at 0 since the 2026-09-05 contest fix, so a
+        # tab switch under an open screen must not record that 0 as the tab's place.
+        page.click('.glm-navitem:has-text("Gallery")')
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _settle(page)
+        page.click('button[title="More"]')
+        page.click('.glm-menu-item:has-text("My Art")')
+        page.wait_for_selector(".glm-screen")
+        _settle(page)
+        assert _body_top(page) == 0, "the screen did not park the scroller"
+        page.click('.glm-navitem:has-text("Create")')
+        _settle(page)
+        page.click('.glm-navitem:has-text("Gallery")')
+        _settle(page)
+        page.click(".glm-screen-back")
+        page.wait_for_selector(".glm-screen", state="detached")
+        _settle(page)
+        assert _body_top(page) == 500, (
+            "a tab round trip UNDER an open screen overwrote the library's place with the "
+            "parked 0: it came back at {:.0f}".format(_body_top(page)))
+    finally:
+        ctx.close()

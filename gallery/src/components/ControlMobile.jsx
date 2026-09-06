@@ -5,6 +5,7 @@ import {
   MarkArt, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import useLayerHistory from "../hooks/useLayerHistory.js";
 import { apiGet } from "../api.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
@@ -143,6 +144,12 @@ export default function ControlMobile({ account }) {
     setBrandClosing(true);
     setTimeout(() => { setBrandOpen(false); setBrandClosing(false); }, 220);
   };
+  /* ...and the Back gesture is the second way out of it (2026-09-06). Branding is a pushed
+     screen, whose only affordance is the back chevron, so the phone's own "go up one" has
+     to mean that chevron -- before this it walked past Branding and out of Moonglade. One
+     shared ledger, one entry per open layer: hooks/useLayerHistory.js. Declared above the
+     early returns below, as every hook in this file must be. */
+  useLayerHistory(brandOpen, closeBrand);
 
   if (summaryErr) {
     return (

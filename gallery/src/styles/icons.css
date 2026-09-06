@@ -54,6 +54,11 @@ button.mgdock-snipbtn .mgico { width: 1.25em; height: 1.25em; margin-right: 0.25
 /* ---- the phone's tab bar: the Control Panel's door ---- */
 .glm-navicon .mgico { width: 1em; height: 1em; vertical-align: middle; }
 
+/* ---- the Folio's own title chip on the phone: an 11px uppercase word, and a duo icon,
+       so it takes the same 1.3em the badges and chips above do to stay readable beside
+       it. It is the same trophy the hero button that opened this screen wears. ---- */
+.fm-titlechip .mgico { width: 1.3em; height: 1.3em; margin-right: 0.15em; }
+
 /* ---- the command palette's row icons: a 20px column, 13px type. Two icons ride this
        rule now -- the Panel's laptop-cog and, since the post-audit rulings, the books on
        every "Collection: <name>" row. The books are the more inset drawing of the two, and

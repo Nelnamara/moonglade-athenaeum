@@ -215,6 +215,15 @@ so you can bookmark one, and the browser's Back button closes it.
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).
 
+**On a phone, three more things about where you are.** Each of the three tabs —
+**Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
+your library and stepping over to the composer no longer drops you into the middle of it,
+and the library is still deep when you come back. Turning the page with **‹ Prev** or
+**Next ›** starts you at the top of the page you asked for, with the search box and the
+media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
+**Actions** — the library behind the dim is held still, and is exactly where you left it
+when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
+
 ## Editing & curating
 
 - **Star ratings** (0–5) per image, inline, stored in `catalog.db`. **A rating that doesn't

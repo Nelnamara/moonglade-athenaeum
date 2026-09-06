@@ -208,7 +208,11 @@ describe("the phone learns completions exist -- announce-only", () => {
     assert.match(userLoad, /navRef\.current\.want = p;/);
     assert.match(userLoad, /navRef\.current\.inFlight \+= 1;/);
     assert.match(userLoad, /navRef\.current\.inFlight = Math\.max\(0, navRef\.current\.inFlight - 1\);/);
-    assert.match(userLoad, /return lib\.load\(p, replace\)\.then\(\(d\) => \{ settle\(\); return d; \}, \(e\) => \{ settle\(\); throw e; \}\);/);
+    // `settle` takes the landed response as of 2026-09-06 -- the page the owner asked for
+    // lands at its TOP, and that reset rides this path precisely so it can never touch a
+    // background refresh (see the pager test below). Both arms still settle the count, and
+    // the same promise is still handed straight back to the caller.
+    assert.match(userLoad, /return lib\.load\(p, replace\)\.then\(\(d\) => \{ settle\(d\); return d; \}, \(e\) => \{ settle\(\); throw e; \}\);/);
     assert.ok(userLoad.indexOf("navRef.current.want = p") < userLoad.indexOf("return lib.load(p, replace)"),
       "the intent must be on the record before the request leaves");
     // The two hands this surface has. The pager takes `load` as a prop out of the {...lib}

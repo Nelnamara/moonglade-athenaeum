@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import Icon from "../icons/Icons.jsx";
 import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
+import useLayerHistory from "../hooks/useLayerHistory.js";
 import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
@@ -264,11 +265,60 @@ import "../styles/create-mobile.css";
        what the desktop saves; and the phone has no Escape, so the hardware/
        browser Back gesture is wired as the second dismiss in its place (a
        same-address history entry pushed when Similar opens, consumed again when
-       the token's ✕ closes it). That entry is the ONLY history AppMobile writes;
-       nothing else here is URL-synced, so it can never be stranded under a
-       later push. The phone's picture screen keeps its "see all" SHEET rather
-       than growing a door of its own -- a sheet is the phone's own idiom for
-       "the rest of these", and it was already real.
+       the token's ✕ closes it). Similar was the FIRST surface here to hold such
+       an entry and, until 2026-09-06, the only one -- see THE BACK GESTURE
+       below for the generalisation that entry became. The phone's picture screen
+       keeps its "see all" SHEET rather than growing a door of its own -- a sheet
+       is the phone's own idiom for "the rest of these", and it was already real.
+
+   THE BACK GESTURE CLOSES ONE LAYER (2026-09-06) -- the phone audit's first
+   confirmed defect, and an app-wide one. Everything this file stacks over the
+   library covered the shell and consumed ZERO history depth: the viewer
+   (lbIndex), the picture screen (detailsFor), all six Menu destinations
+   (`screen`), the Folio, the contact sheet, the contest entry screen -- plus
+   the Control tab's Branding drill-in, the composer's Advanced screen and
+   Collection Health's Duplicates drill-in, which each own their own local pair.
+   Only ◈ Similar guarded its own Back. So the phone's own "go up one" walked
+   past every one of them and out of Moonglade.
+     Similar's mechanism is now the shared one (hooks/useLayerHistory.js, whose
+   header carries the full account): every layer registers, the manager keeps
+   ONE same-address entry per open layer, and a Back press closes exactly the
+   topmost. Similar's behaviour is unchanged -- it is simply the first
+   registrant rather than a private copy. The three things to know here:
+     - MUTUALLY EXCLUSIVE IS A SWAP, NOT A STACK. The viewer and the picture
+       screen null each other (mirroring App.jsx's own lbIndex/detailsFor
+       pairing), so "⛶ / Details ›" trades one layer for another inside one
+       commit: the depth never moves, and Back from either closes the one that
+       is showing and lands on the library. Genuinely stacked pairs -- the
+       Folio over an open Menu screen, the contest entry screen over the
+       record, Duplicates over Collection Health -- close one at a time.
+     - SHEETS ARE NOT LAYERS, and stay tap-out-only. That is the two chrome
+       primitives' own line, not a new one: MobileSheet.jsx dims a scrim that
+       "travels with the slab" and catches the tap-outside, so a sheet already
+       has the second dismiss Similar had to borrow the Back gesture to get,
+       and the thing behind it is still visible one tap away. MobileScreen.jsx
+       states the opposite contract in its own words -- no scrim, no
+       tap-outside, "onClose fires from the chevron alone" -- which is exactly
+       the surface a Back press is for. Wiring the sheets in would also churn
+       the ledger on every Menu row (openScreen yanks the sheet and pushes a
+       screen in one click) for a control that never needed it.
+     - BACK ON THE BARE GALLERY IS UNCHANGED. With nothing open the manager
+       holds no entries and never touches history, so the gesture leaves the
+       app exactly as it did before this pass. No trap.
+
+   THE PHONE REMEMBERS WHERE EACH TAB WAS (2026-09-06) -- the audit's fourth
+   finding. All three tabs share ONE scroller (.glm-body, see bodyRef), so a
+   deep read of the library left the Create tab opening a thousand pixels down
+   its own composer, and coming back to the library after a round trip put you
+   somewhere neither tab chose. tabScrollRef below gives the shell a per-tab
+   memory: the offset is banked as the tab is scrolled, and put back when the
+   tab is entered. Both halves stand down while a pushed screen is up, because
+   MobileScreen.jsx parks this same scroller at 0 for the whole time one is
+   open -- restoring under it would drag the screen off the top (the exact
+   2026-09-05 defect that park exists for), and saving under it would record
+   the parked 0 as the tab's place. Why the save is a scroll listener rather
+   than the obvious effect cleanup is written out beside the code: the cleanup
+   reads an offset the browser has already clamped to the incoming tab.
 
    CONTACT SHEET MOBILE (2026-08-03) -- the Gallery tab's Actions sheet
    (ActionsMenu.jsx, mounted "as-is" inside GalleryMobile.jsx) has a real
@@ -456,22 +506,53 @@ export default function AppMobile({ boot }) {
     loading: similar.loading, count: similar.images.length,
   } : null), [similarFor, similarSource, similar.loading, similar.images.length]);
   /* The phone's second dismiss, standing in for the desktop's Escape: one history entry
-     pushed at the SAME address when Similar opens, so the Back gesture pops it and lands
+     held at the SAME address while Similar is up, so the Back gesture closes it and lands
      back on the library instead of leaving the app. Keyed on the BOOLEAN, so re-anchoring
-     the set on another picture never churns history. If the token's ✕ closed it instead,
-     the cleanup consumes the entry we pushed so Back keeps meaning what it meant before. */
+     the set on another picture never churns history. If the token's ✕ closes it instead,
+     the entry is handed back so Back keeps meaning what it meant before.
+     Since 2026-09-06 this is the SHARED manager every layer below registers with, not
+     Similar's private pushState/popstate pair -- same entry, same behaviour, one
+     implementation. See THE BACK GESTURE in this file's header comment. */
   const simOn = !!similarFor;
+  useLayerHistory(simOn, clearSimilar);
+
+  /* EACH TAB KEEPS ITS OWN PLACE (2026-09-06) -- see THE PHONE REMEMBERS WHERE EACH TAB WAS
+     in this file's header comment for what was wrong.
+       THE SAVE IS A SCROLL LISTENER, NOT A TEARDOWN, and that is the whole subtlety here.
+     The obvious shape -- one effect whose cleanup records the outgoing tab's offset -- is
+     WRONG on this shell, and measurably so: React runs a layout effect's cleanup AFTER the
+     commit has already swapped the tab's contents, and .glm-body is one scroller shared by
+     all three, so the browser has already clamped the offset to the INCOMING tab's height
+     by the time the cleanup reads it. Measured at 390x844 on a 120-row library: leaving the
+     Gallery at 500 recorded 30, the composer's entire range, and the library came back at
+     30. Recording on the scroll event instead means the number banked is the one the tab
+     really had while it was showing, written before anything could shrink under it.
+       `parked` is the one thing neither half may fight. MobileScreen.jsx holds this
+     scroller at 0 for as long as a pushed screen is up (gallery-mobile.css locks it too),
+     so while one is open a restore would drag the screen off the top and a save would
+     record the parked 0 as the tab's place. Both stand down; the screen's own close puts
+     the offset back, and the listener banks THAT.
+       The restore is a layout effect for the same reason the ◈ restore above is: the
+     incoming tab is in the DOM and measured but the frame has not painted, so the tab comes
+     back already in place instead of visibly jumping. */
+  const tabScrollRef = useRef({});
+  const tabRef = useRef(tab);
+  useLayoutEffect(() => {
+    tabRef.current = tab;
+    const el = bodyRef.current;
+    if (!el || el.querySelector(".glm-screen")) return;
+    el.scrollTop = tabScrollRef.current[tab] || 0;
+  }, [tab]);
   useEffect(() => {
-    if (!simOn) return undefined;
-    let popped = false;
-    const onPop = () => { popped = true; setSimilarFor(null); };
-    window.history.pushState({ mgSimilar: 1 }, "");
-    window.addEventListener("popstate", onPop);
-    return () => {
-      window.removeEventListener("popstate", onPop);
-      if (!popped) window.history.back();
+    const el = bodyRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      if (el.querySelector(".glm-screen")) return;
+      tabScrollRef.current[tabRef.current] = el.scrollTop;
     };
-  }, [simOn]);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
   const openLightbox = (mid, onMiss) => {
     const idx = lib.items.findIndex((it) => it.media_id === mid);
@@ -601,22 +682,43 @@ export default function AppMobile({ boot }) {
   const navRef = useRef({ want: 1, inFlight: 0 });
   const genLoadRef = useRef(lib.load);
   const genSimilarRef = useRef(similarFor);
+  /* WHICH PAGE THE GRID IS CURRENTLY SHOWING (2026-09-06), for the landing below and for
+     nothing else. Deliberately NOT the perch guard's business: that one reads what the
+     owner ASKED for (navRef.want) precisely because a settled page is the wrong thing to
+     decide a refresh on. This asks a different question -- "did the tiles under this
+     scroller get replaced?" -- which the settled page is exactly the right answer to. */
+  const shownPageRef = useRef(1);
   /* The owner's own load. Marks the intent BEFORE the request leaves, counts it in the
      air, and hands back the same promise lib.load gives (the response, or undefined when a
      newer request superseded it) so every caller reads the answer exactly as before --
      LightboxMobile's page-boundary step reads the landed page's items off it to pick the
-     near edge. */
+     near edge.
+       A PAGE HE ASKED FOR LANDS AT ITS TOP (2026-09-06, the audit's second finding).
+     .glm-body kept its offset across a Prev/Next, so tapping Next from halfway down page 1
+     opened page 2 already halfway down it -- the pill row, the search field and the first
+     row of pictures all scrolled away above a page he had not read a word of. The reset
+     rides HERE, on the owner's own load, so it can never touch a background refresh: a
+     completion landing at the perch goes through the raw lib.load and moves nothing, which
+     is the whole of the library-stands-still policy above. Two further guards: only when
+     the response really is a different page than the one under the scroller (`from` is read
+     before the request leaves), and never on a superseded response (`d` is undefined then --
+     useLibrary's reqSeq -- and the request that beat it does its own landing). ◈ Similar is
+     untouched: its own save/restore is the libScrollRef pair above, and the pager is not
+     even rendered while the token is up. */
   const userLoad = useCallback((p, replace) => {
     navRef.current.want = p;
     navRef.current.inFlight += 1;
-    const settle = () => {
+    const from = shownPageRef.current;
+    const settle = (d) => {
       navRef.current.inFlight = Math.max(0, navRef.current.inFlight - 1);
+      if (d && d.page !== from && bodyRef.current) bodyRef.current.scrollTop = 0;
     };
-    return lib.load(p, replace).then((d) => { settle(); return d; }, (e) => { settle(); throw e; });
+    return lib.load(p, replace).then((d) => { settle(d); return d; }, (e) => { settle(); throw e; });
   }, [lib.load]);
   useEffect(() => {
     genLoadRef.current = lib.load;
     genSimilarRef.current = similarFor;
+    shownPageRef.current = lib.page;
     if (!navRef.current.inFlight && lib.total != null) navRef.current.want = lib.page;
   });
   const setLibSelected = lib.setSelected;   // a setState: stable, safe to close over once
@@ -670,6 +772,22 @@ export default function AppMobile({ boot }) {
     closeScreenRaw();
     setPublishFor("");
   };
+
+  /* EVERY LAYER THIS SHELL PUSHES, ON THE ONE BACK LEDGER (2026-09-06) -- registered
+     together, and here rather than beside each piece of state, because what matters about
+     them is that it is ONE list with no gaps: a layer missing from it is a layer the Back
+     gesture walks straight past and out of the app, which is precisely the defect this
+     closes. ◈ Similar registers above, next to the account of why it was the first.
+     `lbIndex != null` and never a truthiness test: index 0 is a real open viewer, the same
+     read App.jsx's own overlay guard makes for the same reason. The Menu screen registers
+     on the KEY being set, so walking My Art -> Train (one `screen`, two values) stays one
+     layer, and Back closes the screen rather than stepping back through the menu. */
+  useLayerHistory(lbIndex != null, closeLightbox);
+  useLayerHistory(!!detailsFor, closeDetails);
+  useLayerHistory(!!screen, closeScreen);
+  useLayerHistory(folioOpen, closeFolio);
+  useLayerHistory(!!contactSheetTarget, closeContactSheet);
+  useLayerHistory(!!contestEntry, closeContestEntry);
 
   // Health's tag/model/LoRA filter taps -- HealthMobile.jsx's own header
   // comment, point 3: "reuse existing UI mechanisms over building parallel
