@@ -275,6 +275,31 @@ describe("My Art draws the numbers it was already fetching", () => {
     });
   }
 
+  test("mobile: the sort button's label keeps pace with every sort SORT_OPTS offers", () => {
+    // Live pixel verification, 2026-09-06: SORT_OPTS grew a "viewed" entry ("Most viewed")
+    // but the sort button's label is its own hardcoded ternary (desktop's Dropdown reads
+    // its label from SORT_OPTS by lookup and cannot go stale this way) -- so "viewed" was
+    // never taught to the ternary. Picking "Most viewed" re-sorted the grid correctly
+    // while the button kept reading "↕ Latest": a silently-stale label, not a crash.
+    // This pins two things so a future sort can't repeat it: every key SORT_OPTS offers
+    // gets an explicit branch bar one (the terminal fallback), and "viewed"'s wording is
+    // identical to the desktop Dropdown's own label for the same key -- one sort, one name.
+    const parseOpts = (text) => [...text.match(/const SORT_OPTS = \[([\s\S]*?)\];/)[1]
+      .matchAll(/\["(\w+)", "([^"]+)"\]/g)].map((m) => [m[1], m[2]]);
+    const mobKeys = parseOpts(mobile);
+    const deskLabel = Object.fromEntries(parseOpts(desktop));
+    assert.ok(mobKeys.length >= 4, "sanity: SORT_OPTS should list latest/oldest/liked/viewed");
+
+    const label = mobile.match(/↕ \{([^}]*)\}/)[1];
+    const explicit = new Set([...label.matchAll(/sort === "(\w+)"/g)].map((m) => m[1]));
+    assert.equal(explicit.size, mobKeys.length - 1,
+      "the sort button label must branch on every SORT_OPTS key but the terminal fallback");
+
+    const viewedWording = deskLabel.viewed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(label, new RegExp('sort === "viewed" \\? "' + viewedWording + '"'),
+      "the mobile button's \"viewed\" wording must match the desktop Dropdown's own label");
+  });
+
   test("the bar is the DESIGNED bar, restored -- not a second one drawn to a new spec", () => {
     // .mgma-barwrap/.mgma-bar are the Frontend Gallery DC's own ranked-list bar (shipped
     // in cecdd91f). Stage 2A replaced that list with the card grid and left the CSS

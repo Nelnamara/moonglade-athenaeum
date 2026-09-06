@@ -260,7 +260,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
               ))}
             </div>
             <button type="button" className="myam-sortbtn" onClick={() => openSheet("sort")}>
-              ↕ {sort === "oldest" ? "Oldest" : sort === "liked" ? "Liked" : "Latest"}
+              ↕ {sort === "oldest" ? "Oldest" : sort === "liked" ? "Liked" : sort === "viewed" ? "Most viewed" : "Latest"}
             </button>
           </>
         )}
