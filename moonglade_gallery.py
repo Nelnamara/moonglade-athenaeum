@@ -8905,6 +8905,30 @@ def create_app(out_dir: Path):
         spec = PANEL_ACTIONS[action]
         return not spec["destructive"] and not spec.get("advanced")
 
+    def _standing_runnable(action):
+        """Can the LEGACY standing-order scheduler actually start this action?
+
+        Its own tick's refusal, stated once so three readers agree: a real PANEL_ACTIONS
+        key, not destructive, not advanced. (The staleness backstop's widening belongs to
+        the living library's list, not to this path -- the legacy scheduler has always
+        refused an advanced action outright.)"""
+        spec = PANEL_ACTIONS.get(action)
+        return bool(spec) and not spec["destructive"] and not spec.get("advanced")
+
+    def _standing_action(s):
+        """The action the legacy standing order is really running, or None.
+
+        NAMING ONE IS NOT RUNNING ONE, and that gap is what made a job disappear from both
+        schedulers. `resync-full` could be SAVED here (the route only rejected unknown and
+        destructive keys) while _scheduler_loop's own tick refused to start it for being
+        advanced -- and _living_tick then stood aside for it, forever, while the Panel told
+        the owner "the standing order below runs this one". The save route rejects an
+        advanced action now; this is the backstop for a schedule.json written by an older
+        build or by hand, so such a row falls through to the living library instead of
+        vanishing from both."""
+        action = s.get("action") if s.get("enabled") else None
+        return action if action and _standing_runnable(action) else None
+
     def _artworks_job_busy():
         """The artworks-touching Panel job in the slot right now, or "" when there is none.
 
@@ -9067,7 +9091,7 @@ def create_app(out_dir: Path):
             # /api/panel/schedule marks it `deferred` and the Panel says so in the row's
             # own note line, because a row displaying a cadence it is not running is a lie
             # the owner has no way to catch.
-            standing = s.get("action") if s.get("enabled") else None
+            standing = _standing_action(s)
             for action in due:
                 if action == standing:
                     continue
@@ -10910,8 +10934,18 @@ def create_app(out_dir: Path):
                             row["interval_s"] = living_clamp_interval(
                                 row["action"], patch["interval_s"],
                                 default=row.get("interval_s"))
-                if s.get("action") not in PANEL_ACTIONS or PANEL_ACTIONS[s["action"]]["destructive"]:
-                    return jsonify({"error": "only safe jobs can be scheduled"}), 400
+                if not _standing_runnable(s.get("action")):
+                    # ADVANCED IS REFUSED HERE TOO, not only at the tick. The tick has
+                    # always skipped an advanced action -- a full re-walk on a six-hour
+                    # timer is a foot-gun, and test-pull needs an N this path cannot
+                    # supply -- but the save route did not, so the pair could be SAVED
+                    # and then never run by anyone: _living_tick stood aside for a
+                    # standing order that refuses the job, and the Panel said "the
+                    # standing order below runs this one" about a job neither path would
+                    # ever start. Both halves say the same thing now.
+                    return jsonify({"error": "only safe jobs can be scheduled — a full "
+                                             "re-walk, an inventory count and a test pull "
+                                             "stay in Advanced, by hand"}), 400
                 _save_sched(s)
             # `catalog` is what the Panel draws the "runs itself" rows from: the shipped
             # label, note and cadence beside each saved row, so the client never has to
@@ -10923,7 +10957,11 @@ def create_app(out_dir: Path):
             # one job would just take turns losing the single Panel slot. But the row went
             # on displaying its own cadence and its own "next in 3h", which is a schedule
             # it is NOT running. The skip stays; the row now says why.
-            standing = s.get("action") if s.get("enabled") else None
+            #
+            # Read through _standing_action, the same function the tick defers by, so the
+            # row and the tick can never disagree: a standing order naming a job that path
+            # refuses to start owns nothing, and the row is not marked deferred to it.
+            standing = _standing_action(s)
             return jsonify(dict(s, catalog=[
                 {"action": j["action"], "label": j["label"], "note": j["note"],
                  "default_interval_s": j["interval_s"],

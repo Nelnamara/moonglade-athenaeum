@@ -1089,6 +1089,54 @@ def test_a_hand_edited_schedule_cannot_lower_the_floor_either(tmp_path):
     assert "resync-full" in due
 
 
+def test_an_advanced_action_cannot_be_saved_as_the_legacy_standing_order(tmp_path):
+    """A job that BOTH schedulers refuse is a job that never runs again.
+
+    The legacy scheduler's own tick has always skipped an `advanced` action (a full
+    re-walk on a six-hour timer is a foot-gun), but the save route never checked -- so
+    POST /api/panel/schedule {"action": "resync-full"} was accepted and written down.
+    With that saved, _living_tick then deferred the 60-day staleness row to a standing
+    order that refuses to run it, and the Panel told the owner "the standing order below
+    runs this one" about a job neither path would ever start.
+
+    The save-time check now mirrors the tick's own guard, so the two agree."""
+    cli = _client(tmp_path)
+    r = cli.post("/api/panel/schedule", json={"enabled": True, "action": "resync-full"})
+    assert r.status_code == 400
+    assert "advanced" in r.get_json()["error"] or "by hand" in r.get_json()["error"]
+    # nothing was written: the standing order is still the default
+    assert cli.get("/api/panel/schedule").get_json()["action"] != "resync-full"
+    # and the staleness row is not deferred to a path that cannot run it
+    cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
+    assert cat["resync-full"]["deferred"] is False
+    # every advanced action is refused, not just this one -- the same set the scheduler
+    # tick has always skipped, asked through the Panel's own action table
+    table = cli.get("/api/panel/summary").get_json()["all_actions"]
+    advanced = [a["action"] for a in table if a["advanced"] and not a["destructive"]]
+    assert "resync-full" in advanced and "test-pull" in advanced
+    for action in advanced:
+        assert cli.post("/api/panel/schedule",
+                        json={"enabled": True, "action": action}).status_code == 400
+
+
+def test_the_defer_check_confirms_the_standing_order_can_actually_run_the_job(tmp_path):
+    """Belt and braces for a schedule.json written by an older build (or by hand), where
+    the save-time check above never ran. _living_tick only steps aside for a standing
+    order that CAN execute the named action -- an advanced one falls through to the
+    living library's own path instead of vanishing from both."""
+    (tmp_path / "schedule.json").write_text(json.dumps({
+        "enabled": True, "action": "resync-full", "interval_hours": 6, "workers": 4,
+    }), encoding="utf-8")
+    cli = _client(tmp_path)
+    cat = {c["action"]: c for c in cli.get("/api/panel/schedule").get_json()["catalog"]}
+    assert cat["resync-full"]["deferred"] is False, \
+        "a standing order that refuses the job must not be shown as running it"
+    src = inspect.getsource(g.create_app)
+    tick = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
+    assert "_standing_action(s)" in tick, \
+        "the tick must ask whether the standing order can run the job, not only its name"
+
+
 def test_a_row_the_standing_order_owns_says_so_instead_of_a_cadence_it_is_not_running(
         tmp_path):
     """_living_tick has always skipped the action the legacy standing order names -- rightly,
@@ -1110,7 +1158,7 @@ def test_a_row_the_standing_order_owns_says_so_instead_of_a_cadence_it_is_not_ru
     tick = inspect.getsource(g.create_app)
     tick = tick[tick.index("def _living_tick():"):]
     tick = tick[:tick.index("def _scheduler_loop():")]
-    assert 'standing = s.get("action") if s.get("enabled") else None' in tick
+    assert "standing = _standing_action(s)" in tick
     assert "if action == standing:" in tick, "the skip itself must not change"
     # the browser half: the row's own note line, in the vocabulary already there
     jsx = (SRC / "gallery/src/components/ControlPanelOverlay.jsx").read_text(encoding="utf-8")
