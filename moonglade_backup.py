@@ -10605,12 +10605,26 @@ def source_media_of_task(task):
 
 def task_media_index(session, task_id, media_id):
     """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
-    needs. Derived from the task's own ordered output list (`_task_image_media`, the same
-    enumeration the downloader uses), never guessed from a filename: a batchSize>1 task
-    stores individuals under outputs.batch[] and their ORDER is the index PixAI means.
-    Read-only. Returns the int index, or None if the task/media can't be resolved -- the
-    caller decides whether that's fatal (it is, for publishing: publishing the wrong image
-    of a batch is not a recoverable mistake)."""
+    needs. Never guessed from a filename: a batchSize>1 task stores its individuals under
+    outputs.batch[] and their ORDER is the index PixAI means.
+
+    It is PixAI's OWN output number -- the RAW position in that array, counted with deleted
+    members still occupying their slots, the same number `batch_position` reports and the
+    same <n> the site's own from-PixAI-<taskId>-<n> download names use. Counting only the
+    members PixAI still has (`_task_image_media`, which skips them, is the right enumeration
+    for DOWNLOADING and the wrong one here) shifts every image after a deletion down one
+    slot: on a batch whose first picture was deleted, publishing the third would send index
+    1, which is the second picture's slot, and the wrong picture would go to the owner's
+    public profile with nothing saying so.
+
+    Read-only. Returns the int index, or None -- publish nothing -- when the task can't be
+    read, when the batch does not list this image at all (a stale row, or the batch's
+    combined preview picture), or when PixAI has already deleted this image: a member with a
+    `deletedAt` is no longer one of the task's outputs, so it has no number to publish at.
+    A task with no batch array (a single-image generation, an edit, an upscale) resolves
+    from its own ordered outputs instead, where the lone image is index 0. The caller decides
+    whether None is fatal (it is, for publishing: publishing the wrong image of a batch is
+    not a recoverable mistake)."""
     if not task_id or not media_id:
         return None
     try:
@@ -10619,8 +10633,14 @@ def task_media_index(session, task_id, media_id):
         return None
     if not task:
         return None
-    pairs = _task_image_media(task.get("outputs") or {})
-    for i, (mid, _seed) in enumerate(pairs):
+    outputs = task.get("outputs") or {}
+    batch = outputs.get("batch")
+    if isinstance(batch, list) and batch:
+        # batch_position answers blank for BOTH "not one of this task's outputs" and "PixAI
+        # deleted this one", and neither may be published -- so both land on None here.
+        bi, _size = batch_position(batch, media_id)
+        return int(bi) if bi != "" else None
+    for i, (mid, _seed) in enumerate(_task_image_media(outputs)):
         if str(mid) == str(media_id):
             return i
     return None

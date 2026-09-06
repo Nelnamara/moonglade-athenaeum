@@ -204,6 +204,47 @@ def test_a_deleted_member_reports_no_position():
     assert core.batch_position(task["outputs"]["batch"], "mB") == ("", "")
 
 
+def _answers(monkeypatch, task):
+    """The live read answers `task`. task_media_index reads the task before it counts, and
+    nothing here goes near the network."""
+    monkeypatch.setattr(core, "task_detail_gql", lambda session, tid, **kw: task)
+    return object()
+
+
+def test_the_publish_index_is_pixais_raw_slot_not_a_count_of_survivors(monkeypatch):
+    """`task_media_index` is what fills `mediaIndex` on the publish mutation, so it has to
+    mean the same thing PixAI means: the RAW position in outputs.batch, with a deleted
+    member still occupying its slot -- exactly what `batch_position` reports above.
+
+    Counting only the live members shifts every image after a deletion down one. On this
+    batch that publishes mB's picture when the owner picked mC's -- the wrong picture, on
+    their public profile, silently. Not a recoverable mistake."""
+    session = _answers(monkeypatch,
+                       _batch_task_with_deletions(["mA", "mB", "mC"], deleted=("mA",)))
+    assert core.task_media_index(session, "T1", "mC") == 2, (
+        "the publish index was counted over the survivors, not PixAI's own slots")
+    assert core.task_media_index(session, "T1", "mB") == 1
+
+
+def test_publishing_an_image_pixai_has_deleted_is_refused(monkeypatch):
+    """A deleted member has no live output number, so there is no honest index to publish it
+    at -- and the caller treats None as fatal rather than guessing one. The same answer
+    covers an id the batch does not list and the batch's own combined preview picture."""
+    session = _answers(monkeypatch,
+                       _batch_task_with_deletions(["mA", "mB", "mC"], deleted=("mA",)))
+    assert core.task_media_index(session, "T1", "mA") is None
+    assert core.task_media_index(session, "T1", "stranger") is None
+    assert core.task_media_index(session, "T1", "GRID-COMBINED") is None
+
+
+def test_a_task_with_no_batch_still_publishes_its_lone_image_at_zero(monkeypatch):
+    """Single-image generations, edits and upscales have no batch array at all -- the image
+    IS outputs.mediaId, and its index is 0, as it always was."""
+    session = _answers(monkeypatch, {"outputs": {"mediaId": "solo", "seed": "1"}})
+    assert core.task_media_index(session, "T1", "solo") == 0
+    assert core.task_media_index(session, "T1", "other") is None
+
+
 def test_the_row_of_a_deleted_member_gets_the_deleted_stamp():
     """So a library that already holds the image says out loud that PixAI no longer does.
     --backfill-full-meta walks EXISTING catalog rows task by task, which is the pass that
