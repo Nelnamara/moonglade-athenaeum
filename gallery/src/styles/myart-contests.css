@@ -569,8 +569,8 @@ button.mgct-ghost:disabled { opacity: .55; cursor: not-allowed; }
   white-space: nowrap; }
 .mgctc-ctsub { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext);
   padding-top: 3px; font-variant-numeric: tabular-nums; }
-/* The entry-cost slot that sat here is DELETED (owner, 2026-09-05: "THERE ARE NO ENTRY
-   FEES"). It had three faces -- emerald "Free", a mono-gold amount, and an "Entry fee
+/* The entry-cost slot that sat here is DELETED (owner, 2026-09-05: "there are no entry
+   fees"). It had three faces -- emerald "Free", a mono-gold amount, and an "Entry fee
    unverified" hedge -- and every one of them told a reader that entering a contest might
    cost something. It is not a hue problem, so nothing replaces it: no contest surface
    carries a cost line at all. */

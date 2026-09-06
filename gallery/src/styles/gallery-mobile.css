@@ -328,7 +328,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
   animation: glmScreenIn .22s ease both; }
 .glm-screen.closing { animation: glmScreenOut .22s ease both; }
 /* A SCREEN IS NOT PART OF THE TAB'S SCROLL (owner report 2026-09-05: "opening a contest
-   ... begin scrolling it leads into the CONTROL PANEL???!!!"). .glm-screen is absolutely
+   ... begin scrolling it leads into the Control Panel"). .glm-screen is absolutely
    positioned INSIDE .glm-body, which is itself a scroller still holding the whole tab
    underneath -- measured at 390x844 with the Control tab open: .glm-body scrolls 1579px
    while the screen is only 600 tall, so a flick that reached the end of the screen's own
