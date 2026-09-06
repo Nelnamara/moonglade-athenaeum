@@ -4977,6 +4977,20 @@ def views_spike(row):
         simply popular, not blowing up.
       * a counter that went DOWN or sideways (PixAI recount, a work re-published):
         clamped to zero gain, never a negative "spike".
+      * an unusable window (no timestamps, or one that runs backwards) -- a spike is a
+        claim about a RATE, and the denominator is never invented.
+      * for the ratio test only, a creation date that will not parse: there is no
+        lifetime to measure the window against.
+
+    A PREVIOUS READING OF 0 IS A SPIKE, not a None (owner's call, 2026-09-06). Going from
+    nothing to something is the plainest "a quiet picture suddenly found an audience" there
+    is, and the rule used to decline it outright: a zero baseline gives the ratio nothing
+    to divide by, and the guard read that as a reason for silence rather than as the ratio
+    simply not applying. It now clears on the absolute floor alone -- SPIKE_MIN_GAIN is
+    what keeps it honest at the bottom of the library -- and reports `multiple: None`,
+    because there is no usual pace to be a multiple OF. Callers must not print a number
+    there; spikeStore.js says "up from nothing" instead. A BLANK previous reading is
+    unchanged and still silent: that is "never swept twice", not "swept and saw zero".
     """
     def _int(v):
         try:
@@ -4998,12 +5012,19 @@ def views_spike(row):
     rate = gained / window_h                         # real views per hour, this window
 
     t_made = _series_ts(row.get("created_at"))
-    if t_made is None or prev_v <= 0:
-        return None                                  # no baseline to beat: never a spike
-    lifetime_h = max(SPIKE_MIN_LIFETIME_H, (t_prev - t_made) / 3600.0)
-    baseline = prev_v / lifetime_h                   # the work's own all-time views/hour
-    if baseline <= 0 or rate < baseline * SPIKE_RATE_MULTIPLE:
-        return None
+    if prev_v <= 0:
+        # THE BLOW-UP FROM ZERO. The floor above is the whole gate here: there is no pace
+        # to beat, so the ratio test is skipped rather than failed, and `multiple` is None
+        # because there is no usual pace to be a multiple of.
+        baseline, multiple = 0.0, None
+    else:
+        if t_made is None:
+            return None                              # no lifetime: nothing to compare to
+        lifetime_h = max(SPIKE_MIN_LIFETIME_H, (t_prev - t_made) / 3600.0)
+        baseline = prev_v / lifetime_h               # the work's own all-time views/hour
+        if baseline <= 0 or rate < baseline * SPIKE_RATE_MULTIPLE:
+            return None
+        multiple = round(rate / baseline, 1)
 
     return {
         "media_id": row.get("media_id") or "",
@@ -5014,7 +5035,7 @@ def views_spike(row):
         "window_hours": round(window_h, 1),
         "rate_per_hour": round(rate, 2),
         "baseline_per_hour": round(baseline, 3),
-        "multiple": round(rate / baseline, 1),
+        "multiple": multiple,
     }
 
 
@@ -5049,7 +5070,20 @@ def published_totals(db_path):
     thing the panel could not show while views were fetched live for a top twelve. It
     sums only rows that have actually been swept; `views_rows` says how many that was,
     so a partially-swept library reports an honest subtotal rather than a total that
-    silently counts blanks as zero."""
+    silently counts blanks as zero.
+
+    ONE ROW PER ARTWORK, and that is not a nicety. An ANIMATED artwork is two catalog
+    rows -- the poster keyed by `mediaId` and the mp4 keyed by `videoMediaId` -- and both
+    the sync and the sweep write the SAME artwork_id, likes, comments and views onto both
+    on purpose (#20: the Animations tab needs the mp4 row tagged). Summing every published
+    row therefore doubled the count, the likes, the comments and the headline lifetime
+    views for every animation in the library. The dedup key is the artwork_id; a published
+    row that has never been merged has none, so it keys on its own media_id and still
+    counts exactly once rather than folding every unmerged row under one blank key.
+
+    Which of an animation's two rows represents it does not matter here -- they carry the
+    same PixAI-owned numbers by construction -- so the lowest rowid is representative
+    enough. published_spikes, which shows a media_id to the owner, is fussier."""
     with catalog(db_path) as con:
         try:
             r = con.execute(
@@ -5060,7 +5094,11 @@ def published_totals(db_path):
                 "                  THEN CAST(views AS INTEGER) ELSE 0 END),0) AS views, "
                 "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' THEN 1 ELSE 0 END),0) AS views_rows, "
                 "MAX(COALESCE(views_at,'')) AS views_at "
-                "FROM catalog WHERE is_published = '1'").fetchone()
+                "FROM catalog WHERE is_published = '1' AND rowid IN ("
+                "  SELECT MIN(rowid) FROM catalog WHERE is_published = '1' "
+                "  GROUP BY CASE WHEN COALESCE(artwork_id,'') = '' "
+                "                THEN 'mid:' || media_id ELSE 'aid:' || artwork_id END)"
+            ).fetchone()
             return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0),
                     "views": int(r[3] or 0), "views_rows": int(r[4] or 0),
                     "views_at": r[5] or ""}
@@ -5074,17 +5112,39 @@ def published_spikes(db_path, limit=5):
 
     A pure catalog read over the swept rows -- no network, no live call. Capped because
     this feeds a corner note, not a feed: the owner asked to be TOLD when something takes
-    off, and a note naming twenty works tells him nothing."""
+    off, and a note naming twenty works tells him nothing.
+
+    ONE SLOT PER ARTWORK. An animation is two rows carrying the same numbers (see
+    published_totals), so both spiked identically and ONE work could fill a two-slot note
+    twice while a genuinely different spiking work never appeared at all. The poster row
+    wins the slot over the mp4 -- the note names a picture, and the still is what the
+    owner recognises. A row that has never been merged has no artwork_id and keys on its
+    own media_id, so it is never folded in with any other."""
     with catalog(db_path) as con:
         try:
             rows = con.execute(
                 "SELECT media_id, artwork_id, title, created_at, views, views_prev, "
-                "views_at, views_prev_at FROM catalog "
-                "WHERE is_published = '1' AND COALESCE(views_prev,'') != ''").fetchall()
+                "views_at, views_prev_at, is_video FROM catalog "
+                "WHERE is_published = '1' AND COALESCE(views_prev,'') != '' "
+                "ORDER BY CASE WHEN COALESCE(is_video,'') = '1' THEN 1 ELSE 0 END, "
+                "         rowid").fetchall()
         except sqlite3.Error:
             return []
-    hits = [s for s in (views_spike(dict(r)) for r in rows) if s]
-    hits.sort(key=lambda s: (s["multiple"], s["gained"]), reverse=True)
+    seen, hits = set(), []
+    for r in rows:
+        row = dict(r)
+        key = "aid:" + str(row.get("artwork_id") or "") if row.get("artwork_id") \
+            else "mid:" + str(row.get("media_id") or "")
+        if key in seen:
+            continue                                 # the same work's other row
+        seen.add(key)
+        s = views_spike(row)
+        if s:
+            hits.append(s)
+    # A blow-up from ZERO has no multiple to rank by -- and is the most dramatic thing on
+    # the list, so it sorts to the top rather than to the bottom of a None comparison.
+    hits.sort(key=lambda s: (float("inf") if s["multiple"] is None else s["multiple"],
+                             s["gained"]), reverse=True)
     return hits[:int(limit)]
 
 

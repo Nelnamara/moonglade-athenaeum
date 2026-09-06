@@ -306,6 +306,103 @@ def test_published_spikes_reads_the_catalog_and_ranks_them(tmp_path):
     assert g.published_spikes(db, limit=1) == hits[:1]
 
 
+def _animated(aid, title, **kw):
+    """One animated artwork as the catalog really holds it: a poster row keyed by the
+    node's mediaId AND an mp4 row keyed by its videoMediaId, both carrying the same
+    artwork_id and the same PixAI-owned numbers (#20's own re-keying, and what
+    apply_artwork_meta/apply_artwork_views write onto both)."""
+    return [_row(media_id=aid + "-poster", artwork_id=aid, title=title,
+                 is_published="1", **kw),
+            _row(media_id=aid + "-mp4", artwork_id=aid, title=title, is_video="1",
+                 is_published="1", **kw)]
+
+
+def test_an_animation_is_one_published_work_not_two_in_the_totals(tmp_path):
+    """THE HEADLINE NUMBER, and it was double for anyone with animations.
+
+    An animated artwork is TWO catalog rows -- the poster and the mp4 -- and the sync
+    writes the same artwork_id, likes, comments and views onto both, deliberately (#20:
+    the Animations tab needs the mp4 row tagged). published_totals summed every published
+    row, so every animation counted twice in the count, the likes, the comments and the
+    real lifetime views total the whole feature is built around."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, _animated("aw9", "Anim", created_at="2026-07-06T00:00:00Z",
+                               liked_count="4", comment_count="2", views="500",
+                               views_at="2026-09-06T00:00:00Z")
+                 + [_row(media_id="m2", artwork_id="aw2", title="Still",
+                         is_published="1", created_at="2026-07-06T00:00:00Z",
+                         liked_count="3", comment_count="1", views="100",
+                         views_at="2026-09-06T00:00:00Z")])
+    t = g.published_totals(db)
+    assert t["count"] == 2, "an animation is one published work"
+    assert t["likes"] == 7 and t["comments"] == 3
+    assert t["views"] == 600, "the lifetime views total must not double an animation"
+    assert t["views_rows"] == 2
+
+
+def test_a_published_row_with_no_artwork_id_still_counts_once(tmp_path):
+    """The dedup is by artwork_id, and a published row that has never been merged has
+    none. It must still be counted -- once -- rather than folded in with every other
+    unmerged row under one blank key."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [
+        _row(media_id="m1", is_published="1", liked_count="1", views="10",
+             views_at="2026-09-06T00:00:00Z"),
+        _row(media_id="m2", is_published="1", liked_count="2", views="20",
+             views_at="2026-09-06T00:00:00Z"),
+    ])
+    t = g.published_totals(db)
+    assert t["count"] == 2 and t["likes"] == 3 and t["views"] == 30
+
+
+def test_an_animation_takes_one_slot_in_the_blow_up_note_not_two(tmp_path):
+    """The same double, in the capped list. Both of an animation's rows spike on the same
+    numbers, so a two-slot note was filled twice by ONE work -- and a genuinely different
+    spiking work never appeared at all."""
+    db = tmp_path / "catalog.db"
+    window = dict(created_at="2026-07-06T00:00:00Z",
+                  views_at="2026-09-06T00:00:00Z", views_prev_at="2026-09-05T00:00:00Z")
+    save_catalog(db, _animated("aw9", "Anim Blowup", views="1401", views_prev="1000",
+                               **window)
+                 + [_row(media_id="m2", artwork_id="aw2", title="Second Real Spike",
+                         is_published="1", views="1301", views_prev="1000", **window)])
+    hits = g.published_spikes(db, limit=2)
+    assert [h["title"] for h in hits] == ["Anim Blowup", "Second Real Spike"]
+    assert len({h["artwork_id"] for h in hits}) == 2
+    # and the poster row is the one that represents the work, not the mp4
+    assert hits[0]["media_id"] == "aw9-poster"
+
+
+def test_a_blow_up_from_zero_is_the_clearest_blow_up_there_is():
+    """OWNER CALL (2026-09-06): a previous reading of 0 counts as a spike once the gain
+    clears the floor.
+
+    Going from nothing to something is the plainest case of "a quiet picture that suddenly
+    finds an audience" there is, and the rule declined it outright -- prev_v <= 0 returned
+    None before the rate check ever ran, because a zero baseline gives a rate comparison
+    nothing to divide by. It is not a reason for silence; it is a reason the ratio does
+    not apply, and the absolute floor is what keeps it honest."""
+    s = g.views_spike(_work("501", "0"))
+    assert s is not None
+    assert s["gained"] == 500
+    assert s["baseline_per_hour"] == 0.0
+    assert s["multiple"] is None, "there is no multiple to report against a zero baseline"
+    # the floor still governs: nothing under SPIKE_MIN_GAIN gets to shout
+    assert g.views_spike(_work("20", "0")) is None
+    assert g.views_spike(_work("26", "0")) is not None
+    # a blank previous reading is still the no-announce baseline case -- never swept twice
+    assert g.views_spike(_work("501", "")) is None
+
+
+def test_the_zero_baseline_case_is_named_in_the_rules_own_docstring():
+    """The exclusion was not in the docstring's enumerated Returns-None cases, which is
+    part of why it read as an overlooked edge rather than a decision. Whichever way it
+    goes, it is written down."""
+    doc = g.views_spike.__doc__
+    assert "A PREVIOUS READING OF 0 IS A SPIKE" in doc
+    assert "A BLANK previous reading" in doc
+
+
 def test_the_route_carries_the_spikes_and_the_sweep_stamp(tmp_path, pixai):
     """What the corner note is fed. `views_at` is the sweep's identity -- the client
     announces once per sweep, not once per boot, and that is the field it remembers."""
