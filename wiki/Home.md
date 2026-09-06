@@ -13,7 +13,7 @@ New here? Start with **[Setup](Setup)** — it takes one API key and about a min
 - **[Collections & Curation](Collections)** — Select mode, drag-paint, Collections.
 - **[Deleting & Cloud Sync](Deleting)** — local vs cloud delete, reconcile orphans.
 - **[Collection Health](Health)** — the analytics dashboard.
-- **[Control Panel](Control-Panel)** — maintenance jobs, the scheduler, sync options, accounts.
+- **[Control Panel](Control-Panel)** — the jobs that run themselves, maintenance buttons, sync options, accounts.
 - **[The Folio of Honors](Folio-of-Honors)** — achievements, ladders, points, and skins.
 
 ## Reference

@@ -385,6 +385,11 @@ button.mgcp-segbtn.on { background: var(--mantle); color: var(--text); box-shado
   color: var(--overlay0); white-space: nowrap; }
 .mgcp-checklast.ok { color: var(--emerald); }
 
+/* The living library's "Runs itself" block (2026-09-06): a full-width stack of the ledger's
+   own standing-order rows, above the manual grid. Spacing only -- every row inside it is
+   drawn with the .mgcp-standing vocabulary that already existed. */
+.mgcp-living { margin-bottom: 22px; }
+
 .mgcp-ledger { display: flex; flex-direction: column; }
 .mgcp-standing { display: flex; align-items: baseline; gap: 9px; padding: 7px 0 10px;
   border-bottom: 1px solid var(--surface1); font-size: 12.5px; flex-wrap: wrap; }

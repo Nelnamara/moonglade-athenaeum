@@ -66,7 +66,7 @@ Deleting a task on PixAI doesn't touch your local backup (by design). To find an
 prune those orphans:
 
 1. Run **`python moonglade_backup.py --reconcile-deleted`** (it's also the last step of
-   `--sync`, and a scheduler action). It pages your live feed (~1–2 min) and flags catalog
+   `--sync`, and one of the jobs that runs itself weekly). It pages your live feed (~1–2 min) and flags catalog
    rows whose task is gone.
 2. Gallery → **Source → "Deleted on PixAI"** → select → **Delete locally**.
 

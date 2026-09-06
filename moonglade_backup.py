@@ -57,6 +57,11 @@ from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
+                            # The row-level artwork write (see run_sync_artworks): one
+                            # narrow UPDATE of the eleven PixAI-owned columns, keyed by
+                            # media_id -- imported the same way its whole-table siblings
+                            # above are.
+                            apply_artwork_meta,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
                             # The one library scan (see moonglade_gallery.py's
@@ -5977,6 +5982,11 @@ def run_sync_artworks(args):
     onto matching catalog rows by media_id. Published artworks are a subset of
     generations, so unmatched/undownloaded ones are simply skipped.
 
+    The merge is a set of NARROW per-row UPDATEs (apply_artwork_meta) of the eleven
+    PixAI-owned columns, not a read-modify-write of the whole table -- see the long note
+    at the merge itself for why that distinction is the difference between a refresh and
+    a silent revert of everything another writer did while this walk was running.
+
     Returns {"artworks", "matched", "videos", "fail"} (B15) -- "fail" counts a
     pagination fetch that failed mid-run (artwork_list_gql has no retry of its own,
     unlike gql()) plus any video that failed to download after retries; a non-zero
@@ -6048,21 +6058,40 @@ def run_sync_artworks(args):
         before = pi.get("startCursor")
         time.sleep(getattr(args, "delay", 0.4))
 
-    # Merge onto existing catalog rows by media_id.
-    rows = load_catalog(db_path)
-    matched = 0
-    for r in rows:
-        # match a row by its own media_id (still artworks) OR by a videoMediaId
-        # (animations, whose row is keyed by the mp4) -- #20.
-        m = by_mid.get(r.get("media_id")) or by_video_mid.get(r.get("media_id"))
-        if not m:
-            continue
-        for k, v in m.items():
-            if k != "media_id":
-                r[k] = v
-        matched += 1
-    if matched:
-        save_catalog(db_path, rows)
+    # THE MERGE -- narrow per-row UPDATEs, never a whole-catalog round trip.
+    #
+    # This used to be `load_catalog -> edit the matched rows in memory -> save_catalog`:
+    # read all ~36k rows, then upsert EVERY column of EVERY row back from a snapshot taken
+    # after a walk that can run for minutes. That is correct only while this process is the
+    # library's ONLY writer -- and since the living library (2026-09-06) it plainly is not.
+    # The artworks sweep writes these same rows every fifteen minutes, on every publish and
+    # at boot; the owner's ratings and collections land from the browser at any moment. Any
+    # write that landed between this run's read and its save was silently reverted, across
+    # EVERY column of EVERY row -- ratings and collections included, which this sync has no
+    # business touching at all. It is the same lost-update class the September carry fixes
+    # closed for the download writers, still open here because this function predates them.
+    #
+    # apply_artwork_meta (moonglade_gallery) is the row-level twin the sweep already uses:
+    # one UPDATE per artwork actually seen, of exactly the eleven PixAI-owned columns
+    # extract_artwork_meta fills, keyed by media_id. Rows this sync never saw are not
+    # written at all, so they cannot be reverted; a locally-authored column is not in the
+    # statement, so it cannot be reached. It also never invents a row, so "unmatched
+    # artworks have no downloaded image" still holds by construction rather than by the
+    # merge loop happening not to add any.
+    #
+    # `matched` means exactly what it always did: SQLite's rowcount for an UPDATE is the
+    # number of rows whose WHERE matched, which is the number of catalog rows this artwork
+    # listing reached.
+    metas = {}
+    for vmid, m in by_video_mid.items():
+        # An animation's catalog row is keyed by its MP4's media_id, not the poster
+        # `mediaId` the node carries (#20) -- so it wants the same metadata under THAT key.
+        metas[vmid] = dict(m, media_id=vmid)
+    for mid, m in by_mid.items():
+        # A still's own row wins any collision between the two maps, exactly as the old
+        # `by_mid.get(...) or by_video_mid.get(...)` did.
+        metas[mid] = m
+    matched = apply_artwork_meta(db_path, list(metas.values()))
     print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
           "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
 
@@ -13418,10 +13447,13 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 def run_rebuild_thumbs(args):
     """--rebuild-thumbs: one uniform thumbnail pass over the whole catalog.
-    Images are re-rendered from their originals at today's size/quality settings
-    (OVERWRITTEN in place, so the gallery never goes blank mid-run -- this is
-    what kills years of quality drift), poster-less videos get a local ffmpeg
-    frame extract, and thumbs whose media left the catalog are swept."""
+    Images are re-rendered from their originals at today's size/quality settings and
+    REPLACED IN PLACE -- each one rendered to a temp file beside its destination and
+    os.replace()d over the old one (make_thumbnail), so the gallery never goes blank
+    mid-run and an interruption can never leave a truncated .jpg sitting at a real
+    thumbnail's name for the exists-check to mistake for a finished one. This is what
+    kills years of quality drift. Poster-less videos get a local ffmpeg frame extract,
+    and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     from moonglade_gallery import build_thumbnails, load_catalog

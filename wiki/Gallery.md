@@ -28,7 +28,7 @@ A row of frosted glow-pill buttons, one hue per destination:
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
   flagged it, so a moderated work is no longer shown as a plain "Public".
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
-  the scheduler, server Stop/Restart, branding.
+  the `Runs itself` job list, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
 - **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
   card led by its own artwork, with a colour-coded chip on the art saying how much work the
