@@ -154,6 +154,14 @@ trust yet, so it overrides them rather than just changing their default. Browsin
 and searching your existing catalog all keep working normally — only the account-mutating
 paths refuse.
 
+**View counts are covered too**, and they are the one case that does not look like a write.
+Asking PixAI how many views a published work has **adds one to that number** — PixAI's
+behaviour, and there is no way to look without it counting. So it is a change to your
+account's own numbers, not just a look, and with `READ_ONLY` set the view read is skipped
+everywhere: the weekly **View counts** job, a hand-run `--sync-artworks`, and its **Run now**
+button alike. The rest of that command — titles, tags, likes, comments, visibility — is a
+plain read and keeps working, so backing up is not blocked, only the counting is.
+
 Contests deserve a word of their own, because they used to be read-only and are not any
 more. Browsing the contest board still changes nothing. But **entering** one is a real,
 public, account-changing act — your artwork goes into a public contest under your name, and
