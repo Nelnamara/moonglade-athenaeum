@@ -26,7 +26,16 @@ A row of frosted glow-pill buttons, one hue per destination:
   closes it).
 - **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
-  flagged it, so a moderated work is no longer shown as a plain "Public".
+  flagged it, so a moderated work is no longer shown as a plain "Public". Every card carries
+  its **♥ likes** and **💬 comments**, and every published one its **view count** with a small
+  bar showing how it compares to your best. Along the top: how many pieces you have published,
+  your **lifetime views**, total likes and total comments — and you can sort the whole library
+  by **Most viewed** as easily as by Most liked. See
+  [View counts](Backing-Up#view-counts-and-the-one-thing-worth-knowing-about-them) for where
+  those numbers come from and why looking at them is not quite free.
+- **Followers and following** sit beside the credits figure in the header, and again in the
+  Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
+  never follows, unfollows, likes or comments on your behalf.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.

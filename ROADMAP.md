@@ -113,11 +113,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
-- **Community read-only surface** *(audited + scoped 2026-09-04)*
-  Followers/following and per-card comment counts are already fetched and never shown (free to
-  show); the top-12 view counts are paid for on every My Art open and thrown away; a real views
-  column needs one read-only probe first, then rides the artworks sync instead of live calls.
-  Scope + owner calls: `../moonglade-internal/scopes/SCOPE_2026-09-04_community-surface.md`.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but

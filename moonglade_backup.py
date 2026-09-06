@@ -5932,6 +5932,89 @@ def artwork_list_gql(session, before=None, last=50):
     return find_connection(data or {})
 
 
+def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
+    """{artwork_id: views} for the owner's whole published library, in paced bulk pages.
+    Returns (views, complete) -- `complete` False means a page failed and the map is a
+    partial answer, never a total to present as whole.
+
+    WHY THIS EXISTS AT ALL. Views are the one engagement number PixAI does not put on the
+    `listArtworks` node the sync already pages, and `listArtworks` is a PERSISTED query --
+    a fixed hash lifted from PixAI's own site, whose selection set cannot be edited. So
+    views could only ever be fetched one-artwork-at-a-time, live, which is exactly what
+    made the My Art panel slow and its totals a subtotal. PROBE_2026-09-06 settled the open
+    question: the AD-HOC bulk form `artworks(authorId, first:N)` -- already proven for
+    field-probing by PROBE_2026-08-24 -- accepts `views`. A hundred works cost three calls
+    here instead of a hundred, and they are paid once per sync rather than once per open.
+
+    READING A VIEW COUNT COSTS A VIEW. The same probe measured it directly: a page that
+    selects `views` increments the counter for EVERY artwork it returns (40 rows read, all
+    40 up by one, repeatedly); a page that does not select `views` costs nothing. There is
+    no way to observe this number without perturbing it, so the design goal is to observe
+    it RARELY AND PREDICTABLY -- once per deliberate --sync-artworks -- rather than on
+    every idle glance at a panel. views_spike() subtracts the sweep's own read before
+    calling anything a spike; do not remove that subtraction on the theory that it is a
+    rounding error, it is the difference between "nobody looked" and "+1 forever".
+
+    Read-only: a query, never a mutation, and nothing here spends."""
+    try:
+        author = str(_client_of(session).user_id or "")
+    except AttributeError:
+        return {}, False
+    if not author:
+        return {}, False
+    doc = ('query($a: ID!, $n: Int, $after: String) {'
+           ' artworks(authorId: $a, first: $n, after: $after) {'
+           ' edges { node { id views } } pageInfo { hasNextPage endCursor } } }')
+    views, cursor, pages = {}, None, 0
+    while pages < max_pages:
+        pages += 1
+        try:
+            data = gql_adhoc(session, doc,
+                             {"a": author, "n": int(page_size), "after": cursor}, retries=1)
+        except (requests.RequestException, PixAIError, ValueError, TypeError):
+            return views, False
+        conn = ((data or {}).get("artworks")) or {}
+        edges = conn.get("edges") or []
+        for e in edges:
+            n = (e or {}).get("node") or {}
+            aid = str(n.get("id") or "")
+            if aid and n.get("views") is not None:
+                try:
+                    views[aid] = int(n["views"])
+                except (TypeError, ValueError):
+                    pass
+        pi = conn.get("pageInfo") or {}
+        if not edges or not pi.get("hasNextPage"):
+            return views, True
+        cursor = pi.get("endCursor")
+        if not cursor:
+            return views, True
+        time.sleep(delay)
+    return views, False               # ran out of pages: partial, and says so
+
+
+def fold_views(row, fresh, now_iso):
+    """Fold one fresh sweep reading into a catalog row's four view columns, in place.
+
+    The whole point of the shuffle: `views_prev` must hold the reading from the PREVIOUS
+    SWEEP, not from some arbitrary earlier moment, or the spike rule's window has no
+    meaning. So the current reading only slides down to `views_prev` when a genuinely new
+    one arrives to replace it.
+
+    Re-running --sync-artworks twice in a row is therefore not destructive of history in
+    the way it looks: the second run does overwrite the baseline, which is correct -- the
+    baseline is "last time we looked", and we just looked."""
+    if fresh is None:
+        return row
+    cur = str(row.get("views") or "")
+    if cur != "":
+        row["views_prev"] = cur
+        row["views_prev_at"] = row.get("views_at") or ""
+    row["views"] = str(int(fresh))
+    row["views_at"] = now_iso
+    return row
+
+
 def extract_artwork_meta(node):
     """Pull the published-artwork fields we store from a listArtworks node.
     Keyed by media_id so it merges onto the existing catalog row.
@@ -6048,9 +6131,30 @@ def run_sync_artworks(args):
         before = pi.get("startCursor")
         time.sleep(getattr(args, "delay", 0.4))
 
+    # VIEWS SWEEP (2026-09-06). A SECOND, ad-hoc pass over the same library, because the
+    # persisted listArtworks above cannot be asked for `views` -- see artwork_views_bulk.
+    # Runs only when the listing itself found something (no point pricing a sweep against a
+    # library we failed to enumerate).
+    #
+    # A SUPPLEMENTARY READ IN ITS OWN GUARD, exactly like /api/account's credit-split call:
+    # it must never turn a successful metadata sync into a failed run. `incomplete` above
+    # means one specific thing -- the ARTWORK LISTING is partial, so the counts printed
+    # below are not the whole library -- and a views sweep that could not reach PixAI says
+    # nothing about that. It reports itself separately (`views_complete` in the return) and
+    # merges whatever it did get; the rows it missed keep their previous reading.
+    views_map, views_ok = {}, False
+    if artworks and not getattr(args, "no_views", False):
+        print("Sweeping view counts (bulk artworks query)...")
+        views_map, views_ok = artwork_views_bulk(
+            session, delay=getattr(args, "delay", 0.4))
+        print("  views for {} artwork(s){}".format(
+            len(views_map), "" if views_ok else "  -- INCOMPLETE, a page failed"))
+
     # Merge onto existing catalog rows by media_id.
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = load_catalog(db_path)
     matched = 0
+    viewed = 0
     for r in rows:
         # match a row by its own media_id (still artworks) OR by a videoMediaId
         # (animations, whose row is keyed by the mp4) -- #20.
@@ -6061,10 +6165,20 @@ def run_sync_artworks(args):
             if k != "media_id":
                 r[k] = v
         matched += 1
+        # The views sweep is keyed by ARTWORK id, not media id, and only touches rows the
+        # sweep actually returned -- a work missing from a partial sweep keeps its previous
+        # reading rather than being reset to blank.
+        fresh = views_map.get(str(m.get("artwork_id") or ""))
+        if fresh is not None:
+            fold_views(r, fresh, now_iso)
+            viewed += 1
     if matched:
         save_catalog(db_path, rows)
     print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
           "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+    if viewed:
+        print("View counts written to {} row(s).  Note: reading a view count registers "
+              "a view, so this sweep added 1 to each.".format(viewed))
 
     # Optionally download animated-artwork video files (videoMediaId) into videos/.
     vids_ok = 0
@@ -6122,7 +6236,8 @@ def run_sync_artworks(args):
         if os.environ.get("MOONGLADE_PROGRESS") == "1":
             print("{}{}".format(PANEL_WARN_PREFIX, fail), flush=True)
 
-    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail}
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail,
+            "views": viewed, "views_complete": views_ok}
 
 
 def run_sync_videos(args):
@@ -13647,11 +13762,16 @@ def main():
                          "this run processes. Videos are skipped. Then exit.")
     ap.add_argument("--sync-artworks", action="store_true",
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
-                         "comments, aes score, tags) via listArtworks and merge it onto "
-                         "matching catalog rows by media_id, then exit")
+                         "comments, views, aes score, tags) via listArtworks and merge it "
+                         "onto matching catalog rows by media_id, then exit")
     ap.add_argument("--with-videos", action="store_true",
                     help="with --sync-artworks, also download animated-artwork video files "
                          "(videoMediaId) into a videos/ folder")
+    ap.add_argument("--no-views", action="store_true",
+                    help="with --sync-artworks, skip the view-count sweep. Reading a view "
+                         "count registers a view on PixAI's side (one per work, per sweep), "
+                         "so this is the opt-out for a run where you want the metadata "
+                         "refreshed without touching your own view numbers")
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit. This is "

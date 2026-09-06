@@ -1284,26 +1284,65 @@ def test_api_contests_route(tmp_path, pixai):
     assert all(c["active"] for c in d["contests"])
 
 
-def test_your_art_ranks_published_and_enriches_views(tmp_path, monkeypatch, pixai):
+def test_your_art_ranks_published_and_reads_swept_views(tmp_path, pixai):
+    """/api/your-art is a PURE CATALOG READ as of 2026-09-06.
+
+    It used to fire twelve live `artwork(id){views}` calls on every open and this test
+    monkeypatched `core.artwork_views` to stand in for them. Views ride --sync-artworks
+    into a `views` column now (PROBE_2026-09-06: the ad-hoc bulk artworks query accepts the
+    field the persisted listArtworks cannot be asked for), so the route makes NO network
+    call at all -- which is what this test's total absence of a mock is asserting.
+
+    The totals are the other half of the change: `views` here is a real lifetime sum over
+    every published row, not the twelve-row subtotal the old `views_top` could manage."""
     import moonglade_gallery as g
-    # views come from a per-artwork call; mock it deterministically off the artwork_id
-    monkeypatch.setattr(core, "artwork_views", lambda s, aid: {"aw1": 500, "aw2": 90}.get(aid, 0))
     cli = _authed_client(tmp_path, [
         _row(media_id="1", artwork_id="aw1", filename="a_1.png", is_published="1",
-             liked_count="4", comment_count="2", created_at="2025-01-01T00:00:00"),
+             liked_count="4", comment_count="2", views="500",
+             views_at="2026-09-06T00:00:00Z", created_at="2025-01-01T00:00:00"),
         _row(media_id="2", artwork_id="aw2", filename="b_2.png", is_published="1",
-             liked_count="40", comment_count="0", created_at="2025-01-02T00:00:00"),
+             liked_count="40", comment_count="0", views="90",
+             views_at="2026-09-06T00:00:00Z", created_at="2025-01-02T00:00:00"),
         _row(media_id="3", filename="c_3.png", is_published="",  # not published -> excluded
-             liked_count="99", created_at="2025-01-03T00:00:00"),
+             liked_count="99", views="9999", created_at="2025-01-03T00:00:00"),
     ])
+    db = tmp_path / "catalog.db"
     # pure helpers
-    assert [r["media_id"] for r in g.top_published_rows(tmp_path / "catalog.db")] == ["2", "1"]  # by likes
-    assert g.published_totals(tmp_path / "catalog.db") == {"count": 2, "likes": 44, "comments": 2}
-    # route: localhost -> enriched with views, re-sorted by views (aw1=500 > aw2=90)
+    assert [r["media_id"] for r in g.top_published_rows(db)] == ["2", "1"]           # by likes
+    assert [r["media_id"] for r in g.top_published_rows(db, order="views")] == ["1", "2"]
+    t = g.published_totals(db)
+    assert t["count"] == 2 and t["likes"] == 44 and t["comments"] == 2
+    assert t["views"] == 590 and t["views_rows"] == 2     # 9999 excluded: not published
+    # route, no mock of any kind: the swept column is the whole answer
     d = cli.get("/api/your-art").get_json()
     assert d["views_synced"] is True and d["totals"]["count"] == 2
-    assert [m["media_id"] for m in d["items"]] == ["1", "2"]     # aw1 (500 views) now first
+    assert d["totals"]["views"] == 590                    # lifetime, not a top-N subtotal
+    assert [m["media_id"] for m in d["items"]] == ["2", "1"]      # default order is likes
+    d = cli.get("/api/your-art?order=views").get_json()
+    assert [m["media_id"] for m in d["items"]] == ["1", "2"]
     assert d["items"][0]["views"] == 500
+
+
+def test_your_art_never_swept_reads_null_views_not_zero(tmp_path, pixai):
+    """Blank and zero are different answers, all the way to the client.
+
+    A library that has never been swept must not draw a grid of confident zeroes and a row
+    of empty comparison bars -- the card has nothing to say about views yet, and `null` is
+    how it says so. A row that WAS swept and genuinely has no views is a real 0."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", artwork_id="aw1", filename="a_1.png", is_published="1",
+             created_at="2025-01-01T00:00:00"),                       # views '' -> null
+        _row(media_id="2", artwork_id="aw2", filename="b_2.png", is_published="1",
+             views="0", views_at="2026-09-06T00:00:00Z",
+             created_at="2025-01-02T00:00:00"),                       # swept, really zero
+    ])
+    d = cli.get("/api/your-art").get_json()
+    by_id = {m["media_id"]: m for m in d["items"]}
+    assert by_id["1"]["views"] is None and by_id["2"]["views"] == 0
+    assert d["totals"]["views_rows"] == 1        # only one row has actually been swept
+    items = cli.get("/api/myart/items").get_json()["items"]
+    by_id = {m["media_id"]: m for m in items}
+    assert by_id["1"]["views"] is None and by_id["2"]["views"] == 0
 
 
 def test_artwork_views_route(tmp_path, monkeypatch, pixai):

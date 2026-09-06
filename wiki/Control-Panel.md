@@ -9,6 +9,10 @@ server itself.
 page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
 **Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
+**PixAI account** opens on a strip of figures — credits, how much of that is paid and how
+much free, free cards on hand, coupons, and your **followers** and **following** — above
+tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+the window never spends, redeems, purchases, follows or unfollows anything.
 The auto-sync schedule lives in the job console's **Ledger** view. (The old separate
 `/panel` page retired with the classic interface, 2026-08-08.)
 

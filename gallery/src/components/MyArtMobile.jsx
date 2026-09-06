@@ -36,6 +36,9 @@ import "../styles/myart-mobile.css";
      source, honest empty state). */
 
 const heartCol = (n) => (n > 10 ? "var(--mauve)" : n > 0 ? "var(--subtext)" : "var(--overlay0)");
+// The comment badge's colour -- the bottom two rungs of heartCol's own scale, no third
+// invented. See MyArtOverlay.jsx's copy for why the mauve rung is deliberately absent.
+const commentCol = (n) => (n > 0 ? "var(--subtext)" : "var(--overlay0)");
 const dateLabel = (iso) => {
   if (!iso) return "";
   const d = new Date(iso + "T00:00:00");
@@ -56,7 +59,8 @@ const TABS = [
   { key: "assets", label: "Assets" },
 ];
 const VIS_OPTS = [["all", "All"], ["public", "Public"], ["private", "Private"]];
-const SORT_OPTS = [["latest", "Latest first"], ["oldest", "Oldest first"], ["liked", "Most liked"]];
+const SORT_OPTS = [["latest", "Latest first"], ["oldest", "Oldest first"],
+  ["liked", "Most liked"], ["viewed", "Most viewed"]];
 
 export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [rows, setRows] = useState(null);
@@ -93,11 +97,18 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     load().catch((e) => { if (!dead) setRowsErr(String(e.message || e)); });
     apiGet("/api/your-art").then((d) => {
       if (dead) return;
+      // A REAL LIFETIME TOTAL as of 2026-09-06, not a top-twelve subtotal -- views ride
+      // --sync-artworks into the catalog now, so the sum covers the whole published
+      // library. A partly-swept library says so in the label rather than passing a
+      // subtotal off as a total, which is the job "(TOP 12)" used to do here.
+      const t = d.totals || {};
+      const label = d.views_synced && (t.views_rows || 0) < (t.count || 0)
+        ? "VIEWS (" + (t.views_rows || 0) + " OF " + (t.count || 0) + ")" : "TOTAL VIEWS";
       setStats([
-        { value: fmt((d.totals || {}).count), label: "PUBLISHED", accent: false },
-        { value: (d.totals || {}).views_top != null ? fmt(d.totals.views_top) : "—", label: "VIEWS (TOP 12)", accent: true },
-        { value: fmt((d.totals || {}).likes), label: "LIKES", accent: false },
-        { value: fmt((d.totals || {}).comments), label: "COMMENTS", accent: false },
+        { value: fmt(t.count), label: "PUBLISHED", accent: false },
+        { value: d.views_synced ? fmt(t.views) : "—", label, accent: true },
+        { value: fmt(t.likes), label: "LIKES", accent: false },
+        { value: fmt(t.comments), label: "COMMENTS", accent: false },
       ]);
     }).catch(() => {});
     return () => { dead = true; };
@@ -131,8 +142,19 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
     if (vis !== "all") list = list.filter((r) => (vis === "public" ? r.public : !r.public));
     if (sort === "oldest") list = [...list].reverse();
     else if (sort === "liked") list = [...list].sort((a, b) => b.likes - a.likes);
+    // Never-swept sorts as -1, below a real zero -- see MyArtOverlay.jsx's copy.
+    else if (sort === "viewed") {
+      list = [...list].sort((a, b) => (b.views == null ? -1 : b.views) - (a.views == null ? -1 : a.views));
+    }
     return list;
   }, [rows, tab, vis, sort]);
+
+  // The bar's denominator, over what this list actually shows -- same derivation and same
+  // reason as the desktop shell's.
+  const gridMaxViews = useMemo(() => {
+    const vs = media.map((r) => r.views).filter((v) => v != null);
+    return vs.length ? Math.max(1, ...vs) : 1;
+  }, [media]);
 
   const counts = useMemo(() => {
     const all = rows || [];
@@ -298,7 +320,23 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                       <div className="myam-date">{dateLabel(it.date)}</div>
                     </div>
                     <span className="myam-likes" style={{ color: heartCol(it.likes) }}>♥ {fmt(it.likes)}</span>
+                    {/* Comment badge, same idiom as likes (owner, 2026-09-06) -- and the
+                        same two-rung colour rule the desktop card uses, for the same
+                        reason: comments never reach the heart's mauve threshold here. */}
+                    <span className="myam-likes" style={{ color: commentCol(it.comments) }}>💬 {fmt(it.comments)}</span>
                   </div>
+                  {/* Per-card views + the comparison bar, on every published card. Same
+                      .mgma-barwrap/.mgma-bar the desktop card restores -- one bar, one
+                      spec, both shells. null views = never swept, and is not a zero. */}
+                  {it.public && it.views != null && (
+                    <div className="mgma2-fviews">
+                      <span className="n">{fmt(it.views)} views</span>
+                      <div className="mgma-barwrap">
+                        <div className="mgma-bar"
+                          style={{ width: Math.max(2, (it.views / gridMaxViews) * 100) + "%" }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
