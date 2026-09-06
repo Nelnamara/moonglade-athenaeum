@@ -12,7 +12,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
 } from "../src/loom-core.js";
 import {
   withResult, buildDuplicateCard, patchCardByIdWith, attachedVideoPatch,
@@ -379,6 +379,57 @@ describe("spendTooltip", () => {
 
   test("says out loud that pre-ledger re-rolls are not in the number", () => {
     assert.match(spendTooltip({ paid: 1, credits: 1 }), /re-rolls from before the ledger/i);
+  });
+});
+
+/* ---------- two overlapping reads of the same board ---------- */
+
+describe("the spend fetch's ordering guard", () => {
+  test("an older response cannot overwrite a newer one for the same board", async () => {
+    /* The guard used to key on the media-id list alone, which is IDENTICAL for every
+       request about one board -- so it could not tell an earlier in-flight read from a
+       later one. refreshSpend (a manual click) deliberately bypasses the short-circuit
+       that would otherwise stop a second concurrent fetch, so two reads of the same board
+       overlap routinely; if the network returned them out of order, whichever landed
+       second won regardless of which was actually issued last. */
+    const gate = makeLatestOnly();
+    const applied = [];
+    const read = (label, ms) => {
+      const token = gate.begin();
+      return new Promise((r) => setTimeout(r, ms)).then(() => {
+        if (!gate.wins(token)) return;
+        applied.push(label);
+      });
+    };
+    const first = read("stale", 20);      // issued first, lands last
+    const second = read("fresh", 1);      // issued second, lands first
+    await Promise.all([first, second]);
+    assert.deepEqual(applied, ["fresh"], "the last request issued is the one that applies");
+  });
+
+  test("a lone request still applies", async () => {
+    const gate = makeLatestOnly();
+    const token = gate.begin();
+    assert.equal(gate.wins(token), true);
+  });
+
+  test("a token from a superseded request never wins again", () => {
+    const gate = makeLatestOnly();
+    const a = gate.begin();
+    const b = gate.begin();
+    assert.equal(gate.wins(a), false);
+    assert.equal(gate.wins(b), true);
+    gate.cancel();
+    assert.equal(gate.wins(b), false, "cancel retires every token in flight");
+  });
+
+  test("the board's fetch really runs through the gate", () => {
+    const jsx = readFileSync(
+      new URL("../master-storyboard.jsx", import.meta.url), "utf8");
+    const hook = jsx.slice(jsx.indexOf("const loadSpend = useCallback"));
+    const body = hook.slice(0, hook.indexOf("const refreshSpend"));
+    assert.match(body, /spendGate\.current\.begin\(\)/);
+    assert.match(body, /spendGate\.current\.wins\(token\)/);
   });
 });
 

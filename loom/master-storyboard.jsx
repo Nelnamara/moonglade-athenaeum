@@ -13,7 +13,7 @@ import {
   reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
-  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -6996,16 +6996,32 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   const collectedSpend = useMemo(() => collectSpendMids(project), [project]);
   const spendKey = collectedSpend.mids.join(",");
   const spendFetchedRef = useRef(null);
+  // WHICH REQUEST IS THE LATEST, as its own tiny gate (makeLatestOnly, loom-core.js). The
+  // staleness check below used to be spendFetchedRef alone -- "is this still the same
+  // board?" -- which is the SAME value for every request about one board, so it could not
+  // tell an earlier in-flight read from a later one. refreshSpend forces past the
+  // short-circuit that would otherwise stop a second concurrent fetch, so two reads of one
+  // board overlap routinely; out of order, the older answer won. Both checks now: the right
+  // board, and the newest read of it.
+  const spendGate = useRef(null);
+  if (!spendGate.current) spendGate.current = makeLatestOnly();
   const loadSpend = useCallback((force) => {
     const mids = collectedSpend.mids;
-    if (!mids.length) { spendFetchedRef.current = ""; setSpendRows({}); setSpendStatus("ok"); return; }
+    if (!mids.length) {
+      // Nothing to read: retire whatever is in flight, or its answer would land on an
+      // empty board and repopulate the pill from a project that no longer has those shots.
+      spendGate.current.cancel();
+      spendFetchedRef.current = ""; setSpendRows({}); setSpendStatus("ok"); return;
+    }
     if (!force && spendFetchedRef.current === spendKey) return;
     spendFetchedRef.current = spendKey;
+    const token = spendGate.current.begin();
     setSpendStatus("loading");
     fetch("/api/loom/spend", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ media_ids: mids }) })
       .then((r) => r.json())
       .then((d) => {
+        if (!spendGate.current.wins(token)) return;         // a later read of this board won
         if (spendFetchedRef.current !== spendKey) return;   // a newer board superseded this read
         if (!d || d.error || !d.rows) { setSpendStatus("error"); return; }
         setSpendRows(d.rows); setSpendStatus("ok");
@@ -7014,7 +7030,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
       // id would join to nothing and the pill would report the whole project "unpriced",
       // which is a lie about the catalog rather than a report about the network. The error
       // status is what stops that, and clearing the ref lets the next board change retry.
-      .catch(() => { if (spendFetchedRef.current === spendKey) { spendFetchedRef.current = null; setSpendStatus("error"); } });
+      // A failure that has already been superseded says nothing about the read that won.
+      .catch(() => {
+        if (!spendGate.current.wins(token)) return;
+        if (spendFetchedRef.current === spendKey) { spendFetchedRef.current = null; setSpendStatus("error"); }
+      });
   }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadSpend(); }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   const refreshSpend = useCallback(() => loadSpend(true), [loadSpend]);

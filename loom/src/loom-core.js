@@ -805,6 +805,30 @@ export const formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, mis
   return "";
 };
 
+/* ONLY THE LATEST REQUEST WINS -- a tiny gate for a read whose answer can arrive stale.
+
+   The spend read's staleness check used to be "is this still the same board?", keyed on the
+   joined media-id list. That is IDENTICAL for every request about one board, so it could not
+   tell an earlier in-flight read from a later one -- and two reads of the same board overlap
+   routinely, because refreshSpend (the pill's own click) deliberately bypasses the
+   short-circuit that would otherwise stop a second concurrent fetch. If the network returned
+   them out of order, whichever landed second won regardless of which was issued last, and a
+   paid_credit backfill landing in between would be silently rolled back on screen.
+
+   `begin()` hands out a token and makes it the only winner; `wins(token)` answers whether
+   that request is still the newest; `cancel()` retires every token in flight (the
+   board-emptied path, where there is no request to wait for at all). A closure rather than a
+   pure function because "newest" is state by definition -- but state a test can drive
+   directly, with no DOM and no React. */
+export const makeLatestOnly = () => {
+  let latest = 0;
+  return {
+    begin() { latest += 1; return latest; },
+    wins(token) { return token === latest; },
+    cancel() { latest += 1; },
+  };
+};
+
 /* IS THERE ANYTHING TO SHOW? The pill's own gate, here rather than inline at the toolbar,
    because it is a claim about the LEDGER and not about the layout.
 
