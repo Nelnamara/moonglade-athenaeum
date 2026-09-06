@@ -14,6 +14,7 @@ import {
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
+  cardsToResume,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -6635,14 +6636,14 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // living in this hook, never a DOM element's lifecycle, so they already survive the
   // toggle with no fix required -- verified by reading their implementations, not
   // assumed. See this increment's own report for the injected-state verification.
+  //
+  // WHICH cards need it is cardsToResume (loom-core.js) -- a pure walk over the board and
+  // the already-resumed record, so the dedup rule is provable without a mounted tree. WHEN
+  // to ask is this effect's dep array, and that is the whole of what lives here.
   useEffect(() => {
     if (!project) return;   // project is null until the store loads the first board
-    (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
-      if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
-        resumedRef.current[c.pendingTaskId] = true;
-        pollShot(c.id, c.pendingTaskId, c.genStartedAt);
-      }
-    }));
+    cardsToResume(project, resumedRef.current)
+      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
   }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
   // generation involved. /api/loom/export already treats every resultMid as just "a video

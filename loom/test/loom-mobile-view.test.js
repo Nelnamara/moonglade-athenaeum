@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { cardsToResume } from "../src/loom-core.js";
 
 // First increment of the Loom Mobile board/reel view (2026-08-03), per the locked design
 // (design_handoff/design_handoff_moonglade_suite/"Loom Mobile.dc.html"). master-storyboard.jsx
@@ -843,16 +844,50 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
 });
 
 describe("Credit safety: the drawer's own component-local poll vs. this increment's fix (fourth increment)", () => {
-  test("useGenerationPipeline's resume-on-reload effect also depends on mobileUI, so a <mg-generate-drawer>-submitted Video render is re-attached the instant the toggle unmounts it", () => {
-    // setCardResult joined the list with the spend ledger (2026-09-06) -- it is the
-    // attempts-recording sibling of setCardStatus. mobileUI staying LAST, and the effect's
-    // own dep array below, are what this test is actually about.
-    assert.match(src, /function useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI \}\)/);
-    assert.match(src, /\}, \[activeId, mobileUI\]\);\s*\/\/ eslint-disable-line/);
+  test("the resume scan re-attaches a poll for every wip shot with a live task id, and never twice for one task", () => {
+    /* WHAT the effect does, run rather than read. This used to assert the hook's whole
+       destructuring signature character for character, which a harmless param reorder
+       breaks and a genuinely mis-wired hook does not.
+
+       The scan is idempotent by TASK ID, not by trigger: that is what lets it be re-run on
+       every "📱 Mobile view" flip -- which unmounts LoomV2 and any <mg-generate-drawer>
+       inside it outright, with no 'mg-paused' event -- without any double-poll risk. */
+    const resumed = Object.create(null);
+    const board = { acts: [{ cards: [
+      { id: "a", status: "wip", pendingTaskId: "T1", genStartedAt: 111 },
+      { id: "b", status: "done", resultMid: "m1" },
+      { id: "c", status: "wip" },                       // never submitted: nothing to resume
+      { id: "d", status: "wip", pendingTaskId: "T2" },
+    ] }] };
+    assert.deepEqual(cardsToResume(board, resumed), [
+      { id: "a", taskId: "T1", startedAt: 111 },
+      { id: "d", taskId: "T2", startedAt: undefined },
+    ]);
+    // the flip fires it again: a genuine no-op for everything already polling
+    assert.deepEqual(cardsToResume(board, resumed), []);
+    // ...and a shot submitted AFTER that flip is picked up on the next one
+    board.acts[0].cards.push({ id: "e", status: "wip", pendingTaskId: "T3" });
+    assert.deepEqual(cardsToResume(board, resumed).map((c) => c.taskId), ["T3"]);
+    // a task id spelled like an Object.prototype key is still a task id
+    board.acts[0].cards.push({ id: "f", status: "wip", pendingTaskId: "constructor" });
+    assert.deepEqual(cardsToResume(board, resumed).map((c) => c.taskId), ["constructor"]);
+    assert.deepEqual(cardsToResume(null, resumed), []);
+  });
+
+  test("the effect re-runs on a mobileUI flip, not on activeId alone", () => {
+    // WHEN it fires is the dep array, and that is all that is left here to read: an
+    // unmounted <mg-generate-drawer> fires no event, so the toggle itself has to be the
+    // trigger. Sliced to the resume effect rather than matched anywhere in the file.
+    const effect = src.slice(src.indexOf("cardsToResume(project, resumedRef.current)"));
+    assert.match(effect.slice(0, 200), /\}, \[activeId, mobileUI\]\);/);
   });
 
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
-    assert.match(src, /= useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI \}\);/);
+    // Both ends of one wire, without pinning the whole parameter list: the hook takes a
+    // mobileUI, and App() hands it the state it renders from rather than a local copy.
+    assert.match(src, /function useGenerationPipeline\(\{[^}]*\bmobileUI\b[^}]*\}\)/);
+    assert.match(src, /= useGenerationPipeline\(\{[^}]*\bmobileUI\b[^}]*\}\);/);
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(/);
   });
 
   test("genImage/genEdit/genRef's own polls are plain setTimeout chains (pollImg/pollTaskWithCeiling), never a DOM element's lifecycle -- confirmed, not just asserted", () => {

@@ -805,6 +805,36 @@ export const formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, mis
   return "";
 };
 
+/* WHICH SHOTS NEED A POLL RE-ATTACHED, and nothing about when to ask.
+
+   A generation submitted before a reload leaves its card at status "wip" with a
+   pendingTaskId, but its in-memory poll loop died with the page -- or with the "📱 Mobile
+   view" toggle, which unmounts LoomV2 and any <mg-generate-drawer> inside it outright. An
+   unmount fires no 'mg-paused' event, so the card silently freezes on "Rendering…" with
+   nothing left polling.
+
+   Deduped by TASK ID, not by card and not by why we are asking, so re-running the scan is a
+   genuine no-op for every task already resumed or still actively polling: no double-poll,
+   whatever fires it. `resumed` is the caller's own record and is UPDATED here, so a caller
+   that scans twice in one commit cannot start two loops for one task.
+
+   Pure and side-effect free apart from that record, so the rule can be proven with a plain
+   object instead of a mounted React tree. */
+export const cardsToResume = (project, resumed) => {
+  const seen = resumed || Object.create(null);
+  const out = [];
+  ((project || {}).acts || []).forEach((a) => {
+    ((a || {}).cards || []).forEach((c) => {
+      if (!c || c.status !== "wip" || !c.pendingTaskId) return;
+      const tid = String(c.pendingTaskId);
+      if (Object.prototype.hasOwnProperty.call(seen, tid)) return;
+      seen[tid] = true;
+      out.push({ id: c.id, taskId: c.pendingTaskId, startedAt: c.genStartedAt });
+    });
+  });
+  return out;
+};
+
 /* ONLY THE LATEST REQUEST WINS -- a tiny gate for a read whose answer can arrive stale.
 
    The spend read's staleness check used to be "is this still the same board?", keyed on the
