@@ -154,6 +154,46 @@ describe("tallySpend", () => {
     assert.equal(t.byAct[1].credits, 0);
   });
 
+  test("an act whose only shots were billed to a sibling act is NOT reported as 0 cr", () => {
+    /* THE FALSE ZERO the whole surface exists to prevent. paid_credit is task-level, so
+       when two acts' shots share one task the first act to reach it owns the charge --
+       correct arithmetic, but the second act then had no paid, no zero and no unknown, so
+       formatSpend fell through every branch to "" and the tooltip printed "0 cr" for an
+       act whose shot really did cost money. The code's own comment says a displayed
+       "0 cr" must only ever mean a genuinely settled, zero-cost result. */
+    const p = proj([
+      act("Act 1", [card({ id: "a", resultMid: "m1" })]),
+      act("Act 2", [card({ id: "b", resultMid: "m2" })]),
+    ]);
+    const t = tally(p, { m1: row(90, "T"), m2: row(90, "T") });
+    assert.equal(t.byAct[1].credits, 0);
+    assert.equal(t.byAct[1].sharedElsewhere, 1, "the second act's result has its own bucket");
+    assert.equal(t.byAct[1].zero, 0, "and is never mistaken for a settled free result");
+    assert.equal(t.sharedElsewhere, 1);
+    const tip = spendTooltip(t);
+    assert.doesNotMatch(tip, /Act 2: 0 cr/);
+    assert.match(tip, /Act 2: counted in Act 1/);
+  });
+
+  test("an act with a real charge AND a shared one still shows its own number", () => {
+    const p = proj([
+      act("Act 1", [card({ id: "a", resultMid: "m1" })]),
+      act("Act 2", [card({ id: "b", resultMid: "m2" }), card({ id: "c", resultMid: "m3" })]),
+    ]);
+    const t = tally(p, { m1: row(90, "T"), m2: row(90, "T"), m3: row(30, "U") });
+    assert.match(spendTooltip(t), /Act 2: ~30 cr/);
+  });
+
+  test("a genuinely free act still says 0 cr, and that still means free", () => {
+    const p = proj([
+      act("Act 1", [card({ id: "a", resultMid: "m1" })]),
+      act("Act 2", [card({ id: "b", resultMid: "m2" })]),
+    ]);
+    const t = tally(p, { m1: row(90, "T"), m2: row(0, "U") });
+    assert.equal(t.byAct[1].zero, 1);
+    assert.match(spendTooltip(t), /Act 2: 0 cr/);
+  });
+
   test("a task_id spelled like an Object.prototype key is still billed", () => {
     const p = proj([act("Act 1", [card({ id: "a", resultMid: "m1" })])]);
     assert.equal(tally(p, { m1: row(64, "constructor") }).credits, 64);

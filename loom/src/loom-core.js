@@ -755,8 +755,12 @@ export const collectSpendMids = (project) => {
 export const tallySpend = (collected, rows) => {
   const src = rows || {};
   const col = collected || { byAct: [], imported: 0 };
-  const counted = Object.create(null);      // task_id -> already billed (see note 2 above)
-  const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+  // task_id -> the act NAME that was billed for it (see note 2 above). The name, not just
+  // a flag: an act whose only results were billed to a sibling has to be able to say WHICH
+  // sibling, or its line reads as a free act.
+  const counted = Object.create(null);
+  const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0,
+                         sharedElsewhere: 0, sharedWith: "" });
   const total = zeroB();
   const byAct = (col.byAct || []).map((b) => {
     const acc = zeroB();
@@ -766,8 +770,18 @@ export const tallySpend = (collected, rows) => {
       add("results", 1);
       if (row === null) { add("missing", 1); return; }
       const tid = String(row.task_id || "");
-      if (tid && counted[tid]) return;      // same task as an id already billed -- one charge
-      if (tid) counted[tid] = true;
+      // hasOwnProperty, not truthiness: an act named "" is still an act that was billed.
+      if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
+        /* SAME TASK AS AN ID ALREADY BILLED -- one charge, and this act is not the one
+           that carries it. Its own bucket, because falling through to the all-zero shape
+           made formatSpend print "0 cr" for an act whose shot really did cost money, and
+           the hard rule above is that a displayed "0 cr" only ever means a genuinely
+           settled, zero-cost result. */
+        add("sharedElsewhere", 1);
+        if (!acc.sharedWith) acc.sharedWith = counted[tid];
+        return;
+      }
+      if (tid) counted[tid] = b.name || "";
       const pc = row.paid_credit;
       if (typeof pc !== "number" || !isFinite(pc)) { add("unpriced", 1); return; }
       if (pc <= 0) { add("zero", 1); return; }
@@ -802,7 +816,18 @@ export const spendTooltip = (s = {}) => {
     `${s.missing || 0} with no catalog row` +
     (s.imported ? `, plus ${s.imported} imported clip(s) not counted — paid for elsewhere` : "") + ".";
   const acts = (s.byAct || []).filter((a) => a.results > 0);
-  const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
+  /* An act whose every result was billed to a sibling has no number of its own to show,
+     and "0 cr" would be a lie about it (that mark means settled and free). Say where the
+     charge went instead -- the money is on the board, just under another act's name. */
+  const actLine = (a) => {
+    const own = formatSpend(a);
+    if (own) return own;
+    if (a.sharedElsewhere > 0) {
+      return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
+    }
+    return "0 cr";
+  };
+  const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
   return [head].concat(lines).join("\n") +
     "\n" + "Counts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
 };
