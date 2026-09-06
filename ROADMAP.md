@@ -108,11 +108,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
   v3.0 — revisit what Moonglade should get now the React app is the whole front end.
-- **Sign-in ⇄ create-account toggle.** The login design showed a mode toggle that was
-  deliberately not shipped (`no_accounts` decides the mode). Options to explore.
-- **Project export tiers.** Shot list / lightweight backup / full bundle works but may deserve
-  a better shape — scope alternatives.
-
 ## Scoped-but-unbuilt — decided once, never executed
 
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
@@ -133,6 +128,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   classic-era code), not to bank the refactor's incidental cleanup as the sweep.
 
 ## Open questions — need a call before they can be scoped
+
+- **App security review** *(owner, 2026-09-06: "I wonder if there is a better way to secure the
+  app now that it has grown to this level")* — a proper audit of the auth surface: login and the
+  no-accounts mode, session/JWT/cookie handling, the localhost trust model, mirror/write gating,
+  and what "grown to this level" changes about the threat picture. Runs on the owner's go.
 
 - **Does the Loom become part of the same app?**
   Today they are two separate builds: the gallery app (`gallery/dist/app.js`) and the Loom
