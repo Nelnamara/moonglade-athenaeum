@@ -3316,6 +3316,56 @@ def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
         "entry for a layer that is not open, which is a trap: {}".format(page.url))
 
 
+def test_two_fast_backs_inside_a_layers_exit_animation_do_not_leave_the_app(
+        logged_in_page):
+    """RED TEAM #13. The ledger and the visible layer disagreed for 200-220ms every time.
+
+    Five of the ten registered layers -- the Menu screens, Branding, the composer's Advanced
+    screen, Duplicates and the Folio -- keep their `open` flag true for another fifth of a
+    second after being told to close, because that is how long their exit takes to play.
+    onPop dropped its entry the instant the FIRST Back arrived, so for that whole window
+    `depth` read 0 while a full-screen layer still covered the display -- and a second real
+    Back inside it found nothing of ours to consume and went straight to the browser. The
+    app closed with the screen still on screen: the exact defect the manager exists to fix.
+
+    Two presses, thirty milliseconds apart, driven from inside the page so they really land
+    inside the window -- a wait_for_selector(state="detached") between them would step over
+    the whole bug. The layer's exit is a JS timer, not a CSS transition, so the harness's
+    motion freeze does not shorten it.
+    """
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    home = page.url
+
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("My Art")')
+    page.wait_for_selector(".glm-screen")
+    _settle(page)
+    assert _layer_depth(page) == 1
+
+    page.evaluate("""() => new Promise((r) => {
+        window.history.back();
+        setTimeout(() => { window.history.back(); setTimeout(r, 80); }, 30);
+    })""")
+    assert page.url == home, (
+        "a second Back inside the exit animation left the app while the screen was still "
+        "on it: {}".format(page.url))
+
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _settle(page)
+    assert _layer_depth(page) == 0, "the ledger did not come down with the screen"
+    # ...and the gallery underneath is not a trap: with nothing open, Back leaves as always
+    page.go_back()
+    page.wait_for_load_state("domcontentloaded")
+    assert "/login" in page.url, (
+        "the swallowed press was never handed back -- the manager is holding an entry for "
+        "a layer that is not open: {}".format(page.url))
+
+
 def test_the_pager_lands_each_page_at_its_top(
         paged_library_server, render_browser, monkeypatch):
     """THE 2026-09-06 AUDIT'S SECOND FINDING: tap Next from halfway down page 1 and page 2

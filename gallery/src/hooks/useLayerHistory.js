@@ -67,8 +67,25 @@ function onPop() {
      it the second press would close the same layer twice and leave the one beneath it
      stranded. */
   for (let i = stack.length - 1; i >= 0; i -= 1) {
-    if (!stack[i].closing) { stack[i].closing = true; stack[i].close(); return; }
+    if (!stack[i].closing) { stack[i].closing = true; stack[i].close(); break; }
   }
+  /* AND RECONCILE, because being TOLD to close is not being closed.
+
+     Five of the ten layers animate their exit -- the Menu screens, Branding, the composer's
+     Advanced screen, Duplicates and the Folio all keep their `open` flag true for another
+     200-220ms after close() runs, which is exactly what MobileScreen/MobileSheet need to
+     play the layer out. The ledger dropped its entry the instant the FIRST Back was seen,
+     so for that whole window `depth` said nothing was open while a full-screen layer was
+     still covering the display -- and a second real Back inside it hit `if (!depth) return`
+     and was let straight through to the browser. Back left the app with the screen still on
+     screen: the exact defect this whole manager exists to fix.
+
+     The entry is therefore owed for as long as the layer is in `stack`, and `stack` only
+     shrinks when the layer's own open flag really flips. Scheduling here hands the entry
+     back immediately, so a second Back inside the exit window is answered by us (a no-op --
+     the layer is already on its way out) rather than by the browser, and the net
+     consumption still lands exactly when the layer unmounts. */
+  schedule();
 }
 
 function sync() {

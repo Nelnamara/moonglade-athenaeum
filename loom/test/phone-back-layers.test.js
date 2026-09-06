@@ -72,9 +72,20 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
       + "will ask the browser to go back a second time");
     // the topmost layer NOT already told to close -- two Backs in one frame must not
     // close the same layer twice and strand the one beneath it
-    assert.match(pop, /if \(!stack\[i\]\.closing\) \{ stack\[i\]\.closing = true; stack\[i\]\.close\(\); return; \}/);
+    assert.match(pop, /if \(!stack\[i\]\.closing\) \{ stack\[i\]\.closing = true; stack\[i\]\.close\(\); break; \}/);
     // ...and `unwinding` is only ever owed by a go() of our own
     assert.match(manager, /unwinding \+= drop;/);
+    /* BEING TOLD TO CLOSE IS NOT BEING CLOSED (red team #13). Five of the ten layers keep
+       their open flag true for another 200-220ms while they play out, so for that whole
+       window the ledger said nothing was open while a full-screen layer still covered the
+       display -- and a second real Back inside it hit `if (!depth) return` and went
+       straight to the browser, leaving the app. The entry is owed while the layer is still
+       in `stack`, so the pop reconciles and hands it back; the net consumption lands when
+       the layer's own flag really flips. */
+    assert.ok(pop.trimEnd().endsWith("schedule();\n}") || /schedule\(\);\s*\n\}/.test(pop),
+      "onPop must reconcile, or a layer still on screen holds no entry to consume");
+    assert.ok(pop.indexOf(".close()") < pop.lastIndexOf("schedule();"),
+      "the reconcile comes after the close is asked for, not instead of it");
   });
 
   test("EVERY layer the phone pushes is registered -- the list with no gaps", () => {
