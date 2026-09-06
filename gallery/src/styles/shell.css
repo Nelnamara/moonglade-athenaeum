@@ -86,6 +86,49 @@
   min-height: clamp(150px, 22vw, 300px);
   transition: min-height .5s cubic-bezier(.2, .9, .24, 1), height .5s cubic-bezier(.2, .9, .24, 1); }
 .mgx-bnr.slim { min-height: 0; height: 62px; }
+/* THE EXPAND IS ONE MOTION (ROADMAP S4 polish batch, fixed 2026-09-06) ===============
+   The complaint, verbatim: "collapse is smooth, but expanding back has a single jump then
+   a slide." Measured in the render harness at 1280px -- hero 281.6, slim 62 -- the expand's
+   first sampled frame (t=1ms) already read 172.3px. A 110px jump, then a 109px slide.
+
+   WHY the two directions differed, which is the whole of it. Two properties carry this
+   banner's height and only one of them can animate:
+     * min-height  -- clamp(150px, 22vw, 300px) <-> 0. Interpolable, animates as written.
+     * height      -- auto <-> 62px. `auto` is not interpolable, so this end SNAPS, in
+                      both directions, and always has.
+   Collapsing, the snap is invisible: height drops to 62 at once, .mgx-bottom goes
+   display:none in the same frame, and the used height is max(62, min-height) -- so the
+   animating min-height is the tallest constraint the whole way down and the box follows it
+   smoothly from 281.6 to 62.
+   Expanding, the same snap is the bug: height returns to `auto` and the bottom band returns
+   to flow in the first frame, so the box is CONTENT-tall (172.3) instantly, while min-height
+   is only just leaving 0. The visible motion is the leftover 172.3 -> 281.6 that min-height
+   still owes -- the "slide" after the jump.
+
+   The fix holds the snap off until the animation has passed it. For the .5s of an expand
+   (and only then -- Banner.jsx adds the class on the slim -> hero flip and drops it when the
+   transition is over) the height stays pinned at 62px, so the box is max(min-height, 62) =
+   the animating min-height, exactly as it is on the way down. One motion, both directions,
+   from the one property that can actually carry it.
+   `overflow: hidden` for those .5s keeps the returning band from spilling past the banner
+   while min-height is still climbing past it. Nothing anchored can be caught by that clip:
+   the band has just come back from display:none, so its popovers (the Advanced flyout, the
+   model menu -- the latter position:fixed anyway) are unmounted and cannot be open. Outside
+   this window the banner is overflow:visible exactly as before, which is what that rule
+   exists for.
+   Measured after, same harness, same 1280px: the expand's first frame is 62px and it climbs
+   to 281.6 with no frame moving more than 37px -- the collapse's own worst frame is 42px.
+
+   What it does NOT change: the collapse, the .5s, the curve, the slim row, the hero at rest.
+   WHAT IT DOES NOT REACH, stated rather than papered over: where the CONTENT is taller than
+   the clamp -- a viewport under ~780px, or an open filter tray -- min-height's endpoint is
+   below the hero's real resting height, so the box still settles the remainder when the pin
+   drops (at 700px: a smooth 62 -> 154 and then 154 -> 212). min-height cannot describe a
+   content-driven height and no honest pin can either; closing that gap means measuring the
+   hero and animating to the measured number, which is a bigger change than this is. It is
+   still the better half of the trade: at those widths the expand today is a single 150px
+   jump with no animation at all, because min-height never reaches the content height. */
+.mgx-bnr.expanding { height: 62px; overflow: hidden; }
 /* the art is its OWN clipped layer so flyouts/tooltips in the band can escape
    the banner (the DC clips the whole banner; it has no anchored popovers) */
 .mgx-art { position: absolute; inset: 0; overflow: hidden; background: var(--base); }
@@ -455,4 +498,8 @@ button.mgx-claim .mgx-claimribbon { display: inline-block; width: 14px; height: 
   /* .at-chip's own live dot / indeterminate ring have their own reduced-motion guard in
      notify.css (shared across every host, not gallery-specific like this block). */
   .mgx-bnr, .mgx-title, .mgx-mark { transition: none; }
+  /* ...and with the transition gone there is no motion for the expand pin to smooth, so it
+     must not hold the banner at 62px for half a second and then drop it. Un-pinned here,
+     the hero comes back instantly, which is the whole contract of this block. */
+  .mgx-bnr.expanding { height: auto; overflow: visible; }
 }

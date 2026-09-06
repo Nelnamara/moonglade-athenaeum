@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate, peek, put } from "../hooks/swrCache.js";
-import useMyArt, { fmt } from "../hooks/useMyArt.js";
+import useMyArt, { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
 import useContests, { qualifies, dayOf } from "../hooks/useContests.js";
 import "../styles/overlays.css";
 import "../styles/myart-contests.css";
@@ -114,6 +114,10 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
      open, and withToken() below is what closes the gap for a click made inside that
      window -- it waits for the live read rather than sending "". */
   const [rows, setRows] = useState(() => (peek("/api/myart/items") || {}).items || null);
+  // Seeded from the same cached read the rows are (#42): a reopen that paints an empty
+  // grid from the cache paints the REASON it is empty in that first frame too, rather
+  // than flashing the bare "Nothing here yet." until the live read lands.
+  const [coverage, setCoverage] = useState(() => (peek("/api/myart/items") || {}).coverage || null);
   const [rowsErr, setRowsErr] = useState(null);
   const [csrf, setCsrf] = useState("");
   const csrfRef = useRef("");
@@ -175,6 +179,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
     put("/api/myart/items", j);          // the csrf is stripped on the way in
     if (dead) return;
     setRows(j.items || []);
+    setCoverage(j.coverage || null);
     setCsrf(j.csrf || "");
   };
 
@@ -448,7 +453,18 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
 
             {mediaTab && rows && (
               media.length === 0 ? (
-                <div className="mgma2-empty">Nothing here yet.</div>
+                /* #42: when the cause is "--sync-artworks has never run here", say so and
+                   point at the fix -- the SAME mgma2-emptywhy pattern the Assets tab below
+                   has always used. Any other emptiness (no videos on Animations, a
+                   Visibility filter that matches nothing, a library that genuinely
+                   published nothing) keeps the plain line, because that is all it can
+                   honestly claim. artworksNeverSynced() states the three conditions. */
+                <div className="mgma2-empty">
+                  Nothing here yet.
+                  {artworksNeverSynced(rows, coverage) && (
+                    <div className="mgma2-emptywhy">{NEVER_SYNCED_WHY}</div>
+                  )}
+                </div>
               ) : (
                 <div className="mgma2-grid">
                   {media.map((it) => {

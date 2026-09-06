@@ -33,6 +33,10 @@ A row of frosted glow-pill buttons, one hue per destination:
   by **Most viewed** as easily as by Most liked. See
   [View counts](Backing-Up#view-counts-and-the-one-thing-worth-knowing-about-them) for where
   those numbers come from and why looking at them is not quite free.
+  My Art reads your local catalog, and the titles, tags and like counts it lists arrive with
+  **Sync published-artwork metadata** (Panel → Maintenance, or `--sync-artworks` — see
+  [Backing Up](Backing-Up)). On a library where that has never run there is nothing for it to
+  list, and it now says so and points at the sync instead of showing a bare "Nothing here yet."
 - **Followers and following** sit beside the credits figure in the header, and again in the
   Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
   never follows, unfollows, likes or comments on your behalf.

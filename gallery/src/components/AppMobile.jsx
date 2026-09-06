@@ -648,6 +648,42 @@ export default function AppMobile({ boot }) {
     };
   }, [setLibSelected]);
 
+  /* ...AND THE ANNOUNCEMENT LEADS SOMEWHERE (#55, 2026-09-06). The other half of the
+     announce-only contract above. Under THE POLICY the library never restacks itself, so
+     the Activity row's thumbnail is this shell's ONE route from "your image is done" to the
+     image. ActivityRow.jsx renders that link on both shells and, for a plain tap, calls
+     preventDefault() and dispatches mg-open-details instead (notify/ActivityRow.jsx) -- but
+     the only listener lived in App.jsx, so on the phone the tap was swallowed whole: the
+     anchor was cancelled and nothing opened in its place. VideoDrawer.jsx's result strip
+     rides the same bus, so both dispatchers are covered by the one listener.
+       It opens the phone's OWN picture record -- setDetailsFor, the same ImageDetailsMobile
+     every tile tap reaches -- rather than letting the anchor follow its /?image=<mid> href:
+     that address is the DESKTOP shell's bookmarkable one and this surface keeps no URL
+     state at all (see the Image Details Mobile note above), so following it would reload
+     the whole app to open one picture.
+       Two things get out of the way first, neither of which the desktop shell has:
+       - the Activity sheet the row was tapped in, yanked instantly via openSheet(null)
+         exactly as openScreen() does below, because Details is an incoming full-viewport
+         surface and closeSheet()'s animated path stays reserved for the scrim tap. Left
+         open, it is what you land back on when the picture closes.
+       - the lightbox, whose .lbm-root (z 55) sits ABOVE .idm-root (z 50): Details opened
+         under it would be invisible. openDetailsFromLightbox clears it for the viewer's
+         own route to Details for that same reason.
+     Mounted once, like the completion listeners: setDetailsFor/setLbIndex are setState, and
+     openSheet only ever touches setState and useSheet's own timer ref, so none of the three
+     can go stale across the single mount. */
+  useEffect(() => {
+    const onOpenDetails = (e) => {
+      const mid = e.detail && e.detail.mid;
+      if (!mid) return;
+      openSheet(null);
+      setLbIndex(null);
+      setDetailsFor(mid);
+    };
+    document.addEventListener("mg-open-details", onOpenDetails);
+    return () => document.removeEventListener("mg-open-details", onOpenDetails);
+  }, []);
+
   const refreshCollections = async () => {
     const c = await fetchCollections();
     if (c) setCollections(c);

@@ -143,6 +143,10 @@ python moonglade_backup.py --sync-artworks --with-videos
 python moonglade_backup.py --sync-artworks --no-views    # everything except the view counts
 ```
 
+`--sync-artworks` is what fills **📈 My Art** — until it has run once, that screen has nothing
+to list and tells you so. The Panel has the same job under Maintenance as **Sync
+published-artwork metadata**, if you would rather not use a terminal.
+
 ### View counts, and the one thing worth knowing about them
 
 `--sync-artworks` also collects the **view count** of every published work, which is what

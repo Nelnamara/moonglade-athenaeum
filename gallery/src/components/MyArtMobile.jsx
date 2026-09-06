@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
-import { fmt } from "../hooks/useMyArt.js";
+import { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
 import "../styles/control-mobile.css";
@@ -64,6 +64,9 @@ const SORT_OPTS = [["latest", "Latest first"], ["oldest", "Oldest first"],
 
 export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const [rows, setRows] = useState(null);
+  // #42 -- the catalog-wide counts that let the empty state name its own cause. Same
+  // field the desktop overlay reads off the same route; see useMyArt.js.
+  const [coverage, setCoverage] = useState(null);
   const [rowsErr, setRowsErr] = useState("");
   const [csrf, setCsrf] = useState("");
   const [stats, setStats] = useState(null);
@@ -89,7 +92,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
   const load = () => apiGet("/api/myart/items")
     .then((j) => {
       if (j.error) throw new Error(j.error);
-      setRows(j.items || []); setCsrf(j.csrf || "");
+      setRows(j.items || []); setCoverage(j.coverage || null); setCsrf(j.csrf || "");
     });
 
   useEffect(() => {
@@ -282,7 +285,15 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
 
       {mediaTab && rows && (
         media.length === 0 ? (
-          <div className="mgh-loading" style={{ padding: "24px 0" }}>Nothing here yet.</div>
+          /* #42, the phone's half: the same cause check and the same wording desktop's
+             MyArtOverlay shows, in this screen's own markup. The Assets tab below already
+             explains ITSELF this way; the Artworks/Animations empty state never did. */
+          <div className="mgh-loading" style={{ padding: "24px 0" }}>
+            Nothing here yet.
+            {artworksNeverSynced(rows, coverage) && (
+              <div style={{ fontSize: 11, marginTop: 8 }}>{NEVER_SYNCED_WHY}</div>
+            )}
+          </div>
         ) : (
           <div className="myam-grid">
             {media.map((it) => {

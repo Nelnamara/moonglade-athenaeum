@@ -245,6 +245,60 @@ describe("the phone learns completions exist -- announce-only", () => {
   });
 });
 
+/* THE ANNOUNCEMENT LEADS SOMEWHERE, ON BOTH SHELLS (#55, fixed 2026-09-06).
+
+   The other half of the policy above, and found while verifying it: with the library standing
+   still, the Activity row's thumbnail is the phone's ONE route from "your image is done" to the
+   image. ActivityRow.jsx renders that link on both shells and cancels the anchor for a plain tap
+   (preventDefault) in favour of the mg-open-details bus -- but only App.jsx listened, so on the
+   phone the tap was swallowed whole: cancelled, and nothing opened in its place.
+
+   Structure is what can be pinned here, for the same reason as everything above: no React test
+   renderer in this suite. The behaviour itself is a real-browser question and belongs in
+   tests/test_render_harness.py if it is ever measured live. */
+describe("the Activity row's thumbnail opens the picture on the phone too", () => {
+  const row = src("notify/ActivityRow.jsx");
+
+  test("the dispatcher is unchanged: one bus event, on document, carrying the media id", () => {
+    // Both ends have to agree on the channel; this is the half the desktop already listened to.
+    assert.match(row, /document\.dispatchEvent\(new CustomEvent\("mg-open-details", \{ bubbles: true, composed: true, detail: \{ mid \} \}\)\);/);
+    // ...and it still cancels the anchor for a plain tap, which is WHY a missing listener was
+    // a dead tap rather than a full-page navigation to the desktop's /?image= address.
+    assert.match(row, /e\.preventDefault\(\);/);
+    assert.match(row, /if \(e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey \|\| e\.button === 1\) return;/);
+  });
+
+  test("BOTH shells listen, and both let go", () => {
+    for (const [name, source] of [["App.jsx", app], ["AppMobile.jsx", mobile]]) {
+      assert.match(source, /document\.addEventListener\("mg-open-details", onOpenDetails\);/,
+        name + " does not listen for mg-open-details");
+      assert.match(source, /document\.removeEventListener\("mg-open-details", onOpenDetails\);/,
+        name + " does not remove its mg-open-details listener");
+    }
+  });
+
+  test("the phone opens its OWN picture record, and clears what would cover it", () => {
+    const handler = bodyOf(mobile, "const onOpenDetails = (e) => {", "    };");
+    assert.match(handler, /const mid = e\.detail && e\.detail\.mid;/);
+    assert.match(handler, /if \(!mid\) return;/);
+    // ImageDetailsMobile, via the same setter every tile tap reaches -- never the desktop's
+    // bookmarkable /?image= address, which this shell keeps no URL state for.
+    assert.match(handler, /setDetailsFor\(mid\);/);
+    assert.doesNotMatch(handler, /\?image=/);
+    // The sheet the row was tapped in, yanked the way openScreen() does it (instant, no 280ms
+    // exit) because Details is an incoming full-viewport surface.
+    assert.match(handler, /openSheet\(null\);/);
+    assert.doesNotMatch(handler, /closeSheet\(\);/);
+    // ...and the lightbox, whose .lbm-root outranks .idm-root, so Details under it is invisible.
+    assert.match(handler, /setLbIndex\(null\);/);
+    const lbm = readFileSync(path.resolve(__dirname, "../../gallery/src/styles/lightbox-mobile.css"), "utf8");
+    const idm = readFileSync(path.resolve(__dirname, "../../gallery/src/styles/image-details-mobile.css"), "utf8");
+    const z = (css, sel) => Number((new RegExp("\\" + sel + "[^}]*z-index:\\s*(\\d+)").exec(css) || [])[1]);
+    assert.ok(z(lbm, ".lbm-root") > z(idm, ".idm-root"),
+      "the reason setLbIndex(null) is in that handler is this ladder; if it inverts, re-read it");
+  });
+});
+
 describe("pruneSelected: the one prune, shared by both shells", () => {
   const fn = bodyOf(library, "export function pruneSelected(setSelected, items) {",
                     "\n}\n");

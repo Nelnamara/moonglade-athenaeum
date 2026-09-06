@@ -2275,7 +2275,10 @@ export function PowerModal({ mode, phase, error, onClose }) {
         <div className="mgcp-pwr-card">
           <div className="mgcp-pwr-mascotwrap">
             <div className={"mgcp-pwr-halo" + (busy && isRestart ? " busy" : "")} />
-            <div className={"mgcp-pwr-mascot" + (mode === "stop" || failed ? " off" : "") + (isRestart && busy ? " spin" : "")}
+            {/* No spin class any more (owner, 2026-09-05) -- the mascot holds still and the
+                halo above it keeps pulsing, which is the busy signal the ruling kept. The
+                greyed `off` state is untouched. control-panel.css carries that ruling. */}
+            <div className={"mgcp-pwr-mascot" + (mode === "stop" || failed ? " off" : "")}
               style={{ backgroundImage: "url(/branding/mascots/" + (mode === "stop" ? "nel_shutdown.png" : "nel_restart.png") + ")" }} />
           </div>
           <div className="mgcp-pwr-title">{title}</div>

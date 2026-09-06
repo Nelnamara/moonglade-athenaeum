@@ -56,12 +56,48 @@ export default function Banner({
     };
   }, []);
 
+  /* THE EXPAND IS ONE MOTION (ROADMAP S4, 2026-09-06). shell.css's `.mgx-bnr.expanding`
+     block carries the full diagnosis and the measured numbers; the short of it is that the
+     banner's height is `auto` when it is a hero, `auto` cannot be interpolated, and so the
+     snap back to it lands in the FIRST frame of the expand -- the jump the owner reported --
+     while the min-height that can actually animate is left sliding the remainder. This flag
+     pins the height at the slim 62px for the length of that animation, so the box follows
+     min-height the whole way up exactly as it follows it the whole way down.
+
+     Only the slim -> hero direction: the collapse never needed it and gets no class.
+
+     DERIVED DURING RENDER, not in an effect, and that is the difference between a fix and a
+     worse bug. An effect commits a frame LATE: the first version of this ran the flip in a
+     useEffect and the harness read 172.3px at t=0, then 62px at t=20ms, then the climb --
+     the banner now jumped UP to content height, dropped back to the slim row, and only then
+     opened. React's own "adjusting state when a prop changes" idiom re-renders before the
+     browser sees anything, so `slim` leaving and `expanding` arriving are ONE commit and one
+     paint. `prevSlim` starting AT `slim` is also what skips the mount: an install that opens
+     slim, or opens hero, paints its settled banner rather than half a second of a transition
+     it never made.
+
+     The 500 matches the .5s in shell.css's own transition; the two are the same number by
+     construction and are commented as a pair at that end. Not transitionend: the
+     reduced-motion block turns that transition off entirely, and an event that never fires
+     would strand the pin -- which is also why that block un-pins this class directly. */
+  const [prevSlim, setPrevSlim] = useState(slim);
+  const [expanding, setExpanding] = useState(false);
+  if (prevSlim !== slim) {
+    setPrevSlim(slim);
+    setExpanding(!slim);   // false on the way down, so a collapse also cancels a live pin
+  }
+  useEffect(() => {
+    if (!expanding) return undefined;
+    const t = setTimeout(() => setExpanding(false), 500);
+    return () => clearTimeout(t);
+  }, [expanding]);
+
   const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString());
   const s = stats || {};
   const live = (running && running.count) || 0;
 
   return (
-    <div className={"mgx-bnr" + (slim ? " slim" : "")}>
+    <div className={"mgx-bnr" + (slim ? " slim" : "") + (expanding ? " expanding" : "")}>
       {/* art layer, clipped on its own so band popovers can escape the banner */}
       <div className="mgx-art" style={{ "--crop": (band.crop != null ? band.crop : 30) + "%" }}>
         <img src="/branding/banner.png" alt="" onError={(e) => e.currentTarget.remove()} />
