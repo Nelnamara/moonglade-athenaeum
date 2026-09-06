@@ -4447,7 +4447,12 @@ _artworks_lock = threading.Lock()
 # was allowed to refresh works older than ARTWORKS_YOUNG_DAYS. Both are mirrored into
 # schedule.json by the sweep itself so they survive a restart -- an in-memory-only deep
 # stamp would make every boot a full walk, which is exactly what the tier exists to avoid.
-_artworks_state = {"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0}
+# `kicks` counts how many times a TRIGGER asked for a sweep -- boot, tick, publish, Run
+# now -- whether or not one actually started. It is the only record that a trigger fired
+# at all: a kick that stands down (a Panel job in the slot, the background gate off, a
+# sweep already in flight) leaves no other trace anywhere, which made "did the publish
+# route really ask?" unanswerable except by reading the source.
+_artworks_state = {"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0, "kicks": 0}
 
 
 def published_index(db_path):
@@ -9115,6 +9120,7 @@ def create_app(out_dir: Path):
         tick sweeps, and a `--sync` or a `--sync-artworks` writes the publish back itself.
 
         Returns whether a sweep was actually started."""
+        _artworks_state["kicks"] += 1        # a trigger asked; see the counter's own note
         if not _bg_release_check:
             return False
         if _artworks_job_busy():
@@ -9197,12 +9203,21 @@ def create_app(out_dir: Path):
 
         ONE JOB PER TICK. There is exactly one Panel slot, and a tick that started four
         things would spawn one and silently drop three. The list is in shipped order, so the
-        first due job that can actually start is the one that goes."""
+        first due job that can actually start is the one that goes.
+
+        THE GATE IS THIS FUNCTION; the work is _living_tick_once below. Split so the loop's
+        heartbeat keeps its gate while the decision itself can be driven directly on a
+        stubbed subprocess seam -- a job list whose one-per-tick rule is only ever asserted
+        by reading source text is a rule nothing proves at runtime."""
         if not _bg_release_check:
             # The same gate the contest sweep and the live mirror ride, for the same
             # reason: this reaches PixAI with the machine's real credentials, and the
             # suite's conftest sets that flag precisely so create_app() cannot.
             return
+        _living_tick_once()
+
+    def _living_tick_once():
+        """One pass of the job list -- see _living_tick above for the whole account."""
         try:
             import time as _t
             with _sched_lock:
@@ -9248,6 +9263,15 @@ def create_app(out_dir: Path):
                     return                      # one job per tick
         except Exception:              # noqa: BLE001 -- a bad schedule must not kill the loop
             pass
+
+    # Test seam, same rationale as app.extensions["mg_panel_job"] above: the job list's
+    # decision and the automation policy are closures over out_dir/db_path, so calling them
+    # is the only way to prove at RUNTIME that two due jobs start exactly ONE subprocess,
+    # or that `organize` is refused by the policy rather than merely absent from a list.
+    # Exposes the functions, not a way around any gate: _artworks_kick keeps its own
+    # background-network gate, so nothing here can reach PixAI.
+    app.extensions["mg_living"] = {"tick": _living_tick_once,
+                                   "runnable": _living_runnable}
 
     def _scheduler_loop():
         import time as _time

@@ -65,7 +65,8 @@ def _fresh_sweep_state():
     not to one create_app). Reset around every test so one test's sweep cannot buy the
     next one fifteen minutes of silence."""
     before = dict(g._artworks_state)
-    g._artworks_state.update({"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0})
+    g._artworks_state.update({"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0,
+                              "kicks": 0})
     yield
     g._artworks_state.update(before)
 
@@ -212,13 +213,24 @@ def _runnable(tmp_path):
 def test_the_automation_policy_refuses_every_must_stay_manual_job(tmp_path):
     """The scope's "must stay manual" row -- organize, undo organize, dedup
     quarantine/delete, restore orphans -- can never be started by the automation, and the
-    set that CAN is a literal in the module, not anything a route or a file can name."""
-    _runnable(tmp_path)
-    src = inspect.getsource(g.create_app)
-    body = src[src.index("def _living_runnable(action):"):]
-    body = body[:body.index("def _living_run(")]
-    # The refusal it inherits from the single-job scheduler, still stated in code
-    assert 'spec["destructive"]' in body and 'spec.get("advanced")' in body
+    set that CAN is a literal in the module, not anything a route or a file can name.
+
+    ASKED AT RUNTIME. This used to read the policy's source for the two checks it makes,
+    which stays true however the control flow around them drifts -- an indentation slip
+    that left a check unreachable would have read exactly the same."""
+    app = _runnable(tmp_path)
+    runnable = app.extensions["mg_living"]["runnable"]
+    for manual in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
+                   "restore-orphans"):
+        assert runnable(manual) is False, "%s must never be automatic" % manual
+    # an advanced action is refused too, and an unknown key is not a way in
+    assert runnable("inventory") is False
+    assert runnable("no-such-action") is False
+    # ...while the ordinary jobs and the closed staleness set are allowed
+    for ok in ("sync", "sync-videos", "reconcile-deleted", "artworks-sweep"):
+        assert runnable(ok) is True
+    for stale_ok in ("resync-full", "rebuild-similar", "rebuild-thumbs"):
+        assert runnable(stale_ok) is True
     # and the widening is a closed, hard-coded set -- never a client-supplied one
     stale = inspect.getsource(g).split("LIVING_STALE_JOBS = (")[1].split("\n)")[0]
     for manual in ("organize", "undo-organize", "dedup-apply", "dedup-delete",
@@ -555,31 +567,69 @@ def test_an_animations_own_row_is_tagged_through_its_video_media_id(tmp_path, mo
 
 def test_the_sweep_has_all_four_triggers_wired(tmp_path):
     """Owner call 2 was "BOTH the publish-kick and the periodic sweep"; the scope adds the
-    boot kick and Run now. All four go through the one single-flight wrapper."""
+    boot kick and Run now. All four go through the one single-flight wrapper.
+
+    Two of the four are DRIVEN here (Run now, and the tick's own due sweep row); the
+    publish kick has its own behavioural test below. The boot kick is the one that cannot
+    be driven -- it is a thread create_app starts only when the background gate is open,
+    which is exactly what the suite closes so no test can reach PixAI -- so it stays a
+    wiring assertion, deliberately and for a stated reason."""
     src = inspect.getsource(g.create_app)
     assert "_artworks_sync_startup" in src and "ARTWORKS_STARTUP_DELAY" in src
     assert "threading.Thread(target=_artworks_sync_startup" in src
-    # the publish kick: forced, and it lives in the My Art publish route
-    publish = src[src.index("def api_myart_publish():"):]
-    publish = publish[:publish.index("def _lineage_card(")]
-    assert "_artworks_kick(force=True)" in publish, \
-        "publishing must re-read PixAI at once -- that is the incident this was scoped from"
-    # the periodic tick, and Run now
+
+    # RUN NOW: the button really reaches the shared kick
+    cli = _client(tmp_path)
+    before = g._artworks_state["kicks"]
+    assert cli.post("/api/panel/sweep", json={}).get_json()["action"] == "artworks-sweep"
+    assert g._artworks_state["kicks"] == before + 1
+
+    # THE PERIODIC TICK: a due sweep row asks for one too, and asks for nothing else
+    _due_schedule(tmp_path, ["artworks-sweep"])
+    cli2 = _client(tmp_path)
+    before = g._artworks_state["kicks"]
+    import subprocess as _sp
+    spawned = []
+    with _mock.patch.object(_sp, "Popen", lambda argv, **kw: spawned.append(argv)):
+        cli2.application.extensions["mg_living"]["tick"]()
+    assert g._artworks_state["kicks"] == before + 1
+    assert spawned == [], "the sweep is in-process -- it must never spawn the CLI"
     assert "_living_tick()" in src and "def api_panel_sweep():" in src
 
 
-def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path):
+def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatch):
     """"publish/unpublish/retag" -- each changes what listArtworks returns, so each is a
     reason to read it back. The kick sits AFTER the whole if/else, not inside the publish
-    branch."""
+    branch.
+
+    DRIVEN THROUGH THE REAL ROUTE. `_artworks_state["kicks"]` counts the triggers that
+    asked for a sweep, which is the only trace a kick leaves when it stands down -- and it
+    stands down in every test, because the background gate the suite sets is what stops
+    create_app reaching PixAI. Asserting on the route's source text instead could not tell
+    a call from a line that never runs."""
+    cli = _client(tmp_path, [_row(media_id="m1", filename="a_m1.png",
+                                  artwork_id="aw1", is_published="1")])
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "resolve_tack_ids", lambda *a, **k: ([1], []))
+    monkeypatch.setattr(core, "update_artwork", lambda *a, **k: {"id": "aw1"})
+    monkeypatch.setattr(core, "delete_artwork", lambda *a, **k: None)
+    csrf = cli.get("/api/panel/summary").get_json()["csrf"]
+    # visibility = unpublish, tags = retag, delete = gone from the list entirely. Each
+    # changes what listArtworks returns, so each is a reason to read it back.
+    for body in ({"action": "visibility", "private": True},
+                 {"action": "tags", "tags": ["moonwell"]},
+                 {"action": "delete"}):
+        before = g._artworks_state["kicks"]
+        r = cli.post("/api/myart/publish",
+                     json=dict(body, media_id="m1", confirm=True, csrf=csrf))
+        assert r.status_code == 200, (body["action"], r.get_json())
+        assert g._artworks_state["kicks"] == before + 1, \
+            "%s must re-read PixAI's own list back" % body["action"]
+    # the kick is the SHARED one, so it defers exactly as every other trigger does
     src = inspect.getsource(g.create_app)
     publish = src[src.index("def api_myart_publish():"):]
     publish = publish[:publish.index("def _lineage_card(")]
-    kick = publish.index("_artworks_kick(force=True)")
-    mirror = publish.index("publish_state(db_path, mid, **changed)")
-    assert kick > mirror
-    # at the route's own body indent (8 spaces), i.e. outside the action branches
-    assert "\n        try:\n            _artworks_kick(force=True)" in publish
+    assert publish.index("_artworks_kick(force=True)") > publish.index("publish_state(")
 
 
 def test_the_living_tick_rides_the_existing_sixty_second_loop_and_adds_no_thread():
@@ -597,16 +647,82 @@ def test_the_living_tick_rides_the_existing_sixty_second_loop_and_adds_no_thread
     assert "threading.Timer" not in body and body.count("threading.Thread") == 0
 
 
-def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order():
+def _due_schedule(tmp_path, actions, standing=None):
+    """A schedule.json where exactly `actions` are enabled and long overdue. The sweep row
+    is off unless asked for: it is in-process and always "starts", so it would eat the one
+    job per tick before any Panel action could be observed."""
+    jobs = [{"action": j["action"], "enabled": j["action"] in actions,
+             "interval_s": j["interval_s"], "last_run": 1.0} for j in g.LIVING_ALL]
+    (tmp_path / "schedule.json").write_text(json.dumps({
+        "enabled": bool(standing), "action": standing or "sync",
+        "interval_hours": 6, "workers": 4, "jobs": jobs}), encoding="utf-8")
+
+
+def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order(tmp_path):
     """One Panel slot. A tick that started four things would spawn one and silently drop
     three -- and the legacy standing order still owns whatever action it names, so the list
-    never takes turns losing the slot to it."""
+    never takes turns losing the slot to it.
+
+    DRIVEN, not read. This used to assert that the literal string "one job per tick"
+    appeared somewhere in the tick's source, which would survive a `return` moved out of
+    the loop. Now two jobs are made due at once and the subprocess seam counts spawns."""
+    _due_schedule(tmp_path, ["sync-videos", "reconcile-deleted"])
+    cli = _client(tmp_path)
+    started = []
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def wait(self):
+            return 0
+
+    def _popen(argv, **kw):
+        if "--workers" in argv:
+            started.append([a for a in argv if a.startswith("--")
+                            and a not in ("--out", "--workers")])
+        return _FakeProc()
+
+    import subprocess as _sp
+    tick = cli.application.extensions["mg_living"]["tick"]
+    with _mock.patch.object(_sp, "Popen", _popen):
+        tick()
+        time.sleep(0.1)
+    assert started == [["--sync-videos"]], \
+        "two due jobs must start ONE subprocess, in shipped order (got %r)" % (started,)
+    # ...and the one that started is the one that got stamped, so the other is still due
+    by = {r["action"]: r for r in cli.get("/api/panel/schedule").get_json()["jobs"]}
+    assert by["sync-videos"]["last_run"] > 1.0
+    assert by["reconcile-deleted"]["last_run"] == 1.0
+
+    # THE STANDING ORDER'S OWN ACTION IS SKIPPED, not raced for.
+    _due_schedule(tmp_path, ["sync-videos", "reconcile-deleted"], standing="sync-videos")
+    cli2 = _client(tmp_path)
+    started.clear()
+    with _mock.patch.object(_sp, "Popen", _popen):
+        cli2.application.extensions["mg_living"]["tick"]()
+        time.sleep(0.1)
+    assert started == [["--reconcile-deleted"]], \
+        "the list must step over the action the standing order owns"
+
     src = inspect.getsource(g.create_app)
-    tick = src[src.index("def _living_tick():"):]
-    tick = tick[:tick.index("def _scheduler_loop():")]
-    assert "return                      # one job per tick" in tick
-    assert "if action == standing:" in tick
-    assert "if _update_busy():" in tick, "an update mid-flight must hold the list off"
+    tick_src = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
+    assert "if _update_busy():" in tick_src, "an update mid-flight must hold the list off"
+
+
+def test_an_update_mid_flight_stops_the_tick_starting_anything(tmp_path, monkeypatch):
+    """The refusal above, driven: pulling code out from under a running job and starting a
+    job under a changing codebase are the same mistake in both directions."""
+    _due_schedule(tmp_path, ["sync-videos"])
+    cli = _client(tmp_path)
+    started = []
+    monkeypatch.setattr(g, "update_state", lambda *a, **k: {"phase": "pulling"})
+
+    import subprocess as _sp
+    with _mock.patch.object(_sp, "Popen", lambda argv, **kw: started.append(argv)):
+        cli.application.extensions["mg_living"]["tick"]()
+        time.sleep(0.05)
+    assert started == []
 
 
 def test_a_scheduled_metadata_refresh_does_not_read_view_counts(tmp_path):
@@ -1024,14 +1140,21 @@ def test_the_sweep_defers_to_a_catalog_writing_panel_job(tmp_path):
     assert not (g.ARTWORKS_TOUCHING_ACTIONS
                 & {"organize", "undo-organize", "dedup-apply", "dedup-delete",
                    "restore-orphans", "rebuild-thumbs"})
-    # every trigger defers, the publish kick included -- the gate is in the shared kick
-    src = inspect.getsource(g.create_app)
-    kick = src[src.index("def _artworks_kick(force=False):"):]
-    kick = kick[:kick.index("def _living_run(action):")]
-    assert "if _artworks_job_busy():\n            return False" in kick
-    tick = src[src.index("def _living_tick():"):]
-    tick = tick[:tick.index("def _scheduler_loop():")]
-    assert "if _artworks_job_busy():\n                        continue" in tick, \
+    # EVERY trigger defers, the publish kick included -- the gate is in the shared kick,
+    # so a publish landing while a --sync runs asks and stands down rather than racing the
+    # job that is already writing the same truth.
+    slot.update(status="running", action="sync", label="Sync now")
+    cli.post("/api/myart/publish", json={"media_id": "1", "action": "unpublish"})
+    assert cli.post("/api/panel/sweep", json={}).get_json()["ok"] is False
+    # and the TICK skips rather than stamping, so a deferral retries next minute instead
+    # of buying the sweep a whole cadence of silence
+    _due_schedule(tmp_path, ["artworks-sweep"])
+    cli2 = _client(tmp_path)
+    cli2.application.extensions["mg_panel_job"].update(
+        status="running", action="sync", label="Sync now")
+    cli2.application.extensions["mg_living"]["tick"]()
+    by = {r["action"]: r for r in cli2.get("/api/panel/schedule").get_json()["jobs"]}
+    assert by["artworks-sweep"]["last_run"] == 1.0, \
         "a deferred tick must skip and retry, never stamp last_run and go quiet"
 
 
