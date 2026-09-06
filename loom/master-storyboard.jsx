@@ -13,7 +13,7 @@ import {
   reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
-  collectSpendMids, tallySpend, formatSpend, spendTooltip,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -3080,7 +3080,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             run's cost with). Only the ~-credits shape takes the "spent" suffix, exactly as
             only the ≈-credits shape above takes "to finish"; "3 unpriced spent" is not a
             sentence, and the hover says the rest either way. */}
-        {spend.results > 0 && (
+        {spendPillShown(spend) && (
           <button className="lv-cost-pill" onClick={refreshSpend}
             title={spend.status === "error"
               ? "Couldn't read the spend ledger — the catalog didn't answer. Click to retry; no number is shown rather than a wrong one."

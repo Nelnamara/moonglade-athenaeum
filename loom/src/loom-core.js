@@ -805,6 +805,18 @@ export const formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, mis
   return "";
 };
 
+/* IS THERE ANYTHING TO SHOW? The pill's own gate, here rather than inline at the toolbar,
+   because it is a claim about the LEDGER and not about the layout.
+
+   `results > 0` alone was wrong for one real, first-class board: a project assembled
+   purely from the Footage tab's "Browse library" import. An imported card never
+   contributes to `results` (that is the whole point of the exclusion), so such a board
+   rendered no pill -- and the tooltip is the ONLY place imported clips are ever disclosed,
+   so "the hover names it instead of silently dropping it" was untrue on exactly the boards
+   where every clip was imported. An empty board still shows nothing. */
+export const spendPillShown = (s) =>
+  ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
+
 // The pill's hover: the one sentence, then the per-act breakdown, then the standing caveat.
 // The caveat is not decoration -- a board only remembers the attempts it recorded, so a shot
 // re-rolled before this ledger existed spent money nothing on the board can still point at.

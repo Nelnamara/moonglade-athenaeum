@@ -10,8 +10,9 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
-  collectSpendMids, tallySpend, formatSpend, spendTooltip,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown,
 } from "../src/loom-core.js";
 import {
   withResult, buildDuplicateCard, patchCardByIdWith, attachedVideoPatch,
@@ -248,6 +249,36 @@ describe("a clip attached from the gallery", () => {
     // a blank or zero duration leaves the card's own default standing, never a lying zero
     assert.equal("actualDur" in attachedVideoPatch("gal-1", ""), false);
     assert.equal("actualDur" in attachedVideoPatch("gal-1", 0), false);
+  });
+
+  test("a board of nothing BUT imported clips still shows its pill", () => {
+    /* The pill was gated on spend.results > 0, and an imported card never contributes to
+       `results` -- so a project assembled purely from "Browse library" (a first-class
+       workflow: importFootage's whole purpose) rendered no pill at all. The tooltip that
+       names the imported clips, and the only place they are ever disclosed, was therefore
+       never reachable on exactly the boards that need it. */
+    const p = proj([act("Act 1", [
+      card({ id: "a", ...attachedVideoPatch("gal-1", 4) }),
+      card({ id: "b", ...attachedVideoPatch("gal-2", 4) }),
+    ])]);
+    const t = tally(p, {});
+    assert.equal(t.results, 0);
+    assert.equal(t.imported, 2);
+    assert.equal(spendPillShown(t), true, "the imported count must still be reachable");
+    assert.match(spendTooltip(t), /2 imported clip\(s\) not counted/);
+  });
+
+  test("a board with nothing on it at all still shows no pill", () => {
+    assert.equal(spendPillShown(tally(proj([act("Act 1", [])]), {})), false);
+    assert.equal(spendPillShown({}), false);
+    assert.equal(spendPillShown(null), false);
+  });
+
+  test("the board's own toolbar reads the pill's gate through that one rule", () => {
+    const jsx = readFileSync(
+      new URL("../master-storyboard.jsx", import.meta.url), "utf8");
+    assert.match(jsx, /\{spendPillShown\(spend\) && \(/);
+    assert.doesNotMatch(jsx, /\{spend\.results > 0 && \(/);
   });
 
   test("an attached clip is excluded from the sum and named in the hover", () => {
