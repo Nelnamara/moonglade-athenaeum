@@ -1178,8 +1178,8 @@ Moonglade now crosses into the half of PixAI that only a logged-in browser could
 
 - **First-run account creation, on the React Login page — the answered design
   request, built the same night it came back.** `design_handoff/request-bootstrap-account-creation.md`
-  (handed to design rather than improvised, per the owner's explicit "you don't
-  get to design shit") came back with a real, complete spec: a toggle on the
+  (handed to design rather than improvised, per the owner's standing rule that screens
+  are designed, not improvised by the assistant) came back with a real, complete spec: a toggle on the
   sign-in card, direct owner-framing copy ("You're setting up this server —
   this account will own it"), a proactive password-requirement checklist with
   live ✓/· marks, per-field errors, and a calmer non-red banner style for the
@@ -1294,8 +1294,8 @@ Moonglade now crosses into the half of PixAI that only a logged-in browser could
   its available height capped and its bottom edge anchored above the dock's top edge.
   Caught by the same adversarial review, verified fixed live (Enhance → Open Filters
   now renders cleanly above the dock, zero overlap).
-- **`<mg-model-picker>` conformed to the DC's "Base model" panel** (owner: *"conform or get
-  the fuck out"*) — card anatomy, search field, and grid now match the design's literal
+- **`<mg-model-picker>` conformed to the DC's "Base model" panel** (owner ruling: conform to
+  the design, no exceptions) — card anatomy, search field, and grid now match the design's literal
   values (11px radius, accent-border-only selection, no hover rule, Official pill, the
   1:1 cover, 9.5px meta typography). The old green "compatible" text badge is gone (the DC
   has none); a confirmed-incompatible LoRA (`compat:'no'`) gets the DC's warning
@@ -4784,8 +4784,8 @@ large docs consolidation, and a real multi-account authentication stack.
 - **Web-based first-account bootstrap + a Users tab on the Panel: no more CLI-only account
   creation** (2026-07-19, `pixai_gallery.py`, `tests/test_web_auth.py`,
   `tests/test_panel_users.py`). Owner directive, in reaction to the localhost-bypass removal
-  just below making `--add-web-user` briefly the ONLY way into a fresh clone: "NO CLI first
-  login bullshit... its why I built a fucking login screen in figma." Design source:
+  just below making `--add-web-user` briefly the ONLY way into a fresh clone: no CLI-first
+  login; the login screen designed in Figma is the front door. Design source:
   `static/_mockup_login_panel.html` (also published as a Claude Artifact) -- its
   FieldSet/SubmitButton/ErrorLine components and two login states (normal / first-run) are now
   server-rendered in `LOGIN_HTML` instead of being a client-side mock, using this app's existing
