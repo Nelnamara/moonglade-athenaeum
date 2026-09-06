@@ -13,6 +13,7 @@ import {
   reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -20,7 +21,7 @@ import {
 // (no React, no DOM, no fetch), consumed by the useProjectStore /
 // useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
 import {
-  patchCard, patchCardById, patchAct, patchAssets,
+  patchCard, patchCardById, patchCardByIdWith, withResult, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
@@ -1031,7 +1032,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -2240,7 +2241,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
               <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
                 if (!routeTarget) return;
-                setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }));
+                setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }, new Date().toISOString()));
                 setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
               }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
             </div>
@@ -3022,6 +3023,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             {/^≈.*cr/.test(formatCostEstimate(costEstimate))
               ? formatCostEstimate(costEstimate) + " to finish"
               : formatCostEstimate(costEstimate)}
+          </button>
+        )}
+        {/* Its historical sibling, and deliberately the SAME pill -- same .lv-cost-pill
+            chrome, same click-to-refresh, same call-site suffix trick -- so the two read as
+            one before/after pair rather than as two inventions sharing a bar. The marks are
+            the house's own and they are not interchangeable: `≈` above is an ESTIMATE
+            (/api/price's quote for what is left), `~` here is a SETTLED ACTUAL (the
+            catalog's paid_credit, the same mark historyCore.costText renders every finished
+            run's cost with). Only the ~-credits shape takes the "spent" suffix, exactly as
+            only the ≈-credits shape above takes "to finish"; "3 unpriced spent" is not a
+            sentence, and the hover says the rest either way. */}
+        {spend.results > 0 && (
+          <button className="lv-cost-pill" onClick={refreshSpend}
+            title={spend.status === "error"
+              ? "Couldn't read the spend ledger — the catalog didn't answer. Click to retry; no number is shown rather than a wrong one."
+              : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."}>
+            {spend.status === "error" ? "—"
+              : spend.status === "loading" ? "…"
+              : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)}
           </button>
         )}
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
@@ -6133,6 +6153,15 @@ function useShotMutations(project, setProject) {
   // which needs the act id. generateShot/pollShot/useExistingVideo don't know (or care)
   // which act a shot lives in, so this stays a sibling of setCard rather than folding in.
   const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
+  // setCardResult is setCardStatus for the ONE patch that carries a new resultMid. It exists
+  // so the card being overwritten gets a say: withResult reads the resultMid it is about to
+  // replace and files it under `attempts`, which is the only reason the spend ledger can
+  // count a re-rolled shot's first, paid-for try instead of forgetting it. Every landing
+  // result goes through here or through withResult directly (the routed-video path in
+  // LoomV2 uses setCard, which already takes a function) -- a fifth write site that used
+  // plain setCardStatus would silently reintroduce the amnesia.
+  const setCardResult = (cardId, patch) =>
+    setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch, new Date().toISOString())));
 
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
@@ -6179,7 +6208,7 @@ function useShotMutations(project, setProject) {
   const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
   const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
 
-  return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+  return { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
 }
@@ -6188,7 +6217,7 @@ function useShotMutations(project, setProject) {
 // mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
 // dependency on the resume effect below -- see that effect's own comment for why the
 // Mobile-view toggle needs to trigger the identical resume it already runs on project load.
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
   const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
   const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
@@ -6436,7 +6465,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // Reset trims too -- a re-roll's new clip is a different length than whatever the
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
         // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
@@ -6522,7 +6551,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
       // this file -- newly reachable while a generation is "paused" (Deep Focus's busy-guard
       // now lets a paused shot through) but was previously left stale/live here, unlike every
       // other done path (found in review).
-      setCardStatus(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
+      setCardResult(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
         ...(dur > 0 ? { actualDur: dur } : {}) });
     }, "video");
   };
@@ -6852,6 +6881,41 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const settled = notDone.filter((e) => { const r = priceCache[e.c.id]; return r && !r.loading; }).map((e) => priceCache[e.c.id].pr);
   const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
 
+  // ---- The standing SPEND ledger: what this project has already spent, the historical
+  // sibling of the cost-to-finish estimate above. Deliberately unlike it in every way that
+  // matters: no /api/price, no cache to warm, no staleness contract to worry about. The
+  // catalog is a settled record, so one read answers it, and the only thing that can change
+  // the answer is a shot finishing -- which changes the collected media-id set, which is
+  // exactly what this refetches on. Editing a prompt, or a poll tick, changes nothing here.
+  const [spendRows, setSpendRows] = useState({});     // media_id -> {paid_credit, task_id}
+  const [spendStatus, setSpendStatus] = useState("loading");   // loading | ok | error
+  const collectedSpend = useMemo(() => collectSpendMids(project), [project]);
+  const spendKey = collectedSpend.mids.join(",");
+  const spendFetchedRef = useRef(null);
+  const loadSpend = useCallback((force) => {
+    const mids = collectedSpend.mids;
+    if (!mids.length) { spendFetchedRef.current = ""; setSpendRows({}); setSpendStatus("ok"); return; }
+    if (!force && spendFetchedRef.current === spendKey) return;
+    spendFetchedRef.current = spendKey;
+    setSpendStatus("loading");
+    fetch("/api/loom/spend", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ media_ids: mids }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (spendFetchedRef.current !== spendKey) return;   // a newer board superseded this read
+        if (!d || d.error || !d.rows) { setSpendStatus("error"); return; }
+        setSpendRows(d.rows); setSpendStatus("ok");
+      })
+      // An empty `rows` and a DEAD REQUEST are not the same fact: with rows left at {} every
+      // id would join to nothing and the pill would report the whole project "unpriced",
+      // which is a lie about the catalog rather than a report about the network. The error
+      // status is what stops that, and clearing the ref lets the next board change retry.
+      .catch(() => { if (spendFetchedRef.current === spendKey) { spendFetchedRef.current = null; setSpendStatus("error"); } });
+  }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSpend(); }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const refreshSpend = useCallback(() => loadSpend(true), [loadSpend]);
+  const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
+
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
@@ -6864,6 +6928,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // fetch/pricing implementation. It was already defined here; only its exposure is new.
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate, priceShot,
+    spend, refreshSpend,
   };
 }
 
@@ -6980,7 +7045,7 @@ export default function App() {
   const { project, setProject, thumbs, storeThumb, busy,
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
-  const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+  const { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
@@ -7016,10 +7081,10 @@ export default function App() {
     // reference to them.
     generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
-    costEstimate, refreshEstimate }
+    costEstimate, refreshEstimate, spend, refreshSpend }
     // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
     // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
   // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
   // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
@@ -7051,9 +7116,9 @@ export default function App() {
   const onVideoResult = useCallback((cardId, detail) => {
     const mid = (detail.media_ids || [])[0];
     setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-    setCardStatus(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
+    setCardResult(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
       ...(detail.duration ? { actualDur: detail.duration } : {}) });
-  }, [setGenState, setCardStatus]);
+  }, [setGenState, setCardResult]);
   const onVideoError = useCallback((cardId, detail) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
     // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
@@ -7178,6 +7243,7 @@ export default function App() {
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
           costEstimate={costEstimate} refreshEstimate={refreshEstimate}
+          spend={spend} refreshSpend={refreshSpend}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>

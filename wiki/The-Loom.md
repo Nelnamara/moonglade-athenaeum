@@ -172,6 +172,16 @@ Other controls in the top bar:
   refresh). The batch confirm counts each shot's tickets against the pool you hold, in order,
   so a batch that outruns your cards is called out shot by shot — "this one will spend" — before
   you confirm, rather than after the tally comes up short.
+- **`~1,180 cr spent`** — beside it, what this project has *already* cost. The two read as
+  before and after, and they are different kinds of number: the estimate is a quote (**≈**),
+  this is a record (**~**) — PixAI's own charge for each finished shot, taken from your
+  catalog. Hover for the act-by-act breakdown; click to re-read it. Every re-roll counts, not
+  just the take that survived, so "spent" means spent — though attempts you re-rolled before
+  this existed were never recorded and cannot be counted now. Two things are deliberately not
+  folded into the total: a shot whose charge PixAI never reported and one whose picture has
+  since been deleted ride alongside as **(+N unk)**, because an unknown is not a zero; and a
+  clip you brought in from your library rather than rendered here is left out entirely — that
+  money was spent elsewhere — and named on hover. Nothing is fetched from PixAI to work it out.
 - **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
 
