@@ -614,7 +614,12 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                               const last = lastByAction[c.action];
                               const cadences = c.action === "artworks-sweep" ? SWEEP_CADENCES : JOB_CADENCES;
                               return (
-                                <div className="mgcp-standing" key={c.action}>
+                                /* The server's own plain-words sentence for this job, on
+                                   the row itself. Carried as a title rather than a fourth
+                                   line of text because the row's layout is the ledger's
+                                   Standing-order row and changing that shape is a design
+                                   step, not a copy fix. */
+                                <div className="mgcp-standing" key={c.action} title={c.note}>
                                   <b className="mgcp-standing-lab">{c.label}</b>
                                   <span className="mgcp-standing-body">
                                     {c.stale ? (

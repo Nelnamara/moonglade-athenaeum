@@ -182,6 +182,87 @@ def test_a_failed_sweep_does_not_fail_the_whole_sync(tmp_path, mocker, pixai):
     assert res["views_complete"] is False        # and the sweep says so on its own line
 
 
+def test_views_only_reads_the_counts_without_re_walking_the_listing(tmp_path, mocker, pixai):
+    """THE VIEW-COUNTS JOB'S OWN MODE (owner's call, 2026-09-06). A view read is the one
+    part of --sync-artworks that costs something -- one view on every published work -- so
+    it gets its own cadence rather than riding whatever cadence the metadata refresh is on.
+    This is the narrow run behind that job: the counts, and nothing else.
+
+    The listing is not walked at all, so the run costs the three paced bulk pages the
+    counts themselves need and no more."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="m1", filename="x_m1.png", artwork_id="aw1",
+                           is_published="1")])
+    mocker.patch.object(core, "USER_ID", "u1")
+    listing = mocker.patch.object(
+        core, "artwork_list_gql",
+        side_effect=AssertionError("the listing must not be walked in views-only mode"))
+    mocker.patch.object(core, "artwork_views_bulk", return_value=({"aw1": 400}, True))
+
+    res = core.run_sync_artworks(SimpleNamespace(
+        out=str(tmp_path), token=None, delay=0, views_only=True))
+
+    listing.assert_not_called()
+    assert res["views"] == 1 and res["artworks"] == 0 and res["fail"] == 0
+    assert {r["media_id"]: r for r in load_catalog(db)}["m1"]["views"] == "400"
+
+
+def test_views_only_beats_no_views_rather_than_doing_nothing(tmp_path, mocker, pixai):
+    """The two flags contradict each other, and the narrow job is the one that meant it:
+    a run whose whole purpose is the counts must not be talked out of them."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="m1", filename="x_m1.png", artwork_id="aw1",
+                           is_published="1")])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(
+        core, "artwork_list_gql",
+        side_effect=AssertionError("the listing must not be walked in views-only mode"))
+    swept = mocker.patch.object(core, "artwork_views_bulk",
+                                return_value=({"aw1": 400}, True))
+    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                           views_only=True, no_views=True))
+    swept.assert_called_once()
+
+
+def test_read_only_refuses_the_view_read_and_says_so(tmp_path, mocker, pixai, capsys):
+    """READ_ONLY is the promise the Trust & Safety page makes: nothing this app does can
+    change the owner's PixAI account while it is set. Reading a view count ADDS ONE TO IT
+    on PixAI's side -- there is no way to look without it counting -- so the sweep is a
+    change to the account's own numbers and it is skipped, out loud, like every other
+    account-touching path.
+
+    The metadata half is a plain read and keeps working: READ_ONLY has never stopped
+    browsing, backing up or searching."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="m1", filename="x_m1.png")])
+    mocker.patch.object(core, "USER_ID", "u1")
+    mocker.patch.object(core, "READ_ONLY", True)
+    mocker.patch.object(core, "artwork_list_gql", return_value={
+        "edges": [{"node": {"id": "aw1", "mediaId": "m1", "visibility": "PUBLIC",
+                            "likedCount": 2, "commentCount": 0, "tacks": []}}],
+        "pageInfo": {"hasPreviousPage": False}})
+    swept = mocker.patch.object(core, "artwork_views_bulk")
+
+    res = core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0))
+
+    swept.assert_not_called()
+    assert res["matched"] == 1 and res["views"] == 0
+    assert "READ_ONLY" in capsys.readouterr().out
+    # the narrow view-counts job is refused the same way, not quietly excused
+    core.run_sync_artworks(SimpleNamespace(out=str(tmp_path), token=None, delay=0,
+                                           views_only=True))
+    swept.assert_not_called()
+
+
+def test_the_fifteen_minute_sweep_never_reads_a_view_count(tmp_path, mocker):
+    """The in-process sweep runs every fifteen minutes and must stay free. It reads the
+    artwork LISTING, which carries no views and costs nothing; the view read has its own
+    weekly job precisely so it cannot end up on that cadence by accident."""
+    import inspect
+    src = inspect.getsource(g.artworks_sweep) + inspect.getsource(g.artworks_sweep_kick)
+    assert "artwork_views_bulk" not in src and "views" not in src.replace("views_", "")
+
+
 class _FlakyPost:
     """A requests-shaped session that fails the first POST and answers the second.
 

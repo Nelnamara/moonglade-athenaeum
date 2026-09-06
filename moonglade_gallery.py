@@ -4768,8 +4768,18 @@ LIVING_JOBS = (
              "known pages, so it usually costs one or two"},
     {"action": "sync", "interval_s": 6 * 3600.0, "enabled": True, "then": "backfill-phash",
      "label": "Sync now", "note": "pull new + fill metadata, then backfill perceptual hashes"},
+    # THE VIEW READ ON ITS OWN TIMER (owner's call, 2026-09-06). It is the one part of the
+    # published-artwork refresh that COSTS something: asking PixAI how many views a work
+    # has adds one to that number, for every published work, every time. Riding the
+    # metadata refresh's cadence made that a daily +1 across the whole library. On its own
+    # row it is the owner's to set, to turn off, and to see -- and the fifteen-minute
+    # sweep still never reads a view count at all.
+    {"action": "sync-artwork-views", "interval_s": 7 * 86400.0, "enabled": True,
+     "label": "View counts",
+     "note": "weekly — reads how many views each published work has. Asking adds one "
+             "view to each, so this is the only job that touches those numbers"},
     {"action": "sync-videos", "interval_s": 24 * 3600.0, "enabled": True,
-     "label": "Sync i2v videos", "note": "nightly"},
+     "label": "Sync i2v videos", "note": "nightly — downloads mp4s for your animated works"},
     {"action": "reconcile-deleted", "interval_s": 7 * 86400.0, "enabled": True,
      "label": "Reconcile deleted", "note": "weekly — flags rows whose task is gone from PixAI"},
     {"action": "sync-similar", "interval_s": 24 * 3600.0, "enabled": True, "needs": "torch",
@@ -8668,9 +8678,28 @@ def create_app(out_dir: Path):
         # They now HAVE buttons (web parity: nothing should need the CLI), but the labels
         # say "full re-walk" out loud so the cost is visible before clicking rather than
         # discovered afterwards. ---
+        # A SCHEDULED RUN OF THIS ONE DOES NOT READ VIEW COUNTS (owner's call,
+        # 2026-09-06). Asking PixAI how many views a work has ADDS ONE to that number, for
+        # every published work the sweep returns -- so an unattended refresh on a timer is
+        # a daily +1 across the whole library, forever, that nobody asked for. `scheduled_args`
+        # is what splits the two cases without splitting the action: a Run now click is the
+        # owner asking by hand and still reads views; every automatic start (the living
+        # library's list, the legacy standing order, a follow-on in a `then` chain) appends
+        # --no-views. The counts have their own weekly job instead -- see
+        # "sync-artwork-views" below and LIVING_JOBS.
         "sync-artworks":     {"args": ["--sync-artworks"],
+                              "scheduled_args": ["--no-views"],
                               "label": "Sync published-artwork metadata (full re-walk)",
                               "destructive": False},
+        # The view read on its own timer, and nothing else: no listing re-walk, just the
+        # counts. Its own key rather than a flag the client can add, the same discipline
+        # audit-full and dedup-delete follow. No Panel button (panel_visible False) -- it
+        # is a "Runs itself" row with its own Run now, and a second button for the same
+        # work in the manual grid would invite running it twice.
+        "sync-artwork-views": {"args": ["--sync-artworks", "--views-only"],
+                               "label": "View counts — read how many views your published "
+                                        "works have (adds one view to each)",
+                               "destructive": False, "panel_visible": False},
         "sync-videos":       {"args": ["--sync-videos"],
                               "label": "Sync i2v videos — back up mp4s (full re-walk)",
                               "destructive": False},
@@ -8774,11 +8803,22 @@ def create_app(out_dir: Path):
         # reader thread on a job it has no business owning.
         if then and status == "done":
             try:
-                _panel_run(then)
+                # A follow-on nobody clicked: scheduled, so it takes the action's own
+                # unattended argv (the view-count opt-out) exactly as the tick would.
+                _panel_run(then, scheduled=True)
             except Exception:                             # noqa: BLE001
                 pass
 
-    def _panel_run(action, int_arg=None, then=None):
+    def _panel_run(action, int_arg=None, then=None, scheduled=False):
+        """Start one whitelisted Panel job as a subprocess.
+
+        `scheduled` means NOBODY CLICKED THIS. It is the living library's tick, the legacy
+        standing order, or a follow-on in a `then` chain -- and it is the one difference
+        that can change the argv, through the action's own `scheduled_args`. Today that is
+        the view-count opt-out on "sync-artworks" (owner's call, 2026-09-06: a view read
+        adds one view to every published work, so an unattended refresh must not do it).
+        Declared per action rather than decided here, so "what does an automatic run do
+        differently" is answerable by reading the action table."""
         import subprocess
         spec = PANEL_ACTIONS[action]
         # Worker count is a persisted panel setting (schedule.json), so BOTH manual
@@ -8801,6 +8841,8 @@ def create_app(out_dir: Path):
             except (TypeError, ValueError):
                 n = spec.get("int_default", lo)
             action_args = action_args + [str(n)]
+        if scheduled:
+            action_args = action_args + list(spec.get("scheduled_args") or [])
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
@@ -9108,7 +9150,8 @@ def create_app(out_dir: Path):
             # here (and that is what stops the first tick repeating the boot kick).
             _artworks_kick(force=True)
             return True
-        return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"))
+        return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"),
+                          scheduled=True)
 
     # Read ONCE, here, exactly as the live-mirror gate is read once further down: a daemon
     # that re-read the environment every minute could catch the instant BETWEEN two tests
@@ -9243,7 +9286,8 @@ def create_app(out_dir: Path):
                 # "sync" row is permanently deferred to it -- so without this the chain
                 # never fired for him at all.
                 if not _panel_run(action,
-                                  then=LIVING_BY_ACTION.get(action, {}).get("then")):
+                                  then=LIVING_BY_ACTION.get(action, {}).get("then"),
+                                  scheduled=True):
                     continue                   # panel busy -- retry on the next tick
                 # Re-read under the lock before stamping: `s` was loaded up to a minute
                 # ago, so writing that whole copy back would silently revert any setting

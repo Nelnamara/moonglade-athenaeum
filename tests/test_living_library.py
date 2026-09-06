@@ -609,6 +609,100 @@ def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order():
     assert "if _update_busy():" in tick, "an update mid-flight must hold the list off"
 
 
+def test_a_scheduled_metadata_refresh_does_not_read_view_counts(tmp_path):
+    """OWNER'S CALL, 2026-09-06. Reading a view count ADDS ONE to it on PixAI -- there is
+    no way to look without it counting -- so an unattended refresh must not do it. Every
+    run nobody asked for by hand (the living library's list, the legacy standing order,
+    and a follow-on in a `then` chain) passes --no-views."""
+    cli = _client(tmp_path)
+    started = []
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def wait(self):
+            return 0
+
+    def _popen(argv, **kw):
+        if "--workers" in argv:
+            started.append([a for a in argv if a.startswith("--")
+                            and a not in ("--out", "--workers")])
+        return _FakeProc()
+
+    import subprocess as _sp
+    # the manual click: the owner asked for it by hand, so it reads views
+    with _mock.patch.object(_sp, "Popen", _popen):
+        assert cli.post("/api/panel/run", json={"action": "sync-artworks"}).status_code == 200
+        time.sleep(0.1)
+    assert started == [["--sync-artworks"]], "a Run now click must still read views"
+
+    # the scheduled paths: the same action, quietly
+    src = inspect.getsource(g.create_app)
+    run = src[src.index("def _panel_run(action"):src.index("def _update_busy():")]
+    assert 'action_args = action_args + list(spec.get("scheduled_args") or [])' in run
+    assert '"scheduled_args": ["--no-views"]' in src, \
+        "the metadata refresh is the action that opts out when nobody asked for it"
+    living = src[src.index("def _living_run(action):"):src.index("# Read ONCE, here")]
+    assert "scheduled=True" in living
+    loop = src[src.index("def _scheduler_loop():"):]
+    assert "scheduled=True" in loop[:loop.index("threading.Thread(target=_scheduler_loop")]
+    reader = src[src.index("def _panel_reader(proc, then=None):"):src.index("def _panel_run(")]
+    assert "_panel_run(then, scheduled=True)" in reader
+
+
+def test_the_view_counts_job_is_on_the_list_at_its_own_weekly_cadence():
+    """The view read has its own row rather than riding the metadata refresh's cadence:
+    it is the one part of --sync-artworks that costs something, so it gets its own timer
+    and its own on/off. Weekly, on by default -- the owner's answer."""
+    by_action = {j["action"]: j for j in g.LIVING_ALL}
+    job = by_action["sync-artwork-views"]
+    assert job["interval_s"] == 7 * DAY
+    assert job["enabled"] is True
+    assert job["label"] == "View counts"
+
+
+def test_the_view_counts_job_runs_the_narrow_read_and_not_a_second_re_walk(tmp_path):
+    """Driven through the real route: the job spawns the counts-only mode, never another
+    full listing walk."""
+    cli = _client(tmp_path)
+    started = []
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def wait(self):
+            return 0
+
+    def _popen(argv, **kw):
+        if "--workers" in argv:
+            started.append([a for a in argv if a.startswith("--")
+                            and a not in ("--out", "--workers")])
+        return _FakeProc()
+
+    import subprocess as _sp
+    with _mock.patch.object(_sp, "Popen", _popen):
+        r = cli.post("/api/panel/run", json={"action": "sync-artwork-views"})
+        assert r.status_code == 200
+        time.sleep(0.1)
+    assert started == [["--sync-artworks", "--views-only"]]
+
+
+def test_every_runs_itself_row_says_what_it_does_in_plain_words(tmp_path):
+    """The Panel draws label + note from the server's own catalog, so a job with no
+    sentence beside it is a row the owner has to guess at."""
+    cli = _client(tmp_path)
+    for c in cli.get("/api/panel/schedule").get_json()["catalog"]:
+        assert c["label"] and c["note"], "%s has no plain-words note" % c["action"]
+        assert len(c["note"]) > 15
+    # and the browser really shows it -- the note rides the row, not just the payload
+    jsx = (SRC / "gallery/src/components/ControlPanelOverlay.jsx").read_text(encoding="utf-8")
+    block = jsx[jsx.index("---- RUNS ITSELF: the living library"):]
+    block = block[:block.index('<div className="mgcp-grid">')]
+    assert "title={c.note}" in block
+
+
 def test_the_backfill_chain_is_a_property_of_the_action_not_of_who_started_it(tmp_path):
     """The wiki states the chain as a plain fact about Sync now: "the one-shot refresh,
     then a perceptual-hash backfill straight after it". It was true only when the living

@@ -142,8 +142,9 @@ change its cadence.
 
 | Job | How often | What it does |
 |---|---|---|
-| **Published-artwork sweep** | every 15 minutes | Re-reads PixAI's list of your published works and refreshes their titles, tags, likes, comments and visibility. |
+| **Published-artwork sweep** | every 15 minutes | Re-reads PixAI's list of your published works and refreshes their titles, tags, likes, comments and visibility. It never reads view counts. |
 | **Sync now** | every 6 hours | The one-shot refresh (`--sync`), then a perceptual-hash backfill straight after it. |
+| **View counts** | weekly | Reads how many views each published work has. Asking adds one view to each, so this is the only job that touches those numbers — see below. |
 | **Sync i2v videos** | daily | Backs up your image-to-video generations. |
 | **Reconcile deleted** | weekly | Flags catalog rows whose task is gone from PixAI. |
 | **Top up Similar** | daily | Embeds anything the visual-similarity index is missing. Needs the optional ML install; without it the row stays asleep rather than failing nightly. |
@@ -172,6 +173,22 @@ Two consequences worth knowing:
 
 The **Sync published-artwork metadata** button below is unchanged and still does the full
 re-walk, for when you want every work re-read this instant.
+
+### View counts have their own row, on purpose
+
+Asking PixAI how many views a work has **adds one to that number** — PixAI's behaviour, not
+Moonglade's, and there is no way to look without it counting. So the view read is not part
+of anything that runs unattended:
+
+- The **fifteen-minute sweep** never reads a view count at all.
+- **View counts** is its own weekly row, on by default. Turn it off and your view numbers are
+  never touched by the app again; press its **Run now** and it reads them once, that minute.
+- A **scheduled** run of **Sync published-artwork metadata** — from this list, or from the
+  standing order — skips the view read too. Clicking that button **by hand** still reads
+  them, because that is you asking.
+- With `READ_ONLY` set in `config.json`, the view read is skipped everywhere, by hand
+  included: it changes a number on your account, so it sits behind the same switch as
+  publishing and deleting.
 
 ### What never runs itself
 

@@ -6103,6 +6103,16 @@ def run_sync_artworks(args):
         raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
                          "Add USER_ID to config.json as a fallback.")
 
+    # VIEWS-ONLY: the narrow run behind the Panel's own "View counts" job (owner's call,
+    # 2026-09-06). The view read is the one part of this command that COSTS something --
+    # one view on every published work -- so it gets its own cadence rather than riding
+    # whatever cadence the metadata refresh happens to be on. In this mode the listing is
+    # not walked at all: the counts join the catalog by artwork_id, which apply_artwork_meta
+    # wrote on some earlier run, so nothing here needs the listing to have just happened.
+    # It beats --no-views on purpose: a run whose whole purpose is the counts must not be
+    # talked out of them by a flag the Panel adds for the OTHER job.
+    views_only = bool(getattr(args, "views_only", False))
+
     by_mid = {}                      # media_id -> artwork fields
     by_video_mid = {}                # videoMediaId -> artwork fields. An animation's
                                      # catalog row is keyed by its MP4's media_id (is_video
@@ -6117,8 +6127,11 @@ def run_sync_artworks(args):
     incomplete = False               # B15: True if pagination stopped on a failed
                                       # fetch rather than legitimately running out of pages
     _prog = getattr(args, "progress", None)
-    print("Syncing published artworks (listArtworks)...")
-    while True:
+    if views_only:
+        print("Reading view counts only — the artwork listing is not walked this run.")
+    else:
+        print("Syncing published artworks (listArtworks)...")
+    while not views_only:
         page += 1
         conn = artwork_list_gql(session, before=before, last=50)
         if not conn:
@@ -6170,7 +6183,21 @@ def run_sync_artworks(args):
     # nothing about that. It reports itself separately (`views_complete` in the return) and
     # merges whatever it did get; the rows it missed keep their previous reading.
     views_map, views_ok = {}, False
-    if artworks and not getattr(args, "no_views", False):
+    want_views = views_only or (artworks and not getattr(args, "no_views", False))
+    if want_views and (READ_ONLY or _read_only_now()):
+        # READ_ONLY IS A PROMISE ABOUT THE ACCOUNT, and this read changes it. Asking PixAI
+        # how many views a work has ADDS ONE to that number, for every work the query
+        # returns -- there is no way to look without it counting -- so the sweep is an
+        # account-touching call and belongs on the same side of the switch as publishing
+        # and deleting. Refused out loud rather than silently, and the metadata half below
+        # keeps working: READ_ONLY has never stopped browsing, backing up or searching.
+        # Skipped rather than raised, because the rest of this run is a plain read and
+        # taking it down with the sweep would be its own bug.
+        print("READ_ONLY is set in config.json — skipping the view-count sweep. "
+              "Reading a view count adds one to it on PixAI, so it is a change to your "
+              "own numbers there, not just a look.")
+        want_views = False
+    if want_views:
         print("Sweeping view counts (bulk artworks query)...")
         views_map, views_ok = artwork_views_bulk(
             session, delay=getattr(args, "delay", 0.4))
@@ -6210,7 +6237,7 @@ def run_sync_artworks(args):
         # A still's own row wins any collision between the two maps, exactly as the old
         # `by_mid.get(...) or by_video_mid.get(...)` did.
         metas[mid] = m
-    matched = apply_artwork_meta(db_path, list(metas.values()))
+    matched = apply_artwork_meta(db_path, list(metas.values())) if metas else 0
 
     # The views half of the same merge, in its own narrow statement (apply_artwork_views).
     # It runs AFTER the meta write on purpose: the sweep is keyed by ARTWORK id and the
@@ -6220,8 +6247,9 @@ def run_sync_artworks(args):
     # and are not written, so a partial sweep leaves the last reading anyone took.
     now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     viewed = apply_artwork_views(db_path, views_map, now_iso) if views_map else 0
-    print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
-          "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+    if not views_only:
+        print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
+              "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
     if viewed:
         print("View counts written to {} row(s).  Note: reading a view count registers "
               "a view, so this sweep added 1 to each.".format(viewed))
@@ -13821,6 +13849,11 @@ def main():
                          "count registers a view on PixAI's side (one per work, per sweep), "
                          "so this is the opt-out for a run where you want the metadata "
                          "refreshed without touching your own view numbers")
+    ap.add_argument("--views-only", dest="views_only", action="store_true",
+                    help="with --sync-artworks, read ONLY the view counts and skip the "
+                         "artwork listing. The counts join your catalog by artwork id, so "
+                         "they do not need the listing walked again. This is what the "
+                         "Control Panel's weekly \"View counts\" job runs")
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit. This is "
