@@ -9119,7 +9119,13 @@ def create_app(out_dir: Path):
                     continue
                 if _update_busy():
                     continue                   # an update is mid-flight -- next tick
-                if not _panel_run(action):
+                # Same follow-on table the tick and the manual click read: an owner whose
+                # standing order was already set to "sync" (the schedule's own default
+                # action) runs that job through THIS path forever, and the list's own
+                # "sync" row is permanently deferred to it -- so without this the chain
+                # never fired for him at all.
+                if not _panel_run(action,
+                                  then=LIVING_BY_ACTION.get(action, {}).get("then")):
                     continue                   # panel busy -- retry on the next tick
                 # Re-read under the lock before stamping: `s` was loaded up to a minute
                 # ago, so writing that whole copy back would silently revert any setting
@@ -10681,7 +10687,14 @@ def create_app(out_dir: Path):
             # clamps it into range and ignores it otherwise, so passing it always is safe.
             # The busy check lives INSIDE _panel_run, under the same lock that claims the
             # slot -- checking it here first would just be the race again.
-            if not _panel_run(action, int_arg=body.get("n")):
+            # THE FOLLOW-ON IS A PROPERTY OF THE ACTION, not of who started it. The wiki
+            # states the chain as a plain fact about Sync now -- "the one-shot refresh,
+            # then a perceptual-hash backfill straight after it" -- and it was true only
+            # when the living library's own tick was the trigger. A click got the sync
+            # alone. Looked up from the same table _living_run reads, so there is one
+            # answer to "what follows this job".
+            if not _panel_run(action, int_arg=body.get("n"),
+                              then=LIVING_BY_ACTION.get(action, {}).get("then")):
                 return jsonify({"error": "a job is already running"}), 409
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:

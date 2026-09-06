@@ -235,9 +235,14 @@ def test_panel_job_events_carry_action_and_rc(tmp_path, monkeypatch):
     # Wait for the TERMINAL event (rc + status) to actually land in jobs.jsonl -- not just for
     # /api/panel/status to flip to "done". On a loaded runner the status flips a beat before the
     # terminal line is flushed, and read_jobs would then see rc=None (the flaky CI race).
+    # Pinned to the SYNC job's own row rather than "the newest panel row": since red team
+    # #6, Sync now is followed by the perceptual-hash backfill however it was started, so
+    # the newest row is that follow-on. What this test is about is unchanged -- the start
+    # event carries the machine action key and the terminal event carries rc.
     job = None
     for _ in range(200):                      # up to ~4s; breaks the instant the terminal event lands
-        jobs = [j for j in core.read_jobs(tmp_path) if j.get("type") == "panel"]
+        jobs = [j for j in core.read_jobs(tmp_path)
+                if j.get("type") == "panel" and j.get("action") == "sync"]
         if jobs and jobs[0].get("rc") is not None:
             job = jobs[0]
             break
@@ -420,7 +425,7 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
         def wait(self):
             return 0
     def fake_popen(argv, **k):
-        captured["argv"] = argv
+        captured.setdefault("argvs", []).append(argv)
         return FakeProc()
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
@@ -429,7 +434,12 @@ def test_run_sync_action_spawns_sync_flag(tmp_path, monkeypatch):
     assert r.get_json()["ok"] is True
     import time
     time.sleep(0.05)
-    assert "--sync" in captured["argv"]
+    # The FIRST PANEL spawn is the one this test is about. Since red team #6 the
+    # perceptual-hash backfill follows Sync now however it was started, so a later panel
+    # spawn is that follow-on. (Non-panel Popens -- the version probe's `git rev-parse` --
+    # are filtered out by the panel argv's own --workers.)
+    panel = [a for a in captured["argvs"] if "--workers" in a]
+    assert "--sync" in panel[0]
 
 
 # --- Server control: stop / restart from the browser (Homebridge-style) ---

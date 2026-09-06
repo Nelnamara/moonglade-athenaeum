@@ -16,7 +16,10 @@ NO REAL PIXAI. The sweep talks to the transport seam, so it is driven here by a 
 answering `listArtworks`, exactly as tests/test_pixai_client.py drives the real client.
 """
 import inspect
+import io
 import json
+import time
+import unittest.mock as _mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -557,6 +560,63 @@ def test_the_tick_starts_at_most_one_job_and_never_doubles_the_standing_order():
     assert "return                      # one job per tick" in tick
     assert "if action == standing:" in tick
     assert "if _update_busy():" in tick, "an update mid-flight must hold the list off"
+
+
+def test_the_backfill_chain_is_a_property_of_the_action_not_of_who_started_it(tmp_path):
+    """The wiki states the chain as a plain fact about Sync now: "the one-shot refresh,
+    then a perceptual-hash backfill straight after it". It was true only when the living
+    library's own tick started the job. A manual Run now click passed no follow-on, and
+    neither did the legacy standing-order scheduler -- and an owner who already had the
+    standing order set to "sync" (the schedule's own default action) got that path
+    forever, with the list's own "sync" row permanently deferred to it.
+
+    All three trigger paths now look the follow-on up from the same table."""
+    create_app(tmp_path)
+    src = inspect.getsource(g.create_app)
+    lookup = 'then=LIVING_BY_ACTION.get(action, {}).get("then")'
+    run_route = src[src.index("def api_panel_run():"):]
+    run_route = run_route[:run_route.index("def _close_orphan_if_resolved(")]
+    assert lookup in run_route, "a manual Run now must chain what the tick chains"
+    loop = src[src.index("def _scheduler_loop():"):]
+    loop = loop[:loop.index("threading.Thread(target=_scheduler_loop")]
+    assert lookup in loop, "the legacy standing order must chain it too"
+    living = src[src.index("def _living_run(action):"):]
+    living = living[:living.index("_bg_release_check = ")]
+    assert lookup in living
+
+
+def test_the_manual_click_really_starts_the_follow_on_job(tmp_path):
+    """Behavioural, not a source read: drive /api/panel/run through the real Flask app with
+    the subprocess seam faked, and watch the second job actually start after the first
+    reports done."""
+    cli = _client(tmp_path)
+    started = []
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def wait(self):
+            return 0
+
+    def _popen(argv, **kw):
+        # Only the Panel's own spawns: its argv always carries --workers. (create_app also
+        # runs `git rev-parse` through Popen to read the build's own version.)
+        if "--workers" in argv:
+            started.append([a for a in argv if a.startswith("--")
+                            and a not in ("--out", "--workers")])
+        return _FakeProc()
+
+    import subprocess as _sp
+    with _mock.patch.object(_sp, "Popen", _popen):
+        assert cli.post("/api/panel/run", json={"action": "sync"}).status_code == 200
+        for _ in range(200):
+            if len(started) >= 2:
+                break
+            time.sleep(0.02)
+    assert started[0] == ["--sync"]
+    assert started[1] == ["--backfill-phash"], \
+        "Sync now must be followed by the perceptual-hash backfill, however it was started"
 
 
 def test_the_backfill_chain_only_follows_a_sync_that_actually_succeeded():
