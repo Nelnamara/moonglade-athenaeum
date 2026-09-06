@@ -272,7 +272,7 @@ import "../styles/create-mobile.css";
 
    CONTACT SHEET MOBILE (2026-08-03) -- the Gallery tab's Actions sheet
    (ActionsMenu.jsx, mounted "as-is" inside GalleryMobile.jsx) has a real
-   "▤ Print sheet" item that, on mobile, previously fell through to
+   "⎙ Print sheet" item that, on mobile, previously fell through to
    ActionsMenu's own desktop-shaped fallback (a bare window.open of the
    classic print page). `contactSheetTarget`/openContactSheet/
    closeContactSheet are lifted HERE for the identical reason detailsFor/
@@ -289,7 +289,11 @@ import "../styles/create-mobile.css";
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
-  { icon: "✎", label: "Publish", screen: "publish" },
+  // ☁ since the 2026-09-05 post-audit rulings: Publish wears the cloud on every OTHER
+  // surface that offers it (the desktop record, the Lightbox, this phone's own picture
+  // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
+  // Edit, which is a different verb one row away from this one.
+  { icon: "☁", label: "Publish", screen: "publish" },
   { icon: "⚗", label: "Train a LoRA", screen: "train" },
   { icon: "⬆", label: "Import", screen: "import" },
   { icon: "🏅", label: "Contests", screen: "contests" },

@@ -117,7 +117,9 @@ describe("the More row: the app's actions the DC never drew, every handler kept"
     const kept = [
       ["Open Full Size", /href=\{"\/full\/" \+ encodeURIComponent\(row\.media_id\)\} target="_blank"[^>]*>Open Full Size<\/a>/],
       ["Open on PixAI", /href=\{row\.url\} target="_blank"[^>]*>Open on PixAI<\/a>/],
-      ["Print", /onClick=\{\(\) => window\.print\(\)\}>🖨 Print<\/button>/],
+      // ⎙ since the 2026-09-05 post-audit rulings: the app printed under three different
+      // characters (⎙, 🖶, 🖨) and this row wore the emoji one. Same handler, one mark.
+      ["Print", /onClick=\{\(\) => window\.print\(\)\}>⎙ Print<\/button>/],
       ["4×6 photo", /format=photo"[^>]*>4×6 photo<\/a>/],
       ["Photo strip", /format=strip"[^>]*>Photo strip<\/a>/],
       // ✎ since the 2026-09-05 Glyph Ledger (owner's G5 pick, and the mark the command

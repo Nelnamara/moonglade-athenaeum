@@ -743,7 +743,7 @@ export default function DetailsView({
           <div className="p-actions p-actions-more">
             <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
             {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
-            <button className="btn" onClick={() => window.print()}>🖨 Print</button>
+            <button className="btn" onClick={() => window.print()}>⎙ Print</button>
             {row.is_video !== "1" && (
               <>
                 <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>

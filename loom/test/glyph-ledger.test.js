@@ -1,5 +1,5 @@
 // THE GLYPH LEDGER, guarded (owner's ballot, moonglade-internal/design/glyphs/README.md,
-// 2026-09-05). Seven Unicode stand-ins became drawn icons and six became different
+// 2026-09-05). Nine Unicode stand-ins became drawn icons and six became different
 // characters; the mark-pick buttons became the marks. These are source guards -- they read
 // the component files, so a later edit cannot quietly put an old glyph back.
 //
@@ -12,6 +12,14 @@
 //          ★->❖ skin flag (⚑ banner kept) · ↺->↩ undo (see G12: the ballot
 //          said ⎌, which does not render as undo in this font stack; Remix keeps ↺)
 //   G2     the Branding mark buttons render the mark's own image
+//
+// AND THE POST-AUDIT RULINGS, the same day, once the ballot's own work was audited for
+// completeness. Five of them, all here (8-12 below):
+//   icons  ❖->books on the palette's "Collection:" rows · ↩->history dial on all four
+//          Undo buttons (G12 finally resolved with a drawing, not a character)
+//   chars  ✎->☁ the phone menu's Publish row · 🖶 and 🖨 -> ⎙, one printer mark app-wide
+//   kept   ❖ stays the Folio's skin flag and is now that ALONE; SeriesModal's "Esc ↩
+//          gallery" keeps ↩, unique again once the four Undo buttons stopped using it
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -55,8 +63,9 @@ const dockCss = src("styles/dock.css");
 
 // ---------------------------------------------------------------- the icon module
 
-test("the icon module carries all seven picks, drawn in currentColor, fetched at no point", () => {
-  for (const name of ["search", "uses", "lora", "entered", "snippets", "folio", "panel"]) {
+test("the icon module carries all nine picks, drawn in currentColor, fetched at no point", () => {
+  for (const name of ["search", "uses", "lora", "entered", "snippets", "folio", "panel",
+    "collection", "undo"]) {
     assert.match(icons, new RegExp("\\n  " + name + ": \\("), "missing icon: " + name);
   }
   // currentColor is the whole tinting mechanism: a literal hex here means one icon has
@@ -77,7 +86,7 @@ test("the licence ships beside the art", () => {
   assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS"/);
   // and the .svg files it covers are actually here
   const svgs = readdirSync(path.join(SRC, "icons")).filter((f) => f.endsWith(".svg"));
-  assert.equal(svgs.length, 7, "expected the seven assigned .svg files: " + svgs.join(", "));
+  assert.equal(svgs.length, 9, "expected the nine assigned .svg files: " + svgs.join(", "));
 });
 
 test("the duo hairlines survive at icon sizes; a drawn stroke-width is left alone", () => {
@@ -88,6 +97,16 @@ test("the duo hairlines survive at icon sizes; a drawn stroke-width is left alon
   const bold = src("icons/person-private_bold.svg");
   assert.match(bold, /stroke-width="6"/);
   assert.doesNotMatch(bold, /vector-effect/);
+  // The two _path icons are the duo grammar minus the 25% companion fill: every shape is a
+  // default-width stroke and there is no soft body underneath, so the SAME rule has to
+  // reach every one of their paths -- a missed one is an invisible line, not a thin one.
+  for (const f of ["icons/books_path.svg", "icons/history_path.svg"]) {
+    const art = src(f);
+    assert.doesNotMatch(art, /fill="(?!none)/, f + " should be stroke-only");
+    assert.equal((art.match(/stroke="currentColor"/g) || []).length,
+                 (art.match(/vector-effect="non-scaling-stroke"/g) || []).length,
+                 f + ": a stroked path missed the non-scaling rule");
+  }
 });
 
 // ---------------------------------------------------------------- 1-7, the drawn icons
@@ -195,29 +214,116 @@ test("G11: the Folio's reward flags are ❖ skin + ⚑ banner (the owner's pick 
   assert.doesNotMatch(folio, /★ unlocks/);
 });
 
-/* G12 -- the owner picked ⎌ (UNDO SYMBOL) and it does not survive contact with the
-   app's font stack: measured in driven Chromium, U+238C falls through Segoe UI Symbol to
-   a fallback that draws an arch on two circles (and, at some sizes, a boxed placeholder).
-   It is not tofu, so a width check passes it -- it simply does not read as undo, at any
-   size. ↩ LEFTWARDS ARROW WITH HOOK is the nearest sane neighbour: the same shape
-   U+238C is NAMED for, drawn as text (not emoji) in both the system and mono stacks,
-   distinct from Remix's ↺ and from Sync's ⟳. Flagged to the owner on the branch. */
-test("G12: undo is ↩ at the undo sites -- and Remix still turns back with ↺", () => {
-  assert.match(dupOverlay, /"↩ Undo"/);
-  assert.match(dupMobile, /"↩ Undo"/);                 // the phone twin of the same button
-  assert.match(drawer, /↩ Undo delete<\/button>/);
-  assert.match(panel, /↩ Reset crop/);
-  for (const [label, file] of [["DuplicateReviewOverlay", dupOverlay],
-    ["DuplicateReviewMobile", dupMobile]]) {
-    assert.doesNotMatch(file, /↺ Undo/, label + " still has a ↺ Undo");
+/* G12 ran out of characters before it ran out of sites. The owner picked ⎌ (UNDO SYMBOL)
+   and it does not survive contact with the app's font stack: measured in driven Chromium,
+   U+238C falls through Segoe UI Symbol to a fallback that draws an arch on two circles
+   (and, at some sizes, a boxed placeholder). It is not tofu, so a width check passes it --
+   it simply does not read as undo, at any size. The branch shipped ↩ as the nearest sane
+   neighbour and flagged it; the owner's post-audit ruling ended the hunt by giving Undo a
+   DRAWING instead, the same answer the other seven got. ↩ goes back to being the series
+   window's "Esc ↩ gallery" hint and nothing else. */
+test("G12: undo wears the history dial at all four sites -- and Remix still turns back with ↺", () => {
+  const sites = [["DuplicateReviewOverlay", dupOverlay], ["DuplicateReviewMobile", dupMobile],
+    ["GenerateDrawer", drawer], ["ControlPanelOverlay", panel]];
+  for (const [label, file] of sites) {
+    assert.match(file, /<Icon name="undo" \/>/, label + " lost the undo icon");
+    // the module is imported, not assumed present from a sibling
+    assert.match(file, /import Icon from "\.\.\/icons\/Icons\.jsx"/, label + " does not import Icon");
+    // both stand-ins gone, and the label each one carries is untouched
+    assert.doesNotMatch(file, /↩/, label + " still has a ↩");
+    assert.doesNotMatch(file, /↺ Undo|↺ Reset crop/, label + " still has a ↺ undo");
   }
-  assert.doesNotMatch(drawer, /↺ Undo delete/);
-  assert.doesNotMatch(panel, /↺ Reset crop/);
+  assert.match(dupOverlay, /"Undoing…" : <><Icon name="undo" \/> Undo<\/>/);
+  assert.match(dupMobile, /"Undoing…" : <><Icon name="undo" \/> Undo<\/>/);
+  assert.match(drawer, /<Icon name="undo" \/> Undo delete<\/button>/);
+  assert.match(panel, /<Icon name="undo" \/> Reset crop/);
   // Remix is a different verb and keeps the arrow (G13 kept ⟳ for Sync the same way)
   assert.match(details, /↺ Remix<\/button>/);
   assert.match(src("components/GridContextMenu.jsx"), /\["↺", "Remix"/);
   // and the credit ledger's "refunded" arrow is a receipt, not an action
   assert.match(src("components/AccountSubOverlay.jsx"), /↺ refunded/);
+  // the Panel's OWN ↺ is "Restore selected" -- pulling files back out of the trash, not
+  // undoing the last thing you did. Not an undo site, and it keeps its arrow.
+  assert.match(panel, /↺ Restore selected/);
+});
+
+// ------------------------------------------------- 8-12, the post-audit rulings
+
+test("8. the palette's Collection rows wear the books, and ❖ is the skin flag ALONE", () => {
+  assert.match(app, /icon: <Icon name="collection" \/>,\n\s+label: "Collection: " \+ name/);
+  // ❖ survives in exactly one place in the whole app: the Folio's skin flag.
+  const files = readdirSync(path.join(SRC, "components"))
+    .filter((f) => f.endsWith(".jsx"))
+    .map((f) => ["components/" + f, src("components/" + f)]);
+  files.push(["App.jsx", app]);
+  const offenders = [];
+  for (const [name, text] of files) {
+    for (const [n, t] of codeLines(text)) {
+      if (!t.includes("❖")) continue;
+      if (name === "components/FolioOverlay.jsx" && /unlocks \{skinName\} skin/.test(t)) continue;
+      offenders.push(name + ":" + n + "  " + t);
+    }
+  }
+  assert.deepEqual(offenders, [], "❖ is used for something that is not the skin flag");
+  assert.match(folio, /className="mgfo-flag">❖ unlocks \{skinName\} skin/);  // not passable by deletion
+});
+
+test("9. ↩ is the series window's Esc hint, and only that", () => {
+  assert.match(src("components/SeriesModal.jsx"), /className="mgss-esc">Esc ↩ gallery/);
+  const files = readdirSync(path.join(SRC, "components"))
+    .filter((f) => f.endsWith(".jsx"))
+    .map((f) => ["components/" + f, src("components/" + f)]);
+  files.push(["App.jsx", app]);
+  const offenders = [];
+  for (const [name, text] of files) {
+    for (const [n, t] of codeLines(text)) {
+      if (!t.includes("↩")) continue;
+      if (name === "components/SeriesModal.jsx" && /Esc ↩ gallery/.test(t)) continue;
+      offenders.push(name + ":" + n + "  " + t);
+    }
+  }
+  assert.deepEqual(offenders, [], "↩ is used somewhere other than the series window's hint");
+});
+
+test("10. the two new icons carry their per-surface sizes, measured not guessed", () => {
+  // The books ride the palette rule the Panel's laptop-cog already rides; the history dial
+  // gets its own three, one per button shape. Without these it renders at 1em -- 10-12px
+  // for a drawing that inks 65% of its own box, which measured as a smudge.
+  assert.match(iconCss, /\.mgpal-ico \.mgico \{ width: 1\.15em/);
+  assert.match(iconCss, /\.mgdr-undo \.mgico \{/);
+  assert.match(iconCss, /button\.mgdock-snip \.mgico \{/);
+  assert.match(iconCss, /button\.mgcp-chip \.mgico \{/);
+});
+
+test("11. the phone menu's Publish row wears ☁, the mark Publish wears everywhere else", () => {
+  assert.match(appMobile, /\{ icon: "☁", label: "Publish", screen: "publish" \}/);
+  assert.doesNotMatch(appMobile, /icon: "✎"/);
+  // the surfaces it is now agreeing with
+  assert.match(app, /img\("publish", "☁", "Publish"/);
+  assert.match(details, /☁ Publish<\/button>/);
+  assert.match(src("components/ImageDetailsMobile.jsx"), /☁ Publish<\/button>/);
+  assert.match(src("components/Lightbox.jsx"), /☁ Publish<\/button>/);
+  // and "Edit this" still keeps ✎ (the ruling's own carve-out)
+  assert.match(details, /✎ Edit this<\/button>/);
+});
+
+test("12. the app prints under ONE mark, ⎙ -- 🖶 and 🖨 are retired", () => {
+  assert.match(actions, /item\("⎙ Print sheet", printSheet\)/);
+  assert.match(src("components/ContactSheetOverlay.jsx"), /⎙ Print/);
+  assert.match(src("components/Flyout.jsx"), /⎙ Contact sheet/);
+  assert.match(details, /window\.print\(\)\}>⎙ Print<\/button>/);
+  // swept, not spot-checked: a NEW printer character anywhere is the failure this catches
+  const files = readdirSync(path.join(SRC, "components"))
+    .filter((f) => f.endsWith(".jsx"))
+    .map((f) => ["components/" + f, src("components/" + f)]);
+  files.push(["App.jsx", app]);
+  const offenders = [];
+  for (const [name, text] of files) {
+    text.split("\n").forEach((line, i) => {
+      if (/🖶|🖨/.test(line)) offenders.push(name + ":" + (i + 1) + "  " + line.trim());
+    });
+  }
+  assert.deepEqual(offenders, [], "a second printer mark is back (comments included)");
 });
 
 test("G4/G13: the settled marks are untouched -- Hero ▣, Sync ⟳", () => {

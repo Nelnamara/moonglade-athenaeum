@@ -1181,7 +1181,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   onClick={saveCurrentSnip}>+ save current</button>
                 {snipUndo && (
                   <button type="button" className="mgdock-snip act" onClick={undoSnip}
-                    title={"Restore “" + snipTrunc(snipUndo.text) + "”"}>↩ Undo delete</button>
+                    title={"Restore “" + snipTrunc(snipUndo.text) + "”"}><Icon name="undo" /> Undo delete</button>
                 )}
                 {snips === null ? (
                   <span className="mgdock-snipempty">loading…</span>

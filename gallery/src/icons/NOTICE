@@ -1,6 +1,6 @@
 Glyphs
 ======
-The seven .svg files in this folder are from **Glyphs**, an open icon set.
+The nine .svg files in this folder are from **Glyphs**, an open icon set.
 
     Home:    https://glyphs.fyi
     Source:  https://github.com/gorango/glyphs
@@ -15,8 +15,9 @@ carry `vector-effect="non-scaling-stroke"` so the hairline outline survives at t
 app's 9-20px icon sizes. The drawings themselves are untouched.
 
 Which file is which is in tools/build_icons.py's ICONS table; the owner's picks are
-recorded in moonglade-internal/design/glyphs/README.md (the Glyph Ledger ballot,
-2026-09-05).
+recorded in moonglade-internal/design/glyphs/README.md — the Glyph Ledger ballot
+(2026-09-05) for seven of them, that day's post-audit rulings for books_path and
+history_path.
 
 
 -------------------------------------------------------------------------------

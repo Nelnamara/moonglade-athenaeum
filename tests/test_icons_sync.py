@@ -1,6 +1,6 @@
 """gallery/src/icons/Icons.jsx is GENERATED -- this is the drift alarm.
 
-tools/build_icons.py transcribes the seven .svg files in gallery/src/icons/ into that one
+tools/build_icons.py transcribes the nine .svg files in gallery/src/icons/ into that one
 React module. A copy of anything may exist only while a test pins it to its source, which
 is the same discipline tests/test_design_kit_sync.py applies to static/design-tokens.css
 and tests/test_upscale_boosters.py to the drawer's ported constants. Without this, a hand
@@ -8,8 +8,9 @@ edit to a path -- or an edited .svg with no re-run -- ships an icon that no long
 the licensed art it claims to be.
 
 The icons are the owner's Glyph Ledger picks (moonglade-internal/design/glyphs/README.md,
-2026-09-05), from the Glyphs set (glyphs.fyi, MIT). Which file means what in the app is
-build_icons.py's ICONS table; the render-side guards are loom/test/glyph-ledger.test.js.
+2026-09-05 -- the ballot's seven plus the post-audit rulings' books_path and history_path),
+from the Glyphs set (glyphs.fyi, MIT). Which file means what in the app is build_icons.py's
+ICONS table; the render-side guards are loom/test/glyph-ledger.test.js.
 """
 import importlib.util
 import pathlib
@@ -43,7 +44,8 @@ def test_every_named_icon_has_its_art_and_the_art_is_all_named():
     assert named == on_disk, "the ICONS table and the .svg files disagree"
     # the app's own keys, so a rename in one place fails here rather than at runtime
     assert [key for key, _, _ in BUILD.ICONS] == [
-        "search", "uses", "lora", "entered", "snippets", "folio", "panel"]
+        "search", "uses", "lora", "entered", "snippets", "folio", "panel",
+        "collection", "undo"]
 
 
 def test_the_shipped_art_is_tintable_and_carries_no_hardcoded_colour():

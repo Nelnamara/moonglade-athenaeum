@@ -10,6 +10,7 @@ import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
+import Icon from "../icons/Icons.jsx";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -1568,7 +1569,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
           🖼 From the gallery…
         </button>
         <button type="button" className="mgcp-chip" disabled={!active || busy} onClick={resetCrop}>
-          ↩ Reset crop
+          <Icon name="undo" /> Reset crop
         </button>
       </div>
       {assets.length > 1 && (

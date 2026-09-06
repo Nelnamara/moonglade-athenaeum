@@ -352,7 +352,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                             <button type="button" className="mgdr-undo"
                               disabled={busy || autoBusy}
                               onClick={() => undoGroup(g)}>
-                              {busy ? "Undoing…" : "↩ Undo"}
+                              {busy ? "Undoing…" : <><Icon name="undo" /> Undo</>}
                             </button>
                           </>
                         ) : (

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import useDuplicateReview, { MATCH_LABEL, fmtBytes } from "../hooks/useDuplicateReview.js";
 import { MemberStars } from "./DuplicateReviewOverlay.jsx";
 import MobileSheet from "./MobileSheet.jsx";
+import Icon from "../icons/Icons.jsx";
 import "../styles/overlays.css";
 import "../styles/control-mobile.css";
 import "../styles/duplicate-review-overlay.css";
@@ -239,7 +240,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                     <button type="button" className="mgdr-undo"
                       disabled={busy || autoBusy}
                       onClick={() => undoGroup(g)}>
-                      {busy ? "Undoing…" : "↩ Undo"}
+                      {busy ? "Undoing…" : <><Icon name="undo" /> Undo</>}
                     </button>
                   </>
                 ) : (

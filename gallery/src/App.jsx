@@ -623,7 +623,7 @@ export default function App({ boot }) {
     // print) -- NOT a hand-off to the classic /contact-sheet page. That route
     // stays for classic's own use only; the new front door never opens it.
     printSheet: () => openContactSheet(selIds),
-    // Advanced flyout's "🖶 Contact sheet" -- prints the current collection
+    // Advanced flyout's "⎙ Contact sheet" -- prints the current collection
     // view rather than an explicit selection; falls back to /api/contact-
     // sheet's own "Recent" default when not viewing a collection.
     printCollection: () => openContactSheet(null, shelf),
@@ -990,11 +990,16 @@ export default function App({ boot }) {
     // /api/collections via unique_collections). "Collection:" is matchable text like any
     // other label. No count sub: no route in this app reports a per-collection image
     // count, and inventing 40 count queries for a palette row is not a trade worth making.
+    //
+    // The books, since the 2026-09-05 post-audit rulings. These rows had borrowed ❖ --
+    // which the same Ledger had just given to the Folio's "unlocks a skin" flag, so one
+    // mark was naming two unrelated things a keystroke apart. ❖ means the skin flag and
+    // nothing else now; a shelf of books means a collection.
     for (const name of collections || []) {
       list.push({
         id: "collection:" + name,
         group: "Go to",
-        icon: "❖",
+        icon: <Icon name="collection" />,
         label: "Collection: " + name,
         run: () => { goLibrary(); applyAdvanced({ shelf: name }); },
         keys: [],
