@@ -811,6 +811,47 @@ def test_login_redirect_query_less_path_has_no_trailing_question_mark(tmp_path):
     assert nxt == "/loom", "query-less next should be the bare path, got {!r}".format(nxt)
 
 
+def test_loom_board_address_survives_the_sign_in_bounce(tmp_path):
+    """/loom?board=<id> (2026-09-06, the Loom-arena plumbing pass): a storyboard is a place
+    you can bookmark now, so following that bookmark with an expired session must land you
+    on THAT board after signing in, not on whichever one the server pointer happened to name.
+
+    Nothing about the route changed for this -- the parameter is read entirely in the
+    browser (loom/src/loom-url.js). This test exists precisely to pin that: the tier is
+    untouched (still a redirect, not a 200 and not a 401), and the `next` the existing
+    full_path redirect builds carries the parameter for free. It is the half of the feature
+    the server can break without anyone noticing.
+    """
+    from urllib.parse import urlparse, parse_qs
+    cli = _client(tmp_path).test_client()
+    r = cli.get("/loom?board=k3f9q2z", environ_overrides={"REMOTE_ADDR": LAN})
+    assert r.status_code in (301, 302, 303, 307, 308)
+    loc = r.headers["Location"]
+    assert loc.startswith("/login")
+    nxt = parse_qs(urlparse(loc).query).get("next", [""])[0]
+    assert nxt == "/loom?board=k3f9q2z", \
+        "the sign-in bounce dropped the storyboard address -- next={!r}".format(nxt)
+
+
+def test_loom_serves_the_same_page_with_or_without_a_board_address(tmp_path):
+    """The board parameter is the CLIENT's, not the route's. A signed-in /loom?board=<id>
+    must serve byte-for-byte the same shell as a bare /loom -- if the server ever starts
+    branching on it, the bookmark stops being a pure address and grows a second place for
+    "which board is open" to live, which is the one thing this pass set out to prevent
+    (see SCOPE_2026-09-06_loom-arena.md, risk 3).
+
+    Also covers the junk case at the route level: an unusable id is not a server error.
+    """
+    from tests.conftest import login_client
+    cli = login_client(tmp_path)
+    plain = cli.get("/loom")
+    withboard = cli.get("/loom?board=k3f9q2z")
+    junk = cli.get("/loom?board=%2Fetc%2Fpasswd&cast=..%2F")
+    assert plain.status_code == withboard.status_code == junk.status_code
+    assert withboard.get_data() == plain.get_data()
+    assert junk.get_data() == plain.get_data()
+
+
 @pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)
 def test_previously_ungated_get_route_now_denied_from_localhost_too(tmp_path, path):
     """The loopback bypass is retired entirely -- localhost is

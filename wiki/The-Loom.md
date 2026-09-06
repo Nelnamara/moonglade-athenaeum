@@ -10,10 +10,29 @@ Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
 python moonglade_gallery.py --out pixai_backup      # then http://127.0.0.1:5000/loom
 ```
 
+**A storyboard has its own address.** `/loom` opens whichever board you had open last, as it
+always has. `/loom?board=<id>` opens *that* one — so a storyboard is somewhere you can
+bookmark and come back to, or send to yourself on another machine. The address in the bar
+follows whichever board is open, so you can copy it at any time; the id appears there for
+you rather than being something you type. An address naming a storyboard this account
+doesn't have isn't an error page — it opens the board you'd have got anyway and says so in
+the corner.
+
+**← Gallery puts you back where you were** — the page of the library you were on, the
+picture you had open, and how far down you had scrolled. (Your search and filters are not
+carried across; the library clears those on any reload, as it always has.) A `/loom` opened
+straight from a bookmark, in a tab that was never in the library, goes to the front door.
+
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a
-tablet on your LAN too. The header button is there at every screen width, phones included.
-It's a dense four-panel tool, so **turn a phone to landscape** — portrait works but is
-cramped.
+tablet on your LAN too, and signing back in returns you to the exact storyboard you asked
+for. The header button is there at every screen width, phones included. It's a dense
+four-panel tool, so **turn a phone to landscape** — portrait works but is cramped.
+
+**On a phone the Loom opens its phone layout by itself** — a board-and-reel view built for
+the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
+still work and always win: untick **📱 Mobile view** in the top bar to get the wide board on
+a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
+browser from then on.
 
 It is also deliberately **engine-agnostic**: every shot can hand you its assembled prompt
 via **Copy shot**, so you can plan here and render somewhere else.

@@ -23,6 +23,20 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **The Loom as its own arena — the half you can see** *(owner, 2026-09-06: "I think it works
+  best as its own arena connected to the gallery")* The question "does the Loom become part of
+  the same app?" is answered: **no, and it does not need to be** — one sign-in, one library, one
+  job list, one look, one price road, two rooms. The plumbing half is built (a storyboard's own
+  address, the return trip's memory, phones opening the phone layout), so what is left is
+  everything that has to *say* something and therefore waits on the Design Handoff: what the
+  hero's **▰ The Loom** button shows about the open board, what the crossing chrome says in both
+  directions, whether a storyboard's address gets a visible home, and what a phone user meets
+  when the Loom opens its phone layout by itself. Brief:
+  `../moonglade-internal/design/BRIEF_2026-09-06_loom-arena.md`; scope and the owner's eight
+  calls: `../moonglade-internal/scopes/SCOPE_2026-09-06_loom-arena.md`. The one-build/two-entries
+  unification is **banked, not refused** — it deletes two fiddly React bridges but changes how a
+  spend-path page is served, so it is its own reviewed piece, later or not at all.
+
 - **Full mobile-surface audit against the designs.** *(owner, 2026-09-05, after the wave
   walkthrough)* "The next audit is going to be the full mobile surface against the designs."
   The walkthrough surfaced real phone breakage (contest detail scroll bleeding into the
@@ -133,13 +147,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   app now that it has grown to this level")* — a proper audit of the auth surface: login and the
   no-accounts mode, session/JWT/cookie handling, the localhost trust model, mirror/write gating,
   and what "grown to this level" changes about the threat picture. Runs on the owner's go.
-
-- **Does the Loom become part of the same app?**
-  Today they are two separate builds: the gallery app (`gallery/dist/app.js`) and the Loom
-  (`loom/dist/master-storyboard.bundle.js`), with the gallery reaching the Loom by full-page
-  navigation to `/loom`. Nothing says whether they should merge. This is not a wiring task — the
-  two load React by incompatible means, and the Loom's root component would have to be broken up
-  before it could be embedded. Worth deciding deliberately, not drifting into.
 
 ---
 

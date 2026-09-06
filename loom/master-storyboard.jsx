@@ -41,6 +41,21 @@ import {
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
+// The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
+// write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
+// modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
+import {
+  readBoardId, buildLoomUrl,
+  LOOM_VIEW_KEY, readStoredView, resolveLoomView,
+} from "./src/loom-url.js";
+// The crossing's memory, library side: where the library was when it handed over, so
+// "← Gallery" gives it back. Shared module, imported straight out of the library's own
+// source exactly as the picker/cost line/video form below are.
+import { readLibraryReturn } from "../gallery/src/lib/loomCrossing.js";
+// The app's ONE phone rule (430px + the coarse-pointer/portrait fallback). Imported rather
+// than re-decided so a tablet stays on the desktop build by construction -- owner call 5,
+// 2026-09-06: "I want to be mindful of the tablet still being able to use desktop."
+import useIsMobile from "../gallery/src/hooks/useIsMobile.js";
 // PixAI's art-filter engine (gradient/canvas compositing, offline, free). Ported out of
 // static/mg-art-filters.js into the React build (2026-08-08, the vanilla static/ campaign);
 // now a plain import esbuild bundles, not a window global loaded by a <script> tag. The
@@ -326,26 +341,56 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
-// A durable, manual owner-preference toggle backed by localStorage -- NOT window.storage
-// (the sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
-// this is a per-browser UI-chrome preference (which SKIN of the Loom to show), not project
-// data, so it has no business round-tripping through the server or living in a storyboard's
-// own JSON. There is no existing hook in this file for that -- the main gallery only ever
-// auto-detects viewport width for its own mobile layout, it never persists a manual override
-// -- so this is a small, real, new one (used by App()'s "📱 Mobile view" switch), not a
-// borrowed one. Reads localStorage exactly once, in the lazy useState initializer, and
-// writes it back only when the value actually changes.
-function useLocalToggle(key, defaultVal) {
-  const [val, setVal] = useState(() => {
-    try { const raw = window.localStorage.getItem(key); return raw === null ? defaultVal : raw === "1"; }
-    catch (e) { return defaultVal; }
+// WHICH SKIN OF THE LOOM TO SHOW -- the "📱 Mobile view" / "🖥 Desktop" pair.
+//
+// A per-browser UI-chrome preference, backed by localStorage -- NOT window.storage (the
+// sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
+// this is not project data, so it has no business round-tripping through the server or
+// living in a storyboard's own JSON.
+//
+// TWO STATES USED TO BE ONE (2026-09-06, owner call 5: phones open the phone layout by
+// themselves). This was a plain useLocalToggle that defaulted to false and WROTE that
+// default on mount, so "never asked" and "asked for desktop" were the same stored "0" and
+// an auto-open gated on it could never fire on a phone that had opened the Loom once. They
+// are separate now: the key is written ONLY by a real flip of either switch, so absent
+// honestly means "not asked", and absent follows the app's one phone rule
+// (gallery/src/hooks/useIsMobile.js, passed in as isPhone -- a tablet is above its 430px
+// screen-width clause, so tablets stay on the desktop build by construction).
+//
+// A choice, once made, wins forever and in BOTH directions -- neither switch can become a
+// one-way trap, which is the same reason LoomMobile carries its own reciprocal chip. Only
+// the AUTO half is new; the switches themselves are untouched.
+function useLoomView(isPhone) {
+  const [stored, setStored] = useState(() => {
+    try { return readStoredView(window.localStorage); } catch (e) { return null; }
   });
-  useEffect(() => {
-    try { window.localStorage.setItem(key, val ? "1" : "0"); } catch (e) {}
-  }, [key, val]);
-  return [val, setVal];
+  const setMobileUI = useCallback((v) => {
+    const next = !!v;
+    setStored(next ? "mobile" : "desktop");
+    try { window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop"); } catch (e) {}
+  }, []);
+  return [resolveLoomView(stored, isPhone), setMobileUI];
 }
-const MOBILE_UI_KEY = "mg_loom_mobile_ui";   // "📱 Mobile view" toggle -- see useLocalToggle above
+
+// WHERE "← GALLERY" GOES (2026-09-06, owner call 2: "YESSS").
+//
+// It went to a bare "/", which threw away the page you were on and the picture you had open
+// -- the exact loss the library fixed for ITSELF in gen/urlState.js and then kept doing to
+// anyone crossing over here. The library records its own address on the way out (one
+// pagehide listener in gallery/src/main.jsx); this reads it back.
+//
+// Read ONCE, at module scope. The library is not running while the Loom is up, so this
+// cannot change under us, and the value is wanted by three separate links -- LoomV2's top
+// bar, LoomMobile's, and the crash screen's, the last of which is a class component that
+// renders when the app itself has fallen over and must not depend on a hook. A tab opened
+// straight onto /loom from a bookmark has no snapshot and falls back to "/", which is
+// exactly what the link used to say and still means.
+//
+// The link's WORDING AND LOOK are untouched, and deliberately so: the crossing chrome
+// belongs to the Design Handoff (../design/BRIEF_2026-09-06_loom-arena.md). Only where it
+// lands is this pass's business.
+const GALLERY_HREF = readLibraryReturn(
+  (typeof window !== "undefined" && window.sessionStorage) || null).url;
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
 // tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
@@ -940,7 +985,7 @@ class V2Boundary extends React.Component {
         <p>The Loom hit a render error. Your storyboards are saved and safe — reload to recover.</p>
         <pre>{String((this.state.err && this.state.err.stack) || this.state.err)}</pre>
         <button className="lv-close" onClick={() => window.location.reload()}>↻ Reload the Loom</button>
-        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Back to the gallery</a>
+        <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Back to the gallery</a>
       </div></div>
     );
     return this.props.children;
@@ -2977,8 +3022,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
             for the Loom: the main gallery only ever auto-detects viewport width for its own
             mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
-            in this file to reuse. Persisted (useLocalToggle, MOBILE_UI_KEY) so the choice
-            survives a reload; reuses .lv-draft's own checkbox-chip visual pattern rather than
+            in this file to reuse. Persisted (useLoomView, LOOM_VIEW_KEY) so the choice
+            survives a reload -- and, since 2026-09-06, so it also OVERRIDES the phone
+            auto-open; reuses .lv-draft's own checkbox-chip visual pattern rather than
             inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
             see this component's own prop-list comment -- specifically so flipping this switch
             mid-draft never loses it. */}
@@ -3056,7 +3102,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             its normal gap. When docked left (act.edge === "left") the whole control instead
             mounts near the row's START, right after the banner-show button -- see above. */}
         {act.edge === "left" ? null : activityControl}
-        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
+        <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
@@ -3348,7 +3394,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 /* =========================================================================
    LOOM MOBILE -- first increment (2026-08-03). A phone-sized ALTERNATIVE to
    LoomV2, chosen by the "📱 Mobile view" toggle in LoomV2's own .lv-top bar
-   (persisted via useLocalToggle/MOBILE_UI_KEY, see App()). Kept INLINE here
+   (persisted via useLoomView/LOOM_VIEW_KEY, see App()) -- or opened by itself
+   on a phone since 2026-09-06, unless one of those switches has been flipped.
+   Kept INLINE here
    rather than split into its own loom/src/loom-mobile.jsx file: unlike
    loom-core.js/loom-mutations.js (deliberately React-free, DOM-free, pure --
    see loom-core.js's own header -- so they can be `node --test`ed directly and
@@ -4626,7 +4674,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     <div className="lm-root">
       <style>{LOOM_MOBILE_STYLES}</style>
       <div className="lm-top">
-        <a className="lm-back" href="/">&larr; Gallery</a>
+        <a className="lm-back" href={GALLERY_HREF}>&larr; Gallery</a>
         <span className="lm-fill" />
         <span className="lm-title">&#9642; The Loom</span>
         <span className="lm-fill" />
@@ -5984,11 +6032,42 @@ function useProjectStore(setSelShot) {
         await sSet(ACTIVE_KEY, id);
         keys = [PPRE + id];
       }
-      let aid = await sGet(ACTIVE_KEY);
-      if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
+         (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
+         articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
+         back to; a bare /loom still opens the last one you had open, exactly as it always
+         has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
+         being the truth.
+
+         ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
+         exists, the pointer is rewritten FROM it immediately, so the two can never drift
+         into disagreeing -- the class of bug the library's own one-builder rule exists to
+         prevent.
+
+         AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
+         app's ordinary corner note saying so. No blank page, no invented screen -- and the
+         address self-corrects to the board actually open (the effect below), so the wrong id
+         does not sit in the bar pretending. */
+      const wantedBoard = readBoardId(location.search);
+      let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
+      let boardMiss = "";
+      if (aid) {
+        await sSet(ACTIVE_KEY, aid);
+      } else {
+        if (wantedBoard) boardMiss = wantedBoard;
+        aid = await sGet(ACTIVE_KEY);
+        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      }
       let p = null; try { const raw = await sGet(PPRE + aid); if (raw) p = JSON.parse(raw); } catch {}
       if (!p) { p = seedProject(); await sSet(PPRE + aid, JSON.stringify(p)); }
       setActiveId(aid); setProject(p);
+      if (boardMiss && typeof window !== "undefined" && window.Toast) {
+        window.Toast.show({
+          kind: "err", title: "No storyboard at that address",
+          msg: "The address asked for “" + boardMiss + "”, which this account has no "
+             + "storyboard for. Opened “" + (p.name || "Untitled") + "” instead.",
+        });
+      }
       const tkeys = await sList(TPRE); const map = {};
       for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
       setThumbs(map);
@@ -6067,6 +6146,27 @@ function useProjectStore(setSelShot) {
   }, [activeId, readProjList, setSelShot]);
   const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
+  /* THE ADDRESS FOLLOWS THE OPEN BOARD (2026-09-06).
+
+     ONE effect rather than a write bolted onto each of the six places that change which
+     board is open (boot, open, new, duplicate, delete-and-fall-back, restore-a-backup):
+     they all already agree on exactly one thing, `activeId`, so that is what the address
+     is derived from. A seventh switch added later cannot forget to update the bar.
+
+     replaceState, not push: switching boards is changing which room you are in, not walking
+     down a corridor. Nothing here reads popstate, so pushing would leave the Back button
+     silently doing nothing -- and the address's job is to be COPYABLE, which replace serves
+     just as well. The no-op guard keeps a re-render from rewriting an identical address.
+
+     Through buildLoomUrl, never by hand, so this write and the cast hand-off's cleanup
+     below cannot throw each other's parameter away. */
+  useEffect(() => {
+    if (!activeId) return;
+    const next = buildLoomUrl({ board: activeId }, location.search, location.pathname);
+    if (next === location.pathname + location.search) return;
+    try { history.replaceState(null, "", next); } catch (e) { /* address lags; nothing else does */ }
+  }, [activeId]);
+
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
   useEffect(() => {
@@ -6086,7 +6186,11 @@ function useProjectStore(setSelShot) {
         tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
       return { ...p, assets: [...existing, ...added] };
     });
-    history.replaceState(null, "", location.pathname);
+    // Clearing ?cast= now goes through the one builder instead of writing a bare
+    // location.pathname (2026-09-06). The hand-off's behaviour is unchanged -- read once,
+    // then gone -- but a bare pathname would also erase ?board=, which is precisely the
+    // "one write throws another's away" bug gen/urlState.js was written to end.
+    history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
   }, [project]);
 
   useEffect(() => {
@@ -7020,11 +7124,13 @@ function useExportPipeline(project, thumbs) {
 
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
-  // "📱 Mobile view" -- a manual, owner-preference switch between LoomV2 (desktop-style
-  // shell) and LoomMobile (phone-sized board/reel), persisted via useLocalToggle so it
-  // survives a reload. The toggle itself lives in LoomV2's own .lv-top bar (and, so it's
-  // never a one-way trap, a small reciprocal one in LoomMobile's own top bar).
-  const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+  // "📱 Mobile view" -- the switch between LoomV2 (desktop-style shell) and LoomMobile
+  // (phone-sized board/reel), persisted so it survives a reload. The toggle itself lives in
+  // LoomV2's own .lv-top bar (and, so it's never a one-way trap, a small reciprocal one in
+  // LoomMobile's own top bar). Since 2026-09-06 a PHONE opens LoomMobile by itself when
+  // neither switch has ever been flipped -- see useLoomView above for the whole rule, and
+  // useIsMobile for the phone test it defers to (a tablet fails it, deliberately).
+  const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
   // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
   // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
   // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)

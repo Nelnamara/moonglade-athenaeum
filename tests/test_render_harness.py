@@ -2935,3 +2935,143 @@ def test_a_completion_never_out_races_the_owners_own_page_change_on_the_phone(
                 before["library"], after["library"]))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# The Loom as its own arena -- the crossing, measured (2026-09-06)
+# ---------------------------------------------------------------------------
+# SCOPE_2026-09-06_loom-arena.md's own test note: "Steps 2-3 want a new case here -- cross
+# to the Loom and back, and land where you started." These are the assertions no source
+# guard can make, because every one is about what a REAL browser does across a REAL
+# whole-page navigation between two separately-built bundles: a snapshot written by the
+# library's pagehide and read back in the Loom's own document, an address the Loom rewrites
+# only after its store has answered, and a phone rule evaluated by an actual matchMedia.
+#
+# Deliberately catalog-independent. The library's address is SET on the page rather than
+# arrived at by paging, so these measure the crossing itself and not how many pictures the
+# throwaway catalog happens to hold -- assertions that move with fixture data are exactly
+# what this file's own docstring warns about.
+
+_LOOM_READY = ".lv-top, .lm-root"   # whichever skin of the Loom mounted
+
+
+def _loom_board_param(page):
+    return page.evaluate("() => new URLSearchParams(location.search).get('board')")
+
+
+def test_the_loom_gives_a_storyboard_its_own_address(logged_in_page):
+    """A bare /loom grows a ?board= for whatever it opened, and that address opens it again.
+
+    The first half is what makes a storyboard copyable at all; the second is what makes it a
+    place rather than a decoration -- and together they are what stops the address and the
+    server-side pointer from becoming two different ideas of "which board is open".
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom")
+    page.wait_for_selector(_LOOM_READY)
+    page.wait_for_function("() => new URLSearchParams(location.search).get('board')")
+
+    board = _loom_board_param(page)
+    assert board, "the Loom opened but put no storyboard in the address"
+
+    # Go somewhere else entirely, then follow the address back: the SAME board must open.
+    _visit(page, "/")
+    _visit(page, "/loom?board=" + board)
+    page.wait_for_selector(_LOOM_READY)
+    _settle(page)
+    assert _loom_board_param(page) == board, (
+        "following a storyboard's own address did not open that storyboard -- the address "
+        "is now {!r}".format(_loom_board_param(page)))
+
+
+def test_an_unknown_storyboard_address_opens_a_real_board_and_says_so(logged_in_page):
+    """No blank page and no invented screen: the board you would have got anyway, the app's
+    ordinary corner note, and an address that corrects itself to what actually opened."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom?board=nosuchboard")
+    page.wait_for_selector(_LOOM_READY)
+    page.wait_for_function(
+        "() => { const b = new URLSearchParams(location.search).get('board');"
+        " return b && b !== 'nosuchboard'; }")
+    _settle(page)
+
+    assert _loom_board_param(page) != "nosuchboard"
+    toast = page.locator(".mg-toast", has_text="No storyboard at that address")
+    assert toast.count() >= 1, "an unknown board id opened silently -- no corner note"
+
+
+def test_the_return_trip_lands_where_the_library_was(logged_in_page):
+    """Cross to the Loom and back, and land where you started -- the whole of owner call 2.
+
+    Measured across the real navigation both ways, because that is the only place it can
+    break: the library writes the snapshot as its page goes away, and a different document
+    entirely reads it back.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    page.wait_for_selector(".mgx-actrow")
+    # The library, somewhere other than its front door.
+    page.evaluate("() => history.replaceState(null, '', '/?page=3&image=demo-mid-42')")
+
+    # Out through the hero's own Loom button -- a plain anchor that runs no JS of its own,
+    # which is exactly why the snapshot rides pagehide rather than a click handler.
+    page.click("a.mgx-metal-loom")
+    page.wait_for_selector(_LOOM_READY)
+
+    back = page.get_attribute("a.lv-close[href]", "href")
+    assert back == "/?page=3&image=demo-mid-42", (
+        "the back link points at {!r} -- the crossing forgot the page and the open "
+        "picture".format(back))
+
+    page.click("a.lv-close[href]")
+    page.wait_for_selector(".mgx-actrow")
+    assert "page=3" in page.url and "image=demo-mid-42" in page.url, (
+        "came back to {!r} instead of the address the library was at".format(page.url))
+
+
+def test_a_loom_opened_cold_still_offers_the_library_front_door(logged_in_page):
+    """A tab that was never in the library has nothing to remember, and must say nothing
+    untrue about it -- the link falls back to the front door, exactly what it always was."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom")
+    page.wait_for_selector(_LOOM_READY)
+    assert page.get_attribute("a.lv-close[href]", "href") == "/"
+
+
+def test_a_phone_opens_the_phone_layout_and_a_tablet_does_not(logged_in_page):
+    """Owner call 5, and the constraint attached to it: "I want to be mindful of the tablet
+    still being able to use desktop."
+
+    Both halves in one test on purpose -- the promise IS the pair, and a threshold that
+    drifted would break them together while either alone still passed.
+    """
+    phone = logged_in_page(width=390, height=844)
+    _visit(phone, "/loom")
+    phone.wait_for_selector(_LOOM_READY)
+    assert phone.locator(".lm-root").count() == 1, (
+        "a 390px phone got the wide desktop board")
+
+    tablet = logged_in_page(width=768, height=1024)
+    _visit(tablet, "/loom")
+    tablet.wait_for_selector(_LOOM_READY)
+    assert tablet.locator(".lm-root").count() == 0, (
+        "a 768px tablet was pulled onto the phone layout -- the auto-open is keyed on a "
+        "threshold of its own instead of useIsMobile's phone rule")
+    assert tablet.locator(".lv-top").count() == 1
+
+
+def test_the_manual_switch_still_overrules_the_phone_auto_open(logged_in_page):
+    """Never a one-way trip: a phone that asks for the wide board gets it, and keeps it."""
+    phone = logged_in_page(width=390, height=844)
+    _visit(phone, "/loom")
+    phone.wait_for_selector(".lm-root")
+    phone.click(".lm-chip:has-text('Desktop')")
+    phone.wait_for_selector(".lv-top")
+    assert phone.locator(".lm-root").count() == 0
+
+    # ...and it is remembered, so the auto-open does not simply undo it on the next visit.
+    _visit(phone, "/loom")
+    phone.wait_for_selector(_LOOM_READY)
+    _settle(phone)
+    assert phone.locator(".lv-top").count() == 1, (
+        "the phone auto-open overruled a choice the owner actually made")
