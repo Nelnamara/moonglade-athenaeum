@@ -2280,9 +2280,9 @@ def _flick(page, x=195, y=430, times=8):
 
 def test_the_phone_contest_detail_scrolls_itself_and_never_the_control_tab_under_it(
         logged_in_page):
-    """THE 2026-09-05 DEFECT, in the owner's own words: "opening a contest the enter button
-    is a floating panel in front of the rest scrolling behind it. If you tap back to the
-    contest details and begin scrolling it leads into the CONTROL PANEL???!!! BROKEN".
+    """THE 2026-09-05 DEFECT, as the owner described it: opening a contest, the enter button
+    is a floating panel in front of the rest, scrolling behind it. Tapping back to contest
+    details and scrolling again lands you in the Control panel underneath instead.
 
     Measured before the fix, at 390x844 with Control as the standing tab: `.glm-screen` is
     position:absolute INSIDE `.glm-body`, which is the tab's own scroller and still held the

@@ -10,8 +10,8 @@
    an entry fires, and PixAI offers no way to withdraw one. A wrong word here is not a
    cosmetic bug -- it is a wrong statement about an act that cannot be taken back.
 
-   THE COST FACE THAT USED TO LIVE HERE IS GONE (owner, 2026-09-05): "THERE ARE NO ENTRY
-   FEES". `entryCostFace` rendered "Free" / an amount / "Entry fee unverified" into the
+   THE COST FACE THAT USED TO LIVE HERE IS GONE (owner, 2026-09-05): "there are no entry
+   fees". `entryCostFace` rendered "Free" / an amount / "Entry fee unverified" into the
    phone's entry screen, the desktop confirm dialog and the publish confirm; all three
    slots are deleted, so no contest surface states, hedges at, or hints at a price. */
 

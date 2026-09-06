@@ -3802,7 +3802,7 @@ min-height:0;}` in `pixai_gallery.py`, scoped to `#model-flyout` only — `#gen-
 **Problem 2 — the Loom's Image tab rendered the model/LoRA picker CRAMMED INLINE** into the
 ~560px right rail: model result cards, a "hide LoRA picker" toggle sitting in the middle of
 the results, then a SECOND search box, then more LoRA cards, all stacked in the narrow
-column. Owner: *"Loom picker is a cramped mess. it does not have a flyout like the gallery."*
+column. Owner feedback: the Loom's picker was cramped and needed a flyout like the gallery's.
 Fixed in `loom/master-storyboard.jsx`: both `<mg-model-picker>` mounts move out of the
 tab-conditional inline flow into a new `.lv-mpick-veil` — a `position:fixed` overlay covering
 the full viewport with a Models/LoRAs segment toggle (mirrors the Gallery's `#model-flyout`
