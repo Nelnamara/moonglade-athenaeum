@@ -81,7 +81,17 @@ CATALOG_FIELDS = [
     "source",
     # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
     # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
+    # TASK-level: written onto every row of the task, and it says nothing about which
+    # individual images survive -- see cloud_deleted_at below for the per-image fact.
     "deleted_remote",
+    # PER-IMAGE (2026-09-06): the ISO stamp PixAI puts on THIS image's entry in its task's
+    # outputs.batch once the image itself is deleted (from the gallery's per-image delete,
+    # or from PixAI's own site). Blank means PixAI still has it. Deliberately NOT
+    # deleted_remote: that one is task-level and is cleared again on the next
+    # --reconcile-deleted, while this is per-row and permanent. A row carrying this is one
+    # whose LOCAL copy is the only copy left anywhere, so the whole-task delete path leaves
+    # such rows and their files alone.
+    "cloud_deleted_at",
     # User collections: comma-joined names (no moving files, survives organize).
     # Names may contain spaces but not commas. Set/filtered in the gallery.
     "collections",
@@ -177,6 +187,7 @@ CREATE TABLE IF NOT EXISTS catalog (
     video_duration  TEXT DEFAULT '',
     source          TEXT DEFAULT '',
     deleted_remote  TEXT DEFAULT '',
+    cloud_deleted_at TEXT DEFAULT '',
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
@@ -307,6 +318,10 @@ _MIGRATIONS = [
     # listArtworks node, distinct from the binary is_nsfw (a work can be sensitive but not
     # nsfw). Already on the wire; the app just never read it. Blank until a --sync-artworks.
     "ALTER TABLE catalog ADD COLUMN is_sensitive TEXT DEFAULT ''",
+    # PER-IMAGE CLOUD DELETION (2026-09-06) -- the deletedAt stamp PixAI puts on this one
+    # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
+    # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
+    "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
 ]
 
 # ---------------------------------------------------------------------------

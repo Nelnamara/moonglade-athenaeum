@@ -2394,6 +2394,10 @@ _FULL_META_FIELDS = (
     # leaves both blank at task level (fm is cached once per task) and each row resolves
     # its own via _with_batch_position before _merge_full / the backfill apply carry them.
     "batch_index", "batch_size",
+    # Per-ROW too (2026-09-06): the deletedAt stamp on this image's own outputs.batch entry,
+    # so a backfill marks the row of an image deleted from PixAI's website rather than
+    # leaving it looking live. Blank for every live output and every non-batch task.
+    "cloud_deleted_at",
 )
 
 
@@ -4068,6 +4072,9 @@ def extract_full_meta(task):
         # None and every row of it stays blank -- "not a batch output", never inferred.
         "batch_index": "",
         "batch_size":  "",
+        # Per-ROW for the same reason (2026-09-06): PixAI deletes one output at a time, so
+        # "does PixAI still have this one" cannot be a task-level answer.
+        "cloud_deleted_at": "",
         "_batch":      outputs.get("batch") if isinstance(outputs.get("batch"), list) else None,
     }
 
@@ -4080,7 +4087,13 @@ def batch_position(batch, media_id):
     no batch array (edits, upscales, videos, imports) or the media id is not in it --
     blank means "not a batch output", NEVER a guess from media_id order (which can swap
     outputs; probe 2026-08-23). The index is PixAI's permanent fact: a sibling deleted
-    later keeps its gap, nothing is ever renumbered."""
+    later keeps its gap, nothing is ever renumbered.
+
+    A member PixAI has deleted (its entry carries `deletedAt`) reports blank: it is no
+    longer one of the task's outputs, so it has no live output number. Its SURVIVING
+    siblings are untouched -- they keep the numbers and the batch size PixAI gave them,
+    because the deleted entry stays in the array and the site's own
+    from-PixAI-<taskId>-<n> download names never shift either."""
     if not isinstance(batch, list) or not batch:
         return "", ""
     mid = str(media_id or "")
@@ -4088,6 +4101,8 @@ def batch_position(batch, media_id):
         return "", ""
     for i, entry in enumerate(batch):
         if isinstance(entry, dict) and str(entry.get("mediaId") or "") == mid:
+            if entry.get("deletedAt"):
+                return "", ""
             return str(i), str(len(batch))
     return "", ""
 
@@ -4098,12 +4113,23 @@ def _with_batch_position(fm, media_id):
     own from the raw outputs.batch list extract_full_meta parked under fm['_batch'].
     Returns fm itself when there is nothing to resolve (no batch array, or the media id
     is not one of its outputs -- both fields stay ''), else a shallow copy with both set,
-    leaving the shared cached dict untouched."""
-    bi, bs = batch_position((fm or {}).get("_batch"), media_id)
-    if not bi:
+    leaving the shared cached dict untouched.
+
+    `cloud_deleted_at` is the third per-row field and rides here for the same reason
+    (2026-09-06): whether PixAI still has THIS image is a per-output fact the task-level
+    meta cannot hold. It is what makes --backfill-full-meta -- the pass that walks existing
+    catalog rows task by task -- mark the local row of an image deleted from PixAI's own
+    website, instead of leaving it looking live forever."""
+    batch = (fm or {}).get("_batch")
+    bi, bs = batch_position(batch, media_id)
+    gone = str((batch_entry(batch, media_id) or {}).get("deletedAt") or "")
+    if not bi and not gone:
         return fm
     fm = dict(fm)
-    fm["batch_index"], fm["batch_size"] = bi, bs
+    if bi:
+        fm["batch_index"], fm["batch_size"] = bi, bs
+    if gone:
+        fm["cloud_deleted_at"] = gone
     return fm
 
 
@@ -8771,7 +8797,14 @@ def _task_image_media(outputs):
     Per-image seed comes from batch[].seed, else the shared outputs.seed. Deduped, order-kept.
 
     This is why batch generations were previously under-captured: the old path read
-    outputs.batchMediaIds (which is null on modern tasks) and saved only the grid."""
+    outputs.batchMediaIds (which is null on modern tasks) and saved only the grid.
+
+    A member PixAI has DELETED keeps its place in the array and gains a `deletedAt`
+    (2026-09-06). It is not one of the task's images any more, so it is skipped here --
+    otherwise every re-sync would list it and download the deleted image straight back in.
+    A batch whose members are ALL deleted therefore yields nothing, and deliberately does
+    not fall back to outputs.mediaId: on a batch task that is the combined preview picture,
+    never one of the images."""
     outputs = outputs or {}
     batch = outputs.get("batch") or []
     shared_seed = str(outputs.get("seed") or "")
@@ -8779,7 +8812,7 @@ def _task_image_media(outputs):
     if batch:                                        # modern batch: save the individuals
         for b in batch:
             mid = str((b or {}).get("mediaId") or "")
-            if mid:
+            if mid and not (b or {}).get("deletedAt"):
                 pairs.append((mid, str((b or {}).get("seed") or shared_seed)))
     else:                                            # single image (or legacy shape)
         if outputs.get("mediaId"):

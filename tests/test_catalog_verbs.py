@@ -188,6 +188,41 @@ def test_migrate_memo_is_keyed_per_path_not_globally(tmp_path):
     assert not [f for f in CATALOG_FIELDS if f not in cols]
 
 
+def test_an_old_install_gains_the_per_image_cloud_delete_marker(tmp_path):
+    """`cloud_deleted_at` (2026-09-06) records that PIXAI dropped THIS ONE image -- the
+    `deletedAt` stamp its entry in the task's outputs.batch carries once it is deleted.
+
+    It is a new column rather than a reuse of `deleted_remote` because the two say different
+    things about different scopes. `deleted_remote` is a TASK-level fact ("--reconcile-deleted
+    did not find this row's task in your live feed"), written onto every row of the task and
+    CLEARED again on the next reconcile. Per-image deletion is per-ROW and permanent, so
+    writing it into the task-level flag would both lie about the siblings and be wiped by the
+    next --reconcile-deleted run."""
+    db = _ancient_db(tmp_path / "catalog.db",
+                     [{"media_id": "m1", "task_id": "t1", "filename": "one.png"}])
+    with catalog(db) as con:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(catalog)").fetchall()}
+    assert "cloud_deleted_at" in cols, "an old install never got the column"
+    assert "cloud_deleted_at" in CATALOG_FIELDS, (
+        "the column exists but save_catalog would never write it")
+
+
+def test_the_marker_is_per_row_and_leaves_the_task_level_flag_alone(tmp_path):
+    """Two images of one task, one of them deleted on PixAI. The marker must land on that
+    row only, and must not touch `deleted_remote`, which means something else."""
+    db = _seed(tmp_path, [
+        _row(media_id="m1", task_id="t1", cloud_deleted_at="2026-09-06T11:22:33.000Z"),
+        _row(media_id="m2", task_id="t1"),
+    ])
+    with catalog(db) as con:
+        rows = {r["media_id"]: dict(r) for r in con.execute(
+            "SELECT media_id, cloud_deleted_at, deleted_remote FROM catalog")}
+    assert rows["m1"]["cloud_deleted_at"] == "2026-09-06T11:22:33.000Z"
+    assert rows["m2"]["cloud_deleted_at"] == "", "the sibling was marked too"
+    assert rows["m1"]["deleted_remote"] == "", (
+        "the per-image marker was written into the task-level reconcile flag")
+
+
 def test_migrate_is_free_after_the_first_call(tmp_path, traced):
     db = _ancient_db(tmp_path / "catalog.db")
     migrate(db)
