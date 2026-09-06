@@ -104,7 +104,7 @@ celebration.**
 Some epic achievements unlock a **skin** — a palette swap applied across the whole
 suite. Five ship in total: two free (**Moonglade**, the lavender-and-emerald default,
 and the void-touched **Nightfallen**) and three earned. A card tells you up front if it
-unlocks one (**★ unlocks … skin**), so the Folio itself is the map — and unlocking all
+unlocks one (**❖ unlocks … skin**), so the Folio itself is the map — and unlocking all
 five earns **Skin-Changer**.
 
 Skins are applied from the **Control Panel**, in its **Identity** strip, not from the

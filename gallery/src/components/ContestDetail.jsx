@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import { parseMarkdownLite } from "../lib/markdownLite.js";
@@ -166,7 +167,7 @@ export default function ContestDetail({ contest, mineRow, onBack, onClose, onEnt
                 {official ? "☀ OFFICIAL" : "🤝 COMMUNITY"}
               </span>
               {entered > 0 && (
-                <span className="mgct-entered strong">★ Entered ×{entered}</span>
+                <span className="mgct-entered strong"><Icon name="entered" />Entered ×{entered}</span>
               )}
             </div>
             <div className="mgct-dtitle">{contest.title}</div>

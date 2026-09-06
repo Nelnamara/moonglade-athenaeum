@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
@@ -1148,7 +1149,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   Only where there is a prompt to insert into (Fixer/Enhance have none). */}
               {snippetsAvail && (
                 <button type="button" className={"mgdock-snipbtn" + (snippetsOpen ? " on" : "")}
-                  onClick={() => setSnippetsOpen((v) => !v)}>★ Snippets</button>
+                  onClick={() => setSnippetsOpen((v) => !v)}><Icon name="snippets" />Snippets</button>
               )}
             </div>
 
@@ -1180,7 +1181,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   onClick={saveCurrentSnip}>+ save current</button>
                 {snipUndo && (
                   <button type="button" className="mgdock-snip act" onClick={undoSnip}
-                    title={"Restore “" + snipTrunc(snipUndo.text) + "”"}>↺ Undo delete</button>
+                    title={"Restore “" + snipTrunc(snipUndo.text) + "”"}>↩ Undo delete</button>
                 )}
                 {snips === null ? (
                   <span className="mgdock-snipempty">loading…</span>

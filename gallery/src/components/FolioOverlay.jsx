@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import "../styles/overlays.css";
 import "../styles/folio-overlay.css";
 import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
@@ -111,7 +112,7 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
             ))}
           </div>
         )}
-        {!masked && a.skin && <div className="mgfo-flag">★ unlocks {skinName} skin</div>}
+        {!masked && a.skin && <div className="mgfo-flag">❖ unlocks {skinName} skin</div>}
         {!masked && a.banner_reward && <div className="mgfo-flag">⚑ unlocks a banner</div>}
       </div>
       <div className="mgfo-card-side">
@@ -229,7 +230,7 @@ export default function FolioOverlay({ onClose }) {
             <div className="mgfo-spacer" />
             {vm && <div className="mgfo-index">record {fmt(vm.earnedNonFeat)} of {fmt(grandTotal)}</div>}
             <div className="mgfo-search">
-              <span className="mgfo-search-ic">⌕</span>
+              <span className="mgfo-search-ic"><Icon name="search" /></span>
               <input type="text" placeholder="search the record…" value={q} onChange={onSearchChange} />
             </div>
             <button type="button" className="mgv-x" onClick={handleClose} aria-label="Close">×</button>

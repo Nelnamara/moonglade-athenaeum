@@ -344,7 +344,7 @@ export default function PublishOverlay({ mediaId, onClose, onPublished }) {
                           {ctLeft && !ctLeft.over ? " · " + ctLeft.text : ""}
                         </div>
                       </div>
-                      <span className="mgpub-cttrack">★ counts toward The Arena</span>
+                      <span className="mgpub-cttrack">⚔ counts toward The Arena</span>
                       <button type="button" className="mgpub-ctclear" title="Not entering a contest"
                         onClick={() => setContest("")}>×</button>
                     </div>

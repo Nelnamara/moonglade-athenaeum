@@ -20,9 +20,9 @@ import "../styles/folio-mobile.css";
    (byte-for-byte, not redefined) -- see the import list above.
 
    ENTRY POINT: rendered by AppMobile.jsx as a fixed, full-viewport overlay
-   (z above the hero AND the tab bar) when the hero's gold "🌙 Folio of
-   Honors" icon is tapped -- replacing the "Its own mobile design file...
-   coming later" toast that icon used to show. See AppMobile.jsx's own
+   (z above the hero AND the tab bar) when the hero's gold Folio of Honors
+   button is tapped -- replacing the "Its own mobile design file...
+   coming later" toast that button used to show. See AppMobile.jsx's own
    header comment for the folioOpen/openFolio/closeFolio wiring.
 
    WHY A DEDICATED FULL-SCREEN PRESENTATION, NOT MobileScreen.jsx: same

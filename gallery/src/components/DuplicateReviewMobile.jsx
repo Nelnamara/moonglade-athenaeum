@@ -239,7 +239,7 @@ export default function DuplicateReviewMobile({ csrf, onResolved }) {
                     <button type="button" className="mgdr-undo"
                       disabled={busy || autoBusy}
                       onClick={() => undoGroup(g)}>
-                      {busy ? "Undoing…" : "↺ Undo"}
+                      {busy ? "Undoing…" : "↩ Undo"}
                     </button>
                   </>
                 ) : (

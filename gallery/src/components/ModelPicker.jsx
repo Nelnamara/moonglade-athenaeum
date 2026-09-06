@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import "../styles/model-picker.css";
 
@@ -350,7 +351,7 @@ export default function ModelPicker({
               <div className="mp-nm">{p.title}</div>
               <div className="mp-sub">
                 <span>{tyShort(p.type)}</span>
-                {p.ref_count ? <span>◈ {fmtCompact(p.ref_count)} uses</span> : null}
+                {p.ref_count ? <span><Icon name="uses" /> {fmtCompact(p.ref_count)} uses</span> : null}
                 <span>♥ {fmt(p.liked_count)}</span>
                 {p.comment_count ? <span>💬 {fmt(p.comment_count)}</span> : null}
               </div>

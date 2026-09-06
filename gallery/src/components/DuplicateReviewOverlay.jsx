@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useDuplicateReview, { MATCH_LABEL, fmtBytes, bestKeeperPath } from "../hooks/useDuplicateReview.js";
 import "../styles/overlays.css";
 import "../styles/duplicate-review-overlay.css";
@@ -180,7 +181,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
             <div className="mgdr-headlabel">⧉ Duplicate Review</div>
             <div className="mgdr-headspacer" />
             <div className="mgdr-search">
-              <span className="mgdr-search-icon" aria-hidden="true">⌕</span>
+              <span className="mgdr-search-icon" aria-hidden="true"><Icon name="search" /></span>
               <input type="text" placeholder="filter by filename…" value={q}
                 onChange={(e) => setQ(e.target.value)} />
             </div>
@@ -351,7 +352,7 @@ export default function DuplicateReviewOverlay({ onClose, onResolved, boot }) {
                             <button type="button" className="mgdr-undo"
                               disabled={busy || autoBusy}
                               onClick={() => undoGroup(g)}>
-                              {busy ? "Undoing…" : "↺ Undo"}
+                              {busy ? "Undoing…" : "↩ Undo"}
                             </button>
                           </>
                         ) : (

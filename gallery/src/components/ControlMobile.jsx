@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
-  BlurToggleTile,
+  MarkArt, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import { apiGet } from "../api.js";
@@ -206,12 +206,18 @@ export default function ControlMobile({ account }) {
         <div className="ctm-sec">
           <div className="mgcp-tile click" onClick={openBrand}>
             <div className="mgcp-mkick">✦ Branding</div>
+            {/* Each button wears its OWN mark (owner's G2 ruling, Glyph Ledger
+                2026-09-05). This row used to draw a moon for the mark whose id is
+                "logo" and a diamond for every other one, so five different marks read
+                as five identical diamonds -- and the art was right there in `m.png`
+                the whole time. MarkArt is the same component the desktop Panel's two
+                mark rows use. */}
             <div className="mgcp-marks">
               {(summary.branding.marks || []).slice(0, 6).map((m) => (
                 <button type="button" key={m.id}
                   className={"mgcp-mark" + (m.id === summary.branding.mark ? " on" : "")}
-                  title={m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
-                  {m.id === "logo" ? "🌙" : "◈"}
+                  title={m.label || m.id} onClick={(e) => { e.stopPropagation(); openBrand(); }}>
+                  <MarkArt mark={m} />
                 </button>
               ))}
             </div>
