@@ -187,6 +187,7 @@ TIER_SNAPSHOT = [
     "/api/loom/import-frames [POST] LOGIN",
     "/api/loom/list [GET] LOGIN",
     "/api/loom/set [POST] LOGIN",
+    "/api/loom/spend [POST] LOGIN",
     "/api/loom/video-duration [GET] LOGIN",
     "/api/mirror/connect [POST] LOGIN",
     "/api/mirror/enable [POST] LOCALHOST",

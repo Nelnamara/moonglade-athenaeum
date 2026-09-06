@@ -837,12 +837,15 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
 
 describe("Credit safety: the drawer's own component-local poll vs. this increment's fix (fourth increment)", () => {
   test("useGenerationPipeline's resume-on-reload effect also depends on mobileUI, so a <mg-generate-drawer>-submitted Video render is re-attached the instant the toggle unmounts it", () => {
-    assert.match(src, /function useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\)/);
+    // setCardResult joined the list with the spend ledger (2026-09-06) -- it is the
+    // attempts-recording sibling of setCardStatus. mobileUI staying LAST, and the effect's
+    // own dep array below, are what this test is actually about.
+    assert.match(src, /function useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI \}\)/);
     assert.match(src, /\}, \[activeId, mobileUI\]\);\s*\/\/ eslint-disable-line/);
   });
 
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
-    assert.match(src, /= useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\);/);
+    assert.match(src, /= useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI \}\);/);
   });
 
   test("genImage/genEdit/genRef's own polls are plain setTimeout chains (pollImg/pollTaskWithCeiling), never a DOM element's lifecycle -- confirmed, not just asserted", () => {

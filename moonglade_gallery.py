@@ -15562,6 +15562,66 @@ __DESIGN_TOKENS__
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
 
+    # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
+    # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
+    # much a single request may ask for. 2000 media ids is far past any real board (a project
+    # would need ~2000 rendered shots plus re-rolls) and keeps a hostile body finite.
+    _LOOM_SPEND_MAX_IDS = 2000
+
+    @app.route("/api/loom/spend", methods=["POST"])
+    @tier(LOGIN)
+    def loom_spend():
+        """What a Loom project has ALREADY spent: catalog `paid_credit` for a list of result
+        media_ids. Read-only and local -- one SELECT against the backup catalog, no PixAI
+        session, no network, nothing written. The historical sibling of /api/price, which
+        quotes what UNRENDERED shots would cost; this reports what finished ones really did.
+
+        The client sends the ids (loom-core.js's collectSpendMids walks the board -- a
+        resultMid-and-attempts-only walk, deliberately NOT _loom_collect_media_ids, which also
+        gathers frame slots and cast images: those are reused INPUTS, not spend) and does the
+        arithmetic itself, so the whole ledger stays under loom/test's node --test. This route
+        is the join and nothing else.
+
+        Answers {"rows": {media_id: {"paid_credit": int|None, "task_id": str}}}. The three
+        states are distinct and the client keeps them apart all the way to the tooltip:
+          - an int          -> PixAI's actual charge for the task that made this media
+          - None            -> the row exists but paid_credit is '' (PixAI never reported one)
+          - key ABSENT      -> no catalog row at all (local file deleted, id never resolved)
+        `task_id` rides along because paid_credit is TASK-level: two media ids from one task
+        carry the same charge, and the client dedups on it rather than summing twice."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        p = request.get_json(silent=True) or {}
+        raw = p.get("media_ids")
+        if not isinstance(raw, list):
+            return jsonify({"error": "media_ids must be a list"}), 400
+        ids, seen = [], set()
+        for m in raw:
+            s = str(m or "").strip()
+            if s and s not in seen:
+                seen.add(s)
+                ids.append(s)
+        if len(ids) > _LOOM_SPEND_MAX_IDS:
+            return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
+        # as_int mirrors /api/next/history's own paid_credit reading exactly ('' -> None, a
+        # real number -> int): one interpretation of that column across both surfaces.
+        def as_int(s):
+            s = str(s or "").strip()
+            if not s:
+                return None
+            try:
+                return int(float(s))
+            except ValueError:
+                return None
+        out = {}
+        for r in rows_for_media_ids(db_path, ids):
+            out[str(r.get("media_id") or "")] = {
+                "paid_credit": as_int(r.get("paid_credit")),
+                "task_id": str(r.get("task_id") or ""),
+            }
+        return jsonify({"rows": out})
+
     @app.route("/api/loom/generate", methods=["POST"])
     @tier(LOGIN)
     def loom_generate():

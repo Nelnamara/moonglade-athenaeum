@@ -273,6 +273,86 @@ var LoomBundle = (() => {
     return "\u2026" + trail;
   };
   var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending2 ? `, ${pending2} still estimating` : ""}.`;
+  var collectSpendMids = (project) => {
+    const seen2 = /* @__PURE__ */ Object.create(null);
+    const byAct = [];
+    let imported = 0;
+    ((project || {}).acts || []).forEach((act, ai) => {
+      const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
+      ((act || {}).cards || []).forEach((c) => {
+        if (!c) return;
+        if (c.imported) {
+          if (c.resultMid) imported++;
+          return;
+        }
+        const own = [];
+        if (c.resultMid) own.push(String(c.resultMid));
+        (c.attempts || []).forEach((a) => {
+          if (a && a.media_id) own.push(String(a.media_id));
+        });
+        own.forEach((m) => {
+          if (!seen2[m]) {
+            seen2[m] = true;
+            bucket.mids.push(m);
+          }
+        });
+      });
+      byAct.push(bucket);
+    });
+    return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
+  };
+  var tallySpend = (collected, rows) => {
+    const src = rows || {};
+    const col = collected || { byAct: [], imported: 0 };
+    const counted = /* @__PURE__ */ Object.create(null);
+    const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+    const total = zeroB();
+    const byAct = (col.byAct || []).map((b) => {
+      const acc = zeroB();
+      (b.mids || []).forEach((m) => {
+        const row = Object.prototype.hasOwnProperty.call(src, m) ? src[m] || {} : null;
+        const add = (k, n) => {
+          acc[k] += n;
+          total[k] += n;
+        };
+        add("results", 1);
+        if (row === null) {
+          add("missing", 1);
+          return;
+        }
+        const tid = String(row.task_id || "");
+        if (tid && counted[tid]) return;
+        if (tid) counted[tid] = true;
+        const pc = row.paid_credit;
+        if (typeof pc !== "number" || !isFinite(pc)) {
+          add("unpriced", 1);
+          return;
+        }
+        if (pc <= 0) {
+          add("zero", 1);
+          return;
+        }
+        add("paid", 1);
+        add("credits", pc);
+      });
+      return { ...acc, name: b.name };
+    });
+    return { ...total, imported: col.imported || 0, byAct };
+  };
+  var formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, missing = 0 } = {}) => {
+    const unknown = unpriced + missing;
+    if (credits > 0) return `~${Math.round(credits).toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}`;
+    if (unknown > 0) return `${unknown} unpriced`;
+    if (paid > 0 || zero > 0) return "0 cr";
+    return "";
+  };
+  var spendTooltip = (s = {}) => {
+    const paid = s.paid || 0, credits = s.credits || 0;
+    const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
+    const acts = (s.byAct || []).filter((a) => a.results > 0);
+    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
+    return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+  };
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -324,6 +404,24 @@ var LoomBundle = (() => {
       cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch2 })
     }))
   });
+  var patchCardByIdWith = (project, cardId, fn) => ({
+    ...project,
+    acts: project.acts.map((a) => ({
+      ...a,
+      cards: a.cards.map((c) => c.id !== cardId ? c : fn(c))
+    }))
+  });
+  var withResult = (card, patch2, at) => {
+    const prev = card && card.resultMid ? String(card.resultMid) : "";
+    const next = patch2 && patch2.resultMid ? String(patch2.resultMid) : "";
+    const had = card && card.attempts || [];
+    const keep = prev && prev !== next && !had.some((a) => a && String(a.media_id) === prev);
+    return {
+      ...card,
+      ...patch2,
+      attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had
+    };
+  };
   var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
   var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
   var importedFootagePatch = (mediaId, duration) => {
@@ -364,12 +462,16 @@ var LoomBundle = (() => {
     refs: card.refs.map((r, i) => ({ ...r, id: newRefIds && newRefIds[i] || r.id })),
     // A duplicate is a fresh, unrendered shot -- it must not inherit the
     // original's generation result, or it silently shows "done" and Export
-    // plays the SAME clip twice.
+    // plays the SAME clip twice. `attempts` clears for the same reason one
+    // step further on: the original's re-rolls are the ORIGINAL's spend, and
+    // a duplicate that carried them would bill the project twice for money it
+    // spent once, every time a shot was duplicated.
     resultMid: "",
     status: "todo",
     actualDur: null,
     trimIn: 0,
-    trimOut: null
+    trimOut: null,
+    attempts: []
   });
   var insertCardAfter = (project, actId, origCardId, newCard2) => ({
     ...project,
@@ -5828,6 +5930,8 @@ ${"=".repeat(48)}
     pollShot,
     costEstimate,
     refreshEstimate,
+    spend,
+    refreshSpend,
     batchTally,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
@@ -6677,7 +6781,7 @@ ${"=".repeat(48)}
         } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
         videoTrailer = /* @__PURE__ */ React.createElement(React.Fragment, null, sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
           if (!routeTarget) return;
-          setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
+          setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }, (/* @__PURE__ */ new Date()).toISOString()));
           setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
         } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
       } else if (tab === "Image") {
@@ -7296,6 +7400,14 @@ ${"=".repeat(48)}
         title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
       },
       /^≈.*cr/.test(formatCostEstimate(costEstimate)) ? formatCostEstimate(costEstimate) + " to finish" : formatCostEstimate(costEstimate)
+    ), spend.results > 0 && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-cost-pill",
+        onClick: refreshSpend,
+        title: spend.status === "error" ? "Couldn't read the spend ledger \u2014 the catalog didn't answer. Click to retry; no number is shown rather than a wrong one." : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."
+      },
+      spend.status === "error" ? "\u2014" : spend.status === "loading" ? "\u2026" : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -10029,6 +10141,7 @@ Your currently-open board is left untouched.`)) return;
     const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
     const setCardStatus = (cardId, patch2) => setProject((p) => patchCardById(p, cardId, patch2));
+    const setCardResult = (cardId, patch2) => setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch2, (/* @__PURE__ */ new Date()).toISOString())));
     const addCard = (aId) => {
       const c = newCard();
       setProject((p) => appendCardToAct(p, aId, c));
@@ -10078,6 +10191,7 @@ Your currently-open board is left untouched.`)) return;
       setAct,
       setAssets,
       setCardStatus,
+      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -10093,7 +10207,7 @@ Your currently-open board is left untouched.`)) return;
       splitShot
     };
   }
-  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState2({});
     const resumedRef = useRef2({});
     const [genImgState, setGenImgState] = useState2({});
@@ -10215,7 +10329,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const elapsed = Date.now() - startedAt;
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+          setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
           setBatchOutcome(cardId, "done");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (cls.phase === "failed") {
@@ -10261,7 +10375,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       openPick((mid, thumb, isVideo, duration) => {
         const dur = parseFloat(duration);
         setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-        setCardStatus(entry.c.id, {
+        setCardResult(entry.c.id, {
           status: "done",
           resultMid: mid,
           trimIn: 0,
@@ -10528,6 +10642,46 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
     const costEstimate = { ...tallyPrices(settled), pending: pending2, notDoneCount: notDone.length };
+    const [spendRows, setSpendRows] = useState2({});
+    const [spendStatus, setSpendStatus] = useState2("loading");
+    const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
+    const spendKey = collectedSpend.mids.join(",");
+    const spendFetchedRef = useRef2(null);
+    const loadSpend = useCallback2((force) => {
+      const mids = collectedSpend.mids;
+      if (!mids.length) {
+        spendFetchedRef.current = "";
+        setSpendRows({});
+        setSpendStatus("ok");
+        return;
+      }
+      if (!force && spendFetchedRef.current === spendKey) return;
+      spendFetchedRef.current = spendKey;
+      setSpendStatus("loading");
+      fetch("/api/loom/spend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_ids: mids })
+      }).then((r) => r.json()).then((d) => {
+        if (spendFetchedRef.current !== spendKey) return;
+        if (!d || d.error || !d.rows) {
+          setSpendStatus("error");
+          return;
+        }
+        setSpendRows(d.rows);
+        setSpendStatus("ok");
+      }).catch(() => {
+        if (spendFetchedRef.current === spendKey) {
+          spendFetchedRef.current = null;
+          setSpendStatus("error");
+        }
+      });
+    }, [spendKey]);
+    useEffect2(() => {
+      loadSpend();
+    }, [spendKey]);
+    const refreshSpend = useCallback2(() => loadSpend(true), [loadSpend]);
+    const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
     return {
       genState,
       setGenState,
@@ -10566,7 +10720,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       batchGenerate,
       costEstimate,
       refreshEstimate,
-      priceShot
+      priceShot,
+      spend,
+      refreshSpend
     };
   }
   function useExportPipeline(project, thumbs) {
@@ -10722,6 +10878,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setAct,
       setAssets,
       setCardStatus,
+      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -10801,8 +10958,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       routeGen,
       batchGenerate,
       costEstimate,
-      refreshEstimate
-    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+      refreshEstimate,
+      spend,
+      refreshSpend
+    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
     const onVideoSubmit = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
       setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
@@ -10811,7 +10970,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const onVideoResult = useCallback2((cardId, detail) => {
       const mid = (detail.media_ids || [])[0];
       setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-      setCardStatus(cardId, {
+      setCardResult(cardId, {
         status: "done",
         resultMid: mid,
         trimIn: 0,
@@ -10820,7 +10979,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         genStartedAt: null,
         ...detail.duration ? { actualDur: detail.duration } : {}
       });
-    }, [setGenState, setCardStatus]);
+    }, [setGenState, setCardResult]);
     const onVideoError = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
       setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
@@ -11022,6 +11181,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         pollShot,
         costEstimate,
         refreshEstimate,
+        spend,
+        refreshSpend,
         mobileUI,
         setMobileUI,
         draftCard,

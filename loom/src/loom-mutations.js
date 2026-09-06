@@ -46,6 +46,45 @@ export const patchCardById = (project, cardId, patch) => ({
   })),
 });
 
+// Same card-by-id search, but the patch is COMPUTED from the card it lands on. Needed by
+// withResult below, which cannot be expressed as a flat patch: it has to read the resultMid
+// it is about to overwrite. Kept as a sibling rather than widening patchCardById's contract,
+// so every existing flat-patch caller stays exactly as it was.
+export const patchCardByIdWith = (project, cardId, fn) => ({
+  ...project,
+  acts: project.acts.map((a) => ({
+    ...a, cards: a.cards.map((c) => c.id !== cardId ? c : fn(c)),
+  })),
+});
+
+// A landing generation result, applied to the card that ordered it.
+//
+// A card holds exactly ONE resultMid, and a re-roll overwrites it. The clip it replaced was
+// still paid for -- the charge sits in the catalog forever -- but once resultMid moves on,
+// nothing on the board points at it any more, so a spend ledger built on resultMid alone
+// silently forgets every re-roll. `attempts` is the fix: the superseded media id is pushed
+// here on the way past, so the ledger can add up what was actually PAID rather than only
+// what survived.
+//
+// What goes in: the results this card has already had and lost, oldest first. The current
+// one is NOT duplicated here -- it is still resultMid, and the ledger reads the union -- so
+// no id is ever counted twice however many times a shot is re-rolled. `at` is the moment the
+// attempt was SUPERSEDED, not the moment it was made (the board never knew that; the catalog
+// row's own created_at does). It is provenance for a human reading the JSON, never arithmetic.
+//
+// Re-landing the SAME mid (a resumed poll re-reporting a finished shot) records nothing:
+// that is one result reported twice, not two attempts.
+export const withResult = (card, patch, at) => {
+  const prev = card && card.resultMid ? String(card.resultMid) : "";
+  const next = patch && patch.resultMid ? String(patch.resultMid) : "";
+  const had = (card && card.attempts) || [];
+  const keep = prev && prev !== next && !had.some((a) => a && String(a.media_id) === prev);
+  return {
+    ...card, ...patch,
+    attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had,
+  };
+};
+
 // Pure reducers for the prompt-override mechanism -- kept here (not inlined at each call
 // site) so the shape can't drift between the several places that set/clear it (the drawer's
 // commit listener, the toolbar's flush-before-batch, the native Prompt textarea, the
@@ -128,8 +167,11 @@ export const buildDuplicateCard = (card, newCardId, newRefIds) => ({
   refs: card.refs.map((r, i) => ({ ...r, id: (newRefIds && newRefIds[i]) || r.id })),
   // A duplicate is a fresh, unrendered shot -- it must not inherit the
   // original's generation result, or it silently shows "done" and Export
-  // plays the SAME clip twice.
-  resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null,
+  // plays the SAME clip twice. `attempts` clears for the same reason one
+  // step further on: the original's re-rolls are the ORIGINAL's spend, and
+  // a duplicate that carried them would bill the project twice for money it
+  // spent once, every time a shot was duplicated.
+  resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null, attempts: [],
 });
 
 // Insert `newCard` immediately after `origCardId` within one act.
