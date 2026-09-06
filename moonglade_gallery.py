@@ -4467,7 +4467,28 @@ def published_index(db_path):
     return idx
 
 
-def artworks_page_needed(nodes, index, now, deep):
+def published_local_ids(db_path):
+    """Every media_id the catalog holds -- the sweep's "is there a local row at all?" set.
+
+    The companion to published_index, and the difference between the two is the whole of
+    the short-circuit's convergence. published_index only holds rows that ALREADY claim an
+    artwork, so a work missing from it is either brand new (a downloaded generation just
+    published) or permanently unmatched (published on the website, never downloaded here).
+    The sweep cannot write the second kind at all -- apply_artwork_meta only UPDATEs rows
+    that exist -- so treating it as "might be new" made it hold the walk open forever.
+
+    One indexed column scan, no row bodies, the same shape published_index already is."""
+    ids = set()
+    try:
+        with catalog(db_path) as con:
+            for r in con.execute("SELECT media_id FROM catalog"):
+                ids.add(str(r["media_id"]))
+    except sqlite3.Error:
+        return set()
+    return ids
+
+
+def artworks_page_needed(nodes, index, now, deep, local=None):
     """Does this page of listArtworks nodes contain anything this sweep needs to write?
 
     THE SHORT-CIRCUIT AND THE TIER, in one predicate -- and the reason a quiet sweep costs
@@ -4477,8 +4498,18 @@ def artworks_page_needed(nodes, index, now, deep):
     generation feed, so the same stop works here. What "already known" means is where the
     owner's tier (call 4) lives:
 
-      * an artwork with no catalog row claiming its artwork_id -> NEEDED. Newly published
-        work is why the sweep exists, and it arrives at the newest end.
+      * an artwork with no catalog row claiming its artwork_id, but WITH a local row ->
+        NEEDED. Newly published work is why the sweep exists, and it arrives at the
+        newest end.
+      * an artwork with NO LOCAL ROW AT ALL -> spent, not needed. This one is the
+        difference between a sweep that converges and one that does not. Such a work is
+        published on PixAI and was never downloaded here, so apply_artwork_meta has
+        nothing to update and the sweep can never write it -- no number of pages will
+        change that. Read as "never merged" it was NEEDED on every sweep forever, and a
+        run of them before the stable tail meant every fifteen-minute sweep walked the
+        whole published history rather than the one or two pages the design promises.
+        `local` (published_local_ids) is what tells "brand new" from "confirmed miss";
+        without it the old, non-converging answer stands.
       * a work younger than ARTWORKS_YOUNG_DAYS -> NEEDED on every sweep. Its like and
         comment counts are the ones still moving.
       * an older work -> needed only when `deep`, i.e. when ARTWORKS_DEEP_S has passed
@@ -4495,6 +4526,8 @@ def artworks_page_needed(nodes, index, now, deep):
         vmid = str((node or {}).get("videoMediaId") or "")
         known = index.get(mid) or index.get(vmid)
         if not known:
+            if local is not None and mid not in local and vmid not in local:
+                continue                     # confirmed miss: no row here to write
             return True                      # never merged this artwork -> fetch it
         if deep:
             return True                      # the 48h pass refreshes every age
@@ -4544,6 +4577,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
         return None
 
     index = published_index(db_path)
+    local = published_local_ids(db_path)
     metas, before, pages, artworks, spent = [], None, 0, 0, 0
     incomplete = False
     while True:
@@ -4570,7 +4604,7 @@ def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
         if not edges:
             break
         nodes = [(e.get("node", e) or {}) for e in edges]
-        if artworks_page_needed(nodes, index, now, deep):
+        if artworks_page_needed(nodes, index, now, deep, local=local):
             spent = 0
             for node in nodes:
                 # PER NODE, not per page or per run. extract_artwork_meta reads a dict PixAI

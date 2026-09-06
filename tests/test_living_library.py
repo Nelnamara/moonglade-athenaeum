@@ -290,6 +290,53 @@ def test_older_works_come_back_into_the_sweep_once_the_forty_eight_hours_are_up(
     assert g.ARTWORKS_YOUNG_DAYS == 90
 
 
+def test_a_published_work_whose_image_was_never_downloaded_does_not_hold_the_walk_open():
+    """THE SHORT-CIRCUIT COULD NOT CONVERGE past a run of published works with no local
+    image. Such a work has no catalog row at all, so it is not in the artwork index and
+    read as "never merged" -- NEEDED -- on every single sweep, forever. Any account with
+    undownloaded published works before a stable tail had every fifteen-minute sweep walk
+    through all of them, which is not the "one or two pages" the wiki promises.
+
+    A node the sweep can never write is not a reason to keep paying for pages: apply_
+    artwork_meta only UPDATEs rows that exist, so a media_id with no local row is a
+    confirmed miss, not a maybe. `local` -- every media_id the catalog holds -- is what
+    tells the two apart:
+      * a row exists but claims no artwork yet -> newly published, NEEDED
+      * no row at all -> confirmed unmatched, counts as spent
+    """
+    now = NOW
+    old = now - 200 * DAY
+    index = {"m1": ("a1", old)}
+    local = {"m1"}
+    page = [_node("m1"), _node("gone1"), _node("gone2")]
+    # without the local set the old answer stands, and it never converges
+    assert g.artworks_page_needed(page, index, now, deep=False) is True
+    # with it, the two undownloaded works are the misses they are, and the page is spent
+    assert g.artworks_page_needed(page, index, now, deep=False, local=local) is False
+    # a work that IS downloaded but has never been merged is still the reason to walk
+    assert g.artworks_page_needed(
+        [_node("m2")], index, now, deep=False, local={"m1", "m2"}) is True
+    # an animation is matched by either of its two ids, exactly as the index lookup is
+    assert g.artworks_page_needed(
+        [_node("p1", video_mid="v1")], index, now, deep=False, local={"v1"}) is True
+
+
+def test_the_sweep_stops_after_two_spent_pages_of_undownloaded_works(tmp_path, monkeypatch):
+    """The same fix, driven through the real sweep: a library whose published works are
+    mostly undownloaded must still reach the grace stop instead of walking every page."""
+    db = tmp_path / "catalog.db"
+    save_catalog(db, [_row(media_id="m1", filename="a_m1.png", artwork_id="a1",
+                           created_at=_iso(200))])
+    pages = [[_node("m1", "a1")] + [_node("gone%d-%d" % (p, i)) for i in range(5)]
+             for p in range(6)]
+    feed = _sweep_env(monkeypatch, pages)
+    g._artworks_state["deep_at"] = NOW                # a deep pass happened just now
+    res = g.artworks_sweep(tmp_path, db, force=True, now=NOW)
+    assert res["deep"] is False
+    assert feed.fetched == g.ARTWORKS_GRACE, \
+        "a run of never-downloaded works must not defeat the two-page grace stop"
+
+
 def test_an_undateable_row_is_treated_as_young_rather_than_silently_abandoned():
     """A row whose created_at will not parse must not become a work the sweep quietly
     stops refreshing forever."""
