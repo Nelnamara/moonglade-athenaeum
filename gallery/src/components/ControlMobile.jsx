@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
-  MarkArt, BlurToggleTile, fmtEvery,
+  MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
