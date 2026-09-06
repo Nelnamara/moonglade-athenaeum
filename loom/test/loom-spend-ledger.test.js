@@ -13,7 +13,9 @@ import assert from "node:assert/strict";
 import {
   collectSpendMids, tallySpend, formatSpend, spendTooltip,
 } from "../src/loom-core.js";
-import { withResult, buildDuplicateCard, patchCardByIdWith } from "../src/loom-mutations.js";
+import {
+  withResult, buildDuplicateCard, patchCardByIdWith, attachedVideoPatch,
+} from "../src/loom-mutations.js";
 
 /* ---------- fixtures ---------- */
 
@@ -223,6 +225,52 @@ describe("tallySpend", () => {
     const t = tally(p, { m1: row(10, "t1"), elsewhere: row(999, "t9") });
     assert.equal(t.credits, 10);
     assert.equal(t.imported, 1);
+  });
+});
+
+/* ---------- "Use an existing video instead" is an IMPORT, not this project's spend ---- */
+
+describe("a clip attached from the gallery", () => {
+  test("the patch marks the card imported, exactly as the Footage tab's import does", () => {
+    /* Both paths attach an already-rendered gallery video through the same picker. The
+       Footage tab's importedFootagePatch sets `imported: true`; the shot card's "Use an
+       existing video instead" did not, so the ledger billed that clip's historical
+       paid_credit to this project -- and to a second act if the shot was ever re-rolled,
+       because the picked mid was filed into attempts too. */
+    const patch = attachedVideoPatch("gal-1", 4.5);
+    assert.equal(patch.imported, true);
+    assert.equal(patch.resultMid, "gal-1");
+    assert.equal(patch.status, "done");
+    assert.equal(patch.actualDur, 4.5);
+    // the same clearing every other done-write in the file does
+    assert.equal(patch.pendingTaskId, null);
+    assert.equal(patch.genStartedAt, null);
+    // a blank or zero duration leaves the card's own default standing, never a lying zero
+    assert.equal("actualDur" in attachedVideoPatch("gal-1", ""), false);
+    assert.equal("actualDur" in attachedVideoPatch("gal-1", 0), false);
+  });
+
+  test("an attached clip is excluded from the sum and named in the hover", () => {
+    const p = proj([act("Act 1", [
+      card({ id: "a", resultMid: "m1" }),
+      card({ id: "b", ...attachedVideoPatch("gal-1", 4) }),
+    ])]);
+    const t = tally(p, { m1: row(10, "t1"), "gal-1": row(999, "t9") });
+    assert.equal(t.credits, 10, "a clip rendered elsewhere is not this project's spend");
+    assert.equal(t.imported, 1);
+    assert.match(spendTooltip(t), /1 imported clip\(s\) not counted/);
+  });
+
+  test("re-rolling an attached shot never files the imported mid into attempts", () => {
+    // withResult pushes the superseded resultMid into attempts, which is how a re-roll's
+    // money stays countable. An IMPORTED mid was never this project's money, so pushing it
+    // there would bill the same borrowed clip a second time.
+    const before = card({ id: "a", ...attachedVideoPatch("gal-1", 4) });
+    const after = withResult(before, { status: "done", resultMid: "m9" }, "T1");
+    assert.deepEqual(after.attempts, []);
+    assert.equal(after.imported, false, "a freshly generated result is this project's own");
+    const p = proj([act("Act 1", [after])]);
+    assert.equal(tally(p, { m9: row(60, "t9"), "gal-1": row(999, "t0") }).credits, 60);
   });
 });
 

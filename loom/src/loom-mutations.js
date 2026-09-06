@@ -74,13 +74,28 @@ export const patchCardByIdWith = (project, cardId, fn) => ({
 //
 // Re-landing the SAME mid (a resumed poll re-reporting a finished shot) records nothing:
 // that is one result reported twice, not two attempts.
+// A SUPERSEDED IMPORT IS NOT AN ATTEMPT. `attempts` exists so a re-roll's money stays
+// countable -- but a clip attached from the gallery was paid for somewhere else, at some
+// other time, and filing it here would bill borrowed footage to this project the moment the
+// shot was re-rolled. It is dropped rather than recorded, exactly as the ledger drops the
+// card itself while the flag is on.
+//
+// And `imported` does not survive a real result landing on top of it: the clip that lands
+// next IS this project's, so the flag has to come off with the mid it described. The patch
+// gets the last word (the attach path sets it true), and a poll re-reporting the SAME mid
+// changes nothing -- that is one result reported twice, not a new one.
 export const withResult = (card, patch, at) => {
   const prev = card && card.resultMid ? String(card.resultMid) : "";
   const next = patch && patch.resultMid ? String(patch.resultMid) : "";
   const had = (card && card.attempts) || [];
-  const keep = prev && prev !== next && !had.some((a) => a && String(a.media_id) === prev);
+  const wasImported = !!(card && card.imported);
+  const keep = prev && prev !== next && !wasImported
+    && !had.some((a) => a && String(a.media_id) === prev);
+  const imported = patch && Object.prototype.hasOwnProperty.call(patch, "imported")
+    ? !!patch.imported
+    : (next && next !== prev ? false : wasImported);
   return {
-    ...card, ...patch,
+    ...card, ...patch, imported,
     attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had,
   };
 };
@@ -109,6 +124,32 @@ export const importedFootagePatch = (mediaId, duration) => {
   const dur = Number(duration);
   return {
     status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    ...(dur > 0 ? { actualDur: dur } : {}),
+  };
+};
+
+// The patch "Use an existing video instead" applies to a SHOT CARD that already exists
+// (unlike importedFootagePatch above, which lands on a fresh blank card in the Footage
+// tab). Same picker, same act -- an already-rendered gallery video becomes this shot's
+// finished clip with no generation -- so it carries the same `imported: true` provenance.
+//
+// IT MUST. That flag is the only thing keeping a clip out of the ledger's sum
+// (loom-core.js's collectSpendMids), and without it the shot's borrowed footage was billed
+// to this project at whatever it cost whoever rendered it, whenever that was -- exactly the
+// case the ledger's imported-exclusion rule exists to state. Worse on a re-roll: withResult
+// files the superseded resultMid into `attempts`, so the same borrowed clip was then billed
+// a SECOND time in the same project.
+//
+// pendingTaskId/genStartedAt are cleared for the same reason every other status:"done"
+// write in master-storyboard.jsx clears them -- an attach can now land on a shot whose
+// generation was paused, and a stale live task id left behind would keep polling.
+// `duration` is only written when it resolves to a real positive number, so a blank or zero
+// leaves the card's own default standing rather than a lying zero.
+export const attachedVideoPatch = (mediaId, duration) => {
+  const dur = Number(duration);
+  return {
+    status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    pendingTaskId: null, genStartedAt: null,
     ...(dur > 0 ? { actualDur: dur } : {}),
   };
 };

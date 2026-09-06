@@ -30,7 +30,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch, importedFramesPatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch, attachedVideoPatch,
   // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
   // being imported. The in-browser Babel path inlines every module into one global scope,
   // so it happened to resolve there and the omission was invisible; esbuild builds a real
@@ -6649,14 +6649,14 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // file to trim+concat," so this writes the exact same shape pollShot does on completion.
   const useExistingVideo = (entry) => {
     openPick((mid, thumb, isVideo, duration) => {
-      const dur = parseFloat(duration);
       setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      // pendingTaskId/genStartedAt cleared too, same as every other status:"done" write in
-      // this file -- newly reachable while a generation is "paused" (Deep Focus's busy-guard
-      // now lets a paused shot through) but was previously left stale/live here, unlike every
-      // other done path (found in review).
-      setCardResult(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
-        ...(dur > 0 ? { actualDur: dur } : {}) });
+      // THE SAME PATCH THE FOOTAGE TAB'S IMPORT APPLIES (attachedVideoPatch, loom-mutations.js
+      // -- see its own note). Same picker, same borrowed clip, so the same `imported: true`
+      // provenance: this shot's video was rendered elsewhere at some other time, and the
+      // spend ledger must not bill it to this project. It was written out by hand here and
+      // missed that flag, which is the whole of the bug. pendingTaskId/genStartedAt clearing
+      // moved into the shared patch with it.
+      setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
     }, "video");
   };
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
