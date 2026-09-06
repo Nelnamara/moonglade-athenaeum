@@ -75,6 +75,31 @@ export function filterQueryString({ applied, media, shelf, adv, perPage }, dateS
   return p.toString();
 }
 
+/* Prune a selection down to what a freshly loaded page actually holds.
+
+   For a BACKGROUND-caused items swap ONLY -- the page-1 in-place refresh a finished
+   generation triggers (App.jsx / AppMobile.jsx). The owner did not ask for that load, so
+   an id it pushed off the end of the page must not stay armed for a later bulk action; a
+   selection is a promise about pictures you can still see. Every USER-initiated swap keeps
+   the behaviour it already had: afterMutation clears the set outright, and a page flip or
+   filter change deliberately keeps it (Gallery.md: "selection persists across pages, which
+   is the point of them").
+
+   Returns the SAME Set when nothing was dropped, so an untouched selection costs no
+   re-render -- <Grid> is memoized and `selected` is one of its props. Same updater idiom as
+   toggleSelected below: the previous Set is read through setSelected, never captured. */
+export function pruneSelected(setSelected, items) {
+  const live = new Set((items || []).map((it) => it.media_id));
+  setSelected((old) => {
+    let dropped = false;
+    old.forEach((mid) => { if (!live.has(mid)) dropped = true; });
+    if (!dropped) return old;
+    const kept = new Set();
+    old.forEach((mid) => { if (live.has(mid)) kept.add(mid); });
+    return kept;
+  });
+}
+
 /* initialPage: the page the FIRST load lands on (App reads it from ?page=, via
    gen/urlState.js -- #31 "Where the Refit Broke" #7). Every later filter change
    still restarts from page 1, exactly as before. */

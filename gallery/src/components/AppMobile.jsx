@@ -1,5 +1,5 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import useLibrary from "../hooks/useLibrary.js";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
@@ -543,6 +543,105 @@ export default function AppMobile({ boot }) {
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
+  /* THE PHONE LEARNS COMPLETIONS EXIST (2026-09-05). This surface had NO listener for
+     mg-gen-done / mg-result at all -- so a generation finishing while the phone was in
+     front of you left the credits chip showing the pre-spend number and never nudged the
+     Folio, both of which the desktop shell has done since it was written. It gets the
+     announce half of that contract now, under the same policy the desktop just adopted:
+     nothing moves the owner's view of the library except his own hands.
+
+     WHAT "the default view" MEANS HERE, read off this surface rather than assumed:
+       - page 1. The phone has no URL page state at all -- GalleryMobile's pager just
+         calls load(page +/- 1) -- so the loaded page IS the whole of where you are, and
+         page 1 is the perch where a refresh moves nothing but the arrival of the new
+         picture at the top. Deeper in, the grid, the page and .glm-body's scroll are left
+         exactly as they are. Which page that is gets read off what the owner ASKED for,
+         not off the page the shell has settled on -- see navRef below.
+       - NOT inside the ◈ Similar answer. There the library grid is not even rendered
+         (GalleryMobile swaps <SimilarResults> into its place), and the whole contract of
+         that view is that the library underneath is untouched so the token's ✕ restores
+         it without re-running anything. Reloading it under the token would break exactly
+         that promise, invisibly.
+     Either way the announcement is the same one the desktop leans on and this shell
+     already renders: notify/jobsStore.js's done-transition toast (main.jsx mounts
+     <NotifyRoot/> for the phone too), plus the row in the Activity sheet above.
+
+     Refs, because the listeners mount ONCE and load's identity follows the filters --
+     the same shape App.jsx's popstate handler uses for the same reason. */
+  /* navRef -- WHAT THE OWNER ASKED FOR, written the moment he asks rather than when the
+     server answers. Ported from the desktop's own pass over THE POLICY the same day
+     (App.jsx's navRef and the commentary above it are the long form), because the phone
+     carried the identical race and for the identical reason: `lib.page` only becomes the
+     page he tapped for once the fetch RESOLVES, so between the Next tap and that response
+     this shell still believed it was on the old page. A completion landing inside that
+     window read the settled page, found 1, passed the perch guard, and fired its own
+     load(1, true) -- a newer reqSeq (useLibrary.js), so the page-2 answer the owner was
+     waiting on was discarded and the tap he made simply did not happen. The rule held and
+     the race beat it, and the deeper the library the likelier: the request it has to
+     out-run is the one he is waiting on.
+       `want` is written synchronously by every hand that asks for a page, and on this
+     surface there are exactly TWO -- GalleryMobile's Prev/Next pager and the viewer
+     stepping across a page boundary (LightboxMobile's step). Both take load as a PROP and
+     are handed userLoad below instead of the raw one. There is no Back/Forward hand to
+     cover here the way the desktop has: the phone keeps no ?page= at all (see above), so
+     that is the whole list. `inFlight` counts the owner's loads still in the air, because
+     it is HIS response that must be the one that renders, not an identical one that
+     raced it.
+       `want` starts at 1, not at anything address-derived, for that same reason: page 1
+     is where this shell always opens. And `page` reconciles `want` only when nothing of
+     his is in flight AND the first load has landed (total != null, the same "not settled
+     yet" test the desktop's rule uses), so a filter / per-page / collection change
+     resetting the grid to page 1 hands the perch back. */
+  const navRef = useRef({ want: 1, inFlight: 0 });
+  const genLoadRef = useRef(lib.load);
+  const genSimilarRef = useRef(similarFor);
+  /* The owner's own load. Marks the intent BEFORE the request leaves, counts it in the
+     air, and hands back the same promise lib.load gives (the response, or undefined when a
+     newer request superseded it) so every caller reads the answer exactly as before --
+     LightboxMobile's page-boundary step reads the landed page's items off it to pick the
+     near edge. */
+  const userLoad = useCallback((p, replace) => {
+    navRef.current.want = p;
+    navRef.current.inFlight += 1;
+    const settle = () => {
+      navRef.current.inFlight = Math.max(0, navRef.current.inFlight - 1);
+    };
+    return lib.load(p, replace).then((d) => { settle(); return d; }, (e) => { settle(); throw e; });
+  }, [lib.load]);
+  useEffect(() => {
+    genLoadRef.current = lib.load;
+    genSimilarRef.current = similarFor;
+    if (!navRef.current.inFlight && lib.total != null) navRef.current.want = lib.page;
+  });
+  const setLibSelected = lib.setSelected;   // a setState: stable, safe to close over once
+  useEffect(() => {
+    const onDone = () => {
+      fetchAccount().then(setAccount);
+      // Guarded exactly like App.jsx's own call -- notify/index.jsx publishes window.Ach
+      // for every authenticated render, phone included, but a page that never installed
+      // notify must not throw here.
+      if (window.Ach) window.Ach.check();
+      /* The perch, read off what the owner ASKED for and not off the page the shell has
+         settled on: while a page of his own is still in the air it is his answer that must
+         land, and the page he is leaving is not the perch. See navRef above. */
+      const nav = navRef.current;
+      if (nav.inFlight || nav.want !== 1) return;
+      // ...and not under the ◈ token even at the perch: the library grid is not rendered
+      // there at all, and the ✕ has to hand back exactly what was underneath.
+      if (genSimilarRef.current) return;
+      genLoadRef.current(1, true).then((data) => {
+        // undefined = a newer request superseded this one (useLibrary's reqSeq guard).
+        if (data) pruneSelected(setLibSelected, data.items);
+      });
+    };
+    window.addEventListener("mg-gen-done", onDone);
+    document.addEventListener("mg-result", onDone);
+    return () => {
+      window.removeEventListener("mg-gen-done", onDone);
+      document.removeEventListener("mg-result", onDone);
+    };
+  }, [setLibSelected]);
+
   const refreshCollections = async () => {
     const c = await fetchCollections();
     if (c) setCollections(c);
@@ -670,8 +769,14 @@ export default function AppMobile({ boot }) {
       </header>
 
       <div className="glm-body" ref={bodyRef}>
+        {/* load={userLoad} comes AFTER the {...lib} spread so it wins over lib.load: the
+            ONE thing GalleryMobile does with this prop is the Prev/Next pager, which is
+            the owner's hand asking for a page. The intent has to be on the record before
+            the request even leaves, so a completion landing mid-flight cannot mistake the
+            page he is leaving for the page he is on. See navRef above. */}
         {tab === "gallery" && (
           <GalleryMobile boot={boot} collections={collections} refreshCollections={refreshCollections} {...lib}
+            load={userLoad}
             onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet}
             similar={similarToken} similarState={similar} similarSource={similarSource}
             onSimilar={showSimilar} onClearSimilar={clearSimilar} />
@@ -767,12 +872,16 @@ export default function AppMobile({ boot }) {
       )}
 
       {/* Lightbox Mobile -- a fixed, full-viewport overlay above the hero/tab
-          bar, mutually exclusive with ImageDetailsMobile (see header comment). */}
+          bar, mutually exclusive with ImageDetailsMobile (see header comment).
+          loadPage={userLoad}, not lib.load: stepping past the end of a page in the viewer
+          is the owner asking for the next page, so it goes on the record exactly the way
+          the pager does. The completion handler already refuses while one of his loads is
+          in the air, which is precisely the window this step opens. See navRef above. */}
       {lbIndex != null && (
         <LightboxMobile
           items={lib.items} index={lbIndex} setIndex={setLbIndex}
           onClose={closeLightbox} onRate={rate}
-          page={lib.page} pages={lib.pages} loadPage={lib.load}
+          page={lib.page} pages={lib.pages} loadPage={userLoad}
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
           onEnterContest={openContestFor}
