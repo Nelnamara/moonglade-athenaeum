@@ -38,14 +38,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   safe buttons demote to "Run now." Nothing destructive ever automatic. Scope + owner calls:
   `../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md`. Builds after the 3.7.1 wave.
 
-- **The icon pass — the Glyph Ledger ballot, built.** *(owner's picks, 2026-09-05)* The owner
-  answered the full symbol workshop: seven spots move from typed characters to drawn icons
-  (glyphs.fyi set, MIT — files + the vote record in `../moonglade-internal/design/glyphs/`),
-  seven character swaps (✎ ⎙ purple-♛ ⚔ ❖/⚑ ⎌, keep ⟳), the Branding mark buttons render each
-  mark's own image instead of a placeholder glyph, and search unifies on the binoculars icon
-  everywhere. Mechanics: bake SVGs inline, one `currentColor` swap per file so every skin tints
-  them via its own tokens; carry the MIT notice. Builds on the post-3.8.0 tree.
-
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
   routes every tablet to the DESKTOP build in both orientations. Three coherent answers: raise the
