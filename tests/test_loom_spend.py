@@ -124,6 +124,31 @@ def test_absurd_id_count_is_rejected_rather_than_queried(tmp_path):
     assert "too many" in r.get_json()["error"]
 
 
+def test_one_unreadable_row_degrades_to_unpriced_instead_of_500ing_the_batch(tmp_path):
+    """A paid_credit that is a number Python cannot make an int of took down the WHOLE read.
+
+    as_int caught ValueError from int(float(s)) -- but int(float("Infinity")) raises
+    OverflowError, so one such row answered the request with a 500 and every other media id
+    in the batch lost its number too. The three states this route exists to keep apart mean
+    nothing if one bad row can delete all of them at once.
+
+    "Unpriced" is the honest answer for a value that is not a charge: the row exists, and
+    nothing usable was reported for it."""
+    cli = _authed_client(tmp_path, [
+        _row(media_id="1", filename="a_1.mp4", paid_credit="Infinity", task_id="t1"),
+        _row(media_id="2", filename="b_2.mp4", paid_credit="-inf", task_id="t2"),
+        _row(media_id="3", filename="c_3.mp4", paid_credit="nan", task_id="t3"),
+        _row(media_id="4", filename="d_4.mp4", paid_credit="1e400", task_id="t4"),
+        _row(media_id="5", filename="e_5.mp4", paid_credit="90", task_id="t5"),
+    ])
+    r = _spend(cli, ["1", "2", "3", "4", "5"])
+    assert r.status_code == 200
+    rows = r.get_json()["rows"]
+    for bad in ("1", "2", "3", "4"):
+        assert rows[bad]["paid_credit"] is None, bad
+    assert rows["5"]["paid_credit"] == 90, "one bad row must not cost the good ones"
+
+
 def test_login_required(tmp_path):
     """Anonymous callers get the same gate every other /api/loom/* route has -- this reads
     real catalog rows off disk."""

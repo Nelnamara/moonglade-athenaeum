@@ -19,6 +19,7 @@ Usage:
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import secrets
@@ -17067,13 +17068,28 @@ __DESIGN_TOKENS__
             return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
         # as_int mirrors /api/next/history's own paid_credit reading exactly ('' -> None, a
         # real number -> int): one interpretation of that column across both surfaces.
+        #
+        # NON-FINITE IS NOT A CHARGE, and it must not take the batch down with it. This
+        # caught ValueError only -- but int(float("Infinity")) raises OverflowError, and
+        # float("nan") converts to a meaningless integer rather than raising at all. One
+        # such row answered the whole request with a 500, so every OTHER media id in the
+        # batch lost its number too: the three states this route keeps apart mean nothing
+        # if one bad row can delete all of them at once. A value that is not a real,
+        # finite number degrades to "unpriced" -- the row exists, and nothing usable was
+        # reported for it -- which is exactly what that state is for.
         def as_int(s):
             s = str(s or "").strip()
             if not s:
                 return None
             try:
-                return int(float(s))
-            except ValueError:
+                v = float(s)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(v):
+                return None
+            try:
+                return int(v)
+            except (OverflowError, ValueError):
                 return None
         out = {}
         for r in rows_for_media_ids(db_path, ids):
