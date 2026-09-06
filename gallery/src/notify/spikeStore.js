@@ -65,10 +65,18 @@ export function spikeMessage(spikes) {
   const top = list[0];
   const name = (top.title || "").trim() || "One of your works";
   const others = list.length - 1;
+  /* A BLOW-UP FROM NOTHING has no usual pace to be a multiple of (owner's call,
+     2026-09-06: a previous reading of 0 counts as a spike once the gain clears the
+     floor), so views_spike sends `multiple: null` and this says it in words. Printing
+     the field regardless would read "about null× its usual pace" on the single most
+     dramatic case the rule has. */
+  const pace = top.multiple == null
+    ? "up from nothing"
+    : "about " + top.multiple + "× its usual pace";
   return {
     title: "◈ " + name + " is taking off",
     msg: "+" + Number(top.gained).toLocaleString() + " views in the last "
-      + top.window_hours + "h — about " + top.multiple + "× its usual pace"
+      + top.window_hours + "h — " + pace
       + (others ? " (and " + others + " more picking up)" : "") + ".",
   };
 }

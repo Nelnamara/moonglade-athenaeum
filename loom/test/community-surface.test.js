@@ -155,6 +155,19 @@ describe("the blow-up note", () => {
   test("an untitled work still gets a sentence, never an empty name", () => {
     assert.match(spikeMessage([hit({ title: "" })]).title, /One of your works/);
   });
+
+  test("a blow-up from nothing says so instead of printing a missing multiple", () => {
+    /* Owner's call, 2026-09-06: a previous reading of 0 counts as a spike once the gain
+       clears the floor. There is no usual pace to be a multiple of, so views_spike sends
+       `multiple: null` -- and the sentence has to say that in words rather than render
+       "about null× its usual pace". */
+    const m = spikeMessage([hit({ multiple: null, baseline_per_hour: 0, gained: 500 })]);
+    assert.match(m.msg, /\+500 views in the last 24h/);
+    assert.match(m.msg, /up from nothing/);
+    assert.doesNotMatch(m.msg, /null|NaN|undefined|×/);
+    // an ordinary spike is untouched
+    assert.match(spikeMessage([hit()]).msg, /about 24\.9× its usual pace/);
+  });
 });
 
 describe("the note ANNOUNCES and does nothing else", () => {
