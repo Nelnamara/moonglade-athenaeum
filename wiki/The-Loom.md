@@ -25,14 +25,20 @@ straight from a bookmark, in a tab that was never in the library, goes to the fr
 
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a
 tablet on your LAN too, and signing back in returns you to the exact storyboard you asked
-for. The header button is there at every screen width, phones included. It's a dense
-four-panel tool, so **turn a phone to landscape** — portrait works but is cramped.
+for. The header button is there at every screen width, phones included.
 
 **On a phone the Loom opens its phone layout by itself** — a board-and-reel view built for
 the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
 still work and always win: untick **📱 Mobile view** in the top bar to get the wide board on
 a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
-browser from then on.
+browser from then on. The wide board is a dense four-panel tool, so if you do ask for it on
+a phone, **turn the phone to landscape** — portrait works but is cramped.
+
+The choice is decided once, when the Loom opens, and after that only those two switches
+change it. Turning the phone over mid-session will not swap the tool out from under you.
+
+A browser that had already used the older **Mobile view** switch keeps whatever it was set
+to — the auto-open speaks only for a browser that has never answered.
 
 It is also deliberately **engine-agnostic**: every shot can hand you its assembled prompt
 via **Copy shot**, so you can plan here and render somewhere else.

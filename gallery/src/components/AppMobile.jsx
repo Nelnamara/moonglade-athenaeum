@@ -1122,9 +1122,16 @@ export default function AppMobile({ boot }) {
       </MobileSheet>
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
+        {/* THE ROTATE LINE WAS TRUE UNTIL 2026-09-06 and is not any more: the Loom now
+            opens a phone layout by itself on a phone, built for a narrow screen. Telling
+            the owner to turn the phone right before the button that gives him a portrait
+            tool was the sheet contradicting the app. The wide four-panel board is still
+            there and still wants landscape -- but only once he has asked for it, so that
+            is what this now says. */}
         <div className="glm-loom-note">
-          Weave shots into a video sequence. <b>Rotate to landscape</b> — the Loom is built for
-          the wide surface, and portrait stays cramped.
+          Weave shots into a video sequence. On a phone it opens a <b>board and reel</b> view
+          built for the narrow screen. The wide four-panel board is still one tap away —
+          tap <b>🖥 Desktop</b> in the Loom's own bar, and turn the phone to landscape for it.
         </div>
         <div className="glm-sheet-actions">
           <a className="glm-primary glm-primary-loom" href="/loom">Open The Loom</a>

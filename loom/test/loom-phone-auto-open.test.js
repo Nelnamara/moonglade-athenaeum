@@ -176,8 +176,17 @@ describe("both manual switches survive the auto-open", () => {
       "an effect writing the value back is exactly the bug the new key exists to undo");
   });
 
-  test("the rotate note's own words are left alone -- that half is the Design Handoff's", () => {
+  test("the phone's Loom sheet describes the layout it actually opens", () => {
+    /* It used to say "Rotate to landscape -- the Loom is built for the wide surface, and
+       portrait stays cramped", directly above the button that now opens a portrait-built
+       board-and-reel view. The sheet was contradicting the app. Landscape advice belongs
+       to the desktop board, which is a choice away, so that is where it sits now. */
     const mobileApp = rd("../gallery/src/components/AppMobile.jsx");
-    assert.match(mobileApp, /<b>Rotate to landscape<\/b>/);
+    const sheet = mobileApp.slice(mobileApp.indexOf('title="THE LOOM"'));
+    const note = sheet.slice(0, sheet.indexOf("</MobileSheet>"));
+    assert.doesNotMatch(note, /<b>Rotate to landscape<\/b>/,
+      "the unconditional rotate instruction is no longer true on a phone");
+    assert.match(note, /board and reel/);
+    assert.match(note, /Desktop/, "and the wide board is still findable, as the override");
   });
 });
