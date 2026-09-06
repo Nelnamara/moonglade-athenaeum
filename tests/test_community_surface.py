@@ -182,6 +182,67 @@ def test_a_failed_sweep_does_not_fail_the_whole_sync(tmp_path, mocker, pixai):
     assert res["views_complete"] is False        # and the sweep says so on its own line
 
 
+class _FlakyPost:
+    """A requests-shaped session that fails the first POST and answers the second.
+
+    Patched at the SESSION, below gql_adhoc and below PixAIClient's own retry loop -- the
+    whole point of the test is that the loop is what must not run a second time, so
+    stubbing gql_adhoc (as every other views test does) would prove nothing here."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.posts = 0
+
+    def post(self, url, json=None, timeout=None):
+        self.posts += 1
+        if self.posts == 1:
+            raise core.requests.exceptions.ReadTimeout("lost response")
+        return SimpleNamespace(status_code=200, json=lambda: {"data": self.payload},
+                               text="")
+
+
+def test_the_view_sweep_never_re_reads_a_page_after_a_lost_response(mocker):
+    """READING A VIEW COUNT COSTS A VIEW, so the sweep's read is non-idempotent -- the
+    same class of call gql_mutate exists for, even though this one is technically a query.
+
+    It went through the retrying transport with retries=1. A lost RESPONSE looks exactly
+    like a lost REQUEST (a read timeout, a proxy's 502 after PixAI already answered), so
+    one retry re-read -- and re-INCREMENTED -- the same forty artworks inside one sweep.
+    Every one of them then stored +2 of the sweep's own making while views_spike subtracts
+    exactly SPIKE_SELF_READ = 1, which can push a borderline work over the floor and fire
+    a false "is taking off" note.
+
+    Single attempt now: a failed page falls into the except and reports the sweep
+    incomplete, which is the honest answer -- the alternative is a silent double-read."""
+    sess = _FlakyPost({"artworks": {"edges": [{"node": {"id": "aw1", "views": 10}}],
+                                    "pageInfo": {"hasNextPage": False}}})
+    client = core.PixAIClient.__new__(core.PixAIClient)
+    client._session = sess
+    client._user_id = "u1"
+
+    views, complete = core.artwork_views_bulk(client, page_size=40, delay=0)
+
+    assert sess.posts == 1, "one lost response must not buy a second read of the page"
+    assert (views, complete) == ({}, False)
+
+
+def test_the_view_sweep_asks_the_transport_for_no_retries_at_all(mocker):
+    """The value itself, observed where the loop actually counts with it -- so this
+    cannot pass because some caller happened to swallow the retry."""
+    seen = {}
+
+    def _post(self, document, variables, retries):
+        seen["retries"] = retries
+        return {"artworks": {"edges": [], "pageInfo": {"hasNextPage": False}}}
+
+    mocker.patch.object(core.PixAIClient, "_graphql_post", _post)
+    client = core.PixAIClient.__new__(core.PixAIClient)
+    client._session = None
+    client._user_id = "u1"
+    core.artwork_views_bulk(client, page_size=40, delay=0)
+    assert seen["retries"] == 0
+
+
 def test_fold_views_leaves_a_row_alone_when_the_sweep_missed_it(tmp_path):
     """A partial sweep must not blank the rows it did not reach. fold_views is only ever
     called for a work the sweep actually returned; handed None it is a no-op, so a row

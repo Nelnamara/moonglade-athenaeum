@@ -5964,7 +5964,20 @@ def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
     calling anything a spike; do not remove that subtraction on the theory that it is a
     rounding error, it is the difference between "nobody looked" and "+1 forever".
 
-    Read-only: a query, never a mutation, and nothing here spends."""
+    SINGLE ATTEMPT, and that is not a style choice. Because the read PERTURBS the thing it
+    reads, this is the same class of call `gql_mutate` exists for even though it is
+    technically a query: a lost RESPONSE looks exactly like a lost REQUEST (a read timeout,
+    a proxy's 502 arriving after PixAI already answered and already bumped the counters),
+    so a retry re-reads -- and re-increments -- the same forty artworks inside one sweep.
+    Those rows then carry +2 of the sweep's own making while views_spike subtracts exactly
+    SPIKE_SELF_READ = 1, which permanently inflates their stored count and can push a
+    borderline work over the floor into a false "is taking off" note. `retries=0` is
+    therefore passed by hand here, the same way delete_batch_media_gql does for its own
+    non-idempotent call; a page that fails falls into the except below and reports the
+    sweep incomplete, which is the honest answer.
+
+    Read-only in the sense that matters for the account: a query, never a mutation, and
+    nothing here spends credits."""
     try:
         author = str(_client_of(session).user_id or "")
     except AttributeError:
@@ -5979,7 +5992,7 @@ def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
         pages += 1
         try:
             data = gql_adhoc(session, doc,
-                             {"a": author, "n": int(page_size), "after": cursor}, retries=1)
+                             {"a": author, "n": int(page_size), "after": cursor}, retries=0)
         except (requests.RequestException, PixAIError, ValueError, TypeError):
             return views, False
         conn = ((data or {}).get("artworks")) or {}
