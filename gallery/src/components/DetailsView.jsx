@@ -743,14 +743,14 @@ export default function DetailsView({
           <div className="p-actions p-actions-more">
             <a className="btn" href={"/full/" + encodeURIComponent(row.media_id)} target="_blank" rel="noreferrer">Open Full Size</a>
             {row.url ? <a className="btn" href={row.url} target="_blank" rel="noreferrer">Open on PixAI</a> : null}
-            <button className="btn" onClick={() => window.print()}>🖨 Print</button>
+            <button className="btn" onClick={() => window.print()}>⎙ Print</button>
             {row.is_video !== "1" && (
               <>
                 <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=photo"} target="_blank" rel="noreferrer">4×6 photo</a>
                 <a className="btn" href={"/contact-sheet?ids=" + encodeURIComponent(row.media_id) + "&format=strip"} target="_blank" rel="noreferrer">Photo strip</a>
               </>
             )}
-            <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✧ Edit this</button>
+            <button className="btn" onClick={() => { onClose(); onEdit(row.media_id); }}>✎ Edit this</button>
             {/* Remix (issue #4, extended to video by SCOPE_2026-08-17 §2): the full
                 recipe into the Generate drawer -- an image's prompt/negative/size/
                 steps/cfg/seed/model + LoRAs into the Image tab, a video's engine/

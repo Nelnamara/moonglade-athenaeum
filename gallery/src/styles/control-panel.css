@@ -155,6 +155,15 @@ button.mgcp-mark { width: 32px; height: 32px; border-radius: 8px; background: va
   display: grid; place-items: center; font-size: 15px; cursor: pointer; border: 1px solid var(--surface1);
   font-family: inherit; overflow: hidden; }
 button.mgcp-mark.on { border-color: var(--gold); }
+button.mgcp-mark img { width: 100%; height: 100%; object-fit: cover; }
+
+/* A MARK WITH NO ART (ControlPanelOverlay.jsx's MarkArt). Every mark button in the app
+   draws its own picture; this is what one looks like when that picture is missing. It is
+   the panel's existing "nothing here yet" idiom -- the dashed frame the locked and upload
+   tiles wear -- deliberately NOT a stand-in glyph, which is what used to sit here and
+   made five different marks look like the same diamond. */
+.mgcp-marknoart { width: 56%; height: 56%; border-radius: 4px; pointer-events: none;
+  border: 1px dashed color-mix(in oklab, var(--overlay0) 75%, transparent); }
 .mgcp-skinsrow { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 9px; }
 .mgcp-skincard { width: 140px; flex: none; border-radius: 11px; padding: 8px 10px 9px; display: flex;
   flex-direction: column; gap: 4px; background: rgba(12,10,28,.55); border: 1px solid var(--surface1); cursor: pointer; }

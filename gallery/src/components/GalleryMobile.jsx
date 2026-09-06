@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
 import useSheet from "../hooks/useSheet.js";
 import GalleryGridMobile from "./GalleryGridMobile.jsx";
@@ -136,7 +137,7 @@ export default function GalleryMobile({
     <div className="glm-tab glm-tab-gallery">
       <div className="glm-bar">
         <div className="glm-search">
-          <span className="glm-search-icon" onClick={() => submitQuery()} title="Search">⚲</span>
+          <span className="glm-search-icon" onClick={() => submitQuery()} title="Search"><Icon name="search" /></span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}

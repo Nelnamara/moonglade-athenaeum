@@ -119,11 +119,16 @@ describe("A. URL page addressing (App.jsx)", () => {
     const open = app.slice(app.indexOf("const openDetails = useCallback((mid) => {"), app.indexOf("const closeDetails"));
     assert.match(open, /setUrl\(\{ image: mid \}\)/);
   });
+  /* Both loads below go through `userLoad` since 2026-09-05 (THE POLICY's race fix, pinned
+     in full by loom/test/gallery-stands-still.test.js): it writes the page the owner asked
+     for into navRef SYNCHRONOUSLY and counts the request in flight, then calls the same
+     load with the same arguments and hands back the same promise. What these two pin --
+     which address each writes, and that a changed page is loaded -- is unchanged. */
   test("goToPage pushes ?page=N through the helper, then loads", () => {
     const goAt = app.indexOf("const goToPage = useCallback((p) => {");
     const go = app.slice(goAt, app.indexOf("}, [", goAt));
     assert.match(go, /setUrl\(\{ page: p \}\);/);
-    assert.match(go, /load\(p, true\);/);
+    assert.match(go, /userLoad\(p, true\);/);
     assert.match(app, /goToPage=\{goToPage\}/);
     assert.doesNotMatch(app, /goToPage=\{\(p\) => load\(p, true\)\}/);
   });
@@ -133,7 +138,7 @@ describe("A. URL page addressing (App.jsx)", () => {
     const pop = app.slice(i, app.indexOf('window.addEventListener("popstate", onPop);', i));
     assert.match(pop, /setDetailsFor\(readImage\(window\.location\.search\)\);/);
     assert.match(pop, /const p = readPage\(window\.location\.search\);/);
-    assert.match(pop, /if \(p !== pageRef\.current\) loadRef\.current\(p, true\);/);
+    assert.match(pop, /if \(p !== pageRef\.current\) userLoadRef\.current\(p, true\);/);
   });
   test("filter/search/sort resets keep the URL honest: the settled page is mirrored with replaceState", () => {
     const i = app.indexOf("if (loading || total == null) return;");

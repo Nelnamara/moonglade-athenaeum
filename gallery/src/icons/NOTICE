@@ -1,0 +1,45 @@
+Glyphs
+======
+The nine .svg files in this folder are from **Glyphs**, an open icon set.
+
+    Home:    https://glyphs.fyi
+    Source:  https://github.com/gorango/glyphs
+    Licence: MIT
+
+They ship here under that licence, reproduced verbatim below (including its
+name-less copyright line, which is how upstream's own LICENSE file reads).
+
+Two mechanical edits were made to the files, both documented in tools/build_icons.py:
+the drawn tint became `currentColor` so a skin can retint them, and stroked paths
+carry `vector-effect="non-scaling-stroke"` so the hairline outline survives at this
+app's 9-20px icon sizes. The drawings themselves are untouched.
+
+Which file is which is in tools/build_icons.py's ICONS table; the owner's picks are
+recorded in moonglade-internal/design/glyphs/README.md — the Glyph Ledger ballot
+(2026-09-05) for seven of them, that day's post-audit rulings for books_path and
+history_path.
+
+
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2018
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------

@@ -573,9 +573,19 @@ html.mg-noblur .mgdock-scrim {
   padding: 0; cursor: pointer;
   font-family: inherit; text-align: left; border-radius: 9px; border: 1px solid var(--surface1);
   background: var(--surface0); transition: border-color .16s, box-shadow .16s; }
+/* The membership gate (♛ since the 2026-09-05 Glyph Ledger; ★ in gold before it).
+   PixAI PURPLE, not a skin colour -- the owner's ruling was "should be purple to match
+   PixAI", and a membership is a fact about PixAI's account, not about the skin the
+   library is wearing, so it must stay purple under ember and verdant too. That means
+   --purple-bright, the app's one :root-fixed violet (no skin redefines it); --lavender
+   and --mauve both retint and would go peach/mint. --purple-bright at full strength
+   measures 2.5:1 on this badge's own plate -- too dim for a 10px mark -- so the crown
+   itself is that violet lifted toward white (5.7:1 measured), which stays the same
+   colour in every skin. */
 .mgdock-aigate { position: absolute; top: 4px; right: 4px; z-index: 1; font-size: 10px; line-height: 1;
-  color: var(--gold); background: color-mix(in oklab, var(--mantle) 78%, transparent);
-  border: 1px solid color-mix(in oklab, var(--gold) 40%, transparent); border-radius: 5px;
+  color: color-mix(in oklab, var(--purple-bright) 65%, #fff);
+  background: color-mix(in oklab, var(--mantle) 78%, transparent);
+  border: 1px solid color-mix(in oklab, var(--purple-bright) 70%, transparent); border-radius: 5px;
   padding: 2px 4px; pointer-events: none; }
 .mgdock-aitile:hover { border-color: color-mix(in oklab, var(--lavender) 55%, transparent); }
 .mgdock-aitile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }

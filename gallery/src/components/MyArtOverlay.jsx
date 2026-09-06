@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet, apiPost } from "../api.js";
 import { invalidate, peek, put } from "../hooks/swrCache.js";
 import useMyArt, { fmt } from "../hooks/useMyArt.js";
@@ -540,7 +541,7 @@ export default function MyArtOverlay({ onClose, onOpenPost }) {
                               same host-guarded proxy, and eager for the same reason
                               (this grid can sit below the fold too). */}
                           {m.cover_url ? <img src={"/api/pixai-cdn/thumb?u=" + encodeURIComponent(m.cover_url)} alt="" /> : null}
-                          <span className="mgma2-lorabadge">◈ USER LORA</span>
+                          <span className="mgma2-lorabadge"><Icon name="lora" />USER LORA</span>
                           <span className="mgma2-lorabase" style={{ color: tc, background: tbg, borderColor: tc }}>{tlabel}</span>
                           <div className="mgma2-loraname">{m.title}</div>
                         </div>

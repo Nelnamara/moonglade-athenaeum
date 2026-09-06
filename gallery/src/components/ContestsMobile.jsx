@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import useContests, { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import ContestDetailMobile from "./ContestDetailMobile.jsx";
 import "../styles/myart-contests.css";
@@ -113,7 +114,9 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
           </span>
         )}
         <span className="cmb-cardmeta">
-          {enteredCount(c) > 0 ? "★ entered ×" + enteredCount(c) + " · " : ""}{closes(c)}
+          {enteredCount(c) > 0 ? (
+            <span className="cmb-entered-inline"><Icon name="entered" />entered ×{enteredCount(c)} · </span>
+          ) : ""}{closes(c)}
         </span>
         {extra}
       </div>

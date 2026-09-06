@@ -117,10 +117,15 @@ describe("the More row: the app's actions the DC never drew, every handler kept"
     const kept = [
       ["Open Full Size", /href=\{"\/full\/" \+ encodeURIComponent\(row\.media_id\)\} target="_blank"[^>]*>Open Full Size<\/a>/],
       ["Open on PixAI", /href=\{row\.url\} target="_blank"[^>]*>Open on PixAI<\/a>/],
-      ["Print", /onClick=\{\(\) => window\.print\(\)\}>🖨 Print<\/button>/],
+      // ⎙ since the 2026-09-05 post-audit rulings: the app printed under three different
+      // characters (⎙, 🖶, 🖨) and this row wore the emoji one. Same handler, one mark.
+      ["Print", /onClick=\{\(\) => window\.print\(\)\}>⎙ Print<\/button>/],
       ["4×6 photo", /format=photo"[^>]*>4×6 photo<\/a>/],
       ["Photo strip", /format=strip"[^>]*>Photo strip<\/a>/],
-      ["Edit this", /onClick=\{\(\) => \{ onClose\(\); onEdit\(row\.media_id\); \}\}>✧ Edit this<\/button>/],
+      // ✎ since the 2026-09-05 Glyph Ledger (owner's G5 pick, and the mark the command
+      // palette's own Edit row already wore); ✧ before it. The mark is what changed --
+      // this row is still the same action with the same handler, which is what (d) guards.
+      ["Edit this", /onClick=\{\(\) => \{ onClose\(\); onEdit\(row\.media_id\); \}\}>✎ Edit this<\/button>/],
       ["Remix", /onClick=\{\(\) => \{ onClose\(\); onRemix && onRemix\(row\.media_id\); \}\}>↺ Remix<\/button>/],
       ["Rebuild poster", /const d = await rebuildPoster\(row\.media_id\);[\s\S]*?"🖼 Rebuild poster"\}<\/button>/],
       ["Delete from PixAI", /<button className="btn btn-danger" disabled=\{busy\} onClick=\{deleteCloud\}>Delete from PixAI<\/button>/],

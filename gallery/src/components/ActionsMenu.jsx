@@ -375,7 +375,7 @@ export default function ActionsMenu({
                 title: onSendVideo ? "Load the selection into the Video tab"
                   : "Ports with the GenerateDock retab — the shared drawer has no bulk video prefill yet" })}
             {item("▮ Send to The Loom (cast)", sendCast)}
-            {item("▤ Print sheet", printSheet)}
+            {item("⎙ Print sheet", printSheet)}
             {item("⬇ Download ZIP", downloadZip)}
             {item("Find / replace in prompts", replacePrompt)}
             {item("Delete locally", deleteLocal,

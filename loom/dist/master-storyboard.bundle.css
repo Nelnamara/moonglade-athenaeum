@@ -285,6 +285,70 @@ body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
   filter: none;
 }
 
+/* ../gallery/src/styles/icons.css */
+.mgico {
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex: none;
+}
+.mgma2-lorabadge .mgico,
+.mgct-entered .mgico,
+.cmb-chip .mgico,
+.cmb-entered-inline .mgico {
+  width: 1.3em;
+  height: 1.3em;
+  margin-right: 0.15em;
+}
+.mp-sub .mgico {
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0.1em;
+}
+button.mgdock-snipbtn .mgico {
+  width: 1.25em;
+  height: 1.25em;
+  margin-right: 0.25em;
+}
+.mgl-sglyph .mgico,
+.mgdr-search-icon .mgico,
+.mgfo-search-ic .mgico {
+  width: 1.3em;
+  height: 1.3em;
+}
+.glm-search-icon .mgico {
+  width: 1.25em;
+  height: 1.25em;
+}
+.glm-iconbtn .mgico {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+.glm-navicon .mgico {
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+}
+.mgpal-ico .mgico {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+}
+.mgdr-undo .mgico {
+  width: 1.35em;
+  height: 1.35em;
+  margin-right: 0.2em;
+}
+button.mgdock-snip .mgico {
+  width: 1.5em;
+  height: 1.5em;
+  margin-right: 0.25em;
+}
+button.mgcp-chip .mgico {
+  width: 1.3em;
+  height: 1.3em;
+}
+
 /* ../gallery/src/styles/model-picker.css */
 .model-picker {
   display: flex;

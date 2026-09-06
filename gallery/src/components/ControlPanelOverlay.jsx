@@ -10,6 +10,7 @@ import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
+import Icon from "../icons/Icons.jsx";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -984,6 +985,35 @@ const skinSwatchGrad = (id) => {
   return "linear-gradient(135deg, " + g[0] + ", " + g[1] + ")";
 };
 
+/* A MARK, DRAWN AS ITSELF (owner's G2 ruling, Glyph Ledger 2026-09-05: "Why is the actual
+   mark not the mark button?").
+
+   Every mark-pick button in the app -- both rows in the Identity strip, the big row in the
+   Branding tab, and the phone's Branding card (ControlMobile.jsx imports this) -- renders
+   THIS, so a button always shows the thing it picks.
+
+   WHAT WAS WRONG. Two different failures wore the same look. The phone's row never looked
+   at the art at all: it drew a moon for the mark whose id is "logo" and a diamond for
+   every other one, so five different marks were five identical tiles. Desktop rendered the
+   image, but
+   its error handler was `e.currentTarget.remove()` -- so a mark whose file 404s left an
+   EMPTY button, because the fallback glyph sits in the branch the ternary already didn't
+   take. (list_marks() in moonglade_gallery.py only lists a mark whose art exists on this
+   machine, so `png` is normally there; a stale catalog or a half-written container is how
+   you reach the other case.)
+
+   WHAT IT DOES NOW. The art, or an honest empty tile -- the dashed placeholder this panel
+   already uses for "nothing here yet" (.mgcp-markbig.locked, the upload tile). Never a
+   stand-in glyph that looks like some other mark's art. `broken` is state rather than a DOM
+   removal so React owns the swap and a later re-render can't resurrect a dead <img>. */
+export function MarkArt({ mark }) {
+  const [broken, setBroken] = useState(false);
+  const url = mark && mark.png;
+  useEffect(() => { setBroken(false); }, [url]);
+  if (!url || broken) return <span className="mgcp-marknoart" aria-hidden="true" />;
+  return <img src={url} alt="" onError={() => setBroken(true)} />;
+}
+
 /* THE IDENTITY STRIP -- what a locked install gets instead of nothing (Identity Chrome
    handoff C3, and the 2026-07-27 three-layers design behind it, #50).
 
@@ -1047,9 +1077,7 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
               <button type="button" key={m.id} disabled={busy}
                 className={"mgcp-idmark" + (m.id === curId ? " on" : "")}
                 onClick={() => pickMark(m.id)} title={m.label || m.id}>
-                {m.png
-                  ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
-                  : (m.id === "logo" ? "🌙" : "◈")}
+                <MarkArt mark={m} />
               </button>
             ))}
             {!greatLibrary && !customMark && (
@@ -1077,9 +1105,7 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
         {/* The pairing, judged together: this repaints on either row's click. */}
         <div className="mgcp-idsample">
           <span className="mgcp-idsample-chip" style={{ background: skinGrad }}>
-            {cur && cur.png
-              ? <img src={cur.png} alt="" onError={(e) => e.currentTarget.remove()} />
-              : "◈"}
+            <MarkArt mark={cur} />
           </span>
           <span className="mgcp-idsample-cap">live sample</span>
         </div>
@@ -1235,9 +1261,7 @@ function MarksSection({
                 <button type="button" key={m.id}
                   className={"mgcp-markbig" + (on ? " on" : "")}
                   onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
-                  {m.png
-                    ? <img src={m.png} alt="" onError={(e) => e.currentTarget.remove()} />
-                    : (m.id === "logo" ? "🌙" : "◈")}
+                  <MarkArt mark={m} />
                   {on && <span className="mgcp-markbig-check">✓</span>}
                 </button>
               );
@@ -1545,7 +1569,7 @@ function BannerEditor({ summary, onSaved, achievements }) {
           🖼 From the gallery…
         </button>
         <button type="button" className="mgcp-chip" disabled={!active || busy} onClick={resetCrop}>
-          ↺ Reset crop
+          <Icon name="undo" /> Reset crop
         </button>
       </div>
       {assets.length > 1 && (

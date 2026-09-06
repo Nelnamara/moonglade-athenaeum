@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import "../styles/command-palette.css";
 
 /* THE COMMAND PALETTE + its two companion surfaces, built pixel-for-pixel off
@@ -96,7 +97,7 @@ export function CommandPalette({ palette }) {
       <div className={"mgpal-host" + cls}>
         <div className={"mgpal" + cls} role="dialog" aria-label="Command palette">
           <div className="mgpal-inputrow">
-            <span className="mgpal-sglyph" aria-hidden="true">⌕</span>
+            <span className="mgpal-sglyph" aria-hidden="true"><Icon name="search" /></span>
             <input
               ref={inputRef}
               className="mgpal-input"

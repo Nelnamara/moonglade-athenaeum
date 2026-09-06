@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
 import { sceneRows, shapeTally } from "../gen/sceneCatalog.js";
 import "../styles/ai-tools.css";
@@ -73,7 +74,7 @@ export default function AiToolsModal({ open, onClose, onPick }) {
           <div className="mgai-title">✦ AI Tools</div>
           <div className="mgai-armed">● mirror armed</div>
           <div className="mgai-search">
-            <span aria-hidden="true">⌕</span>
+            <span aria-hidden="true"><Icon name="search" /></span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tools…" aria-label="Search tools" />
           </div>
           <div className="mgai-tiers">
