@@ -28,7 +28,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   The walkthrough surfaced real phone breakage (contest detail scroll bleeding into the
   Control screen; a false "no search field on mobile" claim) — sweep every phone screen
   against its design source and the desktop behavior it mirrors, screen by screen, in a
-  driven browser at phone size. Runs after the design-queue wave merges.
+  driven browser at phone size. The design-queue wave has merged, so nothing gates this.
 
 - **The living library — maintenance runs itself** *(scoped 2026-09-04; owner's ask that day)*
   "It's not just a backup dump. It's a living library that should update itself and its data
@@ -54,8 +54,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   Deck era, rerolls only) that would name a series from the *image* rather than the prompt —
   banked for when the Provider Deck seam exists.
 
-- **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself is
-  `fix/gallery-stands-still`)* Two era-mismatches the census surfaced, both design-adjacent:
+- **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself
+  shipped — see `CHANGELOG.md` [3.8.1])* Two era-mismatches the census surfaced, both design-adjacent:
   a **batch** card still takes over the whole library the way series cards did before the 3.8.0
   series modal (asymmetric siblings; likely wants the same modal treatment), and the viewer's
   page-stepping and its scroll-lock came from different months — stepping past a page boundary

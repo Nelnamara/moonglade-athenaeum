@@ -589,7 +589,15 @@ the button comes back — the app will tell you it doesn't know rather than leav
   address, the pictures on it and your place among them all stay put — the finished picture
   announces itself with a notice in the corner and a row in **Activity** whose thumbnail opens
   it. On page 1 the library refreshes where it stands, because that is where the new picture
-  arrives anyway.
+  arrives anyway — nothing moves there either, the new one simply appears at the top.
+  **Anything you are holding open is held still too**, at page 1 as much as anywhere: a
+  picture open full-screen stays that picture rather than quietly becoming its neighbour, and
+  a **◈ Similar** view or an open session stack keeps the library beneath it exactly as you
+  left it. **And a page you asked for is the page you get** — turning to page 2 the instant
+  something lands is your own hand, and your hand wins; the page you asked for is the one that
+  loads and keeps its address, on the phone's **Next** as much as at the desk. If you had
+  pictures ticked, any that are no longer in front of you afterwards are un-ticked, so a bulk
+  action can never reach something you cannot see.
 - **Runs** — the strip across the top of the dock is *today's* runs: each finished picture is
   a tile as soon as it lands (blur → sharp), a batch still cooking shows as one 2×2 cluster,
   and a running tile carries the mascot and a moving bar rather than a made-up percentage

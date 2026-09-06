@@ -119,6 +119,13 @@ itself and the version at the foot of the sidebar is the new one. If the update 
 or fails, the refusal appears in the same window in place of the progress bar rather than
 as a message you might miss.
 
+**You get a receipt when the app comes back.** After the reload a small note sits in the
+corner — *"Updated to v3.8.1"* — and stays until you close it, so you don't have to go back
+into the Control Panel to find out whether it landed. It is checked rather than assumed: it
+appears only when the version the app is really running is the one you were promised, an
+update that failed or was rolled back says nothing at all, and it appears once — reloading
+the page again does not bring it back.
+
 The one-click path needs the managed launcher (**`Serve Gallery.pyw`**) — without it the
 server would stop instead of restarting into the new version — and a clean checkout on
 `master`. If yours is a working copy with local edits, or on a branch, the Panel says so

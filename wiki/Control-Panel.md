@@ -256,6 +256,14 @@ there; the update is pulled, applied and restarted only when you press **Update 
 that window and confirm it. There is no silent update and no automatic one — see
 [FAQ](FAQ) for what pressing it actually does.
 
+**An update that worked says so when the app comes back.** Pressing **Update now** ends in
+the page reloading into the new version, and a small note appears in the corner on the way
+back in — *"Updated to v3.8.1"* — and waits there until you close it. It is checked, not
+assumed: the note appears only when the version the app is really running is the one you
+were promised. An update that failed or was rolled back says nothing at all, and cannot say
+it later against some future release that happens to match. It appears once, for the update
+that earned it; reloading the page again does not bring it back.
+
 The corner notice appears **once per version** — not once an hour, and not again the next
 time you load the page. Opening this Panel asks GitHub for a fresh answer rather than
 showing you one that could be half an hour old; opening and closing it repeatedly costs

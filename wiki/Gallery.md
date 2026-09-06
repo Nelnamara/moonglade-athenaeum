@@ -30,6 +30,14 @@ A row of frosted glow-pill buttons, one hue per destination:
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
   the scheduler, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
+- **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
+  card led by its own artwork, with a colour-coded chip on the art saying how much work the
+  tool wants of you before you open it: **1-Click**, **Select**, **Text**, **Language** or
+  **Dual**. Search it, or narrow it to Free / Tier 1. Picking a tool hands off to the
+  Generate drawer, which is where it runs. **The entry only appears once _Mirror to PixAI_
+  is armed** (Control Panel → Maintenance) — with the mirror off there is no entry and no
+  hint, because none of these tools can dispatch. What they cost, why the mirror is
+  required, and what each one does are on [Generating](Generating).
 
 **Overlays reopen instantly.** Each of these remembers what it last showed for the rest of
 the browser session: reopening one paints those numbers/rows in the first frame and
@@ -37,6 +45,20 @@ refreshes them behind, instead of showing an empty panel while it loads. Anythin
 that changes the library — publishing, importing, resolving duplicates, a finished
 generation, a maintenance job — drops what is remembered, so a reopen after a change always
 re-reads. See [Health → How fresh are these numbers?](Health).
+
+**And the library stands still.** A generation finishing — an edit, an enhance, a fix, a
+scene, a plain generate, an upscale, a video — never moves your view of it. The page you are
+on, its address, the pictures on it and your place among them all stay exactly where they
+were; the finished picture announces itself instead, with the notice in the corner and a row
+in **Activity** whose thumbnail opens it. **Anything you are holding open is held still
+too** — a picture full-screen, a **◈ Similar** view, an open session stack — at page 1 as
+much as anywhere, so closing one still puts you back where you were. At page 1 with none of
+those open the library does refresh where it stands, because that is where a new picture
+arrives anyway: nothing moves, the new one simply appears at the top. And a page you asked
+for is the page you get — turning to page 2 the instant something lands is your hand, and
+your hand wins. If you had pictures ticked, any that are no longer in front of you
+afterwards are un-ticked, so a bulk action can never reach something you cannot see;
+ticking pictures across pages yourself is untouched.
 
 **Everything here needs a login as of v2.0.0**, including on the machine running the server.
 Once signed in, **Generate**, **The Loom**, **Panel** and the balance chip are available from
@@ -74,6 +96,11 @@ The filter bar:
   dropdown too. They belong to **your account**, not to the install — if someone else
   has a login here, your saved searches are yours and theirs are theirs. (Your skin
   choice, being purely cosmetic, is still install-wide.)
+- **Layout** — four small marks sit beside the SIZE slider in the header: **▤** masonry,
+  **▦** grid, **▣** hero, **≡** timeline. Hover one and it names itself. The layout you pick
+  is remembered the same way your thumbnail size is. **There is no switcher on a phone** —
+  the phone lays the library out one way, so a control that changed nothing was worse than
+  no control.
 - When any filter is active, the active-filter bar shows an **⬇ Export this view (CSV)**
   link that downloads exactly the rows you're looking at. (The Control Panel's **Download
   catalog (CSV)** is the whole-library dump.) **It's a complete answer even mid-sync.** It
@@ -113,6 +140,22 @@ the grid, the pickers, saved views, and the filtered CSV export.
 Cards show a ▶ badge on videos and **AI** / **local** badges by source. **Videos play
 right in the lightbox** (and on the detail page), so you can browse a mixed grid of
 images and videos with the arrow keys without leaving the overlay.
+
+### Session stacks
+
+The filter bar's **Stack sessions** chip folds a re-roll session — a night of dialling in
+the same idea — or a lone batch's siblings into one stacked card, so the library reads as
+the sessions you had rather than every frame they produced.
+
+**Opening a stack is a window over the gallery, not a trip out of it.** The library
+underneath keeps its search, its filters, its page and your place on it, and **Esc** closes
+the window straight back — there is nothing to undo. Inside, the session's runs are listed
+down the left with their own picture counts, headed by **All runs**; click one to see just
+it. Chips for portrait, video and rated sit under them and narrow whichever run you have
+picked rather than replacing it. The header sorts by **run №** or by **newest**, and every
+picture is stamped with the run it came from (`r2·3` — run two, third picture), so under
+either sort you can read which run a picture belongs to. An open stack has its own address,
+so you can bookmark one, and the browser's Back button closes it.
 
 ## The lightbox & detail page
 
@@ -201,7 +244,7 @@ an undo taxes only the mistake, where a prompt would tax every delete you meant.
 ### Sending a selection onward
 
 Selections persist across pages, which is the point of them — and it's also what made
-**Actions → ▰ Send to The Loom (cast)** miss a video. The cast is images only, but the check
+**Actions → ▮ Send to The Loom (cast)** miss a video. The cast is images only, but the check
 asked the *page you were looking at*, so a video ticked on page 2 and sent from page 1 was
 invisible to it and went through. The kinds are now remembered alongside the selection
 itself, so the exclusion holds wherever a video was picked.
