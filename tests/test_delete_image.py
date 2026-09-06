@@ -54,11 +54,52 @@ def _batch(tmp_path):
     ]
 
 
+GONE = "2026-09-06T11:22:33.000Z"
+
+
+def _live_task(*members):
+    """What PixAI answers about the batch above. `members` are (media_id, deleted?) pairs.
+
+    The route has to READ this before it deletes anything: which mutation PixAI accepts
+    depends on how many of a task's images PixAI still has, and the local catalog cannot
+    know that -- a sibling deleted from PixAI's own website leaves the local row untouched.
+    """
+    batch = []
+    for mid, deleted in members:
+        entry = {"extra": {}, "mediaId": mid, "seed": "1"}
+        if deleted:
+            entry["deletedAt"] = GONE
+        batch.append(entry)
+    return {"id": "T1", "status": "completed",
+            "outputs": {"mediaId": "GRID-COMBINED", "seed": "1", "batch": batch}}
+
+
+def _lone_task(media_id):
+    """A task that made ONE image: no batch array at all, the picture IS outputs.mediaId."""
+    return {"id": "T1", "status": "completed", "outputs": {"mediaId": media_id, "seed": "1"}}
+
+
+def _reads(monkeypatch, task):
+    """Answer the live read with `task` and count how often it was asked."""
+    seen = []
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, tid, **k: seen.append(str(tid)) or task)
+    return seen
+
+
+def _all_live():
+    return _live_task(("a", False), ("b", False), ("c", False))
+
+
 def test_it_deletes_only_the_named_image_and_leaves_its_siblings(tmp_path, monkeypatch):
     """The whole point. The task-level delete takes every image of a batch; this must take
-    exactly one and leave the rest of the task alone, on PixAI and in the catalog."""
+    exactly one and leave the rest of the task alone, on PixAI and in the catalog.
+
+    PixAI still has all three images here, so this is the one case `deleteBatchMedia` was
+    ever right for -- the live read is what establishes that."""
     seen = {}
     monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
     monkeypatch.setattr(core, "delete_batch_media_gql",
                         lambda s, tid, mid: seen.update(task=tid, media=mid))
     for f in ("a.png", "b.png", "c.png"):
@@ -82,6 +123,7 @@ def test_a_failed_cloud_delete_leaves_the_local_copy_alone(tmp_path, monkeypatch
     be nothing to clean up locally and the image is still there to try again. The reverse
     order leaves a hole in the catalog for an image PixAI still has."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
 
     def boom(s, tid, mid):
         raise core.PixAIError("HTTP 500 from PixAI")
@@ -105,6 +147,7 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
     An unhandled 500 tells the user nothing while a row for an image PixAI no longer has
     quietly stays in the catalog."""
     monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
     monkeypatch.setattr(core, "delete_batch_media_gql", lambda s, tid, mid: None)
     (tmp_path / "b.png").write_bytes(b"x")
     cli = _cli(tmp_path, _batch(tmp_path))
@@ -124,6 +167,179 @@ def test_a_failed_local_purge_comes_back_as_an_error_body(tmp_path, monkeypatch)
         assert con.execute(
             "SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1, (
             "the row was cleared for a file still sitting in the library")
+
+
+# ---------------------------------------------------------------------------
+# Two phases: say what will happen, then do exactly that (2026-09-06)
+# ---------------------------------------------------------------------------
+
+def _nothing_deletes(monkeypatch):
+    """Both delete mutations wired to fail the test if either one is reached."""
+    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+        "the per-image mutation fired"))
+    monkeypatch.setattr(core, "delete_task_gql", lambda *a, **k: pytest.fail(
+        "the whole-task mutation fired"))
+
+
+def test_the_preview_says_what_will_happen_and_deletes_nothing(tmp_path, monkeypatch):
+    """The dialog's words have to come from PixAI's own answer about this task, not from a
+    count of local rows -- the local catalog cannot see a sibling deleted from the website.
+    So the button asks first, with confirm false, and gets a plan back with nothing done."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    reads = _reads(monkeypatch, _live_task(("a", True), ("b", False), ("c", False)))
+    _nothing_deletes(monkeypatch)
+    for f in ("a.png", "b.png", "c.png"):
+        (tmp_path / f).write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "b", "confirm": False}).get_json()
+    assert d["plan"] == "per-image"
+    assert d["live_siblings"] == 1, "it counted the sibling PixAI already deleted"
+    assert d["local_rows"] == ["b"], "the preview named the wrong local rows"
+    assert "1 other image" in d["message"], d["message"]
+    assert reads == ["T1"], "the preview did not read the live task"
+    assert d.get("ok") is not True
+    assert (tmp_path / "b.png").exists() and not (tmp_path / "_deleted").exists()
+
+
+def test_the_preview_names_every_local_row_a_whole_task_delete_takes(tmp_path, monkeypatch):
+    """The honest half of the whole-task branch: it removes the generation record on PixAI,
+    so every local row of that task goes with it -- and the dialog has to say so BEFORE the
+    user types DELETE, not discover it afterwards."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _live_task(("a", True), ("b", False), ("c", True)))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": False}).get_json()
+    assert d["plan"] == "whole-task"
+    assert d["local_rows"] == ["b"], (
+        "rows for images PixAI already deleted were listed for quarantine: {}".format(
+            d["local_rows"]))
+    assert "whole generation" in d["message"], d["message"]
+
+
+def test_a_confirm_carrying_a_stale_plan_is_refused(tmp_path, monkeypatch):
+    """The dialog said "one image, two siblings stay". Between reading that and typing
+    DELETE, the siblings were deleted from PixAI's website -- so the same click would now
+    take the whole generation. Refuse: the user agreed to the other thing."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _live_task(("a", True), ("b", False), ("c", True)))
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "b", "confirm": True, "plan": "per-image"}).get_json()
+    assert d.get("ok") is not True
+    assert "changed" in (d.get("error") or "").lower(), d
+    assert (tmp_path / "b.png").exists(), "it purged locally on a delete that never fired"
+
+
+def test_the_whole_task_branch_keeps_what_pixai_already_deleted(tmp_path, monkeypatch):
+    """The rule that decides which local files survive. PixAI removes the generation record,
+    so every image of it that PixAI still had is gone there -- those rows are quarantined
+    here too, so the two sides do not drift. But the images PixAI had ALREADY deleted are
+    only still anywhere because THIS library holds them, and nothing about this delete
+    changes that. Those rows and their files stay."""
+    fired = {}
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    # PixAI's copy of this task: `a` was deleted earlier, `c` is the one image still there,
+    # and `b` is a local row PixAI's copy no longer lists at all.
+    _reads(monkeypatch, _live_task(("a", True), ("c", False)))
+    monkeypatch.setattr(core, "delete_task_gql",
+                        lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+        "the per-image mutation fired on the last live image of a batch"))
+    for f in ("a.png", "b.png", "c.png"):
+        (tmp_path / f).write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image",
+                 json={"media_id": "c", "confirm": True, "plan": "whole-task"}).get_json()
+    assert d.get("ok") is True, d
+    assert fired == {"task": "T1"}
+    assert sorted(d["local_rows"]) == ["b", "c"]
+
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        left = sorted(r[0] for r in con.execute("SELECT media_id FROM catalog"))
+    assert left == ["a", "z"], "the row PixAI had already deleted was taken too"
+    assert (tmp_path / "a.png").exists(), (
+        "the only surviving copy of an image PixAI already deleted was quarantined")
+    assert (tmp_path / "_deleted" / "b.png").exists()
+    assert (tmp_path / "_deleted" / "c.png").exists()
+
+
+def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
+    """The bug this whole change exists for. A task that made ONE image has no batch for
+    `deleteBatchMedia` to delete from, and PixAI answers 403 -- so the button had never once
+    worked on a single-image generation. PixAI's own site sends the whole-task mutation."""
+    fired = {}
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _lone_task("b"))
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: fired.update(task=tid))
+    monkeypatch.setattr(core, "delete_batch_media_gql", lambda *a, **k: pytest.fail(
+        "the per-image mutation fired on a task with no batch -- PixAI answers 403"))
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    assert d.get("ok") is True, d
+    assert fired == {"task": "T1"}
+    assert (tmp_path / "_deleted" / "b.png").exists()
+
+
+def test_a_read_that_fails_deletes_nothing(tmp_path, monkeypatch):
+    """Fail-safe direction. The read fails soft to None on a network blip, and the answer to
+    "I could not see this task" must never be a delete -- least of all the whole-task one,
+    which would take a whole generation off a dropped packet."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, None)
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    assert d.get("ok") is not True
+    assert "nothing was deleted" in (d.get("error") or "").lower(), d
+    assert (tmp_path / "b.png").exists()
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        assert con.execute("SELECT COUNT(*) FROM catalog WHERE media_id='b'").fetchone()[0] == 1
+
+
+def test_an_image_pixai_already_deleted_says_so_and_marks_the_row(tmp_path, monkeypatch):
+    """Nothing to delete, so nothing is sent. The row is marked instead, so the library
+    stops presenting the image as one PixAI still holds -- and the local file stays, because
+    it is now the only copy anywhere."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _live_task(("a", False), ("b", True), ("c", False)))
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    assert "already deleted" in (d.get("error") or "").lower(), d
+    assert (tmp_path / "b.png").exists(), "it quarantined the only copy left"
+    with sqlite3.connect(str(tmp_path / "catalog.db")) as con:
+        stamp = con.execute(
+            "SELECT cloud_deleted_at FROM catalog WHERE media_id='b'").fetchone()[0]
+    assert stamp == GONE, "the row still claims PixAI has this image"
+
+
+def test_a_video_clip_is_refused_rather_than_guessed_at(tmp_path, monkeypatch):
+    """Video outputs hang off outputs.videos and neither mutation is known to be the right
+    one for them. Say where to do it instead of firing a destructive guess."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, {"id": "T1", "outputs": {"mediaId": "poster", "videos": [
+        {"mediaId": "b", "seed": "1"}]}})
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    assert "video" in (d.get("error") or "").lower(), d
+    assert (tmp_path / "b.png").exists()
 
 
 def test_it_refuses_without_the_confirm_flag(tmp_path, monkeypatch):
