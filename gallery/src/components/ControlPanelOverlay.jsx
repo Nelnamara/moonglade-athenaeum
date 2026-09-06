@@ -9,6 +9,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
+import { lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import Icon from "../icons/Icons.jsx";
 
@@ -661,8 +662,17 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                                       <>{" · "}<span>the standing order below runs this one — this row waits</span></>
                                     )}
                                     {" · last ran "}
+                                    {/* THE LEDGER IS NOT THE ONLY RECORD (red team #18).
+                                        The sweep writes an Activity entry only when it
+                                        CHANGED something -- a fifteen-minute heartbeat
+                                        logging every quiet pass would bury the events that
+                                        matter -- so a healthy sweep that found nothing new
+                                        showed "last ran —" beside a live "next in 12m" off
+                                        schedule.json's own stamp. lastRanAt prefers the
+                                        ledger and falls back to that stamp, so the two
+                                        halves of one row can no longer disagree. */}
                                     <b className={last && ledgerResult(last).good ? "ok" : ""}>
-                                      {last ? fmtWhen(last.ts) : "—"}</b>
+                                      {fmtWhen(lastRanAt(last, row))}</b>
                                   </span>
                                   {/* No "next in 3h" on a deferred row: this scheduler is
                                       not the one running it, so it has no next. */}
