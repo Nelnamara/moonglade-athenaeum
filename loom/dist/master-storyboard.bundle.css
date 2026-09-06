@@ -334,6 +334,20 @@ button.mgdock-snipbtn .mgico {
   height: 1.15em;
   vertical-align: -0.2em;
 }
+.mgdr-undo .mgico {
+  width: 1.35em;
+  height: 1.35em;
+  margin-right: 0.2em;
+}
+button.mgdock-snip .mgico {
+  width: 1.5em;
+  height: 1.5em;
+  margin-right: 0.25em;
+}
+button.mgcp-chip .mgico {
+  width: 1.3em;
+  height: 1.3em;
+}
 
 /* ../gallery/src/styles/model-picker.css */
 .model-picker {
