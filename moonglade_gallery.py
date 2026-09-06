@@ -4662,17 +4662,46 @@ def artworks_sweep_fresh(interval_s, now):
     return (now - _artworks_state["at"]) < max(1.0, float(interval_s or ARTWORKS_SWEEP_S))
 
 
-def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None):
+def artworks_sweep_in_flight():
+    """Is a published-artwork sweep running in THIS process right now?
+
+    THE SECOND DIRECTION of the sweep-vs-Panel-job exclusion, and the whole of the shared
+    state it needs. `_artworks_job_busy` (in create_app) already lets the sweep stand down
+    for a catalog-writing Panel job; this is the same question asked the other way round,
+    so a Panel job can stand down for a sweep. One lock answers both -- there is no second
+    flag to keep in step.
+
+    A non-blocking probe: acquire-and-release rather than `locked()`, because a plain
+    `locked()` read is the same information with no memory barrier discipline, and this is
+    read from a different thread than the one that holds it. Never blocks, so a caller
+    holding another lock cannot deadlock on it."""
+    if _artworks_lock.acquire(False):
+        _artworks_lock.release()
+        return False
+    return True
+
+
+def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None, busy=None):
     """Run one artworks sweep under the single-flight lock, or skip if one is running.
 
     The lock is the whole contract, the same way it is for the contest sweep: the boot
     kick, the fifteen-minute tick, the publish kick and the Run now button all reach the
     same work, and a caller that loses the race has nothing to do. Returns the sweep's
-    result dict, or None when it did not run."""
+    result dict, or None when it did not run.
+
+    `busy` is the caller's "a catalog-writing Panel job is in the slot" check
+    (create_app's _artworks_job_busy), and it is asked HERE, after the lock, rather than
+    only before the kick. Before the lock there was a window: the kick read the slot, found
+    it free, and a Panel job claimed it before this sweep actually started. Asked inside the
+    lock it is the same instant _panel_run's own probe finds this lock held, so whichever of
+    the two arrives first, the other one stands down. Passed in rather than imported because
+    the slot is a create_app closure and this function is module-level and testable."""
     import logging as _logging
     if not _artworks_lock.acquire(False):
         return None
     try:
+        if busy is not None and busy():
+            return None
         return artworks_sweep(out_dir, db_path, force=force, log_event=log_event)
     except Exception as e:                                   # noqa: BLE001 -- a sweep must
         _logging.getLogger(__name__).warning(               # never kill its caller
@@ -8695,6 +8724,19 @@ def create_app(out_dir: Path):
         with _panel_lock:
             if _panel_job["status"] == "running":
                 return False
+            # THE SECOND DIRECTION of the sweep exclusion, claimed under the SAME lock that
+            # claims the slot -- which is what makes the pair airtight rather than merely
+            # narrow. The sweep takes _artworks_lock and only THEN reads this slot
+            # (artworks_sweep_kick's `busy`); this reads _artworks_lock while holding the
+            # slot's own lock. So one of the two always sees the other, whichever order
+            # they arrive in, and the loser stands down. The probe never blocks, so holding
+            # _panel_lock across it cannot deadlock.
+            #
+            # Without this, run_download's per-page save silently reverted every column the
+            # sweep wrote: it rebuilds each row from a snapshot taken when the JOB started,
+            # and the upsert writes the whole row back.
+            if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
+                return False
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
                               started_at=None, progress=None, proc=None, cancelled=False,
@@ -8927,7 +8969,8 @@ def create_app(out_dir: Path):
                     saved = float(_load_sched().get("artworks_deep_at") or 0.0)
                 if saved > _artworks_state["deep_at"]:
                     _artworks_state["deep_at"] = saved
-                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_log_job)
+                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_log_job,
+                                    busy=_artworks_job_busy)
                 _sched_stamp(artworks_deep_at=_artworks_state["deep_at"])
             except Exception:                                # noqa: BLE001
                 pass
@@ -10624,6 +10667,15 @@ def create_app(out_dir: Path):
         # running job, and a job must not start under a changing codebase.
         if _update_busy():
             return _update_busy_refusal()
+        # The published-artwork sweep writes the same catalog rows these jobs do, and it is
+        # in-process rather than in the job slot, so _panel_run refuses one while the other
+        # is in flight. The refusal is re-stated here only so the click gets a reason it can
+        # read: _panel_run answers False for "the slot is taken" too, and "a job is already
+        # running" would be the wrong sentence for a sweep that has no slot.
+        if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
+            return jsonify({"error": "the published-artwork sweep is reading PixAI into "
+                                     "these same rows right now — wait a moment and press "
+                                     "Run now again"}), 409
         try:
             # `n` is only consumed by an int_param action (test-pull); _panel_run
             # clamps it into range and ignores it otherwise, so passing it always is safe.

@@ -834,6 +834,67 @@ def test_the_sweep_defers_to_a_catalog_writing_panel_job(tmp_path):
         "a deferred tick must skip and retry, never stamp last_run and go quiet"
 
 
+def test_a_catalog_writing_panel_job_refuses_to_start_while_a_sweep_is_in_flight(tmp_path):
+    """THE OTHER DIRECTION, and the one that was missing. The sweep already stood down for
+    a Panel job in the slot; nothing stopped a Panel job starting while the sweep was
+    already mid-flight in this process -- and run_download's per-page save rebuilds each
+    row from a snapshot taken when the job STARTED, so every column the sweep wrote after
+    that snapshot was silently reverted.
+
+    One shared piece of state answers both directions now: the sweep's own lock. Held ->
+    a catalog-writing job refuses, by name, instead of spawning a subprocess into the
+    rows the sweep is writing."""
+    cli = _client(tmp_path)
+    slot = cli.application.extensions["mg_panel_job"]
+    assert g._artworks_lock.acquire(False), "the sweep's lock must be free at test start"
+    try:
+        assert g.artworks_sweep_in_flight() is True
+        r = cli.post("/api/panel/run", json={"action": "sync"})
+        assert r.status_code == 409
+        assert "published-artwork sweep" in r.get_json()["error"]
+        # and nothing was spawned: the slot is untouched
+        assert slot["status"] != "running"
+        # a job that writes none of the sweep's rows is no reason to refuse -- it is the
+        # same ARTWORKS_TOUCHING_ACTIONS set the sweep's own deferral reads
+        assert "audit" not in g.ARTWORKS_TOUCHING_ACTIONS
+    finally:
+        g._artworks_lock.release()
+    assert g.artworks_sweep_in_flight() is False
+
+
+def test_the_scheduled_paths_defer_the_same_way_the_manual_click_does(tmp_path):
+    """The refusal lives in _panel_run itself -- the one choke point _living_tick, the
+    legacy standing-order loop and the Run now click all reach the subprocess through --
+    so a deferral is a property of the ACTION, not of which of the three started it. A
+    False from _panel_run is already "the slot was taken, try again next tick" to both
+    schedulers, so they retry rather than stamp last_run and go quiet."""
+    create_app(tmp_path)
+    src = inspect.getsource(g.create_app)
+    run = src[src.index("def _panel_run(action"):]
+    run = run[:run.index("def _update_busy():")]
+    assert ("if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():\n"
+            "                return False") in run, \
+        "the second direction must be claimed under the SAME lock that claims the slot"
+    # the two schedulers both treat a False as "not started": no stamp, retry next tick
+    tick = src[src.index("def _living_tick():"):src.index("def _scheduler_loop():")]
+    assert "if _living_run(action):\n                    _living_stamp(action, now)" in tick
+    loop = src[src.index("def _scheduler_loop():"):]
+    assert "if not _panel_run(action" in loop and "continue                   # panel busy" in loop
+
+
+def test_the_sweep_re_checks_the_panel_slot_after_taking_its_own_lock(tmp_path):
+    """The mirror image, so the pair cannot both slip through at once. The sweep used to
+    read the Panel's slot BEFORE it took its own lock, which left a window where a job
+    could claim the slot in between. It now re-checks INSIDE the lock, which is the same
+    instant _panel_run's own probe would find the lock held -- so whichever of the two
+    gets there first, the other one stands down."""
+    called = []
+    res = g.artworks_sweep_kick(tmp_path, tmp_path / "catalog.db", force=True,
+                                busy=lambda: "sync")
+    assert res is None and called == []
+    assert g.artworks_sweep_in_flight() is False, "the lock must be released on a stand-down"
+
+
 def test_the_ticks_first_kick_does_not_repeat_the_boot_sweep():
     """The boot kick fires 25s after start; the first tick lands 35s after THAT with the
     sweep row's last_run still unset -- so it read as due, and a forced kick re-ran the
