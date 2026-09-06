@@ -568,6 +568,166 @@ ${"=".repeat(48)}
     };
   }
 
+  // src/loom-url.js
+  function isBoardId(s) {
+    return /^[A-Za-z0-9_-]{1,64}$/.test(String(s == null ? "" : s));
+  }
+  function readBoardId(search) {
+    let raw = null;
+    try {
+      raw = new URLSearchParams(search || "").get("board");
+    } catch (e) {
+      return null;
+    }
+    return isBoardId(raw) ? raw : null;
+  }
+  function buildLoomUrl(patch2, search, pathname) {
+    let p;
+    try {
+      p = new URLSearchParams(search || "");
+    } catch (e) {
+      p = new URLSearchParams("");
+    }
+    const patchObj = patch2 || {};
+    if ("board" in patchObj) {
+      if (isBoardId(patchObj.board)) p.set("board", String(patchObj.board));
+      else p.delete("board");
+    }
+    if ("cast" in patchObj) {
+      if (patchObj.cast) p.set("cast", String(patchObj.cast));
+      else p.delete("cast");
+    }
+    const qs = p.toString();
+    return (pathname || "/loom") + (qs ? "?" + qs : "");
+  }
+  var LOOM_VIEW_KEY = "mg_loom_view";
+  var LEGACY_MOBILE_UI_KEY = "mg_loom_mobile_ui";
+  function readStoredView(store) {
+    if (!store) return null;
+    let v = null;
+    try {
+      v = store.getItem(LOOM_VIEW_KEY);
+    } catch (e) {
+      return null;
+    }
+    if (v === "mobile" || v === "desktop") return v;
+    let legacy = null;
+    try {
+      legacy = store.getItem(LEGACY_MOBILE_UI_KEY);
+    } catch (e) {
+      return null;
+    }
+    return legacy === "1" ? "mobile" : null;
+  }
+  function resolveLoomView(stored, isPhone) {
+    if (stored === "mobile") return true;
+    if (stored === "desktop") return false;
+    return !!isPhone;
+  }
+
+  // ../gallery/src/lib/loomCrossing.js
+  var RETURN_KEY = "mg_loom_return";
+  function safeLibraryPath(url) {
+    const s = String(url == null ? "" : url);
+    if (!s.startsWith("/") || s.startsWith("//")) return null;
+    if (/[\\\t\r\n]/.test(s)) return null;
+    const path = s.split(/[?#]/)[0];
+    if (path === "/loom" || path.startsWith("/loom/")) return null;
+    return s;
+  }
+  function unpackReturn(raw) {
+    const fallback = { url: "/", scrollY: 0 };
+    if (!raw) return fallback;
+    let d = null;
+    try {
+      d = JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+    if (!d || typeof d !== "object") return fallback;
+    const url = safeLibraryPath(d.url);
+    if (!url) return fallback;
+    const y = Number(d.scrollY);
+    return { url, scrollY: Number.isFinite(y) && y > 0 ? Math.round(y) : 0 };
+  }
+  function readLibraryReturn(store) {
+    if (!store) return { url: "/", scrollY: 0 };
+    let raw = null;
+    try {
+      raw = store.getItem(RETURN_KEY);
+    } catch (e) {
+      return { url: "/", scrollY: 0 };
+    }
+    return unpackReturn(raw);
+  }
+
+  // scripts/react-global-shim.js
+  var React2 = window.React;
+  var react_global_shim_default = React2;
+  var useState = React2.useState;
+  var useEffect = React2.useEffect;
+  var useLayoutEffect = React2.useLayoutEffect;
+  var useRef = React2.useRef;
+  var useCallback = React2.useCallback;
+  var useMemo = React2.useMemo;
+  var useReducer = React2.useReducer;
+  var useContext = React2.useContext;
+  var useImperativeHandle = React2.useImperativeHandle;
+  var useDebugValue = React2.useDebugValue;
+  var useId = React2.useId;
+  var useTransition = React2.useTransition;
+  var useDeferredValue = React2.useDeferredValue;
+  var useSyncExternalStore = React2.useSyncExternalStore;
+  var useInsertionEffect = React2.useInsertionEffect;
+  var createElement = React2.createElement;
+  var cloneElement = React2.cloneElement;
+  var createContext = React2.createContext;
+  var forwardRef = React2.forwardRef;
+  var memo = React2.memo;
+  var lazy = React2.lazy;
+  var Suspense = React2.Suspense;
+  var Fragment = React2.Fragment;
+  var StrictMode = React2.StrictMode;
+  var Children = React2.Children;
+  var isValidElement = React2.isValidElement;
+  var createRef = React2.createRef;
+  var Component = React2.Component;
+  var PureComponent = React2.PureComponent;
+
+  // ../gallery/src/hooks/useIsMobile.js
+  var MOBILE_QUERY = "(max-width: 430px)";
+  function detectMobile() {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    if (window.matchMedia(MOBILE_QUERY).matches) return true;
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    const portrait = window.matchMedia("(orientation: portrait)").matches;
+    const screenW = window.screen && window.screen.width || Infinity;
+    return coarse && portrait && screenW <= 430;
+  }
+  function useIsMobile() {
+    const [isMobile, setIsMobile] = useState(detectMobile);
+    useEffect(() => {
+      if (typeof window === "undefined" || !window.matchMedia) return;
+      const sync = () => setIsMobile(detectMobile());
+      sync();
+      const mqls = [
+        window.matchMedia(MOBILE_QUERY),
+        window.matchMedia("(orientation: portrait)")
+      ];
+      const bind = (mql) => mql.addEventListener ? mql.addEventListener("change", sync) : mql.addListener(sync);
+      const unbind = (mql) => mql.removeEventListener ? mql.removeEventListener("change", sync) : mql.removeListener(sync);
+      mqls.forEach(bind);
+      window.addEventListener("resize", sync);
+      window.addEventListener("orientationchange", sync);
+      return () => {
+        mqls.forEach(unbind);
+        window.removeEventListener("resize", sync);
+        window.removeEventListener("orientationchange", sync);
+      };
+    }, []);
+    return isMobile;
+  }
+
   // ../gallery/src/art/artFilters.js
   var MgArtFilters = (function() {
     "use strict";
@@ -1223,39 +1383,6 @@ ${"=".repeat(48)}
     };
   })();
   var artFilters_default = MgArtFilters;
-
-  // scripts/react-global-shim.js
-  var React2 = window.React;
-  var react_global_shim_default = React2;
-  var useState = React2.useState;
-  var useEffect = React2.useEffect;
-  var useLayoutEffect = React2.useLayoutEffect;
-  var useRef = React2.useRef;
-  var useCallback = React2.useCallback;
-  var useMemo = React2.useMemo;
-  var useReducer = React2.useReducer;
-  var useContext = React2.useContext;
-  var useImperativeHandle = React2.useImperativeHandle;
-  var useDebugValue = React2.useDebugValue;
-  var useId = React2.useId;
-  var useTransition = React2.useTransition;
-  var useDeferredValue = React2.useDeferredValue;
-  var useSyncExternalStore = React2.useSyncExternalStore;
-  var useInsertionEffect = React2.useInsertionEffect;
-  var createElement = React2.createElement;
-  var cloneElement = React2.cloneElement;
-  var createContext = React2.createContext;
-  var forwardRef = React2.forwardRef;
-  var memo = React2.memo;
-  var lazy = React2.lazy;
-  var Suspense = React2.Suspense;
-  var Fragment = React2.Fragment;
-  var StrictMode = React2.StrictMode;
-  var Children = React2.Children;
-  var isValidElement = React2.isValidElement;
-  var createRef = React2.createRef;
-  var Component = React2.Component;
-  var PureComponent = React2.PureComponent;
 
   // ../gallery/src/api.js
   function withParams(path, params) {
@@ -5000,24 +5127,27 @@ ${"=".repeat(48)}
   };
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
-  function useLocalToggle(key, defaultVal) {
-    const [val, setVal] = useState2(() => {
+  function useLoomView(isPhone) {
+    const [stored, setStored] = useState2(() => {
       try {
-        const raw = window.localStorage.getItem(key);
-        return raw === null ? defaultVal : raw === "1";
+        return readStoredView(window.localStorage);
       } catch (e) {
-        return defaultVal;
+        return null;
       }
     });
-    useEffect2(() => {
+    const setMobileUI = useCallback2((v) => {
+      const next = !!v;
+      setStored(next ? "mobile" : "desktop");
       try {
-        window.localStorage.setItem(key, val ? "1" : "0");
+        window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop");
       } catch (e) {
       }
-    }, [key, val]);
-    return [val, setVal];
+    }, []);
+    return [resolveLoomView(stored, isPhone), setMobileUI];
   }
-  var MOBILE_UI_KEY = "mg_loom_mobile_ui";
+  var GALLERY_HREF = readLibraryReturn(
+    typeof window !== "undefined" && window.sessionStorage || null
+  ).url;
   var hasStore = typeof window !== "undefined" && window.storage;
   var PKEY = "storyboard:v2:project";
   var PPRE = "storyboard:v2:proj:";
@@ -5662,7 +5792,7 @@ ${"=".repeat(48)}
       return { err: e };
     }
     render() {
-      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The Loom hit a render error. Your storyboards are saved and safe \u2014 reload to recover."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: () => window.location.reload() }, "\u21BB Reload the Loom"), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Back to the gallery")));
+      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The Loom hit a render error. Your storyboards are saved and safe \u2014 reload to recover."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: () => window.location.reload() }, "\u21BB Reload the Loom"), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Back to the gallery")));
       return this.props.children;
     }
   };
@@ -7321,7 +7451,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;
@@ -8634,7 +8764,7 @@ ${"=".repeat(48)}
         AF.clearPreview(host);
       };
     }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
-    return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: GALLERY_HREF }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lm-chip" + (project.draft ? " on" : ""),
@@ -9808,8 +9938,16 @@ ${"=".repeat(48)}
           await sSet(ACTIVE_KEY, id);
           keys = [PPRE + id];
         }
-        let aid = await sGet(ACTIVE_KEY);
-        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+        const wantedBoard = readBoardId(location.search);
+        let aid = wantedBoard && keys.includes(PPRE + wantedBoard) ? wantedBoard : null;
+        let boardMiss = "";
+        if (aid) {
+          await sSet(ACTIVE_KEY, aid);
+        } else {
+          if (wantedBoard) boardMiss = wantedBoard;
+          aid = await sGet(ACTIVE_KEY);
+          if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+        }
         let p = null;
         try {
           const raw = await sGet(PPRE + aid);
@@ -9822,6 +9960,13 @@ ${"=".repeat(48)}
         }
         setActiveId(aid);
         setProject(p);
+        if (boardMiss && typeof window !== "undefined" && window.Toast) {
+          window.Toast.show({
+            kind: "err",
+            title: "No storyboard at that address",
+            msg: "The address asked for \u201C" + boardMiss + "\u201D, which this account has no storyboard for. Opened \u201C" + (p.name || "Untitled") + "\u201D instead."
+          });
+        }
         const tkeys = await sList(TPRE);
         const map = {};
         for (const k of tkeys) {
@@ -9920,6 +10065,15 @@ ${"=".repeat(48)}
     }, [activeId, readProjList, setSelShot]);
     const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
     useEffect2(() => {
+      if (!activeId) return;
+      const next = buildLoomUrl({ board: activeId }, location.search, location.pathname);
+      if (next === location.pathname + location.search) return;
+      try {
+        history.replaceState(null, "", next);
+      } catch (e) {
+      }
+    }, [activeId]);
+    useEffect2(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
       const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
@@ -9939,7 +10093,7 @@ ${"=".repeat(48)}
         }));
         return { ...p, assets: [...existing, ...added] };
       });
-      history.replaceState(null, "", location.pathname);
+      history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
     }, [project]);
     useEffect2(() => {
       if (!project || !hasStore || !activeId) return;
@@ -10674,7 +10828,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function App() {
     const [selShot, setSelShot] = useState2(null);
-    const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+    const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
     const [draftCard, setDraftCard] = useState2(() => ({
       id: "__draft__",
       mode: "R2V",

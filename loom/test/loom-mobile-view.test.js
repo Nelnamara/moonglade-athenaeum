@@ -56,18 +56,25 @@ describe("LoomMobile exists as a real component, inline (matching this file's ow
 });
 
 describe("the Mobile-view toggle: a new, persisted, manual owner-preference switch", () => {
-  test("a small, real useLocalToggle hook exists (no prior localStorage-toggle hook in this file)", () => {
-    assert.match(src, /function useLocalToggle\(key, defaultVal\)\s*\{/);
-    assert.match(src, /window\.localStorage\.getItem\(key\)/);
-    assert.match(src, /window\.localStorage\.setItem\(key, val \? "1" : "0"\)/);
+  // 2026-09-06 (the Loom-arena plumbing pass, owner call 5): the hook this switch rides was
+  // useLocalToggle(MOBILE_UI_KEY, false), which wrote its own default on mount -- so "never
+  // asked" and "asked for desktop" were the same stored "0". It is useLoomView now, over
+  // loom/src/loom-url.js's LOOM_VIEW_KEY, written ONLY by a real flip, so a phone with no
+  // stored answer can open the phone layout by itself. What this file is about is unchanged:
+  // the switch is still manual, still persisted, still bidirectional. The auto half has its
+  // own tests in loom-phone-auto-open.test.js.
+  test("a real, persisted hook backs the switch (no prior localStorage-toggle hook in this file)", () => {
+    assert.match(src, /function useLoomView\(isPhone\)\s*\{/);
+    assert.match(src, /readStoredView\(window\.localStorage\)/);
+    assert.match(src, /window\.localStorage\.setItem\(LOOM_VIEW_KEY, next \? "mobile" : "desktop"\)/);
   });
 
-  test("the localStorage key is a real, named constant", () => {
-    assert.match(src, /const MOBILE_UI_KEY = "mg_loom_mobile_ui";/);
+  test("the localStorage key is a real, named constant, shared from loom-url.js", () => {
+    assert.match(src, /LOOM_VIEW_KEY, readStoredView, resolveLoomView,\s*\n\} from "\.\/src\/loom-url\.js";/);
   });
 
-  test("App() wires mobileUI/setMobileUI through useLocalToggle(MOBILE_UI_KEY, false)", () => {
-    assert.match(src, /const \[mobileUI, setMobileUI\] = useLocalToggle\(MOBILE_UI_KEY, false\);/);
+  test("App() wires mobileUI/setMobileUI through useLoomView, keyed on the app's phone rule", () => {
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\)\);/);
   });
 
   test("a toggle chip lives in LoomV2's own .lv-top bar, reusing .lv-draft's exact visual pattern", () => {

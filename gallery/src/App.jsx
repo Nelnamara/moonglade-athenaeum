@@ -37,6 +37,7 @@ import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
+import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -933,6 +934,53 @@ export default function App({ boot }) {
     libScrollRef.current = null;
     window.scrollTo(0, y);
   }, [similarFor]);
+
+  /* THE SAME PROMISE, ACROSS THE CROSSING (owner call 2, 2026-09-06).
+
+     "← Gallery" now hands back the library's own address, so the page and the open picture
+     come back on their own -- ?page= and ?image= are read at boot exactly as a bookmark's
+     would be. What an address cannot carry is how far down the page you were, and that is
+     the same "where you were" the Similar drill-down above already saves and puts back.
+     So the crossing's snapshot carries it too (lib/loomCrossing.js), and this is the half
+     that spends it.
+
+     ONLY ON THE RETURN TRIP. document.referrer being the Loom is the whole gate -- an
+     ordinary reload of the library still lands at the top, because making every reload
+     restore its offset would be a new library-wide behaviour nobody asked for. Read once,
+     at mount, before any navigation of our own can overwrite it.
+
+     AND ONLY UNTIL THE OWNER'S OWN HANDS ARRIVE. The grid grows as thumbnails resolve, so
+     one scrollTo on the first painted page usually lands short; it is re-asked across a
+     few frames until the document is tall enough. Any real input -- wheel, touch, a key --
+     ends it immediately and leaves the view exactly where he put it. That is the standing
+     rule (DECISIONS.md, "The library stands still", 2026-09-05): the only thing allowed to
+     move his view is him, and here he is the one who asked. */
+  const loomReturnY = useRef(
+    cameFromLoom(document.referrer, window.location.origin)
+      ? readLibraryReturn(window.sessionStorage).scrollY : 0);
+  useEffect(() => {
+    const y = loomReturnY.current;
+    if (!y || !items.length) return;
+    loomReturnY.current = 0;         // one restore per load, whatever happens below
+    let stopped = false, frames = 0, raf = 0;
+    const stop = () => { stopped = true; };
+    const step = () => {
+      if (stopped) return;
+      window.scrollTo(0, y);
+      if (Math.abs((window.scrollY || 0) - y) > 2 && ++frames < 30) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    window.addEventListener("wheel", stop, { passive: true });
+    window.addEventListener("touchstart", stop, { passive: true });
+    window.addEventListener("keydown", stop);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+      window.removeEventListener("keydown", stop);
+    };
+  }, [items.length]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const similar = useSimilar(similarFor);
   const similarSource = useMemo(() => {
     if (!similarFor) return null;
