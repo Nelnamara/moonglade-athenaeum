@@ -36,7 +36,7 @@ jobs:
       # libraries, which the cache does not cover, so that part re-runs -- unavoidable and
       # still cheaper than a browser download every time.
       - name: Cache the Playwright browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}
