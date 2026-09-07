@@ -175,15 +175,23 @@ export async function fetchSeries(taskId) {
 const SERIES_PAGE_SIZE = 200;   // /api/next/library's own server-side cap
 const SERIES_PAGE_CAP = 5;      // 1000 images; the documented series maximum is ~801
 
-export async function fetchSeriesStack(sid) {
-  if (!sid) return null;
-  const meta = await apiGet("/api/series/" + encodeURIComponent(sid));
+/* ONE stack loader, two stack kinds (owner ruling, 2026-09-07: a batch card opens in
+   the series modal, tagged BATCH, instead of taking the library over). The only thing
+   that differs between them is WHICH pair of routes carries the stack:
+     series -> /api/series/<sid>      + /api/next/library?series=<sid>
+     batch  -> /api/batch/<task_id>   + /api/next/library?batch=<task_id>
+   Everything else -- the walk to the end of the listing, the page cap, the truncated
+   flag, the fail-soft null -- is shared, so the modal has one code path and a batch
+   never touches /api/series/. */
+async function fetchStack(metaRoute, listParam, id) {
+  if (!id) return null;
+  const meta = await apiGet(metaRoute + encodeURIComponent(id));
   if (!meta || meta.error || !Array.isArray(meta.steps) || !meta.steps.length) return null;
   const items = [];
   let total = null, pages = 1, truncated = false;
   for (let p = 1; p <= SERIES_PAGE_CAP; p++) {
     const lib = await apiGet("/api/next/library",
-      { series: sid, page: p, page_size: SERIES_PAGE_SIZE });
+      { [listParam]: id, page: p, page_size: SERIES_PAGE_SIZE });
     if (!lib || lib.error || !Array.isArray(lib.items)) break;
     items.push(...lib.items);
     if (typeof lib.total === "number") total = lib.total;
@@ -192,6 +200,19 @@ export async function fetchSeriesStack(sid) {
     if (p === SERIES_PAGE_CAP) truncated = true;
   }
   return { ...meta, items, total, truncated };
+}
+
+export async function fetchSeriesStack(sid) {
+  return fetchStack("/api/series/", "series", sid);
+}
+
+/* A BATCH stack: one task's outputs, in the same struct the modal already consumes
+   (moonglade_gallery.py's api_batch_detail answers a one-run series). The pictures
+   ride the EXISTING ?batch= library filter -- the one the retired View-batch takeover
+   used to push into the grid's own filters -- asked for directly here instead, so the
+   library underneath the modal is never disturbed. */
+export async function fetchBatchStack(taskId) {
+  return fetchStack("/api/batch/", "batch", taskId);
 }
 
 // ZIP download goes through a real form submit so the browser owns the download.

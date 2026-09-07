@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { fetchSeriesStack } from "../api.js";
+import { fetchSeriesStack, fetchBatchStack } from "../api.js";
 import { localDay } from "../gen/dates.js";
 import "../styles/series-modal.css";
 
@@ -39,6 +39,16 @@ import "../styles/series-modal.css";
    DATA: api.js's fetchSeriesStack -- /api/series/<sid> for the runs, and the
    same ?series=<sid> listing the retired takeover used, asked for directly here.
    No new backend.
+
+   TWO STACK KINDS THROUGH ONE MODAL (owner ruling, 2026-09-07). This refines B3's
+   own ruling of 2026-09-04, which retired the takeover for a SERIES only and left a
+   BATCH card still re-loading the whole library as ?batch=<task_id>. A batch opens
+   here too now -- "but it needs to be separately tagged so you know what you're
+   looking at, batch or series", which is the .mgss-kicker above the title. The
+   `stack` prop says which: { kind: "series" | "batch", id }. A batch is one run, so
+   the same rail, the same sort pair and the same tiles render from a one-step struct
+   (api.js's fetchBatchStack -> /api/batch/<task_id>); a batch never asks
+   /api/series/ anything.
    ========================================================================== */
 
 /* The run a media row belongs to: its task's position in the chain (1-based),
@@ -62,7 +72,9 @@ const FACETS = [
   ["star", "★", (it) => (it.rating || 0) > 0],
 ];
 
-export default function SeriesModal({ sid, onClose, onOpenDetails }) {
+export default function SeriesModal({ stack, onClose, onOpenDetails }) {
+  const isBatch = !!stack && stack.kind === "batch";
+  const sid = stack ? stack.id : null;      // the stack's id, whichever kind it is
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [run, setRun] = useState(-1);          // -1 = All runs
@@ -78,12 +90,12 @@ export default function SeriesModal({ sid, onClose, onOpenDetails }) {
     setData(null);
     setRun(-1);
     setFacets([]);
-    fetchSeriesStack(sid).then((d) => {
+    (isBatch ? fetchBatchStack(sid) : fetchSeriesStack(sid)).then((d) => {
       if (mine !== seq.current) return;
       setData(d);
       setLoading(false);
     });
-  }, [sid]);
+  }, [sid, isBatch]);
 
   /* Esc goes STRAIGHT BACK -- one key, one level, no ladder. That is the whole
      point of B3: the gallery underneath was never disturbed, so closing is the
@@ -145,7 +157,11 @@ export default function SeriesModal({ sid, onClose, onOpenDetails }) {
 
   if (!sid) return null;
 
-  const title = (data && data.title) || "Series";
+  /* The kicker (owner, 2026-09-07) -- the one thing that tells the two stack kinds
+     apart at a glance, since everything below the header is identical. */
+  const kicker = isBatch ? "BATCH" : "SERIES";
+  const noun = isBatch ? "batch" : "series";
+  const title = (data && data.title) || (isBatch ? "Batch" : "Series");
   const nImages = data ? (data.count_images != null ? data.count_images : tiles.length) : 0;
   const nRuns = steps.length;
 
@@ -155,12 +171,15 @@ export default function SeriesModal({ sid, onClose, onOpenDetails }) {
   return (
     <>
       <div className="mgss-scrim" onClick={onClose} />
-      <div className="mgss" role="dialog" aria-modal="true" aria-label={title + " — the series"}
+      <div className="mgss" role="dialog" aria-modal="true" aria-label={title + " — the " + noun}
         ref={panelRef} tabIndex={-1}>
         <div className="mgss-head">
-          <span className="mgss-title">{title} — the series</span>
+          <span className="mgss-kicker">{kicker}</span>
+          <span className="mgss-title">{title} — the {noun}</span>
           <span className="mgss-meta">
-            {nImages} image{nImages === 1 ? "" : "s"} · {nRuns} run{nRuns === 1 ? "" : "s"}
+            {nImages} image{nImages === 1 ? "" : "s"} · {isBatch
+              ? "one generation"
+              : nRuns + " run" + (nRuns === 1 ? "" : "s")}
           </span>
           <span className="mgss-sp" />
           {/* Sort: run № orders by run then index; newest is flat reverse-chronology. */}
@@ -221,9 +240,9 @@ export default function SeriesModal({ sid, onClose, onOpenDetails }) {
 
           <div className="mgss-grid">
             {loading ? (
-              <p className="mgss-note">Opening the series…</p>
+              <p className="mgss-note">Opening the {noun}…</p>
             ) : !data ? (
-              <p className="mgss-note">This series is no longer in the catalog.</p>
+              <p className="mgss-note">This {noun} is no longer in the catalog.</p>
             ) : shown.length ? (
               shown.map((t) => (
                 <button
@@ -241,7 +260,7 @@ export default function SeriesModal({ sid, onClose, onOpenDetails }) {
             )}
             {data && data.truncated ? (
               <p className="mgss-note mgss-wide">
-                This series is larger than one view — showing the first {tiles.length}.
+                This {noun} is larger than one view — showing the first {tiles.length}.
               </p>
             ) : null}
           </div>

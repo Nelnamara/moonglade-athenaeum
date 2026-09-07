@@ -394,15 +394,16 @@ export default function App({ boot }) {
 
      viewRef -- THE SURFACES THAT CARRY AN UNTOUCHED-LIBRARY CONTRACT. ◈ Similar (the grid
      is not even mounted under it, and the token's ✕ has to restore the library EXACTLY),
-     the series stack (B3: same filters, same page, same scroll), and the full-screen
-     viewer -- which indexes the array POSITIONALLY (Lightbox.jsx: `const it =
-     items[index]`, and the filmstrip and neighbour-warm read the same way). Swap `items`
-     at page 1, which is exactly where a finished picture arrives at the TOP, and every
-     index shifts by one: the picture on screen silently becomes its neighbour, mid-look.
+     the stack modal -- series or batch alike (B3 and 2026-09-07: same filters, same
+     page, same scroll under both) -- and the full-screen viewer, which indexes the
+     array POSITIONALLY (Lightbox.jsx: `const it = items[index]`, and the filmstrip and
+     neighbour-warm read the same way). Swap `items` at page 1, which is exactly where a
+     finished picture arrives at the TOP, and every index shifts by one: the picture on
+     screen silently becomes its neighbour, mid-look.
      The phone already refuses under its own Similar for the first of these reasons
      (AppMobile.jsx); the desktop has all three. */
   const navRef = useRef({ want: Math.max(1, initialPage | 0), inFlight: 0 });
-  const viewRef = useRef({ similar: null, series: null, lb: null });
+  const viewRef = useRef({ similar: null, stack: null, lb: null });
   /* The owner's own load. Marks the intent BEFORE the request leaves, counts it in the
      air, and hands back the same promise load() gives (the response, or undefined when a
      newer request superseded it) so every caller reads the answer exactly as before. */
@@ -415,7 +416,7 @@ export default function App({ boot }) {
     return load(p, replace).then((d) => { settle(); return d; }, (e) => { settle(); throw e; });
   }, [load]);
   const userLoadRef = useRef(userLoad);
-  /* One mirror, after every render. similarFor/seriesFor are declared further down the
+  /* One mirror, after every render. similarFor/stackFor are declared further down the
      file (the ◈ section and B3's); an effect body runs after the whole render has, so both
      are initialized by the time this line reads them -- the same reach paletteUpRef's own
      mirror effect makes for `palette`. */
@@ -424,14 +425,18 @@ export default function App({ boot }) {
     loadRef.current = load;
     userLoadRef.current = userLoad;
     if (!navRef.current.inFlight && total != null) navRef.current.want = page;
-    viewRef.current = { similar: similarFor, series: seriesFor, lb: lbIndex };
+    viewRef.current = { similar: similarFor, stack: stackFor, lb: lbIndex };
   });
   useEffect(() => {
     const onPop = () => {
       setDetailsFor(readImage(window.location.search));
-      // B3: the open series stack is addressable too, so Back closes it (or reopens
-      // the one the entry it landed on had up) exactly like it does for Details.
-      setSeriesFor(readSeries(window.location.search));
+      // B3: the open SERIES stack is addressable too, so Back closes it (or reopens
+      // the one the entry it landed on had up) exactly like it does for Details. A
+      // BATCH stack has no address (2026-09-07), so the address answering 'no series'
+      // simply closes whatever stack was up -- which is the honest read of a Back that
+      // was never told a batch was open.
+      const popSid = readSeries(window.location.search);
+      setStackFor(popSid ? { kind: "series", id: popSid } : null);
       const p = readPage(window.location.search);
       // Back/Forward is the owner's hand as surely as the pager is, and the address
       // already says p -- so the intent is p whether or not the grid needs a load to
@@ -464,6 +469,10 @@ export default function App({ boot }) {
     closeDetails();
     setAdv((old) => ({ ...old, model: name }));
   }, [closeDetails, setAdv]);
+  /* The ?batch= library drill-down. Since 2026-09-07 this is NO LONGER what a batch
+     CARD click does (see openBatch below) -- it is the Details record's own "View
+     batch" chip (DetailsView.jsx, ImageDetailsMobile.jsx), which is a different verb:
+     from one picture, show me the whole library filtered to its siblings. */
   const filterByBatch = useCallback((batch) => {
     closeDetails();
     setAdv((old) => ({ ...old, batch, series: "" }));
@@ -486,20 +495,36 @@ export default function App({ boot }) {
 
      `adv.series` itself is deliberately left in place and still rides every listing
      request -- the CSV export writes it, and it is the parameter this modal's own
-     fetch uses. What went away is the one caller that SET it from a click. */
-  const [seriesFor, setSeriesFor] = useState(() => readSeries(window.location.search));
+     fetch uses. What went away is the one caller that SET it from a click.
+
+     2026-09-07 (owner) extends that ruling to the OTHER stack kind. A batch card
+     still did the thing B3 retired -- filterByBatch, the whole library re-loaded as
+     ?batch=<task_id> -- and it opens the same modal now, "separately tagged so you
+     know what you're looking at, batch or series". So this state is the OPEN STACK,
+     not the open series: { kind: "series" | "batch", id }. Only the series kind is
+     addressable (?series=<sid>, the deterministic sid); a batch has no address of
+     its own, so opening one writes no history and Back simply closes it. */
+  const [stackFor, setStackFor] = useState(() => {
+    const sid = readSeries(window.location.search);
+    return sid ? { kind: "series", id: sid } : null;
+  });
   const openSeries = useCallback((sid) => {
     closeDetails();
     setLbIndex(null);
     setUrl({ series: sid });
-    setSeriesFor(sid);
+    setStackFor({ kind: "series", id: sid });
   }, [closeDetails, setUrl]);
-  const closeSeries = useCallback(() => {
-    setUrl({ series: null });
-    setSeriesFor(null);
+  const openBatch = useCallback((taskId) => {
+    closeDetails();
+    setLbIndex(null);
+    setStackFor({ kind: "batch", id: taskId });
+  }, [closeDetails]);
+  const closeStack = useCallback(() => {
+    setUrl({ series: null });   // a no-op for a batch: setUrl skips a write that changes nothing
+    setStackFor(null);
   }, [setUrl]);
   /* Opening a picture from inside the stack is ONE navigation, so it must leave ONE
-     history entry. It used to be closeSeries() then openDetails(): two setUrl calls,
+     history entry. It used to be closeStack() then openDetails(): two setUrl calls,
      two pushStates, and a middle entry -- the bare library with neither the stack nor
      the record -- that the owner never saw and that Back landed on. The address is
      written ONCE here, with both keys in the same patch (buildUrl takes a multi-key
@@ -507,11 +532,11 @@ export default function App({ boot }) {
      STATE work, and their own setUrl calls fall through setUrl's already-matches
      guard because the address is by then exactly what they would have written. So
      Back from the record goes straight to the stack that was open. */
-  const openDetailsFromSeries = useCallback((mid) => {
+  const openDetailsFromStack = useCallback((mid) => {
     setUrl({ series: null, image: mid });
-    closeSeries();
+    closeStack();
     openDetails(mid);
-  }, [setUrl, closeSeries, openDetails]);
+  }, [setUrl, closeStack, openDetails]);
 
   /* Generation completions refresh the credits chip -- and the library, but only from
      the perch where refreshing it moves nothing (see THE POLICY below).
@@ -546,11 +571,11 @@ export default function App({ boot }) {
       const nav = navRef.current;
       if (nav.inFlight || nav.want !== 1) return;
       /* ...and not even at the perch while a surface with an untouched-library contract is
-         up: the ◈ lookalikes, the series stack, or the full-screen viewer -- which reads
+         up: the ◈ lookalikes, the stack modal, or the full-screen viewer -- which reads
          `items` by INDEX, so a swap at page 1 slides a different picture under the one
          being looked at. See viewRef above. */
       const view = viewRef.current;
-      if (view.similar || view.series || view.lb != null) return;
+      if (view.similar || view.stack || view.lb != null) return;
       load(1, true).then((data) => {
         // undefined = a newer request superseded this one (useLibrary's reqSeq guard).
         if (data) pruneSelected(setSelected, data.items);
@@ -1340,7 +1365,7 @@ export default function App({ boot }) {
      them, this is the explicit half of the same rule. `similarFor` is in the list
      for a second reason since B2: the grid isn't even mounted then. */
   const gridKeys = lbIndex == null && !detailsFor && !overlay && !ctxMenu
-    && !similarFor && !seriesFor && !dockActive && !claimModal.open
+    && !similarFor && !stackFor && !dockActive && !claimModal.open
     && !palette.active && !palette.sheetActive;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
@@ -1486,7 +1511,7 @@ export default function App({ boot }) {
             onFocusCard={setGridFocus}
             onSimilar={showSimilar}
             onOpenSeries={openSeries}
-            onOpenBatch={filterByBatch}
+            onOpenBatch={openBatch}
           />
         )}
       </main>
@@ -1494,12 +1519,12 @@ export default function App({ boot }) {
       {ctxMenu && (
         <GridContextMenu target={ctxMenu} actions={ctxActions} onClose={() => setCtxMenu(null)} />
       )}
-      {/* B3: a series stack, over the gallery. Opening a picture from inside it closes
+      {/* B3: a stack -- series or batch -- over the gallery. Opening a picture from it closes
           the modal first -- the record is the deeper view, not a third layer stacked on
-          a second one -- and does it as ONE history entry (openDetailsFromSeries). */}
-      {seriesFor && (
-        <SeriesModal sid={seriesFor} onClose={closeSeries}
-          onOpenDetails={openDetailsFromSeries} />
+          a second one -- and does it as ONE history entry (openDetailsFromStack). */}
+      {stackFor && (
+        <SeriesModal stack={stackFor} onClose={closeStack}
+          onOpenDetails={openDetailsFromStack} />
       )}
 
       {/* the DC's veil: keeps the column bottom legible under the (future) dock */}

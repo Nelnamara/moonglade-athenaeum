@@ -602,7 +602,11 @@ export default function CreateMobile({
 
       {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
       <div className="cm-modelwrap">
+        {/* phone: the head's right-hand control is Done, not the desktop's ✕/Esc
+            (owner, 2026-09-07) -- a LoRA pick only toggles, so without it the sheet
+            never closes on its own. */}
         <ModelFlyout
+          phone
           open={flyOpen} kind={flyKind} setKind={setFlyKind}
           baseType={m ? m.model_type : ""}
           value={m} selected={s.loras}
