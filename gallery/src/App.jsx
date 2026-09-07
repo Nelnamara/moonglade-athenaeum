@@ -38,6 +38,7 @@ import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
+import { landingAfterViewer } from "./lib/viewerLanding.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -63,6 +64,18 @@ import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
      separator bar's compact <CostBadge> is its (dormant) price chip.
    - Grid refit: receives `thumb` (SIZE slider) — also exposed as --thumb on
      <main>; shell.css maps it onto the existing .grid columns until then. */
+
+/* The grid card for one picture, by id (Grid.jsx writes data-id on every .mgg-card).
+   The one DOM half of the viewer-landing ruling; the decision it feeds is
+   lib/viewerLanding.js, which has no DOM in it and is tested without one. Returns null
+   for a picture with no card of its own -- filtered out, or hidden under a stack cover. */
+function cardFor(mediaId) {
+  if (!mediaId) return null;
+  const q = typeof CSS !== "undefined" && CSS.escape
+    ? CSS.escape(String(mediaId))
+    : String(mediaId).replace(/["\\]/g, "\\$&");
+  try { return document.querySelector('.mgg-card[data-id="' + q + '"]'); } catch { return null; }
+}
 
 export default function App({ boot }) {
   // ?page=N on first load (#31, "Where the Refit Broke" #7): the classic addressed
@@ -935,6 +948,88 @@ export default function App({ boot }) {
     window.scrollTo(0, y);
   }, [similarFor]);
 
+  /* WHERE THE VIEWER PUTS YOU DOWN (owner, 2026-09-07).
+
+     "Land on the picture you were viewing; if it is off-page -- the viewer stepped onto
+     another page -- the top of its page." A refinement of "the library stands still"
+     (2026-09-05), not a hole in it: closing the viewer is the owner's own hands, and the
+     view handed back was WRONG before this. The viewer's ← / → past either end of a page
+     rolls to the next one through userLoad (Lightbox.jsx's step), which is a real,
+     recorded page change -- so the grid re-rendered as page 8 under the offset he had on
+     page 7 and dropped him in the middle of a page he had never seen.
+
+     WHY THE SNAPSHOT IS TAKEN IN THE CLOSE HANDLER and not on the lbIndex -> null
+     transition: five other paths clear lbIndex and go somewhere else entirely (Edit, To
+     Video, Similar -- which does its own save/restore above -- Details, the deep-link
+     reset). Only the viewer's own ✕/Esc means "put me back in the library".
+
+     WHY A PASSIVE EFFECT and not the useLayoutEffect the Similar restore above uses:
+     the viewer holds a body-overflow scroll lock (useScrollLock), and while it is on the
+     viewport is not scrollable at all -- a scrollTo fired from the layout phase, before
+     the unmounting Lightbox's passive teardown has released it, is simply swallowed. So
+     this waits for the lock to lift, then measures, then moves. Once per close.
+
+     The decision itself is lib/viewerLanding.js, with no DOM in it. */
+  const lbLandRef = useRef(null);       // { openPage, page, mediaId } while the viewer is up
+  const lbLandPending = useRef(null);   // the snapshot the close handler hands to the effect
+  useEffect(() => {
+    if (lbIndex == null) { lbLandRef.current = null; return; }
+    const it = items[lbIndex];
+    const prev = lbLandRef.current;
+    lbLandRef.current = {
+      // The page it OPENED on, kept across every step: two steps forward and one back is
+      // still the page he started on, and still not a page change.
+      openPage: prev ? prev.openPage : page,
+      page,
+      mediaId: (it && it.media_id) || null,
+    };
+  }, [lbIndex, page, items]);
+
+  const closeLightbox = useCallback(() => {
+    lbLandPending.current = lbLandRef.current;
+    setLbIndex(null);
+  }, []);
+
+  useEffect(() => {
+    if (lbIndex != null) return;
+    const snap = lbLandPending.current;
+    if (!snap) return;
+    lbLandPending.current = null;
+
+    // Grid.jsx's own page flip settled the "instant, never smooth" question already; a
+    // close is not a journey either.
+    const behavior = "instant" in document.documentElement.style ? "instant" : "auto";
+    const chromeTop = () => {
+      const v = parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--mgx-chrome-h"));
+      return Number.isFinite(v) ? v : 0;    // the sticky header App publishes (grid.css:54)
+    };
+    let raf = 0, waited = 0;
+    const run = () => {
+      // The lock, and the card the new page has not painted yet, are the same wait.
+      if ((document.body.style.overflow === "hidden"
+           || (snap.mediaId && !cardFor(snap.mediaId))) && ++waited < 20) {
+        raf = requestAnimationFrame(run);
+        return;
+      }
+      const card = snap.mediaId ? cardFor(snap.mediaId) : null;
+      const box = card ? card.getBoundingClientRect() : null;
+      const where = landingAfterViewer({
+        pageChanged: snap.page !== snap.openPage,
+        cardTop: box ? box.top : null,
+        cardBottom: box ? box.bottom : null,
+        viewportTop: chromeTop(),
+        viewportBottom: window.innerHeight || document.documentElement.clientHeight || 0,
+      });
+      if (where === "top") window.scrollTo({ top: 0, behavior });
+      // scroll-margin-top on .mgg-card (grid.css:54) is what keeps the card clear of the
+      // sticky header, exactly as the grid's own arrow-key focus does.
+      else if (where === "card" && card) card.scrollIntoView({ block: "nearest", inline: "nearest", behavior });
+    };
+    run();
+    return () => cancelAnimationFrame(raf);
+  }, [lbIndex]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   /* THE SAME PROMISE, ACROSS THE CROSSING (owner call 2, 2026-09-06).
 
      "← Gallery" now hands back the library's own address, so the page and the open picture
@@ -1403,7 +1498,10 @@ export default function App({ boot }) {
       {lbIndex != null && (
         <Lightbox
           items={items} index={lbIndex} setIndex={setLbIndex}
-          onClose={() => setLbIndex(null)}
+          /* closeLightbox, not a bare setLbIndex(null): this is the ONE exit that lands
+             the owner back on the library, so it is the one that takes the landing
+             snapshot (owner, 2026-09-07 -- see the effect above). */
+          onClose={closeLightbox}
           onRate={rate}
           /* userLoad, not load: stepping past the end of a page in the viewer is the
              owner asking for the next page as surely as the pager is, so it goes on the
