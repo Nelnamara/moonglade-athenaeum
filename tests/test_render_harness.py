@@ -3188,8 +3188,26 @@ def test_the_return_trip_lands_where_the_library_was(logged_in_page):
     page = logged_in_page(**DESKTOP)
     _visit(page, "/")
     page.wait_for_selector(".mgx-actrow")
+    # 2026-09-07: wait for the library's FIRST load to land before faking the address.
+    # `.mgx-actrow` is painted from boot-time data (Banner.jsx), so it is up long before
+    # the grid's own request resolves -- and App's page-mirror effect (App.jsx:465-468,
+    # "whenever the loaded page settles somewhere the URL doesn't say") fires the moment
+    # `loading` goes false and `total` arrives, calling setUrl({page: 1}); buildUrl
+    # deletes `page` for n <= 1 and leaves `image` alone (urlState.js:47-54), so a
+    # replaceState made mid-flight came back as `/?image=demo-mid-42` and the test failed
+    # on its own setup. Flaked twice in the 3.10 wave on exactly that; a real visit to
+    # /?page=3 cannot hit it, because readPage() seeds React's `page` from the real
+    # address at mount and the mirror writes back the same 3.
+    page.wait_for_selector(".mgg-card")
+    page.wait_for_load_state("networkidle")
+    _settle(page)
+
     # The library, somewhere other than its front door.
     page.evaluate("() => history.replaceState(null, '', '/?page=3&image=demo-mid-42')")
+    _settle(page)
+    assert page.url.endswith("/?page=3&image=demo-mid-42"), (
+        "the app rewrote the address to {!r} before the crossing even started -- the "
+        "library's own first load was still in flight".format(page.url))
 
     # Out through the hero's own Loom button -- a plain anchor that runs no JS of its own,
     # which is exactly why the snapshot rides pagehide rather than a click handler.
