@@ -505,25 +505,6 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-fixrow { display: flex; align-items: center; gap: 8px; }
 .mgdock-fixrow .sp { flex: 1 1 auto; }
 
-/* ---- slab 2 under the ENHANCE sub-tab: ART FILTERS (DC 1509-1516) ---- */
-/* the DC's column (1510): flex col, gap 9 */
-.mgdock-enhancecol { display: flex; flex-direction: column; gap: 9px; }
-/* the sub-label (1511): 9px 700 .1em overlay0 -- NO text-transform, its tail is
-   lowercase in the DC ('ART FILTERS · free, no generation') */
-.mgdock-enhancesub { font-size: 9px; font-weight: 700; letter-spacing: .1em;
-  color: var(--overlay0); }
-/* ◉ Open filters (1512, openFiltersBtnStyle 2947) */
-.mgdock-openfilters { text-align: center; padding: 10px; border-radius: 10px;
-  font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
-  border: 1px solid var(--surface1); background: rgba(182, 146, 230, .14);
-  color: var(--accent); }
-/* paragraph 1 (1513): 10px / 1.55 subtext, <b> in var(--text) */
-.mgdock-enhancecopy { font-size: 10px; line-height: 1.55; color: var(--subtext); }
-.mgdock-enhancecopy b { color: var(--text); font-weight: 700; }
-/* paragraph 2 (1514): 10px / 1.55 overlay0, <b> in var(--subtext) */
-.mgdock-enhancecopy2 { font-size: 10px; line-height: 1.55; color: var(--overlay0); }
-.mgdock-enhancecopy2 b { color: var(--subtext); font-weight: 700; }
-
 /* ---- The Bridge Enhance sub-tab (EnhanceTab), rebuilt 2026-09-04 to
    moonglade-internal/design/enhance/"Enhance Family Handoff.dc.html" comps A2 + A3
    (picks 1c / 1f) -- issues #48, #44 and #49. The sub-tab used to be ONE tall slab in
