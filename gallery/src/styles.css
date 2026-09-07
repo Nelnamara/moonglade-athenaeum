@@ -84,15 +84,6 @@ button:disabled { cursor: default; }
 .card.cred { color: var(--gold); }
 .card.eye.on { color: var(--peach); }
 
-.grp { display: inline-flex; gap: 2px; border-radius: 18px; padding: 3px;
-  background: rgba(33, 31, 58, .38); border: 1px solid rgba(255, 255, 255, .14);
-  backdrop-filter: blur(12px); }
-.grp .g { border: 0; border-radius: 14px; padding: 4px 12px; font-size: 11px;
-  color: var(--subtext); white-space: nowrap; background: none; }
-.grp .g.on { background: color-mix(in srgb, var(--accent) 30%, transparent); color: #fff; }
-.grp .gsel { appearance: none; color-scheme: dark; }
-.grp .gsel option { background: var(--mantle); color: var(--text); }
-
 .stats { font-size: 12px; color: var(--subtext); white-space: nowrap; }
 .stats b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
 .bkd { border-radius: 12px; font-size: 10.5px; padding: 3px 10px; white-space: nowrap;
