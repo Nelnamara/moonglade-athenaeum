@@ -10,6 +10,7 @@
    2026-09-07 restart-card verdict (was emerald rgba(79,201,154,..) at 7px); the colour is
    --loomc, written out because a keyframe cannot read a variable that is set per-skin. */
 @keyframes cpPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(71,203,195,.5); } 50% { box-shadow: 0 0 0 12px rgba(71,203,195,0); } }
+@keyframes cpPulseDot { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.5); } 50% { box-shadow: 0 0 0 7px rgba(79,201,154,0); } }
 /* cpEmber -- the halo itself brightening and swelling, then settling. Runs on the same beat
    as cpPulse and touches different properties, so the two layer instead of fighting
    (2026-09-07 verdict: "Ember ALONG WITH the chosen settings"). */
@@ -50,10 +51,10 @@
   color: var(--overlay0); margin-top: 2px; }
 .mgcp-mirror { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--subtext); margin-top: 8px; }
 .mgcp-mirrordot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; margin-top: 5px;
-  /* Shares cpPulse with the restart halo, so the 2026-09-07 verdict's cyan ring and 12px
-     reach reach this dot too -- its own fill stays emerald and its 2.6s beat is untouched.
-     Noted, not designed around: the verdict was written against the keyframe. */
-  animation: cpPulse 2.6s ease-in-out infinite; }
+  /* Its own keyframe since 2026-09-07: the restart verdict recoloured cpPulse (cyan, 12px) for the
+     restart halo only; this dot keeps the emerald 7px ring it always had -- the verdict named the
+     restart card, not the Mirror tile, and nothing moves a surface the ruling did not name. */
+  animation: cpPulseDot 2.6s ease-in-out infinite; }
 .mgcp-mirrordot.off { background: var(--overlay0); animation: none; }
 /* Control Panel.dc.html:696's resStyle -- the Organize flow's dry-run result readout. */
 .mgcp-res { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--overlay0);
