@@ -3434,6 +3434,119 @@ def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged
     assert max(f["bnrH"] for f in frames) > 200, "the banner never reached its hero height"
 
 
+_DONE_JOB = {"jobs": [{
+    "job_id": "77", "type": "generate", "label": "Generated", "status": "done",
+    "media_ids": ["100"], "ts": 0, "started_at": 0,
+}]}
+
+
+def test_the_phone_activity_thumbnail_really_opens_the_picture(logged_in_page):
+    """RED TEAM #24. The phone's ONE route from "your image is done" to the image.
+
+    Under the library-stands-still policy nothing restacks the grid when a generation
+    lands, so the Activity row's thumbnail is the whole of the way there. ActivityRow
+    cancels its own anchor for a plain tap and dispatches `mg-open-details` instead -- and
+    until this branch the only listener lived in App.jsx, so on the phone the tap was
+    swallowed whole: the link cancelled, nothing opened in its place.
+
+    That fix shipped with a regex over the JSX and its own docstring saying the behaviour
+    "belongs in tests/test_render_harness.py if it is ever measured live". This is that.
+    """
+    page = logged_in_page(**PHONE)
+    page.route("**/api/jobs", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(_DONE_JOB)))
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+    page.click('button[title="Activity"]')
+    page.wait_for_selector(".glm-sheet .at-row")
+    thumb = page.locator(".glm-sheet .at-row .at-thumb")
+    assert thumb.count() == 1, (
+        "a finished job with a media id must offer its thumbnail -- there is no other way "
+        "to the picture from here")
+    before = page.url
+
+    thumb.click()
+    page.wait_for_selector(".idm-root")
+    assert page.url == before, (
+        "the tap followed the desktop shell's /?image= address and reloaded the app "
+        "instead of opening the phone's own picture record: {}".format(page.url))
+    # ...and the sheet it was tapped in got out of the way, rather than being what the
+    # owner lands back on when the picture closes
+    assert page.locator('.glm-sheet:has(.at-row)').count() == 0
+
+
+_MASCOT_PROBE_JS = """
+() => {
+  /* The restart mascot's own markup, mounted against the SHIPPED stylesheet rather than by
+     restarting the harness's server. What is being read is a CSS fact -- whether the rule
+     the owner's ruling removed is still gone from the bundle the browser actually loaded --
+     and the modal is unreachable here without a real restart. */
+  const host = document.createElement("div");
+  host.className = "mgcp-pwr-card";
+  host.style.cssText = "position:fixed;left:-9999px;top:0;";
+  host.innerHTML = '<div class="mgcp-pwr-mascotwrap">'
+    + '<div class="mgcp-pwr-halo busy"></div>'
+    + '<div class="mgcp-pwr-mascot"></div></div>';
+  document.body.appendChild(host);
+  const mascot = host.querySelector(".mgcp-pwr-mascot");
+  const halo = host.querySelector(".mgcp-pwr-halo");
+  const out = {
+    mascotAnim: getComputedStyle(mascot).animationName,
+    haloAnim: getComputedStyle(halo).animationName,
+    // the greyed-out state the ruling explicitly kept
+    offFilter: (() => {
+      mascot.classList.add("off");
+      const f = getComputedStyle(mascot).filter;
+      mascot.classList.remove("off");
+      return f;
+    })(),
+    // ...and a class nothing renders any more must not be quietly resurrected in CSS
+    spinAnim: (() => {
+      mascot.classList.add("spin");
+      const a = getComputedStyle(mascot).animationName;
+      mascot.classList.remove("spin");
+      return a;
+    })(),
+  };
+  host.remove();
+  return out;
+}
+"""
+
+
+def test_the_restart_mascot_holds_still_and_the_halo_keeps_pulsing(logged_in_page):
+    """RED TEAM #24, and the owner's own words: "I don't want the mascot to spin anymore.
+    it just looks wrong. I like the pulse, we can keep that."
+
+    Both halves of that ruling, read off the stylesheet the browser really loaded: the
+    mascot has no animation of its own, the halo's pulse is untouched, and the `spin` class
+    the removal took out of the JSX does not quietly still exist in CSS waiting for someone
+    to put the class back. Nothing measured this in a browser before -- and cpSpin itself
+    is still defined and still used by the job console's spinner, so a stray selector here
+    would animate again with no source change anyone would notice.
+
+    Mounted directly rather than by opening the modal: reaching it needs a real restart of
+    the harness's own server, and what is under test is a CSS fact, not the route to it.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.goto("/", wait_until="domcontentloaded")     # no motion freeze: it would zero these
+    page.wait_for_selector(".mgx-bnr")
+    _settle(page)
+    seen = page.evaluate(_MASCOT_PROBE_JS)
+
+    assert seen["mascotAnim"] == "none", (
+        "the restart mascot is animating again: {}".format(seen["mascotAnim"]))
+    assert seen["spinAnim"] == "none", (
+        "a .spin rule survived in the stylesheet: {}".format(seen["spinAnim"]))
+    assert seen["haloAnim"] == "cpPulse", (
+        "the pulse the owner kept is gone: {}".format(seen["haloAnim"]))
+    assert "grayscale" in seen["offFilter"], (
+        "the greyed stopped-server state went with it: {}".format(seen["offFilter"]))
+
+
 def test_two_fast_backs_inside_a_layers_exit_animation_do_not_leave_the_app(
         logged_in_page):
     """RED TEAM #13. The ledger and the visible layer disagreed for 200-220ms every time.
