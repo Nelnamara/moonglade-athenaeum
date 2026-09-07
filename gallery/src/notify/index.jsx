@@ -6,6 +6,7 @@ import * as ach from "./ach.js";
 import { claimReceipt } from "./updateStore.js";
 import { checkSpikes } from "./spikeStore.js";
 import ToastHost from "./ToastHost.jsx";
+import BannerHost from "./BannerHost.jsx";
 import "../styles/notify.css";
 
 /* notify/index.jsx -- the one installer for the notify system (no-vanilla campaign, component
@@ -70,5 +71,14 @@ export function installNotify() {
 }
 
 export function NotifyRoot() {
-  return <ToastHost />;
+  /* Two body-level surfaces, not one, since 2026-09-07: the corner toast stack, and the
+     standing update strip (notify/BannerHost.jsx). Both mount here so every shell that
+     renders this root -- the desktop gallery, the phone, the Loom, the setup wizard --
+     gets them without a single one of them knowing they exist. */
+  return (
+    <>
+      <BannerHost />
+      <ToastHost />
+    </>
+  );
 }

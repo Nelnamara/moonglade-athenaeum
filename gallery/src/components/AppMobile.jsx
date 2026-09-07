@@ -34,6 +34,7 @@ import ClaimModal from "./ClaimModal.jsx";
 import useClaimModal from "../hooks/useClaimModal.js";
 import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
+import { registerUpdateHost } from "../notify/bannerStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -368,6 +369,13 @@ const SCREEN_TITLES = {
 
 export default function AppMobile({ boot }) {
   const [tab, setTab] = useState("gallery");
+  /* WHAT "UPDATE" MEANS ON THE PHONE (owner ruling 2026-09-07, "phone gets update"). The
+     standing update strip is portaled to document.body from the notify root and knows
+     nothing about tabs; this is this shell's own answer to its button. Control is where the
+     apply lives on this surface, so the press lands there and ControlMobile.jsx picks the
+     intent up on mount and pushes its update screen. Same two-part contract App.jsx uses
+     for the Panel overlay -- see notify/bannerStore.js. */
+  useEffect(() => registerUpdateHost(() => setTab("control")), []);
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);

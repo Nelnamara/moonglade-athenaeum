@@ -41,6 +41,7 @@ import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer } from "./lib/viewerLanding.js";
+import { registerUpdateHost } from "./notify/bannerStore.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -214,6 +215,13 @@ export default function App({ boot }) {
   const openOverlay = useCallback((key) => {
     setOverlay(key);
   }, []);
+  /* WHAT "UPDATE" MEANS ON THIS SHELL (owner ruling 2026-09-07). The standing update strip
+     is portaled to document.body from the notify root and has no idea what a Control Panel
+     is; this is the desktop's own answer to its button, registered once. The Panel then
+     reads the intent on mount and opens its update modal (ControlPanelOverlay.jsx) -- one
+     registration and one flag, rather than a prop chain from the body-level banner down
+     into the overlay's own state. */
+  useEffect(() => registerUpdateHost(() => setOverlay("panel")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection
