@@ -11688,9 +11688,21 @@ def create_app(out_dir: Path):
         those rows back), so the preview over-reported the blast radius against the one
         thing it was supposed to describe exactly. This is that same read, moved forward.
 
-        Read-only and it stays read-only: getTaskById, nothing else. It deliberately does
-        NOT write cloud_deleted_at the way the delete's own read does -- a confirm dialog
-        the owner may well cancel is not a place to mutate the catalog from.
+        Read-only ON PIXAI, and it stays that way: getTaskById, nothing else. It does
+        write `cloud_deleted_at` on the rows the read finds already deleted, exactly as
+        the delete's own read does (mark_cloud_deleted) -- REFINING this function's own
+        2026-09-07 note, which held that a confirm dialog the owner may well cancel is no
+        place to mutate the catalog from. It is, for this one column. The preview's whole
+        promise is "that file stays in your backup, because this is the last copy of it
+        anywhere", and a promise made from an answer nobody wrote down is only as good as
+        the SECOND read that has to be made at delete time: if that one fails where this
+        one succeeded, _rows_the_bulk_purge_must_keep falls back to the catalog, finds
+        nothing, and purges the very rows this dialog named. Stamping here makes the
+        catalog the one place both reads answer from, so the preview can only ever become
+        a source of the same truth, never a different one. The stamp is not a deletion and
+        does not become one if the owner cancels: `cloud_deleted_at` records what PIXAI
+        did to its own copy, which is true whatever this dialog decides, and every path
+        that reads it (the keep-back, the single-image plan) only ever keeps a row.
 
         FAILS SOFT, and in the SAFE direction. A task whose read raises, comes back
         empty, or never answers inside the budget is `unverified`: it keeps its local rows
@@ -11738,7 +11750,15 @@ def create_app(out_dir: Path):
             if task is None:
                 return tid, None
             batch = (task.get("outputs") or {}).get("batch")
-            return tid, {str(m) for m in core.deleted_batch_media(batch) if m}
+            gone_ids = {str(m) for m in core.deleted_batch_media(batch) if m}
+            # WRITE IT DOWN, right here, with the same verb the delete's own read uses.
+            # See the docstring: this is what stops the delete-time read's failure from
+            # taking the rows this preview is about to promise would stay.
+            for mid in gone_ids:
+                stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+                if stamp:
+                    mark_cloud_deleted(db_path, mid, stamp)
+            return tid, gone_ids
 
         gone, unverified = {}, set()
         from concurrent.futures import ThreadPoolExecutor
@@ -11777,8 +11797,11 @@ def create_app(out_dir: Path):
     @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
-        anything fires. Read-only in the sense that matters: it deletes nothing and writes
-        nothing. It is no longer offline, though -- see THE LIVE CHECK below.
+        anything fires. Read-only in the sense that matters: it deletes nothing, here or
+        on PixAI. It is no longer offline, and no longer writes NOTHING either -- the one
+        thing it records is `cloud_deleted_at` on the rows PixAI says it has already
+        dropped, so the delete keeps them back whether or not its own read works
+        (_preview_live_gone). See THE LIVE CHECK below.
 
         Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
         whole batch, cloud AND local. The confirm dialog said that in prose but never
