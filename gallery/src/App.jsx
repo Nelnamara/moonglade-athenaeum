@@ -970,7 +970,7 @@ export default function App({ boot }) {
     if (libScrollRef.current === null) libScrollRef.current = window.scrollY || 0;
     setLbIndex(null);
     closeDetails();
-    setSeriesFor(null);
+    setStackFor(null);
     setSimilarFor(mid);
   }, [closeDetails]);
   /* The other half, on EVERY dismiss path -- the token's ✕, Escape, and the empty
@@ -1191,7 +1191,7 @@ export default function App({ boot }) {
     setOverlay(null);
     setLbIndex(null);
     setSimilarFor(null);
-    setSeriesFor(null);
+    setStackFor(null);
     if (dockStateRef.current.open) closeDock();
     setUrl({ image: null, series: null });
     setDetailsFor(null);
