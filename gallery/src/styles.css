@@ -87,14 +87,11 @@ button:disabled { cursor: default; }
 .stats { font-size: 12px; color: var(--subtext); white-space: nowrap; }
 .stats b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
 
-.srch { position: relative; flex: 1 1 250px; min-width: 180px; max-width: 470px; }
-.srch i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-  font-style: normal; font-size: 11px; color: var(--overlay0); }
-.srch input { width: 100%; font-size: 12px; color: var(--text); border-radius: 20px;
-  padding: 9px 90px 9px 30px; border: 1px solid rgba(255, 255, 255, .18);
-  background: rgba(20, 17, 40, .55); backdrop-filter: blur(14px);
-  box-shadow: 0 0 34px -10px color-mix(in srgb, var(--cyan) 45%, transparent); }
-.srch input::placeholder { color: var(--overlay0); }
+/* (The .srch search-slab cluster -- .srch, .srch i, .srch input, .srch input::placeholder --
+   was removed 2026-09-07. FiltersPanel.jsx:254 renders the slab as .mgl-search, styled in
+   styles/librarybar.css:60-88, and its magnifier is .mgl-sglyph; nothing has carried a bare
+   `srch` class since. The .fly flyout below still anchors correctly: it positions against
+   .mgl-search, which sets `position: relative` itself.) */
 
 /* ---- the Advanced flyout: ANCHORED to the search slab, never placed ----
    Its old trigger pill .adv/.adv.has was removed 2026-09-07: FiltersPanel.jsx:281
@@ -226,13 +223,12 @@ button:disabled { cursor: default; }
 .gd-res.err { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent);
   white-space: pre-wrap; }
 .gd-res img { width: 44px; height: 58px; object-fit: cover; border-radius: 5px; margin: 4px 4px 0 0; }
-/* ---- Edit tab: reference slots ---- */
-.gd-slot { position: relative; width: 64px; height: 64px; border-radius: 8px;
-  border: 1px solid var(--surface1); background: var(--surface0); overflow: hidden;
-  display: grid; place-items: center; color: var(--subtext); font-size: 10px;
-  text-align: center; padding: 0; }
-.gd-slot.dashed { border-style: dashed; cursor: pointer; }
-.gd-slot img { width: 100%; height: 100%; object-fit: cover; }
+/* (The Edit tab's reference slots, .gd-slot / .gd-slot.dashed / .gd-slot img, were removed
+   2026-09-07 -- the last of the family whose .gd-slottag/.gd-slotx went in the same sweep.
+   Nothing has rendered a bare `gd-slot` since the dock rebuild: EditTab.jsx:378-394 renders
+   .mgdock-srcslot and the Image tab's single ref is .mgdock-refslot, both styled in
+   styles/dock.css. The Video drawer's own .mgd-slot family in styles/gen-drawer.css is a
+   DIFFERENT class and is live -- it merely reads alike.) */
 
 /* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
    2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */
@@ -299,8 +295,14 @@ button:disabled { cursor: default; }
    nothing that loads this sheet carries a bare `grid` class any more. Grid.jsx
    renders .mgg-grid and grid.css owns the cards -- as that file's own header
    (grid.css:6) already said, it "detaches the old styles.css .grid card rules
-   wholesale". .gridwrap, .tipbar, .stars, .vbadge, .tick, .sentinel and .srcbadge
-   below are NOT part of that block and are still live. ---- */
+   wholesale". .gridwrap, .tipbar, .stars, .vbadge, .tick and .sentinel below are
+   NOT part of that block and are still live -- each one re-checked against a render
+   site: .gridwrap Grid.jsx:813, .tipbar Grid.jsx:818, .sentinel Grid.jsx:890,
+   .stars Stars.jsx:9, .vbadge DetailsView.jsx:732, .tick ContestConfirm.jsx:86.
+   (.srcbadge was named in that same sentence until 2026-09-07 and did NOT belong:
+   nothing in the repo has ever rendered it. The grid card's real source label is
+   grid.css's .mgg-pill -- Grid.jsx:753 -- so the rule went the way of the block it
+   had been standing beside.) ---- */
 .gridwrap { padding: 0 0 60px; }
 /* the separator bar: a real band, not a floating caption */
 .tipbar { display: flex; align-items: center; gap: 12px; padding: 6px 16px;
@@ -319,10 +321,6 @@ button:disabled { cursor: default; }
 .tick.on { color: var(--base); background: var(--accent); border-color: var(--accent); }
 .sentinel { text-align: center; padding: 26px 0 10px; font-size: 11px;
   color: var(--overlay0); font-style: italic; }
-.srcbadge { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 9px;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--subtext);
-  background: rgba(8, 6, 18, .75); border-radius: 8px; padding: 2px 7px;
-  border: 1px solid var(--surface1); }
 
 /* ---- real pagination: Prev/Next + windowed numbers, replacing infinite scroll ---- */
 .pagebar { display: flex; justify-content: center; align-items: center; gap: 6px;

@@ -173,3 +173,138 @@ def test_collections_wiki_documents_remove_from_collection_and_actions_menu():
     assert re.search(r"Actions", coll), (
         "wiki/Collections.md doesn't mention the Actions menu these bulk actions now "
         "live behind")
+
+
+# ---------------------------------------------------------------------------
+# wiki/Glossary.md (new 2026-09-07) names controls, so every name in it is a claim
+# about the current UI. The red-team round found three that were not: the Fixer
+# described as a live control on the dock's Edit tab (removed from the desktop
+# 2026-08-18, a "coming next" placeholder on the phone), a "LAN session" chip in
+# the header (deleted with the classic UI and never rebuilt in the React shell),
+# and Activity placed at the bottom-left (it lives at an end of the separator bar
+# in the sticky header). Each test below re-derives the truth from the source
+# rather than trusting the entry -- the glossary exists so a user can name a
+# screen and a control in a bug report, and an entry that names a control that
+# is not there defeats exactly that.
+# ---------------------------------------------------------------------------
+
+def _glossary_entry(term):
+    """One Glossary bullet, term line plus its wrapped continuation lines."""
+    lines = _read("wiki/Glossary.md").splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("- **" + term + "**"):
+            out = [line]
+            for nxt in lines[i + 1:]:
+                if nxt.startswith("- ") or not nxt.strip():
+                    break
+                out.append(nxt)
+            return "\n".join(out)
+    raise AssertionError("wiki/Glossary.md has no entry for " + term)
+
+
+def test_glossary_does_not_sell_the_fixer_as_a_control_you_can_reach():
+    """Desktop: EditTab's SOURCE sub-tab strip is the literal [["edit"],["enhance"]] and
+    nothing ever sets the dock's `sub` to "fixer", so FixTab is unreachable. Phone:
+    CreateMobile's fixer sub-tab renders a `cm-soon` placeholder. So the entry must not
+    read as a live control; it must say it is not built and where the placeholder is."""
+    edit_tab = _read("gallery/src/components/EditTab.jsx")
+    assert '["enhance", "Enhance"]' in edit_tab and '"fixer"' not in edit_tab, (
+        "EditTab's sub-tab strip changed -- if the desktop Fixer is back, the Glossary "
+        "entry this test guards should be rewritten to say so")
+    drawer = _read("gallery/src/components/GenerateDrawer.jsx")
+    assert not re.search(r'setSub\(\s*"fixer"', drawer), (
+        "something now navigates the dock to the Fixer sub-tab -- re-check the Glossary")
+    phone = _read("gallery/src/components/CreateMobile.jsx")
+    assert "cm-soon" in phone and "coming next" in phone, (
+        "the phone's Fixer placeholder changed -- re-check the Glossary entry")
+
+    entry = _glossary_entry("the Fixer")
+    assert re.search(r"not\s+built", entry, re.I), (
+        "wiki/Glossary.md still presents the Fixer as something you can use; the desktop "
+        "dock has no Fixer and the phone's is a 'coming next' placeholder")
+    assert "placeholder" in entry.lower(), (
+        "the Fixer entry no longer says where the placeholder sits, so a reader cannot "
+        "tell the difference between 'missing' and 'not built yet'")
+
+
+def test_glossary_does_not_promise_a_lan_session_chip_the_shell_never_renders():
+    """The classic UI's "LAN session · local-only tools hidden" chip went with the classic
+    cut and was never rebuilt: there is no globe glyph anywhere in gallery/src, and nothing
+    renders a LAN badge. What a LAN session actually meets is withheld controls (NavSpine
+    drops localOnly items unless boot.is_true_local)."""
+    src = []
+    for path in (_REPO / "gallery" / "src").rglob("*"):
+        if path.suffix in (".jsx", ".js"):
+            src.append(path.read_text(encoding="utf-8"))
+    joined = "\n".join(src)
+    assert "\U0001f310" not in joined, (
+        "a globe glyph is back in the React shell -- if the LAN chip was rebuilt, the "
+        "Glossary entry this test guards should name it again")
+    navspine = _read("gallery/src/components/NavSpine.jsx")
+    assert re.search(r"localOnly\s*&&\s*!boot\.is_true_local", navspine), (
+        "NavSpine no longer withholds local-only items, which is what the corrected "
+        "Glossary entry describes a LAN session by")
+
+    entry = _glossary_entry("LAN session")
+    assert "\U0001f310" not in entry and "chip" not in entry.lower(), (
+        "wiki/Glossary.md still tells the reader to look for a LAN session chip in the "
+        "header; nothing in the React shell draws one")
+
+
+def test_glossary_puts_activity_where_the_shell_actually_mounts_it():
+    """ActivityChip mounts in SeparatorBar -- the sticky header bar under the banner -- at
+    whichever outer edge act.edge names, and again in the Loom's top bar. It is not, and
+    has never been in the React shell, a bottom-left button."""
+    sep = _read("gallery/src/components/SeparatorBar.jsx")
+    assert "<ActivityChip" in sep, (
+        "the Activity chip no longer mounts in the separator bar -- re-check the Glossary")
+    loom = _read("loom/master-storyboard.jsx")
+    assert "<ActivityChip" in loom, "the Loom no longer mounts the Activity chip"
+
+    entry = _glossary_entry("Activity")
+    assert "bottom-left" not in entry, (
+        "wiki/Glossary.md still sends the reader to the bottom-left of the gallery for "
+        "Activity; it sits at an end of the bar under the banner")
+    assert "banner" in entry and "Loom" in entry, (
+        "the Activity entry no longer says where the button is on either host")
+
+
+# ---------------------------------------------------------------------------
+# The Identity strip and the ✦ Branding tab are EITHER/OR states of one install,
+# not two places that both exist: ControlPanelOverlay renders one or the other on
+# a single brandingUnlocked ternary, and hides the tab button entirely while it is
+# locked. Glossary entries that name either as a fixed location are therefore
+# wrong for whichever state the reader's install is in -- on any given install at
+# least two of them pointed at a screen that is not there (red team 2026-09-07).
+# The wiki's own Control-Panel.md always carried the condition; the Glossary lost
+# it. These pin both halves: the code's exclusivity, and the entries stating it.
+# ---------------------------------------------------------------------------
+
+def test_the_branding_tab_and_the_identity_strip_are_still_mutually_exclusive():
+    """If this ever stops being one either/or, the Glossary wording below is the thing
+    to revisit -- so the guard starts at the code, not at the prose."""
+    cp = _read("gallery/src/components/ControlPanelOverlay.jsx")
+    assert re.search(r"brandingUnlocked\s*&&\s*\(", cp), (
+        "the ✦ Branding tab button is no longer gated on brandingUnlocked")
+    assert re.search(r"brandingUnlocked\s*\?[\s\S]{0,900}<IdentityStrip", cp), (
+        "the Identity strip is no longer the ELSE of a brandingUnlocked ternary -- if the "
+        "strip and the tab can now coexist, the Glossary entries should say so instead")
+    assert re.search(r'tab === "brand"\s*&&\s*brandingUnlocked', cp), (
+        "the ✦ Branding tab body is no longer gated on brandingUnlocked")
+
+
+def test_every_glossary_entry_about_branding_says_which_state_it_belongs_to():
+    """Four entries locate controls in the Identity strip or the ✦ Branding tab (plus the
+    Control Panel entry, which used to name Maintenance as the only tab). Each must carry
+    the earned/unearned condition, or it is false for half the installs that read it."""
+    for term in ("the banner", "the Control Panel", "the Identity strip", "the mark", "skin"):
+        entry = _glossary_entry(term)
+        assert "Under the Hood" in entry, (
+            "wiki/Glossary.md's \"" + term + "\" entry locates a branding control without "
+            "saying whether it means an install that has earned Under the Hood or one that "
+            "has not -- the strip and the ✦ Branding tab never both exist")
+
+    strip = _glossary_entry("the Identity strip")
+    assert re.search(r"replaced by", strip), (
+        "the Identity strip entry no longer says the ✦ Branding tab replaces it, so a reader "
+        "who has earned Under the Hood will still go looking for the strip")

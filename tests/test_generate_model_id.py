@@ -146,3 +146,27 @@ def test_model_version_version_id_param_reverse_resolves_the_base_model(tmp_path
     r2 = client.get("/api/model-version?version_id=UNKNOWN")
     assert r2.status_code == 200, r2.data
     assert r2.get_json() == {"model_id": ""}
+
+
+def test_model_version_single_resolve_fetches_the_modes_the_model_offers(tmp_path, monkeypatch, pixai):
+    """The bare /api/model-version is a BASE-model resolve whose single-version answer is what
+    the composer's mode bar reads, so it is the caller that opts in to the second,
+    version-keyed inference-profiles read. Everything else that shares resolve_version_meta
+    (the LoRA/remix loop) stays at one read -- see tests/test_task_params.py (red team
+    2026-09-07)."""
+    calls = []
+
+    def rest(session, path, **k):
+        calls.append(path)
+        if path.endswith("/inference-profiles"):
+            return {"profiles": [{"profileName": "pro", "profileFlag": "default"},
+                                 {"profileName": "ultra", "profileFlag": "membershipOnly"}]}
+        return [{"id": "V2", "modelType": "MMDIT26A_MODEL", "createdAt": ""}]
+
+    monkeypatch.setattr(core, "_rest_get", rest)
+    client = login_client(tmp_path)
+    d = client.get("/api/model-version?model_id=M1").get_json()
+    assert d["version_id"] == "V2"
+    assert d["profiles"] == ["pro", "ultra"]
+    assert calls == ["/generation-model/M1/versions",
+                     "/generation-model/V2/inference-profiles"]

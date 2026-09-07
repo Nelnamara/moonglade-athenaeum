@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { fetchPresets } from "../api.js";
 
-/* The Advanced flyout -- ANCHORED to the search slab (rendered inside .srch),
+/* The Advanced flyout -- ANCHORED to the search slab (rendered inside .mgl-search,
    never placed: the locked behavior from the design pass. Drafts locally,
    commits on Apply. Saved views are the server-side, account-scoped store the
    classic gallery writes; each preset holds the classic query string, parsed

@@ -219,7 +219,10 @@ def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch
 # (Tsubaki.2 = lite/standard/pro/ultra incl. a membershipOnly Ultra; Tsubaki.3 = pro/ultra
 # only). It is NOT in the /versions row, so the resolver runs a SECOND, version-keyed read
 # (_model_profiles, the same one the price/submit gate uses) and hands the drawer the plain
-# profileName list it needs to dim a bar. PixAI is read-only here; the REST call is faked.
+# profileName list it needs to dim a bar. That read is OPT-IN (with_profiles=True) as of
+# 2026-09-07: only the callers that render a mode bar pay it, because a caller that never
+# looks at `profiles` was silently paying a second PixAI GET per resolve. PixAI is read-only
+# here; the REST call is faked.
 
 _VERSIONS = [{"id": "V7", "modelType": "MMDIT26A_MODEL", "loraBaseModelType": None,
               "createdAt": "2026-08-25T00:00:00Z", "extra": {}},
@@ -255,7 +258,7 @@ def _route(versions=_VERSIONS, profiles=_TSUBAKI2, calls=None):
 def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
     calls = []
     monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
-    m = core.resolve_version_meta(object(), "M1")
+    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m["version_id"] == "V7"
     # plain profileNames, in the order the site returned them -- membershipOnly Ultra
     # INCLUDED (the site's own rejection path owns membership, not this display gate)
@@ -268,33 +271,95 @@ def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
         {"profileName": "pro", "profileFlag": "default"},
         {"profileName": "ultra", "profileFlag": "custom"}]}))
     core._profile_cache.clear()
-    assert core.resolve_version_meta(object(), "M1")["profiles"] == ["pro", "ultra"]
+    assert core.resolve_version_meta(
+        object(), "M1", with_profiles=True)["profiles"] == ["pro", "ultra"]
 
 
 def test_version_meta_profiles_survive_a_failed_read(monkeypatch):
     """A failed/unparseable profile read must never break the resolve or lose the rest of
     the meta -- it leaves profiles=None, which the drawer reads as "unknown, dim nothing"."""
     monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("nope")))
-    m = core.resolve_version_meta(object(), "M1")
+    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m["profiles"] is None and m["version_id"] == "V7"
     assert m["model_type"] == "MMDIT26A_MODEL"          # the rest of the shape is intact
 
     core._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles=RuntimeError("socket")))
-    assert core.resolve_version_meta(object(), "M1")["profiles"] is None
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
 
     core._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}))   # wrong body key
-    assert core.resolve_version_meta(object(), "M1")["profiles"] is None
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
 
     # An SDXL model answers a definitive `{"profiles": []}` -- a real answer, not a failure.
     core._profile_cache.clear()
     monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": []}))
-    assert core.resolve_version_meta(object(), "M1")["profiles"] == []
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] == []
 
     # No version at all -> the empty shape still carries the key.
     monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
-    assert core.resolve_version_meta(object(), "x")["profiles"] is None
+    assert core.resolve_version_meta(object(), "x", with_profiles=True)["profiles"] is None
+
+
+def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
+    """The profiles read is OPT-IN (red team 2026-09-07). resolve_version_meta is the SHARED
+    low-level resolver -- /api/task-params' Remix loop calls it once per unique LoRA base and
+    reads only lora_base_model_type/model_type. Attaching profiles inside it doubled that
+    route's PixAI reads for a field it drops. Default: ONE GET, profiles present but None."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    m = core.resolve_version_meta(object(), "M1")
+    assert m["version_id"] == "V7"                       # the rest of the shape is untouched
+    assert m["profiles"] is None                         # the key is still always present
+    assert calls == ["/generation-model/M1/versions"]    # exactly one read, no /inference-profiles
+
+    # ...and the opt-in caller (the mode bar's own route) pays exactly one more.
+    calls.clear()
+    core._profile_cache.clear()
+    m2 = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    assert m2["profiles"] == ["lite", "standard", "pro", "ultra"]
+    assert calls == ["/generation-model/M1/versions",
+                     "/generation-model/V7/inference-profiles"]
+
+
+def test_resolve_latest_version_stays_a_one_read_wrapper(monkeypatch):
+    """resolve_latest_version wants an id and nothing else -- it must never have been paying
+    for a profiles read either."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    assert core.resolve_latest_version(object(), "M1") == "V7"
+    assert calls == ["/generation-model/M1/versions"]
+
+
+def test_a_failed_profiles_read_is_not_repeated_within_the_short_ttl(monkeypatch):
+    """A failed read used to be cached NOT AT ALL, so a version PixAI will not answer for
+    re-fired the GET on every single call -- every /api/price keystroke, forever. It is now
+    remembered for _PROFILE_FAIL_TTL (60s) and returns the same fail-soft None meanwhile
+    (red team 2026-09-07)."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("502"), calls=calls))
+    for _ in range(4):
+        assert core._model_profiles(object(), "V7") is None
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+
+    # An unparseable 200 body is the same kind of miss and is bounded the same way.
+    calls.clear()
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}, calls=calls))
+    for _ in range(4):
+        assert core._model_profiles(object(), "V7") is None
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+
+    # ...but it is a SHORT memory: once the fail TTL is behind it, the next call retries and
+    # a recovered route is picked up. (Pinned by rewinding the entry's timestamp, so the test
+    # neither sleeps nor depends on the constant's exact value beyond it being finite.)
+    core._profile_cache["V7"] = (core._profile_cache["V7"][0] - core._PROFILE_FAIL_TTL - 1, None)
+    calls.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=_TSUBAKI2, calls=calls))
+    assert core._model_profiles(object(), "V7") == _TSUBAKI2["profiles"]
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+    # and a SUCCESS keeps the long TTL, not the short one
+    assert core._PROFILE_FAIL_TTL < core._PROFILE_CACHE_TTL
 
 
 def test_list_model_versions_reads_profiles_once_for_the_applied_row(monkeypatch):

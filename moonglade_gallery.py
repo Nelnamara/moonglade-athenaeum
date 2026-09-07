@@ -12964,7 +12964,12 @@ def create_app(out_dir: Path):
             core, session = _gen_session()
             if (request.args.get("all") or "").strip() in ("1", "true"):
                 return jsonify({"versions": core.list_model_versions(session, mid)})
-            return jsonify(core.resolve_version_meta(session, mid))
+            # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
+            # mode bar, so it is one of the two places that pays the second, version-keyed
+            # inference-profiles read (the ?all=1 branch's own is_latest row is the other).
+            # Every other caller of resolve_version_meta -- the LoRA/remix path below --
+            # leaves it off and stays at one read (red team 2026-09-07).
+            return jsonify(core.resolve_version_meta(session, mid, with_profiles=True))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
@@ -13027,6 +13032,10 @@ def create_app(out_dir: Path):
                         unresolved += 1
                         continue
                     if base not in meta_cache:
+                        # No with_profiles here on purpose: nothing below reads `profiles`
+                        # and a LoRA never renders a mode bar, so asking for it would cost a
+                        # second PixAI GET per unique LoRA base for a field this route drops
+                        # (red team 2026-09-07).
                         meta_cache[base] = core.resolve_version_meta(session, base) or {}
                     meta = meta_cache[base]
                     lbt = str(meta.get("lora_base_model_type") or "")
