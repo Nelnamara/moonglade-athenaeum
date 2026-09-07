@@ -274,14 +274,14 @@
   padding: 34px;
   font-size: 13px;
 }
-body.privacy-blur .mg-gallery-picker .mg-pk-cell img {
+.mg-gallery-picker.mg-blur .mg-pk-cell img {
   filter: blur(16px);
   transition: filter .18s cubic-bezier(.2, .9, .24, 1);
 }
-body.privacy-blur .mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img {
+.mg-gallery-picker.mg-blur .mg-pk-cell[data-nsfw="1"] img {
   filter: blur(28px);
 }
-body.privacy-blur .mg-gallery-picker .mg-pk-cell:hover img {
+.mg-gallery-picker.mg-blur .mg-pk-cell:hover img {
   filter: none;
 }
 
@@ -1554,14 +1554,14 @@ button.mgcp-chip .mgico {
   object-fit: cover;
   display: block;
 }
-body.privacy-blur .gen-drawer .mgd-slot img {
+.gen-drawer.mg-blur .mgd-slot img {
   filter: blur(16px);
   transition: filter .12s;
 }
-body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img {
+.gen-drawer.mg-blur .mgd-slot[data-nsfw="1"] img {
   filter: blur(28px);
 }
-body.privacy-blur .gen-drawer .mgd-slot:hover img {
+.gen-drawer.mg-blur .mgd-slot:hover img {
   filter: none;
 }
 .gen-drawer .mgd-slot {
@@ -3105,11 +3105,107 @@ body.privacy-blur .gen-drawer .mgd-slot:hover img {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  #jobs-fab.busy .jf-dot {
-    animation: none;
-  }
   .mg-toast,
   .mg-toast.out {
     animation: none;
   }
+}
+.mg-updbanner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 509;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+  background: var(--surface0);
+  border-bottom: 1px solid var(--accent);
+  font-family: var(--font-system,system-ui,sans-serif);
+}
+.mgub-line {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text);
+}
+button.mgub-go {
+  flex: none;
+  padding: 6px 15px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  color: #241a05;
+  border: 1px solid rgba(212, 175, 55, .7);
+  background:
+    linear-gradient(
+      180deg,
+      #e2c04a,
+      #a8871f);
+}
+button.mgub-later {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--subtext);
+  border: 1px solid var(--surface1);
+  background: transparent;
+}
+button.mgub-later:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.mg-updbanner.small {
+  background: transparent;
+  border-bottom-color: transparent;
+  pointer-events: none;
+  padding: calc(4px + env(safe-area-inset-top)) 14px 4px;
+}
+button.mgub-pill {
+  pointer-events: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface0);
+  border: 1px solid var(--accent);
+}
+.mg-updbanner {
+  transition: padding .18s cubic-bezier(.4, 0, .2, 1), background .18s cubic-bezier(.4, 0, .2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mg-updbanner {
+    transition: none;
+  }
+}
+html.mg-updbanner-on .app {
+  padding-top: var(--mg-updbanner-h,0px);
+}
+html.mg-updbanner-on .mgx-hdr {
+  top: var(--mg-updbanner-h,0px);
+}
+html.mg-updbanner-on .glm-stage {
+  top: var(--mg-updbanner-h,0px);
+}
+html.mg-updbanner-on .glm-hero {
+  --glm-safetop:0px;
+}
+html.mg-updbanner-on .glm-hero-icons {
+  top: 12px;
+}
+html.mg-updbanner-on .sb-root {
+  padding-top: var(--mg-updbanner-h,0px);
+}
+html.mg-updbanner-on .wz-stage,
+html.mg-updbanner-on .wzm-stage {
+  padding-top: var(--mg-updbanner-h,0px);
 }

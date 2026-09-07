@@ -1438,18 +1438,18 @@ ${"=".repeat(48)}
       s.textContent = CSS;
       (document.head || document.documentElement).appendChild(s);
     }
-    function clearLayers(host) {
-      var old = host.querySelectorAll(":scope > [data-mgaf-layer]");
+    function clearLayers(host2) {
+      var old = host2.querySelectorAll(":scope > [data-mgaf-layer]");
       for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
     }
-    function buildLayerDivs(host, layers, angle) {
+    function buildLayerDivs(host2, layers, angle) {
       layers.forEach(function(L) {
         var d = document.createElement("div");
         d.setAttribute("data-mgaf-layer", L.name || "");
         d.style.backgroundImage = gradientCss(L, angle);
         d.style.mixBlendMode = L.css;
         d.style.opacity = String(L.opacity);
-        host.appendChild(d);
+        host2.appendChild(d);
       });
     }
     function renderSwatch(el, idOrRecipe, opts) {
@@ -1460,24 +1460,24 @@ ${"=".repeat(48)}
       buildLayerDivs(el, swatchLayers(idOrRecipe), o.angle);
       return el;
     }
-    function applyPreview(host, idOrRecipe, opts) {
+    function applyPreview(host2, idOrRecipe, opts) {
       injectStyle();
       var o = opts || {};
       var n = normalizeLayers(idOrRecipe, o);
-      var target = o.target || host.querySelector("img,canvas,video");
-      host.classList.add("mgaf-stage");
-      clearLayers(host);
+      var target = o.target || host2.querySelector("img,canvas,video");
+      host2.classList.add("mgaf-stage");
+      clearLayers(host2);
       if (target) target.style.filter = imageAdjustCss(idOrRecipe);
-      buildLayerDivs(host, n.layers, o.angle);
+      buildLayerDivs(host2, n.layers, o.angle);
       return n;
     }
-    function clearPreview(host, opts) {
+    function clearPreview(host2, opts) {
       var o = opts || {};
-      var target = o.target || host.querySelector("img,canvas,video");
+      var target = o.target || host2.querySelector("img,canvas,video");
       if (target) target.style.filter = "";
-      clearLayers(host);
-      host.classList.remove("mgaf-stage");
-      return host;
+      clearLayers(host2);
+      host2.classList.remove("mgaf-stage");
+      return host2;
     }
     function composite(source, idOrRecipe, opts) {
       var o = opts || {};
@@ -1724,6 +1724,20 @@ ${"=".repeat(48)}
   })();
   var pickerCore_default = PickerCore;
 
+  // ../gallery/src/lib/privacyBlur.js
+  var PRIVACY_BLUR_KEY = "gallery_privacy_blur";
+  var PRIVACY_BLUR_CLASS = "mg-blur";
+  function isPrivacyBlurOn() {
+    try {
+      return localStorage.getItem(PRIVACY_BLUR_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function privacyBlurClass(on) {
+    return on ? " " + PRIVACY_BLUR_CLASS : "";
+  }
+
   // ../gallery/src/components/GalleryPicker.jsx
   var COPY_KEY = "pick-copyprompt";
   var TILE_KEY = "mg-pk-tile";
@@ -1867,7 +1881,7 @@ ${"=".repeat(48)}
         pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
       });
     };
-    const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "");
+    const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "") + privacyBlurClass(isPrivacyBlurOn());
     return /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
@@ -2992,7 +3006,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit4, count, onPhase }) {
+  async function submitTask(route, payload, { label, emit: emit5, count, onPhase }) {
     let d;
     try {
       const r = await fetch(route, {
@@ -3002,14 +3016,14 @@ ${"=".repeat(48)}
       });
       d = await r.json();
     } catch {
-      emit4({
+      emit5({
         kind: "err",
         text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
       });
       return null;
     }
     if (d.error || !d.task_id) {
-      emit4({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
+      emit5({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
       return null;
     }
     const adj = (d.adjusted || []).map((a) => a.field + " " + a.asked + "\u2192" + a.used).join(", ");
@@ -3020,9 +3034,9 @@ ${"=".repeat(48)}
         msg: adj
       });
     }
-    emit4({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    emit5({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
     if (!window.Jobs) {
-      emit4({
+      emit5({
         kind: "ok",
         text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
       });
@@ -3032,7 +3046,7 @@ ${"=".repeat(48)}
       const data2 = st || {};
       if (phase === "done") {
         const paid = data2.paid_credit;
-        emit4({
+        emit5({
           kind: "ok",
           text: paid === 0 ? "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
           media: data2.media_ids || []
@@ -3040,12 +3054,12 @@ ${"=".repeat(48)}
         window.dispatchEvent(new CustomEvent("mg-gen-done"));
         if (window.Ach) window.Ach.check();
       } else if (phase === "failed") {
-        emit4({
+        emit5({
           kind: "err",
           text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
-        emit4({
+        emit5({
           kind: "err",
           text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
         });
@@ -3200,7 +3214,7 @@ ${"=".repeat(48)}
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const emit4 = useCallback((name, detail) => {
+    const emit5 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
@@ -3221,7 +3235,7 @@ ${"=".repeat(48)}
     };
     const userSetMode = (m) => {
       setMode(m, true);
-      emit4("mg-mode-commit", { vmode: m });
+      emit5("mg-mode-commit", { vmode: m });
     };
     const applyModelGating2 = (userDriven) => {
       applyModelGating(st.current, userDriven);
@@ -3264,11 +3278,11 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit4("mg-prompt-commit", { text: promptText2() });
+      emit5("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
-      emit4("mg-dirty", {});
+      emit5("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify2(false);
@@ -3318,7 +3332,7 @@ ${"=".repeat(48)}
       previewTimer.current = setTimeout(() => p.classList.remove("open"), 180);
     };
     const requestPick = (bank, i) => {
-      emit4("mg-pick-request", {
+      emit5("mg-pick-request", {
         slot: i,
         bank,
         mode: st.current.mode,
@@ -3432,21 +3446,21 @@ ${"=".repeat(48)}
         const elapsed = Date.now() - startedAt;
         if (phase === "done") {
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-          emit4("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          emit5("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
         } else if (phase === "failed") {
           const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
-          emit4("mg-error", { error: msg });
+          emit5("mg-error", { error: msg });
         } else if (phase === "stalled") {
           updateLine(id, {
             kind: "plain",
             text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
           });
-          emit4("mg-paused", { task_id: taskId });
+          emit5("mg-paused", { task_id: taskId });
         } else if (phase === "slow" || phase === "stale") {
           tier = phase;
           updateLine(id, tierLine(phase, elapsed));
-          emit4("mg-slow", { tier: phase, elapsed, task_id: taskId });
+          emit5("mg-slow", { tier: phase, elapsed, task_id: taskId });
         } else {
           updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
         }
@@ -3454,16 +3468,16 @@ ${"=".repeat(48)}
       const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
       unlock();
       if (!tid) {
-        emit4("mg-error", { error: lastErr || "submit failed" });
+        emit5("mg-error", { error: lastErr || "submit failed" });
         return;
       }
       taskId = tid;
-      emit4("mg-submit", { task_id: tid, payload: p });
+      emit5("mg-submit", { task_id: tid, payload: p });
       reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
-      emit4("mg-error", { error: msg });
+      emit5("mg-error", { error: msg });
     };
     const setRefs = (refs) => {
       applySetRefs(st.current, refs);
@@ -3653,7 +3667,7 @@ ${"=".repeat(48)}
       " ",
       /* @__PURE__ */ react_global_shim_default.createElement("span", null, "\xD7")
     )) : null;
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "SHOT MODE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: setRoot, className: "gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + privacyBlurClass(isPrivacyBlurOn()) + (className ? " " + className : ""), style, "data-loom-ctx": loomCtx ? "" : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabwrap" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slabs" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slab", style: { animationDelay: "0ms" } }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "SHOT MODE"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-seg", role: "tablist" }, shotModes.map((sm) => /* @__PURE__ */ react_global_shim_default.createElement(
       "button",
       {
         key: sm.v,
@@ -3735,7 +3749,7 @@ ${"=".repeat(48)}
           st.current.audioGen = e.target.checked;
           rerender();
           reprice();
-          emit4("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
+          emit5("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Generate audio")), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Off by default \u2014 the opposite of image gen" }, /* @__PURE__ */ react_global_shim_default.createElement(
@@ -3760,7 +3774,7 @@ ${"=".repeat(48)}
           st.current.audioLanguage = e.target.value;
           rerender();
           reprice();
-          emit4("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
+          emit5("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
@@ -3781,7 +3795,7 @@ ${"=".repeat(48)}
             st.current.duration = d;
             rerender();
             reprice();
-            emit4("mg-duration-commit", { duration: d });
+            emit5("mg-duration-commit", { duration: d });
           }
         },
         d
@@ -3875,13 +3889,57 @@ ${"=".repeat(48)}
     return n;
   }
 
-  // ../gallery/src/notify/updateStore.js
-  var SEEN_KEY = "mg_update_announced";
-  var current = null;
+  // ../gallery/src/notify/bannerStore.js
+  var banner = null;
+  var collapsed = false;
   var subs2 = /* @__PURE__ */ new Set();
-  var memSeen = "";
   function emit2() {
-    subs2.forEach((fn) => fn(current));
+    subs2.forEach((fn) => fn(banner, collapsed));
+  }
+  function subscribe2(fn) {
+    subs2.add(fn);
+    fn(banner, collapsed);
+    return () => subs2.delete(fn);
+  }
+  function setBanner(next) {
+    const version = next && next.version ? String(next.version) : "";
+    const was = banner ? banner.version : "";
+    if (version === was) return;
+    banner = version ? { version, notes: next && next.notes || "" } : null;
+    collapsed = false;
+    emit2();
+  }
+  function collapse() {
+    if (!collapsed) {
+      collapsed = true;
+      emit2();
+    }
+  }
+  function expand() {
+    if (collapsed) {
+      collapsed = false;
+      emit2();
+    }
+  }
+  var host = null;
+  var pendingOpen = false;
+  var openSubs = /* @__PURE__ */ new Set();
+  function requestUpdateOpen() {
+    pendingOpen = true;
+    openSubs.forEach((fn) => fn());
+    if (host) {
+      host();
+      return;
+    }
+    if (typeof window === "undefined" || !window.location) return;
+    if (window.location.pathname !== "/") window.location.assign("/");
+  }
+
+  // ../gallery/src/notify/updateStore.js
+  var current = null;
+  var subs3 = /* @__PURE__ */ new Set();
+  function emit3() {
+    subs3.forEach((fn) => fn(current));
   }
   function parseVersion(v) {
     const s = String(v == null ? "" : v).trim().replace(/^v/i, "");
@@ -3897,65 +3955,33 @@ ${"=".repeat(48)}
     }
     return 0;
   }
-  function readStored() {
+  function runningVersion(payload) {
+    let stamp = "";
     try {
-      return localStorage.getItem(SEEN_KEY) || "";
+      stamp = typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.build_stamp || "";
     } catch {
-      return "";
+      stamp = "";
     }
-  }
-  function highestSeen() {
-    const stored = readStored();
-    if (!memSeen) return stored;
-    if (!stored) return memSeen;
-    const c = cmpVersions(stored, memSeen);
-    if (c === null) return memSeen;
-    return c > 0 ? stored : memSeen;
-  }
-  function markSeen(v) {
-    memSeen = v;
-    const stored = readStored();
-    if (stored) {
-      const c = cmpVersions(v, stored);
-      if (c === null || c <= 0) return;
-    }
-    try {
-      localStorage.setItem(SEEN_KEY, v);
-    } catch {
-    }
-  }
-  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
-    window.addEventListener("storage", (e) => {
-      if (!e || e.key !== SEEN_KEY) return;
-      const v = String(e.newValue || "");
-      if (!v) return;
-      if (!memSeen) {
-        memSeen = v;
-        return;
-      }
-      const c = cmpVersions(v, memSeen);
-      if (c !== null && c > 0) memSeen = v;
-    });
+    const v = versionFromStamp(stamp);
+    if (v && parseVersion(v) !== null) return v;
+    return payload && payload.current || "";
   }
   function note(payload) {
     const next = payload && payload.behind && payload.latest ? payload : null;
     const version = next ? String(next.latest) : "";
     const was = current ? String(current.latest) : "";
     current = next;
-    if (version !== was) emit2();
-    if (!version) return false;
-    if (memSeen) {
-      const m = cmpVersions(version, memSeen);
-      if (m === null || m <= 0) return false;
+    if (version !== was) emit3();
+    if (!version || receiptArmed()) {
+      setBanner(null);
+      return false;
     }
-    const c = cmpVersions(version, highestSeen() || "0");
-    if (c === null || c <= 0) return false;
-    markSeen(version);
-    show({
-      sticky: true,
-      title: "Moonglade " + version + " is ready",
-      msg: "Open the Control Panel to update."
-    });
+    const c = cmpVersions(version, runningVersion(next));
+    if (c === null || c <= 0) {
+      setBanner(null);
+      return false;
+    }
+    setBanner({ version, notes: next.notes_url || "" });
     return true;
   }
   var RECEIPT_KEY = "mg_update_receipt";
@@ -3966,6 +3992,13 @@ ${"=".repeat(48)}
     try {
       localStorage.removeItem(RECEIPT_KEY);
     } catch {
+    }
+  }
+  function receiptArmed() {
+    try {
+      return !!localStorage.getItem(RECEIPT_KEY);
+    } catch {
+      return false;
     }
   }
   function claimReceipt(stamp) {
@@ -3998,14 +4031,14 @@ ${"=".repeat(48)}
   var timer = null;
   var seeded = false;
   var last = {};
-  var subs3 = /* @__PURE__ */ new Set();
-  function emit3() {
-    subs3.forEach((fn) => fn({ jobs, open }));
+  var subs4 = /* @__PURE__ */ new Set();
+  function emit4() {
+    subs4.forEach((fn) => fn({ jobs, open }));
   }
-  function subscribe2(fn) {
-    subs3.add(fn);
+  function subscribe3(fn) {
+    subs4.add(fn);
     fn({ jobs, open });
-    return () => subs3.delete(fn);
+    return () => subs4.delete(fn);
   }
   function runningCount() {
     return jobs.filter((j) => (j.status || "running") === "running").length;
@@ -4023,7 +4056,7 @@ ${"=".repeat(48)}
     } catch {
     }
     open = !!v;
-    emit3();
+    emit4();
   }
   function openTray() {
     setOpen(true);
@@ -4087,7 +4120,7 @@ ${"=".repeat(48)}
       toastTransitions(rows);
       if (d && !d.error) note(d.update);
       jobs = rows;
-      emit3();
+      emit4();
     }).catch(() => {
     });
   }
@@ -4115,7 +4148,7 @@ ${"=".repeat(48)}
     if (started) return;
     started = true;
     open = readOpen();
-    emit3();
+    emit4();
     refresh().then(schedule);
   }
 
@@ -4704,28 +4737,28 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/notify/spikeStore.js
-  var SEEN_KEY2 = "mg_spike_announced";
-  var memSeen2 = "";
+  var SEEN_KEY = "mg_spike_announced";
+  var memSeen = "";
   var asked = false;
-  function readStored2() {
+  function readStored() {
     try {
-      return localStorage.getItem(SEEN_KEY2) || "";
+      return localStorage.getItem(SEEN_KEY) || "";
     } catch {
       return "";
     }
   }
-  function markSeen2(at) {
-    memSeen2 = at;
+  function markSeen(at) {
+    memSeen = at;
     try {
-      localStorage.setItem(SEEN_KEY2, at);
+      localStorage.setItem(SEEN_KEY, at);
     } catch {
     }
   }
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("storage", (e) => {
-      if (!e || e.key !== SEEN_KEY2) return;
+      if (!e || e.key !== SEEN_KEY) return;
       const v = String(e.newValue || "");
-      if (v && v > memSeen2) memSeen2 = v;
+      if (v && v > memSeen) memSeen = v;
     });
   }
   function spikeMessage(spikes) {
@@ -4745,15 +4778,15 @@ ${"=".repeat(48)}
     const at = String(d.views_at || "");
     const spikes = d.spikes || [];
     if (!at || !spikes.length) return false;
-    if (at <= memSeen2) return false;
-    const stored = readStored2();
+    if (at <= memSeen) return false;
+    const stored = readStored();
     if (stored && at <= stored) {
-      memSeen2 = stored;
+      memSeen = stored;
       return false;
     }
     const words = spikeMessage(spikes);
     if (!words) return false;
-    markSeen2(at);
+    markSeen(at);
     show({
       kind: "ok",
       sticky: true,
@@ -4787,6 +4820,58 @@ ${"=".repeat(48)}
     );
   }
 
+  // ../gallery/src/notify/BannerHost.jsx
+  function BannerHost() {
+    const [state, setState] = useState({ banner: null, collapsed: false });
+    const ref = useRef(null);
+    useEffect(() => subscribe2((banner3, isCollapsed) => setState({ banner: banner3, collapsed: isCollapsed })), []);
+    const { banner: banner2, collapsed: collapsed2 } = state;
+    useLayoutEffect(() => {
+      const root = typeof document !== "undefined" ? document.documentElement : null;
+      const el = ref.current;
+      if (!root) return void 0;
+      if (!el) {
+        root.classList.remove("mg-updbanner-on");
+        root.style.removeProperty("--mg-updbanner-h");
+        return void 0;
+      }
+      root.classList.add("mg-updbanner-on");
+      const measure = () => root.style.setProperty("--mg-updbanner-h", el.offsetHeight + "px");
+      measure();
+      const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+      if (ro) ro.observe(el);
+      return () => {
+        if (ro) ro.disconnect();
+        root.classList.remove("mg-updbanner-on");
+        root.style.removeProperty("--mg-updbanner-h");
+      };
+    }, [banner2, collapsed2]);
+    if (!banner2) return null;
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          ref,
+          className: "mg-updbanner" + (collapsed2 ? " small" : ""),
+          role: "status",
+          "aria-live": "polite"
+        },
+        collapsed2 ? /* @__PURE__ */ react_global_shim_default.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mgub-pill",
+            onClick: expand,
+            title: "Moonglade " + banner2.version + " is ready"
+          },
+          banner2.version,
+          " ready"
+        ) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgub-line" }, "Moonglade ", banner2.version, " is ready"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-go", onClick: requestUpdateOpen }, "Update"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-later", onClick: collapse }, "Not now"))
+      ),
+      document.body
+    );
+  }
+
   // ../gallery/src/notify/index.jsx
   var installed = false;
   function installNotify() {
@@ -4809,7 +4894,7 @@ ${"=".repeat(48)}
     checkSpikes();
   }
   function NotifyRoot() {
-    return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(BannerHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null));
   }
 
   // ../gallery/src/notify/ActivityChip.jsx
@@ -5071,7 +5156,7 @@ ${"=".repeat(48)}
     const [closing, setClosing] = useState(false);
     const [edge, setEdgeState] = useState(readEdge);
     const closeTimer = useRef(null);
-    useEffect(() => subscribe2(setState), []);
+    useEffect(() => subscribe3(setState), []);
     useEffect(() => () => clearTimeout(closeTimer.current), []);
     const setEdge = useCallback((next) => {
       const v = next === "left" ? "left" : "right";
@@ -6716,11 +6801,11 @@ ${"=".repeat(48)}
     };
     useEffect2(() => {
       if (!fcOpen || !AF || !fcStageRef.current) return;
-      const host = fcStageRef.current;
-      AF.clearPreview(host);
-      if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+      const host2 = fcStageRef.current;
+      AF.clearPreview(host2);
+      if (fcActive) AF.applyPreview(host2, fcActive, { strength: fcStrength, angle: fcAngle });
       return () => {
-        AF.clearPreview(host);
+        AF.clearPreview(host2);
       };
     }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
     const editSrcMid = active.c.openFrame && active.c.openFrame.mediaId;
@@ -9025,11 +9110,11 @@ ${"=".repeat(48)}
     };
     useEffect2(() => {
       if (!fcOpen || !AF || !fcStageRef.current) return;
-      const host = fcStageRef.current;
-      AF.clearPreview(host);
-      if (fcActive) AF.applyPreview(host, fcActive, { strength: fcStrength, angle: fcAngle });
+      const host2 = fcStageRef.current;
+      AF.clearPreview(host2);
+      if (fcActive) AF.applyPreview(host2, fcActive, { strength: fcStrength, angle: fcAngle });
       return () => {
-        AF.clearPreview(host);
+        AF.clearPreview(host2);
       };
     }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
     return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: GALLERY_HREF }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
