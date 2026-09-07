@@ -122,8 +122,6 @@
 .fm-bartrack i.reach { background: linear-gradient(90deg, var(--emerald), var(--accent-soft)); }
 .fm-progrow-ct { flex: none; width: 38px; font-size: 10px; color: var(--subtext); text-align: right;
   font-variant-numeric: tabular-nums; }
-.fm-laddericon-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-.fm-laddericon-thumb { width: 16px; height: 16px; border-radius: 4px; flex: none; opacity: .8; object-fit: cover; }
 
 /* ---- Within reach ---- */
 .fm-reachcard { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(9,7,22,.6);
