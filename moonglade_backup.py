@@ -6106,7 +6106,7 @@ def run_sync_artworks(args):
                                       # fetch rather than legitimately running out of pages
     _prog = getattr(args, "progress", None)
     if views_only:
-        print("Reading view counts only — the artwork listing is not walked this run.")
+        print("Reading view counts only -- the artwork listing is not walked this run.")
     else:
         print("Syncing published artworks (listArtworks)...")
     while not views_only:
@@ -6171,7 +6171,7 @@ def run_sync_artworks(args):
         # keeps working: READ_ONLY has never stopped browsing, backing up or searching.
         # Skipped rather than raised, because the rest of this run is a plain read and
         # taking it down with the sweep would be its own bug.
-        print("READ_ONLY is set in config.json — skipping the view-count sweep. "
+        print("READ_ONLY is set in config.json -- skipping the view-count sweep. "
               "Reading a view count adds one to it on PixAI, so it is a change to your "
               "own numbers there, not just a look.")
         want_views = False
