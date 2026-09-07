@@ -99,14 +99,14 @@ describe("the desktop shell: a completion refreshes only from the default perch"
     assert.match(mirror, /loadRef\.current = load;/);
     assert.match(mirror, /userLoadRef\.current = userLoad;/);
     assert.match(mirror, /if \(!navRef\.current\.inFlight && total != null\) navRef\.current\.want = page;/);
-    assert.match(mirror, /viewRef\.current = \{ similar: similarFor, series: seriesFor, lb: lbIndex \};/);
+    assert.match(mirror, /viewRef\.current = \{ similar: similarFor, stack: stackFor, lb: lbIndex \};/);
   });
 
   test("the three untouched-library surfaces refuse the refresh, at page 1 as much as anywhere", () => {
-    assert.match(app, /const viewRef = useRef\(\{ similar: null, series: null, lb: null \}\);/);
+    assert.match(app, /const viewRef = useRef\(\{ similar: null, stack: null, lb: null \}\);/);
     assert.match(refresh, /const view = viewRef\.current;/);
     // lbIndex 0 is a real open viewer: `!= null`, never a truthiness test.
-    assert.match(refresh, /if \(view\.similar \|\| view\.series \|\| view\.lb != null\) return;/);
+    assert.match(refresh, /if \(view\.similar \|\| view\.stack \|\| view\.lb != null\) return;/);
     assert.ok(refresh.indexOf("view.lb != null") < refresh.indexOf("load(1, true)"),
       "the overlay guard must precede the load it guards");
     // WHY the viewer is in that list: it reads `items` POSITIONALLY, so a swap at page 1 --

@@ -992,6 +992,26 @@ def _series_member_task_ids(db_path, sid):
     return out
 
 
+def batch_member_order(rows):
+    """One task's surviving catalog rows in #33's BATCH order -- PixAI's own output
+    number (`batch_index`) when EVERY row carries one, else media_id ascending.
+
+    The all-or-nothing rule is compute_series' own (see its "member media_ids are
+    ordered the way /api/siblings orders them" note): a partly-numbered task would
+    otherwise interleave numbered and unnumbered rows into an order nothing else in
+    the app agrees with. Keeping the rule here means a BATCH stack lists a task's
+    pictures in exactly the order its sibling strip and its series run already do.
+    Pure -- no db, so tests/test_batch_stack.py drives it directly."""
+    def _bi(r):
+        try:
+            return int(str(r.get("batch_index") or "").strip())
+        except ValueError:
+            return None
+    if rows and all(_bi(r) is not None for r in rows):
+        return sorted(rows, key=lambda r: (_bi(r), str(r.get("media_id") or "")))
+    return sorted(rows, key=lambda r: str(r.get("media_id") or ""))
+
+
 def _filters_from_args(args):
     """Pull the gallery grid's filter set out of a request query string, keyed by
     query_catalog()'s own parameter names (the index route reads exactly these args --
@@ -14702,6 +14722,61 @@ def create_app(out_dir: Path):
         if not s:
             return jsonify({"error": "unknown series id"}), 404
         return jsonify(s)
+
+    @tier(LOGIN)
+    @app.route("/api/batch/<task_id>")
+    def api_batch_detail(task_id):
+        """One BATCH's struct in the SAME shape /api/series/<sid> returns.
+
+        Owner ruling, 2026-09-07: a batch card opens in the SERIES modal now,
+        "separately tagged so you know what you're looking at, batch or series" --
+        it no longer takes the library over the way the ?batch= drill-down did. One
+        modal wants one payload shape, so this answers the series struct: a batch is
+        simply a series of ONE run, so `steps` holds exactly one entry, count_tasks
+        is 1, and its label is "one generation" rather than a dial-in delta.
+
+        The rows are the task's SURVIVING catalog rows -- read through query_catalog's
+        own `batch` predicate, which is `(batch = ? OR task_id = ?)`, so this and the
+        pictures listing the modal fetches next (/api/next/library?batch=<id>) see
+        exactly the same set and their counts cannot disagree. Order is #33's batch
+        order (batch_member_order).
+
+        404 for an unknown id AND for a LONE image: one surviving row is not a batch.
+        The grouped grid marks a batch stack only at >= 2 survivors (see the folded-BATCH
+        arm of /api/next/library), so nothing can open one -- answering 200 here would
+        invent a stack the library never draws. Pure catalog read, no network."""
+        tid = str(task_id or "").strip()
+        rows = []
+        if tid:
+            rows, _ = query_catalog(db_path, batch=tid, page_size=None)
+        if len(rows) < 2:
+            return jsonify({"error": "unknown batch id"}), 404
+        rows = batch_member_order(rows)
+        first = rows[0]
+        # The title is derived the way a series' is (_series_title over the same
+        # capped prompt text), so the two stack kinds name themselves by one rule;
+        # the row's own `title` column is the fallback when the prompt says nothing.
+        title = _series_title(_series_text(first)) or str(first.get("title") or "").strip()
+        stamps = sorted(str(r.get("created_at") or "") for r in rows
+                        if str(r.get("created_at") or ""))
+        return jsonify({
+            "sid": tid,                 # the modal keys on this the same way it does a sid
+            "task_id": tid,
+            "title": title,
+            "model": (str(first.get("model_name") or "")
+                      or str(first.get("model_id") or "")),
+            "count_tasks": 1,
+            "count_images": len(rows),
+            "span": [stamps[0], stamps[-1]] if stamps else ["", ""],
+            "steps": [{
+                "task_id": tid,
+                "v": 1,
+                "reroll": False,
+                "label": "one generation",
+                "first_media_id": str(first.get("media_id") or ""),
+                "n": len(rows),
+            }],
+        })
 
     @app.route("/api/train/recent-tasks")
     @tier(LOGIN)
