@@ -226,13 +226,12 @@ button:disabled { cursor: default; }
 .gd-res.err { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent);
   white-space: pre-wrap; }
 .gd-res img { width: 44px; height: 58px; object-fit: cover; border-radius: 5px; margin: 4px 4px 0 0; }
-/* ---- Edit tab: reference slots ---- */
-.gd-slot { position: relative; width: 64px; height: 64px; border-radius: 8px;
-  border: 1px solid var(--surface1); background: var(--surface0); overflow: hidden;
-  display: grid; place-items: center; color: var(--subtext); font-size: 10px;
-  text-align: center; padding: 0; }
-.gd-slot.dashed { border-style: dashed; cursor: pointer; }
-.gd-slot img { width: 100%; height: 100%; object-fit: cover; }
+/* (The Edit tab's reference slots, .gd-slot / .gd-slot.dashed / .gd-slot img, were removed
+   2026-09-07 -- the last of the family whose .gd-slottag/.gd-slotx went in the same sweep.
+   Nothing has rendered a bare `gd-slot` since the dock rebuild: EditTab.jsx:378-394 renders
+   .mgdock-srcslot and the Image tab's single ref is .mgdock-refslot, both styled in
+   styles/dock.css. The Video drawer's own .mgd-slot family in styles/gen-drawer.css is a
+   DIFFERENT class and is live -- it merely reads alike.) */
 
 /* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
    2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */

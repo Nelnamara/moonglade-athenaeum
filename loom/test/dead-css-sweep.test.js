@@ -86,6 +86,7 @@ describe("the swept selectors stay swept", () => {
      class that DID survive named beside it so a reader can see what to use instead. */
   const SWEPT = [
     ["srcbadge", "mgg-pill", "the grid card's source label (grid.css, Grid.jsx)"],
+    ["gd-slot", "mgdock-srcslot", "the Edit tab's reference slots (dock.css, EditTab.jsx)"],
   ];
 
   for (const [dead, alive, where] of SWEPT) {
