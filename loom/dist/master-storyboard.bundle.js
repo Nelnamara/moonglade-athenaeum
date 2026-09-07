@@ -305,7 +305,16 @@ var LoomBundle = (() => {
     const src = rows || {};
     const col = collected || { byAct: [], imported: 0 };
     const counted = /* @__PURE__ */ Object.create(null);
-    const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0 });
+    const zeroB = () => ({
+      paid: 0,
+      credits: 0,
+      zero: 0,
+      unpriced: 0,
+      missing: 0,
+      results: 0,
+      sharedElsewhere: 0,
+      sharedWith: ""
+    });
     const total = zeroB();
     const byAct = (col.byAct || []).map((b) => {
       const acc = zeroB();
@@ -321,8 +330,12 @@ var LoomBundle = (() => {
           return;
         }
         const tid = String(row.task_id || "");
-        if (tid && counted[tid]) return;
-        if (tid) counted[tid] = true;
+        if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
+          add("sharedElsewhere", 1);
+          if (!acc.sharedWith) acc.sharedWith = counted[tid];
+          return;
+        }
+        if (tid) counted[tid] = b.name || "";
         const pc = row.paid_credit;
         if (typeof pc !== "number" || !isFinite(pc)) {
           add("unpriced", 1);
@@ -346,11 +359,49 @@ var LoomBundle = (() => {
     if (paid > 0 || zero > 0) return "0 cr";
     return "";
   };
+  var cardsToResume = (project, resumed) => {
+    const seen2 = resumed || /* @__PURE__ */ Object.create(null);
+    const out = [];
+    ((project || {}).acts || []).forEach((a) => {
+      ((a || {}).cards || []).forEach((c) => {
+        if (!c || c.status !== "wip" || !c.pendingTaskId) return;
+        const tid = String(c.pendingTaskId);
+        if (Object.prototype.hasOwnProperty.call(seen2, tid)) return;
+        seen2[tid] = true;
+        out.push({ id: c.id, taskId: c.pendingTaskId, startedAt: c.genStartedAt });
+      });
+    });
+    return out;
+  };
+  var makeLatestOnly = () => {
+    let latest = 0;
+    return {
+      begin() {
+        latest += 1;
+        return latest;
+      },
+      wins(token) {
+        return token === latest;
+      },
+      cancel() {
+        latest += 1;
+      }
+    };
+  };
+  var spendPillShown = (s) => ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
   var spendTooltip = (s = {}) => {
     const paid = s.paid || 0, credits = s.credits || 0;
     const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
     const acts = (s.byAct || []).filter((a) => a.results > 0);
-    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${formatSpend(a) || "0 cr"}`) : [];
+    const actLine = (a) => {
+      const own = formatSpend(a);
+      if (own) return own;
+      if (a.sharedElsewhere > 0) {
+        return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
+      }
+      return "0 cr";
+    };
+    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
     return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
   };
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
@@ -415,10 +466,13 @@ var LoomBundle = (() => {
     const prev = card && card.resultMid ? String(card.resultMid) : "";
     const next = patch2 && patch2.resultMid ? String(patch2.resultMid) : "";
     const had = card && card.attempts || [];
-    const keep = prev && prev !== next && !had.some((a) => a && String(a.media_id) === prev);
+    const wasImported = !!(card && card.imported);
+    const keep = prev && prev !== next && !wasImported && !had.some((a) => a && String(a.media_id) === prev);
+    const imported = patch2 && Object.prototype.hasOwnProperty.call(patch2, "imported") ? !!patch2.imported : next && next !== prev ? false : wasImported;
     return {
       ...card,
       ...patch2,
+      imported,
       attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had
     };
   };
@@ -432,6 +486,19 @@ var LoomBundle = (() => {
       trimIn: 0,
       trimOut: null,
       imported: true,
+      ...dur > 0 ? { actualDur: dur } : {}
+    };
+  };
+  var attachedVideoPatch = (mediaId, duration) => {
+    const dur = Number(duration);
+    return {
+      status: "done",
+      resultMid: mediaId,
+      trimIn: 0,
+      trimOut: null,
+      imported: true,
+      pendingTaskId: null,
+      genStartedAt: null,
       ...dur > 0 ? { actualDur: dur } : {}
     };
   };
@@ -719,7 +786,8 @@ ${"=".repeat(48)}
     } catch (e) {
       return null;
     }
-    return legacy === "1" ? "mobile" : null;
+    if (legacy == null) return null;
+    return legacy === "1" ? "mobile" : "desktop";
   }
   function resolveLoomView(stored, isPhone) {
     if (stored === "mobile") return true;
@@ -4666,9 +4734,10 @@ ${"=".repeat(48)}
     const top = list[0];
     const name = (top.title || "").trim() || "One of your works";
     const others = list.length - 1;
+    const pace = top.multiple == null ? "up from nothing" : "about " + top.multiple + "\xD7 its usual pace";
     return {
       title: "\u25C8 " + name + " is taking off",
-      msg: "+" + Number(top.gained).toLocaleString() + " views in the last " + top.window_hours + "h \u2014 about " + top.multiple + "\xD7 its usual pace" + (others ? " (and " + others + " more picking up)" : "") + "."
+      msg: "+" + Number(top.gained).toLocaleString() + " views in the last " + top.window_hours + "h \u2014 " + pace + (others ? " (and " + others + " more picking up)" : "") + "."
     };
   }
   function note2(payload) {
@@ -5315,22 +5384,24 @@ ${"=".repeat(48)}
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
   function useLoomView(isPhone) {
-    const [stored, setStored] = useState2(() => {
+    const [mobileUI, setView] = useState2(() => {
+      let stored = null;
       try {
-        return readStoredView(window.localStorage);
+        stored = readStoredView(window.localStorage);
       } catch (e) {
-        return null;
+        stored = null;
       }
+      return resolveLoomView(stored, isPhone);
     });
     const setMobileUI = useCallback2((v) => {
       const next = !!v;
-      setStored(next ? "mobile" : "desktop");
+      setView(next);
       try {
         window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop");
       } catch (e) {
       }
     }, []);
-    return [resolveLoomView(stored, isPhone), setMobileUI];
+    return [mobileUI, setMobileUI];
   }
   var GALLERY_HREF = readLibraryReturn(
     typeof window !== "undefined" && window.sessionStorage || null
@@ -7615,7 +7686,7 @@ ${"=".repeat(48)}
         title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
       },
       /^≈.*cr/.test(formatCostEstimate(costEstimate)) ? formatCostEstimate(costEstimate) + " to finish" : formatCostEstimate(costEstimate)
-    ), spend.results > 0 && /* @__PURE__ */ React.createElement(
+    ), spendPillShown(spend) && /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "lv-cost-pill",
@@ -10603,26 +10674,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     useEffect2(() => {
       if (!project) return;
-      (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
-        if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
-          resumedRef.current[c.pendingTaskId] = true;
-          pollShot(c.id, c.pendingTaskId, c.genStartedAt);
-        }
-      }));
+      cardsToResume(project, resumedRef.current).forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
     }, [activeId, mobileUI]);
     const useExistingVideo = (entry) => {
       openPick((mid, thumb, isVideo, duration) => {
-        const dur = parseFloat(duration);
         setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-        setCardResult(entry.c.id, {
-          status: "done",
-          resultMid: mid,
-          trimIn: 0,
-          trimOut: null,
-          pendingTaskId: null,
-          genStartedAt: null,
-          ...dur > 0 ? { actualDur: dur } : {}
-        });
+        setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
       }, "video");
     };
     const pollTaskWithCeiling = (tid, setState, cardId) => {
@@ -10886,9 +10943,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
     const spendKey = collectedSpend.mids.join(",");
     const spendFetchedRef = useRef2(null);
+    const spendGate = useRef2(null);
+    if (!spendGate.current) spendGate.current = makeLatestOnly();
     const loadSpend = useCallback2((force) => {
       const mids = collectedSpend.mids;
       if (!mids.length) {
+        spendGate.current.cancel();
         spendFetchedRef.current = "";
         setSpendRows({});
         setSpendStatus("ok");
@@ -10896,12 +10956,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       if (!force && spendFetchedRef.current === spendKey) return;
       spendFetchedRef.current = spendKey;
+      const token = spendGate.current.begin();
       setSpendStatus("loading");
       fetch("/api/loom/spend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ media_ids: mids })
       }).then((r) => r.json()).then((d) => {
+        if (!spendGate.current.wins(token)) return;
         if (spendFetchedRef.current !== spendKey) return;
         if (!d || d.error || !d.rows) {
           setSpendStatus("error");
@@ -10910,6 +10972,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setSpendRows(d.rows);
         setSpendStatus("ok");
       }).catch(() => {
+        if (!spendGate.current.wins(token)) return;
         if (spendFetchedRef.current === spendKey) {
           spendFetchedRef.current = null;
           setSpendStatus("error");
