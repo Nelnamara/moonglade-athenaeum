@@ -40,7 +40,7 @@ import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
-import { landingAfterViewer } from "./lib/viewerLanding.js";
+import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
 
 /* ============================ THE APP SHELL =================================
@@ -78,6 +78,38 @@ function cardFor(mediaId) {
     ? CSS.escape(String(mediaId))
     : String(mediaId).replace(/["\\]/g, "\\$&");
   try { return document.querySelector('.mgg-card[data-id="' + q + '"]'); } catch { return null; }
+}
+
+/* Does this element scroll its own children? overflow-y that can scroll AND content taller
+   than the box -- a pane with `auto` and nothing overflowing is not a scroller, and
+   treating it as one would send the landing to a container that cannot move. The document
+   scrollers (<html>/<body>) are deliberately NOT matched: those ARE the window, which is
+   what cardScroller falls back to. */
+function isOwnScroller(el) {
+  if (!el || el === document.body || el === document.documentElement) return false;
+  let oy = "";
+  try { oy = window.getComputedStyle(el).overflowY; } catch { return false; }
+  return (oy === "auto" || oy === "scroll" || oy === "overlay")
+    && el.scrollHeight > el.clientHeight + 1;
+}
+
+/* THE CONTAINER THAT ACTUALLY SCROLLS THE CARDS (2026-09-07, correcting the same day's
+   build). Masonry, grid and hero let the document scroll -- the window is the scroller,
+   which is why Grid's own page flip calls window.scrollTo. TIMELINE does not: .mgg-tl-cols
+   is a real scroll context (grid.css), so window.scrollTo({top:0}) moves nothing and the
+   pane keeps the offset it had on the page the owner never saw.
+
+   Walked from the card rather than read off the layout state, so it is right for any
+   layout that grows a pane of its own later. With no card to walk from -- the page changed,
+   and the answer is the top of it -- the timeline pane is looked up by name, because that
+   is the only layout that has one today. */
+function cardScroller(card) {
+  for (let n = card && card.parentElement; n; n = n.parentElement) {
+    if (isOwnScroller(n)) return n;
+  }
+  const pane = document.querySelector(".mgg-tl-cols");
+  if (isOwnScroller(pane)) return pane;
+  return window;
 }
 
 export default function App({ boot }) {
@@ -1034,9 +1066,15 @@ export default function App({ boot }) {
     if (!snap) return;
     lbLandPending.current = null;
 
-    // Grid.jsx's own page flip settled the "instant, never smooth" question already; a
-    // close is not a journey either.
-    const behavior = "instant" in document.documentElement.style ? "instant" : "auto";
+    // Instant, never smooth: a close is not a journey. Asked for outright (2026-09-07,
+    // correcting the same day's build, which copied Grid.jsx's feature test for the word
+    // `instant` in the root element's style object. That test is ALWAYS false --
+    // CSSStyleDeclaration carries one member per CSS PROPERTY, and `instant` is a VALUE of
+    // scroll-behavior, not a property of its own -- so it always said "auto", which only
+    // happens to be non-smooth while no stylesheet sets scroll-behavior: smooth on these
+    // scrollers.) Every browser this app supports takes "instant"; one that did not would
+    // fall back to "auto" on its own, which is the same answer the dead guard gave.
+    const behavior = "instant";
     const chromeTop = () => {
       const v = parseFloat(getComputedStyle(document.documentElement)
         .getPropertyValue("--mgx-chrome-h"));
@@ -1057,17 +1095,24 @@ export default function App({ boot }) {
       }
       const card = snap.mediaId ? cardFor(snap.mediaId) : null;
       const box = card ? card.getBoundingClientRect() : null;
+      // The pane that holds the cards, not the window -- see cardScroller. "Already on
+      // screen" is asked about THAT box: in Timeline a card can be well inside the window
+      // and still below the fold of the pane it lives in.
+      const scroller = cardScroller(card);
       const where = landingAfterViewer({
         pageChanged,
         cardTop: box ? box.top : null,
         cardBottom: box ? box.bottom : null,
-        viewportTop: chromeTop(),
-        viewportBottom: window.innerHeight || document.documentElement.clientHeight || 0,
+        ...viewportOfScroller(scroller, {
+          viewportTop: chromeTop(),
+          viewportBottom: window.innerHeight || document.documentElement.clientHeight || 0,
+        }),
       });
-      if (where === "top") window.scrollTo({ top: 0, behavior });
-      // scroll-margin-top on .mgg-card (grid.css:54) is what keeps the card clear of the
-      // sticky header, exactly as the grid's own arrow-key focus does.
-      else if (where === "card" && card) card.scrollIntoView({ block: "nearest", inline: "nearest", behavior });
+      // "top" moves the scroller itself; "card" rides the card's own scrollIntoView, whose
+      // block:"nearest" scrolls that same pane and lets scroll-margin-top on .mgg-card
+      // (grid.css:54) keep it clear of the sticky header, exactly as the grid's own
+      // arrow-key focus does.
+      landInScroller(where, { scroller, card, behavior });
     };
     run();
     return () => cancelAnimationFrame(raf);
