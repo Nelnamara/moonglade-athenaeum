@@ -21,6 +21,15 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ---
 
+## In review — built, not merged
+
+Every branch that is built but not on `master` is listed here with its review sheet, so work in
+flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
+why this section exists.
+
+- **`staging/wave-3.10`** — the 3.10 wave, in build. Lanes A–C per the internal plan
+  (`../moonglade-internal/scopes/PLAN_2026-09-07_lanes.md`); sheet to follow.
+
 ## Next — scoped, not started
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
