@@ -427,31 +427,64 @@ def _dismiss_any_achievement_toast(page, rounds=4):
     4.2-6.4s hold. A no-op when nothing is showing.
 
     2026-09-07: this used to dismiss ONE moment and return, which is not the same thing as
-    clearing the screen. `ach.js`'s `celebrate()` pushes onto `_q` and `_play()` only calls
-    `_next()` 500ms AFTER the clicked moment is removed, so a second earned achievement is
-    still queued and lands a beat after the first is detached -- the old one-shot returned
-    into that gap and the very next click went to the successor overlay instead of the
-    control under it. That is exactly the shape of failure this docstring anticipated
-    ("a test's own real actions can organically cross a NEW threshold mid-test") without
-    covering: it anticipated a toast, not a QUEUE of them. So it now loops until the screen
-    is genuinely clear, bounded, and says so loudly rather than silently giving up. Call it
-    before any interaction a full-screen overlay could swallow, not just once after boot.
+    clearing the screen -- `celebrate()` pushes onto `_q`, so two achievements earned at
+    once are two moments, and the old one-shot's very next click went to the successor
+    overlay instead of the control under it. It now loops until the screen is genuinely
+    clear, bounded, and says so loudly rather than silently giving up.
+
+    2026-09-07, second pass -- REFINES the loop above, whose stated model of ach.js was
+    wrong. That first rewrite waited for `.ach-m2` to reach `state="detached"` and treated
+    a following `state="attached"` as "another one is queued", on the belief that `_play()`
+    calls `_next()` 500ms AFTER the clicked moment is removed. It does not. `_play()`'s
+    `done()` (ach.js:264-268) schedules ONE callback that removes the clicked moment and
+    calls `after()` -- which IS `_next` (ach.js:444) -- in the same task, and `_next`
+    (ach.js:437-445) is plain synchronous code that ends in `_play()`'s
+    `document.body.appendChild(m)` (ach.js:259-260). Old node out, new node in, one tick,
+    same `.ach-m2` class. So when a moment really is queued there is NO observable moment
+    at which `.ach-m2` matches zero elements, `state="detached"` can never resolve, and the
+    helper raised a Playwright TimeoutError in exactly the queued-parade case it was
+    written to fix.
+
+    What the loop waits for now is "the moment I clicked is gone", not "the screen went
+    empty": hold the clicked element's own handle, then wait until that node is off the
+    document OR the front `.ach-m2` is a different node. That is satisfied by both real
+    shapes -- the last moment leaving (nothing replaces it) and a queued successor being
+    swapped in on the same tick -- so the loop advances to the successor instead of timing
+    out on a state ach.js never enters.
+
+    Call it before any interaction a full-screen overlay could swallow, not just once after
+    boot. NOT a match for the >3 flood parade (`_floodParade`, owner ruling 2026-09-03):
+    there a click RECEDES the moment into the `_trail` instead of removing it, so the node
+    keeps its `.ach-m2` class and the count climbs rather than falling. Receded layers drop
+    their scrim and pointer events, so they swallow nothing -- but this helper is not the
+    thing that clears them.
     """
     for _ in range(rounds):
         toast = page.locator(".ach-m2")
         if not toast.count():
             return
-        toast.first.click(timeout=1000)
-        page.wait_for_selector(".ach-m2", state="detached", timeout=2000)
-        # The 500ms removal + _next() handoff above: if another moment is queued it attaches
-        # inside this window. Nothing queued => the wait times out, which is the success case.
         try:
-            page.wait_for_selector(".ach-m2", state="attached", timeout=700)
+            handle = toast.first.element_handle(timeout=1000)
         except _PlaywrightTimeout:
-            return
+            continue                       # it left on its own between the count and here
+        if handle is None:
+            continue
+        try:
+            toast.first.click(timeout=1000)
+            # Bounded, and deliberately NOT a `.ach-m2` count/detached check: a queued
+            # successor is appended in the same task the clicked one is removed in.
+            # 500ms removal + the successor's own append, with room for a loaded runner.
+            page.wait_for_function(
+                "el => !el.isConnected || document.querySelector('.ach-m2') !== el",
+                arg=handle, timeout=3000)
+        except _PlaywrightTimeout:
+            break                          # the assert below reports it
+        finally:
+            handle.dispose()
     assert not page.locator(".ach-m2").count(), (
-        "still an .ach-m2 celebration up after dismissing {} of them -- either the app is "
-        "firing an unbounded parade or the overlay stopped closing on click".format(rounds))
+        "still an .ach-m2 celebration up after dismissing up to {} of them -- either the "
+        "app is firing an unbounded parade or the overlay stopped closing on click".format(
+            rounds))
 
 
 def _login(page):
@@ -4091,6 +4124,102 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
         # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
         _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
         save_ach_state(root, ach_before)
+
+
+# ---------------------------------------------------------------------------
+# The dismiss helper vs a QUEUE of celebrations (2026-09-07, second pass)
+# ---------------------------------------------------------------------------
+# _dismiss_any_achievement_toast's whole reason to exist is the parade: two achievements
+# earned in one pass are two moments, and the helper must leave the screen clear, not
+# hand the next click to the successor overlay. Its first rewrite was written against a
+# model of ach.js that ach.js does not implement -- `_play()`'s done() removes the clicked
+# moment and calls `_next()` in the SAME task, so `.ach-m2` never matches zero elements
+# between them -- and so it timed out on exactly the case it was meant to fix. Nothing
+# pinned that, because every existing call site happens to be single-moment.
+#
+# The queue is driven through the REAL engine (installNotify -> ach.check() -> GET
+# /api/achievements?mark=1 -> toastNew -> celebrate x2 -> _q/_next), with only the boot
+# payload faked -- the achievements themselves are irrelevant to what is under test and
+# a real two-at-once earn would have to mutate the module server's shared out_dir. The
+# unmarked /api/achievements calls the rest of the app makes are passed straight through.
+#
+# Two ORDINARY tiers deliberately: `_fanfare` (legendary/feat only) seats a mascot off a
+# canvas alpha sample and rains 84 confetti nodes, none of which the queue handoff cares
+# about.
+_QUEUED_ACH = [
+    {"id": "harness-queued-one", "name": "First In The Queue", "tier": "epic",
+     "desc": "the moment that gets clicked first", "points": 10, "icon": "\U0001F3C6"},
+    {"id": "harness-queued-two", "name": "Second In The Queue", "tier": "rare",
+     "desc": "the moment appended in the same task the first one leaves in",
+     "points": 5, "icon": "\U0001F3C5"},
+]
+
+# Records every .ach-m2 the engine appends, by its name line, so the test can prove the
+# SECOND moment really presented rather than inferring it from an empty screen.
+_WATCH_MOMENTS_JS = """
+window.__achSeen = [];
+document.addEventListener('DOMContentLoaded', () => {
+  new MutationObserver((recs) => {
+    recs.forEach((r) => Array.prototype.forEach.call(r.addedNodes, (n) => {
+      if (n.nodeType === 1 && n.classList && n.classList.contains('ach-m2')) {
+        const el = n.querySelector('.n');
+        window.__achSeen.push(el ? el.textContent : '');
+      }
+    }));
+  }).observe(document.body, { childList: true });
+});
+"""
+
+
+def test_the_dismiss_helper_clears_a_queue_of_celebrations(logged_in_page):
+    """Two achievements earned at once, both dismissed through the helper, no timeout.
+
+    This is the shape the helper's own docstring promises to handle and the shape its
+    2026-09-07 first rewrite could not: ach.js swaps the successor in on the same tick the
+    clicked moment leaves on, so a helper that waits for `.ach-m2` to detach waits for a
+    state the engine never enters.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.add_init_script(_WATCH_MOMENTS_JS)
+
+    payload = {"achievements": list(_QUEUED_ACH), "skins": [], "skin": "moonglade",
+               "newly": [a["id"] for a in _QUEUED_ACH]}
+
+    def _boot(route):
+        # ONLY the mark-and-toast boot fetch is faked; the Folio's and the Panel's own
+        # unmarked reads go to the real server untouched.
+        if "mark=1" in route.request.url:
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload))
+        else:
+            route.continue_()
+
+    _is_ach = lambda url: "/api/achievements" in url   # noqa: E731 -- unroute needs the identity
+    page.route(_is_ach, _boot)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".ach-m2")
+        assert page.locator(".ach-m2").count() == 1, (
+            "the engine put {} moments on screen at once -- this test is meant to drive "
+            "the QUEUE (_q/_next), not the flood parade".format(
+                page.locator(".ach-m2").count()))
+        assert _QUEUED_ACH[0]["name"] in page.locator(".ach-m2").first.inner_text()
+
+        try:
+            _dismiss_any_achievement_toast(page)
+        except _PlaywrightTimeout as exc:
+            pytest.fail(
+                "the dismiss helper timed out on a two-deep celebration queue -- ach.js "
+                "removes the clicked moment and appends its successor in one task, so "
+                "`.ach-m2` is never absent between them: {}".format(exc))
+
+        assert page.locator(".ach-m2").count() == 0, (
+            "the helper returned with a celebration still on screen")
+        seen = page.evaluate("() => window.__achSeen")
+        assert seen == [a["name"] for a in _QUEUED_ACH], (
+            "the queue did not present both moments in turn -- saw {!r}".format(seen))
+    finally:
+        page.unroute(_is_ach, _boot)
 
 
 # ---------------------------------------------------------------------------
