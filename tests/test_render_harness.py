@@ -3588,8 +3588,10 @@ def test_the_restart_mascot_holds_still_and_the_halo_keeps_pulsing(logged_in_pag
         "the restart mascot is animating again: {}".format(seen["mascotAnim"]))
     assert seen["spinAnim"] == "none", (
         "a .spin rule survived in the stylesheet: {}".format(seen["spinAnim"]))
-    assert seen["haloAnim"] == "cpPulse", (
-        "the pulse the owner kept is gone: {}".format(seen["haloAnim"]))
+    # The pulse the owner kept, now with the ember the 2026-09-07 restart-card verdict
+    # layered beside it on the same beat. Both names, in that order, on the one element.
+    assert [a.strip() for a in seen["haloAnim"].split(",")] == ["cpPulse", "cpEmber"], (
+        "the halo's pulse+ember pair is not what ships: {}".format(seen["haloAnim"]))
     assert "grayscale" in seen["offFilter"], (
         "the greyed stopped-server state went with it: {}".format(seen["offFilter"]))
 

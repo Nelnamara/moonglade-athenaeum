@@ -656,6 +656,14 @@ function Grid({
       <figure
         key={it.media_id}
         data-laid-index={i}
+        /* data-laid-index is the LAYOUT's index (into `cells`, stacks included), which is
+           the only thing marquee hit-testing and the arrow handler need. Landing the owner
+           back on one particular picture after the viewer closes needs the other question
+           answered -- WHICH picture is this card -- so the id rides along
+           (lib/viewerLanding.js, owner 2026-09-07). A stack cover carries its own cover's
+           id; the landing simply finds no card for a member hidden under one, which is the
+           "stay" case there by design. */
+        data-id={it.media_id}
         // keyboard-reachable (Tab) and the arrow handler's focus target (#31, Refit #7)
         tabIndex={0}
         onFocus={(ev) => {

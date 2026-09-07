@@ -6,7 +6,17 @@
    overlay uses, sized much larger given how much this one holds. */
 
 @keyframes cpSpin { to { transform: rotate(360deg); } }
-@keyframes cpPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.5); } 50% { box-shadow: 0 0 0 7px rgba(79,201,154,0); } }
+/* cpPulse -- the ring that leaves the restart halo. Cyan and reaching 12px since the
+   2026-09-07 restart-card verdict (was emerald rgba(79,201,154,..) at 7px); the colour is
+   --loomc, written out because a keyframe cannot read a variable that is set per-skin. */
+@keyframes cpPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(71,203,195,.5); } 50% { box-shadow: 0 0 0 12px rgba(71,203,195,0); } }
+/* cpEmber -- the halo itself brightening and swelling, then settling. Runs on the same beat
+   as cpPulse and touches different properties, so the two layer instead of fighting
+   (2026-09-07 verdict: "Ember ALONG WITH the chosen settings"). */
+@keyframes cpEmber {
+  0%, 100% { opacity: .55; transform: scale(1); filter: brightness(1); }
+  50% { opacity: 1; transform: scale(1.07); filter: brightness(1.25); }
+}
 @keyframes cpModalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes cpRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes cpMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -40,6 +50,9 @@
   color: var(--overlay0); margin-top: 2px; }
 .mgcp-mirror { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--subtext); margin-top: 8px; }
 .mgcp-mirrordot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; margin-top: 5px;
+  /* Shares cpPulse with the restart halo, so the 2026-09-07 verdict's cyan ring and 12px
+     reach reach this dot too -- its own fill stays emerald and its 2.6s beat is untouched.
+     Noted, not designed around: the verdict was written against the keyframe. */
   animation: cpPulse 2.6s ease-in-out infinite; }
 .mgcp-mirrordot.off { background: var(--overlay0); animation: none; }
 /* Control Panel.dc.html:696's resStyle -- the Organize flow's dry-run result readout. */
@@ -500,10 +513,10 @@ html.mg-noblur .mgcp-pwr-scrim { backdrop-filter: none !important; }
   background: linear-gradient(120deg, rgba(24,18,54,.96) 0%, rgba(14,11,32,.98) 100%);
   box-shadow: 0 34px 80px -18px rgba(0,0,0,.75), 0 0 34px rgba(182,146,230,.14);
   animation: cpModalIn .3s cubic-bezier(.2,.9,.24,1) both; }
-.mgcp-pwr-mascotwrap { position: relative; width: 88px; height: 88px; margin: 0 auto 14px; }
-.mgcp-pwr-halo { position: absolute; inset: -10px; border-radius: 50%;
+.mgcp-pwr-mascotwrap { position: relative; width: 128px; height: 128px; margin: 0 auto 14px; }
+.mgcp-pwr-halo { position: absolute; inset: -18px; border-radius: 50%;
   background: radial-gradient(circle, rgba(182,146,230,.5), transparent 66%); }
-.mgcp-pwr-halo.busy { animation: cpPulse 2.2s ease-in-out infinite; }
+.mgcp-pwr-halo.busy { animation: cpPulse 1.8s ease-in-out infinite, cpEmber 1.8s ease-in-out infinite; }
 .mgcp-pwr-bar { margin: 4px 0 14px; }
 /* The mascot does NOT spin (owner, 2026-09-05: "I don't want the mascot to spin anymore. it
    just looks wrong. I like the pulse, we can keep that"). `.mgcp-pwr-mascot.spin` (cpSpin,
@@ -511,8 +524,13 @@ html.mg-noblur .mgcp-pwr-scrim { backdrop-filter: none !important; }
    The pulse STAYS -- that is .mgcp-pwr-halo.busy above, a separate element and a separate
    keyframe (cpPulse), untouched. cpSpin itself also stays: .mgcp-runspin, the job console's
    spinner, is its other and now only user.
-   Whether some other effect ever takes the spin's place is an open question for a workshop
-   and deliberately unanswered here -- the owner's own "...or not" is half the ruling. */
+   That open question -- whether some other effect ever takes the spin's place -- was left
+   here deliberately unanswered, and the owner answered it on 2026-09-07 in a small workshop
+   off the Restart Card Board: PULSE + EMBER, one beat, both on the halo. The dials he set:
+   period 1.8s (was 2.2s), ring reach 12px (was 7px), halo inset -18px (was -10px), mascot
+   128px (was 88px), ring colour cyan rgba(71,203,195) (was emerald rgba(79,201,154)). Every
+   line of the card's text stays exactly as it was, and the mascot still does not spin.
+   Record: moonglade-internal/scopes/WORKSHOP_2026-09-07_restart-card-verdict.md. */
 .mgcp-pwr-mascot { position: relative; width: 100%; height: 100%; background-size: contain;
   background-position: center; background-repeat: no-repeat; }
 .mgcp-pwr-mascot.off { filter: grayscale(.85) brightness(.72); }
