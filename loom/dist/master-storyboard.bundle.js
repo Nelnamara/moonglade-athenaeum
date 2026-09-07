@@ -1565,11 +1565,23 @@ ${"=".repeat(48)}
     return s ? path + (path.includes("?") ? "&" : "?") + s : path;
   }
   async function request(path, init) {
+    const { timeoutMs, timeoutMessage, ...rest } = init || {};
+    let ctl = null, timer2 = 0;
+    if (timeoutMs > 0 && typeof AbortController !== "undefined") {
+      ctl = new AbortController();
+      if (!rest.signal) rest.signal = ctl.signal;
+      timer2 = setTimeout(() => ctl.abort(), timeoutMs);
+    }
     let r;
     try {
-      r = await fetch(path, init);
+      r = await fetch(path, rest);
     } catch (e) {
+      if (ctl && ctl.signal.aborted) {
+        return { error: timeoutMessage || "timed out waiting for the server", timed_out: true };
+      }
       return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
+    } finally {
+      if (timer2) clearTimeout(timer2);
     }
     let d = null;
     try {
@@ -3924,6 +3936,39 @@ ${"=".repeat(48)}
   var host = null;
   var pendingOpen = false;
   var openSubs = /* @__PURE__ */ new Set();
+  var hostSubs = /* @__PURE__ */ new Set();
+  var CARRY_KEY = "mg_update_open_intent";
+  function session() {
+    try {
+      return typeof window !== "undefined" && window.sessionStorage || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function carryIntent() {
+    const s = session();
+    if (!s) return false;
+    try {
+      s.setItem(CARRY_KEY, "1");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  function navigableTarget() {
+    if (typeof window === "undefined" || !window.location) return "";
+    return (window.location.pathname || "/") === "/" ? "" : "/";
+  }
+  function updateAffordance() {
+    if (host) return { canOpen: true, why: "" };
+    if (navigableTarget()) return { canOpen: true, why: "open the gallery to update" };
+    return { canOpen: false, why: "finish setup first" };
+  }
+  function subscribeUpdateHost(fn) {
+    hostSubs.add(fn);
+    fn(!!host);
+    return () => hostSubs.delete(fn);
+  }
   function requestUpdateOpen() {
     pendingOpen = true;
     openSubs.forEach((fn) => fn());
@@ -3931,8 +3976,9 @@ ${"=".repeat(48)}
       host();
       return;
     }
-    if (typeof window === "undefined" || !window.location) return;
-    if (window.location.pathname !== "/") window.location.assign("/");
+    const target = navigableTarget();
+    if (!target) return;
+    window.location.assign(carryIntent() ? target : target + "?update=1");
   }
 
   // ../gallery/src/notify/updateStore.js
@@ -4823,8 +4869,10 @@ ${"=".repeat(48)}
   // ../gallery/src/notify/BannerHost.jsx
   function BannerHost() {
     const [state, setState] = useState({ banner: null, collapsed: false });
+    const [, setHasHost] = useState(false);
     const ref = useRef(null);
     useEffect(() => subscribe2((banner3, isCollapsed) => setState({ banner: banner3, collapsed: isCollapsed })), []);
+    useEffect(() => subscribeUpdateHost(setHasHost), []);
     const { banner: banner2, collapsed: collapsed2 } = state;
     useLayoutEffect(() => {
       const root = typeof document !== "undefined" ? document.documentElement : null;
@@ -4836,17 +4884,39 @@ ${"=".repeat(48)}
         return void 0;
       }
       root.classList.add("mg-updbanner-on");
-      const measure = () => root.style.setProperty("--mg-updbanner-h", el.offsetHeight + "px");
+      const publish = (h) => root.style.setProperty("--mg-updbanner-h", h + "px");
+      const measure = () => {
+        const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
+        publish(rect && rect.height ? rect.height : el.offsetHeight);
+      };
       measure();
-      const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
-      if (ro) ro.observe(el);
+      const onResize = (entries) => {
+        const entry = entries && entries[0];
+        const box = entry && entry.borderBoxSize && (entry.borderBoxSize[0] || entry.borderBoxSize);
+        if (box && typeof box.blockSize === "number") {
+          publish(box.blockSize);
+          return;
+        }
+        measure();
+      };
+      const ro = typeof ResizeObserver === "function" ? new ResizeObserver(onResize) : null;
+      if (ro) {
+        try {
+          ro.observe(el, { box: "border-box" });
+        } catch (e) {
+          ro.observe(el);
+        }
+      }
+      el.addEventListener("transitionend", measure);
       return () => {
+        el.removeEventListener("transitionend", measure);
         if (ro) ro.disconnect();
         root.classList.remove("mg-updbanner-on");
         root.style.removeProperty("--mg-updbanner-h");
       };
     }, [banner2, collapsed2]);
     if (!banner2) return null;
+    const { canOpen, why } = updateAffordance();
     return createPortal(
       /* @__PURE__ */ react_global_shim_default.createElement(
         "div",
@@ -4866,7 +4936,7 @@ ${"=".repeat(48)}
           },
           banner2.version,
           " ready"
-        ) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgub-line" }, "Moonglade ", banner2.version, " is ready"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-go", onClick: requestUpdateOpen }, "Update"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-later", onClick: collapse }, "Not now"))
+        ) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgub-line" }, "Moonglade ", banner2.version, " is ready"), why ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgub-why" }, why) : null, canOpen ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-go", onClick: requestUpdateOpen }, "Update") : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgub-later", onClick: collapse }, "Not now"))
       ),
       document.body
     );
