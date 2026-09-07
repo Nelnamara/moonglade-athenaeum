@@ -3961,7 +3961,7 @@ def _decode(raw):
     return im
 
 
-def test_a_dropped_branding_file_is_adopted_and_the_browser_wears_it(
+def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
         logged_in_page, render_server, tmp_path):
     """Drop a PNG into a slot folder; reload; the app is wearing it.
 
