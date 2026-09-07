@@ -451,6 +451,14 @@ export default function useFolio() {
       .then((res) => {
         if (!mountedRef.current) return;
         if (res.error) return;
+        // A debounced reply means the server read this tap as the second half of
+        // one gesture and counted nothing -- so hold the line you are on: no toast
+        // at all, silence rather than a rewind (2026-09-07, refining the same day's
+        // debounce ruling). Before this the reply's missing `pokes` fell through to
+        // the `|| 1` below and re-showed POKES[0], so a fast second tap visibly
+        // un-escalated the toast. It carries the real count now, but ONE gesture
+        // gets ONE toast, so this returns before showing anything.
+        if (res.debounced) return;
         // Same escalating warning toast the classic poke() shows on every
         // single click, byte-for-byte (POKES above) -- the real feedback
         // loop that makes 5 pokes feel earned, not the count alone.

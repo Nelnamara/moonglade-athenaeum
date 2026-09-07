@@ -342,8 +342,9 @@ def test_ach_nonce_is_bound_to_its_session(tmp_path):
 
 
 def test_ach_event_debounces_a_double_fire(tmp_path):
-    """Two pokes inside 400ms are one click fired twice. The second is accepted (and still
-    hands back a nonce, or the page would be left with none) but counts nothing."""
+    """Two pokes inside the window are one click fired twice. The second is accepted (and
+    still hands back a nonce, or the page would be left with none) but counts nothing --
+    and it carries the count it did NOT move, so the client can hold its line."""
     cli = login_client(tmp_path)
     first = cli.post("/api/ach-event", json={"event": "narrator", "nonce": ach_nonce(cli)}
                      ).get_json()
@@ -351,6 +352,10 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     second = cli.post("/api/ach-event",
                       json={"event": "narrator", "nonce": first["next_nonce"]}).get_json()
     assert second["debounced"] is True and second["next_nonce"]
+    # The debounced reply carries the LAST COUNTED value, read not bumped (2026-09-07):
+    # without it useFolio.js's `res.pokes || 1` fell back to 1 and rewound the escalating
+    # toast to its first line on the swallowed half of every double-fire.
+    assert second["pokes"] == first["pokes"] and second["snapped"] is False
     assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
     # ...and the debounce is per (session, event): a different event is not held back.
     cli.post("/api/ach-event", json={"event": "docs", "nonce": second["next_nonce"]})

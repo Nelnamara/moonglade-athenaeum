@@ -15518,7 +15518,18 @@ def create_app(out_dir: Path):
         # second half of a double-fire leaves the page with no nonce at all.
         nxt = _ach_mint(sid)
         if _ach_debounced(sid, ev):
-            return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
+            # ...and it carries the CURRENT counter, READ not bumped (2026-09-07, refining
+            # the same day's debounce ruling). A debounced reply used to be the three keys
+            # above and nothing else, so useFolio.js's `res.pokes || 1` fell back to 1 and
+            # re-showed POKES[0] -- the escalating toast visibly REWOUND on the swallowed
+            # half of a double-fire. The client holds its line on `debounced` now; sending
+            # the true count as well means a client that does read it cannot be misled.
+            held = {"ok": True, "debounced": True, "next_nonce": nxt}
+            if ev == "narrator":
+                pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+                held["pokes"] = pokes
+                held["snapped"] = pokes >= 5
+            return jsonify(held)
         if ev == "konami":
             telem_flag("konami_triggered", out_dir=out_dir)
             return jsonify({"ok": True, "next_nonce": nxt})
