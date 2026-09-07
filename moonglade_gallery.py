@@ -6385,10 +6385,18 @@ DELETE_PREVIEW_LIVE_CAP = 40
 # The same pool width build_thumbnails() has used for its own fan-out (workers=8). 40 reads
 # eight at a time is five rounds, not forty round trips in a row.
 DELETE_PREVIEW_LIVE_WORKERS = 8
-# A wall-clock ceiling on the whole fan-out. api.js's deletePreview has no fetch timeout of
-# its own (it goes through the plain apiPost), so the ONLY thing standing between a slow
-# PixAI and a confirm dialog that never opens is this. Whatever has not answered by then is
-# reported unverified, exactly like a read that failed.
+# A wall-clock ceiling on the whole fan-out, and a real one (2026-09-07): _preview_live_gone
+# spends it three ways -- it starts no read after the deadline, gives each read a socket
+# timeout no longer than the budget has LEFT, and stops collecting at the deadline without
+# waiting for the pool to drain. The first of those was the whole enforcement until this
+# date, which bounded only when a read STARTED: one connection that stalled after the
+# handshake could run out the transport's own 60s and then retry for another, so the route
+# could block for ~2 minutes against the 12 it promised. Whatever has not answered by the
+# deadline is reported unverified, exactly like a read that failed.
+#
+# api.js's deletePreview carries a fetch timeout a little ABOVE this (DELETE_PREVIEW_MS),
+# so the dialog always gets an answer -- the server's, in the ordinary case, and the
+# client's plain "PixAI did not answer in time" only if the server itself goes silent.
 DELETE_PREVIEW_LIVE_BUDGET_S = 12.0
 
 
@@ -11725,7 +11733,9 @@ def create_app(out_dir: Path):
 
         retries=1, not the default 3: the caller here is a confirm dialog the owner is
         watching, and the fallback is a visible "could not be checked" rather than the
-        lost-generation sentence task_detail_gql's own retries exist to prevent.
+        lost-generation sentence task_detail_gql's own retries exist to prevent. Each read
+        also gets the budget's REMAINING time as its socket timeout, so the confirm dialog
+        is bounded by DELETE_PREVIEW_LIVE_BUDGET_S rather than by the transport's 60s.
 
         Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
         that answered, and the set of task ids that did not."""
@@ -11738,13 +11748,23 @@ def create_app(out_dir: Path):
             # from the catalog exactly as it did before this existed.
             return {}, set(ids)
 
+        # THE CEILING IS WALL-CLOCK, and it is enforced in three places because one is not
+        # enough (2026-09-07, correcting the same day's build, which checked it only here):
+        #   * before a read STARTS -- the budget is spent, don't start another;
+        #   * on the read ITSELF -- each one is given no more socket time than the budget
+        #     has left, so a connection that stalls after the handshake cannot run out the
+        #     transport's own 60s (and then retry for another 60);
+        #   * on the COLLECTION -- as_completed stops at the deadline and the pool is left
+        #     to drain on its own, so a worker still in flight cannot hold the route.
+        # Anything not back by then is `unverified`, exactly like a read that failed.
         deadline = time.monotonic() + DELETE_PREVIEW_LIVE_BUDGET_S
 
         def _one(tid):
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return tid, None                     # budget spent: don't start another
             try:
-                task = core.task_detail_gql(session, tid, retries=1)
+                task = core.task_detail_gql(session, tid, retries=1, timeout=remaining)
             except Exception:                        # noqa: BLE001 -- fail soft, see above
                 return tid, None
             if task is None:
@@ -11760,14 +11780,33 @@ def create_app(out_dir: Path):
                     mark_cloud_deleted(db_path, mid, stamp)
             return tid, gone_ids
 
-        gone, unverified = {}, set()
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS) as ex:
-            for tid, res in ex.map(_one, ids):
-                if res is None:
-                    unverified.add(tid)
-                else:
-                    gone[tid] = res
+        # Every task starts unverified and EARNS its way out, so a task whose worker never
+        # answers -- the case the deadline exists for -- is counted the safe way by default
+        # rather than by remembering to add it.
+        gone, unverified = {}, set(ids)
+        from concurrent.futures import (ThreadPoolExecutor, as_completed,
+                                        TimeoutError as _FutureTimeout)
+        # NOT a `with` block: its __exit__ is shutdown(wait=True), which waits for every
+        # in-flight read and would put the whole ceiling back where it was.
+        ex = ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS)
+        try:
+            futures = [ex.submit(_one, tid) for tid in ids]
+            try:
+                for fut in as_completed(futures,
+                                        timeout=max(0.0, deadline - time.monotonic())):
+                    try:
+                        tid, res = fut.result()
+                    except Exception:                # noqa: BLE001 -- a dead worker is unverified
+                        continue
+                    if res is not None:
+                        gone[tid] = res
+                        unverified.discard(tid)
+            except _FutureTimeout:
+                pass                                 # the ceiling; the rest stay unverified
+        finally:
+            # Don't wait. A stalled read is already bounded by its own socket timeout and
+            # writes nothing anyone is still listening to; the route answers now.
+            ex.shutdown(wait=False, cancel_futures=True)
         return gone, unverified
 
     def _preview_entry(row, selected_ids, gone_ids=()):

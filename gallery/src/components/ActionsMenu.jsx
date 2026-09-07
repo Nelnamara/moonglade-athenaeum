@@ -327,11 +327,16 @@ export default function ActionsMenu({
 
   const askCloud = run(async () => {
     const data = await deletePreview(ids);
-    if (data) { setPreview({ data, ids }); return; }
+    // `totals` is what makes it a preview -- an answer carrying only {error} (the 15s
+    // timeout above the server's own 12s ceiling is the one that says so in words) is a
+    // failure wearing an object, and must not open a dialog with nothing in it.
+    if (data && data.totals) { setPreview({ data, ids }); return; }
     // Fail-soft, verbatim from the classic: an unreachable preview falls back to
-    // the prose-only confirm rather than a dead click or a silent skip.
+    // the prose-only confirm rather than a dead click or a silent skip. The reason, when
+    // there is one, is said out loud rather than left as an unexplained fallback.
     if (window.confirm(
       "Delete " + ids.length + " selected file(s) from your PixAI account AND locally?\n\n" +
+      (data && data.error ? data.error + "\n\n" : "") +
       "The preview of exactly what that takes could not be loaded, so: this deletes the whole " +
       "TASK behind each selection (every image in the batch, including ones you did not " +
       "select), from the cloud AND your backup. It is IRREVERSIBLE."

@@ -669,3 +669,62 @@ def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
     assert {r["media_id"] for r in load_catalog(db)} == {"k3"}, (
         "the row the modal promised would stay was purged with the task")
     assert job.get("kept_media") == ["k3"]
+
+
+def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, monkeypatch):
+    """DELETE_PREVIEW_LIVE_BUDGET_S is a WALL-CLOCK ceiling on the route, not just on when
+    reads are allowed to START (2026-09-07).
+
+    Checking the deadline only before dispatching a read bounds nothing that is already in
+    flight: one connection stalled after the handshake ran to the transport's own 60s and
+    then retried, and the pool was drained inside a `with` block, so the confirm dialog
+    could sit there for about two minutes against the twelve seconds the constant, its
+    comment and the changelog all promise. The read now gets no more socket time than the
+    budget has left, and the collection stops at the deadline with whatever has not
+    answered counted `unverified` -- the same answer a read that failed gets."""
+    import threading
+    import time as _time
+    _seed(tmp_path, [
+        _row(media_id="s1", task_id="S1", filename="s1.png"),
+        _row(media_id="s2", task_id="S1", filename="s2.png"),
+        _row(media_id="t1", task_id="S2", filename="t1.png"),
+        _row(media_id="t2", task_id="S2", filename="t2.png"),
+    ], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(g, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
+
+    release = threading.Event()
+    given = {}
+
+    def _read(sess, tid, retries=3, timeout=60):
+        given[str(tid)] = timeout
+        if str(tid) == "S2":
+            # A stalled connection that does NOT honour its own socket timeout: the only
+            # thing that can end the route here is the collection deadline.
+            release.wait(5.0)
+            raise core.PixAIError("read timed out")
+        return _live_task("S1", ["s1", "s2"], gone=("s2",))
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    try:
+        t0 = _time.monotonic()
+        body = client.post("/api/delete-preview",
+                           json={"media_ids": ["s1", "t1"]}).get_json()
+        elapsed = _time.monotonic() - t0
+    finally:
+        release.set()                    # let the stalled worker go rather than leaking it
+
+    assert elapsed < 2.0, (
+        "the route waited {:.1f}s on a stalled read against a 0.3s budget -- the ceiling "
+        "bounds only when reads start".format(elapsed))
+    assert body["unverified"] == 1 and body["live_checked"] == 1
+    by_task = {tk["task_id"]: tk for tk in body["tasks"]}
+    assert by_task["S2"]["unverified"] is True
+    assert by_task["S1"]["unverified"] is False
+    assert body["already_gone"] == 1, (
+        "the task that DID answer inside the budget must still be counted exactly")
+    assert 0 < given["S2"] <= 0.3, (
+        "the read was handed the transport's own 60s ({}) instead of what the budget had "
+        "left".format(given["S2"]))
