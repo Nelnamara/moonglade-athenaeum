@@ -246,7 +246,8 @@ def test_login_page_no_accounts_flag_flips_once_a_real_account_exists(tmp_path):
     """With zero AUTH_USERS configured (the fresh-clone default), a LOCAL request to
     /login gets the React shell with boot.no_accounts:true -- LoginPage.jsx reads
     that client-side to default into its create-account mode (design:
-    design_handoff/request-bootstrap-account-creation.md) -- first-run setup
+    ../moonglade-internal/design/handoff-2026-09-04/briefs/request-bootstrap-account-creation.md)
+    -- first-run setup
     happens in the browser, never the CLI, so classic's --add-web-user hint must
     never leak into the response either way. The flag flips to false -- and
     LoginPage.jsx switches to its ordinary sign-in mode -- the moment a real

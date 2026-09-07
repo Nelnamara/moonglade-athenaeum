@@ -14797,7 +14797,7 @@ def create_app(out_dir: Path):
         trainings remain, whether this one is free).
 
         COST SAFETY. PixAI prices training CLIENT-side from a matrix, so there is no
-        server value to quote (documented in private/GENERATOR_SURFACE.md). That gives
+        server value to quote (documented in ../moonglade-internal/private/GENERATOR_SURFACE.md). That gives
         exactly two honest states:
           * free quota > 0  -> this training is FREE and consumes one quota unit.
           * free quota == 0 -> it costs real credits, and this app CANNOT say how many.

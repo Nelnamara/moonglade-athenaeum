@@ -9,6 +9,10 @@ serve.txt
 serve.log
 
 # ---- Private dev notes: reverse-engineering ledger, internal maps. NEVER publish ----
+# MOVED 2026-09-06 -> ../moonglade-internal/private/ (notes + the harvest capture).
+# Git-ignored here was never the right home: an ignored folder still sits in every
+# working copy of a PUBLIC repo and never syncs between machines. The ignore line stays
+# so a stray copy can never be committed by accident.
 private/
 
 # ---- Gallery server generated files ----
@@ -101,6 +105,9 @@ Thumbs.db
 # Ephemeral design mockups: throwaway single-file HTML built to verify a design
 # before implementing it (the locked pixel source lives in the Claude artifact, not
 # here). Never committed -- they would rot instantly against the real surface.
+# MOVED 2026-09-06: the three July 2026 mockups that had accumulated here are archived at
+# ../moonglade-internal/design/archive-2026-07/ (with a README naming the CHANGELOG entries
+# that cite _mockup_login_panel.html). The ignore line stays for the next throwaway.
 static/_mockup_*.html
 
 # Branding art and the selections that go with it. Moved out of the library folder to the app
@@ -128,11 +135,15 @@ static/_mockup_*.html
 # writer's .ico -- PowerShell reads IconLocation off disk). Regenerable, like branding/_thumbs/.
 /_container_cache/
 
-# The Claude Design handoff package (design_handoff_moonglade_suite): DC prototype
-# surfaces, drift report, and ASSETS INCLUDING THE OWNER'S BRANDING ART -- which is
-# deliberately machine-local (see /branding/ above) and must never reach this public
-# repo. Kept beside the code as the implementation reference for the gallery-era
-# redesign; master copies are the zips the owner downloaded from Claude Design.
+# The Claude Design handoff package: DC prototype surfaces, drift report, and ASSETS
+# INCLUDING THE OWNER'S BRANDING ART -- which is deliberately machine-local (see
+# /branding/ above) and must never reach this public repo.
+# MOVED 2026-09-06: design material lives in ../moonglade-internal/design/ -- the latest
+# Design Handoff in handoff-<date>/, per-surface notes in notes/, and design/README.md
+# holds the convention. Every file that was here is proven present there (225 of 228
+# byte-identical; the other 3 were older READMEs/drift reports wholly contained in the
+# kept ones). The four documents that existed ONLY here are in that handoff's docs/.
+# The ignore line stays so a fresh export dropped here is never committed.
 /design_handoff/
 
 # The REPO-ROOT gallery/ is the React frontend's SOURCE (the /next pilot) -- not an

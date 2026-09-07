@@ -8,7 +8,7 @@ This file is committed so it is available on every machine that clones the repo.
 
 **Moonglade Athenaeum** — *"a library against the Void."* It began as a backup tool for the **owner's own** PixAI.art generations and grew into a full local PixAI **client**: back up · browse · generate · curate. Talks to the same API the browser uses, pages the entire history at full resolution, keeps a searchable SQLite catalog, **creates** new images via the API, and manages both the local archive and the cloud account. See `../moonglade-internal/architecture.md` for the module breakdown, function reference, and catalog schema.
 
-Built by reverse-engineering site network traffic (catalogued privately in `private/API_OPERATIONS.md`, git-ignored). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
+Built by reverse-engineering site network traffic (catalogued privately in `../moonglade-internal/private/API_OPERATIONS.md`). The `gql_adhoc()` ad-hoc POST path means most operations need no persisted-hash capture. There is no official API for listing your own generations. Be polite to their servers (paced requests). PixAI's terms grant users copyright of their generations. User-facing docs live in `docs/`.
 
 ---
 
@@ -42,12 +42,17 @@ mass commit. Follow this protocol:
    divergence. If push is rejected, it's the remote moving — pull --rebase, then push.
 4. **Never `git add -A` / `git add .`** — stray untracked files live here (`config.json`,
    `.coverage`, `design_refs/`, old `pixai_*.py` side scripts). Stage **explicit paths** only.
-5. **`config.json` + `private/` are git-ignored and machine-local** — they will NOT be on the
-   other machine, and that's correct. Don't recreate, commit, or complain about their absence.
+5. **`config.json` is git-ignored and machine-local** — it will NOT be on the other machine,
+   and that's correct. Don't recreate, commit, or complain about its absence. (`private/` used
+   to be named here too; it moved on 2026-09-06 — see 7.)
 6. **Commits: no `Co-Authored-By: Claude` trailer** (standing preference).
 7. **The internal dev docs live in a PRIVATE companion repo at `../moonglade-internal`**
    (sibling of this checkout, both machines — `Nelnamara/moonglade-internal`). That's where
-   DECISIONS.md, ART.md, STANDARDS.md, LOOM.md, architecture.md and ROADMAP-internal.md are.
+   DECISIONS.md, ART.md, STANDARDS.md, LOOM.md, architecture.md and ROADMAP-internal.md are,
+   plus **`design/`** (the Design Handoffs — the pixel source of truth for visual builds) and
+   **`private/`** (the reverse-engineering notes and the harvest capture, moved out of this repo
+   on 2026-09-06: git-ignored in a PUBLIC checkout was the wrong home, and ignored files never
+   sync between machines).
    Pull it at session start and push it at session end, alongside this repo — same rhythm,
    both repos. If the clone is absent on this machine, SAY SO rather than guessing at what
    those documents contain; do not recreate them in this repo.
@@ -155,8 +160,9 @@ object's `fileUrl`. SSL trust store: `truststore.inject_into_ssl()` called at im
 present — fixes corporate/antivirus HTTPS interception.
 
 > **Reverse-engineering detail (the persisted-query/hash mechanism, pagination internals,
-> `gql_adhoc()` technique, Apollo header requirements) lives in `private/ARCHITECTURE_RE.md`**
-> — git-ignored, not public. Read it there when you need the specifics; this section stays at
+> `gql_adhoc()` technique, Apollo header requirements) lives in
+> `../moonglade-internal/private/ARCHITECTURE_RE.md`**
+> — the private companion repo, not public. Read it there when you need the specifics; this section stays at
 > the same redacted level as the public `../moonglade-internal/architecture.md` on purpose (owner's IP/security
 > boundary, set 2026-07-04 — public docs describe how to USE the tool, never how it
 > reverse-engineers PixAI). **This section was found duplicating the excised detail verbatim on
@@ -246,8 +252,8 @@ single-image generation.
 - `cloud_deleted_at` is the PER-ROW catalog column for "PixAI dropped this one image", set from that `deletedAt`. It is deliberately not `deleted_remote`, which is task-level and is rewritten by every `--reconcile-deleted`.
 
 > **Reverse-engineering detail (frontend handler flow, sibling mutations, hash-capture
-> method) lives in `private/RE_NOTES.md`** — git-ignored, not public. Read it there when
-> you need it.
+> method) lives in `../moonglade-internal/private/RE_NOTES.md`** — the private companion repo,
+> not public. Read it there when you need it.
 
 ## Logging (`-v` / `--verbose`, and the persistent file log)
 
@@ -257,7 +263,7 @@ single-image generation.
 ## Recapture procedure (when PixAI changes their frontend)
 
 Symptoms: `PersistedQueryNotFound`, "Cannot query field…", or sudden 400s. Step-by-step
-recapture is in `private/RE_NOTES.md`.
+recapture is in `../moonglade-internal/private/RE_NOTES.md`.
 
 ---
 
@@ -365,5 +371,5 @@ python moonglade_backup.py --generate-video --task-id <id> --dump-params  # reco
 `kaisuukenId` → the generation costs **0 credits**, exactly like the website. Works for every create path
 (generate / edit / video / reference-video). Preview prints FREE-vs-paid up front. `--no-card` forces
 credits; `--kaisuuken-id <id>` forces a specific card. `--dump-params` banks any submit shape off a
-recovered `--task-id` (no browser). Deep RE detail (incl. the full `/v2` REST surface) in git-ignored
-`private/GENERATOR_SURFACE.md`.
+recovered `--task-id` (no browser). Deep RE detail (incl. the full `/v2` REST surface) in
+`../moonglade-internal/private/GENERATOR_SURFACE.md`.

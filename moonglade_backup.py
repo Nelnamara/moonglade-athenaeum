@@ -3015,7 +3015,7 @@ def model_search_rest(session, keyword="", usage="MODEL", size=24, offset=0):
         med = m.get("media") or {}
         # Real field names (probed 2026-07-04): the rich description lives under
         # `modelDescription`, base-model family under `category`, and an official
-        # badge under `curations` (e.g. ["inhouse"]). See private/GENERATOR_SURFACE.md.
+        # badge under `curations` (e.g. ["inhouse"]). See ../moonglade-internal/private/GENERATOR_SURFACE.md.
         cur = m.get("curations") or []
         out.append({
             "title": m.get("title") or "",
@@ -3142,7 +3142,8 @@ MODEL_TYPE_FILTERS = (
 # [..., "SDXL_MODEL"], then [..., "SD_V1_MODEL"], which is also what settled the last two.
 #
 # The full 46-member GenerationModelType enum is not copied here on purpose. It is
-# recoverable at any time, and stays current, via tools/harvest_api_surface.py -- their
+# recoverable at any time, and stays current, via the harvester (moved 2026-09-06 to
+# ../moonglade-internal/tools/harvest_api_surface.py) -- their
 # own contract chunk carries it verbatim. A hand-copied list would just rot.
 
 # Their "Source" filter (All / PixAI / External) is NOT a separate argument -- it is expressed
@@ -3200,7 +3201,7 @@ def posted_at_range(token):
 # is why `loraBaseModelTypes` is interpolated behind a whitelist. That claim is WRONG: PixAI's own
 # query documents declare `$types: [GenerationModelType]`, `$permittedUse: PermittedUse` and
 # `$loraBaseModelTypes: [GenerationModelType!]` and bind them normally. Verified by reading their
-# documents (tools/harvest_api_surface.py).
+# documents (../moonglade-internal/tools/harvest_api_surface.py).
 #
 # So the filters added below are BOUND VARIABLES, never interpolated -- caller text cannot reach
 # the query document at all, which is strictly safer than interpolating it after a whitelist
@@ -3496,7 +3497,8 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
 
 
 # Derived offline from PixAI's own bundle and validated against three hashes seen on real
-# requests (tools/harvest_api_surface.py). Only the FALLBACK needs it -- the ad-hoc path below
+# requests (../moonglade-internal/tools/harvest_api_surface.py). Only the FALLBACK needs it --
+# the ad-hoc path below
 # carries its own document, so a rotated hash cannot break the primary route.
 BOOKMARKED_MODELS_OP = "listMyBookmarkedGenerationModels"
 BOOKMARKED_MODELS_HASH = "2281653492ff54ef17707104736fd74e7a8d70dc314e024e595f0e71ff2945b9"
@@ -10850,7 +10852,7 @@ def publish_artwork_from_task(session, task_id, media_index=0, title="", descrip
 
     `challenge` DOES NOT ENTER A CONTEST -- verified live 2026-09-01, after a publish made
     with one attached produced no entry. It is artwork METADATA: the contest back-link that
-    listArtworks hands back on node.extra (private/API_OPERATIONS.md). Entering is a
+    listArtworks hands back on node.extra (../moonglade-internal/private/API_OPERATIONS.md). Entering is a
     separate REST call, `contest_enter` -> POST /v2/contest/{slug}/artwork, and a caller
     that wants publish-and-enter has to make both (see api_myart_publish, which does)."""
     _check_read_only("publish an artwork to your PixAI account")
@@ -11096,7 +11098,7 @@ def run_account_info(args):
 # The `personalEvents` subscription (no args) streams two channels: `taskUpdated`
 # (your generations changing state) and `newNotification`. Listening is READ-ONLY and
 # far gentler on PixAI than periodic polling. Confirmed reachable with the same Bearer
-# token the tool already holds (see private/APP_OPERATIONS_FULL.md).
+# token the tool already holds (see ../moonglade-internal/private/APP_OPERATIONS_FULL.md).
 #
 # STATUS: this `--watch` command is the shipped live monitor. With --watch-backup it
 # is also the event-driven backup mode -- each task's 'completed' frame (confirmed
@@ -11279,7 +11281,7 @@ def run_watch(args):
 # PixAI's live contest board lives at REST `GET /v2/contest/list?page=N&pageSize=M`
 # (NOT the GraphQL `contests` connection, which is a stale official-only archive).
 # "Active" is the server-computed `runtimeStatus == "running"` -- no client date math.
-# Read-only: browsing contests never spends. See private/APP_OPERATIONS_FULL.md.
+# Read-only: browsing contests never spends. See ../moonglade-internal/private/APP_OPERATIONS_FULL.md.
 _CONTEST_PAGE_SIZE = 50
 
 

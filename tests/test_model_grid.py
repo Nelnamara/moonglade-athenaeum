@@ -36,7 +36,7 @@ def test_model_search_rest_shapes_rows(monkeypatch):
 def test_model_search_rest_preview_card_fields(monkeypatch):
     """Enrichment for the model-preview pop-out. Uses the REAL /v2 search field names
     (probed 2026-07-04): modelDescription, category (base family), curations (official
-    badge), commentCount, refCount, authorId. See private/GENERATOR_SURFACE.md."""
+    badge), commentCount, refCount, authorId. See ../moonglade-internal/private/GENERATOR_SURFACE.md."""
     rich = {"data": [
         {"id": "1", "title": "Rich", "type": "SDXL_MODEL", "likedCount": 3,
          "flag": {}, "media": {"thumbnailUrl": "t", "publicUrl": "p"},
