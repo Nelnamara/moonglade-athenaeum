@@ -6385,10 +6385,18 @@ DELETE_PREVIEW_LIVE_CAP = 40
 # The same pool width build_thumbnails() has used for its own fan-out (workers=8). 40 reads
 # eight at a time is five rounds, not forty round trips in a row.
 DELETE_PREVIEW_LIVE_WORKERS = 8
-# A wall-clock ceiling on the whole fan-out. api.js's deletePreview has no fetch timeout of
-# its own (it goes through the plain apiPost), so the ONLY thing standing between a slow
-# PixAI and a confirm dialog that never opens is this. Whatever has not answered by then is
-# reported unverified, exactly like a read that failed.
+# A wall-clock ceiling on the whole fan-out, and a real one (2026-09-07): _preview_live_gone
+# spends it three ways -- it starts no read after the deadline, gives each read a socket
+# timeout no longer than the budget has LEFT, and stops collecting at the deadline without
+# waiting for the pool to drain. The first of those was the whole enforcement until this
+# date, which bounded only when a read STARTED: one connection that stalled after the
+# handshake could run out the transport's own 60s and then retry for another, so the route
+# could block for ~2 minutes against the 12 it promised. Whatever has not answered by the
+# deadline is reported unverified, exactly like a read that failed.
+#
+# api.js's deletePreview carries a fetch timeout a little ABOVE this (DELETE_PREVIEW_MS),
+# so the dialog always gets an answer -- the server's, in the ordinary case, and the
+# client's plain "PixAI did not answer in time" only if the server itself goes silent.
 DELETE_PREVIEW_LIVE_BUDGET_S = 12.0
 
 
@@ -11718,9 +11726,21 @@ def create_app(out_dir: Path):
         those rows back), so the preview over-reported the blast radius against the one
         thing it was supposed to describe exactly. This is that same read, moved forward.
 
-        Read-only and it stays read-only: getTaskById, nothing else. It deliberately does
-        NOT write cloud_deleted_at the way the delete's own read does -- a confirm dialog
-        the owner may well cancel is not a place to mutate the catalog from.
+        Read-only ON PIXAI, and it stays that way: getTaskById, nothing else. It does
+        write `cloud_deleted_at` on the rows the read finds already deleted, exactly as
+        the delete's own read does (mark_cloud_deleted) -- REFINING this function's own
+        2026-09-07 note, which held that a confirm dialog the owner may well cancel is no
+        place to mutate the catalog from. It is, for this one column. The preview's whole
+        promise is "that file stays in your backup, because this is the last copy of it
+        anywhere", and a promise made from an answer nobody wrote down is only as good as
+        the SECOND read that has to be made at delete time: if that one fails where this
+        one succeeded, _rows_the_bulk_purge_must_keep falls back to the catalog, finds
+        nothing, and purges the very rows this dialog named. Stamping here makes the
+        catalog the one place both reads answer from, so the preview can only ever become
+        a source of the same truth, never a different one. The stamp is not a deletion and
+        does not become one if the owner cancels: `cloud_deleted_at` records what PIXAI
+        did to its own copy, which is true whatever this dialog decides, and every path
+        that reads it (the keep-back, the single-image plan) only ever keeps a row.
 
         FAILS SOFT, and in the SAFE direction. A task whose read raises, comes back
         empty, or never answers inside the budget is `unverified`: it keeps its local rows
@@ -11743,7 +11763,9 @@ def create_app(out_dir: Path):
 
         retries=1, not the default 3: the caller here is a confirm dialog the owner is
         watching, and the fallback is a visible "could not be checked" rather than the
-        lost-generation sentence task_detail_gql's own retries exist to prevent.
+        lost-generation sentence task_detail_gql's own retries exist to prevent. Each read
+        also gets the budget's REMAINING time as its socket timeout, so the confirm dialog
+        is bounded by DELETE_PREVIEW_LIVE_BUDGET_S rather than by the transport's 60s.
 
         Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
         that answered, and the set of task ids that did not."""
@@ -11756,28 +11778,65 @@ def create_app(out_dir: Path):
             # from the catalog exactly as it did before this existed.
             return {}, set(ids)
 
+        # THE CEILING IS WALL-CLOCK, and it is enforced in three places because one is not
+        # enough (2026-09-07, correcting the same day's build, which checked it only here):
+        #   * before a read STARTS -- the budget is spent, don't start another;
+        #   * on the read ITSELF -- each one is given no more socket time than the budget
+        #     has left, so a connection that stalls after the handshake cannot run out the
+        #     transport's own 60s (and then retry for another 60);
+        #   * on the COLLECTION -- as_completed stops at the deadline and the pool is left
+        #     to drain on its own, so a worker still in flight cannot hold the route.
+        # Anything not back by then is `unverified`, exactly like a read that failed.
         deadline = time.monotonic() + DELETE_PREVIEW_LIVE_BUDGET_S
 
         def _one(tid):
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return tid, None                     # budget spent: don't start another
             try:
-                task = core.task_detail_gql(session, tid, retries=1)
+                task = core.task_detail_gql(session, tid, retries=1, timeout=remaining)
             except Exception:                        # noqa: BLE001 -- fail soft, see above
                 return tid, None
             if task is None:
                 return tid, None
             batch = (task.get("outputs") or {}).get("batch")
-            return tid, {str(m) for m in core.deleted_batch_media(batch) if m}
+            gone_ids = {str(m) for m in core.deleted_batch_media(batch) if m}
+            # WRITE IT DOWN, right here, with the same verb the delete's own read uses.
+            # See the docstring: this is what stops the delete-time read's failure from
+            # taking the rows this preview is about to promise would stay.
+            for mid in gone_ids:
+                stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+                if stamp:
+                    mark_cloud_deleted(db_path, mid, stamp)
+            return tid, gone_ids
 
-        gone, unverified = {}, set()
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS) as ex:
-            for tid, res in ex.map(_one, ids):
-                if res is None:
-                    unverified.add(tid)
-                else:
-                    gone[tid] = res
+        # Every task starts unverified and EARNS its way out, so a task whose worker never
+        # answers -- the case the deadline exists for -- is counted the safe way by default
+        # rather than by remembering to add it.
+        gone, unverified = {}, set(ids)
+        from concurrent.futures import (ThreadPoolExecutor, as_completed,
+                                        TimeoutError as _FutureTimeout)
+        # NOT a `with` block: its __exit__ is shutdown(wait=True), which waits for every
+        # in-flight read and would put the whole ceiling back where it was.
+        ex = ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS)
+        try:
+            futures = [ex.submit(_one, tid) for tid in ids]
+            try:
+                for fut in as_completed(futures,
+                                        timeout=max(0.0, deadline - time.monotonic())):
+                    try:
+                        tid, res = fut.result()
+                    except Exception:                # noqa: BLE001 -- a dead worker is unverified
+                        continue
+                    if res is not None:
+                        gone[tid] = res
+                        unverified.discard(tid)
+            except _FutureTimeout:
+                pass                                 # the ceiling; the rest stay unverified
+        finally:
+            # Don't wait. A stalled read is already bounded by its own socket timeout and
+            # writes nothing anyone is still listening to; the route answers now.
+            ex.shutdown(wait=False, cancel_futures=True)
         return gone, unverified
 
     def _preview_entry(row, selected_ids, gone_ids=()):
@@ -11807,8 +11866,11 @@ def create_app(out_dir: Path):
     @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
-        anything fires. Read-only in the sense that matters: it deletes nothing and writes
-        nothing. It is no longer offline, though -- see THE LIVE CHECK below.
+        anything fires. Read-only in the sense that matters: it deletes nothing, here or
+        on PixAI. It is no longer offline, and no longer writes NOTHING either -- the one
+        thing it records is `cloud_deleted_at` on the rows PixAI says it has already
+        dropped, so the delete keeps them back whether or not its own read works
+        (_preview_live_gone). See THE LIVE CHECK below.
 
         Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
         whole batch, cloud AND local. The confirm dialog said that in prose but never

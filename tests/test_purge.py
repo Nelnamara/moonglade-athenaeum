@@ -610,3 +610,121 @@ def test_delete_preview_reads_nothing_when_there_is_no_session_to_read_with(
     assert body["live_checked"] == 0 and body["unverified"] == 1
     assert body["already_gone"] == 0 and body["estimate"] is False
     assert body["totals"]["media"] == 2
+
+
+def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
+        tmp_path, monkeypatch):
+    """The preview's answer is PERSISTED, not just displayed (2026-09-07, refining the
+    same day's "the preview mutates nothing" note).
+
+    The dialog promises, by name, that an image PixAI has already deleted stays in the
+    backup because this copy is the last one anywhere. The delete makes its OWN read a
+    moment later, and that read can fail where this one worked -- a blip, a 401, a 5xx
+    past its retries. When it does, _rows_the_bulk_purge_must_keep falls back to the
+    catalog alone; if nothing wrote the preview's answer there, the fallback finds no
+    marker and purges exactly the row the dialog named. So the preview stamps
+    cloud_deleted_at when it sees deletedAt, and the promise survives the second read."""
+    import time
+    db = _seed(tmp_path, [
+        _row(media_id="k1", task_id="K1", filename="k1.png"),
+        _row(media_id="k2", task_id="K1", filename="k2.png"),
+        _row(media_id="k3", task_id="K1", filename="k3.png"),
+    ], {"k1.png": b"a", "k2.png": b"b", "k3.png": b"c"})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: _live_task(
+        "K1", ["k1", "k2", "k3"], gone=("k3",)))
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={"media_ids": ["k1"]}).get_json()
+    assert body["already_gone"] == 1
+
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["k3"]["cloud_deleted_at"] == _LIVE_GONE, (
+        "the preview saw PixAI's deletedAt and threw it away -- the delete's own read is "
+        "now the only thing standing between that promise and the purge")
+    assert not rows["k1"]["cloud_deleted_at"] and not rows["k2"]["cloud_deleted_at"], (
+        "only the member PixAI really dropped may be stamped")
+
+    # The delete, with its own live read failing where the preview's succeeded.
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+
+    def _blip(sess, tid, **k):
+        raise core.PixAIError("network error reading task")
+
+    monkeypatch.setattr(core, "task_detail_gql", _blip)
+
+    assert client.post("/api/delete-tasks",
+                       json={"media_ids": ["k1"]}).get_json()["ok"] is True
+    job = None
+    for _ in range(300):
+        jobs = client.get("/api/jobs").get_json()["jobs"]
+        job = next((j for j in jobs if j.get("type") == "delete"), None)
+        if job and job["status"] in ("done", "failed"):
+            break
+        time.sleep(0.02)
+    assert job is not None and job["status"] == "done", job
+
+    assert (tmp_path / "images" / "k3.png").exists(), (
+        "the file the modal promised would stay was quarantined by the delete")
+    assert {r["media_id"] for r in load_catalog(db)} == {"k3"}, (
+        "the row the modal promised would stay was purged with the task")
+    assert job.get("kept_media") == ["k3"]
+
+
+def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, monkeypatch):
+    """DELETE_PREVIEW_LIVE_BUDGET_S is a WALL-CLOCK ceiling on the route, not just on when
+    reads are allowed to START (2026-09-07).
+
+    Checking the deadline only before dispatching a read bounds nothing that is already in
+    flight: one connection stalled after the handshake ran to the transport's own 60s and
+    then retried, and the pool was drained inside a `with` block, so the confirm dialog
+    could sit there for about two minutes against the twelve seconds the constant, its
+    comment and the changelog all promise. The read now gets no more socket time than the
+    budget has left, and the collection stops at the deadline with whatever has not
+    answered counted `unverified` -- the same answer a read that failed gets."""
+    import threading
+    import time as _time
+    _seed(tmp_path, [
+        _row(media_id="s1", task_id="S1", filename="s1.png"),
+        _row(media_id="s2", task_id="S1", filename="s2.png"),
+        _row(media_id="t1", task_id="S2", filename="t1.png"),
+        _row(media_id="t2", task_id="S2", filename="t2.png"),
+    ], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(g, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
+
+    release = threading.Event()
+    given = {}
+
+    def _read(sess, tid, retries=3, timeout=60):
+        given[str(tid)] = timeout
+        if str(tid) == "S2":
+            # A stalled connection that does NOT honour its own socket timeout: the only
+            # thing that can end the route here is the collection deadline.
+            release.wait(5.0)
+            raise core.PixAIError("read timed out")
+        return _live_task("S1", ["s1", "s2"], gone=("s2",))
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    try:
+        t0 = _time.monotonic()
+        body = client.post("/api/delete-preview",
+                           json={"media_ids": ["s1", "t1"]}).get_json()
+        elapsed = _time.monotonic() - t0
+    finally:
+        release.set()                    # let the stalled worker go rather than leaking it
+
+    assert elapsed < 2.0, (
+        "the route waited {:.1f}s on a stalled read against a 0.3s budget -- the ceiling "
+        "bounds only when reads start".format(elapsed))
+    assert body["unverified"] == 1 and body["live_checked"] == 1
+    by_task = {tk["task_id"]: tk for tk in body["tasks"]}
+    assert by_task["S2"]["unverified"] is True
+    assert by_task["S1"]["unverified"] is False
+    assert body["already_gone"] == 1, (
+        "the task that DID answer inside the budget must still be counted exactly")
+    assert 0 < given["S2"] <= 0.3, (
+        "the read was handed the transport's own 60s ({}) instead of what the budget had "
+        "left".format(given["S2"]))

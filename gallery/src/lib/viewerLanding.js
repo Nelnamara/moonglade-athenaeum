@@ -48,4 +48,53 @@ export function landingAfterViewer({
   return "card";
 }
 
+/* WHICH VIEWPORT "ALREADY ON SCREEN" IS MEASURED AGAINST (2026-09-07, correcting the same
+   day's build). Three of the four layouts scroll the document, so the window's own
+   viewport -- below the sticky chrome -- is the right frame. TIMELINE does not: its cards
+   live inside .mgg-tl-cols, a pane with its own overflow-y and its own top and bottom
+   edges, and a card can be perfectly "on screen" by the window's reckoning while sitting
+   below the fold of the pane that actually holds it.
+
+   Duck-typed on getBoundingClientRect so the window (which has none) falls back to the
+   frame the caller measured, and so this is testable without a DOM. */
+export function viewportOfScroller(scroller, fallback) {
+  if (scroller && typeof scroller.getBoundingClientRect === "function") {
+    const r = scroller.getBoundingClientRect();
+    if (r && Number.isFinite(r.top) && Number.isFinite(r.bottom)
+        && r.bottom > r.top) {
+      return { viewportTop: r.top, viewportBottom: r.bottom };
+    }
+  }
+  return fallback;
+}
+
+/* SPENDING THE DECISION, in the container that actually scrolls the cards.
+
+   The first build scrolled the WINDOW for the "top" outcome, so in Timeline the ruling did
+   nothing at all: the document does not move, and the pane kept the offset it had on the
+   page the owner never saw -- exactly the placement this ruling exists to fix.
+
+   "top" moves the scroller itself. "card" goes through the card's own scrollIntoView with
+   block:"nearest", which scrolls the nearest scrollable ancestor -- the same pane -- and
+   is what lets .mgg-card's scroll-margin-top clear the sticky chrome; hand-rolling that
+   offset here would re-implement it and lose the margin.
+
+   Returns what it actually did, which is not always what it was asked to do: a "card"
+   landing with no card left to land on is a "stay", the same default the decision itself
+   falls back to. */
+export function landInScroller(where, { scroller, card, behavior = "instant" } = {}) {
+  if (where === "top") {
+    if (scroller && typeof scroller.scrollTo === "function") {
+      scroller.scrollTo({ top: 0, behavior });
+      return "top";
+    }
+    return "stay";
+  }
+  if (where === "card" && card && typeof card.scrollIntoView === "function") {
+    card.scrollIntoView({ block: "nearest", inline: "nearest", behavior });
+    return "card";
+  }
+  return "stay";
+}
+
 export default landingAfterViewer;

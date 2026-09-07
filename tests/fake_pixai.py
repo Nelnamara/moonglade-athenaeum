@@ -158,14 +158,17 @@ class FakePixAI:
         return self._resolve(op, "GraphQL operation", call)
 
     def persisted(self, op_name, variables=None, sha256=None, retries=4,
-                  client_library=None, headers=None):
+                  client_library=None, headers=None, timeout=60):
         """Keyed by `op_name`, the whole point of the seam-level road: a test registers a
         canned answer with `fake.on(op_name, ...)` and it is returned here, or refuses by name
-        if nobody did. `client_library` and `headers` mirror the real client's signature (the
-        listArtworks GET passes both) and are recorded on the call so a test can assert the
-        `x-apollo-operation-name` header rode along, exactly as it does on the wire."""
+        if nobody did. `client_library`, `headers` and `timeout` mirror the real client's
+        signature (the listArtworks GET passes the first two; a caller under a wall-clock
+        ceiling passes the last) and are recorded on the call so a test can assert the
+        `x-apollo-operation-name` header -- or the timeout the read was given -- rode along,
+        exactly as it does on the wire."""
         call = self._record(verb="persisted", op=op_name, variables=variables,
-                            retries=retries, client_library=client_library, headers=headers)
+                            retries=retries, client_library=client_library, headers=headers,
+                            timeout=timeout)
         return self._resolve(op_name, "persisted operation", call)
 
     def rest_get(self, path, params=None, timeout=30):

@@ -1587,14 +1587,18 @@ class PixAIClient:
 
     # -- persisted-hash GET --------------------------------------------------
     def persisted(self, op_name, variables=None, sha256=None, retries=4,
-                  client_library=None, headers=None):
+                  client_library=None, headers=None, timeout=60):
         """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
         params their frontend sends. `sha256=None` resolves the captured hash for
         `op_name` (the history feed is the operation that rides this road out of the box);
         every other captured op rides here by passing its OWN `sha256=`. `client_library`
         overrides the Apollo `clientLibrary` block for the one op that sends its own
         (`listArtworks`), and `headers` adds request headers for this single call
-        (`listArtworks`' `x-apollo-operation-name`). Returns the `data` dict; raises
+        (`listArtworks`' `x-apollo-operation-name`). `timeout` is the per-ATTEMPT socket
+        timeout in seconds (60, this road's long-standing value, unless a caller says
+        otherwise): a caller working against a wall-clock ceiling of its own -- the
+        delete preview's live check is the one today -- passes the time it has left, so a
+        stalled connection cannot outlive the budget it was started under. Returns the `data` dict; raises
         PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
         bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
         credential or an edge refusal answered in its own JSON)."""
@@ -1618,7 +1622,8 @@ class PixAIClient:
         for attempt in range(retries + 1):
             try:
                 _t = time.monotonic()
-                r = self._session.get(API_URL, params=params, timeout=60, headers=headers)
+                r = self._session.get(API_URL, params=params, timeout=timeout,
+                                      headers=headers)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException as e:
@@ -2419,8 +2424,13 @@ def _paid_credit_str(task):
     return "" if v is None else str(v)
 
 
-def task_detail_gql(session, task_id, retries=3):
+def task_detail_gql(session, task_id, retries=3, timeout=60):
     """GET getTaskById for one task. Returns the task dict or None on failure.
+
+    `timeout` is the per-attempt socket timeout, handed straight to the transport. A
+    caller under a wall-clock ceiling passes the time it has left rather than letting a
+    stalled read run out the transport's own 60s (the delete preview's live check does
+    exactly that -- moonglade_gallery.py's DELETE_PREVIEW_LIVE_BUDGET_S).
 
     RETRIED with backoff -- the same 3-retry shape `gql_adhoc` gives any query -- because a
     single blip here is read downstream as a LOST GENERATION. The moment that matters is the
@@ -2453,7 +2463,8 @@ def task_detail_gql(session, task_id, retries=3):
     # gone" -- the seam's raise is caught here and turned back into None.
     try:
         data = _client_of(session).persisted(
-            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries)
+            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries,
+            timeout=timeout)
     except (PixAIError, requests.RequestException) as e:
         print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
               "is lost -- this call only READS a task, so the generation and its credits are "

@@ -65,12 +65,30 @@ function withParams(path, params) {
   return s ? path + (path.includes("?") ? "&" : "?") + s : path;
 }
 
+/* `timeoutMs` / `timeoutMessage` are OURS, not fetch's: they are lifted out of the init before
+   it goes anywhere near the browser. A route with a wall-clock ceiling of its own passes the
+   two so a server that goes silent still ends as an ordinary {error} answer the caller already
+   branches on, in plain words, instead of a spinner with no end
+   (/api/delete-preview is the one caller today). Nothing else changes: no timeoutMs, no
+   AbortController, exactly the bare fetch every other call has always made. */
 async function request(path, init) {
+  const { timeoutMs, timeoutMessage, ...rest } = init || {};
+  let ctl = null, timer = 0;
+  if (timeoutMs > 0 && typeof AbortController !== "undefined") {
+    ctl = new AbortController();
+    if (!rest.signal) rest.signal = ctl.signal;
+    timer = setTimeout(() => ctl.abort(), timeoutMs);
+  }
   let r;
   try {
-    r = await fetch(path, init);
+    r = await fetch(path, rest);
   } catch (e) {
+    if (ctl && ctl.signal.aborted) {
+      return { error: timeoutMessage || "timed out waiting for the server", timed_out: true };
+    }
     return { error: "network error: " + (e && e.message ? e.message : "unreachable") };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   let d = null;
   try { d = await r.json(); } catch { d = null; }   // an HTML error page, a 204, a cut stream
@@ -230,9 +248,24 @@ export function downloadZipForm(idList) {
   f.remove();
 }
 
+/* The blast-radius preview. It reads every selected task back from PixAI, so it is the one
+   call in this module that can legitimately take seconds -- and the server bounds itself at
+   DELETE_PREVIEW_LIVE_BUDGET_S (12s). This waits a little longer than that ceiling and then
+   stops: 15s means an ordinary slow answer still arrives, and a server that has gone silent
+   ends as a plain sentence rather than a dialog that never opens.
+
+   Answers three ways, and the caller must tell them apart: the preview itself (it has
+   `totals`), an {error} the caller can show, or null when the route answered something
+   unusable. ActionsMenu falls back to the prose-only confirm on either of the last two. */
+export const DELETE_PREVIEW_MS = 15000;
+
 export async function deletePreview(idList) {
-  const d = await apiPost("/api/delete-preview", { media_ids: idList });
-  return d && d.totals ? d : null;
+  const d = await apiPost("/api/delete-preview", { media_ids: idList }, {
+    timeoutMs: DELETE_PREVIEW_MS,
+    timeoutMessage: "PixAI did not answer in time, so the preview could not be built.",
+  });
+  if (d && d.totals) return d;
+  return d && d.error ? { error: d.error } : null;
 }
 
 export async function fetchCollections() {
