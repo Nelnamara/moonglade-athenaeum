@@ -157,13 +157,13 @@ export default function ControlMobile({ account }) {
   /* ---- THE UPDATE, on the phone (owner ruling 2026-09-07: "phone gets update") ---------
      Nothing about updates showed on this surface before today -- the apply flow was the
      desktop Panel's modal and only that, so a person holding the phone could be told a
-     release was out and have nowhere to go with it. The apply route is already
-     @tier(LOGIN), so this is a
-     surface, not a policy change: the SAME useControlPanel() applyUpdate the desktop modal
-     calls (that hook is the one module allowed to name the apply route, and still owns the
-     POST, its explicit CSRF token and its confirm), drawn through the SAME UpdatePhases.jsx card, with the reload and the receipt
-     already working here because notify/index.jsx claims the receipt once per boot on
-     whichever shell booted (main.jsx mounts NotifyRoot on both).
+     release was out and have nowhere to go with it. The apply route is already @tier(LOGIN),
+     so this is a surface, not a policy change: the SAME useControlPanel() applyUpdate the
+     desktop modal calls -- that hook is the one module in gallery/src allowed to name the
+     apply route, and still owns the POST, its explicit CSRF token and its confirm -- drawn
+     through the SAME UpdatePhases.jsx card, with the reload and the receipt already working
+     here because notify/index.jsx claims the receipt once per boot on whichever shell booted
+     (main.jsx mounts NotifyRoot on both).
 
      A drill-in, like Branding: the confirm and the running phases are a place you go from
      the Control tab and come back from, which is exactly MobileScreen.jsx's shape and
