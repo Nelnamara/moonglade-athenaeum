@@ -122,6 +122,14 @@ describe("the wiring: the move", () => {
     assert.match(app, /import \{ landingAfterViewer \} from "\.\/lib\/viewerLanding\.js";/);
     assert.match(app, /const where = landingAfterViewer\(\{/);
   });
+
+  test("a changed page does not wait for a card that will never paint", () => {
+    // The answer there is the top of the page and needs no card; waiting twenty frames
+    // for one would put a third of a second of visible delay on the exact case this
+    // exists to fix.
+    assert.match(app, /!pageChanged && snap\.mediaId && !cardFor\(snap\.mediaId\)/);
+    assert.match(app, /\+\+waited < 20/, "the wait is bounded -- a close can never hang");
+  });
 });
 
 describe("the wiring: finding the card", () => {

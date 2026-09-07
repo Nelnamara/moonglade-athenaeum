@@ -1004,18 +1004,23 @@ export default function App({ boot }) {
         .getPropertyValue("--mgx-chrome-h"));
       return Number.isFinite(v) ? v : 0;    // the sticky header App publishes (grid.css:54)
     };
+    const pageChanged = snap.page !== snap.openPage;
     let raf = 0, waited = 0;
     const run = () => {
-      // The lock, and the card the new page has not painted yet, are the same wait.
+      // Two reasons to wait a frame, both bounded at 20 so a close can never hang: the
+      // lock is still on, or the card has not painted yet. The card wait is skipped when
+      // the page changed -- the answer there is the top of the page, which needs no card,
+      // and waiting for one that will never appear would cost a third of a second of
+      // visible delay on the very case this whole thing exists to fix.
       if ((document.body.style.overflow === "hidden"
-           || (snap.mediaId && !cardFor(snap.mediaId))) && ++waited < 20) {
+           || (!pageChanged && snap.mediaId && !cardFor(snap.mediaId))) && ++waited < 20) {
         raf = requestAnimationFrame(run);
         return;
       }
       const card = snap.mediaId ? cardFor(snap.mediaId) : null;
       const box = card ? card.getBoundingClientRect() : null;
       const where = landingAfterViewer({
-        pageChanged: snap.page !== snap.openPage,
+        pageChanged,
         cardTop: box ? box.top : null,
         cardBottom: box ? box.bottom : null,
         viewportTop: chromeTop(),
