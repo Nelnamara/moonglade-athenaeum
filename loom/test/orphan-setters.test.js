@@ -29,7 +29,8 @@ describe("no orphan setters", () => {
     test(path.basename(file) + " calls only setters it declares", () => {
       const src = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
       const declared = declaredSetters(src);
-      const called = new Set([...src.matchAll(/\b(set[A-Z]\w*)\s*\(/g)].map(m => m[1]));
+      // a bare call only -- lib.setItems(...) is a method on an object, not a local setter
+      const called = new Set([...src.matchAll(/(?<![.\w])(set[A-Z]\w*)\s*\(/g)].map(m => m[1]));
       // DOM/JS builtins that look like setters
       for (const b of ["setTimeout", "setInterval", "setAttribute", "setItem", "setProperty", "setRequestHeader", "setPointerCapture", "setSelectionRange", "setState", "setDate", "setHours", "setMinutes", "setSeconds", "setMilliseconds", "setFullYear", "setMonth", "setTime", "setUTCHours", "setPrototypeOf"]) called.delete(b);
       const orphans = [...called].filter(n => !declared.has(n)).sort();
