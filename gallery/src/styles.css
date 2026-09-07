@@ -299,8 +299,14 @@ button:disabled { cursor: default; }
    nothing that loads this sheet carries a bare `grid` class any more. Grid.jsx
    renders .mgg-grid and grid.css owns the cards -- as that file's own header
    (grid.css:6) already said, it "detaches the old styles.css .grid card rules
-   wholesale". .gridwrap, .tipbar, .stars, .vbadge, .tick, .sentinel and .srcbadge
-   below are NOT part of that block and are still live. ---- */
+   wholesale". .gridwrap, .tipbar, .stars, .vbadge, .tick and .sentinel below are
+   NOT part of that block and are still live -- each one re-checked against a render
+   site: .gridwrap Grid.jsx:813, .tipbar Grid.jsx:818, .sentinel Grid.jsx:890,
+   .stars Stars.jsx:9, .vbadge DetailsView.jsx:732, .tick ContestConfirm.jsx:86.
+   (.srcbadge was named in that same sentence until 2026-09-07 and did NOT belong:
+   nothing in the repo has ever rendered it. The grid card's real source label is
+   grid.css's .mgg-pill -- Grid.jsx:753 -- so the rule went the way of the block it
+   had been standing beside.) ---- */
 .gridwrap { padding: 0 0 60px; }
 /* the separator bar: a real band, not a floating caption */
 .tipbar { display: flex; align-items: center; gap: 12px; padding: 6px 16px;
@@ -319,10 +325,6 @@ button:disabled { cursor: default; }
 .tick.on { color: var(--base); background: var(--accent); border-color: var(--accent); }
 .sentinel { text-align: center; padding: 26px 0 10px; font-size: 11px;
   color: var(--overlay0); font-style: italic; }
-.srcbadge { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 9px;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--subtext);
-  background: rgba(8, 6, 18, .75); border-radius: 8px; padding: 2px 7px;
-  border: 1px solid var(--surface1); }
 
 /* ---- real pagination: Prev/Next + windowed numbers, replacing infinite scroll ---- */
 .pagebar { display: flex; justify-content: center; align-items: center; gap: 6px;
