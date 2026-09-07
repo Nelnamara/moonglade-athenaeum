@@ -15469,10 +15469,38 @@ def create_app(out_dir: Path):
         return jsonify({"skin": skin})
 
     def _ach_sid():
-        """This session's beacon identity: a random id minted once and kept in the
-        session cookie, the same way `csrf` is. Nonces are bound to it, and the
-        debounce and rate limit are keyed on it."""
-        return session.setdefault("ach_sid", secrets.token_hex(16))
+        """This session's beacon identity: the LOGIN's own stable identity -- the account
+        name plus the `csrf` token _establish_session() mints AT LOGIN -- fingerprinted,
+        with the caller's address as a second key. Nonces are bound to it, and the debounce
+        and the rate limit are keyed on it.
+
+        REPLACING (2026-09-07, refining the same day's nonce ruling) a lazy
+        `session.setdefault("ach_sid", secrets.token_hex(16))`. The Flask session is a
+        client-held signed cookie, and _is_authorized_request() re-validates only
+        user/sess_epoch -- so the cookie handed out at login is still valid, still
+        authorized, and carries NO ach_sid. setdefault therefore minted a fresh one on
+        every replay of it, and with it a fresh 30-call budget and a fresh debounce slate:
+        the limit this route's own docstring calls the stop for a scripted replay loop did
+        not bind at all (60 rounds, 60 sids, no 429). The key had to be something a client
+        cannot vary by replaying an OLDER cookie, and both halves of this one are written
+        once, at login, by the single _establish_session() that defines what a session is
+        -- a replayed cookie carries the same pair, so it draws on the same budget. The
+        address is a second key so two devices signed into one account keep budgets of
+        their own rather than sharing (and colliding on) one.
+
+        The csrf token is HASHED rather than used raw: it is the same token that guards the
+        write routes, and a long-lived process dict is not a place to leave it lying about.
+        The lazy random id survives only as the fallback for a session with no login
+        identity at all -- nothing behind @tier(LOGIN) can reach that, but the render seams
+        call this too, and a no-accounts first render has no `user` to key on."""
+        import hashlib
+        user = str(session.get("user") or "")
+        tok = str(session.get("csrf") or "")
+        if user and tok:
+            who = hashlib.sha256(("%s\x00%s" % (user, tok)).encode("utf-8")).hexdigest()[:16]
+        else:
+            who = "anon:" + session.setdefault("ach_sid", secrets.token_hex(16))
+        return "%s@%s" % (who, _client_ip())
 
     @app.route("/api/ach-nonce")
     @tier(LOGIN)

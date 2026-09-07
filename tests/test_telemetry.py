@@ -410,6 +410,45 @@ def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
+def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
+    """The budget follows the LOGIN, not the copy of the cookie the client is holding.
+
+    The Flask session is a client-held signed cookie, and _is_authorized_request() only
+    re-validates user/sess_epoch -- so a client can keep presenting the copy it was handed
+    at login for as long as that login lives. _ach_sid() used to lazily setdefault a random
+    id INTO that cookie, so every replay of a copy taken before the id existed minted a new
+    id, and with it a fresh 30-call budget and a clean debounce slate: the limit the route's
+    own docstring calls the stop for a scripted replay loop did not bind at all (probed
+    2026-09-07: 60 rounds, 60 sids, no 429). Keyed on the login's own stable identity, the
+    replays all draw on one budget."""
+    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    app = g.create_app(tmp_path)
+    cli = login_test_client(app)
+    c0 = cli.get_cookie("session").value          # captured before any beacon call
+
+    def replay():
+        """A brand-new client that knows nothing but the captured cookie -- what a script
+        replaying its own POST /api/login response has."""
+        c = app.test_client()
+        c.set_cookie("session", c0)
+        return c
+
+    rounds = g._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
+    for i in range(rounds):
+        c = replay()
+        d = c.get("/api/ach-nonce").get_json()
+        assert d.get("nonce"), "round %d refused early: %r" % (i + 1, d)
+        r = c.post("/api/ach-event", json={"event": "narrator", "nonce": d["nonce"]})
+        assert r.status_code == 200, "round %d: %r" % (i + 1, r.get_json())
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
+    # call 31 of the window, on a cookie as fresh as every other replay: still refused.
+    c = replay()
+    assert c.get("/api/ach-nonce").status_code == 429
+    assert c.post("/api/ach-event",
+                  json={"event": "narrator", "nonce": "anything"}).status_code == 429
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
+
+
 @needs_donor
 def test_api_skin_change_bumps_interior_decorator(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
