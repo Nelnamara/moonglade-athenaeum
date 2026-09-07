@@ -15,6 +15,20 @@
    Z bands: components 0–7 only (the dock/overlays own 300–500 elsewhere).
    ========================================================================== */
 
+/* ---- THE ONE MARK SIZE ------------------------------------------------------
+   The marks workshop's ruling (2026-08-31): "Hero 96, Slim 56, All scales from
+   Hero." Both numbers used to be literals in the two rules below, and the three
+   OTHER surfaces that render a mark carried three more unrelated literals of
+   their own (login 88, login-mobile 66, gallery-mobile 50) — so "all scales from
+   hero" was true only until someone changed one of them. They are tokens now:
+   every other site states its own size as a RATIO of --mark-hero, so changing the
+   hero here reaches all of them. Declared on :root (one CSS bundle, gallery/dist/
+   app.css) so the login and phone stylesheets can read them too. */
+:root {
+  --mark-hero: 96px;
+  --mark-slim: 56px;
+}
+
 /* ---- the mg* keyframes this shell uses (Frontend Gallery.dc.html lines 19–40,
    verbatim). Other workstreams may re-declare identical copies — identical
    definitions collide harmlessly. */
@@ -172,13 +186,16 @@
 .mgx-flavour.fA { animation: mgFlavourA .5s cubic-bezier(.2, .9, .24, 1) both; }
 .mgx-flavour.fB { animation: mgFlavourB .5s cubic-bezier(.2, .9, .24, 1) both; }
 
-/* 96×96 living mark: tilt 9s, sheen 6.2s, static halo. The size is the marks
-   workshop's ruling (2026-08-31, "Hero 96, Slim 56, All scales from Hero") -- it was
-   58/34, and every other surface that renders a mark moved with it by the same ratio.
-   The animation engine's own geometry rides this size in em (see mark-anims.css). */
-.mgx-mark { flex: none; position: relative; width: 96px; height: 96px; perspective: 320px;
+/* The living mark: tilt 9s, sheen 6.2s, static halo. The size is the marks workshop's
+   ruling (2026-08-31, "Hero 96, Slim 56, All scales from Hero") -- it was 58/34, and every
+   other surface that renders a mark moved with it by the same ratio. Both numbers now live
+   once, as --mark-hero / --mark-slim at the top of this file, and every other site derives
+   from them; nothing states 96 or 56 again. The animation engine's own geometry rides this
+   size in em (see mark-anims.css). */
+.mgx-mark { flex: none; position: relative; width: var(--mark-hero); height: var(--mark-hero);
+  perspective: 320px;
   transition: width .5s cubic-bezier(.2, .9, .24, 1), height .5s cubic-bezier(.2, .9, .24, 1); }
-.mgx-bnr.slim .mgx-mark { width: 56px; height: 56px; }
+.mgx-bnr.slim .mgx-mark { width: var(--mark-slim); height: var(--mark-slim); }
 /* No accent-tile background or centered "M": both were the comp's placeholder mark and
    showed through behind a real alpha mark (Nightfallen / Winged Crescent) -- issue #24 pt 2.
    The <img> alone carries the mark; the tilt/sheen/halo treatment stays. */
