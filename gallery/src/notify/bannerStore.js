@@ -69,15 +69,107 @@ export function expand() { if (collapsed) { collapsed = false; emit(); } }
                                 run its mount effect again.
 
    With no host registered -- the Loom, which has no Control Panel -- the press goes to the
-   gallery, which does. Already there (the setup wizard) it does nothing rather than
-   reloading a page that cannot help. --------------------------------------------------- */
+   gallery, which does. Already there (the setup wizard) there is nowhere to send it, and the
+   strip says so instead of drawing a button that cannot work (see updateAffordance below;
+   2026-09-07, later the same day, correcting a silently dead Update on the wizard shell).
+   ------------------------------------------------------------------------------------- */
 let host = null;
 let pendingOpen = false;
 const openSubs = new Set();
+const hostSubs = new Set();
+
+/* THE INTENT ACROSS A DOCUMENT LOAD (2026-09-07, later the same day, refining the two-halves
+   design above). `pendingOpen` is memory, and the Loom's press is window.location.assign("/")
+   -- a full load that throws that memory away, so the gallery came back with nothing open and
+   the press had to be made a second time. The intent is therefore written down for the
+   crossing and read back once by whichever shell registers a host on the other side.
+
+   sessionStorage rather than localStorage: this belongs to THIS tab's navigation and must not
+   leak into a second window, and it must not outlive the crossing. A browser with storage
+   blocked throws on the property access itself, so the fallback is a ?update=1 the boot reads
+   once and strips out of the address bar -- the intent survives either way. */
+const CARRY_KEY = "mg_update_open_intent";
+
+function session() {
+  try { return (typeof window !== "undefined" && window.sessionStorage) || null; }
+  catch (e) { return null; }
+}
+
+function carryIntent() {
+  const s = session();
+  if (!s) return false;
+  try { s.setItem(CARRY_KEY, "1"); return true; } catch (e) { return false; }
+}
+
+let carriedQueryRead = false;
+
+function takeCarriedQuery() {
+  /* Once per document, whatever the address bar still says: replaceState is what normally
+     takes the marker back out, and a browser without it must not re-open the surface on
+     every shell that registers. */
+  if (carriedQueryRead) return false;
+  if (typeof window === "undefined" || !window.location) return false;
+  const search = String(window.location.search || "");
+  if (search.indexOf("update=1") < 0) return false;
+  try {
+    const params = new URLSearchParams(search);
+    if (params.get("update") !== "1") return false;
+    carriedQueryRead = true;
+    params.delete("update");
+    const rest = params.toString();
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, "",
+        (window.location.pathname || "/") + (rest ? "?" + rest : "") + (window.location.hash || ""));
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
+function takeCarriedIntent() {
+  let found = false;
+  const s = session();
+  if (s) {
+    try { if (s.getItem(CARRY_KEY) !== null) { s.removeItem(CARRY_KEY); found = true; } } catch (e) { /* blocked */ }
+  }
+  if (takeCarriedQuery()) found = true;
+  return found;
+}
+
+/* "/" when a press here can be answered by navigating to the gallery, "" when it cannot --
+   either because this shell IS the gallery's front door (the setup wizard) or because there
+   is no browser to navigate. */
+function navigableTarget() {
+  if (typeof window === "undefined" || !window.location) return "";
+  return (window.location.pathname || "/") === "/" ? "" : "/";
+}
+
+/* WHAT THE STRIP MAY OFFER on the shell it is standing on. The Update button is drawn only
+   when the press can actually reach the surface that owns the confirm: a registered host, or
+   a gallery to cross to. On the setup wizard it is neither, so the strip states the reason
+   instead -- a button that silently does nothing is worse than no button. */
+export function updateAffordance() {
+  if (host) return { canOpen: true, why: "" };
+  if (navigableTarget()) return { canOpen: true, why: "open the gallery to update" };
+  return { canOpen: false, why: "finish setup first" };
+}
+
+export function hasUpdateHost() { return !!host; }
+
+/* The strip mounts before any shell registers, so it watches rather than asks once. */
+export function subscribeUpdateHost(fn) {
+  hostSubs.add(fn);
+  fn(!!host);
+  return () => hostSubs.delete(fn);
+}
 
 export function registerUpdateHost(fn) {
   host = fn;
-  return () => { if (host === fn) host = null; };
+  hostSubs.forEach((s) => s(true));
+  /* The other side of a crossing: a press made on the Loom a moment ago, carried through the
+     document load. Consumed here rather than by the surface itself, because the surface is
+     not mounted on a fresh boot -- the host is what mounts it. */
+  if (takeCarriedIntent()) { pendingOpen = true; fn(); }
+  return () => { if (host === fn) { host = null; hostSubs.forEach((s) => s(false)); } };
 }
 
 export function subscribeOpenIntent(fn) {
@@ -95,6 +187,7 @@ export function requestUpdateOpen() {
   pendingOpen = true;
   openSubs.forEach((fn) => fn());
   if (host) { host(); return; }
-  if (typeof window === "undefined" || !window.location) return;
-  if (window.location.pathname !== "/") window.location.assign("/");
+  const target = navigableTarget();
+  if (!target) return;
+  window.location.assign(carryIntent() ? target : target + "?update=1");
 }
