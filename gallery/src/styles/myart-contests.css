@@ -6,14 +6,18 @@
 /* ---- My Art, rebuilt 2026-08-06 to the handoff's tabbed-gallery design (Frontend
    Gallery.dc.html ovMyArt 599-809 / 2277-2436): 980px slab, sticky header with serif
    title + stat row + count-pill sub-tabs, dropdown toolbar, 3:4 card grid. The old
-   desktop ranked-list rules are gone with it; .mgma-barwrap/.mgma-bar/.mgma-footnote
+   desktop ranked-list rules are gone with it; .mgma-barwrap/.mgma-bar
    survive below as the ranked list's own bar.
 
    THE BAR CAME BACK, 2026-09-06. The note here used to say those three survived "because
    MyArtMobile still renders them", and that had quietly stopped being true -- nothing in
    gallery/src referenced .mgma-bar at all, on either shell. It is rendered again now, by
    both My Art shells, per card: the owner asked for a view count and the comparison bar on
-   every published work, and this is the bar that was designed for exactly that job. ---- */
+   every published work, and this is the bar that was designed for exactly that job.
+
+   .mgma-footnote did NOT come back with it, and was dropped 2026-09-07: the 2026-09-06
+   revival above restored the bar only, and nothing in gallery/src ever referenced the
+   footnote. ---- */
 .mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; display: flex;
   flex-direction: column; padding: 0; }
 .mgma2-head { flex: none; padding: 22px 26px 0; }
@@ -181,8 +185,6 @@ button.mgma2-toolbtn.danger { color: var(--red, #f38ba8); border-color: rgba(243
 
 .mgma-barwrap { height: 4px; border-radius: 2px; background: var(--surface0); overflow: hidden; }
 .mgma-bar { height: 100%; border-radius: 2px; background: var(--accent); }
-.mgma-footnote { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
-  font-style: italic; color: var(--overlay0); padding-top: 14px; }
 
 /* ---- My Art mobile row -- Moonglade Mobile.dc.html:506, artPostRowStyle/artRankStyle/
    artPostTitleStyle/dimTextStyle. A flat, dashed-divider LIST row -- no card chrome, no

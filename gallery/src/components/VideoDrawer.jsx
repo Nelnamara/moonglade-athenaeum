@@ -2,6 +2,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { apiUpload } from "../api.js";
+import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
 import { createPortal } from "react-dom";
 import CostBadge from "./CostBadge.jsx";
 import {
@@ -640,8 +641,12 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     </>
   ) : null;
 
+  /* The privacy blur rides the drawer's OWN root, read at render time -- the reference
+     slots' rules were keyed on `body.privacy-blur` until 2026-09-07 and nothing in the app
+     has ever set a class on <body>, so a flagged reference thumbnail sat here unblurred
+     while the same image was frosted in the grid behind it. */
   return (
-    <div ref={setRoot} className={"gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
+    <div ref={setRoot} className={"gen-drawer" + (inDock ? " mgd-dock" : "") + (inDock && dock.expanded === false ? " mgd-collapsed" : "") + privacyBlurClass(isPrivacyBlurOn()) + (className ? " " + className : "")} style={style} data-loom-ctx={loomCtx ? "" : undefined}>
       {/* The DC's expanded Video settings: three slabs (DC 1209-1210 grid; slab(i) 2876),
           rebalanced by §45 -- SHOT MODE + banks + CAMERA · ENGINE chip grid (alone) ·
           MODE & CHANNEL + switches + DURATION.

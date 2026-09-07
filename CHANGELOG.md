@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- Removed leftover styles from retired screens (the classic grid, the old Edit-tab slots, the retired jobs tray and others); nothing you see changes.
+- The Blur toggle now also blurs the gallery picker's thumbnails and the generate drawer's reference images.
 
 ## [3.9.0] - 2026-09-06 — Runs Itself
 - **A storyboard is somewhere you can go back to.** The Loom opened at one address, `/loom`, and which storyboard you found there was whichever one the app happened to remember — you could not bookmark a board, and you could not send yourself a link to the one you were working on. Each storyboard has its own address now: `/loom?board=…`, and the address in the bar follows whichever board is open, so it is always there to copy. A plain `/loom` still opens the last board you had open, exactly as before — that memory is the fallback now rather than the only answer, and the two can never disagree, because opening a board by address is what sets the memory. Following a link to a storyboard while signed out still lands you on **that** board once you have signed in, rather than the front of the Loom. And an address naming a storyboard this account doesn't have is not a broken page: you get the board you would have got anyway, with a note in the corner saying which one it opened and why. (2026-09-06)

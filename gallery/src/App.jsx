@@ -38,6 +38,7 @@ import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
+import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -101,12 +102,12 @@ export default function App({ boot }) {
   const [collections, setCollections] = useState(boot.collections || []);
   // ui -- blur shares the classic gallery's localStorage key on purpose: one
   // setting, both surfaces, exactly the classic semantics (all thumbs 16px,
-  // flagged 28px, hover reveals).
-  const [blur, setBlurState] = useState(
-    () => localStorage.getItem("gallery_privacy_blur") === "1"
-  );
+  // flagged 28px, hover reveals). The key moved into lib/privacyBlur.js on
+  // 2026-09-07 so the gallery picker and the generate drawer can read the SAME
+  // preference instead of the `body.privacy-blur` rules that never matched.
+  const [blur, setBlurState] = useState(isPrivacyBlurOn);
   const setBlur = (v) => {
-    localStorage.setItem("gallery_privacy_blur", v ? "1" : "");
+    setPrivacyBlurOn(v);
     setBlurState(v);
   };
   const [lbIndex, setLbIndex] = useState(null);

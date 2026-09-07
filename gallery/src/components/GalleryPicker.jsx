@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import PickerCore from "../picker/pickerCore.js";
 import { apiUpload } from "../api.js";
+import { isPrivacyBlurOn, privacyBlurClass } from "../lib/privacyBlur.js";
 import "../styles/gallery-picker.css";
 
 /* Faithful React port of static/mg-gallery-picker.js (2026-08-08, the vanilla static/ ->
@@ -141,7 +142,13 @@ export default function GalleryPicker({
     });
   };
 
-  const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "");
+  /* The privacy blur rides the picker's OWN root, not <body> -- read at render time so a
+     flip in the Control Panel reaches a picker that is already open, and so the Loom (which
+     mounts this same component with no App.jsx behind it) honours the preference too. Until
+     2026-09-07 gallery-picker.css keyed these thumbnails on `body.privacy-blur`, and nothing
+     in either shell has ever set a class on <body>, so the picker never blurred at all. */
+  const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "")
+    + privacyBlurClass(isPrivacyBlurOn());
   return (
     <div className={cls} style={{ "--mg-pk-tile": tile + "px" }}
       onClick={(e) => { if (e.target === e.currentTarget) doClose(); }}>

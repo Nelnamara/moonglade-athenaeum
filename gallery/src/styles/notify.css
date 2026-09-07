@@ -269,4 +269,4 @@
 .mg-toast .mt-x:hover{color:var(--text);}
 @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
-@media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
+@media (prefers-reduced-motion: reduce){ .mg-toast,.mg-toast.out{animation:none;} }
