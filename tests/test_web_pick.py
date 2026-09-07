@@ -150,21 +150,28 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     # The picker is the React GalleryPicker since 2026-08-08 (ported out of
     # static/mg-gallery-picker.js); the is_nsfw/data-nsfw handling moved with it, the
     # privacy-blur CSS to gallery-picker.css (element selector -> .mg-gallery-picker class).
+    # RE-KEYED 2026-09-07: the rule used to be body-scoped, and nothing in the app has ever
+    # put a class on <body>, so it never actually fired -- the assertion below passed on a
+    # selector that could not match. It is scoped to the picker's OWN root now, and the
+    # component is pinned to carry that class (loom/test/privacy-blur-surfaces.test.js).
     picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "GalleryPicker.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={m.is_nsfw === "1" ? "1" : undefined}' in picker_jsx
     assert 'is_nsfw: m.is_nsfw === "1"' in picker_jsx
     picker_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gallery-picker.css").read_text(encoding="utf-8")
-    assert 'body.privacy-blur .mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_css
+    assert '.mg-gallery-picker.mg-blur .mg-pk-cell[data-nsfw="1"] img' in picker_css
+    assert "body.privacy-blur" not in picker_css
 
     # The video drawer is the React <VideoDrawer> since 2026-08-08 (no-vanilla port); its slot
     # nsfw handling moved with it -- one shared slotBox() sets data-nsfw, the pick-request's
     # respond() still forwards is_nsfw, and the privacy-blur CSS moved to gen-drawer.css
-    # (element selector -> .gen-drawer class).
+    # (element selector -> .gen-drawer class). Re-keyed off <body> onto the drawer's own
+    # root 2026-09-07, same reason as the picker above.
     drawer_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "VideoDrawer.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={item && item.is_nsfw ? "1" : undefined}' in drawer_jsx
     assert "respond: (media_id, thumb, is_nsfw) =>" in drawer_jsx
     drawer_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gen-drawer.css").read_text(encoding="utf-8")
-    assert 'body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img' in drawer_css
+    assert '.gen-drawer.mg-blur .mgd-slot[data-nsfw="1"] img' in drawer_css
+    assert "body.privacy-blur" not in drawer_css
 
     loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
     # onGalleryPick (the React onPick prop) forwards the media fields as m.* now -- was the
