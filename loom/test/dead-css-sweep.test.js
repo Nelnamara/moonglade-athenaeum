@@ -40,9 +40,9 @@ function sources(rx) {
 }
 
 /* Block comments come OUT before anything is searched, on both sides. A class named in a
-   comment is prose -- not a render site, and not a rule: `.srch` outlived its own class in
-   Flyout.jsx's header sentence, and the sweep comment below names the very selectors it
-   removed. Only code counts as evidence, in either direction. */
+   comment is prose -- not a render site, and not a rule: `.srch` outlived its own class by
+   months inside Flyout.jsx's header sentence, and the sweep comments in styles.css name the
+   very selectors they removed. Only code counts as evidence, in either direction. */
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ");
 
 const jsxFiles = sources(/\.(jsx|js)$/);
@@ -87,6 +87,7 @@ describe("the swept selectors stay swept", () => {
   const SWEPT = [
     ["srcbadge", "mgg-pill", "the grid card's source label (grid.css, Grid.jsx)"],
     ["gd-slot", "mgdock-srcslot", "the Edit tab's reference slots (dock.css, EditTab.jsx)"],
+    ["srch", "mgl-search", "the library's search slab (librarybar.css, FiltersPanel.jsx)"],
   ];
 
   for (const [dead, alive, where] of SWEPT) {

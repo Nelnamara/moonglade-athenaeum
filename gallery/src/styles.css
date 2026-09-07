@@ -87,14 +87,11 @@ button:disabled { cursor: default; }
 .stats { font-size: 12px; color: var(--subtext); white-space: nowrap; }
 .stats b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
 
-.srch { position: relative; flex: 1 1 250px; min-width: 180px; max-width: 470px; }
-.srch i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-  font-style: normal; font-size: 11px; color: var(--overlay0); }
-.srch input { width: 100%; font-size: 12px; color: var(--text); border-radius: 20px;
-  padding: 9px 90px 9px 30px; border: 1px solid rgba(255, 255, 255, .18);
-  background: rgba(20, 17, 40, .55); backdrop-filter: blur(14px);
-  box-shadow: 0 0 34px -10px color-mix(in srgb, var(--cyan) 45%, transparent); }
-.srch input::placeholder { color: var(--overlay0); }
+/* (The .srch search-slab cluster -- .srch, .srch i, .srch input, .srch input::placeholder --
+   was removed 2026-09-07. FiltersPanel.jsx:254 renders the slab as .mgl-search, styled in
+   styles/librarybar.css:60-88, and its magnifier is .mgl-sglyph; nothing has carried a bare
+   `srch` class since. The .fly flyout below still anchors correctly: it positions against
+   .mgl-search, which sets `position: relative` itself.) */
 
 /* ---- the Advanced flyout: ANCHORED to the search slab, never placed ----
    Its old trigger pill .adv/.adv.has was removed 2026-09-07: FiltersPanel.jsx:281
