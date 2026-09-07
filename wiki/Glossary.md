@@ -3,8 +3,9 @@
 The names for the things you see in Moonglade Athenaeum, so a report can say *where* as well as
 *what*. Each line says what the thing is and where you meet it.
 
-- **Activity** — the running list of what the app has just done. The button sits at the bottom-left
-  of the gallery, and again in The Loom.
+- **Activity** — the running list of what the app has just done. The button sits at one end of
+  the bar under the banner — the right by default, and the panel's own header moves it to the
+  left — and again in The Loom's top bar.
 - **AI Tools** — the **✦ AI Tools** catalog in the gallery header: PixAI's one-click workflow tools,
   one card each. The entry only appears once **Mirror to PixAI** is armed.
 - **the art pack** — the file the app's own art ships in, `moonglade.dat`, sitting beside the
@@ -22,21 +23,26 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   [Control Panel](Control-Panel).
 - **the Darkroom** — the full-screen room the art filters live in: the dock → **Edit** → **Enhance**
   → **Open the Darkroom ▸**.
-- **the detail page** — a picture's own page, reached from the lightbox's *Details*: the whole
-  generation record, Copy Prompt, **↺ Remix**, and LINEAGE.
+- **the detail page** — a picture's own page, reached from the lightbox's **Details**: the whole
+  generation record, **⧉ Copy prompt**, **↺ Remix**, and **LINEAGE**.
 - **the dock** — the generate panel docked at the bottom of the screen, opened with **✦ Generate**.
   Also called the Generate drawer. See [Generating](Generating).
 - **feat** — a **Feats of the Athenaeum** achievement. Worth no points on purpose, and the whole
   section stays hidden until your first one lands.
 - **the filter bar** — the row of search, filter, sort and layout controls above the Library.
-- **the Fixer** — the drag-a-box hand and face repair on the dock's **Edit** tab.
+- **the Fixer** — drawing a box over a hand or a face and having PixAI repair it. **It is not
+  built yet.** On a computer the dock's **Edit** tab offers **Edit** and **Enhance** and nothing
+  else; on a phone, **Create → Edit → Fixer** is a placeholder that says touch box-drawing is
+  still to come. The one-click **Handfix** and **Face Enhance** presets under **Enhance** are
+  what do that job today.
 - **The Folio of Honors** — the **🏆** overlay: achievements, ladders, points and skins.
 - **the Identity strip** — the mark and skin, shown as a pair, at the foot of the Control Panel's
   Maintenance tab.
 - **ladder** — one of the Folio's ten tracks, climbed rung by rung from common to legendary.
 - **LAN session** — a browser that reached the gallery across your network rather than from the
-  machine running it. The header says so with a **🌐 LAN session** chip, and some controls are not
-  drawn for it.
+  machine running it — a phone or a laptop on your own Wi-Fi. Nothing on screen announces it;
+  you meet it as controls that are simply not drawn: **Import**, and the Control Panel's
+  machine-only buttons. Everything else, including watching a job run, works as normal.
 - **the launcher** — **`Serve Gallery.pyw`**, the double-click way to start the gallery with no
   console window. See [Setup](Setup).
 - **the Library** — the grid of your pictures: the gallery's home screen, and what a popup covers.
