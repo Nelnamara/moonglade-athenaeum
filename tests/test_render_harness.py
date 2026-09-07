@@ -3926,3 +3926,166 @@ def test_each_tab_keeps_its_own_scroll(
             "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# A branding file DROPPED into a slot folder, all the way to the browser
+# ---------------------------------------------------------------------------
+# tests/test_branding.py already covers the sweep as a FUNCTION (adopt, delete the raw
+# file, register the asset, fire the feat) against Flask's test client. Nothing covered
+# the trip the owner actually takes: put a picture in the folder, reload the page, and
+# see the app wearing it. That is three mechanisms in a row, and a unit test can see none
+# of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
+# -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
+# friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
+_UNDER_THE_HOOD = "under-the-hood"     # the hidden feat sweep_branding_drops() fires
+_DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
+#                                        served pixel PROVES it came from this exact drop
+_DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the
+#                                        whole picture and the colour check stays meaningful
+
+
+def _png_of(size, rgb):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _decode(raw):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(raw))
+    im.load()
+    return im
+
+
+def test_a_dropped_branding_file_is_adopted_and_the_browser_wears_it(
+        logged_in_page, render_server, tmp_path):
+    """Drop a PNG into a slot folder; reload; the app is wearing it.
+
+    Order-independent by construction, and that is worth spelling out because this test
+    writes to two trees, one of which OUTLIVES it:
+
+      * the branding tree is `tmp_path/branding` -- conftest's autouse `_isolated_branding`
+        re-points branding_root() there for the duration of THIS test, so the folder the
+        drop lands in (and the adopted asset, the manifest and the rendered flat that
+        follow it) evaporates with the test. Asserted below rather than assumed: a test
+        that drops files into a real folder must prove first that the folder is the
+        throwaway one.
+      * the feat's earn-state lives in the module server's out_dir, which every later test
+        in this file shares. So this one snapshots the two files it disturbs -- the
+        telemetry flags and the achievement state -- and restores them in a `finally`,
+        whether it passes or not.
+
+    THREE preconditions have to be undone for the celebration to be a real earn rather
+    than a re-run of an already-recognized one, and each is a fixture decision made for an
+    unrelated reason:
+      1. render_server pre-seeds the `branding_custom_file` flag, to unlock the Branding
+         tab for the Control Panel test -- cleared here, so the sweep is what sets it;
+      2. it pre-marks every earned achievement `seen`, to stop boot toasts -- this feat is
+         un-seen here, so its own toast is allowed to fire;
+      3. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
+         library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
+         and the fixture computes those BEFORE conftest's per-test sealed container exists
+         -- module-scoped fixtures set up ahead of function-scoped autouse ones -- so they
+         land empty and the gate reads "still syncing" for the life of the module. An
+         install with a fully swept catalog, which is exactly what this harness serves, has
+         that flag set; it is set here for the same reason the API key above it is.
+
+    The achievement half is donor-gated exactly like the Branding tab in
+    test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
+    moonglade.dat, so donor-absent (public CI) there is no `under-the-hood` to earn and no
+    toast to wait for. The adoption half -- the part with no coverage at all -- runs either
+    way.
+    """
+    import moonglade_gallery as _g
+    from moonglade_gallery import list_slot_assets, load_ach_state
+
+    slot = "banner_main"
+    sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
+    assert tmp_path in sdir.parents, (
+        "branding_root() is {} -- not under this test's tmp_path. Refusing to write a "
+        "drop into a real branding tree.".format(_g.branding_root()))
+    sdir.mkdir(parents=True, exist_ok=True)
+
+    root = render_server.root
+    before_ids = {a["id"] for a in list_slot_assets(root, slot)}
+    flags_before = dict(load_telemetry(root)["flags"])
+    ach_before = load_ach_state(root)
+
+    try:
+        # --- put the feat back to genuinely-unearned, and open the celebration gate ---
+        _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
+        telem_flag("first_sync_done", out_dir=root)
+        save_ach_state(root, dict(ach_before, seen=[
+            i for i in (ach_before.get("seen") or []) if i != _UNDER_THE_HOOD]))
+        assert not load_telemetry(root)["flags"].get("branding_custom_file")
+
+        page = logged_in_page(**DESKTOP)
+
+        # --- the drop itself: a picture, by hand, into the slot folder ---
+        drop = sdir / "my_own_banner.png"
+        drop.write_bytes(_png_of(_DROP_SIZE, _DROP_RGB))
+        assert drop.exists()
+
+        # --- the reload the owner would do. The boot fetch is what runs the sweep, so
+        # wait on THAT response, not on a wall-clock guess: when it lands, so has the
+        # adoption -- and its body is the payload the celebration engine reads.
+        with page.expect_response(
+                lambda r: "/api/achievements" in r.url and r.request.method == "GET") as boot:
+            _visit(page, "/")
+
+        # 1. the raw drop is consumed, not left sitting beside the adopted copy
+        assert not drop.exists(), (
+            "the dropped file is still in the slot folder -- the sweep never adopted it")
+
+        # 2. the slot now holds exactly one NEW asset, and the app really serves it
+        after = [a for a in list_slot_assets(root, slot) if a["id"] not in before_ids]
+        assert len(after) == 1, "expected one newly adopted asset, got {}".format(after)
+        asset = after[0]
+        assert asset["png"] == "/branding/%s/%s.png" % (slot, asset["id"])
+
+        # Fetched through the BROWSER's own context (its session cookie, its base_url), so
+        # this is the URL the page itself asks for -- coded-rel translation included.
+        got = page.request.get(asset["png"])
+        assert got.status == 200, "{} served {}".format(asset["png"], got.status)
+        im = _decode(got.body())
+        assert im.format == "PNG"
+        assert im.size == _DROP_SIZE, (
+            "the served asset is {}, not the dropped picture's own {}".format(
+                im.size, _DROP_SIZE))
+        assert im.convert("RGB").getpixel((600, 150)) == _DROP_RGB, (
+            "the slot serves SOMETHING, but not the file that was dropped")
+
+        # 3. ...and the flat the header actually paints was re-rendered from it, which is
+        # the difference between "stored" and "worn" (add_slot_asset -> _write_banner_flat).
+        flat = page.request.get("/branding/banner.png")
+        assert flat.status == 200, "/branding/banner.png served {}".format(flat.status)
+        flat_im = _decode(flat.body()).convert("RGB")
+        assert flat_im.size == (1920, 480), "banner_main's flat is {}".format(flat_im.size)
+        assert flat_im.getpixel((960, 240)) == _DROP_RGB, (
+            "the header's flat did not re-render from the adopted drop")
+
+        # 4. the sweep really fired the feat, and it really paid out ON SCREEN.
+        # Donor-gated: no sealed roster, no achievement to earn and nothing to celebrate.
+        assert load_telemetry(root)["flags"].get("branding_custom_file"), (
+            "the adoption did not fire branding_custom_file")
+        if _SEALED_DONOR.is_file():
+            payload = boot.value.json()
+            assert _UNDER_THE_HOOD in (payload.get("newly") or []), (
+                "the boot fetch did not report the feat as newly earned: newly={!r}"
+                .format(payload.get("newly")))
+            page.wait_for_selector(".ach-m2")
+            shown = page.locator(".ach-m2").first.inner_text()
+            assert "Under the Hood" in shown, (
+                "a celebration fired, but not the one the drop earns: {!r}".format(shown))
+            # Leave the screen clear for whatever runs next -- see the helper's docstring.
+            _dismiss_any_achievement_toast(page)
+            assert page.locator(".ach-m2").count() == 0
+    finally:
+        # The module's shared out_dir goes back byte-for-byte, pass or fail: the flags this
+        # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
+        _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
+        save_ach_state(root, ach_before)
