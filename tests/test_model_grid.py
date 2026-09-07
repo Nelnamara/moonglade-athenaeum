@@ -214,6 +214,103 @@ def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch
     assert listed[0]["model_type"] == single["model_type"]
 
 
+# ---- the version meta carries the model's ALLOWED inference profiles ---------------------
+# SCOPE 2026-08-17 §4b, capture PROBE 2026-08-25: the profile set is per VERSION, not fixed
+# (Tsubaki.2 = lite/standard/pro/ultra incl. a membershipOnly Ultra; Tsubaki.3 = pro/ultra
+# only). It is NOT in the /versions row, so the resolver runs a SECOND, version-keyed read
+# (_model_profiles, the same one the price/submit gate uses) and hands the drawer the plain
+# profileName list it needs to dim a bar. PixAI is read-only here; the REST call is faked.
+
+_VERSIONS = [{"id": "V7", "modelType": "MMDIT26A_MODEL", "loraBaseModelType": None,
+              "createdAt": "2026-08-25T00:00:00Z", "extra": {}},
+             {"id": "V6", "modelType": "MMDIT26A_MODEL", "loraBaseModelType": None,
+              "createdAt": "2026-08-01T00:00:00Z", "extra": {}}]
+
+_TSUBAKI2 = {"profiles": [
+    {"profileName": "lite", "title": "Lite", "samplingSteps": 4, "profileFlag": "default",
+     "negativePrompt": "off"},
+    {"profileName": "standard", "title": "Standard", "samplingSteps": 8,
+     "profileFlag": "custom", "negativePrompt": "off"},
+    {"profileName": "pro", "title": "Pro", "samplingSteps": 35, "profileFlag": "custom",
+     "negativePrompt": "on"},
+    {"profileName": "ultra", "title": "Ultra", "samplingSteps": 50,
+     "profileFlag": "membershipOnly", "negativePrompt": "on"},
+]}
+
+
+def _route(versions=_VERSIONS, profiles=_TSUBAKI2, calls=None):
+    """One fake for BOTH reads: /versions answers rows, /inference-profiles answers the
+    captured body. `profiles` may be an exception instance to fail that read only."""
+    def get(session, path, **k):
+        if calls is not None:
+            calls.append(path)
+        if path.endswith("/inference-profiles"):
+            if isinstance(profiles, Exception):
+                raise profiles
+            return profiles
+        return versions
+    return get
+
+
+def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    m = core.resolve_version_meta(object(), "M1")
+    assert m["version_id"] == "V7"
+    # plain profileNames, in the order the site returned them -- membershipOnly Ultra
+    # INCLUDED (the site's own rejection path owns membership, not this display gate)
+    assert m["profiles"] == ["lite", "standard", "pro", "ultra"]
+    # the second read is version-keyed, not model-keyed (the model route 404s on a version)
+    assert "/generation-model/V7/inference-profiles" in calls
+
+    # Tsubaki.3's real shape: only two profiles, so the drawer dims lite + standard
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": [
+        {"profileName": "pro", "profileFlag": "default"},
+        {"profileName": "ultra", "profileFlag": "custom"}]}))
+    core._profile_cache.clear()
+    assert core.resolve_version_meta(object(), "M1")["profiles"] == ["pro", "ultra"]
+
+
+def test_version_meta_profiles_survive_a_failed_read(monkeypatch):
+    """A failed/unparseable profile read must never break the resolve or lose the rest of
+    the meta -- it leaves profiles=None, which the drawer reads as "unknown, dim nothing"."""
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("nope")))
+    m = core.resolve_version_meta(object(), "M1")
+    assert m["profiles"] is None and m["version_id"] == "V7"
+    assert m["model_type"] == "MMDIT26A_MODEL"          # the rest of the shape is intact
+
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=RuntimeError("socket")))
+    assert core.resolve_version_meta(object(), "M1")["profiles"] is None
+
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}))   # wrong body key
+    assert core.resolve_version_meta(object(), "M1")["profiles"] is None
+
+    # An SDXL model answers a definitive `{"profiles": []}` -- a real answer, not a failure.
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": []}))
+    assert core.resolve_version_meta(object(), "M1")["profiles"] == []
+
+    # No version at all -> the empty shape still carries the key.
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
+    assert core.resolve_version_meta(object(), "x")["profiles"] is None
+
+
+def test_list_model_versions_reads_profiles_once_for_the_applied_row(monkeypatch):
+    """The picker's ?all=1 list must not turn one pick into a read PER version (this
+    function's own no-N+1 contract). Only the row the drawer applies -- is_latest -- gets
+    the second read; the others carry profiles=None, which dims nothing."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V7", "V6"]
+    assert out[0]["is_latest"] is True and out[0]["profiles"] == ["lite", "standard", "pro", "ultra"]
+    assert out[1]["profiles"] is None
+    assert [c for c in calls if c.endswith("/inference-profiles")] == \
+        ["/generation-model/V7/inference-profiles"]
+
+
 # ---- annotate_lora_compat (problem 3: architecture-aware LoRA sort/badge) -----------------
 # Mock rows use the CONFIRMED-live shape: `lora_base_model_type`, sourced from GraphQL's
 # latestVersion.loraBaseModelType (model_search_market_gql) -- e.g. real rows come back as

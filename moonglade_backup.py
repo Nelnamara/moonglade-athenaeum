@@ -3661,7 +3661,7 @@ def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
-            "compatibility": {}, "restrictions": {}}
+            "compatibility": {}, "restrictions": {}, "profiles": None}
 
 
 def _version_row_to_meta(r):
@@ -3684,7 +3684,11 @@ def _version_row_to_meta(r):
       key" as "unknown, don't restrict" (fail open), same convention as capabilities above.
     - restrictions: real min/max bounds for the params above (e.g.
       {samplingSteps:{min:16,max:50}}) -- clamp the drawer's own hardcoded bounds to these
-      when present instead of a one-size-fits-all guess."""
+      when present instead of a one-size-fits-all guess.
+    - profiles: PLACEHOLDER ONLY here (always None). The allowed inference-profile set is
+      NOT in this row -- it comes from a second, version-keyed route, so the CALLERS fill it
+      via _attach_profiles (see below). Kept in the shape so every row a caller hands out
+      has the same keys whether or not that caller ran the second read."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     compat = extra.get("compatibility")
@@ -3701,7 +3705,43 @@ def _version_row_to_meta(r):
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
         "compatibility": compat if isinstance(compat, dict) else {},
         "restrictions": restrictions if isinstance(restrictions, dict) else {},
+        "profiles": None,
     }
+
+
+def _attach_profiles(session, meta):
+    """Fill a version meta's `profiles` -- the profileName list the model VERSION actually
+    offers -- and return the same dict (mutated in place).
+
+    SCOPE §4b, 2026-08-17 (per-model inference profiles), captured 2026-08-25: the allowed
+    set is per VERSION, not fixed -- Tsubaki.2 offers lite/standard/pro/ultra while
+    Tsubaki.3 offers only pro/ultra. The drawer's five mode bars were always all clickable,
+    so a mode the model rejects could be quoted and then silently retried on the model's
+    own default (submit_generation's drop-and-retry), which is the quote-vs-charge
+    divergence this closes at the source.
+
+    The read is _model_profiles: the SAME version-keyed GET the price/submit gate already
+    uses, so this shares its cache (one call per version per hour, not one per pick) and
+    its fail-soft contract.
+
+    FAIL SOFT -> None. No version id, a failed read, or a body we could not parse all leave
+    `profiles = None`, which the drawer reads as "unknown -- dim nothing". An empty list
+    `[]` is a real answer (SDXL: definitively no profiles) and is NOT None; the drawer
+    leaves the bars alone for it too, because an SDXL model's modes are handled by the
+    submit gate, not by this display gate. A `membershipOnly` profile IS listed: the site's
+    own rejection path handles membership, and hiding it here would be a second, weaker
+    copy of that rule."""
+    vid = str(meta.get("version_id") or "")
+    if not vid:
+        meta["profiles"] = None
+        return meta
+    rows = _model_profiles(session, vid)
+    if not isinstance(rows, list):
+        meta["profiles"] = None
+        return meta
+    meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
+                        if isinstance(p, dict) and p.get("profileName")]
+    return meta
 
 
 def resolve_version_meta(session, model_id):
@@ -3729,7 +3769,9 @@ def resolve_version_meta(session, model_id):
     rows = data if isinstance(data, list) else (data or {}).get("data") or []
     if not rows:
         return _empty_version_meta()
-    return _version_row_to_meta(rows[0])
+    # SECOND read (SCOPE 2026-08-17 §4b): the resolved version's allowed inference
+    # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
+    return _attach_profiles(session, _version_row_to_meta(rows[0]))
 
 
 def list_model_versions(session, model_id):
@@ -3763,6 +3805,12 @@ def list_model_versions(session, model_id):
         tag = "Latest" if i == 0 else "v{}".format(n - i)
         meta["label"] = tag + (" · " + created[:10] if created else "")
         meta["is_latest"] = (i == 0)
+        # SCOPE 2026-08-17 §4b: ONE second read, for the row the drawer actually applies
+        # (applyModelRow takes is_latest, useGenerate.js:97). Every other row keeps
+        # profiles=None -- "unknown, dim nothing" -- deliberately, because a read per row
+        # would be exactly the N+1 this function's own contract above rules out.
+        if meta["is_latest"]:
+            _attach_profiles(session, meta)
         out.append(meta)
     return out
 

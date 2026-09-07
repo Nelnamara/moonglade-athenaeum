@@ -58,6 +58,10 @@ export default function useGenerate({ costRef }) {
       compat_steps: cget(v, "samplingSteps"),
       compat_cfg: cget(v, "cfgScale"),
       compat_upscale: cget(v, "upscale"),
+      // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
+      // null = the server could not determine them -> the drawer dims nothing, exactly as
+      // before. An array (including []) is a real answer.
+      profiles: Array.isArray(v.profiles) ? v.profiles : null,
       restrictions: v.restrictions || {},
       preset: {
         negative: v.negative_prompt || "", steps: v.sampling_steps,

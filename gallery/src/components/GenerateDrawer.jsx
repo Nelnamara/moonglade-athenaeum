@@ -3,7 +3,7 @@ import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
-  planLoraRestore,
+  modeOffered, planLoraRestore,
 } from "../gen/genCore.js";
 import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
@@ -941,12 +941,21 @@ function GenerateDrawer({ open, onClose, account, request }) {
               {/* SLAB 3 — TUNING */}
               <div className="mgdock-slab" style={{ animationDelay: "120ms" }}>
                 <div className="mgdock-lbl">TUNING · {(MODES.find(([v]) => v === s.mode) || ["", s.mode])[1]}</div>
+                {/* A bar for a profile this model does not offer is DIMMED, never removed
+                    (SCOPE 2026-08-17 §4b) -- same disabled-control precedent as the STEPS
+                    row just below. modeOffered fails open: `auto` always stands, and an
+                    unknown profile set (m.profiles null) dims nothing. */}
                 <div className="mgdock-modebars">
-                  {MODES.map(([v, l], i) => (
-                    <button key={v} type="button" title={l}
-                      className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
-                      onClick={() => set({ mode: v })} />
-                  ))}
+                  {MODES.map(([v, l], i) => {
+                    const off = !modeOffered(v, m && m.profiles);
+                    return (
+                      <button key={v} type="button"
+                        title={off ? "Not offered for this model" : l}
+                        disabled={off}
+                        className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
+                        onClick={() => set({ mode: v })} />
+                    );
+                  })}
                 </div>
                 <div className="mgdock-sliderrow">
                   <span className="mgdock-lbl">STEPS</span>
