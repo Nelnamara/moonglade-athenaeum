@@ -23,11 +23,103 @@ import path from "node:path";
    Plus the one client-side fact the dialog's own opening depends on: the preview fetch is
    bounded, a little above the server's own 12s ceiling. */
 
+import { cloudDeleteCounts } from "../../gallery/src/lib/cloudDeleteCounts.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = (p) => readFileSync(path.resolve(__dirname, "../../gallery/src", p), "utf8")
   .replace(/\r\n/g, "\n");
 
 const api = src("api.js");
+const menu = src("components/ActionsMenu.jsx");
+
+describe("the counts reconcile", () => {
+  /* The route's own fixture, from tests/test_purge.py's
+     test_delete_preview_reads_each_selected_task_back_from_pixai_once: T1={a1,a2,a3} with
+     a3 already deleted on PixAI, T2={b1,b2}, and [a1,b1] selected. */
+  const ROUTE = { totals: { selected: 2, tasks: 2, media: 5, unselected: 3, local_only: 0 },
+                  already_gone: 1 };
+
+  test("what goes plus what is already gone is the whole membership", () => {
+    const c = cloudDeleteCounts(ROUTE.totals, ROUTE.already_gone);
+    assert.equal(c.willDelete, 4);
+    assert.equal(c.alreadyGone, 1);
+    assert.equal(c.willDelete + c.alreadyGone, c.inBatches,
+      "the headline and the already-gone line must add up to the files in these batches");
+    assert.equal(c.picked + c.alongside, c.inBatches,
+      "'you picked N; the other M' counts the SAME membership -- 2 + 3 = 5, not 4");
+  });
+
+  test("both sums hold across the shapes the route can answer with", () => {
+    const shapes = [
+      // no live check at all (an older server, or over the 40-task cap)
+      [{ selected: 2, tasks: 1, media: 4, unselected: 2, local_only: 0 }, undefined],
+      // every file in the selection is already gone on PixAI
+      [{ selected: 1, tasks: 1, media: 1, unselected: 0, local_only: 0 }, 1],
+      // imports mixed in: they have no task, so they can never be "already gone"
+      [{ selected: 3, tasks: 1, media: 5, unselected: 2, local_only: 2 }, 1],
+      // pure imports: no task at all
+      [{ selected: 2, tasks: 0, media: 2, unselected: 0, local_only: 2 }, 0],
+    ];
+    for (const [totals, gone] of shapes) {
+      const c = cloudDeleteCounts(totals, gone);
+      assert.equal(c.willDelete + c.alreadyGone, c.inBatches, JSON.stringify(totals));
+      assert.equal(c.picked + c.alongside, c.inBatches, JSON.stringify(totals));
+      assert.ok(c.willDelete >= 0, "the headline can never go negative");
+    }
+  });
+
+  test("a nonsense answer cannot make the headline lie", () => {
+    // Defensive: an older server sends no already_gone at all, and no answer may drive
+    // the number of files "about to be deleted" below zero or above the membership.
+    assert.equal(cloudDeleteCounts({ media: 3 }, undefined).willDelete, 3);
+    assert.equal(cloudDeleteCounts({ media: 3 }, "not a number").willDelete, 3);
+    assert.equal(cloudDeleteCounts({ media: 3 }, 99).willDelete, 0);
+    assert.equal(cloudDeleteCounts({ media: 3 }, 99).alreadyGone, 3);
+    assert.equal(cloudDeleteCounts(null, 1).inBatches, 0);
+  });
+});
+
+describe("the wording matches the arithmetic", () => {
+  test("the dialog derives its numbers in one place, not three", () => {
+    assert.match(menu, /import \{ cloudDeleteCounts \} from "\.\.\/lib\/cloudDeleteCounts\.js";/);
+    assert.match(menu, /cloudDeleteCounts\(t, data\.already_gone\)/);
+    assert.doesNotMatch(menu, /Math\.max\(0, t\.media - goneNow\)/,
+      "the subtraction moved into cloudDeleteCounts.js so the prose can be written "
+      + "against numbers that are known to reconcile");
+  });
+
+  test('the already-gone files are "more", never "of them"', () => {
+    // willDelete EXCLUDES them by construction, so "N of them are already gone" said they
+    // were both going and staying. They are added to the headline now, not taken out of it.
+    assert.match(menu, /One more is already gone on PixAI/);
+    assert.match(menu, /\{goneNow\} more are already gone on PixAI/);
+    assert.doesNotMatch(menu, /of them are already gone on PixAI/);
+    assert.doesNotMatch(menu, /One of them is already gone on PixAI/);
+  });
+
+  test("when the headline is not the whole membership, the membership is named", () => {
+    // "You picked 2; the other 3 come with their batches" under a headline of 4 is the
+    // sum that did not add up. With gone files in the selection the dialog says what the
+    // 5 is before it splits it.
+    assert.match(menu, /Those tasks hold \{plural\(inBatches, "file", "files"\)\} in all/);
+  });
+
+  test("all-gone says so in the headline instead of a 0 that needs explaining", () => {
+    assert.match(menu, /willDelete === 0 && goneNow > 0/);
+    assert.match(menu, /Nothing will be deleted\. PixAI has already deleted/);
+    // ...and the "more are already gone" line is suppressed there, so it is said once.
+    assert.match(menu, /\{goneNow > 0 && willDelete > 0 && \(/);
+  });
+
+  test("the unverified and estimate lines still stand on their own", () => {
+    // Order, per the ruling: headline, then already-gone, then unverified, then estimate.
+    const gone = menu.indexOf("more is already gone on PixAI");
+    const unver = menu.indexOf("could not be checked on PixAI just now");
+    const est = menu.indexOf("These counts are an ");
+    assert.ok(gone > 0 && unver > gone && est > unver,
+      "the dialog's paragraphs must read in the order the ruling set them out in");
+  });
+});
 
 describe("the preview fetch cannot hang the dialog open forever", () => {
   test("deletePreview carries a timeout, above the server's 12s ceiling", () => {

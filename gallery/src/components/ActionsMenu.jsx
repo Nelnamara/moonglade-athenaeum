@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
+import { cloudDeleteCounts } from "../lib/cloudDeleteCounts.js";
 import "../styles/librarybar.css";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
@@ -63,28 +64,48 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
      reported as already gone rather than counted among the files this will take. Read
      defensively: an older server answers this route without any of these fields, and the
      dialog must still open and still be true. */
-  const goneNow = Number(data.already_gone) || 0;
+  const { willDelete, alreadyGone: goneNow, inBatches, picked, alongside, localOnly } =
+    cloudDeleteCounts(t, data.already_gone);
   const unchecked = Number(data.unverified) || 0;
   const estimate = data.estimate === true;
-  const willDelete = Math.max(0, t.media - goneNow);
+  /* THE NUMBERS HAVE TO ADD UP (corrected 2026-09-07, the day the live check landed).
+     Three quantities, and a reader has to be able to put them together:
+       willDelete + goneNow === inBatches      what goes, plus what is already gone
+       picked     + alongside === inBatches    what he picked, plus what rides along
+     So the membership is named out loud the moment goneNow makes it differ from the
+     headline -- the first build left "you picked 2; the other 3" standing under a
+     headline of 4 -- and the already-gone sentence says "more", never "of them": those
+     files are NOT among the ones the headline just said were going. */
   let head;
   if (t.tasks === 0) {
     head = (
-      <><b>{plural(t.media, "file", "files")}</b> will be removed from your backup.
+      <><b>{plural(inBatches, "file", "files")}</b> will be removed from your backup.
       None of them is on PixAI (local imports), so nothing is deleted from your account.</>
+    );
+  } else if (willDelete === 0 && goneNow > 0) {
+    // Everything in the blast radius is already gone on PixAI, so there is no headline
+    // number to state: "0 files will be deleted" followed by "1 more is already gone" is
+    // arithmetic nobody should have to do. (Imports cannot be already-gone, so this case
+    // can only arise with none of them in the selection.)
+    head = (
+      <>Nothing will be deleted. PixAI has already deleted{" "}
+      <b>{plural(goneNow, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>
+      {" "}— deleted there, not here — and {goneNow === 1 ? "it stays" : "they stay"} in your
+      backup, because {goneNow === 1 ? "this is the last copy of it" : "these are the last copies of them"} anywhere.</>
     );
   } else {
     head = (
       <><b>{plural(willDelete, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>{" "}
       will be deleted from your PixAI account <b>and</b> from your backup.
-      {t.unselected > 0 && (
-        <> You picked {plural(t.selected, "file", "files")}; the other{" "}
-        {t.unselected === 1 ? "1 comes with its batch." : t.unselected + " come with their batches."}</>
-      )}
-      {t.local_only > 0 && (
-        t.local_only === 1
+      {alongside > 0 && (goneNow > 0
+        ? <> Those tasks hold {plural(inBatches, "file", "files")} in all: you picked{" "}
+          {picked}, and the other {alongside === 1 ? "1 comes with its batch." : alongside + " come with their batches."}</>
+        : <> You picked {plural(picked, "file", "files")}; the other{" "}
+          {alongside === 1 ? "1 comes with its batch." : alongside + " come with their batches."}</>)}
+      {localOnly > 0 && (
+        localOnly === 1
           ? <> One is a local import with no PixAI task — that one only leaves your backup.</>
-          : <> {t.local_only} are local imports with no PixAI task — those only leave your backup.</>
+          : <> {localOnly} are local imports with no PixAI task — those only leave your backup.</>
       )}</>
     );
   }
@@ -112,11 +133,13 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
         <div className="cd-head">Delete from PixAI — the whole blast radius</div>
         <p className="cd-summary">{head}</p>
         {/* The live check's three sentences, in the same plain voice as the counts above
-            and only when there is something to say. */}
-        {goneNow > 0 && (
+            and only when there is something to say. "MORE", not "of them": these files are
+            not among the ones the headline just said were going -- add them to it. The
+            all-gone case says this in the headline itself, so it is not said twice. */}
+        {goneNow > 0 && willDelete > 0 && (
           <p className="cd-summary">{goneNow === 1
-            ? <>One of them is already gone on PixAI — deleted there, not here. That file stays in your backup, because this is the last copy of it anywhere.</>
-            : <>{goneNow} of them are already gone on PixAI — deleted there, not here. Those files stay in your backup, because these are the last copies of them anywhere.</>}</p>
+            ? <>One more is already gone on PixAI — deleted there, not here — so it stays in your backup, because this is the last copy of it anywhere.</>
+            : <>{goneNow} more are already gone on PixAI — deleted there, not here — so they stay in your backup, because these are the last copies of them anywhere.</>}</p>
         )}
         {unchecked > 0 && (
           <p className="cd-summary">{unchecked === 1
