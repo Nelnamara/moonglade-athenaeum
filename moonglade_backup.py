@@ -3744,7 +3744,7 @@ def _attach_profiles(session, meta):
     return meta
 
 
-def resolve_version_meta(session, model_id):
+def resolve_version_meta(session, model_id, with_profiles=False):
     """Resolve a model's latest generatable version AND the metadata we were throwing away.
     One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
     resolve_latest_version() kept only the id. Read-only.
@@ -3761,7 +3761,17 @@ def resolve_version_meta(session, model_id):
     reverted). This function still always takes rows[0] (presumed latest) -- it's the
     fast path used right after a pick, where "latest" is the right default. To offer a
     real choice among the other rows, see list_model_versions() below (picker-parity-round2,
-    2026-07-24), which maps the FULL list through the same per-row shape."""
+    2026-07-24), which maps the FULL list through the same per-row shape.
+
+    `with_profiles=True` adds the SECOND, version-keyed read that fills `profiles` (SCOPE
+    2026-08-17 §4b). It is OPT-IN and OFF by default, because `profiles` is only ever
+    LOOKED AT by a caller that renders the drawer's mode bar. The first cut attached it here
+    unconditionally, which quietly charged every other caller of this shared resolver a
+    second PixAI GET for a field it never reads: /api/task-params' Remix loop resolves one
+    LoRA base per unique LoRA and reads only lora_base_model_type/model_type, so a four-LoRA
+    remix went from four reads to eight (red team 2026-09-07). `profiles` is still always
+    PRESENT in the returned shape; without the flag it is None, which the drawer reads as
+    "unknown -- dim nothing"."""
     try:
         data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
     except PixAIError:
@@ -3769,9 +3779,12 @@ def resolve_version_meta(session, model_id):
     rows = data if isinstance(data, list) else (data or {}).get("data") or []
     if not rows:
         return _empty_version_meta()
+    meta = _version_row_to_meta(rows[0])
     # SECOND read (SCOPE 2026-08-17 §4b): the resolved version's allowed inference
     # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
-    return _attach_profiles(session, _version_row_to_meta(rows[0]))
+    # ONLY for a caller that asked -- see the docstring: the LoRA/remix resolves never read
+    # `profiles`, and paying a PixAI GET for them was pure cost (red team 2026-09-07).
+    return _attach_profiles(session, meta) if with_profiles else meta
 
 
 def list_model_versions(session, model_id):
@@ -9233,7 +9246,14 @@ def _bump_card_use(params):
 # model whose profiles PixAI later changes is picked up within the hour (a restart clears it
 # too). conftest clears it between tests so no model's profiles leak across them.
 _PROFILE_CACHE_TTL = 3600.0                  # seconds; inference profiles change very rarely
-_profile_cache = {}                          # version_id -> (fetched_at_monotonic, profiles_list)
+# A FAILED read is cached too, on a much shorter clock (red team 2026-09-07, refining the
+# original "only a SUCCESSFUL result is cached" rule in _model_profiles below). Caching
+# nothing meant a version whose /inference-profiles route does not answer 200 re-fired that
+# GET on EVERY call -- every /api/price keystroke, every drawer open -- for as long as the
+# failure lasted. Sixty seconds keeps a transient failure transient while bounding the
+# repeat to once a minute.
+_PROFILE_FAIL_TTL = 60.0
+_profile_cache = {}                          # version_id -> (fetched_at_monotonic, profiles_list|None)
 
 
 def _model_profiles(session, version_id):
@@ -9252,21 +9272,32 @@ def _model_profiles(session, version_id):
 
     CACHED per version_id across ALL sessions (see _profile_cache) with a TTL, because
     /api/price runs this on every keystroke on a FRESH session (gallery _gen_session) -- a
-    session-keyed memo re-hit the network each time. Only a SUCCESSFUL result is cached (None
-    is not, so a transient failure re-attempts rather than sticking)."""
+    session-keyed memo re-hit the network each time. A FAILURE is cached too, but only for
+    _PROFILE_FAIL_TTL (red team 2026-09-07, refining the original "only a SUCCESSFUL result
+    is cached" rule): caching nothing at all meant a version PixAI will not answer for
+    re-fired the GET on every single call for as long as that lasted. A minute is short
+    enough that a transient failure is still transient -- the next call after it tries again,
+    and a recovered route is picked up then -- and long enough that the repeat is bounded.
+    The fail-soft contract is unchanged: a cached failure returns the SAME None a fresh one
+    does, so every caller behaves exactly as it did."""
     vid = str(version_id)
     now = time.monotonic()
     hit = _profile_cache.get(vid)
-    if hit is not None and (now - hit[0]) < _PROFILE_CACHE_TTL:
-        return hit[1]
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
     try:
         data = _rest_get(session, "/generation-model/" + vid + "/inference-profiles")
     except Exception:
+        _profile_cache[vid] = (now, None)
         return None
     if not isinstance(data, dict):
+        _profile_cache[vid] = (now, None)
         return None
     profiles = data.get("profiles")
     if not isinstance(profiles, list):
+        _profile_cache[vid] = (now, None)
         return None
     _profile_cache[vid] = (now, profiles)
     return profiles

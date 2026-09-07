@@ -187,3 +187,37 @@ def test_redactor_scrubs_foreign_user_homes_any_os(tmp_path):
     # Ordinary prose with no user-home path is untouched.
     msg = "retry in 0.5s (attempt 2 of 3): connection reset by Users of the API"
     assert red(msg) == msg
+
+
+def test_a_lora_resolve_costs_one_read_and_never_asks_for_profiles(tmp_path, monkeypatch):
+    """The Remix loop reads lora_base_model_type/model_type off each unique LoRA base and
+    never touches `profiles` -- a LoRA does not render a mode bar. So it must cost exactly
+    ONE PixAI GET per base. Wiring _attach_profiles into the shared resolve_version_meta
+    itself made it two, and a failed second read repeated on every remix open (red team
+    2026-09-07). This test runs the REAL resolver against a call-counting _rest_get, which
+    the rest of this file's stub-the-resolver tests cannot see."""
+    cli = _cli(tmp_path, monkeypatch)
+    calls = []
+
+    def rest(session, path, **k):
+        calls.append(path)
+        if path.endswith("/inference-profiles"):
+            return {"profiles": [{"profileName": "pro", "profileFlag": "default"}]}
+        return [{"id": "ver-" + path.split("/")[2], "modelType": "SDXL_MODEL",
+                 "loraBaseModelType": "SDXL_MODEL", "extra": {}}]
+
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, retries=3: {
+        "parameters": {"modelId": "vER1",
+                       "lora": {"L1v": 0.9, "L2v": 0.8, "L3v": 0.7, "L4v": 0.6}}})
+    monkeypatch.setattr(core, "resolve_model_base_id",
+                        lambda s, vid: {"L1v": "b1", "L2v": "b2",
+                                        "L3v": "b3", "L4v": "b4"}[str(vid)])
+    monkeypatch.setattr(core, "model_name_gql", lambda s, vid, **k: "A LoRA")
+    monkeypatch.setattr(core, "_rest_get", rest)
+
+    d = cli.get("/api/task-params/" + TID).get_json()
+    assert "error" not in d and len(d["loras"]) == 4
+    assert all(r["lora_base_model_type"] == "SDXL_MODEL" for r in d["loras"])
+    assert calls == ["/generation-model/b1/versions", "/generation-model/b2/versions",
+                     "/generation-model/b3/versions", "/generation-model/b4/versions"]
+    assert not [c for c in calls if c.endswith("/inference-profiles")]
