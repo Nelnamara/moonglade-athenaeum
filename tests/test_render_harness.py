@@ -414,8 +414,8 @@ def no_confirmed_contest_entry(render_browser):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _dismiss_any_achievement_toast(page):
-    """Click-dismiss a real achievement celebration (.ach-m2) if one happens to be up.
+def _dismiss_any_achievement_toast(page, rounds=4):
+    """Click-dismiss EVERY real achievement celebration (.ach-m2) that is up, in turn.
 
     render_server's fixture pre-seeds `seen` from the harness's INITIAL catalog state
     (suppresses the page-load toast), but a test's own real actions -- a job run, an
@@ -425,11 +425,35 @@ def _dismiss_any_achievement_toast(page):
     not a bug -- see `_play()` in gallery/src/notify/ach.js, the 2026-08-08 React-port home
     of the celebration engine), so left alone it blocks every click under it for its real
     4.2-6.4s hold. A no-op when nothing is showing.
+
+    2026-09-07: this used to dismiss ONE moment and return, which is not the same thing as
+    clearing the screen. `ach.js`'s `celebrate()` pushes onto `_q` and `_play()` only calls
+    `_next()` 500ms AFTER the clicked moment is removed, so a second earned achievement is
+    still queued and lands a beat after the first is detached -- the old one-shot returned
+    into that gap and the very next click went to the successor overlay instead of the
+    control under it. That is exactly the shape of failure this docstring anticipated
+    ("a test's own real actions can organically cross a NEW threshold mid-test") without
+    covering: it anticipated a toast, not a QUEUE of them. So it now loops until the screen
+    is genuinely clear, bounded, and says so loudly rather than silently giving up. Call it
+    before any interaction a full-screen overlay could swallow, not just once after boot.
     """
-    toast = page.locator(".ach-m2")
-    if toast.count():
+    for _ in range(rounds):
+        toast = page.locator(".ach-m2")
+        if not toast.count():
+            return
         toast.first.click(timeout=1000)
         page.wait_for_selector(".ach-m2", state="detached", timeout=2000)
+        # The 500ms removal + _next() handoff above: if another moment is queued it attaches
+        # inside this window. Nothing queued => the wait times out, which is the success case.
+        try:
+            page.wait_for_selector(".ach-m2", state="attached", timeout=700)
+        except _PlaywrightTimeout:
+            return
+    assert not page.locator(".ach-m2").count(), (
+        "still an .ach-m2 celebration up after dismissing {} of them -- either the app is "
+        "firing an unbounded parade or the overlay stopped closing on click".format(rounds))
+
+
 def _login(page):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -1603,15 +1627,30 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     tiles_before = page.locator(".glm-grid .glm-tile").count()
 
     # A tap opens the full-screen viewer (GalleryMobile's tapView -> LightboxMobile).
+    # Clear the screen first: a full-screen .ach-m2 swallows this tap, and this test's own
+    # page load can cross a threshold the module fixture's `seen` pre-seed never saw.
+    _dismiss_any_achievement_toast(page)
     page.locator(_DOOR_TILE).click()
     page.wait_for_selector(".lbm-root")
     # Put the library at a known offset UNDER the viewer -- the offset is set here rather
     # than before the tap because Playwright scrolls the tile into view to click it, which
     # moves .glm-body itself. This is the number that has to come back.
-    page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 40; }")
+    #
+    # 2026-09-07, order-independence: the offset used to be a hardcoded 40, which only fits
+    # because SOME EARLIER TEST grew the module-scoped catalog (the import-overlay test
+    # writes real rows into the same render_server catalog). On the fixture's own six rows
+    # .glm-body overscrolls by 15px, so scrollTop clamped to 15 and this assertion failed --
+    # alone, and under any -k that deselected the importer. The number now comes from the
+    # live scroller, capped at the same 40; what the assertion actually needs is a non-zero
+    # offset that survives the round trip, and that is what it now demands.
+    scroll_before = page.evaluate("""() => {
+        const b = document.querySelector('.glm-body');
+        b.scrollTop = Math.min(40, b.scrollHeight - b.clientHeight);
+        return b.scrollTop;
+    }""")
     _settle(page)
     scroll_before = page.evaluate("() => document.querySelector('.glm-body').scrollTop")
-    assert scroll_before == 40, (
+    assert scroll_before > 0, (
         "the phone's library scroller would not take a test offset ({!r}) -- the restore "
         "assertion below would be vacuous".format(scroll_before))
 
@@ -1619,6 +1658,9 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     chip = page.locator(".lbm-actsrow .lbm-similar")
     assert chip.count() == 1
     assert "◈" in chip.inner_text()
+    # Same guard again: the tile tap itself is a real action, so a fresh moment can be up
+    # over the viewer by now and the chip click would land on the overlay instead.
+    _dismiss_any_achievement_toast(page)
     chip.click()
 
     # The viewer closes, the lookalikes take the GRID's place, and the token is up.
