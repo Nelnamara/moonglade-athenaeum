@@ -244,23 +244,16 @@ def test_committed_gallery_bundle_matches_a_fresh_build(tmp_path):
     except OSError as e:
         pytest.skip("cannot spawn node in this environment: {}".format(e))
     log = log_path.read_text(encoding="utf-8", errors="replace")
-    assert rc == 0, "gallery's `npm run build` failed, so the bundle can't be checked:
-" + log
+    assert rc == 0, "gallery's `npm run build` failed, so the bundle can't be checked:\n" + log
 
     def _norm(b):
-        return b.replace(b"
-", b"
-")
+        return b.replace(b"\r\n", b"\n")
 
     for name, was in committed.items():
         fresh = (outdir / name).read_bytes()
         assert _norm(fresh) == _norm(was), (
-            "gallery/dist/{} is STALE -- it does not match a fresh build of gallery/src.
-"
-            "  committed: {:,} bytes
-  rebuilt  : {:,} bytes
-"
+            "gallery/dist/{} is STALE -- it does not match a fresh build of gallery/src.\n"
+            "  committed: {:,} bytes\n  rebuilt  : {:,} bytes\n"
             "The shell serves the committed file, so it is serving code that no longer "
-            "matches the source.
-Fix: `cd gallery && npm run build`, then commit gallery/dist/."
+            "matches the source.\nFix: `cd gallery && npm run build`, then commit gallery/dist/."
             .format(name, len(was), len(fresh)))
