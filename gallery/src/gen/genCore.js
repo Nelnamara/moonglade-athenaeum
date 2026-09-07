@@ -55,6 +55,25 @@ export function modeOffered(mode, profiles) {
   return profiles.some((p) => String(p).toLowerCase() === String(mode).toLowerCase());
 }
 
+/* The mode that SURVIVES applying a model version (red team 2026-09-07, refining the
+   2026-08-17 §4b ruling above rather than reversing it).
+
+   Dimming a bar only governs the NEXT click. A mode picked on one model stayed selected
+   when you switched to a model whose profiles omit it: the bar dimmed but still painted
+   filled, buildPayload still sent that mode, /api/price still quoted that tier, and the
+   submit was then rejected and silently re-run on the model's own default -- the exact
+   quote-vs-charge divergence the dimming exists to close, reached by a model switch
+   instead of a click. So the mode is re-checked at the moment a version applies and drops
+   back to `auto` when the newly applied version does not offer it.
+
+   `auto` is the only safe landing: it is always offered (see modeOffered) and it is what
+   GEN_DEFAULTS starts on, so this can only ever move a selection to the state a fresh
+   session is already in -- never onto another priced tier the user did not choose. Fails
+   open exactly as modeOffered does: an unknown/empty profile set keeps the mode untouched. */
+export function modeAfterApply(mode, profiles) {
+  return modeOffered(mode, profiles) ? mode : "auto";
+}
+
 // The classic's blank-steps fallback: `+el('gen-steps').value||25`.
 export const STEPS_FALLBACK = 25;
 

@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- **Switching to a model that does not offer the quality mode you had picked now puts you back on Auto.** The five bars under **TUNING** grey out a mode a model does not offer, but that only ever governed the next click: a mode you had already chosen stayed chosen when you switched models. The bar went grey and stayed filled, the cost you were quoted was still for that tier, and the generation was then quietly re-run on the model's own default — the very gap the greying-out exists to close, reached by changing model instead of by clicking. Applying a model, or a different version of one, now re-checks the mode you are on and returns it to **Auto** when the new model does not offer it, so the price you were shown is the price you pay. A mode the new model does offer is left exactly where it was, and when the app cannot find out what a model offers nothing moves at all. (2026-09-07)
 - Removed leftover styles from retired screens (the classic grid, the old Edit-tab slots, the retired jobs tray and others); nothing you see changes.
 - The Blur toggle now also blurs the gallery picker's thumbnails and the generate drawer's reference images.
 - **The Konami Code, Read the Manual and Triggered can be earned from a phone or any logged-in device again; each event is one-time and rate-limited so it cannot be replayed.** (2026-09-07)
