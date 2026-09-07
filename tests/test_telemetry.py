@@ -3,6 +3,7 @@ its flattening into the metric namespace, the roster compute post-passes, the
 hidden-feat masking on /api/achievements, and the /api/ach-event beacon. All
 local + fail-soft -- a telemetry hiccup must never break a page or a backup."""
 import json
+import time
 
 import datetime as _dt
 from pathlib import Path
@@ -245,7 +246,7 @@ def test_badge_thumb_cache(tmp_path):
 # Rewritten 2026-09-07: /api/ach-event moved back from LOCALHOST to LOGIN ("triggered
 # should be obtainable easily on a phone just like desktop. For sure build the nonce"),
 # and the per-render nonce is what stands in for loopback now. These tests own that
-# contract -- one event per nonce, 60 seconds, this session only, a 400ms debounce and 30
+# contract -- one event per nonce, 60 seconds, this session only, a 150ms debounce and 30
 # calls a minute -- because nothing else in the suite would notice it silently stopping.
 #
 # Two of them turn the debounce off (monkeypatch _ACH_DEBOUNCE_S) rather than sleeping:
@@ -360,6 +361,37 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     # ...and the debounce is per (session, event): a different event is not held back.
     cli.post("/api/ach-event", json={"event": "docs", "nonce": second["next_nonce"]})
     assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+
+
+def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
+    """The window is a wall-clock gap and can tell nothing else apart, so its WIDTH is the
+    whole claim the comments make. Real time, deliberately: two taps 200ms apart are two
+    taps and must both count; 50ms apart is one gesture fired twice and counts once.
+
+    It shipped at 400ms on 2026-09-07 and this is what that cost -- an ordinary phone
+    tap-rate of ~3/sec landed every second poke inside the window, so Triggered wanted
+    about ten taps for its five, while three separate comments said separate clicks were
+    never touched. 150ms is over a double-fired DOM event and under a hand."""
+    cli = login_client(tmp_path)
+    n = ach_nonce(cli)
+    a = cli.post("/api/ach-event", json={"event": "narrator", "nonce": n}).get_json()
+    assert a["pokes"] == 1
+    time.sleep(0.2)                                  # two separate taps at ~5/sec
+    b = cli.post("/api/ach-event", json={"event": "narrator", "nonce": a["next_nonce"]}
+                 ).get_json()
+    assert b.get("debounced") is not True, "a real second tap must not be swallowed"
+    assert b["pokes"] == 2
+    time.sleep(0.2)                                  # clear the window again
+    c = cli.post("/api/ach-event", json={"event": "narrator", "nonce": b["next_nonce"]}
+                 ).get_json()
+    assert c["pokes"] == 3
+    time.sleep(0.05)                                 # the second half of ONE click
+    d = cli.post("/api/ach-event", json={"event": "narrator", "nonce": c["next_nonce"]}
+                 ).get_json()
+    assert d["debounced"] is True and d["pokes"] == 3
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 3
+    # A hand cannot do this; that is the whole basis of the window.
+    assert g._ACH_DEBOUNCE_S <= 0.15
 
 
 def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):

@@ -73,10 +73,16 @@ export const RARITY_ORDER = ["common", "rare", "epic", "legendary"];
 // just this missing feedback loop.
 // The "no cooldown anywhere, client or server" this comment used to record was
 // true until 2026-09-07 and is not any more: /api/ach-event now debounces the
-// same (session, event) inside 400ms and refuses past 30 beacon calls a minute
-// (see its handler, and notify/achNonce.js). Neither is a gate on the FEAT --
-// 400ms separates a double-fired click from a second click, not one poke from
-// the next -- so 5 real, separate clicks is still the only real gate there is.
+// same (session, event) inside 150ms and refuses past 30 beacon calls a minute
+// (see its handler, and notify/achNonce.js). The debounce is a wall-clock gap
+// and can tell nothing else apart, so the width is the whole claim: 150ms is
+// under a hand and over a double-fired DOM event. It shipped at 400ms earlier
+// the SAME DAY, and this comment said then that it "separates a double-fired
+// click from a second click" -- it did not: at a phone's ordinary ~3 taps/sec
+// every second real poke was thrown away, so Triggered wanted about ten taps.
+// Narrowed to 150ms, 5 real, separate clicks is again the only real gate there
+// is. A swallowed tap says nothing at all (pokeNarrator returns on
+// res.debounced) rather than rewinding the escalating toast to its first line.
 export const POKES = [
   "The narrator ignores you.",
   "The narrator raises an eyebrow. Do you mind?",

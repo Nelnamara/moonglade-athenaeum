@@ -7599,21 +7599,34 @@ window.storage = {
    api_ach_event()). The classic Loom shell has no bundle seam to import
    gallery/src/notify/achNonce.js from, so it carries the same three rules by hand:
    send the nonce, adopt the next_nonce an accepted event returns, and on a stale-page
-   403 ask /api/ach-nonce once and retry once. Anything else is a quiet no-op -- the
-   feat stays earnable on the next open. The value below is a PLACEHOLDER the /loom route
-   substitutes on the way out -- a fresh mint per render, exactly as app_page puts one in
-   MG_BOOT. (Naming the placeholder token in this comment would substitute it here too.) */
+   403 ask /api/ach-nonce once and retry once -- but ONLY when the nonce it just lost is
+   missing or older than the 60s window (2026-09-07, refining the same day's ruling; see
+   achNonce.js's own writeup). A double-fired click on the ? button sends one nonce twice;
+   the twin that loses is refused 403 as consumed, and retrying THAT one with a fresh nonce
+   counts one press as two the moment the round trip outruns the server's 150ms debounce.
+   Anything else is a quiet no-op -- the feat stays earnable on the next open. The value
+   below is a PLACEHOLDER the /loom route substitutes on the way out -- a fresh mint per
+   render, exactly as app_page puts one in MG_BOOT. (Naming the placeholder token in this
+   comment would substitute it here too.) */
 window.MG_ACH_NONCE = "__ACH_NONCE__";
+window.MG_ACH_NONCE_AT = Date.now();     // when the nonce we hold was minted
 window.mgAchDocs = function (retried) {
+  // Read the age BEFORE the request: a twin that beat us may adopt its own next_nonce
+  // while ours is in flight, and reset the clock this decision reads.
+  var stale = !window.MG_ACH_NONCE || (Date.now() - window.MG_ACH_NONCE_AT) >= 60000;
   fetch('/api/ach-event', {method:'POST',headers:{'Content-Type':'application/json'},
         body: JSON.stringify({event:'docs', nonce: window.MG_ACH_NONCE})})
     .then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d || {}}; },
                                               function () { return {status: r.status, body: {}}; }); })
     .then(function (x) {
-      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce; return; }
-      if (x.status !== 403 || retried) return;      // 429 or anything else: give up quietly
+      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce;
+                               window.MG_ACH_NONCE_AT = Date.now(); return; }
+      // 429, anything else, or a 403 on a nonce young enough to have been spent by this
+      // click's own twin: give up quietly.
+      if (x.status !== 403 || retried || !stale) return;
       return fetch('/api/ach-nonce').then(function (r) { return r.json(); }).then(function (d) {
-        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.mgAchDocs(true); }
+        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.MG_ACH_NONCE_AT = Date.now();
+                            window.mgAchDocs(true); }
       });
     })
     .catch(function () {});
@@ -8643,7 +8656,7 @@ def scene_row(sc):
 # once and carry on, so the failure mode is a wasted round trip, not a lost feat.
 _ACH_NONCE_TTL_S = 60.0       # a nonce is good for one event inside this window
 _ACH_NONCE_MAX = 4000         # hard cap on the table (sweep-first, then evict oldest)
-_ACH_DEBOUNCE_S = 0.4         # the same (session, event) inside this counts once
+_ACH_DEBOUNCE_S = 0.15        # the same (session, event) inside this counts once
 _ACH_RATE_MAX = 30            # beacon calls per session per window (mint + event both count)
 _ACH_RATE_WINDOW_S = 60.0
 _ach_lock = threading.Lock()
@@ -8706,8 +8719,25 @@ def _ach_consume(nonce, sid, now=None):
 
 
 def _ach_debounced(sid, event, now=None):
-    """True when the same (session, event) already counted less than 400ms ago -- a double
-    fire of one gesture, not two gestures. Records this event's stamp when it is not."""
+    """True when the same (session, event) already counted less than _ACH_DEBOUNCE_S ago.
+    Records this event's stamp when it is not.
+
+    This is a WALL-CLOCK gap and nothing else: it cannot see whether one gesture fired
+    twice or a person tapped twice, so the window is the whole of the distinction. At the
+    400ms it shipped with on 2026-09-07 it was not one -- a phone user tapping the narrator
+    at an ordinary ~3 taps/sec had every second REAL poke discarded, so Triggered wanted
+    about ten taps instead of five, while this docstring, the route's, and useFolio.js's
+    all claimed separate clicks were never touched. Narrowed to 150ms the same day: a
+    double-fired DOM event arrives inside a few milliseconds, and a hand cannot tap the
+    same control twice inside 150ms, so the window now catches what those comments say it
+    catches. Faster than a hand, not faster than a bug.
+
+    A double fire also means one nonce sent twice -- the twin that loses the race is
+    refused 403 as consumed, BEFORE reaching here. That refusal must stay silent on the
+    client: gallery/src/notify/achNonce.js (and the Loom shell's own mgAchDocs) refresh and
+    retry only when their nonce is missing or older than the 60s window, never on the
+    immediate twin, or the retry would arrive with a fresh nonce and count the gesture a
+    second time on any round trip slower than this window."""
     now = time.time() if now is None else now
     with _ach_lock:
         prev = _ach_last.get((sid, event))
@@ -15490,10 +15520,21 @@ def create_app(out_dir: Path):
         of MG_BOOT and curl it -- but it is the same class of witness CSRF gives
         us everywhere else, and it costs a phone nothing.
 
-        Also here, so five real pokes stay five real pokes: a 400ms debounce per
-        (session, event) -- a double-fired click counts once -- and 30 beacon
-        calls per session per rolling minute, beyond which the answer is 429 and
-        no counter moves.
+        Also here, so five real pokes stay five real pokes: a 150ms debounce per
+        (session, event), and 30 beacon calls per session per rolling minute,
+        beyond which the answer is 429 and no counter moves. The debounce is a
+        wall-clock gap, so its width IS its meaning: 150ms is under a hand and
+        over a double-fired DOM event, which is the only thing it should fold
+        together. It shipped at 400ms earlier the same day and swallowed every
+        second tap of an ordinary phone tap-rate -- see _ach_debounced(). A
+        debounced reply is accepted, hands back a nonce, counts nothing, and
+        carries the current counter so the client holds its line rather than
+        rewinding its toast.
+
+        The other half of one double-fired click is one nonce sent twice: the
+        twin that loses is refused 403 as consumed. The clients do NOT refresh
+        and retry that one -- see achNonce.js -- or the retry would count the
+        same gesture twice from the other side.
 
         The clients still treat a refusal as a no-op by design: api.js never
         throws (a 403 comes back as an {error} body), App.jsx's konami handler is
