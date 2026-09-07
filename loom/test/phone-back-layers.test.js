@@ -75,7 +75,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     assert.match(pop, /if \(!stack\[i\]\.closing\) \{ stack\[i\]\.closing = true; stack\[i\]\.close\(\); break; \}/);
     // ...and `unwinding` is only ever owed by a go() of our own
     assert.match(manager, /unwinding \+= drop;/);
-    /* BEING TOLD TO CLOSE IS NOT BEING CLOSED (red team #13). Five of the ten layers keep
+    /* BEING TOLD TO CLOSE IS NOT BEING CLOSED (red team #13). Six of the eleven layers keep
        their open flag true for another 200-220ms while they play out, so for that whole
        window the ledger said nothing was open while a full-screen layer still covered the
        display -- and a second real Back inside it hit `if (!depth) return` and went
@@ -102,9 +102,14 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     // index 0 is a REAL open viewer -- never a truthiness test, the same read App.jsx's
     // own overlay guard makes for the same reason
     assert.doesNotMatch(mobile, /useLayerHistory\(!!lbIndex/);
-    // and the three drill-ins that own their own local open/closing pair
+    // and the four drill-ins that own their own local open/closing pair. Control's Update
+    // (owner ruling 2026-09-07, "phone gets update") joined them: it is a pushed screen
+    // whose only affordance is the back chevron, so Back has to mean that chevron -- and
+    // while an apply is running its close is deliberately inert, which useLayerHistory
+    // answers by re-pushing the entry rather than letting Back out of the app.
     for (const [what, file, re] of [
       ["Control's Branding", control, /useLayerHistory\(brandOpen, closeBrand\);/],
+      ["Control's Update", control, /useLayerHistory\(updScreen, closeUpdScreen\);/],
       ["the composer's Advanced", create, /useLayerHistory\(advOpen, closeAdv\);/],
       ["Health's Duplicates", health, /useLayerHistory\(dupOpen, closeDup\);/],
     ]) {
@@ -118,7 +123,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
     assert.match(mobile, /SHEETS ARE NOT LAYERS, and stay tap-out-only/);
     /* No sheet state is on the ledger, asserted as a CLOSED list rather than by hunting
        for the word: every registration in the whole phone shell, read out of the source,
-       has to be one of the ten layers above. A sheet quietly joining -- `sheet === "menu"`,
+       has to be one of the eleven layers above. A sheet quietly joining -- `sheet === "menu"`,
        GalleryMobile's own useSheet, anything -- fails here by not being on it. */
     const registered = [];
     for (const f of [mobile, control, create, health, src("components/GalleryMobile.jsx"),
@@ -136,6 +141,7 @@ describe("ONE ledger, one entry per open layer, and a Back closes the topmost", 
       "folioOpen, closeFolio",
       "lbIndex != null, closeLightbox",
       "simOn, clearSimilar",
+      "updScreen, closeUpdScreen",
     ]);
     assert.doesNotMatch(src("components/GalleryMobile.jsx"), /useLayerHistory/);
     // ...and the two chrome primitives still say why: a sheet has a scrim that catches

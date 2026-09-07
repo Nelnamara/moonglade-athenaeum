@@ -13,7 +13,9 @@ import React from "react";
    animation pretending to know how long a pull takes.
 
    This file DRAWS the apply; it cannot start one. `steps`, `phase` and `refusal` all come
-   from the hook, and the one POST to /api/update/apply stays in hooks/useControlPanel.js. */
+   from the hook, and the one POST that applies anything stays in hooks/useControlPanel.js --
+   the only module in gallery/src that may so much as name the apply route (pinned by
+   loom/test/mg-update-announce.test.js and mg-update-phone-apply.test.js). */
 
 /* A refusal replaces the METER, not the surface, in one of exactly three presentations the
    handoff draws: offline gray, busy gold, failed ruby. All three are tokens. The failed one
