@@ -25,7 +25,7 @@ const createMobile = src("gallery/src/components/CreateMobile.jsx");
 const drawer = src("gallery/src/components/GenerateDrawer.jsx");
 const css = src("gallery/src/styles/create-mobile.css");
 
-describe("the phone sheet's head ends in Done; the desktop's still ends in ✕", () => {
+describe("the phone sheet's head ends in Confirm selection; the desktop's still ends in ✕", () => {
   test("the label is ONE exported constant, so PixAI's wording is a one-line change", () => {
     assert.match(flyout, /export const LORA_SHEET_DONE_LABEL = "Confirm selection";/, "PixAI's own wording, captured 2026-09-07");
     assert.ok(flyout.includes("{LORA_SHEET_DONE_LABEL}"),

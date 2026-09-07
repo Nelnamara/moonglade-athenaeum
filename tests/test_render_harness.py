@@ -1049,6 +1049,12 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
     page.wait_for_selector('[aria-label="Control Panel"]')
     _settle(page)
+    # The panel paints "opening the panel..." until /api/panel/summary answers; under load
+    # that outlasts _settle (seen 2026-09-07 with a test workflow running beside the
+    # harness), so wait for the summary's own text rather than a fixed pause.
+    page.wait_for_function(
+        "() => /THE LIBRARY/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        timeout=20_000)
     # innerText reflects the CSS text-transform:uppercase on .mgcp-sidekick, not the raw
     # JSX literal ("The library") -- assert what actually renders.
     assert "THE LIBRARY" in page.inner_text('[aria-label="Control Panel"]')
