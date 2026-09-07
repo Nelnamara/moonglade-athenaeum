@@ -4089,3 +4089,147 @@ def test_a_dropped_branding_file_is_adopted_and_the_browser_wears_it(
         # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
         _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
         save_ach_state(root, ach_before)
+
+
+# ---------------------------------------------------------------------------
+# The Bridge §1 -- the Control Panel's Mirror tile, at rest
+# ---------------------------------------------------------------------------
+# ROADMAP-internal.md kept one Bridge follow-on open: "a render-harness guard". The tile
+# (ControlPanelOverlay.jsx's MirrorTile, control-panel.css's "The Bridge §1" block) is a
+# credential gate, so the two things worth guarding are what it SAYS at rest and what it
+# REFUSES to do. Its colour ladder -- emerald >7 days / peach <=7 / ruby <=0 / grey off --
+# lives entirely in CSS class rules, which is exactly the shape of thing a substring test
+# can confirm exists while the rendered ring paints something else.
+#
+# Nothing in this test may reach pixai.art. It cannot by construction: the resting state
+# is `connected: false` (no mirror_session.json under the harness's own config path), and
+# MirrorTile.toggle() short-circuits BEFORE any fetch when the switch is asked to arm with
+# no session. That is asserted, not assumed, and a route abort backs it up.
+
+# Read the ring's rendered stroke against the two tokens the ladder names, resolved by the
+# browser from real probe elements -- comparing a computed rgb() to a raw token string
+# would be the substring test this file exists to replace.
+_READ_MIRROR_RING_JS = """() => {
+  const probe = (tok) => {
+    const d = document.createElement('div');
+    d.style.color = 'var(' + tok + ')';
+    document.body.appendChild(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  };
+  const ring = document.querySelector('.mgbr-ring');
+  const fg = ring.querySelector('.mgbr-ring-fg');
+  return {
+    ringClass: ring.className,
+    stroke: getComputedStyle(fg).stroke,
+    grey: probe('--overlay0'),
+    emerald: probe('--emerald'),
+    dasharray: fg.getAttribute('stroke-dasharray'),
+    dashoffset: fg.getAttribute('stroke-dashoffset'),
+  };
+}"""
+
+
+def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_page):
+    """The Bridge §1's gate, rendered: grey ring, empty ring, pill off, and a toggle that
+    goes nowhere.
+
+    Four assertions, in the order the owner meets the tile:
+      1. it is there and it is NOT armed -- .mgbr-tile without .armed;
+      2. the JWT ring is in its OFF state, measured rather than read off a class name: the
+         rendered stroke is the ladder's grey (--overlay0) and not its emerald, and the arc
+         is drawn at zero length (dashoffset == the full circumference), which is what "no
+         session, no days" looks like;
+      3. the pill toggle exists, is off, and says so to a screen reader (aria-pressed);
+      4. pressing it ARMS NOTHING. MirrorTile.toggle() refuses a want-on with no connected
+         session before it fetches anything, so the tile stays off, the refusal appears in
+         its own message line, and no /api/mirror write -- and no request to any host but
+         this harness's own server -- ever leaves the page.
+
+    The Connect button is deliberately never pressed: /api/mirror/connect makes the SERVER
+    read this machine's real browser cookie store. Reading the tile's resting state is the
+    guard the roadmap asked for; arming it is not.
+    """
+    from urllib.parse import urlparse
+
+    page = logged_in_page(**DESKTOP)
+    # Belt and braces under the assertion below: even a regression that tried could not
+    # actually reach the site from this page.
+    page.route("**/*pixai.art/**", lambda route: route.abort())
+    seen = []
+    page.on("request", lambda r: seen.append((r.method, r.url)))
+
+    _visit(page, "/")
+    page.wait_for_selector("header")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-bridge .mgbr-tile")
+    # The pill is disabled until /api/mirror/status answers, so this is also the wait for
+    # the tile to be driven by the SERVER's real state rather than its null-state placeholder.
+    page.wait_for_selector(".mgbr-pill:not([disabled])")
+    _settle(page)
+
+    # 1. present, and off
+    tile = page.locator(".mgcp-bridge .mgbr-tile")
+    assert tile.count() == 1
+    assert "armed" not in (tile.get_attribute("class") or ""), (
+        "the Mirror tile is armed on a harness server that has no session at all")
+    assert "Off · tier hidden" in page.locator(".mgbr-status").inner_text()
+    assert "Not connected" in page.locator(".mgbr-session-sub").inner_text()
+
+    # 2. the ring's OFF rung of the ladder, as rendered
+    ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert "off" in ring["ringClass"].split(), (
+        "the ring is on the {!r} rung with no session".format(ring["ringClass"]))
+    assert ring["stroke"] == ring["grey"], (
+        "the OFF ring paints {} -- the ladder's grey (--overlay0) is {}".format(
+            ring["stroke"], ring["grey"]))
+    assert ring["stroke"] != ring["emerald"], "the OFF ring paints the ARMED colour"
+    assert ring["dashoffset"] == ring["dasharray"], (
+        "the OFF ring draws an arc ({} of {}) -- with no session there are no days to show"
+        .format(ring["dashoffset"], ring["dasharray"]))
+    assert page.locator(".mgbr-days").inner_text().strip() == "0"
+
+    # --- phase 2: prove that ladder is LIVE css, not a rule nothing reaches. Flip the rung
+    # in the page only (never a committed change) and the same stroke must move to emerald.
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('off'); r.classList.add('healthy'); }")
+    _settle(page)
+    armed_ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert armed_ring["stroke"] == armed_ring["emerald"], (
+        "the healthy rung does not repaint the ring ({}) -- the OFF assertion above is "
+        "vacuous".format(armed_ring["stroke"]))
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('healthy'); r.classList.add('off'); }")
+
+    # 3. the pill, off
+    pill = page.locator(".mgbr-pill")
+    assert pill.count() == 1
+    assert "on" not in (pill.get_attribute("class") or "").split()
+    assert pill.get_attribute("aria-pressed") == "false"
+
+    # 4. pressing it arms nothing and calls nothing
+    before = len(seen)
+    pill.click()
+    page.wait_for_selector(".mgbr-msg")
+    assert "Connect a session first" in page.locator(".mgbr-msg").inner_text(), (
+        "the toggle did something other than refuse: {!r}".format(
+            page.locator(".mgbr-msg").inner_text()))
+    _settle(page)
+    assert "armed" not in (tile.get_attribute("class") or ""), "the tile armed itself"
+    assert "on" not in (pill.get_attribute("class") or "").split(), "the pill flipped on"
+    assert page.evaluate(_READ_MIRROR_RING_JS)["stroke"] == ring["grey"]
+
+    after = seen[before:]
+    assert not after, "pressing the toggle fired {} request(s): {}".format(len(after), after)
+    # And over the WHOLE test: the tile read its status and wrote nothing, and nothing at
+    # all went anywhere but this harness's own ephemeral port.
+    host = urlparse(page.url).hostname
+    foreign = [u for (m, u) in seen
+               if urlparse(u).hostname not in (None, "", host)]
+    assert not foreign, "requests left the harness server: {}".format(foreign)
+    writes = [(m, u) for (m, u) in seen if "/api/mirror/" in u and m != "GET"]
+    assert not writes, "a mirror WRITE left the page: {}".format(writes)
+    assert any(m == "GET" and "/api/mirror/status" in u for (m, u) in seen), (
+        "the tile never read /api/mirror/status -- it is rendering a placeholder, so every "
+        "assertion above is about nothing")
