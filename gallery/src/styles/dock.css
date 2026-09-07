@@ -351,6 +351,9 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-modebar { flex: 1 1 0; height: 6px; border-radius: 3px; border: 0;
   cursor: pointer; padding: 0; background: var(--surface1); transition: background .2s; }
 .mgdock-modebar.on { background: var(--accent); }
+/* A quality mode this model does not offer: dimmed in place, never removed -- the same
+   .35 the disabled STEPS/CFG sliders use (SCOPE 2026-08-17 §4b). */
+.mgdock-modebar:disabled { opacity: .35; cursor: default; }
 
 .mgdock-sliderrow { display: flex; align-items: center; gap: 8px; }
 .mgdock-sliderrow .mgdock-lbl { flex: none; width: 38px; }

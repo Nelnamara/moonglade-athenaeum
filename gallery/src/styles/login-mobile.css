@@ -55,8 +55,10 @@
     color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }
 .lgnm-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
-/* The mark treatment stays: it is what the banner's onError falls back to. */
-.lgnm-mark { position: relative; height: 66px; border-radius: 11px; overflow: hidden;
+/* The mark treatment stays: it is what the banner's onError falls back to.
+   The height scales from the hero mark (marks ruling 2026-08-31, "All scales from Hero"):
+   66/96 of --mark-hero, the ratio that reproduces the 66px this rule used to state. */
+.lgnm-mark { position: relative; height: calc(var(--mark-hero) * 66 / 96); border-radius: 11px; overflow: hidden;
   box-shadow: 0 0 34px rgba(146, 109, 222, .3);
   background: radial-gradient(120% 140% at 18% 0%,
     color-mix(in oklab, var(--accent) 26%, #0b0820) 0%, #0b0820 62%, #070512 100%); }

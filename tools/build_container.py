@@ -40,18 +40,43 @@ Verification is not optional: after writing, the container is re-opened cold and
 every asset is compared byte-for-byte against the source tree; any mismatch
 deletes the output and fails loudly. A container that silently packed wrong bytes
 is worse than no container.
+
+STAMPS the build (moonglade_container schema 1, 2026-09-07): the container's TOC
+carries `built_at` (ISO-8601 UTC) and `builder` (this script's version string, with
+the app version), alongside the `schema` and `content_sha256` the format writes for
+itself. The verify step above checks the stamp round-trips too. ONE CONSEQUENCE worth
+knowing: the timestamp is inside the file, so two builds of identical inputs are no
+longer byte-identical by default -- and the URL rule below only carries a prior
+release URL forward for byte-identical bytes. Pass --built-at <the previous build's
+timestamp> when a deliberate reproducible rebuild is what you want.
 """
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import moonglade_assets as ma
+import moonglade_backup as core
 import moonglade_container as mc
 import moonglade_gallery as g
 
 EXCLUDED_DIRS = {"_thumbs"}
+
+# What goes in the container's `builder` stamp (moonglade_container schema 1). Bump the /N
+# when THIS packer's output changes in a way a reader of an old pack should be able to tell
+# apart; the app version rides along so a pack can be traced to the release that cut it.
+BUILDER = "build_container.py/1"
+
+
+def builder_stamp():
+    return "%s moonglade/%s" % (BUILDER, core.__version__)
+
+
+def utc_now_iso():
+    """Second-resolution ISO-8601 UTC, e.g. 2026-09-07T14:03:11Z."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def gather(root):
@@ -89,6 +114,12 @@ def main():
                          "ancillary tables). Default: the private sibling repo "
                          "../moonglade-internal/achievements_sealed_donor.json -- the "
                          "definitions no longer live in this public tree.")
+    ap.add_argument("--built-at", default=None,
+                    help="the ISO-8601 UTC build time stamped into the container "
+                         "(default: now). Pin it to reproduce an earlier build's exact "
+                         "bytes -- the stamp is inside the file, so a rebuild with a "
+                         "different time is a different sha256, and the manifest's "
+                         "carry-the-URL-forward rule only fires on byte-identical bytes.")
     args = ap.parse_args()
 
     root = Path(args.root).resolve() if args.root else g.branding_root()
@@ -118,7 +149,10 @@ def main():
         sys.exit("Donor %s is missing required keys: %s" % (donor_path, ", ".join(missing)))
     payloads = {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")}
 
-    n_assets, n_payloads = mc.write_container(out_path, assets, payloads)
+    built_at = args.built_at or utc_now_iso()
+    builder = builder_stamp()
+    n_assets, n_payloads = mc.write_container(out_path, assets, payloads,
+                                              builder=builder, built_at=built_at)
 
     box = mc.open_container(out_path)
     problems = []
@@ -133,6 +167,19 @@ def main():
                 problems.append("%s: bytes mismatch on read-back" % rel)
         if box.payload("achievements") != payloads["achievements"]:
             problems.append("achievements payload mismatch on read-back")
+        # The build stamp is verified on the same terms as the bytes: a container whose
+        # provenance did not survive the round trip is not one to publish. (open_container
+        # has already re-derived and matched content_sha256 -- a mismatch there is why box
+        # would be None -- so this checks that what we ASKED to be stamped is what is
+        # stamped, and that the schema is the one this reader vouches for.)
+        stamp = box.stamp()
+        if stamp["schema"] != mc.SUPPORTED_SCHEMA:
+            problems.append("stamp schema %r, expected %r" % (
+                stamp["schema"], mc.SUPPORTED_SCHEMA))
+        if stamp["built_at"] != built_at or stamp["builder"] != builder:
+            problems.append("build stamp mismatch on read-back: %r" % (stamp,))
+        if not stamp["content_sha256"]:
+            problems.append("container carries no content_sha256")
     if problems:
         out_path.unlink(missing_ok=True)
         sys.exit("Verification FAILED, container deleted:\n  " + "\n  ".join(problems))
@@ -168,7 +215,9 @@ def main():
                 "The manifest's existing URL(s) point at the OLD file, so a fresh install "
                 "would download bytes that fail the new checksum and end up undressed.\n"
                 "Pass --url <new release asset URL> for this build, or rebuild identical "
-                "bytes. The manifest was NOT written." % (
+                "bytes -- which since the build stamp (2026-09-07) also means passing "
+                "--built-at with the previous build's timestamp, because the stamp is "
+                "inside the file. The manifest was NOT written." % (
                     whole_sha256[:12], str(prior.get("sha256"))[:12]))
     else:
         urls = []
@@ -178,6 +227,8 @@ def main():
           % (out_path, n_assets, n_payloads, out_path.stat().st_size / 1e6))
     print("Manifest: version %s, %s..., %d mirror URL(s)"
           % (version, whole_sha256[:12], len(urls)))
+    print("Stamp: schema %d, built %s by %s"
+          % (mc.SUPPORTED_SCHEMA, built_at, builder))
 
 
 if __name__ == "__main__":

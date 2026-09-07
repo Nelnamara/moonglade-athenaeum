@@ -2785,6 +2785,50 @@ def _mark_earned(out_dir, db_path, ach_id):
     return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
 
 
+ICO_SIZES = (16, 32, 48, 256)
+
+
+def _cut_mark_ico(mdir, mark_id, art_bytes):
+    """Cut <mark_id>.ico beside an uploaded mark's art. Returns True if the file was
+    written, False if it could not be (and the caller keeps the mark either way).
+
+    WHY: the Desktop launcher shortcut is the app's real icon (make_launcher_shortcut --
+    a .pyw cannot carry one, the .lnk can), and it reads a mark's .ico off disk. The
+    shipped tile marks are delivered with one already cut; an UPLOADED mark never had one,
+    so POST /api/branding/shortcut answered "no .ico cut" for it and a custom mark could
+    never become the launcher's icon. Cutting it at upload time is what closes that.
+
+    The art is padded to a SQUARE on transparency (an icon is square; letterboxing beats
+    stretching), and scaled to 256 when it is smaller, so all four of ICO_SIZES really land
+    in the file rather than Pillow silently dropping the ones larger than the source. An
+    animated webp contributes its FIRST frame -- an .ico has no animation to keep it in.
+
+    FAILS SOFT on everything: no Pillow, unreadable art, a write that cannot happen. The
+    mark itself is already saved by the time this runs, and losing the icon is not a reason
+    to lose the mark."""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(art_bytes)) as im:
+            im.load()
+            rgba = im.convert("RGBA")
+        side = max(rgba.width, rgba.height)
+        if side <= 0:
+            return False
+        if rgba.width != rgba.height:
+            square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            square.paste(rgba, ((side - rgba.width) // 2, (side - rgba.height) // 2))
+            rgba = square
+        biggest = max(ICO_SIZES)
+        if side < biggest:
+            rgba = rgba.resize((biggest, biggest), Image.LANCZOS)
+        rgba.save(mdir / (str(mark_id) + ".ico"), format="ICO",
+                  sizes=[(s, s) for s in ICO_SIZES])
+        return True
+    except Exception:
+        return False
+
+
 def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     """Save The Great Library's custom-mark upload into branding/marks/ and make
     it the active mark. Same manifest shape list_marks() already reads
@@ -2796,8 +2840,12 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
 
     There is only ONE custom-mark slot (the design's single 6th tile), so a
     second upload REPLACES the first -- any existing kind:'upload' entry (and
-    its .png) is dropped here first, rather than accumulating orphaned marks
-    the picker would need de-duping logic to hide."""
+    its .png/.webp/.ico) is dropped here first, rather than accumulating
+    orphaned marks the picker would need de-duping logic to hide.
+
+    Also cuts the mark's launcher .ico (2026-09-07, see _cut_mark_ico) -- the
+    returned `ico` is True when that file was written and False when the cut
+    failed, and the mark is saved either way."""
     mdir = _role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
@@ -2807,13 +2855,21 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     except (OSError, ValueError):
         marks = []
     for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
-        for old_ext in MARK_EXTS:        # the replaced upload may be either format
+        # ".ico" joins MARK_EXTS here (2026-09-07): an upload now gets one cut for it, so
+        # the replaced upload's icon has to go with its art -- otherwise a stale .ico
+        # outlives the mark it was cut from and list_marks would keep claiming it.
+        for old_ext in MARK_EXTS + (".ico",):   # the replaced upload may be either format
             old_art = mdir / (str(old.get("id")) + old_ext)
             if old_art.exists():
                 old_art.unlink()
     marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
     new_id = secrets.token_hex(4)
     (mdir / (new_id + ext)).write_bytes(png_bytes)
+    # Cut the launcher icon too (2026-09-07). Before this an upload always reported
+    # ico:False and POST /api/branding/shortcut refused it, so a custom mark could never
+    # become the app's Desktop icon. Best effort: the mark is already on disk, and a
+    # failed cut costs the icon, never the mark.
+    ico = _cut_mark_ico(mdir, new_id, png_bytes)
     marks.append({"id": new_id, "label": label, "kind": "upload"})
     (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
     cfg = load_branding(out_dir)
@@ -2821,7 +2877,7 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     save_branding(out_dir, cfg)
     return {"id": new_id, "label": label, "kind": "upload",
             "png": "/branding/marks/%s%s" % (new_id, ext),
-            "animated": ext == ".webp", "ico": False}
+            "animated": ext == ".webp", "ico": ico}
 
 
 def remove_custom_mark(out_dir, mark_id):
@@ -2842,7 +2898,10 @@ def remove_custom_mark(out_dir, mark_id):
         return False
     keep = [m for m in marks if m is not target]
     (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
-    for ext in MARK_EXTS:                # an uploaded mark may be png or webp
+    # ".ico" joins the sweep (2026-09-07): an upload gets a launcher icon cut for it, and
+    # it must not outlive the mark -- a left-behind .ico is an icon path pointing at a
+    # mark that no longer exists.
+    for ext in MARK_EXTS + (".ico",):    # an uploaded mark may be png or webp
         art = mdir / (str(mark_id) + ext)
         if art.exists():
             art.unlink()
