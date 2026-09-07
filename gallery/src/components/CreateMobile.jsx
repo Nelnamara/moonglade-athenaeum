@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
-  dims, goGate, loraIncompat, loraRange, loraStep,
+  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered,
 } from "../gen/genCore.js";
 import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
@@ -685,12 +685,23 @@ function ImageAdvanced({ s, set, setLora, m }) {
 
       <div className="cm-subhead">Tuning</div>
       <div className="cm-lbl">Mode</div>
+      {/* Same profile gate the dock's mode bars carry (SCOPE 2026-08-17 4b), through the
+          SAME genCore.modeOffered -- a chip for a mode this model does not offer is DIMMED,
+          never removed, so the row keeps its shape, and it says why. The phone was left out
+          of the first cut (red team 2026-09-07) even though it already gates steps/CFG/
+          upscale/negative off the same `m` two rows down. The reset half lives in
+          useGenerate (modeAfterApply), which AppMobile shares with the dock, so a model
+          switch clears a stale pick here too with no second copy of the rule. */}
       <div className="cm-chiprow">
-        {GEN_MODES.map(([v, l]) => (
-          <button key={v} type="button" title={l}
-            className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
-            onClick={() => set({ mode: v })}>{l}</button>
-        ))}
+        {GEN_MODES.map(([v, l]) => {
+          const off = !modeOffered(v, m && m.profiles);
+          return (
+            <button key={v} type="button" disabled={off}
+              title={off ? "Not offered for this model" : l}
+              className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
+              onClick={() => set({ mode: v })}>{l}</button>
+          );
+        })}
       </div>
 
       <div className="cm-adv-sliderrow">
