@@ -77,10 +77,11 @@ why this section exists.
 - **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself
   shipped — see `CHANGELOG.md` [3.8.1])* Two era-mismatches the census surfaced, both design-adjacent:
   a **batch** card still takes over the whole library the way series cards did before the 3.8.0
-  series modal (asymmetric siblings) — **builds in 3.10: the series popup, marked BATCH** — and the viewer's
+  series modal (asymmetric siblings), and the viewer's
   page-stepping and its scroll-lock came from different months — stepping past a page boundary
   swaps the grid behind the viewer while scroll is frozen, not remembered, so closing it can
-  strand the reader. Diagnosis + full 23-trigger census in the 2026-09-05 session record.
+  strand the reader. The batch card **builds in 3.10: the series popup, marked BATCH.**
+  Diagnosis + full 23-trigger census in the 2026-09-05 session record.
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
