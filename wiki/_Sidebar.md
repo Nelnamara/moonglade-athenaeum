@@ -19,5 +19,6 @@
 - [Trust & Safety](Trust-and-Safety)
 - [Troubleshooting](Troubleshooting)
 - [FAQ](FAQ)
+- [Glossary](Glossary)
 
 [← Back to repo](https://github.com/Nelnamara/moonglade-athenaeum)
