@@ -267,7 +267,11 @@ def test_cancel_stops_the_download_and_leaves_no_partial(tmp_path):
     target = tmp_path / "moonglade.dat"
     manifest = _manifest_for(REAL_BYTES * 500)
     job = ma.AssetFetchJob(target)
-    job.start(manifest=manifest, opener=_opener(REAL_BYTES * 500, chunk=16))
+    # A per-chunk delay, not a small chunk, is what keeps this download running at the
+    # moment cancel() fires: with no delay a fast runner finished the whole 2 MB inside
+    # the 50 ms sleep, the file was legitimately complete, and the "no partial" assertion
+    # read a finished download as a leaked one (CI, 2026-09-06).
+    job.start(manifest=manifest, opener=_opener(REAL_BYTES * 500, chunk=16, delay=0.02))
     time.sleep(0.05)
     job.cancel()
     deadline = time.monotonic() + 5

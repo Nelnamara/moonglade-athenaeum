@@ -27,7 +27,10 @@
 
 import { show as toastShow } from "./toastStore.js";
 import { apiGet } from "../api.js";
-import { put } from "../hooks/swrCache.js";
+// From the STORE, not hooks/swrCache.js: that module imports React for its hook, and this
+// one runs where React may not be installed (the Loom's node test job installs only loom/).
+// swrCache re-exports this same `put`, so the cache the overlays read is the same cache.
+import { put } from "../hooks/swrStore.js";
 
 const SEEN_KEY = "mg_spike_announced";
 

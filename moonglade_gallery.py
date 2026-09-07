@@ -8931,6 +8931,10 @@ def create_app(out_dir: Path):
                                     stderr=subprocess.STDOUT, text=True, bufsize=1,
                                     encoding="utf-8", errors="replace", env=env,
                                     creationflags=_NO_WINDOW)
+            if proc is None:
+                # A spawn that hands back nothing is a failed spawn: the reader thread
+                # would otherwise die on `proc.stdout` and leave the slot "running".
+                raise RuntimeError("could not start the job: no process was created")
         except Exception:
             # Release the slot on a failed spawn, or one bad launch wedges the Panel for
             # the life of the process (nothing would ever clear a "running" with no proc).
