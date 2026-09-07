@@ -12,6 +12,8 @@ import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
 import { lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import Icon from "../icons/Icons.jsx";
+import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
+import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -376,6 +378,19 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [power, subOverlay, updOpen, updPhase]);
+
+  /* OPENED BY THE BANNER (owner ruling 2026-09-07). The standing update strip lives at
+     body level and cannot reach this component's state, so it leaves an intent behind and
+     asks the shell to bring the Panel up (App.jsx registers that). Two readings, because
+     the Panel is usually NOT mounted when the button is pressed and occasionally is: the
+     one-shot flag on mount, and the subscription for a Panel already open. Both open the
+     modal the sidebar's version stamp opens -- nothing new, and still nothing that can
+     apply anything on its own. */
+  useEffect(() => {
+    if (takeOpenIntent()) setUpdOpen(true);
+    return subscribeOpenIntent(() => { takeOpenIntent(); setUpdOpen(true); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (summaryErr) {
     return (
@@ -2166,12 +2181,13 @@ export function TrashSubOverlay({ isLocal, onClose }) {
    A refusal replaces the METER, not the modal, in one of exactly three presentations the
    handoff draws: offline gray, busy gold, failed ruby. All three are tokens. The failed
    one keeps the tool's VERBATIM words (git's or pip's), which is the thing that actually
-   tells you the fix. */
-const UPD_PHASE_HINT = {
-  offline: "nothing was touched",
-  busy: "nothing was touched — try again in a moment",
-  failed: "nothing was touched",
-};
+   tells you the fix.
+
+   THE RUNNING HALF MOVED OUT, 2026-09-07 (owner: "phone gets update"). The phases list, the
+   meter, the hold line, that refusal block and the three "what happens" lines now live in
+   UpdatePhases.jsx, so the phone's Control tab shows the SAME card instead of a second
+   drawing of it that would drift. Same markup, same classes, no visual change here -- this
+   modal is still the surface the handoff describes. */
 
 /* `target` is the SNAPSHOT taken when the user pressed Update now (useControlPanel.js).
    Once the apply is under way this card is making a claim about a specific version -- what
@@ -2183,7 +2199,6 @@ export function UpdateModal({ update, target, phase, refusal, steps, onApply, on
   const busy = phase === "applying" || phase === "done";
   const running = !!steps && busy;
   const shown = (busy && target) ? target : update;
-  const doneCount = (steps || []).filter((s) => s.state === "done").length;
   const title = phase === "done" ? "Updated to " + shown.latest
     : running ? "Applying " + shown.latest
       : "Update available";
@@ -2209,43 +2224,12 @@ export function UpdateModal({ update, target, phase, refusal, steps, onApply, on
           ) : null}
 
           {running ? (
-            <>
-              <ol className="mgcp-updphases">
-                {steps.map((s) => (
-                  <li key={s.key} className={"mgcp-updphase " + s.state}>
-                    <span className="mgcp-updphase-dot" aria-hidden="true">
-                      {s.state === "done" ? "✓" : s.state === "now" ? <i /> : null}
-                    </span>
-                    <span className="mgcp-updphase-lab">{s.label}</span>
-                    <span className="mgcp-updphase-t">
-                      {s.state === "done"
-                        ? (s.note || (s.secs != null ? s.secs.toFixed(1) + "s" : "done"))
-                        : s.state === "now" ? "now" : s.note}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              {/* The meter is the phase count, not a clock: it can only move when a phase
-                  really finishes. CSS eases the width change so it reads as motion. */}
-              <div className="mgcp-updmeter">
-                <i style={{ width: [8, 38, 72, 100][doneCount] + "%" }} />
-              </div>
-              <div className="mgcp-updhold">
-                {phase === "done" ? "done · reloading into the new version"
-                  : "do not close · resumes on its own"}
-              </div>
-            </>
+            <UpdatePhases steps={steps} phase={phase} />
           ) : refusal ? (
-            <div className={"mgcp-updrefusal " + refusal.kind}>
-              <span className="mgcp-updrefusal-kind">{refusal.kind}</span>
-              <span className="mgcp-updrefusal-line">{refusal.line}</span>
-              <span className="mgcp-updrefusal-note">{UPD_PHASE_HINT[refusal.kind]}</span>
-            </div>
+            <UpdateRefusal refusal={refusal} />
           ) : (
             <ul className="mgcp-updwhat">
-              <li>The update is pulled atomically — if it can't apply cleanly, nothing changes.</li>
-              <li>Dependencies are installed only if they changed in this release.</li>
-              <li>The server restarts. This tab reloads itself when it is back.</li>
+              {UPDATE_WHAT.map((line) => <li key={line}>{line}</li>)}
             </ul>
           )}
 
