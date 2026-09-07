@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiPost } from "../api.js";
+import { apiGet } from "../api.js";
+import { sendAchEvent } from "../notify/achNonce.js";
 import { peek, put } from "./swrCache.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
@@ -68,10 +69,14 @@ export const RARITY_ORDER = ["common", "rare", "epic", "legendary"];
 // REAL escalating warning toast every poke already shows in the classic
 // Trophy Hall. The React port was posting to /api/ach-event silently with no
 // per-click feedback at all, which is what made 5 real pokes feel trivial/
-// unearned compared to classic's actual build-up -- not a missing time-gate
-// (verified: neither poke() nor /api/ach-event's server handler has ANY
-// cooldown/rate-limit, client or server side; 5 real, separate clicks is the
-// only real gate there ever was), just this missing feedback loop.
+// unearned compared to classic's actual build-up -- not a missing time-gate,
+// just this missing feedback loop.
+// The "no cooldown anywhere, client or server" this comment used to record was
+// true until 2026-09-07 and is not any more: /api/ach-event now debounces the
+// same (session, event) inside 400ms and refuses past 30 beacon calls a minute
+// (see its handler, and notify/achNonce.js). Neither is a gate on the FEAT --
+// 400ms separates a double-fired click from a second click, not one poke from
+// the next -- so 5 real, separate clicks is still the only real gate there is.
 export const POKES = [
   "The narrator ignores you.",
   "The narrator raises an eyebrow. Do you mind?",
@@ -436,8 +441,13 @@ export default function useFolio() {
   // "Triggered" feat poking in the classic Trophy Hall does). On snap,
   // refetch /api/achievements so the newly-unblanked roast_nsfw text is
   // actually there to scramble to (mirrors mg-notify.js's poke()->load(true)).
+  // Through sendAchEvent since 2026-09-07: it carries this page's nonce and adopts
+  // the next one, so five pokes in a row are five accepted events (a bare post would
+  // spend the boot nonce and have the other four refused). A refusal -- a stale page
+  // it could not refresh, or the rate limit -- comes back as {error} and is dropped
+  // below, exactly as before.
   function pokeNarrator() {
-    apiPost("/api/ach-event", { event: "narrator" })
+    sendAchEvent("narrator")
       .then((res) => {
         if (!mountedRef.current) return;
         if (res.error) return;
