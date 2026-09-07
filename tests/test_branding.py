@@ -802,3 +802,95 @@ def test_custom_mark_remove_route(tmp_path, monkeypatch):
     assert r.get_json()["marks"] == []
     assert cli.get("/api/branding").get_json()["mark"] == "logo"
     assert cli.post("/api/branding/mark/custom/remove", json={"id": "nope"}).status_code == 400
+
+
+# ---- A custom mark can become the launcher's icon (2026-09-07) ---------------
+# The Desktop .lnk IS the app's icon (a .pyw can carry none) and it reads a mark's .ico off
+# disk. Shipped tile marks arrive with one cut; an upload never had one, so add_custom_mark
+# always returned ico:False and POST /api/branding/shortcut refused a custom mark outright.
+# The cut now happens at upload time.
+
+def test_custom_mark_upload_cuts_an_ico(tmp_path):
+    from PIL import Image
+    mark = g.add_custom_mark(tmp_path, _png_bytes(), label="My mark")
+    assert mark["ico"] is True
+    ico = g._role_dir("marks") / (mark["id"] + ".ico")
+    assert ico.exists()
+    with Image.open(ico) as im:
+        assert im.format == "ICO"
+        # every size the cut promises is really in the file -- a 4x4 source is scaled up
+        # rather than letting Pillow drop the sizes larger than it
+        assert {s for s in im.info["sizes"]} >= {(s, s) for s in g.ICO_SIZES}
+    # and the listing agrees, because it exists-checks the same file
+    assert [m["ico"] for m in g.list_marks(tmp_path)] == [True]
+
+
+def test_the_ico_is_square_padded_not_stretched(tmp_path):
+    """An icon is square. A wide mark is centred on transparency rather than distorted."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGBA", (400, 100), (200, 30, 30, 255)).save(buf, format="PNG")
+    mark = g.add_custom_mark(tmp_path, buf.getvalue())
+    assert mark["ico"] is True
+    with Image.open(g._role_dir("marks") / (mark["id"] + ".ico")) as im:
+        im.size = (256, 256)
+        frame = im.convert("RGBA")
+    assert frame.width == frame.height
+    assert frame.getpixel((128, 128))[3] > 0          # the art is in the middle
+    assert frame.getpixel((128, 4))[3] == 0           # and the padding is transparent
+
+
+def test_a_failed_ico_cut_still_saves_the_mark(tmp_path, monkeypatch):
+    """Best effort: losing the icon is never a reason to lose the mark the owner just
+    uploaded (the same failure a machine with no Pillow would produce)."""
+    monkeypatch.setattr(g, "_cut_mark_ico", lambda *a, **k: False)
+    mark = g.add_custom_mark(tmp_path, _png_bytes())
+    assert mark["ico"] is False
+    assert (g._role_dir("marks") / (mark["id"] + ".png")).exists()
+    assert not (g._role_dir("marks") / (mark["id"] + ".ico")).exists()
+    assert g.load_branding(tmp_path)["mark"] == mark["id"]
+
+
+def test_cut_mark_ico_returns_false_on_art_it_cannot_read(tmp_path):
+    mdir = g._role_dir("marks")
+    mdir.mkdir(parents=True, exist_ok=True)
+    assert g._cut_mark_ico(mdir, "x", b"not an image at all") is False
+    assert not (mdir / "x.ico").exists()
+
+
+def test_replacing_and_removing_a_custom_mark_take_the_ico_with_them(tmp_path):
+    """A stale .ico is an icon path pointing at a mark that no longer exists -- and
+    list_marks would go on reporting ico:True for it."""
+    first = g.add_custom_mark(tmp_path, _png_bytes((1, 1, 1)))
+    second = g.add_custom_mark(tmp_path, _png_bytes((2, 2, 2)))
+    assert not (g._role_dir("marks") / (first["id"] + ".ico")).exists()
+    assert (g._role_dir("marks") / (second["id"] + ".ico")).exists()
+
+    assert g.remove_custom_mark(tmp_path, second["id"]) is True
+    assert not (g._role_dir("marks") / (second["id"] + ".ico")).exists()
+
+
+def test_the_shortcut_route_accepts_an_uploaded_custom_mark(tmp_path, monkeypatch):
+    """The whole point: before the cut, this route answered 400 'no .ico cut for it' for
+    every custom mark. subprocess.run is stubbed exactly as the shipped shortcut test
+    stubs it -- no real Desktop shortcut is written."""
+    import subprocess
+    monkeypatch.setattr(g, "_mark_earned", lambda *a, **k: True)
+    captured = {}
+
+    class R:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda argv, **k: (captured.__setitem__("argv", argv), R())[1])
+    cli = _client(tmp_path)
+    mark_id = cli.post("/api/branding/mark/custom",
+                       data={"file": (io_bytes(_png_bytes()), "m.png")},
+                       content_type="multipart/form-data").get_json()["mark"]
+
+    r = cli.post("/api/branding/shortcut", json={"mark": mark_id})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert mark_id + ".ico" in captured["argv"][-1]
