@@ -414,8 +414,8 @@ def no_confirmed_contest_entry(render_browser):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _dismiss_any_achievement_toast(page):
-    """Click-dismiss a real achievement celebration (.ach-m2) if one happens to be up.
+def _dismiss_any_achievement_toast(page, rounds=4):
+    """Click-dismiss EVERY real achievement celebration (.ach-m2) that is up, in turn.
 
     render_server's fixture pre-seeds `seen` from the harness's INITIAL catalog state
     (suppresses the page-load toast), but a test's own real actions -- a job run, an
@@ -425,11 +425,35 @@ def _dismiss_any_achievement_toast(page):
     not a bug -- see `_play()` in gallery/src/notify/ach.js, the 2026-08-08 React-port home
     of the celebration engine), so left alone it blocks every click under it for its real
     4.2-6.4s hold. A no-op when nothing is showing.
+
+    2026-09-07: this used to dismiss ONE moment and return, which is not the same thing as
+    clearing the screen. `ach.js`'s `celebrate()` pushes onto `_q` and `_play()` only calls
+    `_next()` 500ms AFTER the clicked moment is removed, so a second earned achievement is
+    still queued and lands a beat after the first is detached -- the old one-shot returned
+    into that gap and the very next click went to the successor overlay instead of the
+    control under it. That is exactly the shape of failure this docstring anticipated
+    ("a test's own real actions can organically cross a NEW threshold mid-test") without
+    covering: it anticipated a toast, not a QUEUE of them. So it now loops until the screen
+    is genuinely clear, bounded, and says so loudly rather than silently giving up. Call it
+    before any interaction a full-screen overlay could swallow, not just once after boot.
     """
-    toast = page.locator(".ach-m2")
-    if toast.count():
+    for _ in range(rounds):
+        toast = page.locator(".ach-m2")
+        if not toast.count():
+            return
         toast.first.click(timeout=1000)
         page.wait_for_selector(".ach-m2", state="detached", timeout=2000)
+        # The 500ms removal + _next() handoff above: if another moment is queued it attaches
+        # inside this window. Nothing queued => the wait times out, which is the success case.
+        try:
+            page.wait_for_selector(".ach-m2", state="attached", timeout=700)
+        except _PlaywrightTimeout:
+            return
+    assert not page.locator(".ach-m2").count(), (
+        "still an .ach-m2 celebration up after dismissing {} of them -- either the app is "
+        "firing an unbounded parade or the overlay stopped closing on click".format(rounds))
+
+
 def _login(page):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -1603,15 +1627,30 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     tiles_before = page.locator(".glm-grid .glm-tile").count()
 
     # A tap opens the full-screen viewer (GalleryMobile's tapView -> LightboxMobile).
+    # Clear the screen first: a full-screen .ach-m2 swallows this tap, and this test's own
+    # page load can cross a threshold the module fixture's `seen` pre-seed never saw.
+    _dismiss_any_achievement_toast(page)
     page.locator(_DOOR_TILE).click()
     page.wait_for_selector(".lbm-root")
     # Put the library at a known offset UNDER the viewer -- the offset is set here rather
     # than before the tap because Playwright scrolls the tile into view to click it, which
     # moves .glm-body itself. This is the number that has to come back.
-    page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 40; }")
+    #
+    # 2026-09-07, order-independence: the offset used to be a hardcoded 40, which only fits
+    # because SOME EARLIER TEST grew the module-scoped catalog (the import-overlay test
+    # writes real rows into the same render_server catalog). On the fixture's own six rows
+    # .glm-body overscrolls by 15px, so scrollTop clamped to 15 and this assertion failed --
+    # alone, and under any -k that deselected the importer. The number now comes from the
+    # live scroller, capped at the same 40; what the assertion actually needs is a non-zero
+    # offset that survives the round trip, and that is what it now demands.
+    scroll_before = page.evaluate("""() => {
+        const b = document.querySelector('.glm-body');
+        b.scrollTop = Math.min(40, b.scrollHeight - b.clientHeight);
+        return b.scrollTop;
+    }""")
     _settle(page)
     scroll_before = page.evaluate("() => document.querySelector('.glm-body').scrollTop")
-    assert scroll_before == 40, (
+    assert scroll_before > 0, (
         "the phone's library scroller would not take a test offset ({!r}) -- the restore "
         "assertion below would be vacuous".format(scroll_before))
 
@@ -1619,6 +1658,9 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     chip = page.locator(".lbm-actsrow .lbm-similar")
     assert chip.count() == 1
     assert "◈" in chip.inner_text()
+    # Same guard again: the tile tap itself is a real action, so a fresh moment can be up
+    # over the viewer by now and the chip click would land on the overlay instead.
+    _dismiss_any_achievement_toast(page)
     chip.click()
 
     # The viewer closes, the lookalikes take the GRID's place, and the token is up.
@@ -3884,3 +3926,310 @@ def test_each_tab_keeps_its_own_scroll(
             "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# A branding file DROPPED into a slot folder, all the way to the browser
+# ---------------------------------------------------------------------------
+# tests/test_branding.py already covers the sweep as a FUNCTION (adopt, delete the raw
+# file, register the asset, fire the feat) against Flask's test client. Nothing covered
+# the trip the owner actually takes: put a picture in the folder, reload the page, and
+# see the app wearing it. That is three mechanisms in a row, and a unit test can see none
+# of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
+# -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
+# friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
+_UNDER_THE_HOOD = "under-the-hood"     # the hidden feat sweep_branding_drops() fires
+_DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
+#                                        served pixel PROVES it came from this exact drop
+_DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the
+#                                        whole picture and the colour check stays meaningful
+
+
+def _png_of(size, rgb):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _decode(raw):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(raw))
+    im.load()
+    return im
+
+
+def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
+        logged_in_page, render_server, tmp_path):
+    """Drop a PNG into a slot folder; reload; the app is wearing it.
+
+    Order-independent by construction, and that is worth spelling out because this test
+    writes to two trees, one of which OUTLIVES it:
+
+      * the branding tree is `tmp_path/branding` -- conftest's autouse `_isolated_branding`
+        re-points branding_root() there for the duration of THIS test, so the folder the
+        drop lands in (and the adopted asset, the manifest and the rendered flat that
+        follow it) evaporates with the test. Asserted below rather than assumed: a test
+        that drops files into a real folder must prove first that the folder is the
+        throwaway one.
+      * the feat's earn-state lives in the module server's out_dir, which every later test
+        in this file shares. So this one snapshots the two files it disturbs -- the
+        telemetry flags and the achievement state -- and restores them in a `finally`,
+        whether it passes or not.
+
+    THREE preconditions have to be undone for the celebration to be a real earn rather
+    than a re-run of an already-recognized one, and each is a fixture decision made for an
+    unrelated reason:
+      1. render_server pre-seeds the `branding_custom_file` flag, to unlock the Branding
+         tab for the Control Panel test -- cleared here, so the sweep is what sets it;
+      2. it pre-marks every earned achievement `seen`, to stop boot toasts -- this feat is
+         un-seen here, so its own toast is allowed to fire;
+      3. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
+         library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
+         and the fixture computes those BEFORE conftest's per-test sealed container exists
+         -- module-scoped fixtures set up ahead of function-scoped autouse ones -- so they
+         land empty and the gate reads "still syncing" for the life of the module. An
+         install with a fully swept catalog, which is exactly what this harness serves, has
+         that flag set; it is set here for the same reason the API key above it is.
+
+    The achievement half is donor-gated exactly like the Branding tab in
+    test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
+    moonglade.dat, so donor-absent (public CI) there is no `under-the-hood` to earn and no
+    toast to wait for. The adoption half -- the part with no coverage at all -- runs either
+    way.
+    """
+    import moonglade_gallery as _g
+    from moonglade_gallery import list_slot_assets, load_ach_state
+
+    slot = "banner_main"
+    sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
+    assert tmp_path in sdir.parents, (
+        "branding_root() is {} -- not under this test's tmp_path. Refusing to write a "
+        "drop into a real branding tree.".format(_g.branding_root()))
+    sdir.mkdir(parents=True, exist_ok=True)
+
+    root = render_server.root
+    before_ids = {a["id"] for a in list_slot_assets(root, slot)}
+    flags_before = dict(load_telemetry(root)["flags"])
+    ach_before = load_ach_state(root)
+
+    try:
+        # --- put the feat back to genuinely-unearned, and open the celebration gate ---
+        _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
+        telem_flag("first_sync_done", out_dir=root)
+        save_ach_state(root, dict(ach_before, seen=[
+            i for i in (ach_before.get("seen") or []) if i != _UNDER_THE_HOOD]))
+        assert not load_telemetry(root)["flags"].get("branding_custom_file")
+
+        page = logged_in_page(**DESKTOP)
+
+        # --- the drop itself: a picture, by hand, into the slot folder ---
+        drop = sdir / "my_own_banner.png"
+        drop.write_bytes(_png_of(_DROP_SIZE, _DROP_RGB))
+        assert drop.exists()
+
+        # --- the reload the owner would do. The boot fetch is what runs the sweep, so
+        # wait on THAT response, not on a wall-clock guess: when it lands, so has the
+        # adoption -- and its body is the payload the celebration engine reads.
+        with page.expect_response(
+                lambda r: "/api/achievements" in r.url and r.request.method == "GET") as boot:
+            _visit(page, "/")
+
+        # 1. the raw drop is consumed, not left sitting beside the adopted copy
+        assert not drop.exists(), (
+            "the dropped file is still in the slot folder -- the sweep never adopted it")
+
+        # 2. the slot now holds exactly one NEW asset, and the app really serves it
+        after = [a for a in list_slot_assets(root, slot) if a["id"] not in before_ids]
+        assert len(after) == 1, "expected one newly adopted asset, got {}".format(after)
+        asset = after[0]
+        assert asset["png"] == "/branding/%s/%s.png" % (slot, asset["id"])
+
+        # Fetched through the BROWSER's own context (its session cookie, its base_url), so
+        # this is the URL the page itself asks for -- coded-rel translation included.
+        got = page.request.get(asset["png"])
+        assert got.status == 200, "{} served {}".format(asset["png"], got.status)
+        im = _decode(got.body())
+        assert im.format == "PNG"
+        assert im.size == _DROP_SIZE, (
+            "the served asset is {}, not the dropped picture's own {}".format(
+                im.size, _DROP_SIZE))
+        assert im.convert("RGB").getpixel((600, 150)) == _DROP_RGB, (
+            "the slot serves SOMETHING, but not the file that was dropped")
+
+        # 3. ...and the flat the header actually paints was re-rendered from it, which is
+        # the difference between "stored" and "worn" (add_slot_asset -> _write_banner_flat).
+        flat = page.request.get("/branding/banner.png")
+        assert flat.status == 200, "/branding/banner.png served {}".format(flat.status)
+        flat_im = _decode(flat.body()).convert("RGB")
+        assert flat_im.size == (1920, 480), "banner_main's flat is {}".format(flat_im.size)
+        assert flat_im.getpixel((960, 240)) == _DROP_RGB, (
+            "the header's flat did not re-render from the adopted drop")
+
+        # 4. the sweep really fired the feat, and it really paid out ON SCREEN.
+        # Donor-gated: no sealed roster, no achievement to earn and nothing to celebrate.
+        assert load_telemetry(root)["flags"].get("branding_custom_file"), (
+            "the adoption did not fire branding_custom_file")
+        if _SEALED_DONOR.is_file():
+            payload = boot.value.json()
+            assert _UNDER_THE_HOOD in (payload.get("newly") or []), (
+                "the boot fetch did not report the feat as newly earned: newly={!r}"
+                .format(payload.get("newly")))
+            page.wait_for_selector(".ach-m2")
+            shown = page.locator(".ach-m2").first.inner_text()
+            assert "Under the Hood" in shown, (
+                "a celebration fired, but not the one the drop earns: {!r}".format(shown))
+            # Leave the screen clear for whatever runs next -- see the helper's docstring.
+            _dismiss_any_achievement_toast(page)
+            assert page.locator(".ach-m2").count() == 0
+    finally:
+        # The module's shared out_dir goes back byte-for-byte, pass or fail: the flags this
+        # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
+        _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
+        save_ach_state(root, ach_before)
+
+
+# ---------------------------------------------------------------------------
+# The Bridge §1 -- the Control Panel's Mirror tile, at rest
+# ---------------------------------------------------------------------------
+# ROADMAP-internal.md kept one Bridge follow-on open: "a render-harness guard". The tile
+# (ControlPanelOverlay.jsx's MirrorTile, control-panel.css's "The Bridge §1" block) is a
+# credential gate, so the two things worth guarding are what it SAYS at rest and what it
+# REFUSES to do. Its colour ladder -- emerald >7 days / peach <=7 / ruby <=0 / grey off --
+# lives entirely in CSS class rules, which is exactly the shape of thing a substring test
+# can confirm exists while the rendered ring paints something else.
+#
+# Nothing in this test may reach pixai.art. It cannot by construction: the resting state
+# is `connected: false` (no mirror_session.json under the harness's own config path), and
+# MirrorTile.toggle() short-circuits BEFORE any fetch when the switch is asked to arm with
+# no session. That is asserted, not assumed, and a route abort backs it up.
+
+# Read the ring's rendered stroke against the two tokens the ladder names, resolved by the
+# browser from real probe elements -- comparing a computed rgb() to a raw token string
+# would be the substring test this file exists to replace.
+_READ_MIRROR_RING_JS = """() => {
+  const probe = (tok) => {
+    const d = document.createElement('div');
+    d.style.color = 'var(' + tok + ')';
+    document.body.appendChild(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  };
+  const ring = document.querySelector('.mgbr-ring');
+  const fg = ring.querySelector('.mgbr-ring-fg');
+  return {
+    ringClass: ring.className,
+    stroke: getComputedStyle(fg).stroke,
+    grey: probe('--overlay0'),
+    emerald: probe('--emerald'),
+    dasharray: fg.getAttribute('stroke-dasharray'),
+    dashoffset: fg.getAttribute('stroke-dashoffset'),
+  };
+}"""
+
+
+def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_page):
+    """The Bridge §1's gate, rendered: grey ring, empty ring, pill off, and a toggle that
+    goes nowhere.
+
+    Four assertions, in the order the owner meets the tile:
+      1. it is there and it is NOT armed -- .mgbr-tile without .armed;
+      2. the JWT ring is in its OFF state, measured rather than read off a class name: the
+         rendered stroke is the ladder's grey (--overlay0) and not its emerald, and the arc
+         is drawn at zero length (dashoffset == the full circumference), which is what "no
+         session, no days" looks like;
+      3. the pill toggle exists, is off, and says so to a screen reader (aria-pressed);
+      4. pressing it ARMS NOTHING. MirrorTile.toggle() refuses a want-on with no connected
+         session before it fetches anything, so the tile stays off, the refusal appears in
+         its own message line, and no /api/mirror write -- and no request to any host but
+         this harness's own server -- ever leaves the page.
+
+    The Connect button is deliberately never pressed: /api/mirror/connect makes the SERVER
+    read this machine's real browser cookie store. Reading the tile's resting state is the
+    guard the roadmap asked for; arming it is not.
+    """
+    from urllib.parse import urlparse
+
+    page = logged_in_page(**DESKTOP)
+    # Belt and braces under the assertion below: even a regression that tried could not
+    # actually reach the site from this page.
+    page.route("**/*pixai.art/**", lambda route: route.abort())
+    seen = []
+    page.on("request", lambda r: seen.append((r.method, r.url)))
+
+    _visit(page, "/")
+    page.wait_for_selector("header")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-bridge .mgbr-tile")
+    # The pill is disabled until /api/mirror/status answers, so this is also the wait for
+    # the tile to be driven by the SERVER's real state rather than its null-state placeholder.
+    page.wait_for_selector(".mgbr-pill:not([disabled])")
+    _settle(page)
+
+    # 1. present, and off
+    tile = page.locator(".mgcp-bridge .mgbr-tile")
+    assert tile.count() == 1
+    assert "armed" not in (tile.get_attribute("class") or ""), (
+        "the Mirror tile is armed on a harness server that has no session at all")
+    assert "Off · tier hidden" in page.locator(".mgbr-status").inner_text()
+    assert "Not connected" in page.locator(".mgbr-session-sub").inner_text()
+
+    # 2. the ring's OFF rung of the ladder, as rendered
+    ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert "off" in ring["ringClass"].split(), (
+        "the ring is on the {!r} rung with no session".format(ring["ringClass"]))
+    assert ring["stroke"] == ring["grey"], (
+        "the OFF ring paints {} -- the ladder's grey (--overlay0) is {}".format(
+            ring["stroke"], ring["grey"]))
+    assert ring["stroke"] != ring["emerald"], "the OFF ring paints the ARMED colour"
+    assert ring["dashoffset"] == ring["dasharray"], (
+        "the OFF ring draws an arc ({} of {}) -- with no session there are no days to show"
+        .format(ring["dashoffset"], ring["dasharray"]))
+    assert page.locator(".mgbr-days").inner_text().strip() == "0"
+
+    # --- phase 2: prove that ladder is LIVE css, not a rule nothing reaches. Flip the rung
+    # in the page only (never a committed change) and the same stroke must move to emerald.
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('off'); r.classList.add('healthy'); }")
+    _settle(page)
+    armed_ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert armed_ring["stroke"] == armed_ring["emerald"], (
+        "the healthy rung does not repaint the ring ({}) -- the OFF assertion above is "
+        "vacuous".format(armed_ring["stroke"]))
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('healthy'); r.classList.add('off'); }")
+
+    # 3. the pill, off
+    pill = page.locator(".mgbr-pill")
+    assert pill.count() == 1
+    assert "on" not in (pill.get_attribute("class") or "").split()
+    assert pill.get_attribute("aria-pressed") == "false"
+
+    # 4. pressing it arms nothing and calls nothing
+    before = len(seen)
+    pill.click()
+    page.wait_for_selector(".mgbr-msg")
+    assert "Connect a session first" in page.locator(".mgbr-msg").inner_text(), (
+        "the toggle did something other than refuse: {!r}".format(
+            page.locator(".mgbr-msg").inner_text()))
+    _settle(page)
+    assert "armed" not in (tile.get_attribute("class") or ""), "the tile armed itself"
+    assert "on" not in (pill.get_attribute("class") or "").split(), "the pill flipped on"
+    assert page.evaluate(_READ_MIRROR_RING_JS)["stroke"] == ring["grey"]
+
+    after = seen[before:]
+    assert not after, "pressing the toggle fired {} request(s): {}".format(len(after), after)
+    # And over the WHOLE test: the tile read its status and wrote nothing, and nothing at
+    # all went anywhere but this harness's own ephemeral port.
+    host = urlparse(page.url).hostname
+    foreign = [u for (m, u) in seen
+               if urlparse(u).hostname not in (None, "", host)]
+    assert not foreign, "requests left the harness server: {}".format(foreign)
+    writes = [(m, u) for (m, u) in seen if "/api/mirror/" in u and m != "GET"]
+    assert not writes, "a mirror WRITE left the page: {}".format(writes)
+    assert any(m == "GET" and "/api/mirror/status" in u for (m, u) in seen), (
+        "the tile never read /api/mirror/status -- it is rendering a placeholder, so every "
+        "assertion above is about nothing")
