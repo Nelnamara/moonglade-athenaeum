@@ -270,3 +270,52 @@
 @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
 @media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
+
+/* ---- the update BANNER (owner ruling 2026-09-07, "update should be noticed anywhere":
+   the once-per-version sticky toast above became a strip that stands until the update is
+   applied). Lives in THIS file, beside the toast it reworks, because notify.css is the one
+   stylesheet every shell already loads through notify/index.jsx -- desktop, phone, Loom and
+   setup wizard alike. Tokens only; the Update button wears the same gold face as the Panel's
+   own .mgcp-updgo, restated here rather than reached for across control-panel.css, which the
+   Loom and the wizard never load.
+
+   IT PUSHES THE SHELL DOWN, IT NEVER COVERS IT. BannerHost.jsx measures the strip (safe-area
+   padding included -- the phone's own top inset is the strip's, so the hero stops claiming it
+   again below) and publishes --mg-updbanner-h on <html>; each shell's top chrome moves by
+   exactly that. z-index sits just under the toasts, which stack from 64px down the right and
+   never meet it. */
+.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:509;box-sizing:border-box;
+  display:flex;align-items:center;gap:10px;
+  padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
+  background:var(--surface0);border-bottom:1px solid var(--accent);
+  font-family:var(--font-system,system-ui,sans-serif);}
+.mgub-line{flex:1;min-width:0;font-size:12.5px;color:var(--text);}
+button.mgub-go{flex:none;padding:6px 15px;border-radius:9px;font-size:12px;font-weight:800;
+  cursor:pointer;font-family:inherit;color:#241a05;border:1px solid rgba(212,175,55,.7);
+  background:linear-gradient(180deg,#e2c04a,#a8871f);}
+button.mgub-later{flex:none;padding:6px 11px;border-radius:9px;font-size:11.5px;cursor:pointer;
+  font-family:inherit;color:var(--subtext);border:1px solid var(--surface1);background:transparent;}
+button.mgub-later:hover{color:var(--text);border-color:var(--accent);}
+/* "Not now" folds the strip to this pill -- for this tab only, never written down. There is
+   no dismiss that makes the news vanish; the pill re-expands on tap. */
+.mg-updbanner.small{background:transparent;border-bottom-color:transparent;pointer-events:none;
+  padding:calc(4px + env(safe-area-inset-top)) 14px 4px;}
+button.mgub-pill{pointer-events:auto;padding:3px 10px;border-radius:999px;font-size:10.5px;
+  cursor:pointer;font-family:inherit;color:var(--text);background:var(--surface0);
+  border:1px solid var(--accent);}
+.mg-updbanner{transition:padding .18s cubic-bezier(.4,0,.2,1),background .18s cubic-bezier(.4,0,.2,1);}
+@media (prefers-reduced-motion: reduce){ .mg-updbanner{transition:none;} }
+
+/* Each shell's own top chrome, moved down by the strip's real height. The desktop header is
+   position:sticky;top:0 (shell.css .mgx-hdr) and the phone shell is position:fixed;inset:0
+   (gallery-mobile.css .glm-stage) -- both would otherwise render underneath the strip. The
+   phone hero re-derives its own notch padding from env(safe-area-inset-top); with the strip
+   above it already holding that inset, it is zeroed here so the hero does not pay for it
+   twice. */
+html.mg-updbanner-on .app{padding-top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .mgx-hdr{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .glm-stage{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .glm-hero{--glm-safetop:0px;}
+html.mg-updbanner-on .glm-hero-icons{top:12px;}
+html.mg-updbanner-on .sb-root{padding-top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(--mg-updbanner-h,0px);}
