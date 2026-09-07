@@ -23,19 +23,21 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
-- **The Loom as its own arena — the half you can see** *(owner, 2026-09-06: "I think it works
-  best as its own arena connected to the gallery")* The question "does the Loom become part of
-  the same app?" is answered: **no, and it does not need to be** — one sign-in, one library, one
-  job list, one look, one price road, two rooms. The plumbing half is built (a storyboard's own
-  address, the return trip's memory, phones opening the phone layout), so what is left is
-  everything that has to *say* something and therefore waits on the Design Handoff: what the
-  hero's **▰ The Loom** button shows about the open board, what the crossing chrome says in both
-  directions, whether a storyboard's address gets a visible home, and what a phone user meets
-  when the Loom opens its phone layout by itself. Brief:
-  `../moonglade-internal/design/BRIEF_2026-09-06_loom-arena.md`; scope and the owner's eight
-  calls: `../moonglade-internal/scopes/SCOPE_2026-09-06_loom-arena.md`. The one-build/two-entries
-  unification is **banked, not refused** — it deletes two fiddly React bridges but changes how a
-  spend-path page is served, so it is its own reviewed piece, later or not at all.
+- **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
+  *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
+  the Loom become part of the same app?" is **not answered**; it has a scope order. The owner's
+  ask: scope the viability of the Loom living inside the gallery as a modal, on one surface, and
+  what rolling it onto one surface would involve. His lean ("it works best as its own arena
+  connected to the gallery") is the thing that scope tests, not the answer. The 3.9.0 arena
+  plumbing (a storyboard's own address, the return trip's memory, phones opening the phone
+  layout) and the crossing design page in `../moonglade-internal/design/loom-arena/` are inputs,
+  built on the earlier reading. Sources for the scope: the locked desktop and phone Loom Design
+  Handoffs, the gallery's Design Handoffs, and the two-build fact (the gallery is
+  `gallery/dist/app.js`, the Loom is `loom/dist/master-storyboard.bundle.js`, React loaded two
+  incompatible ways, the Loom's root component would need breaking up). Next step: a workshop-prep
+  document that walks each seam in three columns — what the design pages say, what the code does,
+  what is undecided — then a workshop the owner drives. Frame and sources:
+  `../moonglade-internal/scopes/PENDING_2026-09-06.md` §3; the decision record's 2026-09-06 entry.
 
 - **Full mobile-surface audit against the designs.** *(owner, 2026-09-05, after the wave
   walkthrough)* "The next audit is going to be the full mobile surface against the designs."
@@ -70,23 +72,10 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
-  - ~~Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.~~
-    **Fixed 2026-09-06.** The banner's `height` is `auto` as a hero and `auto` cannot be
-    interpolated, so the snap landed in the expand's first frame while the `min-height` that
-    *can* animate was left sliding the remainder. Banner.jsx now pins the height at the slim
-    62px for the length of the expand; `gallery/src/styles/shell.css`'s `.mgx-bnr.expanding`
-    block holds the measurements and the one case it does not reach (a viewport under ~780px,
-    where the content is taller than the clamp and the last stretch still settles at the end).
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
     candidate to drop at the next Loom pass.
-
-- **Loom per-project spend ledger (historical)** *(scoped 2026-09-04)*
-  The live *cost-to-finish* roll-up shipped; what's missing is a per-Loom-project record of what a
-  project has *already* spent. The join exists today (each finished shot's `resultMid` → the
-  catalog's `paid_credit`, which is PixAI's real charge); the build is small. Scope + owner calls:
-  `../moonglade-internal/scopes/SCOPE_2026-09-04_loom-spend-ledger.md`.
 
 - **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
   The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
