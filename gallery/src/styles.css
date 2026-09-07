@@ -223,7 +223,6 @@ button:disabled { cursor: default; }
   text-overflow: ellipsis; white-space: nowrap; }
 .gd-lora input[type=range] { flex: 1 1 60px; accent-color: var(--accent); min-width: 50px; }
 .gd-w { font: 11px ui-monospace, Menlo, monospace; color: var(--gold); min-width: 34px; }
-.gd-refthumb { width: 30px; height: 38px; object-fit: cover; border-radius: 5px; }
 .gd-go { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .gd-cost { min-height: 20px; }
 .gd-results { display: flex; flex-direction: column; gap: 6px; }
@@ -234,18 +233,12 @@ button:disabled { cursor: default; }
   white-space: pre-wrap; }
 .gd-res img { width: 44px; height: 58px; object-fit: cover; border-radius: 5px; margin: 4px 4px 0 0; }
 /* ---- Edit tab: reference slots ---- */
-.gd-refs { display: flex; gap: 8px; flex-wrap: wrap; }
 .gd-slot { position: relative; width: 64px; height: 64px; border-radius: 8px;
   border: 1px solid var(--surface1); background: var(--surface0); overflow: hidden;
   display: grid; place-items: center; color: var(--subtext); font-size: 10px;
   text-align: center; padding: 0; }
 .gd-slot.dashed { border-style: dashed; cursor: pointer; }
 .gd-slot img { width: 100%; height: 100%; object-fit: cover; }
-.gd-slottag { position: absolute; left: 3px; bottom: 3px; background: rgba(21, 19, 28, .85);
-  color: var(--accent); font-size: 9px; padding: 1px 4px; border-radius: 4px; }
-.gd-slotx { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
-  border-radius: 50%; border: none; background: rgba(21, 19, 28, .85); color: var(--subtext);
-  font-size: 11px; line-height: 1; padding: 0; }
 
 /* (The Fix tab's box canvas, .gd-fixwrap, moved to styles/dock.css as .mgdock-fixwrap on
    2026-08-16 -- FixTab.jsx renders inside the dock's REGION slab now.) */
