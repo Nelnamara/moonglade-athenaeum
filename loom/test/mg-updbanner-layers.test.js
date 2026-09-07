@@ -191,3 +191,48 @@ describe("the update strip and the app's fixed full-screen layers", () => {
     }
   });
 });
+
+/* THE HEIGHT EVERY RULE ABOVE IS MULTIPLIED BY (2026-09-07, later the same day).
+
+   Each offset in notify.css is `top:var(--mg-updbanner-h)`, so all of it is only as right as
+   that one number. The first cut read `el.offsetHeight` synchronously in a layout effect and
+   watched the default CONTENT box -- while notify.css transitions the strip's PADDING over
+   180ms between 8px/8px expanded and 4px/4px folded. So re-expanding the pill published the
+   new content with the old padding, ~8px short, and no ResizeObserver callback ever fixed it:
+   a padding-only change does not move the content box. Every shell then sat 8px too high and
+   the strip overlapped the chrome it exists to push down.
+
+   A source guard, and here is its honest limit: BannerHost needs a DOM and a mounted React
+   tree, which this repo's node runner has no renderer for. What it CAN pin is the two
+   mechanics that were wrong and would rot back silently. */
+describe("the height the strip publishes", () => {
+  const host = read(path.join(__dirname, "../../gallery/src/notify/BannerHost.jsx"));
+  const notify = stripComments(read(path.join(STYLES_DIR, "notify.css")));
+
+  test("the strip's padding really is transitioned, which is why this matters", () => {
+    assert.ok(/\.mg-updbanner\{transition:[^}]*padding/.test(notify),
+      "if the padding stopped animating this guard could be dropped -- it has not");
+    const pad = (sel) => {
+      const m = new RegExp("(?:^|\n)\\" + sel + "\{([^}]*)\}").exec(notify);
+      return m ? /padding:([^;]*)/.exec(m[1])[1] : null;
+    };
+    assert.notEqual(pad(".mg-updbanner"), pad(".mg-updbanner.small"),
+      "expanded and folded carry different padding, so the box really does change height");
+  });
+
+  test("it measures the border box, not the content box", () => {
+    assert.ok(/ro\.observe\(el,\s*\{\s*box:\s*"border-box"/.test(host),
+      "a default ResizeObserver watches the content box, which a padding change never touches");
+    assert.ok(host.includes("borderBoxSize"),
+      "and the callback reads the border-box size the observer hands it");
+    assert.ok(host.includes("getBoundingClientRect()"),
+      "with the border-box rect as the fallback where borderBoxSize is missing");
+  });
+
+  test("it publishes again when the padding transition lands", () => {
+    assert.ok(/addEventListener\("transitionend"/.test(host),
+      "the settled height must be the last word, not the mid-flight one");
+    assert.ok(/removeEventListener\("transitionend"/.test(host),
+      "and the listener comes off with the strip");
+  });
+});

@@ -48,11 +48,33 @@ export default function BannerHost() {
       return undefined;
     }
     root.classList.add("mg-updbanner-on");
-    const measure = () => root.style.setProperty("--mg-updbanner-h", el.offsetHeight + "px");
+    /* THE BORDER BOX, AND AGAIN WHEN THE PADDING LANDS (2026-09-07, later the same day,
+       correcting the first cut's measurement). The strip's padding is 8px/8px expanded and
+       4px/4px folded, and notify.css transitions between them over 180ms -- so the height
+       read here, synchronously at commit, is the new content with the OLD padding, ~8px
+       short. A default ResizeObserver watches the CONTENT box, which a padding-only change
+       never touches, so it never corrected it either: every shell below sat 8px too high and
+       the strip overlapped the chrome it exists to push down, until some unrelated relayout.
+       Two changes: observe the BORDER box, which the padding animation does move frame by
+       frame, and re-measure on transitionend so the settled value is the last word. */
+    const publish = (h) => root.style.setProperty("--mg-updbanner-h", h + "px");
+    const measure = () => {
+      const rect = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
+      publish(rect && rect.height ? rect.height : el.offsetHeight);
+    };
     measure();
-    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
-    if (ro) ro.observe(el);
+    const onResize = (entries) => {
+      const entry = entries && entries[0];
+      const box = entry && entry.borderBoxSize && (entry.borderBoxSize[0] || entry.borderBoxSize);
+      if (box && typeof box.blockSize === "number") { publish(box.blockSize); return; }
+      measure();
+    };
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(onResize) : null;
+    // An older ResizeObserver throws on the options bag rather than ignoring it.
+    if (ro) { try { ro.observe(el, { box: "border-box" }); } catch (e) { ro.observe(el); } }
+    el.addEventListener("transitionend", measure);
     return () => {
+      el.removeEventListener("transitionend", measure);
       if (ro) ro.disconnect();
       root.classList.remove("mg-updbanner-on");
       root.style.removeProperty("--mg-updbanner-h");
