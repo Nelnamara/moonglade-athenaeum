@@ -3316,6 +3316,124 @@ def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
         "entry for a layer that is not open, which is a trap: {}".format(page.url))
 
 
+_BANNER_EXPAND_JS = """
+() => new Promise((resolve) => {
+  /* Sample the expand while it is RUNNING. Everything this measures is mid-transition, so
+     nothing here may wait for it to settle: the banner's box, the mark's box, and whether
+     a point inside the mark that lies BELOW the banner's own bottom edge still belongs to
+     the mark. elementFromPoint is the honest test of a clip -- a clipped element keeps its
+     layout rect, so a rect alone can never see one. */
+  const bnr = document.querySelector(".mgx-bnr");
+  const mark = document.querySelector(".mgx-mark");
+  const band = document.querySelector(".mgx-bottom");
+  const frames = [];
+  const t0 = performance.now();
+  const sample = (again) => {
+    const b = bnr.getBoundingClientRect();
+    const m = mark.getBoundingClientRect();
+    const r = band.getBoundingClientRect();
+    const x = Math.round(m.left + m.width / 2);
+    const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
+    const hit = document.elementFromPoint(x, y);
+    frames.push({
+      t: Math.round(performance.now() - t0),
+      expanding: bnr.classList.contains("expanding"),
+      overflow: getComputedStyle(bnr).overflowY,
+      bandOverflow: getComputedStyle(band).overflowY,
+      bandMaxH: getComputedStyle(band).maxHeight,
+      bnrH: Math.round(b.height * 10) / 10,
+      markH: Math.round(m.height * 10) / 10,
+      markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
+      // is the point inside the mark, but below the banner's edge, still the mark's?
+      belowEdge: m.bottom > b.bottom + 2,
+      hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
+      bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+    });
+    if (!again) return;
+    if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
+    else resolve(frames);
+  };
+  sample(false);            // t=0, before a frame has been yielded: the pin at its tightest
+  requestAnimationFrame(() => sample(true));
+})
+"""
+
+
+def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged_in_page):
+    """RED TEAM #14 and #24, in a real engine and mid-animation.
+
+    The expand's height pin (`.mgx-bnr.expanding { height: 62px }`) carried an
+    `overflow: hidden` on the BANNER, and the mark runs its own independent .5s size
+    transition -- 56px to 96px -- inside that still-pinned 62px box. So the pin cropped the
+    mark, its halo and its moondust field for the whole animation, contradicting in every
+    frame the invariant `.mgx-bnr { overflow: visible }` exists for and that
+    loom/test/mark-anim-containment.test.js states in as many words. That suite measures
+    static hero-size overhang budgets only; a transitional state is invisible to it, and no
+    real-browser test measured this geometry at all.
+
+    The clip is scoped to the returning band now, so this holds both ends at once: the mark
+    may spill, and the band still may not.
+
+    Motion is deliberately NOT frozen here -- the animation IS the subject.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.goto("/", wait_until="domcontentloaded")     # no _freeze_motion: see the docstring
+    page.wait_for_selector(".mgx-bnr")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+    collapse = page.locator('.mgx-sqbtn[title="Collapse the banner to its slim bar"]')
+    collapse.click()
+    page.wait_for_selector(".mgx-bnr.slim")
+    page.wait_for_timeout(700)                        # let the collapse finish entirely
+
+    page.evaluate("() => { window.__mgFrames = null; }")
+    page.locator('.mgx-sqbtn[title="Expand the banner to its hero height"]').click()
+    frames = page.evaluate(_BANNER_EXPAND_JS)
+
+    pinned = [f for f in frames if f["expanding"]]
+    assert len(pinned) >= 5, (
+        "the expand's pin was never observed -- nothing below measures anything: "
+        "{}".format(frames[:6]))
+
+    # 1. THE BANNER IS NOT A CLIP while it expands. This is the invariant the mark's own
+    #    halo and moondust rely on at every other moment too.
+    assert all(f["overflow"] == "visible" for f in pinned), (
+        "the banner clipped itself during the expand: "
+        "{}".format(sorted({f["overflow"] for f in pinned})))
+
+    # 2. THE CLIP MOVED, it did not simply go. The band is what the pin has to hold, and
+    #    the guard is only narrowed if the band is still clipped in the same frames.
+    assert all(f["bandOverflow"] == "hidden" and f["bandMaxH"] == "0px" for f in pinned), (
+        "the pin's clip was dropped rather than scoped to the band: {}".format(
+            sorted({(f["bandOverflow"], f["bandMaxH"]) for f in pinned})))
+
+    # 3. WHERE THE MARK DOES outgrow the pinned box, it still belongs to the mark --
+    #    elementFromPoint below the banner's own edge is what a clip would take away.
+    #    Not required to happen: min-height leaves 62px within a few milliseconds, so the
+    #    overhang is a handful of pixels for a handful of frames and a slow runner can
+    #    step over it. Assertion 1 is the deterministic half; this is the direct evidence
+    #    when the timing offers it.
+    cropped = [f for f in pinned if f["belowEdge"] and not f["hitsMark"]]
+    assert not cropped, (
+        "the mark was cropped by the banner mid-expand at {}".format(
+            [(f["t"], f["markBelow"]) for f in cropped]))
+
+    # 4. AND THE BAND STILL DOES NOT SPILL. That is what the pin's clip was for, and
+    #    narrowing it must not give that up.
+    spilling = [f for f in pinned if f["bandPaints"]]
+    assert not spilling, (
+        "the hero band painted below the pinned banner at {}".format(
+            [f["t"] for f in spilling]))
+
+    # 5. and the expand itself is still ONE motion: it starts at the slim row, not at
+    #    content height, which is the fix this pin exists for.
+    assert pinned[0]["bnrH"] <= 80, (
+        "the expand jumped to content height in its first frame again: "
+        "{}".format([(f["t"], f["bnrH"]) for f in pinned[:4]]))
+    assert max(f["bnrH"] for f in frames) > 200, "the banner never reached its hero height"
+
+
 def test_two_fast_backs_inside_a_layers_exit_animation_do_not_leave_the_app(
         logged_in_page):
     """RED TEAM #13. The ledger and the visible layer disagreed for 200-220ms every time.

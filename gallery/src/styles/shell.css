@@ -110,12 +110,16 @@
    transition is over) the height stays pinned at 62px, so the box is max(min-height, 62) =
    the animating min-height, exactly as it is on the way down. One motion, both directions,
    from the one property that can actually carry it.
-   `overflow: hidden` for those .5s keeps the returning band from spilling past the banner
-   while min-height is still climbing past it. Nothing anchored can be caught by that clip:
-   the band has just come back from display:none, so its popovers (the Advanced flyout, the
-   model menu -- the latter position:fixed anyway) are unmounted and cannot be open. Outside
-   this window the banner is overflow:visible exactly as before, which is what that rule
-   exists for.
+   The returning band needs holding while min-height is still climbing past it, and the clip
+   that does it is SCOPED TO THE BAND (red team #14, 2026-09-06). It was on `.mgx-bnr`
+   itself, which cropped everything in the banner for those .5s -- including `.mgx-mark`,
+   whose own independent .5s size transition (56 -> 96px) grows it past the still-pinned 62px
+   box, and including the halo and moondust field around it. That directly contradicts the
+   invariant `.mgx-bnr { overflow: visible }` exists for and that
+   loom/test/mark-anim-containment.test.js states in as many words: the mark's decorations
+   are MEANT to spill. Nothing anchored is caught by the narrower clip either: the band has
+   just come back from display:none, so its popovers (the Advanced flyout, the model menu --
+   the latter position:fixed anyway) are unmounted and cannot be open.
    Measured after, same harness, same 1280px: the expand's first frame is 62px and it climbs
    to 281.6 with no frame moving more than 37px -- the collapse's own worst frame is 42px.
 
@@ -128,7 +132,11 @@
    hero and animating to the measured number, which is a bigger change than this is. It is
    still the better half of the trade: at those widths the expand today is a single 150px
    jump with no animation at all, because min-height never reaches the content height. */
-.mgx-bnr.expanding { height: 62px; overflow: hidden; }
+.mgx-bnr.expanding { height: 62px; }
+/* Zero-height AND zero-padding, or the band's own 10px bottom padding is still a 10px box
+   sitting below the pinned banner -- which is the spill, just thinner. */
+.mgx-bnr.expanding .mgx-bottom { overflow: hidden; max-height: 0; padding-top: 0;
+  padding-bottom: 0; }
 /* the art is its OWN clipped layer so flyouts/tooltips in the band can escape
    the banner (the DC clips the whole banner; it has no anchored popovers) */
 .mgx-art { position: absolute; inset: 0; overflow: hidden; background: var(--base); }
@@ -502,4 +510,8 @@ button.mgx-claim .mgx-claimribbon { display: inline-block; width: 14px; height: 
      must not hold the banner at 62px for half a second and then drop it. Un-pinned here,
      the hero comes back instantly, which is the whole contract of this block. */
   .mgx-bnr.expanding { height: auto; overflow: visible; }
+  /* ...and the band comes straight back with it -- the pin's clip is scoped to the band
+     now (red team #14), so this is where that gets un-done rather than on the banner. */
+  .mgx-bnr.expanding .mgx-bottom { overflow: visible; max-height: none;
+    padding: 0 22px 10px; }
 }
