@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
-  MarkArt, BlurToggleTile,
+  MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import useLayerHistory from "../hooks/useLayerHistory.js";
 import { apiGet } from "../api.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
@@ -143,6 +144,12 @@ export default function ControlMobile({ account }) {
     setBrandClosing(true);
     setTimeout(() => { setBrandOpen(false); setBrandClosing(false); }, 220);
   };
+  /* ...and the Back gesture is the second way out of it (2026-09-06). Branding is a pushed
+     screen, whose only affordance is the back chevron, so the phone's own "go up one" has
+     to mean that chevron -- before this it walked past Branding and out of Moonglade. One
+     shared ledger, one entry per open layer: hooks/useLayerHistory.js. Declared above the
+     early returns below, as every hook in this file must be. */
+  useLayerHistory(brandOpen, closeBrand);
 
   if (summaryErr) {
     return (
@@ -388,6 +395,26 @@ export default function ControlMobile({ account }) {
                     {" · "}{schedule.workers || 4} workers
                   </div>
                 )}
+                {/* Runs itself — the living library (2026-09-06). READ-ONLY here, exactly
+                    as the standing order above it is: every write on this surface is
+                    localhost-only server-side, and the phone is a LAN session by
+                    definition. What it owes the owner is the answer to "is it keeping
+                    itself up to date?", and that is what it gives. */}
+                {schedule && (schedule.catalog || []).map((c) => {
+                  const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
+                  return (
+                    <div className="ctm-standing" key={c.action}>
+                      <b>{c.label}</b>{" "}
+                      {c.stale ? "only if idle " : "every "}
+                      <b>{fmtEvery(row.interval_s)}</b>
+                      {" — "}<b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
+                      {/* The standing order above owns this action, so this row is not the
+                          one running it — say so here too rather than show a cadence the
+                          phone's owner would take for the truth. */}
+                      {c.deferred && " · the standing order runs this one"}
+                    </div>
+                  );
+                })}
                 {panelHistory.length === 0 && (
                   <div className="ctm-ledgernote">
                     No maintenance runs recorded yet — jobs land here as they finish.

@@ -40,8 +40,13 @@
   font-family: inherit; flex: none; }
 .idm-navbtn:disabled { opacity: .35; cursor: default; }
 
-/* ---- scrollable body ---- */
+/* ---- scrollable body ----
+   `overscroll-behavior: contain` (2026-09-06): the picture screen covers the whole shell,
+   and a flick that runs past the end of the record must stop there rather than chain into
+   the tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
+   contest detail took on 2026-09-05; this surface and the Folio were the two it missed. */
 .idm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 14px 14px max(26px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
 
 .idm-frame { position: relative; flex: none; width: 100%; border-radius: 14px; overflow: hidden;

@@ -33,9 +33,13 @@ import "../styles/image-details-mobile.css";
    equivalent the same "replaces the screen" status, rather than nesting it
    inside a generic push-screen built for menu destinations, matches that.
    No URL sync (unlike desktop's bookmarkable /?image=<mid>): AppMobile.jsx
-   has no URL-synced state ANYWHERE yet (tabs/sheets/screens are all plain
-   state) -- adding history.pushState/popstate wiring here would be a first,
-   separate architectural change, out of scope for porting this one screen.
+   has no URL-synced state ANYWHERE (tabs/sheets/screens are all plain state),
+   and that is still true. What DID change on 2026-09-06 is a different thing
+   wearing the same API: this screen now holds one SAME-ADDRESS history entry
+   while it is up, so the phone's Back gesture closes it instead of walking
+   past it and out of the app. That entry is a depth marker, not a place --
+   nothing about it is bookmarkable and no address is written. AppMobile.jsx
+   registers it (hooks/useLayerHistory.js); nothing in this file has to know.
 
    SCOPE, matched to the locked design file exactly (not desktop's larger
    action set -- "Install Design As Specified": the design package wins every

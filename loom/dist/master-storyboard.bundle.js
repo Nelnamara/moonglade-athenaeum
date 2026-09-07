@@ -273,6 +273,137 @@ var LoomBundle = (() => {
     return "\u2026" + trail;
   };
   var costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pending: pending2 = 0 } = {}) => `Cost to finish: ${free} free-card, ${paid} paid (\u2248${credits.toLocaleString()} credits), ${unknown} unpriced${pending2 ? `, ${pending2} still estimating` : ""}.`;
+  var collectSpendMids = (project) => {
+    const seen2 = /* @__PURE__ */ Object.create(null);
+    const byAct = [];
+    let imported = 0;
+    ((project || {}).acts || []).forEach((act, ai) => {
+      const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
+      ((act || {}).cards || []).forEach((c) => {
+        if (!c) return;
+        if (c.imported) {
+          if (c.resultMid) imported++;
+          return;
+        }
+        const own = [];
+        if (c.resultMid) own.push(String(c.resultMid));
+        (c.attempts || []).forEach((a) => {
+          if (a && a.media_id) own.push(String(a.media_id));
+        });
+        own.forEach((m) => {
+          if (!seen2[m]) {
+            seen2[m] = true;
+            bucket.mids.push(m);
+          }
+        });
+      });
+      byAct.push(bucket);
+    });
+    return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
+  };
+  var tallySpend = (collected, rows) => {
+    const src = rows || {};
+    const col = collected || { byAct: [], imported: 0 };
+    const counted = /* @__PURE__ */ Object.create(null);
+    const zeroB = () => ({
+      paid: 0,
+      credits: 0,
+      zero: 0,
+      unpriced: 0,
+      missing: 0,
+      results: 0,
+      sharedElsewhere: 0,
+      sharedWith: ""
+    });
+    const total = zeroB();
+    const byAct = (col.byAct || []).map((b) => {
+      const acc = zeroB();
+      (b.mids || []).forEach((m) => {
+        const row = Object.prototype.hasOwnProperty.call(src, m) ? src[m] || {} : null;
+        const add = (k, n) => {
+          acc[k] += n;
+          total[k] += n;
+        };
+        add("results", 1);
+        if (row === null) {
+          add("missing", 1);
+          return;
+        }
+        const tid = String(row.task_id || "");
+        if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
+          add("sharedElsewhere", 1);
+          if (!acc.sharedWith) acc.sharedWith = counted[tid];
+          return;
+        }
+        if (tid) counted[tid] = b.name || "";
+        const pc = row.paid_credit;
+        if (typeof pc !== "number" || !isFinite(pc)) {
+          add("unpriced", 1);
+          return;
+        }
+        if (pc <= 0) {
+          add("zero", 1);
+          return;
+        }
+        add("paid", 1);
+        add("credits", pc);
+      });
+      return { ...acc, name: b.name };
+    });
+    return { ...total, imported: col.imported || 0, byAct };
+  };
+  var formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, missing = 0 } = {}) => {
+    const unknown = unpriced + missing;
+    if (credits > 0) return `~${Math.round(credits).toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}`;
+    if (unknown > 0) return `${unknown} unpriced`;
+    if (paid > 0 || zero > 0) return "0 cr";
+    return "";
+  };
+  var cardsToResume = (project, resumed) => {
+    const seen2 = resumed || /* @__PURE__ */ Object.create(null);
+    const out = [];
+    ((project || {}).acts || []).forEach((a) => {
+      ((a || {}).cards || []).forEach((c) => {
+        if (!c || c.status !== "wip" || !c.pendingTaskId) return;
+        const tid = String(c.pendingTaskId);
+        if (Object.prototype.hasOwnProperty.call(seen2, tid)) return;
+        seen2[tid] = true;
+        out.push({ id: c.id, taskId: c.pendingTaskId, startedAt: c.genStartedAt });
+      });
+    });
+    return out;
+  };
+  var makeLatestOnly = () => {
+    let latest = 0;
+    return {
+      begin() {
+        latest += 1;
+        return latest;
+      },
+      wins(token) {
+        return token === latest;
+      },
+      cancel() {
+        latest += 1;
+      }
+    };
+  };
+  var spendPillShown = (s) => ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
+  var spendTooltip = (s = {}) => {
+    const paid = s.paid || 0, credits = s.credits || 0;
+    const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
+    const acts = (s.byAct || []).filter((a) => a.results > 0);
+    const actLine = (a) => {
+      const own = formatSpend(a);
+      if (own) return own;
+      if (a.sharedElsewhere > 0) {
+        return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
+      }
+      return "0 cr";
+    };
+    const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
+    return [head].concat(lines).join("\n") + "\nCounts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+  };
   var durOf = (c) => Number(c.actualDur || c.duration) || 0;
   var reelStats = (entries, target) => {
     const total = entries.reduce((s, x) => s + durOf(x.c), 0);
@@ -282,7 +413,7 @@ var LoomBundle = (() => {
   };
   var mediaRefIndex = (project) => {
     const ids = {};
-    const note2 = (mid, where) => {
+    const note3 = (mid, where) => {
       const k = String(mid);
       (ids[k] = ids[k] || []).push(where);
     };
@@ -290,15 +421,15 @@ var LoomBundle = (() => {
       (act.cards || []).forEach((c, ci) => {
         const title = (c.title || "").trim();
         const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
-        if (c.resultMid) note2(c.resultMid, `${code} (shot result)`);
+        if (c.resultMid) note3(c.resultMid, `${code} (shot result)`);
         ["openFrame", "closeFrame"].forEach((slot) => {
           const f = c[slot] || {};
-          if (f.mediaId) note2(f.mediaId, `${code} (${slot})`);
+          if (f.mediaId) note3(f.mediaId, `${code} (${slot})`);
         });
       });
     });
     ((project || {}).assets || []).forEach((a) => {
-      if (a.mediaId) note2(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
+      if (a.mediaId) note3(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
     });
     return ids;
   };
@@ -324,6 +455,27 @@ var LoomBundle = (() => {
       cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch2 })
     }))
   });
+  var patchCardByIdWith = (project, cardId, fn) => ({
+    ...project,
+    acts: project.acts.map((a) => ({
+      ...a,
+      cards: a.cards.map((c) => c.id !== cardId ? c : fn(c))
+    }))
+  });
+  var withResult = (card, patch2, at) => {
+    const prev = card && card.resultMid ? String(card.resultMid) : "";
+    const next = patch2 && patch2.resultMid ? String(patch2.resultMid) : "";
+    const had = card && card.attempts || [];
+    const wasImported = !!(card && card.imported);
+    const keep = prev && prev !== next && !wasImported && !had.some((a) => a && String(a.media_id) === prev);
+    const imported = patch2 && Object.prototype.hasOwnProperty.call(patch2, "imported") ? !!patch2.imported : next && next !== prev ? false : wasImported;
+    return {
+      ...card,
+      ...patch2,
+      imported,
+      attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had
+    };
+  };
   var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
   var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
   var importedFootagePatch = (mediaId, duration) => {
@@ -334,6 +486,19 @@ var LoomBundle = (() => {
       trimIn: 0,
       trimOut: null,
       imported: true,
+      ...dur > 0 ? { actualDur: dur } : {}
+    };
+  };
+  var attachedVideoPatch = (mediaId, duration) => {
+    const dur = Number(duration);
+    return {
+      status: "done",
+      resultMid: mediaId,
+      trimIn: 0,
+      trimOut: null,
+      imported: true,
+      pendingTaskId: null,
+      genStartedAt: null,
       ...dur > 0 ? { actualDur: dur } : {}
     };
   };
@@ -364,12 +529,16 @@ var LoomBundle = (() => {
     refs: card.refs.map((r, i) => ({ ...r, id: newRefIds && newRefIds[i] || r.id })),
     // A duplicate is a fresh, unrendered shot -- it must not inherit the
     // original's generation result, or it silently shows "done" and Export
-    // plays the SAME clip twice.
+    // plays the SAME clip twice. `attempts` clears for the same reason one
+    // step further on: the original's re-rolls are the ORIGINAL's spend, and
+    // a duplicate that carried them would bill the project twice for money it
+    // spent once, every time a shot was duplicated.
     resultMid: "",
     status: "todo",
     actualDur: null,
     trimIn: 0,
-    trimOut: null
+    trimOut: null,
+    attempts: []
   });
   var insertCardAfter = (project, actId, origCardId, newCard2) => ({
     ...project,
@@ -566,6 +735,167 @@ ${"=".repeat(48)}
       high_priority: !!a.highPriority,
       prompt_helper: !!a.promptHelper
     };
+  }
+
+  // src/loom-url.js
+  function isBoardId(s) {
+    return /^[A-Za-z0-9_-]{1,64}$/.test(String(s == null ? "" : s));
+  }
+  function readBoardId(search) {
+    let raw = null;
+    try {
+      raw = new URLSearchParams(search || "").get("board");
+    } catch (e) {
+      return null;
+    }
+    return isBoardId(raw) ? raw : null;
+  }
+  function buildLoomUrl(patch2, search, pathname) {
+    let p;
+    try {
+      p = new URLSearchParams(search || "");
+    } catch (e) {
+      p = new URLSearchParams("");
+    }
+    const patchObj = patch2 || {};
+    if ("board" in patchObj) {
+      if (isBoardId(patchObj.board)) p.set("board", String(patchObj.board));
+      else p.delete("board");
+    }
+    if ("cast" in patchObj) {
+      if (patchObj.cast) p.set("cast", String(patchObj.cast));
+      else p.delete("cast");
+    }
+    const qs = p.toString();
+    return (pathname || "/loom") + (qs ? "?" + qs : "");
+  }
+  var LOOM_VIEW_KEY = "mg_loom_view";
+  var LEGACY_MOBILE_UI_KEY = "mg_loom_mobile_ui";
+  function readStoredView(store) {
+    if (!store) return null;
+    let v = null;
+    try {
+      v = store.getItem(LOOM_VIEW_KEY);
+    } catch (e) {
+      return null;
+    }
+    if (v === "mobile" || v === "desktop") return v;
+    let legacy = null;
+    try {
+      legacy = store.getItem(LEGACY_MOBILE_UI_KEY);
+    } catch (e) {
+      return null;
+    }
+    if (legacy == null) return null;
+    return legacy === "1" ? "mobile" : "desktop";
+  }
+  function resolveLoomView(stored, isPhone) {
+    if (stored === "mobile") return true;
+    if (stored === "desktop") return false;
+    return !!isPhone;
+  }
+
+  // ../gallery/src/lib/loomCrossing.js
+  var RETURN_KEY = "mg_loom_return";
+  function safeLibraryPath(url) {
+    const s = String(url == null ? "" : url);
+    if (!s.startsWith("/") || s.startsWith("//")) return null;
+    if (/[\\\t\r\n]/.test(s)) return null;
+    const path = s.split(/[?#]/)[0];
+    if (path === "/loom" || path.startsWith("/loom/")) return null;
+    return s;
+  }
+  function unpackReturn(raw) {
+    const fallback = { url: "/", scrollY: 0 };
+    if (!raw) return fallback;
+    let d = null;
+    try {
+      d = JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+    if (!d || typeof d !== "object") return fallback;
+    const url = safeLibraryPath(d.url);
+    if (!url) return fallback;
+    const y = Number(d.scrollY);
+    return { url, scrollY: Number.isFinite(y) && y > 0 ? Math.round(y) : 0 };
+  }
+  function readLibraryReturn(store) {
+    if (!store) return { url: "/", scrollY: 0 };
+    let raw = null;
+    try {
+      raw = store.getItem(RETURN_KEY);
+    } catch (e) {
+      return { url: "/", scrollY: 0 };
+    }
+    return unpackReturn(raw);
+  }
+
+  // scripts/react-global-shim.js
+  var React2 = window.React;
+  var react_global_shim_default = React2;
+  var useState = React2.useState;
+  var useEffect = React2.useEffect;
+  var useLayoutEffect = React2.useLayoutEffect;
+  var useRef = React2.useRef;
+  var useCallback = React2.useCallback;
+  var useMemo = React2.useMemo;
+  var useReducer = React2.useReducer;
+  var useContext = React2.useContext;
+  var useImperativeHandle = React2.useImperativeHandle;
+  var useDebugValue = React2.useDebugValue;
+  var useId = React2.useId;
+  var useTransition = React2.useTransition;
+  var useDeferredValue = React2.useDeferredValue;
+  var useSyncExternalStore = React2.useSyncExternalStore;
+  var useInsertionEffect = React2.useInsertionEffect;
+  var createElement = React2.createElement;
+  var cloneElement = React2.cloneElement;
+  var createContext = React2.createContext;
+  var forwardRef = React2.forwardRef;
+  var memo = React2.memo;
+  var lazy = React2.lazy;
+  var Suspense = React2.Suspense;
+  var Fragment = React2.Fragment;
+  var StrictMode = React2.StrictMode;
+  var Children = React2.Children;
+  var isValidElement = React2.isValidElement;
+  var createRef = React2.createRef;
+  var Component = React2.Component;
+  var PureComponent = React2.PureComponent;
+
+  // ../gallery/src/hooks/useIsMobile.js
+  var MOBILE_QUERY = "(max-width: 430px)";
+  function detectMobile() {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    if (window.matchMedia(MOBILE_QUERY).matches) return true;
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    const portrait = window.matchMedia("(orientation: portrait)").matches;
+    const screenW = window.screen && window.screen.width || Infinity;
+    return coarse && portrait && screenW <= 430;
+  }
+  function useIsMobile() {
+    const [isMobile, setIsMobile] = useState(detectMobile);
+    useEffect(() => {
+      if (typeof window === "undefined" || !window.matchMedia) return;
+      const sync = () => setIsMobile(detectMobile());
+      sync();
+      const mqls = [
+        window.matchMedia(MOBILE_QUERY),
+        window.matchMedia("(orientation: portrait)")
+      ];
+      const bind = (mql) => mql.addEventListener ? mql.addEventListener("change", sync) : mql.addListener(sync);
+      const unbind = (mql) => mql.removeEventListener ? mql.removeEventListener("change", sync) : mql.removeListener(sync);
+      mqls.forEach(bind);
+      window.addEventListener("resize", sync);
+      window.addEventListener("orientationchange", sync);
+      return () => {
+        mqls.forEach(unbind);
+        window.removeEventListener("resize", sync);
+        window.removeEventListener("orientationchange", sync);
+      };
+    }, []);
+    return isMobile;
   }
 
   // ../gallery/src/art/artFilters.js
@@ -1223,39 +1553,6 @@ ${"=".repeat(48)}
     };
   })();
   var artFilters_default = MgArtFilters;
-
-  // scripts/react-global-shim.js
-  var React2 = window.React;
-  var react_global_shim_default = React2;
-  var useState = React2.useState;
-  var useEffect = React2.useEffect;
-  var useLayoutEffect = React2.useLayoutEffect;
-  var useRef = React2.useRef;
-  var useCallback = React2.useCallback;
-  var useMemo = React2.useMemo;
-  var useReducer = React2.useReducer;
-  var useContext = React2.useContext;
-  var useImperativeHandle = React2.useImperativeHandle;
-  var useDebugValue = React2.useDebugValue;
-  var useId = React2.useId;
-  var useTransition = React2.useTransition;
-  var useDeferredValue = React2.useDeferredValue;
-  var useSyncExternalStore = React2.useSyncExternalStore;
-  var useInsertionEffect = React2.useInsertionEffect;
-  var createElement = React2.createElement;
-  var cloneElement = React2.cloneElement;
-  var createContext = React2.createContext;
-  var forwardRef = React2.forwardRef;
-  var memo = React2.memo;
-  var lazy = React2.lazy;
-  var Suspense = React2.Suspense;
-  var Fragment = React2.Fragment;
-  var StrictMode = React2.StrictMode;
-  var Children = React2.Children;
-  var isValidElement = React2.isValidElement;
-  var createRef = React2.createRef;
-  var Component = React2.Component;
-  var PureComponent = React2.PureComponent;
 
   // ../gallery/src/api.js
   function withParams(path, params) {
@@ -2136,7 +2433,7 @@ ${"=".repeat(48)}
     return { state: "error", note: "", msg: "", raw: d };
   }
   function build(view, props) {
-    const { state, note: note2, msg, raw } = view;
+    const { state, note: note3, msg, raw } = view;
     const d = raw || {};
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
@@ -2175,7 +2472,7 @@ ${"=".repeat(48)}
     } else if (state === "checking") {
       main = "Checking cost\u2026";
     } else {
-      main = note2 || (props.hint || "").trim() || DEFAULT_HINT;
+      main = note3 || (props.hint || "").trim() || DEFAULT_HINT;
     }
     const text = main + (sub ? " \xB7 " + sub.text : "");
     const stack = !!props.stack;
@@ -2586,7 +2883,7 @@ ${"=".repeat(48)}
     const seq2 = useRef(0);
     const timer2 = useRef(0);
     const ctrl = useRef(null);
-    const put = useCallback((v) => {
+    const put2 = useCallback((v) => {
       live.current = v;
       setVerdict(v);
     }, []);
@@ -2603,7 +2900,7 @@ ${"=".repeat(48)}
       }
     }, []);
     const fire = useCallback(() => {
-      put(fired());
+      put2(fired());
       const badge = costRef.current;
       if (!badge) return;
       const built2 = buildRef.current() || {};
@@ -2614,7 +2911,7 @@ ${"=".repeat(48)}
         if (built2.idle === true) badge.clear();
         else badge.clear(String(built2.idle));
         setResponse(null);
-        put(settledFor(key));
+        put2(settledFor(key));
         return;
       }
       badge.setChecking();
@@ -2627,15 +2924,15 @@ ${"=".repeat(48)}
         if (failed) {
           costRef.current.setPrice(null);
           setResponse(null);
-          put(settledFor(key));
+          put2(settledFor(key));
           return;
         }
         const d = response2;
         costRef.current.setPrice(d);
         setResponse(d);
-        put(settledFor(key));
+        put2(settledFor(key));
       });
-    }, [costRef, put]);
+    }, [costRef, put2]);
     const refresh2 = useCallback((opts) => {
       if (!enabledRef.current) return;
       const force = !!(opts && opts.force);
@@ -2643,11 +2940,11 @@ ${"=".repeat(48)}
       if (shouldShortCircuit(live.current, built2.payload, force, skipRef.current)) return;
       const badge = costRef.current;
       if (badge && badge.setChecking) badge.setChecking();
-      put(scheduled());
+      put2(scheduled());
       seq2.current++;
       clearTimeout(timer2.current);
       timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
-    }, [costRef, fire, put]);
+    }, [costRef, fire, put2]);
     useEffect(() => {
       if (!enabled) {
         stop();
@@ -3554,6 +3851,17 @@ ${"=".repeat(48)}
 
   // ../gallery/src/hooks/swrStore.js
   var _store = /* @__PURE__ */ new Map();
+  var _isPlainPayload = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  function put(path, data2) {
+    if (!path || !_isPlainPayload(data2) || data2.error) return false;
+    let keep = data2;
+    if ("csrf" in data2) {
+      keep = { ...data2 };
+      delete keep.csrf;
+    }
+    _store.set(String(path), keep);
+    return true;
+  }
   function invalidate(prefix) {
     const list = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean).map(String);
     if (!list.length) return 0;
@@ -4395,6 +4703,80 @@ ${"=".repeat(48)}
     };
   }
 
+  // ../gallery/src/notify/spikeStore.js
+  var SEEN_KEY2 = "mg_spike_announced";
+  var memSeen2 = "";
+  var asked = false;
+  function readStored2() {
+    try {
+      return localStorage.getItem(SEEN_KEY2) || "";
+    } catch {
+      return "";
+    }
+  }
+  function markSeen2(at) {
+    memSeen2 = at;
+    try {
+      localStorage.setItem(SEEN_KEY2, at);
+    } catch {
+    }
+  }
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("storage", (e) => {
+      if (!e || e.key !== SEEN_KEY2) return;
+      const v = String(e.newValue || "");
+      if (v && v > memSeen2) memSeen2 = v;
+    });
+  }
+  function spikeMessage(spikes) {
+    const list = spikes || [];
+    if (!list.length) return null;
+    const top = list[0];
+    const name = (top.title || "").trim() || "One of your works";
+    const others = list.length - 1;
+    const pace = top.multiple == null ? "up from nothing" : "about " + top.multiple + "\xD7 its usual pace";
+    return {
+      title: "\u25C8 " + name + " is taking off",
+      msg: "+" + Number(top.gained).toLocaleString() + " views in the last " + top.window_hours + "h \u2014 " + pace + (others ? " (and " + others + " more picking up)" : "") + "."
+    };
+  }
+  function note2(payload) {
+    const d = payload || {};
+    const at = String(d.views_at || "");
+    const spikes = d.spikes || [];
+    if (!at || !spikes.length) return false;
+    if (at <= memSeen2) return false;
+    const stored = readStored2();
+    if (stored && at <= stored) {
+      memSeen2 = stored;
+      return false;
+    }
+    const words = spikeMessage(spikes);
+    if (!words) return false;
+    markSeen2(at);
+    show({
+      kind: "ok",
+      sticky: true,
+      // a sweep can finish with nobody at the keyboard; see updateStore
+      icon: "\u25C8",
+      title: words.title,
+      msg: words.msg
+    });
+    return true;
+  }
+  function checkSpikes() {
+    if (asked) return Promise.resolve(false);
+    asked = true;
+    return apiGet("/api/your-art").then((d) => {
+      if (!d || d.error) return false;
+      try {
+        put("/api/your-art", d);
+      } catch {
+      }
+      return note2(d);
+    }).catch(() => false);
+  }
+
   // ../gallery/src/notify/ToastHost.jsx
   function ToastHost() {
     const [toasts2, setToasts] = useState([]);
@@ -4424,6 +4806,7 @@ ${"=".repeat(48)}
     check();
     const boot = typeof window !== "undefined" && window.MG_BOOT || {};
     claimReceipt(boot.build_stamp || "");
+    checkSpikes();
   }
   function NotifyRoot() {
     return /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null);
@@ -5000,24 +5383,29 @@ ${"=".repeat(48)}
   };
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
   var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
-  function useLocalToggle(key, defaultVal) {
-    const [val, setVal] = useState2(() => {
+  function useLoomView(isPhone) {
+    const [mobileUI, setView] = useState2(() => {
+      let stored = null;
       try {
-        const raw = window.localStorage.getItem(key);
-        return raw === null ? defaultVal : raw === "1";
+        stored = readStoredView(window.localStorage);
       } catch (e) {
-        return defaultVal;
+        stored = null;
       }
+      return resolveLoomView(stored, isPhone);
     });
-    useEffect2(() => {
+    const setMobileUI = useCallback2((v) => {
+      const next = !!v;
+      setView(next);
       try {
-        window.localStorage.setItem(key, val ? "1" : "0");
+        window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop");
       } catch (e) {
       }
-    }, [key, val]);
-    return [val, setVal];
+    }, []);
+    return [mobileUI, setMobileUI];
   }
-  var MOBILE_UI_KEY = "mg_loom_mobile_ui";
+  var GALLERY_HREF = readLibraryReturn(
+    typeof window !== "undefined" && window.sessionStorage || null
+  ).url;
   var hasStore = typeof window !== "undefined" && window.storage;
   var PKEY = "storyboard:v2:project";
   var PPRE = "storyboard:v2:proj:";
@@ -5662,7 +6050,7 @@ ${"=".repeat(48)}
       return { err: e };
     }
     render() {
-      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The Loom hit a render error. Your storyboards are saved and safe \u2014 reload to recover."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: () => window.location.reload() }, "\u21BB Reload the Loom"), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Back to the gallery")));
+      if (this.state.err) return /* @__PURE__ */ React.createElement("div", { className: "lv-overlay" }, /* @__PURE__ */ React.createElement("div", { className: "lv-err" }, /* @__PURE__ */ React.createElement("p", null, "The Loom hit a render error. Your storyboards are saved and safe \u2014 reload to recover."), /* @__PURE__ */ React.createElement("pre", null, String(this.state.err && this.state.err.stack || this.state.err)), /* @__PURE__ */ React.createElement("button", { className: "lv-close", onClick: () => window.location.reload() }, "\u21BB Reload the Loom"), /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Back to the gallery")));
       return this.props.children;
     }
   };
@@ -5828,6 +6216,8 @@ ${"=".repeat(48)}
     pollShot,
     costEstimate,
     refreshEstimate,
+    spend,
+    refreshSpend,
     batchTally,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
@@ -6677,7 +7067,7 @@ ${"=".repeat(48)}
         } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
         videoTrailer = /* @__PURE__ */ React.createElement(React.Fragment, null, sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
           if (!routeTarget) return;
-          setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }));
+          setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }, (/* @__PURE__ */ new Date()).toISOString()));
           setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
         } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
       } else if (tab === "Image") {
@@ -7296,6 +7686,14 @@ ${"=".repeat(48)}
         title: costTooltip(costEstimate) + " \u2014 estimate reflects Generate-all composition; a shot generated by hand from its own Video-tab drawer (esp. I2V/FLF with both cast images and a frame set) may price differently. Click to refresh."
       },
       /^≈.*cr/.test(formatCostEstimate(costEstimate)) ? formatCostEstimate(costEstimate) + " to finish" : formatCostEstimate(costEstimate)
+    ), spendPillShown(spend) && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "lv-cost-pill",
+        onClick: refreshSpend,
+        title: spend.status === "error" ? "Couldn't read the spend ledger \u2014 the catalog didn't answer. Click to retry; no number is shown rather than a wrong one." : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."
+      },
+      spend.status === "error" ? "\u2014" : spend.status === "loading" ? "\u2026" : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)
     ), /* @__PURE__ */ React.createElement(
       "button",
       {
@@ -7321,7 +7719,7 @@ ${"=".repeat(48)}
         bundling,
         importBackup
       }
-    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: "/", style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
       const done = outs.filter((o) => o === "done").length;
       const failed = outs.filter((o) => o === "failed").length;
@@ -8634,7 +9032,7 @@ ${"=".repeat(48)}
         AF.clearPreview(host);
       };
     }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
-    return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: "/" }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: GALLERY_HREF }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lm-chip" + (project.draft ? " on" : ""),
@@ -9808,8 +10206,16 @@ ${"=".repeat(48)}
           await sSet(ACTIVE_KEY, id);
           keys = [PPRE + id];
         }
-        let aid = await sGet(ACTIVE_KEY);
-        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+        const wantedBoard = readBoardId(location.search);
+        let aid = wantedBoard && keys.includes(PPRE + wantedBoard) ? wantedBoard : null;
+        let boardMiss = "";
+        if (aid) {
+          await sSet(ACTIVE_KEY, aid);
+        } else {
+          if (wantedBoard) boardMiss = wantedBoard;
+          aid = await sGet(ACTIVE_KEY);
+          if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+        }
         let p = null;
         try {
           const raw = await sGet(PPRE + aid);
@@ -9822,6 +10228,13 @@ ${"=".repeat(48)}
         }
         setActiveId(aid);
         setProject(p);
+        if (boardMiss && typeof window !== "undefined" && window.Toast) {
+          window.Toast.show({
+            kind: "err",
+            title: "No storyboard at that address",
+            msg: "The address asked for \u201C" + boardMiss + "\u201D, which this account has no storyboard for. Opened \u201C" + (p.name || "Untitled") + "\u201D instead."
+          });
+        }
         const tkeys = await sList(TPRE);
         const map = {};
         for (const k of tkeys) {
@@ -9920,6 +10333,15 @@ ${"=".repeat(48)}
     }, [activeId, readProjList, setSelShot]);
     const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
     useEffect2(() => {
+      if (!activeId) return;
+      const next = buildLoomUrl({ board: activeId }, location.search, location.pathname);
+      if (next === location.pathname + location.search) return;
+      try {
+        history.replaceState(null, "", next);
+      } catch (e) {
+      }
+    }, [activeId]);
+    useEffect2(() => {
       if (!project || castImported.current) return;
       castImported.current = true;
       const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
@@ -9939,7 +10361,7 @@ ${"=".repeat(48)}
         }));
         return { ...p, assets: [...existing, ...added] };
       });
-      history.replaceState(null, "", location.pathname);
+      history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
     }, [project]);
     useEffect2(() => {
       if (!project || !hasStore || !activeId) return;
@@ -10029,6 +10451,7 @@ Your currently-open board is left untouched.`)) return;
     const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
     const setCardStatus = (cardId, patch2) => setProject((p) => patchCardById(p, cardId, patch2));
+    const setCardResult = (cardId, patch2) => setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch2, (/* @__PURE__ */ new Date()).toISOString())));
     const addCard = (aId) => {
       const c = newCard();
       setProject((p) => appendCardToAct(p, aId, c));
@@ -10078,6 +10501,7 @@ Your currently-open board is left untouched.`)) return;
       setAct,
       setAssets,
       setCardStatus,
+      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -10093,7 +10517,7 @@ Your currently-open board is left untouched.`)) return;
       splitShot
     };
   }
-  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState2({});
     const resumedRef = useRef2({});
     const [genImgState, setGenImgState] = useState2({});
@@ -10215,7 +10639,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const elapsed = Date.now() - startedAt;
         if (cls.phase === "done") {
           setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+          setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
           setBatchOutcome(cardId, "done");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (cls.phase === "failed") {
@@ -10250,26 +10674,12 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     useEffect2(() => {
       if (!project) return;
-      (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
-        if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
-          resumedRef.current[c.pendingTaskId] = true;
-          pollShot(c.id, c.pendingTaskId, c.genStartedAt);
-        }
-      }));
+      cardsToResume(project, resumedRef.current).forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
     }, [activeId, mobileUI]);
     const useExistingVideo = (entry) => {
       openPick((mid, thumb, isVideo, duration) => {
-        const dur = parseFloat(duration);
         setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-        setCardStatus(entry.c.id, {
-          status: "done",
-          resultMid: mid,
-          trimIn: 0,
-          trimOut: null,
-          pendingTaskId: null,
-          genStartedAt: null,
-          ...dur > 0 ? { actualDur: dur } : {}
-        });
+        setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
       }, "video");
     };
     const pollTaskWithCeiling = (tid, setState, cardId) => {
@@ -10528,6 +10938,52 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       return r && !r.loading;
     }).map((e) => priceCache[e.c.id].pr);
     const costEstimate = { ...tallyPrices(settled), pending: pending2, notDoneCount: notDone.length };
+    const [spendRows, setSpendRows] = useState2({});
+    const [spendStatus, setSpendStatus] = useState2("loading");
+    const collectedSpend = useMemo2(() => collectSpendMids(project), [project]);
+    const spendKey = collectedSpend.mids.join(",");
+    const spendFetchedRef = useRef2(null);
+    const spendGate = useRef2(null);
+    if (!spendGate.current) spendGate.current = makeLatestOnly();
+    const loadSpend = useCallback2((force) => {
+      const mids = collectedSpend.mids;
+      if (!mids.length) {
+        spendGate.current.cancel();
+        spendFetchedRef.current = "";
+        setSpendRows({});
+        setSpendStatus("ok");
+        return;
+      }
+      if (!force && spendFetchedRef.current === spendKey) return;
+      spendFetchedRef.current = spendKey;
+      const token = spendGate.current.begin();
+      setSpendStatus("loading");
+      fetch("/api/loom/spend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_ids: mids })
+      }).then((r) => r.json()).then((d) => {
+        if (!spendGate.current.wins(token)) return;
+        if (spendFetchedRef.current !== spendKey) return;
+        if (!d || d.error || !d.rows) {
+          setSpendStatus("error");
+          return;
+        }
+        setSpendRows(d.rows);
+        setSpendStatus("ok");
+      }).catch(() => {
+        if (!spendGate.current.wins(token)) return;
+        if (spendFetchedRef.current === spendKey) {
+          spendFetchedRef.current = null;
+          setSpendStatus("error");
+        }
+      });
+    }, [spendKey]);
+    useEffect2(() => {
+      loadSpend();
+    }, [spendKey]);
+    const refreshSpend = useCallback2(() => loadSpend(true), [loadSpend]);
+    const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
     return {
       genState,
       setGenState,
@@ -10566,7 +11022,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       batchGenerate,
       costEstimate,
       refreshEstimate,
-      priceShot
+      priceShot,
+      spend,
+      refreshSpend
     };
   }
   function useExportPipeline(project, thumbs) {
@@ -10674,7 +11132,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function App() {
     const [selShot, setSelShot] = useState2(null);
-    const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+    const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
     const [draftCard, setDraftCard] = useState2(() => ({
       id: "__draft__",
       mode: "R2V",
@@ -10722,6 +11180,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setAct,
       setAssets,
       setCardStatus,
+      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -10801,8 +11260,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       routeGen,
       batchGenerate,
       costEstimate,
-      refreshEstimate
-    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+      refreshEstimate,
+      spend,
+      refreshSpend
+    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
     const onVideoSubmit = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
       setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
@@ -10811,7 +11272,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const onVideoResult = useCallback2((cardId, detail) => {
       const mid = (detail.media_ids || [])[0];
       setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-      setCardStatus(cardId, {
+      setCardResult(cardId, {
         status: "done",
         resultMid: mid,
         trimIn: 0,
@@ -10820,7 +11281,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         genStartedAt: null,
         ...detail.duration ? { actualDur: detail.duration } : {}
       });
-    }, [setGenState, setCardStatus]);
+    }, [setGenState, setCardResult]);
     const onVideoError = useCallback2((cardId, detail) => {
       setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
       setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
@@ -11022,6 +11483,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         pollShot,
         costEstimate,
         refreshEstimate,
+        spend,
+        refreshSpend,
         mobileUI,
         setMobileUI,
         draftCard,

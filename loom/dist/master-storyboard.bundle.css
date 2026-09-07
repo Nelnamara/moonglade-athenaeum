@@ -329,6 +329,11 @@ button.mgdock-snipbtn .mgico {
   height: 1em;
   vertical-align: middle;
 }
+.fm-titlechip .mgico {
+  width: 1.3em;
+  height: 1.3em;
+  margin-right: 0.15em;
+}
 .mgpal-ico .mgico {
   width: 1.15em;
   height: 1.15em;

@@ -9,6 +9,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import AccountSubOverlay from "./AccountSubOverlay.jsx";
 import BonjourCard from "./BonjourCard.jsx";
 import { isBlurOff, setBlurOff, applyBlurClass } from "../lib/blurPref.js";
+import { lastRanAt } from "../lib/livingRow.js";
 import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } from "../lib/fonts.js";
 import Icon from "../icons/Icons.jsx";
 
@@ -74,6 +75,33 @@ function fmtWhen(ts) {
   if (d.toDateString() === yd.toDateString()) return "yesterday " + hm;
   return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm;
 }
+
+/* ---- The living library's row vocabulary (2026-09-06) --------------------------------
+   Cadences here run from fifteen MINUTES (the published-artwork sweep) to sixty DAYS (the
+   staleness backstop), which is why these exist at all: the standing order's own
+   hours-only "{n} hours" cannot say either end of that. Deliberately the same terse,
+   monospaced shape the ledger's "next in 3h 20m" already uses -- no new visual language,
+   just a wider range of units. */
+export function fmtEvery(s) {
+  if (!s) return "—";
+  if (s < 3600) return Math.round(s / 60) + " min";
+  if (s < 86400) return Math.round(s / 3600) + "h";
+  return Math.round(s / 86400) + " days";
+}
+function fmtNextRun(row) {
+  if (!row || !row.enabled) return "";
+  if (!row.last_run) return "next: on schedule";
+  const left = row.last_run + row.interval_s - Date.now() / 1000;
+  if (left <= 0) return "due now";
+  if (left < 3600) return "next in " + Math.max(1, Math.floor(left / 60)) + "m";
+  if (left < 86400) return "next in " + Math.floor(left / 3600) + "h";
+  return "next in " + Math.floor(left / 86400) + "d";
+}
+/* What the cadence selector offers, per job. The staleness backstop gets NO selector: sixty
+   days is the owner's floor under a job that has no incremental form, not a dial. */
+const SWEEP_CADENCES = [[300, "5 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hour"]];
+const JOB_CADENCES = [[3600, "1 hour"], [3 * 3600, "3 hours"], [6 * 3600, "6 hours"],
+                      [12 * 3600, "12 hours"], [86400, "1 day"], [7 * 86400, "1 week"]];
 
 // One ledger row's result column, from the job's REAL terminal event fields
 // (status/rc/error -- rc only exists on events written 2026-08-06+; older rows
@@ -290,7 +318,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
 
   const {
     summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements,
-    panelHistory, schedule, saveSchedule,
+    panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
@@ -560,6 +588,113 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                           </div>
                         )}
                         {heart === "pipelines" && (
+                        <>
+                        {/* ---- RUNS ITSELF: the living library (2026-09-06) ------------
+                            "It's not just a backup dump. It's a living library that should
+                            update itself and its data without my need to clicky click."
+                            The scope's item 4 in one block: every automated job shows what
+                            it is, how often it runs, when it last ran and when it next
+                            will, with a Run now beside it -- the button stops being the
+                            only way. It leads, and the manual grid below it demotes.
+
+                            Nothing new was drawn for this. Each row is the ledger's own
+                            Standing-order row (mgcp-standing + its label/body/next/toggle/
+                            select vocabulary), which has always been this app's way of
+                            saying "this happens by itself"; the run link is the same
+                            mgcp-run the Check rows use. The one addition is a margin.
+
+                            THE LIBRARY STANDS STILL: nothing here reloads the grid. Run now
+                            starts a job and the Activity tray reports it; the page, the
+                            search, the address and the selection are the owner's alone. */}
+                        {schedule && (schedule.catalog || []).length > 0 && (
+                          <div className="mgcp-living">
+                            <div className="mgcp-grp">Runs itself — the living library</div>
+                            {(schedule.catalog || []).map((c) => {
+                              const row = (schedule.jobs || []).find((j) => j.action === c.action) || {};
+                              const last = lastByAction[c.action];
+                              const cadences = c.action === "artworks-sweep" ? SWEEP_CADENCES : JOB_CADENCES;
+                              return (
+                                /* The server's own plain-words sentence for this job, on
+                                   the row itself. Carried as a title rather than a fourth
+                                   line of text because the row's layout is the ledger's
+                                   Standing-order row and changing that shape is a design
+                                   step, not a copy fix. */
+                                <div className="mgcp-standing" key={c.action} title={c.note}>
+                                  <b className="mgcp-standing-lab">{c.label}</b>
+                                  <span className="mgcp-standing-body">
+                                    {c.stale ? (
+                                      /* No dial: sixty days is a floor under a job with no
+                                         incremental form, not a cadence to tune. */
+                                      <>only if it hasn't run in <b>{fmtEvery(row.interval_s)}</b></>
+                                    ) : (
+                                      <>every{" "}
+                                        {isLocal ? (
+                                          <select className="mgcp-standing-sel" value={row.interval_s || c.default_interval_s}
+                                            onChange={async (e) => {
+                                              const d = await saveLivingJob(c.action, { interval_s: Number(e.target.value) });
+                                              setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                            }}>
+                                            {cadences.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+                                          </select>
+                                        ) : (
+                                          <b>{fmtEvery(row.interval_s)}</b>
+                                        )}
+                                      </>
+                                    )}
+                                    {" — "}
+                                    {isLocal ? (
+                                      <button type="button" className={"mgcp-standing-toggle" + (row.enabled ? " on" : "")}
+                                        onClick={async () => {
+                                          const d = await saveLivingJob(c.action, { enabled: !row.enabled });
+                                          setSchedMsg(d.error ? "⚠ " + d.error : "");
+                                        }}>{row.enabled ? "on" : "off"}</button>
+                                    ) : (
+                                      <b className={row.enabled ? "ok" : ""}>{row.enabled ? "on" : "off"}</b>
+                                    )}
+                                    {!c.available && (
+                                      /* Honest about a job that cannot run here rather than
+                                         showing a toggle that silently does nothing --
+                                         "Top up Similar" needs the ML stack installed. */
+                                      <>{" · "}<span>needs the ML stack (torch) installed</span></>
+                                    )}
+                                    {c.deferred && (
+                                      /* Same honesty, the other collision: the standing
+                                         order below owns this action, so the scheduler
+                                         skips this row rather than have two paths take
+                                         turns losing the one job slot. Without this the
+                                         row went on showing a cadence and a "next in 3h"
+                                         it was not running. */
+                                      <>{" · "}<span>the standing order below runs this one — this row waits</span></>
+                                    )}
+                                    {" · last ran "}
+                                    {/* THE LEDGER IS NOT THE ONLY RECORD (red team #18).
+                                        The sweep writes an Activity entry only when it
+                                        CHANGED something -- a fifteen-minute heartbeat
+                                        logging every quiet pass would bury the events that
+                                        matter -- so a healthy sweep that found nothing new
+                                        showed "last ran —" beside a live "next in 12m" off
+                                        schedule.json's own stamp. lastRanAt prefers the
+                                        ledger and falls back to that stamp, so the two
+                                        halves of one row can no longer disagree. */}
+                                    <b className={last && ledgerResult(last).good ? "ok" : ""}>
+                                      {fmtWhen(lastRanAt(last, row))}</b>
+                                  </span>
+                                  {/* No "next in 3h" on a deferred row: this scheduler is
+                                      not the one running it, so it has no next. */}
+                                  <span className="mgcp-standing-next">
+                                    {c.deferred ? "" : fmtNextRun(row)}</span>
+                                  {!running && (
+                                    <button type="button" className="mgcp-run"
+                                      onClick={() => runLiving(c.action)}>Run now ▸</button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div className="mgcp-footnote">
+                              <span>Nothing destructive is ever automatic — organize, dedup and restore stay below, by hand.</span>
+                            </div>
+                          </div>
+                        )}
                         <div className="mgcp-grid">
                           <div>
                             <div className="mgcp-grp">Sync — the daily pull</div>
@@ -659,6 +794,7 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
                             </div>
                           </div>
                         </div>
+                        </>
                         )}
 
                         {/* ---- The ledger: run history + the standing order ----
@@ -2154,7 +2290,10 @@ export function PowerModal({ mode, phase, error, onClose }) {
         <div className="mgcp-pwr-card">
           <div className="mgcp-pwr-mascotwrap">
             <div className={"mgcp-pwr-halo" + (busy && isRestart ? " busy" : "")} />
-            <div className={"mgcp-pwr-mascot" + (mode === "stop" || failed ? " off" : "") + (isRestart && busy ? " spin" : "")}
+            {/* No spin class any more (owner, 2026-09-05) -- the mascot holds still and the
+                halo above it keeps pulsing, which is the busy signal the ruling kept. The
+                greyed `off` state is untouched. control-panel.css carries that ruling. */}
+            <div className={"mgcp-pwr-mascot" + (mode === "stop" || failed ? " off" : "")}
               style={{ backgroundImage: "url(/branding/mascots/" + (mode === "stop" ? "nel_shutdown.png" : "nel_restart.png") + ")" }} />
           </div>
           <div className="mgcp-pwr-title">{title}</div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } from "../hooks/useFolio.js";
+import Icon from "../icons/Icons.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 import "../styles/gallery-mobile.css";
@@ -251,7 +252,11 @@ export default function FolioMobile({ onClose }) {
       <div className="fm-topbar">
         <button type="button" className="fm-back" onClick={handleClose}>← Gallery</button>
         <div className="fm-fill" />
-        <div className="fm-titlechip">🏆 Folio</div>
+        {/* The drawn trophy the Glyph Ledger put on the hero's Folio button (2026-09-05).
+            This chip is the same door's own title and was still wearing the raw emoji --
+            one mark for the Folio, everywhere, in the app's own line and not the
+            platform's. */}
+        <div className="fm-titlechip"><Icon name="folio" /> Folio</div>
         <div className="fm-fill" />
         {/* Poke until it snaps -- 5 real, server-persisted pokes (the SAME
             /api/ach-event narrator_pokes counter the classic Trophy Hall's

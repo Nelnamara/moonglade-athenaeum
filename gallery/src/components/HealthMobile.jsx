@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import useHealth, { fmt } from "../hooks/useHealth.js";
 import MobileScreen from "./MobileScreen.jsx";
+import useLayerHistory from "../hooks/useLayerHistory.js";
 import DuplicateReviewMobile from "./DuplicateReviewMobile.jsx";
 import "../styles/overlays.css";
 import "../styles/control-mobile.css";
@@ -86,6 +87,13 @@ export default function HealthMobile({ onModelFilter, onTagFilter, onLoraFilter,
     setDupClosing(true);
     setTimeout(() => { setDupOpen(false); setDupClosing(false); }, 220);
   };
+  /* ...and the Back gesture is the second way out of it (2026-09-06). This is the phone's
+     deepest genuine stack -- Duplicates sits on top of Collection Health, which is itself a
+     pushed screen -- so it is also the clearest case for the rule: one Back closes
+     Duplicates and leaves Health standing, a second closes Health. One shared ledger, one
+     entry per open layer: hooks/useLayerHistory.js. Declared above the early returns
+     below, as every hook in this file must be. */
+  useLayerHistory(dupOpen, closeDup);
 
   if (err) return <div className="mgh-loading">couldn't load health data — {err}</div>;
   if (!h) return <div className="mgh-loading">measuring the collection…</div>;

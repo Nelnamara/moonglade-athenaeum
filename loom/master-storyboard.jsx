@@ -13,6 +13,8 @@ import {
   reelStats, effectivePrompt,
   priceFingerprint, tallyPrices, tallyPricesDetailed, priceIsShort, shortSpendLine,
   formatCostEstimate, costTooltip, bundleMissingReport,
+  collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
+  cardsToResume,
   shotPayload as buildShotPayload,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
@@ -20,7 +22,7 @@ import {
 // (no React, no DOM, no fetch), consumed by the useProjectStore /
 // useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
 import {
-  patchCard, patchCardById, patchAct, patchAssets,
+  patchCard, patchCardById, patchCardByIdWith, withResult, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
@@ -29,7 +31,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch, importedFramesPatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch, attachedVideoPatch,
   // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
   // being imported. The in-browser Babel path inlines every module into one global scope,
   // so it happened to resolve there and the omission was invisible; esbuild builds a real
@@ -40,6 +42,21 @@ import {
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
 } from "./src/loom-mutations.js";
+// The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
+// write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
+// modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
+import {
+  readBoardId, buildLoomUrl,
+  LOOM_VIEW_KEY, readStoredView, resolveLoomView,
+} from "./src/loom-url.js";
+// The crossing's memory, library side: where the library was when it handed over, so
+// "← Gallery" gives it back. Shared module, imported straight out of the library's own
+// source exactly as the picker/cost line/video form below are.
+import { readLibraryReturn } from "../gallery/src/lib/loomCrossing.js";
+// The app's ONE phone rule (430px + the coarse-pointer/portrait fallback). Imported rather
+// than re-decided so a tablet stays on the desktop build by construction -- owner call 5,
+// 2026-09-06: "I want to be mindful of the tablet still being able to use desktop."
+import useIsMobile from "../gallery/src/hooks/useIsMobile.js";
 // PixAI's art-filter engine (gradient/canvas compositing, offline, free). Ported out of
 // static/mg-art-filters.js into the React build (2026-08-08, the vanilla static/ campaign);
 // now a plain import esbuild bundles, not a window global loaded by a <script> tag. The
@@ -325,26 +342,87 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
 const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
-// A durable, manual owner-preference toggle backed by localStorage -- NOT window.storage
-// (the sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
-// this is a per-browser UI-chrome preference (which SKIN of the Loom to show), not project
-// data, so it has no business round-tripping through the server or living in a storyboard's
-// own JSON. There is no existing hook in this file for that -- the main gallery only ever
-// auto-detects viewport width for its own mobile layout, it never persists a manual override
-// -- so this is a small, real, new one (used by App()'s "📱 Mobile view" switch), not a
-// borrowed one. Reads localStorage exactly once, in the lazy useState initializer, and
-// writes it back only when the value actually changes.
-function useLocalToggle(key, defaultVal) {
-  const [val, setVal] = useState(() => {
-    try { const raw = window.localStorage.getItem(key); return raw === null ? defaultVal : raw === "1"; }
-    catch (e) { return defaultVal; }
+// WHICH SKIN OF THE LOOM TO SHOW -- the "📱 Mobile view" / "🖥 Desktop" pair.
+//
+// A per-browser UI-chrome preference, backed by localStorage -- NOT window.storage (the
+// sGet/sSet/sList/sDel family above, which is the async, server-backed project store):
+// this is not project data, so it has no business round-tripping through the server or
+// living in a storyboard's own JSON.
+//
+// TWO STATES USED TO BE ONE (2026-09-06, owner call 5: phones open the phone layout by
+// themselves). This was a plain useLocalToggle that defaulted to false and WROTE that
+// default on mount, so "never asked" and "asked for desktop" were the same stored "0" and
+// an auto-open gated on it could never fire on a phone that had opened the Loom once. They
+// are separate now: the key is written ONLY by a real flip of either switch, so absent
+// honestly means "not asked", and absent follows the app's one phone rule
+// (gallery/src/hooks/useIsMobile.js, passed in as isPhone -- a tablet is above its 430px
+// screen-width clause, so tablets stay on the desktop build by construction).
+//
+// A choice, once made, wins forever and in BOTH directions -- neither switch can become a
+// one-way trap, which is the same reason LoomMobile carries its own reciprocal chip. Only
+// the AUTO half is new; the switches themselves are untouched.
+//
+// DECIDED ONCE, ON MOUNT -- and this is the difference between a default and a live
+// reading. `isPhone` arrives from the app's one phone rule, which is deliberately
+// reactive: it subscribes to matchMedia, resize and orientationchange precisely so the
+// app's presentation flips with the device. Re-deriving the view from it every render made
+// ordinary ROTATION a full
+// unmount/remount between LoomMobile and LoomV2 -- not a CSS reflow, a whole subtree swap
+// -- so a phone user watching a clip in Review & trim who turned the phone to see it wider
+// had the review close under them: that state is LoomMobile's own and dies with the
+// subtree. Rotating a phone is not a request to change tools.
+//
+// So the phone rule decides the OPENING view, and after that only a real flip of either
+// switch changes it. The state seeded here is the answer itself rather than the stored
+// string, because "what did the browser say" and "what are we showing" stop being the same
+// question the moment the second one is not re-derived.
+function useLoomView(isPhone) {
+  const [mobileUI, setView] = useState(() => {
+    let stored = null;
+    try { stored = readStoredView(window.localStorage); } catch (e) { stored = null; }
+    return resolveLoomView(stored, isPhone);
   });
-  useEffect(() => {
-    try { window.localStorage.setItem(key, val ? "1" : "0"); } catch (e) {}
-  }, [key, val]);
-  return [val, setVal];
+  const setMobileUI = useCallback((v) => {
+    const next = !!v;
+    setView(next);
+    try { window.localStorage.setItem(LOOM_VIEW_KEY, next ? "mobile" : "desktop"); } catch (e) {}
+  }, []);
+  return [mobileUI, setMobileUI];
 }
-const MOBILE_UI_KEY = "mg_loom_mobile_ui";   // "📱 Mobile view" toggle -- see useLocalToggle above
+
+// WHERE "← GALLERY" GOES (2026-09-06, owner call 2: "YESSS").
+//
+// It went to a bare "/", which threw away the page you were on and the picture you had open
+// -- the exact loss the library fixed for ITSELF in gen/urlState.js and then kept doing to
+// anyone crossing over here. The library records its own address on the way out (one
+// pagehide listener in gallery/src/main.jsx); this reads it back.
+//
+// Read ONCE, at module scope. The library is not running while the Loom is up, so this
+// cannot change under us, and the value is wanted by three separate links -- LoomV2's top
+// bar, LoomMobile's, and the crash screen's, the last of which is a class component that
+// renders when the app itself has fallen over and must not depend on a hook. A tab opened
+// straight onto /loom from a bookmark has no snapshot and falls back to "/", which is
+// exactly what the link used to say and still means.
+//
+// THE PROMISE IS FOR A SAME-TAB CROSSING, and that is a deliberate limit rather than an
+// oversight. The snapshot is written on the library tab's own `pagehide` (main.jsx) --
+// which is exactly the event a same-tab navigation fires. Open the Loom in a NEW tab
+// instead (ctrl/cmd/middle-click on the header's ▰ The Loom, a plain <a href="/loom">)
+// and the library tab stays open and never fires it: sessionStorage for the new tab was
+// copied from the opener at creation time, so "← Gallery" there carries whatever snapshot
+// the opener happened to be holding, which can predate where the owner actually is.
+//
+// The alternative is writing the snapshot far more often -- every visibilitychange, every
+// in-library navigation -- so the library pays a storage write on ordinary browsing to
+// serve an auxiliary tab it does not know exists. Not worth it: the auxiliary tab was
+// deliberately opened BESIDE the library, so its owner still has the library open to go
+// back to. The narrower promise is what the wiki states (wiki/The-Loom.md).
+//
+// The link's WORDING AND LOOK are untouched, and deliberately so: the crossing chrome
+// belongs to the Design Handoff (../design/BRIEF_2026-09-06_loom-arena.md). Only where it
+// lands is this pass's business.
+const GALLERY_HREF = readLibraryReturn(
+  (typeof window !== "undefined" && window.sessionStorage) || null).url;
 // CONNECT, CONTINUITY_PHRASE, actLetter, maxTagNum/nextTag, frameLinked, and
 // connectMeta now live in ./src/loom-core.js (imported above) -- Phase 1
 // tooling pass, 2026-07-16. continuityLinked (same module) added 2026-07-23 to
@@ -939,7 +1017,7 @@ class V2Boundary extends React.Component {
         <p>The Loom hit a render error. Your storyboards are saved and safe — reload to recover.</p>
         <pre>{String((this.state.err && this.state.err.stack) || this.state.err)}</pre>
         <button className="lv-close" onClick={() => window.location.reload()}>↻ Reload the Loom</button>
-        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Back to the gallery</a>
+        <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Back to the gallery</a>
       </div></div>
     );
     return this.props.children;
@@ -1031,7 +1109,7 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
   );
 }
 
-function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, batchTally,
+function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -2240,7 +2318,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
               <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
                 if (!routeTarget) return;
-                setCard(routeTarget.a.id, routeTarget.c.id, (x) => ({ ...x, status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }));
+                setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }, new Date().toISOString()));
                 setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
               }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
             </div>
@@ -2976,8 +3054,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             below useProjectStore) -- unlike everything else in this bar, this is a NEW pattern
             for the Loom: the main gallery only ever auto-detects viewport width for its own
             mobile layout, there is no existing "durable manual UI-mode toggle" hook anywhere
-            in this file to reuse. Persisted (useLocalToggle, MOBILE_UI_KEY) so the choice
-            survives a reload; reuses .lv-draft's own checkbox-chip visual pattern rather than
+            in this file to reuse. Persisted (useLoomView, LOOM_VIEW_KEY) so the choice
+            survives a reload -- and, since 2026-09-06, so it also OVERRIDES the phone
+            auto-open; reuses .lv-draft's own checkbox-chip visual pattern rather than
             inventing a new one. draftCard/draftTarget/draftAttachedInfo are lifted to App() --
             see this component's own prop-list comment -- specifically so flipping this switch
             mid-draft never loses it. */}
@@ -3024,6 +3103,25 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               : formatCostEstimate(costEstimate)}
           </button>
         )}
+        {/* Its historical sibling, and deliberately the SAME pill -- same .lv-cost-pill
+            chrome, same click-to-refresh, same call-site suffix trick -- so the two read as
+            one before/after pair rather than as two inventions sharing a bar. The marks are
+            the house's own and they are not interchangeable: `≈` above is an ESTIMATE
+            (/api/price's quote for what is left), `~` here is a SETTLED ACTUAL (the
+            catalog's paid_credit, the same mark historyCore.costText renders every finished
+            run's cost with). Only the ~-credits shape takes the "spent" suffix, exactly as
+            only the ≈-credits shape above takes "to finish"; "3 unpriced spent" is not a
+            sentence, and the hover says the rest either way. */}
+        {spendPillShown(spend) && (
+          <button className="lv-cost-pill" onClick={refreshSpend}
+            title={spend.status === "error"
+              ? "Couldn't read the spend ledger — the catalog didn't answer. Click to retry; no number is shown rather than a wrong one."
+              : spendTooltip(spend) + "\nA record, not an estimate: PixAI's own charge for each finished shot. Click to re-read."}>
+            {spend.status === "error" ? "—"
+              : spend.status === "loading" ? "…"
+              : /^~.*cr/.test(formatSpend(spend)) ? formatSpend(spend) + " spent" : formatSpend(spend)}
+          </button>
+        )}
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => playSequence(entries)}
           title="Play every finished shot back-to-back, honoring trims — a rough cut, no rendering">&#9654;&#9654; Play</button>
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
@@ -3036,7 +3134,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             its normal gap. When docked left (act.edge === "left") the whole control instead
             mounts near the row's START, right after the banner-show button -- see above. */}
         {act.edge === "left" ? null : activityControl}
-        <a className="lv-close" href="/" style={{ textDecoration: "none" }}>← Gallery</a>
+        <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
       {batchTally && (() => {
         // done/failed/stale are DERIVED from the outcomes map every render, never stored as
@@ -3328,7 +3426,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 /* =========================================================================
    LOOM MOBILE -- first increment (2026-08-03). A phone-sized ALTERNATIVE to
    LoomV2, chosen by the "📱 Mobile view" toggle in LoomV2's own .lv-top bar
-   (persisted via useLocalToggle/MOBILE_UI_KEY, see App()). Kept INLINE here
+   (persisted via useLoomView/LOOM_VIEW_KEY, see App()) -- or opened by itself
+   on a phone since 2026-09-06, unless one of those switches has been flipped.
+   Kept INLINE here
    rather than split into its own loom/src/loom-mobile.jsx file: unlike
    loom-core.js/loom-mutations.js (deliberately React-free, DOM-free, pure --
    see loom-core.js's own header -- so they can be `node --test`ed directly and
@@ -4606,7 +4706,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     <div className="lm-root">
       <style>{LOOM_MOBILE_STYLES}</style>
       <div className="lm-top">
-        <a className="lm-back" href="/">&larr; Gallery</a>
+        <a className="lm-back" href={GALLERY_HREF}>&larr; Gallery</a>
         <span className="lm-fill" />
         <span className="lm-title">&#9642; The Loom</span>
         <span className="lm-fill" />
@@ -5964,11 +6064,42 @@ function useProjectStore(setSelShot) {
         await sSet(ACTIVE_KEY, id);
         keys = [PPRE + id];
       }
-      let aid = await sGet(ACTIVE_KEY);
-      if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
+         (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
+         articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
+         back to; a bare /loom still opens the last one you had open, exactly as it always
+         has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
+         being the truth.
+
+         ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
+         exists, the pointer is rewritten FROM it immediately, so the two can never drift
+         into disagreeing -- the class of bug the library's own one-builder rule exists to
+         prevent.
+
+         AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
+         app's ordinary corner note saying so. No blank page, no invented screen -- and the
+         address self-corrects to the board actually open (the effect below), so the wrong id
+         does not sit in the bar pretending. */
+      const wantedBoard = readBoardId(location.search);
+      let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
+      let boardMiss = "";
+      if (aid) {
+        await sSet(ACTIVE_KEY, aid);
+      } else {
+        if (wantedBoard) boardMiss = wantedBoard;
+        aid = await sGet(ACTIVE_KEY);
+        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      }
       let p = null; try { const raw = await sGet(PPRE + aid); if (raw) p = JSON.parse(raw); } catch {}
       if (!p) { p = seedProject(); await sSet(PPRE + aid, JSON.stringify(p)); }
       setActiveId(aid); setProject(p);
+      if (boardMiss && typeof window !== "undefined" && window.Toast) {
+        window.Toast.show({
+          kind: "err", title: "No storyboard at that address",
+          msg: "The address asked for “" + boardMiss + "”, which this account has no "
+             + "storyboard for. Opened “" + (p.name || "Untitled") + "” instead.",
+        });
+      }
       const tkeys = await sList(TPRE); const map = {};
       for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
       setThumbs(map);
@@ -6047,6 +6178,27 @@ function useProjectStore(setSelShot) {
   }, [activeId, readProjList, setSelShot]);
   const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
+  /* THE ADDRESS FOLLOWS THE OPEN BOARD (2026-09-06).
+
+     ONE effect rather than a write bolted onto each of the six places that change which
+     board is open (boot, open, new, duplicate, delete-and-fall-back, restore-a-backup):
+     they all already agree on exactly one thing, `activeId`, so that is what the address
+     is derived from. A seventh switch added later cannot forget to update the bar.
+
+     replaceState, not push: switching boards is changing which room you are in, not walking
+     down a corridor. Nothing here reads popstate, so pushing would leave the Back button
+     silently doing nothing -- and the address's job is to be COPYABLE, which replace serves
+     just as well. The no-op guard keeps a re-render from rewriting an identical address.
+
+     Through buildLoomUrl, never by hand, so this write and the cast hand-off's cleanup
+     below cannot throw each other's parameter away. */
+  useEffect(() => {
+    if (!activeId) return;
+    const next = buildLoomUrl({ board: activeId }, location.search, location.pathname);
+    if (next === location.pathname + location.search) return;
+    try { history.replaceState(null, "", next); } catch (e) { /* address lags; nothing else does */ }
+  }, [activeId]);
+
   // Gallery -> cast: /loom?cast=id1,id2 (from the gallery's "Send to Loom cast" bulk
   // action) adds those images as reusable @image cast members, once, then clears the URL.
   useEffect(() => {
@@ -6066,7 +6218,11 @@ function useProjectStore(setSelShot) {
         tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
       return { ...p, assets: [...existing, ...added] };
     });
-    history.replaceState(null, "", location.pathname);
+    // Clearing ?cast= now goes through the one builder instead of writing a bare
+    // location.pathname (2026-09-06). The hand-off's behaviour is unchanged -- read once,
+    // then gone -- but a bare pathname would also erase ?board=, which is precisely the
+    // "one write throws another's away" bug gen/urlState.js was written to end.
+    history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
   }, [project]);
 
   useEffect(() => {
@@ -6133,6 +6289,15 @@ function useShotMutations(project, setProject) {
   // which needs the act id. generateShot/pollShot/useExistingVideo don't know (or care)
   // which act a shot lives in, so this stays a sibling of setCard rather than folding in.
   const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
+  // setCardResult is setCardStatus for the ONE patch that carries a new resultMid. It exists
+  // so the card being overwritten gets a say: withResult reads the resultMid it is about to
+  // replace and files it under `attempts`, which is the only reason the spend ledger can
+  // count a re-rolled shot's first, paid-for try instead of forgetting it. Every landing
+  // result goes through here or through withResult directly (the routed-video path in
+  // LoomV2 uses setCard, which already takes a function) -- a fifth write site that used
+  // plain setCardStatus would silently reintroduce the amnesia.
+  const setCardResult = (cardId, patch) =>
+    setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch, new Date().toISOString())));
 
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
@@ -6179,7 +6344,7 @@ function useShotMutations(project, setProject) {
   const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
   const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
 
-  return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+  return { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
 }
@@ -6188,7 +6353,7 @@ function useShotMutations(project, setProject) {
 // mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
 // dependency on the resume effect below -- see that effect's own comment for why the
 // Mobile-view toggle needs to trigger the identical resume it already runs on project load.
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
   const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
   const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
@@ -6436,7 +6601,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
         // Reset trims too -- a re-roll's new clip is a different length than whatever the
         // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
         // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardStatus(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
         setBatchOutcome(cardId, "done");
         // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
@@ -6502,28 +6667,28 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   // living in this hook, never a DOM element's lifecycle, so they already survive the
   // toggle with no fix required -- verified by reading their implementations, not
   // assumed. See this increment's own report for the injected-state verification.
+  //
+  // WHICH cards need it is cardsToResume (loom-core.js) -- a pure walk over the board and
+  // the already-resumed record, so the dedup rule is provable without a mounted tree. WHEN
+  // to ask is this effect's dep array, and that is the whole of what lives here.
   useEffect(() => {
     if (!project) return;   // project is null until the store loads the first board
-    (project.acts || []).forEach((a) => (a.cards || []).forEach((c) => {
-      if (c.status === "wip" && c.pendingTaskId && !resumedRef.current[c.pendingTaskId]) {
-        resumedRef.current[c.pendingTaskId] = true;
-        pollShot(c.id, c.pendingTaskId, c.genStartedAt);
-      }
-    }));
+    cardsToResume(project, resumedRef.current)
+      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
   }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
   // generation involved. /api/loom/export already treats every resultMid as just "a video
   // file to trim+concat," so this writes the exact same shape pollShot does on completion.
   const useExistingVideo = (entry) => {
     openPick((mid, thumb, isVideo, duration) => {
-      const dur = parseFloat(duration);
       setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      // pendingTaskId/genStartedAt cleared too, same as every other status:"done" write in
-      // this file -- newly reachable while a generation is "paused" (Deep Focus's busy-guard
-      // now lets a paused shot through) but was previously left stale/live here, unlike every
-      // other done path (found in review).
-      setCardStatus(entry.c.id, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
-        ...(dur > 0 ? { actualDur: dur } : {}) });
+      // THE SAME PATCH THE FOOTAGE TAB'S IMPORT APPLIES (attachedVideoPatch, loom-mutations.js
+      // -- see its own note). Same picker, same borrowed clip, so the same `imported: true`
+      // provenance: this shot's video was rendered elsewhere at some other time, and the
+      // spend ledger must not bill it to this project. It was written out by hand here and
+      // missed that flag, which is the whole of the bug. pendingTaskId/genStartedAt clearing
+      // moved into the shared patch with it.
+      setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
     }, "video");
   };
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
@@ -6852,6 +7017,61 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
   const settled = notDone.filter((e) => { const r = priceCache[e.c.id]; return r && !r.loading; }).map((e) => priceCache[e.c.id].pr);
   const costEstimate = { ...tallyPrices(settled), pending, notDoneCount: notDone.length };
 
+  // ---- The standing SPEND ledger: what this project has already spent, the historical
+  // sibling of the cost-to-finish estimate above. Deliberately unlike it in every way that
+  // matters: no /api/price, no cache to warm, no staleness contract to worry about. The
+  // catalog is a settled record, so one read answers it, and the only thing that can change
+  // the answer is a shot finishing -- which changes the collected media-id set, which is
+  // exactly what this refetches on. Editing a prompt, or a poll tick, changes nothing here.
+  const [spendRows, setSpendRows] = useState({});     // media_id -> {paid_credit, task_id}
+  const [spendStatus, setSpendStatus] = useState("loading");   // loading | ok | error
+  const collectedSpend = useMemo(() => collectSpendMids(project), [project]);
+  const spendKey = collectedSpend.mids.join(",");
+  const spendFetchedRef = useRef(null);
+  // WHICH REQUEST IS THE LATEST, as its own tiny gate (makeLatestOnly, loom-core.js). The
+  // staleness check below used to be spendFetchedRef alone -- "is this still the same
+  // board?" -- which is the SAME value for every request about one board, so it could not
+  // tell an earlier in-flight read from a later one. refreshSpend forces past the
+  // short-circuit that would otherwise stop a second concurrent fetch, so two reads of one
+  // board overlap routinely; out of order, the older answer won. Both checks now: the right
+  // board, and the newest read of it.
+  const spendGate = useRef(null);
+  if (!spendGate.current) spendGate.current = makeLatestOnly();
+  const loadSpend = useCallback((force) => {
+    const mids = collectedSpend.mids;
+    if (!mids.length) {
+      // Nothing to read: retire whatever is in flight, or its answer would land on an
+      // empty board and repopulate the pill from a project that no longer has those shots.
+      spendGate.current.cancel();
+      spendFetchedRef.current = ""; setSpendRows({}); setSpendStatus("ok"); return;
+    }
+    if (!force && spendFetchedRef.current === spendKey) return;
+    spendFetchedRef.current = spendKey;
+    const token = spendGate.current.begin();
+    setSpendStatus("loading");
+    fetch("/api/loom/spend", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ media_ids: mids }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!spendGate.current.wins(token)) return;         // a later read of this board won
+        if (spendFetchedRef.current !== spendKey) return;   // a newer board superseded this read
+        if (!d || d.error || !d.rows) { setSpendStatus("error"); return; }
+        setSpendRows(d.rows); setSpendStatus("ok");
+      })
+      // An empty `rows` and a DEAD REQUEST are not the same fact: with rows left at {} every
+      // id would join to nothing and the pill would report the whole project "unpriced",
+      // which is a lie about the catalog rather than a report about the network. The error
+      // status is what stops that, and clearing the ref lets the next board change retry.
+      // A failure that has already been superseded says nothing about the read that won.
+      .catch(() => {
+        if (!spendGate.current.wins(token)) return;
+        if (spendFetchedRef.current === spendKey) { spendFetchedRef.current = null; setSpendStatus("error"); }
+      });
+  }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSpend(); }, [spendKey]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const refreshSpend = useCallback(() => loadSpend(true), [loadSpend]);
+  const spend = { ...tallySpend(collectedSpend, spendRows), status: spendStatus };
+
   return {
     genState, setGenState, genImgState, setGenImgState, imgModel, setImgModel,
     imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults,
@@ -6864,6 +7084,7 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAss
     // fetch/pricing implementation. It was already defined here; only its exposure is new.
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate, priceShot,
+    spend, refreshSpend,
   };
 }
 
@@ -6955,11 +7176,13 @@ function useExportPipeline(project, thumbs) {
 
 export default function App() {
   const [selShot, setSelShot] = useState(null);   // V2 selected-shot: card.id or null
-  // "📱 Mobile view" -- a manual, owner-preference switch between LoomV2 (desktop-style
-  // shell) and LoomMobile (phone-sized board/reel), persisted via useLocalToggle so it
-  // survives a reload. The toggle itself lives in LoomV2's own .lv-top bar (and, so it's
-  // never a one-way trap, a small reciprocal one in LoomMobile's own top bar).
-  const [mobileUI, setMobileUI] = useLocalToggle(MOBILE_UI_KEY, false);
+  // "📱 Mobile view" -- the switch between LoomV2 (desktop-style shell) and LoomMobile
+  // (phone-sized board/reel), persisted so it survives a reload. The toggle itself lives in
+  // LoomV2's own .lv-top bar (and, so it's never a one-way trap, a small reciprocal one in
+  // LoomMobile's own top bar). Since 2026-09-06 a PHONE opens LoomMobile by itself when
+  // neither switch has ever been flipped -- see useLoomView above for the whole rule, and
+  // useIsMobile for the phone test it defers to (a tablet fails it, deliberately).
+  const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
   // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
   // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
   // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)
@@ -6980,7 +7203,7 @@ export default function App() {
   const { project, setProject, thumbs, storeThumb, busy,
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
 
-  const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
+  const { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
@@ -7016,10 +7239,10 @@ export default function App() {
     // reference to them.
     generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
-    costEstimate, refreshEstimate }
+    costEstimate, refreshEstimate, spend, refreshSpend }
     // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
     // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
   // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
   // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
   // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
@@ -7051,9 +7274,9 @@ export default function App() {
   const onVideoResult = useCallback((cardId, detail) => {
     const mid = (detail.media_ids || [])[0];
     setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-    setCardStatus(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
+    setCardResult(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
       ...(detail.duration ? { actualDur: detail.duration } : {}) });
-  }, [setGenState, setCardStatus]);
+  }, [setGenState, setCardResult]);
   const onVideoError = useCallback((cardId, detail) => {
     setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
     // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
@@ -7178,6 +7401,7 @@ export default function App() {
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
           costEstimate={costEstimate} refreshEstimate={refreshEstimate}
+          spend={spend} refreshSpend={refreshSpend}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>

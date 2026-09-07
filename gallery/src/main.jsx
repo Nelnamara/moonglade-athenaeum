@@ -10,6 +10,7 @@ import useIsMobile from "./hooks/useIsMobile.js";
 import { installNotify, NotifyRoot } from "./notify/index.jsx";
 import { syncBlurClass } from "./lib/blurPref.js";
 import { syncPairing } from "./lib/fonts.js";
+import { rememberLibrary, libraryPlace } from "./lib/loomCrossing.js";
 import "./styles.css";
 
 /* THE BLUR SWITCH, applied before anything can render (owner ruling 2026-09-04; see
@@ -76,6 +77,36 @@ const boot = window.MG_BOOT || {};
 // visible UI to document.body. The engines live outside the React tree on purpose (a paid
 // generation's poll loop must survive any view unmounting) -- see gallery/src/notify/.
 if (boot.authenticated !== false) installNotify();
+
+/* THE CROSSING'S MEMORY, library side (owner call 2, 2026-09-06 -- see lib/loomCrossing.js
+   for why this is a stored snapshot and not a `?from=` parameter).
+
+   ONE listener, at module scope, for the whole library: on the way out it records where the
+   library was, and the Loom's "← Gallery" link reads it back. `pagehide` is what makes this
+   one line instead of four -- every door into the Loom is a whole-page navigation (the
+   hero's ▰ The Loom anchor, the palette's `g s`, "Send to Loom cast", the phone sheet's
+   "Open The Loom"), and one of them is a plain <a> that runs no JavaScript of its own. The
+   page leaving is the single event they all share, so none of them has to be touched, and a
+   typed /loom in the same tab is remembered too.
+
+   Guarded to the REAL library: /login renders through this same file with
+   authenticated === false, and the first-run wizard renders instead of App -- neither is
+   somewhere "← Gallery" should ever land, so neither records. */
+if (boot.authenticated !== false
+    && !(boot.needs_key || boot.catalog_empty || boot.needs_assets)) {
+  window.addEventListener("pagehide", () => {
+    // The window's own answer is the DEFAULT, not the only one. It is right for the
+    // desktop shell, which syncs ?page=/?image= into the address and scrolls the document
+    // -- and wrong for the phone shell, which has no URL sync at all and scrolls an
+    // element. AppMobile registers its own answer (setLibraryPlace); with nothing
+    // registered, or a source that throws, this is what stands.
+    const place = libraryPlace({
+      url: window.location.pathname + window.location.search,
+      scrollY: window.scrollY || 0,
+    });
+    rememberLibrary(place.url, place.scrollY, window.sessionStorage);
+  });
+}
 
 function Root() {
   const isMobile = useIsMobile();

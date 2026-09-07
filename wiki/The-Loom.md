@@ -10,10 +10,42 @@ Open it from the gallery header (**▰ The Loom**) or go to `/loom`:
 python moonglade_gallery.py --out pixai_backup      # then http://127.0.0.1:5000/loom
 ```
 
+**A storyboard has its own address.** `/loom` opens whichever board you had open last, as it
+always has. `/loom?board=<id>` opens *that* one — so a storyboard is somewhere you can
+bookmark and come back to, or send to yourself on another machine. The address in the bar
+follows whichever board is open, so you can copy it at any time; the id appears there for
+you rather than being something you type. An address naming a storyboard this account
+doesn't have isn't an error page — it opens the board you'd have got anyway and says so in
+the corner.
+
+**← Gallery puts you back where you were** — the page of the library you were on, the
+picture you had open, and how far down you had scrolled. (Your search and filters are not
+carried across; the library clears those on any reload, as it always has.) A `/loom` opened
+straight from a bookmark, in a tab that was never in the library, goes to the front door.
+
+That promise is for the **same tab** — the ordinary case, where you leave the library and
+the Loom takes its place. If you open the Loom in a **new tab** instead (middle-click, or
+ctrl/cmd-click the header button), the library tab never leaves, so it never records where
+you got to: **← Gallery** in that new tab lands on whatever the library was showing when
+the tab was opened. You still have the library itself sitting in the other tab, which is
+why it works this way rather than the library writing a note on every scroll.
+
 You need to be signed in, exactly like the rest of the gallery — so the Loom works from a
-tablet on your LAN too. The header button is there at every screen width, phones included.
-It's a dense four-panel tool, so **turn a phone to landscape** — portrait works but is
-cramped.
+tablet on your LAN too, and signing back in returns you to the exact storyboard you asked
+for. The header button is there at every screen width, phones included.
+
+**On a phone the Loom opens its phone layout by itself** — a board-and-reel view built for
+the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
+still work and always win: untick **📱 Mobile view** in the top bar to get the wide board on
+a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
+browser from then on. The wide board is a dense four-panel tool, so if you do ask for it on
+a phone, **turn the phone to landscape** — portrait works but is cramped.
+
+The choice is decided once, when the Loom opens, and after that only those two switches
+change it. Turning the phone over mid-session will not swap the tool out from under you.
+
+A browser that had already used the older **Mobile view** switch keeps whatever it was set
+to — the auto-open speaks only for a browser that has never answered.
 
 It is also deliberately **engine-agnostic**: every shot can hand you its assembled prompt
 via **Copy shot**, so you can plan here and render somewhere else.
@@ -172,6 +204,16 @@ Other controls in the top bar:
   refresh). The batch confirm counts each shot's tickets against the pool you hold, in order,
   so a batch that outruns your cards is called out shot by shot — "this one will spend" — before
   you confirm, rather than after the tally comes up short.
+- **`~1,180 cr spent`** — beside it, what this project has *already* cost. The two read as
+  before and after, and they are different kinds of number: the estimate is a quote (**≈**),
+  this is a record (**~**) — PixAI's own charge for each finished shot, taken from your
+  catalog. Hover for the act-by-act breakdown; click to re-read it. Every re-roll counts, not
+  just the take that survived, so "spent" means spent — though attempts you re-rolled before
+  this existed were never recorded and cannot be counted now. Two things are deliberately not
+  folded into the total: a shot whose charge PixAI never reported and one whose picture has
+  since been deleted ride alongside as **(+N unk)**, because an unknown is not a zero; and a
+  clip you brought in from your library rather than rendered here is left out entirely — that
+  money was spent elsewhere — and named on hover. Nothing is fetched from PixAI to work it out.
 - **💾 Use an existing video instead** (Video tab) — skip generation entirely and attach a
   video you already have as this shot's clip.
 

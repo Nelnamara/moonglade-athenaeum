@@ -5,11 +5,22 @@ CLI does, as background jobs with a live log and a progress bar, so routine upke
 needs a terminal. It also holds your login accounts and Stop / Restart for the
 server itself.
 
+**Most of it runs itself.** The block at the top of the console — **Runs itself** — lists the
+jobs the app performs on its own: what each one is, how often it runs, when it last ran, when
+it next will, and a **Run now** beside it. The buttons below it are still there and still work;
+they are simply no longer the only way anything happens. See
+[Runs itself — the living library](#runs-itself--the-living-library).
+
 **⚙ Panel** opens the Panel as an **overlay on top of the gallery**, not a separate
 page — click it again or `Esc` to close. Its tab is **Maintenance**; **Accounts**,
 **Trash**, and **PixAI account** (your cards, coupons and credit ledger) are their own
 tiles inside Maintenance, each opening as a further overlay on top of the Panel itself.
-The auto-sync schedule lives in the job console's **Ledger** view. (The old separate
+**PixAI account** opens on a strip of figures — credits, how much of that is paid and how
+much free, free cards on hand, coupons, and your **followers** and **following** — above
+tabs for the card roster, coupons and the credit ledger. Every figure on it is a reading:
+the window never spends, redeems, purchases, follows or unfollows anything.
+The **Runs itself** list heads the job console; the older single **⏱ Standing order** — the
+auto-sync schedule — still lives in that console's **Ledger** view. (The old separate
 `/panel` page retired with the classic interface, 2026-08-08.)
 
 Like every page in the gallery, it needs a login (see [Setup](Setup)).
@@ -61,13 +72,16 @@ The buttons are grouped exactly as the risk splits.
 - **Organize — preview (dry run)** and **Dedup — preview (dry run)** — show the plan
   without moving anything.
 - **Sync published-artwork metadata (full re-walk)** — merges titles, tags, likes and
-  aesthetic scores onto matching rows.
+  aesthetic scores onto matching rows. You rarely need it now: the **Published-artwork
+  sweep** in [Runs itself](#runs-itself--the-living-library) keeps this current on its own.
+  This button is the *whole* re-read, for when you want every work refreshed this instant.
 - **Sync i2v videos — back up mp4s (full re-walk)** — finds image-to-video tasks and
   downloads their mp4s.
 
 The two labelled *(full re-walk)* re-scan your whole history every run rather than stopping
 at what's already downloaded, so they take much longer than **Sync now**. That's why the
-label says so — they're good candidates for the scheduler rather than a click after every
+label says so — and why the automatic versions of both are in
+[Runs itself](#runs-itself--the-living-library) rather than being a click after every
 generation.
 
 ### Changes files · asks first
@@ -105,38 +119,106 @@ delete), but each re-walks the full account instead of stopping at what you alre
   in the box on the button (1–200, default 20); anything outside that range is clamped.
   Good for a quick smoke test after changing settings.
 
-These are manual-run only — they don't appear in the scheduler dropdown.
+These are manual-run only. None of them is on a cadence, and none can be put on one — the
+**Full re-walk** appears in [Runs itself](#runs-itself--the-living-library) purely as a
+sixty-day floor, never as a timer.
 
 ## Download workers
 
 The selector under the job buttons (1–16, default 4) sets how many images download in
-parallel. It's saved with the schedule and used by **both** your button clicks and the
-scheduled run. More workers mainly speed up a big metadata backfill or a first catch-up;
-**Sync now** only pulls what's new, so it rarely needs many.
+parallel. It's saved alongside the job list and used by **both** your button clicks and
+every automatic run. More workers mainly speed up a big metadata backfill or a first
+catch-up; **Sync now** only pulls what's new, so it rarely needs many.
 
-## Automated tasks (the scheduler)
+## Runs itself — the living library
 
-Tick **Enabled**, pick a job under **Run**, pick an interval under **Every** (1 hour through
-1 week), and **Save schedule**. The card then shows when it last fired.
+**Runs itself** is the block at the top of the console, above the buttons. It is the list of
+jobs the app performs on its own, and each row says the same four things: what the job is,
+**how often** it runs, **when it last ran**, and **when it next will** — with a **Run now**
+beside it, because a job that runs itself should still be one you can start by hand.
 
-- Only **safe, non-advanced** jobs can be scheduled — nothing that deletes or moves files.
-- It's an **in-process timer, not an OS cron**: it fires only while the gallery is running,
-  and skips its turn if a job is already going. For always-on backups, point Windows Task
-  Scheduler at the CLI instead:
+Everything in it is on by default. Flip a row **off** to stop it; change its **every** to
+change its cadence.
+
+| Job | How often | What it does |
+|---|---|---|
+| **Published-artwork sweep** | every 15 minutes | Re-reads PixAI's list of your published works and refreshes their titles, tags, likes, comments and visibility. It never reads view counts. |
+| **Sync now** | every 6 hours | The one-shot refresh (`--sync`), then a perceptual-hash backfill straight after it. |
+| **View counts** | weekly | Reads how many views each published work has. Asking adds one view to each, so this is the only job that touches those numbers — see below. |
+| **Sync i2v videos** | daily | Backs up your image-to-video generations. |
+| **Reconcile deleted** | weekly | Flags catalog rows whose task is gone from PixAI. |
+| **Top up Similar** | daily | Embeds anything the visual-similarity index is missing. Needs the optional ML install; without it the row stays asleep rather than failing nightly. |
+| **Full re-walk** · **Rebuild Similar** · **Rebuild ALL thumbnails** | only if it hasn't run in 60 days | The three jobs with no incremental form. They are not on a cadence — this is a floor under them, so a library can't drift for months untended. |
+
+### The sweep, and why it's cheap
+
+The **published-artwork sweep** is the one that matters most, because publishing is written
+only to *this* machine's catalog: nothing else on earth hears about it until something reads
+PixAI's own list back. (That is how a piece published from the app could vanish from **My
+Art** on the other install.) So the sweep reads it back — on a timer, once shortly after the
+app starts, **and the instant you publish, unpublish or re-tag anything**, which makes the
+machine you published from right immediately instead of within the next quarter hour.
+
+It costs almost nothing because it stops early. It walks your published works newest-first
+and gives up after two pages in a row that hold nothing it needs — the same "stop when you
+reach what you already know" the incremental pull has always used. So a quiet sweep is one
+or two pages, not your whole history.
+
+Two consequences worth knowing:
+
+- Works **younger than 90 days** have their like and comment counts refreshed on **every**
+  sweep — those are the numbers still moving.
+- **Older** works refresh at most **once every 48 hours**. Every two days the sweep walks
+  the whole history once to collect them, and is quiet again after that.
+
+The **Sync published-artwork metadata** button below is unchanged and still does the full
+re-walk, for when you want every work re-read this instant.
+
+### View counts have their own row, on purpose
+
+Asking PixAI how many views a work has **adds one to that number** — PixAI's behaviour, not
+Moonglade's, and there is no way to look without it counting. So the view read is not part
+of anything that runs unattended:
+
+- The **fifteen-minute sweep** never reads a view count at all.
+- **View counts** is its own weekly row, on by default. Turn it off and your view numbers are
+  never touched by the app again; press its **Run now** and it reads them once, that minute.
+- A **scheduled** run of **Sync published-artwork metadata** — from this list, or from the
+  standing order — skips the view read too. Clicking that button **by hand** still reads
+  them, because that is you asking.
+- With `READ_ONLY` set in `config.json`, the view read is skipped everywhere, by hand
+  included: it changes a number on your account, so it sits behind the same switch as
+  publishing and deleting.
+
+### What never runs itself
+
+**Nothing destructive, ever — not now, and not as an option.** Organize, undo organize,
+dedup (quarantine or delete) and restore orphans have no row here and cannot be given one:
+they stay buttons, with their confirm and their server's-own-machine gate exactly as before.
+
+### The rest of the rules
+
+- It's an **in-process timer, not an OS cron**: jobs fire only while the gallery is running.
+  For always-on backups, point Windows Task Scheduler at the CLI instead:
 
 ```bash
 python moonglade_backup.py --out pixai_backup --update
 ```
 
-- Saving the schedule (like the destructive jobs) requires a request from the server's own
-  machine. A LAN session still sees the current settings.
+- **One job at a time**, as always. A job whose turn arrives while another is running simply
+  waits for the next minute.
+- **A finished job never moves the page you are reading.** It announces itself the way
+  everything else does — the notice in the corner and a row in **Activity** — and touches
+  nothing else: not your page, your search, your address or the pictures you have ticked.
+- Changing a row (**on/off**, **every**, **Run now**) requires a request from the server's
+  own machine, like the destructive buttons. A LAN session — including the phone — still
+  **sees** the whole list and what it is doing.
 
-### Jobs with no button
+### The standing order
 
-A couple of actions are schedulable but have no button on purpose. **Reconcile deleted
-(flag cloud-removed rows)** is the main one: `--sync` already runs it as its final step, so
-a button would be a second path to work that just happened. Pick it from the **Run**
-dropdown if you want it on its own cadence — see [Deleting & Sync](Deleting).
+The single **⏱ Standing order** in the console's **Ledger** view is still there and still
+works: one job, one cadence, chosen from the **Run** dropdown. It predates the list above,
+it is independent of it, and the list never doubles up on whatever job it names.
 
 ## Recover a task by ID
 

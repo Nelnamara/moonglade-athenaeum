@@ -191,6 +191,32 @@ export default function useControlPanel() {
     if (!d.error) { put("/api/panel/schedule", d); setSchedule(d); }
     return d;
   };
+  /* ---- The living library (2026-09-06) ------------------------------------------------
+     The same endpoint, the same persisted file, the same localhost-only write: the job
+     LIST rides /api/panel/schedule's `jobs` beside the legacy standing order rather than
+     inventing a second settings surface. saveLivingJob sends ONE row's patch -- the server
+     merges, so a toggle and a cadence change can never wipe each other, exactly like the
+     schedule toggle and the workers selector already can't.
+
+     THE LIBRARY STANDS STILL. Nothing in here touches the gallery: no load(), no setItems,
+     no refresh of the grid, the search, the address or the selection. A living job that
+     finishes announces itself through the Activity ledger the notify tray already polls,
+     and that is the whole of what the owner sees move. (DECISIONS.md 2026-09-05, which
+     names living-library jobs as an inheritor of that rule by name; guarded by
+     tests/test_living_library.py, which walks this file.) */
+  const saveLivingJob = async (action, patch) =>
+    saveSchedule({ jobs: [{ action, ...patch }] });
+  /* Run now. The sweep is in-process and has no PANEL_ACTIONS key, so it has its own
+     route; everything else is a normal panel job and goes through the same runAction the
+     buttons have always used. */
+  const runLiving = async (action) => {
+    if (action === "artworks-sweep") {
+      const d = await apiPost("/api/panel/sweep", {});
+      fetchPanelHistory();
+      return d;
+    }
+    return runAction(action);
+  };
   const fetchAchievements = async () => {
     try {
       const d = await apiGet("/api/achievements");
@@ -702,7 +728,7 @@ export default function useControlPanel() {
 
   return {
     summary, summaryErr, achievements, skins, activeSkin, pickSkin, brandingUnlocked,
-    panelHistory, schedule, saveSchedule,
+    panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,

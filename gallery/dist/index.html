@@ -5,7 +5,10 @@
      and the Vite proxy supplies real /api data from the running server. -->
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover, the dev twin of the served shells' own meta (2026-09-06): every
+       env(safe-area-inset-*) in this app resolves to 0 without it, so the notch/home-
+       indicator guards the mobile stylesheets are full of would read as no-ops here. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Moonglade Athenaeum (dev)</title>
   <!-- PWA installability (2026-08-02). Dev-only paths: Vite serves gallery/public/
        at root ("/") in dev regardless of the "/next/assets/" build base -- the

@@ -4,6 +4,7 @@ import * as jobs from "./jobs.js";
 import * as jobsStore from "./jobsStore.js";
 import * as ach from "./ach.js";
 import { claimReceipt } from "./updateStore.js";
+import { checkSpikes } from "./spikeStore.js";
 import ToastHost from "./ToastHost.jsx";
 import "../styles/notify.css";
 
@@ -60,6 +61,12 @@ export function installNotify() {
      waits rather than guessing. See notify/updateStore.js. */
   const boot = (typeof window !== "undefined" && window.MG_BOOT) || {};
   claimReceipt(boot.build_stamp || "");
+  /* THE BLOW-UP NOTE (owner, 2026-09-06). Here for the same two reasons the receipt above
+     is: it must fire ONCE PER BOOT rather than once per mount, and this is already where
+     the app's other "something happened while you were away" news lives. Announce-only --
+     see notify/spikeStore.js; it can no more open a screen than updateStore can install a
+     release. Its read is a local catalog query, not a PixAI call. */
+  checkSpikes();
 }
 
 export function NotifyRoot() {

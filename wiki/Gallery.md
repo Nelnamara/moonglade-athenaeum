@@ -26,9 +26,33 @@ A row of frosted glow-pill buttons, one hue per destination:
   closes it).
 - **🏅 Contests** — live PixAI contests. **📈 My Art** — how your published art is doing; each
   piece shows its visibility (Public / Private) and an amber **Sensitive** mark when PixAI has
-  flagged it, so a moderated work is no longer shown as a plain "Public".
+  flagged it, so a moderated work is no longer shown as a plain "Public". Every card carries
+  its **♥ likes** and **💬 comments**, and every published one its **view count** with a small
+  bar showing how it compares to your best. Along the top: how many pieces you have published,
+  your **lifetime views**, total likes and total comments — and you can sort the whole library
+  by **Most viewed** as easily as by Most liked. See
+  [View counts](Backing-Up#view-counts-and-the-one-thing-worth-knowing-about-them) for where
+  those numbers come from and why looking at them is not quite free.
+  My Art reads your local catalog, and the titles, tags and like counts it lists arrive with
+  **Sync published-artwork metadata** (Panel → Maintenance, or `--sync-artworks` — see
+  [Backing Up](Backing-Up)). On a library where that has never run there is nothing for it to
+  list, and it now says so and points at the sync instead of showing a bare "Nothing here yet."
+
+  **When something takes off, Moonglade tells you.** After a run that reads view counts, if
+  a published work's recent pace has left its own normal well behind, a notice appears in the
+  corner — *"◈ <title> is taking off"* — with how many views it gained, over how long, and
+  roughly how many times its usual pace that is. A work that had **no views at all** before
+  says *"up from nothing"* instead, because there is no usual pace to compare against.
+  The rule is deliberately quiet: it wants a real number of new views, not just a big-looking
+  ratio on a work with three, and it subtracts the one view the reading itself adds. It fires
+  **once per sweep** and names **one** work, counting any others rather than listing them —
+  it is a note, not a feed. It is **announce-only**: nothing is published, changed, sorted or
+  moved, and the page you are reading stays exactly where it is.
+- **Followers and following** sit beside the credits figure in the header, and again in the
+  Control Panel's **PixAI account** window. They are a reading, not a control — Moonglade
+  never follows, unfollows, likes or comments on your behalf.
 - **⚙ Panel** — the Control Panel overlay: maintenance jobs with live logs and progress,
-  the scheduler, server Stop/Restart, branding.
+  the `Runs itself` job list, server Stop/Restart, branding.
 - **♡ Health** — the [collection health](Health) dashboard.
 - **✦ AI Tools** — a browsable catalog of PixAI's one-click workflow tools. Each one is a
   card led by its own artwork, with a colour-coded chip on the art saying how much work the
@@ -214,6 +238,15 @@ so you can bookmark one, and the browser's Back button closes it.
 
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).
+
+**On a phone, three more things about where you are.** Each of the three tabs —
+**Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
+your library and stepping over to the composer no longer drops you into the middle of it,
+and the library is still deep when you come back. Turning the page with **‹ Prev** or
+**Next ›** starts you at the top of the page you asked for, with the search box and the
+media pills back on screen. And while a sheet is up — **Sort**, **Advanced Search**,
+**Actions** — the library behind the dim is held still, and is exactly where you left it
+when the sheet goes. See the [FAQ](FAQ) for what the phone's Back gesture closes.
 
 ## Editing & curating
 

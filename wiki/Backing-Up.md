@@ -138,9 +138,45 @@ The two older opt-ins work the same way for their own columns:
 
 ```bash
 python moonglade_backup.py --sync-videos          # back up image-to-video mp4s
-python moonglade_backup.py --sync-artworks        # published titles/tags/likes/aesthetic
+python moonglade_backup.py --sync-artworks        # published titles/tags/likes/comments/views
 python moonglade_backup.py --sync-artworks --with-videos
+python moonglade_backup.py --sync-artworks --no-views    # everything except the view counts
+python moonglade_backup.py --sync-artworks --views-only  # ONLY the view counts, no re-walk
 ```
+
+`--sync-artworks` is what fills **📈 My Art** — until it has run once, that screen has nothing
+to list and tells you so. The Panel has the same job under Maintenance as **Sync
+published-artwork metadata**, if you would rather not use a terminal.
+
+### View counts, and the one thing worth knowing about them
+
+`--sync-artworks` also collects the **view count** of every published work, which is what
+lets **My Art** show a lifetime views total, a number and a little bar on every published
+card, and a **Most viewed** sort. It costs a handful of requests for your whole library,
+however many works that is.
+
+**Asking PixAI how many views a work has adds one to that number.** That is PixAI's
+behaviour, not Moonglade's, and there is no way to look without it counting. So Moonglade
+looks *rarely and deliberately* — once per `--sync-artworks`, adding exactly one view to
+each published work — rather than every time you open a screen. (It used to do the latter:
+opening My Art fetched twelve view counts live, which both made the panel slow and quietly
+added twelve views to your own most-watched pictures every time you looked at them.)
+
+Use **`--no-views`** for a run that refreshes titles, tags, likes and comments without
+touching your view numbers at all, and **`--views-only`** for the opposite — the counts on
+their own, with no listing re-walk.
+
+That split is how the app schedules it. The Control Panel's **View counts** row is a weekly
+`--views-only` run, on by default; every *unattended* run of the metadata refresh passes
+`--no-views`; and the fifteen-minute published-artwork sweep never reads a view count at
+all. Clicking **Sync published-artwork metadata** yourself still reads them, because that is
+you asking. With `READ_ONLY` set in `config.json` the view read is skipped everywhere — it
+changes a number on your PixAI account, so it sits behind the same switch as publishing and
+deleting.
+
+Because the counts are stored, everything that reads them — My Art's totals, the bars, the
+sort — is instant and works over your LAN with no network call. They are as fresh as your
+last sync, and My Art says so when only part of the library has been swept.
 
 ## Converting formats (`--convert`)
 

@@ -239,10 +239,18 @@ test("F: the phone restores the library exactly -- its OWN scroller, and Back as
   // only the FIRST entry saves, so chaining ◈ can't overwrite the library's own offset
   assert.match(appMobile, /if \(libScrollRef\.current === null\) \{/);
   // no Escape on a phone: ONE same-address history entry stands in for it, keyed on the
-  // boolean so re-anchoring the set never churns history
+  // boolean so re-anchoring the set never churns history. Since 2026-09-06 that entry
+  // comes from the SHARED layer ledger every other phone layer now registers with
+  // (hooks/useLayerHistory.js) instead of Similar's own inline pushState/popstate pair --
+  // same entry, same behaviour, one implementation. The boolean and the ✕ closer are what
+  // this surface still owns, so they are what is pinned here; loom/test/phone-back-
+  // layers.test.js owns the manager's own shape.
   assert.match(appMobile, /const simOn = !!similarFor;/);
-  assert.match(appMobile, /window\.history\.pushState\(\{ mgSimilar: 1 \}, ""\);/);
-  assert.match(appMobile, /if \(!popped\) window\.history\.back\(\);/);
+  assert.match(appMobile, /useLayerHistory\(simOn, clearSimilar\);/);
+  assert.match(appMobile, /import useLayerHistory from "\.\.\/hooks\/useLayerHistory\.js";/);
+  // ...and Similar no longer keeps a private copy of the mechanism.
+  assert.doesNotMatch(appMobile, /mgSimilar/);
+  assert.doesNotMatch(appMobile, /window\.history\.pushState/);
 });
 
 test("F: the ◈ token rides the phone's own search bar, and the results take the grid's place", () => {

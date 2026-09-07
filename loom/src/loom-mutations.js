@@ -46,6 +46,60 @@ export const patchCardById = (project, cardId, patch) => ({
   })),
 });
 
+// Same card-by-id search, but the patch is COMPUTED from the card it lands on. Needed by
+// withResult below, which cannot be expressed as a flat patch: it has to read the resultMid
+// it is about to overwrite. Kept as a sibling rather than widening patchCardById's contract,
+// so every existing flat-patch caller stays exactly as it was.
+export const patchCardByIdWith = (project, cardId, fn) => ({
+  ...project,
+  acts: project.acts.map((a) => ({
+    ...a, cards: a.cards.map((c) => c.id !== cardId ? c : fn(c)),
+  })),
+});
+
+// A landing generation result, applied to the card that ordered it.
+//
+// A card holds exactly ONE resultMid, and a re-roll overwrites it. The clip it replaced was
+// still paid for -- the charge sits in the catalog forever -- but once resultMid moves on,
+// nothing on the board points at it any more, so a spend ledger built on resultMid alone
+// silently forgets every re-roll. `attempts` is the fix: the superseded media id is pushed
+// here on the way past, so the ledger can add up what was actually PAID rather than only
+// what survived.
+//
+// What goes in: the results this card has already had and lost, oldest first. The current
+// one is NOT duplicated here -- it is still resultMid, and the ledger reads the union -- so
+// no id is ever counted twice however many times a shot is re-rolled. `at` is the moment the
+// attempt was SUPERSEDED, not the moment it was made (the board never knew that; the catalog
+// row's own created_at does). It is provenance for a human reading the JSON, never arithmetic.
+//
+// Re-landing the SAME mid (a resumed poll re-reporting a finished shot) records nothing:
+// that is one result reported twice, not two attempts.
+// A SUPERSEDED IMPORT IS NOT AN ATTEMPT. `attempts` exists so a re-roll's money stays
+// countable -- but a clip attached from the gallery was paid for somewhere else, at some
+// other time, and filing it here would bill borrowed footage to this project the moment the
+// shot was re-rolled. It is dropped rather than recorded, exactly as the ledger drops the
+// card itself while the flag is on.
+//
+// And `imported` does not survive a real result landing on top of it: the clip that lands
+// next IS this project's, so the flag has to come off with the mid it described. The patch
+// gets the last word (the attach path sets it true), and a poll re-reporting the SAME mid
+// changes nothing -- that is one result reported twice, not a new one.
+export const withResult = (card, patch, at) => {
+  const prev = card && card.resultMid ? String(card.resultMid) : "";
+  const next = patch && patch.resultMid ? String(patch.resultMid) : "";
+  const had = (card && card.attempts) || [];
+  const wasImported = !!(card && card.imported);
+  const keep = prev && prev !== next && !wasImported
+    && !had.some((a) => a && String(a.media_id) === prev);
+  const imported = patch && Object.prototype.hasOwnProperty.call(patch, "imported")
+    ? !!patch.imported
+    : (next && next !== prev ? false : wasImported);
+  return {
+    ...card, ...patch, imported,
+    attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had,
+  };
+};
+
 // Pure reducers for the prompt-override mechanism -- kept here (not inlined at each call
 // site) so the shape can't drift between the several places that set/clear it (the drawer's
 // commit listener, the toolbar's flush-before-batch, the native Prompt textarea, the
@@ -70,6 +124,32 @@ export const importedFootagePatch = (mediaId, duration) => {
   const dur = Number(duration);
   return {
     status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    ...(dur > 0 ? { actualDur: dur } : {}),
+  };
+};
+
+// The patch "Use an existing video instead" applies to a SHOT CARD that already exists
+// (unlike importedFootagePatch above, which lands on a fresh blank card in the Footage
+// tab). Same picker, same act -- an already-rendered gallery video becomes this shot's
+// finished clip with no generation -- so it carries the same `imported: true` provenance.
+//
+// IT MUST. That flag is the only thing keeping a clip out of the ledger's sum
+// (loom-core.js's collectSpendMids), and without it the shot's borrowed footage was billed
+// to this project at whatever it cost whoever rendered it, whenever that was -- exactly the
+// case the ledger's imported-exclusion rule exists to state. Worse on a re-roll: withResult
+// files the superseded resultMid into `attempts`, so the same borrowed clip was then billed
+// a SECOND time in the same project.
+//
+// pendingTaskId/genStartedAt are cleared for the same reason every other status:"done"
+// write in master-storyboard.jsx clears them -- an attach can now land on a shot whose
+// generation was paused, and a stale live task id left behind would keep polling.
+// `duration` is only written when it resolves to a real positive number, so a blank or zero
+// leaves the card's own default standing rather than a lying zero.
+export const attachedVideoPatch = (mediaId, duration) => {
+  const dur = Number(duration);
+  return {
+    status: "done", resultMid: mediaId, trimIn: 0, trimOut: null, imported: true,
+    pendingTaskId: null, genStartedAt: null,
     ...(dur > 0 ? { actualDur: dur } : {}),
   };
 };
@@ -128,8 +208,11 @@ export const buildDuplicateCard = (card, newCardId, newRefIds) => ({
   refs: card.refs.map((r, i) => ({ ...r, id: (newRefIds && newRefIds[i]) || r.id })),
   // A duplicate is a fresh, unrendered shot -- it must not inherit the
   // original's generation result, or it silently shows "done" and Export
-  // plays the SAME clip twice.
-  resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null,
+  // plays the SAME clip twice. `attempts` clears for the same reason one
+  // step further on: the original's re-rolls are the ORIGINAL's spend, and
+  // a duplicate that carried them would bill the project twice for money it
+  // spent once, every time a shot was duplicated.
+  resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null, attempts: [],
 });
 
 // Insert `newCard` immediately after `origCardId` within one act.

@@ -146,3 +146,49 @@ class TestRunDeleteTasks:
                                token=None, delay=0)
         out = core.run_delete_tasks(args)
         assert out == {"targeted": 1, "deleted": 1, "failed": 0}
+
+
+class TestDeprecationNotice:
+    """`--delete-task` is deprecated (2026-09-06). Deletion converged on the per-image path:
+    the gallery's Delete from PixAI now reads the task first and sends whichever mutation
+    PixAI accepts, and the Actions dropdown's Delete from PixAI still takes whole tasks in
+    bulk. This flag is the third road to the same place, with none of the reading -- so it
+    keeps working this release and says where to go instead.
+
+    The notice must reach someone who is only ever going to run the DRY RUN, which is the
+    default and the shape most people try first."""
+
+    def test_the_dry_run_says_it_is_deprecated_and_where_to_go(self, monkeypatch, capsys):
+        monkeypatch.setattr(core, "_make_session",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("network!")))
+        args = SimpleNamespace(delete_task=["1"], apply=False, yes=False)
+        core.run_delete_tasks(args)
+        out = capsys.readouterr().out.lower()
+        assert "deprecated" in out
+        assert "delete from pixai" in out, "it never names the control that replaces it"
+
+    def test_the_real_delete_says_it_too(self, monkeypatch, capsys):
+        monkeypatch.setattr(core, "_make_session", lambda *a, **k: "SESSION")
+        monkeypatch.setattr(core, "delete_task_gql", lambda session, tid: None)
+        args = SimpleNamespace(delete_task=["10"], apply=True, yes=True, token=None, delay=0)
+        core.run_delete_tasks(args)
+        assert "deprecated" in capsys.readouterr().out.lower()
+
+    def test_the_help_text_says_deprecated(self):
+        """`--help` is where someone looks BEFORE running it, so the notice has to be there
+        too, not only in the output of a run. The parser is built inside main(), so the help
+        string is read out of the source rather than by running the CLI."""
+        import ast
+        import inspect
+        helps = [kw.value.value
+                 for node in ast.walk(ast.parse(inspect.getsource(core)))
+                 if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute)
+                 and node.func.attr == "add_argument"
+                 and any(isinstance(a, ast.Constant) and a.value == "--delete-task"
+                         for a in node.args)
+                 for kw in node.keywords
+                 if kw.arg == "help" and isinstance(kw.value, ast.Constant)]
+        assert helps, "--delete-task has no help text at all"
+        assert "deprecated" in helps[0].lower(), (
+            "`--help` still presents --delete-task as the way to delete")

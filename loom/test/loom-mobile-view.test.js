@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { cardsToResume } from "../src/loom-core.js";
 
 // First increment of the Loom Mobile board/reel view (2026-08-03), per the locked design
 // (design_handoff/design_handoff_moonglade_suite/"Loom Mobile.dc.html"). master-storyboard.jsx
@@ -56,18 +57,25 @@ describe("LoomMobile exists as a real component, inline (matching this file's ow
 });
 
 describe("the Mobile-view toggle: a new, persisted, manual owner-preference switch", () => {
-  test("a small, real useLocalToggle hook exists (no prior localStorage-toggle hook in this file)", () => {
-    assert.match(src, /function useLocalToggle\(key, defaultVal\)\s*\{/);
-    assert.match(src, /window\.localStorage\.getItem\(key\)/);
-    assert.match(src, /window\.localStorage\.setItem\(key, val \? "1" : "0"\)/);
+  // 2026-09-06 (the Loom-arena plumbing pass, owner call 5): the hook this switch rides was
+  // useLocalToggle(MOBILE_UI_KEY, false), which wrote its own default on mount -- so "never
+  // asked" and "asked for desktop" were the same stored "0". It is useLoomView now, over
+  // loom/src/loom-url.js's LOOM_VIEW_KEY, written ONLY by a real flip, so a phone with no
+  // stored answer can open the phone layout by itself. What this file is about is unchanged:
+  // the switch is still manual, still persisted, still bidirectional. The auto half has its
+  // own tests in loom-phone-auto-open.test.js.
+  test("a real, persisted hook backs the switch (no prior localStorage-toggle hook in this file)", () => {
+    assert.match(src, /function useLoomView\(isPhone\)\s*\{/);
+    assert.match(src, /readStoredView\(window\.localStorage\)/);
+    assert.match(src, /window\.localStorage\.setItem\(LOOM_VIEW_KEY, next \? "mobile" : "desktop"\)/);
   });
 
-  test("the localStorage key is a real, named constant", () => {
-    assert.match(src, /const MOBILE_UI_KEY = "mg_loom_mobile_ui";/);
+  test("the localStorage key is a real, named constant, shared from loom-url.js", () => {
+    assert.match(src, /LOOM_VIEW_KEY, readStoredView, resolveLoomView,\s*\n\} from "\.\/src\/loom-url\.js";/);
   });
 
-  test("App() wires mobileUI/setMobileUI through useLocalToggle(MOBILE_UI_KEY, false)", () => {
-    assert.match(src, /const \[mobileUI, setMobileUI\] = useLocalToggle\(MOBILE_UI_KEY, false\);/);
+  test("App() wires mobileUI/setMobileUI through useLoomView, keyed on the app's phone rule", () => {
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\)\);/);
   });
 
   test("a toggle chip lives in LoomV2's own .lv-top bar, reusing .lv-draft's exact visual pattern", () => {
@@ -836,13 +844,50 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
 });
 
 describe("Credit safety: the drawer's own component-local poll vs. this increment's fix (fourth increment)", () => {
-  test("useGenerationPipeline's resume-on-reload effect also depends on mobileUI, so a <mg-generate-drawer>-submitted Video render is re-attached the instant the toggle unmounts it", () => {
-    assert.match(src, /function useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\)/);
-    assert.match(src, /\}, \[activeId, mobileUI\]\);\s*\/\/ eslint-disable-line/);
+  test("the resume scan re-attaches a poll for every wip shot with a live task id, and never twice for one task", () => {
+    /* WHAT the effect does, run rather than read. This used to assert the hook's whole
+       destructuring signature character for character, which a harmless param reorder
+       breaks and a genuinely mis-wired hook does not.
+
+       The scan is idempotent by TASK ID, not by trigger: that is what lets it be re-run on
+       every "📱 Mobile view" flip -- which unmounts LoomV2 and any <mg-generate-drawer>
+       inside it outright, with no 'mg-paused' event -- without any double-poll risk. */
+    const resumed = Object.create(null);
+    const board = { acts: [{ cards: [
+      { id: "a", status: "wip", pendingTaskId: "T1", genStartedAt: 111 },
+      { id: "b", status: "done", resultMid: "m1" },
+      { id: "c", status: "wip" },                       // never submitted: nothing to resume
+      { id: "d", status: "wip", pendingTaskId: "T2" },
+    ] }] };
+    assert.deepEqual(cardsToResume(board, resumed), [
+      { id: "a", taskId: "T1", startedAt: 111 },
+      { id: "d", taskId: "T2", startedAt: undefined },
+    ]);
+    // the flip fires it again: a genuine no-op for everything already polling
+    assert.deepEqual(cardsToResume(board, resumed), []);
+    // ...and a shot submitted AFTER that flip is picked up on the next one
+    board.acts[0].cards.push({ id: "e", status: "wip", pendingTaskId: "T3" });
+    assert.deepEqual(cardsToResume(board, resumed).map((c) => c.taskId), ["T3"]);
+    // a task id spelled like an Object.prototype key is still a task id
+    board.acts[0].cards.push({ id: "f", status: "wip", pendingTaskId: "constructor" });
+    assert.deepEqual(cardsToResume(board, resumed).map((c) => c.taskId), ["constructor"]);
+    assert.deepEqual(cardsToResume(null, resumed), []);
+  });
+
+  test("the effect re-runs on a mobileUI flip, not on activeId alone", () => {
+    // WHEN it fires is the dep array, and that is all that is left here to read: an
+    // unmounted <mg-generate-drawer> fires no event, so the toggle itself has to be the
+    // trigger. Sliced to the resume effect rather than matched anywhere in the file.
+    const effect = src.slice(src.indexOf("cardsToResume(project, resumedRef.current)"));
+    assert.match(effect.slice(0, 200), /\}, \[activeId, mobileUI\]\);/);
   });
 
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {
-    assert.match(src, /= useGenerationPipeline\(\{ project, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI \}\);/);
+    // Both ends of one wire, without pinning the whole parameter list: the hook takes a
+    // mobileUI, and App() hands it the state it renders from rather than a local copy.
+    assert.match(src, /function useGenerationPipeline\(\{[^}]*\bmobileUI\b[^}]*\}\)/);
+    assert.match(src, /= useGenerationPipeline\(\{[^}]*\bmobileUI\b[^}]*\}\);/);
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(/);
   });
 
   test("genImage/genEdit/genRef's own polls are plain setTimeout chains (pollImg/pollTaskWithCeiling), never a DOM element's lifecycle -- confirmed, not just asserted", () => {

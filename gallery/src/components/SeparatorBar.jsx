@@ -97,6 +97,15 @@ export default function SeparatorBar({
 
   const claimCredits = account && Number(account.claim_credits) > 0 ? account.claim_credits : 0;
 
+  /* Followers / following, off the same /api/account payload. Rendered only when PixAI
+     actually answered with both numbers: an account read that failed, or one whose
+     followerCount came back null, must show NOTHING rather than a confident pair of
+     zeroes -- "nobody follows you" is a very different sentence from "we could not ask". */
+  const social = account && account.followers != null && account.following != null
+    ? { followers: Number(account.followers).toLocaleString(),
+        following: Number(account.following).toLocaleString() }
+    : null;
+
   // Header-docked Activity control (Claude Design handoff 2026-08-09, drift item 39):
   // replaces the old floating #jobs-fab/#jobs-tray with this bar's own ambient activity
   // cluster upgraded into the real trigger+dropdown. Reads jobsStore -- real /api/jobs
@@ -221,6 +230,28 @@ export default function SeparatorBar({
         <span className={"mgx-costslot" + (hasCost ? " has" : "")}>
           <CostBadge compact onCost={() => setHasCost(true)} />
         </span>
+
+        {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06: "BOTH beside the credits chip and in
+            the account popup"). Free -- both numbers already ride the same /api/account
+            call the credits chip beside it makes, and have since the CLI's --account
+            dashboard; no screen had ever read them.
+
+            THE SAME CHIP, minus the affordance. It borrows .mgx-cred's own markup and
+            classes verbatim -- val, label, divider -- and adds only .mgx-social, which
+            takes the pointer cursor and the hover lift back off. This is a reading, not a
+            control: there is nowhere for it to go and nothing for it to do (following
+            somebody is a WRITE to PixAI, and the scope's out-of-scope list rules that out),
+            so it is a <span>, not a button, and never enters the tab order. */}
+        {social ? (
+          <span className="mgx-cred mgx-social"
+            title={social.followers + " followers · " + social.following + " following on PixAI"}>
+            <span className="mgx-credval">{social.followers}</span>
+            <span className="mgx-credlab">FOLLOWERS</span>
+            <span className="mgx-creddiv" aria-hidden="true" />
+            <span className="mgx-credval">{social.following}</span>
+            <span className="mgx-credlab">FOLLOWING</span>
+          </span>
+        ) : null}
 
         {/* account credits chip: gold billing tooltip drops below, right-anchored */}
         <button type="button" className="mgx-cred"

@@ -7,6 +7,7 @@ import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import useLayerHistory from "../hooks/useLayerHistory.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
@@ -316,6 +317,11 @@ export default function CreateMobile({
     setAdvClosing(true);
     setTimeout(() => { setAdvOpen(false); setAdvClosing(false); }, 220);
   };
+  /* ...and the Back gesture is the second way out of it (2026-09-06). A pushed screen has
+     exactly one affordance -- the back chevron -- so on a phone the hardware Back has to
+     mean the same thing, or it walks past the screen and out of the app. One shared
+     ledger, one entry per open layer: hooks/useLayerHistory.js. */
+  useLayerHistory(advOpen, closeAdv);
 
   const d = dims(s);
   const editCapsNow = editCaps(edit.s.model);

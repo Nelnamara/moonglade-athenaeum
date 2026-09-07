@@ -51,12 +51,21 @@ import sqlite3
 import sys
 import threading
 import time
-from collections import defaultdict, Counter
+from collections import defaultdict, namedtuple, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from moonglade_gallery import (CATALOG_FIELDS, _IMAGE_EXTS, init_db, migrate, load_catalog,
                             save_catalog, _db_is_empty, rows_for_media_ids,
+                            # The row-level artwork write (see run_sync_artworks): one
+                            # narrow UPDATE of the eleven PixAI-owned columns, keyed by
+                            # media_id -- imported the same way its whole-table siblings
+                            # above are.
+                            apply_artwork_meta,
+                            # ...and its twin for the four view columns, which are folded
+                            # by their own narrow UPDATE because they are read once per
+                            # deliberate sync, not on the fifteen-minute sweep's cadence.
+                            apply_artwork_views,
                             media_id_of, find_files_for_media_id, build_thumbnails,
                             _NO_WINDOW, DELETED_DIRNAME, _redact_host_paths_cli,
                             # The one library scan (see moonglade_gallery.py's
@@ -2394,6 +2403,10 @@ _FULL_META_FIELDS = (
     # leaves both blank at task level (fm is cached once per task) and each row resolves
     # its own via _with_batch_position before _merge_full / the backfill apply carry them.
     "batch_index", "batch_size",
+    # Per-ROW too (2026-09-06): the deletedAt stamp on this image's own outputs.batch entry,
+    # so a backfill marks the row of an image deleted from PixAI's website rather than
+    # leaving it looking live. Blank for every live output and every non-batch task.
+    "cloud_deleted_at",
 )
 
 
@@ -2447,6 +2460,156 @@ def task_detail_gql(session, task_id, retries=3):
               "exactly as PixAI left them. Try again in a moment.".format(task_id, e))
         return None
     return (data or {}).get("task")
+
+
+# ---------------------------------------------------------------------------
+# DELETING ONE IMAGE -- read the task, then pick the mutation PixAI will accept
+#
+# There are two delete mutations and they are not interchangeable:
+#
+#   deleteBatchMedia (inside updateGenerationTask)  drops ONE member out of a task's
+#       outputs.batch[]. PixAI accepts it only while the task would still have an output
+#       left afterwards.
+#   deleteGenerationTask                            removes the whole generation record.
+#
+# From v2.5.0 until 2026-09-06 the gallery's single-image "Delete from PixAI" sent the
+# first one every time. For a task that made ONE image (no `batch` key -- the picture is
+# outputs.mediaId) and for the LAST live member of a batch, PixAI answers 403 "task outputs
+# does not include any media with mediaId". Their own site routes those two cases to the
+# whole-task mutation. Nothing changed on their side; the app was wrong from the start.
+#
+# What a read-only probe of the owner's own tasks established on 2026-09-06, and what this
+# code is therefore allowed to rely on:
+#   * a deleted batch member KEEPS its place in outputs.batch[] and gains `deletedAt`
+#     (an ISO string). Untouched members carry no such key. So the array's LENGTH and a
+#     member's POSITION say nothing about how many images are still live.
+#   * outputs.mediaId on a batch task is the combined preview picture PixAI renders of the
+#     whole batch. It is never one of outputs.batch[]; the two sets are disjoint.
+#   * the task's `updatedAt` does NOT move on a per-image delete -- nothing may key on it.
+#   * getTaskById still resolves a whole-task-deleted task, so it cannot be used to ask
+#     whether a task is gone.
+# ---------------------------------------------------------------------------
+
+#: What `route_image_delete` decided: which mutation to send ("per-image" / "whole-task"),
+#: or "refuse" to send anything; a plain-words `reason`; how many OTHER images of the batch
+#: would still be live on PixAI afterwards; and the target's own outputs.batch[] entry (None
+#: when the task has no batch, or does not list this image at all).
+ImageDeleteRoute = namedtuple("ImageDeleteRoute", "plan reason live_siblings entry")
+
+
+def batch_entry(batch, media_id):
+    """One media's own entry in a task's `outputs.batch` array, or None.
+
+    The single place that decides which array entry belongs to which image, so the router,
+    the output enumerator and the per-row batch position cannot drift on it."""
+    if not isinstance(batch, list):
+        return None
+    mid = str(media_id or "")
+    if not mid:
+        return None
+    for entry in batch:
+        if isinstance(entry, dict) and str(entry.get("mediaId") or "") == mid:
+            return entry
+    return None
+
+
+def live_batch_media(batch):
+    """The media ids of a task's batch that PixAI still has, newest-first order kept.
+
+    A member with a `deletedAt` is not one of them -- it is a tombstone PixAI leaves in
+    place, which is why counting the array itself overcounts."""
+    if not isinstance(batch, list):
+        return []
+    return [str(e.get("mediaId") or "") for e in batch
+            if isinstance(e, dict) and e.get("mediaId") and not e.get("deletedAt")]
+
+
+def deleted_batch_media(batch):
+    """The mirror of `live_batch_media`: members PixAI has already dropped (they carry a
+    `deletedAt`). The local copies of these are the only ones left anywhere, so a whole-task
+    delete must leave their catalog rows and their files alone."""
+    if not isinstance(batch, list):
+        return []
+    return [str(e.get("mediaId") or "") for e in batch
+            if isinstance(e, dict) and e.get("mediaId") and e.get("deletedAt")]
+
+
+def route_image_delete(task, media_id):
+    """Decide, from a task record PixAI just answered with, which delete to send for ONE
+    image -- or that nothing may be sent. Returns an `ImageDeleteRoute`.
+
+    Pure: a record in, a decision out. It reads nothing live and deletes nothing, so every
+    shape below is exercisable offline (tests/test_delete_routing.py).
+
+    The rows, in the order they are checked:
+
+      refuse      the record is missing -- the read failed. The fail-safe direction is
+                  ALWAYS refuse: answering "I could not look" with the whole-task mutation
+                  would delete a whole generation off a dropped packet.
+      refuse      a video task (its clips hang off outputs.videos). Out of scope; guessing a
+                  destructive mutation is not an option.
+      refuse      the id is the batch's combined preview picture, not one of its images.
+      refuse      the task does not list this image at all -- a stale row or a rotated id.
+      refuse      this image's own entry already carries `deletedAt`.
+      per-image   the image is a batch member and at least one OTHER member is still live,
+                  so the task keeps an output and PixAI accepts deleteBatchMedia.
+      whole-task  the image is the last live member of its batch, or the task has no batch
+                  and this image IS its output. Either way the delete would leave the task
+                  with nothing, which is the case PixAI's own site sends
+                  deleteGenerationTask for.
+    """
+    mid = str(media_id or "").strip()
+    if not mid:
+        return ImageDeleteRoute(
+            "refuse", "There is no image id to delete; nothing was deleted.", 0, None)
+    if not isinstance(task, dict) or not task:
+        return ImageDeleteRoute(
+            "refuse",
+            "Couldn't read the task from PixAI; nothing was deleted, try again.", 0, None)
+
+    outputs = task.get("outputs") or {}
+    videos = outputs.get("videos")
+    if isinstance(videos, list) and videos:
+        # Checked BEFORE the lone-image row on purpose: a video task also carries an
+        # outputs.mediaId (its poster still), so the lone-image rule would happily route it
+        # into a whole-task delete.
+        return ImageDeleteRoute(
+            "refuse", "Video clips are deleted from the task's page on PixAI.", 0, None)
+
+    batch = outputs.get("batch")
+    if isinstance(batch, list) and batch:
+        entry = batch_entry(batch, mid)
+        if entry is None:
+            if str(outputs.get("mediaId") or "") == mid:
+                return ImageDeleteRoute(
+                    "refuse",
+                    "That is the combined preview picture PixAI makes for a batch, not one "
+                    "of the images in it.", len(live_batch_media(batch)), None)
+            return ImageDeleteRoute(
+                "refuse", "PixAI's copy of this task no longer lists this image.", 0, None)
+        if entry.get("deletedAt"):
+            return ImageDeleteRoute(
+                "refuse", "This image is already deleted on PixAI.",
+                len(live_batch_media(batch)), entry)
+        others = [m for m in live_batch_media(batch) if m != mid]
+        if others:
+            return ImageDeleteRoute(
+                "per-image",
+                "{} other image{} in this batch stay on PixAI.".format(
+                    len(others), "" if len(others) == 1 else "s"),
+                len(others), entry)
+        return ImageDeleteRoute(
+            "whole-task",
+            "This is the last image of its generation still on PixAI, so PixAI removes the "
+            "whole generation record.", 0, entry)
+
+    if str(outputs.get("mediaId") or "") == mid:
+        return ImageDeleteRoute(
+            "whole-task",
+            "This generation made only this one image, so PixAI removes the whole "
+            "generation record.", 0, None)
+    return ImageDeleteRoute(
+        "refuse", "PixAI's copy of this task no longer lists this image.", 0, None)
 
 
 _DELETE_BATCH_MEDIA_MUT = """
@@ -2547,6 +2710,84 @@ def delete_task_gql(session, task_id):
     vlog("deleteGenerationTask {} -> {} in {:.2f}s".format(
         task_id, result, time.monotonic() - _t))
     return result
+
+
+#: What one routed image delete decided and did. `plan` is the branch that FIRED --
+#: "per-image", "whole-task", or "refuse" when nothing was sent -- so a caller never has to
+#: work the branch out again from its own catalog. `keep_media` names the task's images PixAI
+#: had ALREADY deleted before this call; their local copies are the only ones left anywhere,
+#: so a whole-task purge must leave them alone. `cloud_deleted_at` is the target's own
+#: deletedAt stamp when it turned out to be one of those. `keep_media_deleted_at` carries WHEN
+#: PixAI deleted each of `keep_media`, as (media_id, deletedAt) pairs -- so a caller holding a
+#: catalog can record the fact off the read this plan already made, rather than making a
+#: second one (moonglade_gallery's /api/delete-image does exactly that).
+ImageDeletePlan = namedtuple(
+    "ImageDeletePlan",
+    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at")
+
+
+def _image_delete_plan(task, media_id):
+    """Turn one routing decision into the plan a caller acts on (pure)."""
+    plan, reason, live_siblings, entry = route_image_delete(task, media_id)
+    batch = ((task or {}).get("outputs") or {}).get("batch")
+    gone = tuple(deleted_batch_media(batch))
+    return ImageDeletePlan(plan, reason, live_siblings, gone,
+                           str((entry or {}).get("deletedAt") or ""),
+                           tuple((m, str((batch_entry(batch, m) or {}).get("deletedAt") or ""))
+                                 for m in gone))
+
+
+def plan_image_delete(session, task_id, media_id):
+    """What deleting ONE image would do, without deleting anything.
+
+    Reads the task back from PixAI (`task_detail_gql`, read-only, retried, fails SOFT to
+    None) and routes it. The read is not optional and cannot be replaced by the local
+    catalog: which members of a batch PixAI still has is a fact only PixAI holds, and the
+    catalog knows nothing about a sibling deleted from the website.
+
+    This is the half the confirm dialog is worded from, so it must be safe to call on a
+    click: no mutation is sent on any road out of here."""
+    return _image_delete_plan(task_detail_gql(session, str(task_id or "").strip()), media_id)
+
+
+def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
+    """Delete ONE image from PixAI through whichever mutation PixAI accepts for it.
+
+    IRREVERSIBLE on their side. Returns the `ImageDeletePlan` that fired, so the caller
+    reads the branch off this answer instead of re-deriving it from its own row counts --
+    the local catalog cannot see a sibling deleted from the website, which is exactly how
+    the old code came to send the wrong mutation.
+
+    Order, and why:
+      1. READ_ONLY first, before even the read. The two primitives below each check it
+         too, but checking here means a read-only install makes NO network call at all for
+         a delete, rather than quietly reading and then refusing.
+      2. Read and route (`plan_image_delete`). A refusal returns here with nothing sent.
+      3. `confirmed_plan`, when given, is the plan the user was shown. If the fresh route
+         disagrees, the task changed underneath the dialog and this refuses rather than
+         doing something the user did not agree to.
+      4. Fire exactly one branch. No loop wraps either call: a destructive mutation
+         re-sent after a lost response can fire again against a task that has already
+         changed (tests/test_delete_routing.py pins this structurally, and
+         tests/test_spend_no_retry.py pins the primitives).
+    """
+    _check_read_only("delete an image from your PixAI account")
+    task_id, media_id = str(task_id or "").strip(), str(media_id or "").strip()
+    plan = plan_image_delete(session, task_id, media_id)
+    if plan.plan == "refuse":
+        return plan
+    if confirmed_plan and str(confirmed_plan) != plan.plan:
+        return ImageDeletePlan(
+            "refuse",
+            "What this delete would do changed while the dialog was open, so nothing was "
+            "deleted. Open it again to see where the image stands now.",
+            plan.live_siblings, plan.keep_media, plan.cloud_deleted_at,
+            plan.keep_media_deleted_at)
+    if plan.plan == "per-image":
+        delete_batch_media_gql(session, task_id, media_id)
+    else:
+        delete_task_gql(session, task_id)
+    return plan
 
 
 def gql_adhoc(session, query, variables=None, retries=None):
@@ -3847,6 +4088,9 @@ def extract_full_meta(task):
         # None and every row of it stays blank -- "not a batch output", never inferred.
         "batch_index": "",
         "batch_size":  "",
+        # Per-ROW for the same reason (2026-09-06): PixAI deletes one output at a time, so
+        # "does PixAI still have this one" cannot be a task-level answer.
+        "cloud_deleted_at": "",
         "_batch":      outputs.get("batch") if isinstance(outputs.get("batch"), list) else None,
     }
 
@@ -3859,7 +4103,13 @@ def batch_position(batch, media_id):
     no batch array (edits, upscales, videos, imports) or the media id is not in it --
     blank means "not a batch output", NEVER a guess from media_id order (which can swap
     outputs; probe 2026-08-23). The index is PixAI's permanent fact: a sibling deleted
-    later keeps its gap, nothing is ever renumbered."""
+    later keeps its gap, nothing is ever renumbered.
+
+    A member PixAI has deleted (its entry carries `deletedAt`) reports blank: it is no
+    longer one of the task's outputs, so it has no live output number. Its SURVIVING
+    siblings are untouched -- they keep the numbers and the batch size PixAI gave them,
+    because the deleted entry stays in the array and the site's own
+    from-PixAI-<taskId>-<n> download names never shift either."""
     if not isinstance(batch, list) or not batch:
         return "", ""
     mid = str(media_id or "")
@@ -3867,6 +4117,8 @@ def batch_position(batch, media_id):
         return "", ""
     for i, entry in enumerate(batch):
         if isinstance(entry, dict) and str(entry.get("mediaId") or "") == mid:
+            if entry.get("deletedAt"):
+                return "", ""
             return str(i), str(len(batch))
     return "", ""
 
@@ -3877,12 +4129,40 @@ def _with_batch_position(fm, media_id):
     own from the raw outputs.batch list extract_full_meta parked under fm['_batch'].
     Returns fm itself when there is nothing to resolve (no batch array, or the media id
     is not one of its outputs -- both fields stay ''), else a shallow copy with both set,
-    leaving the shared cached dict untouched."""
-    bi, bs = batch_position((fm or {}).get("_batch"), media_id)
-    if not bi:
+    leaving the shared cached dict untouched.
+
+    `cloud_deleted_at` is the third per-row field and rides here for the same reason
+    (2026-09-06): whether PixAI still has THIS image is a per-output fact the task-level
+    meta cannot hold.
+
+    WHEN THE MARKER IS ACTUALLY SET -- this path is the quieter of its two writers, and on
+    a settled catalog it never fires at all. --backfill-full-meta re-fetches a row only when
+    that row is missing its prompt or all of model/steps/sampler/CFG (or when --with-loras /
+    --with-credit / --with-surface widen the net), so a row that already carries its detail
+    is never revisited and never reaches this line. The writer that does the work in the
+    ordinary case is the DELETE path: whenever the app reads a task back from PixAI for a
+    delete -- the confirm dialog's question, the delete itself, and the Actions dropdown's
+    bulk delete -- it stamps the row of every batch member that answer reports deleted
+    (moonglade_gallery's /api/delete-image, and _rows_the_bulk_purge_must_keep).
+
+    IT IS NOT ONLY HAND-RUN ANY MORE (2026-09-06, the living library). --backfill-full-meta
+    is a STEP OF --sync (see the CLI's --sync handler: run_download, then this backfill,
+    then fix-models), and --sync is one of LIVING_JOBS -- every six hours, enabled by
+    default -- so this line is reachable unattended, on whatever rows that run was
+    re-fetching anyway. The gate is unchanged and is what keeps it quiet: a row already
+    carrying its detail is never revisited. --reconcile-deleted still writes only the
+    task-level `deleted_remote` advisory and never looks inside a batch, and the
+    fifteen-minute artworks_sweep and the weekly view-count job never touch this column."""
+    batch = (fm or {}).get("_batch")
+    bi, bs = batch_position(batch, media_id)
+    gone = str((batch_entry(batch, media_id) or {}).get("deletedAt") or "")
+    if not bi and not gone:
         return fm
     fm = dict(fm)
-    fm["batch_index"], fm["batch_size"] = bi, bs
+    if bi:
+        fm["batch_index"], fm["batch_size"] = bi, bs
+    if gone:
+        fm["cloud_deleted_at"] = gone
     return fm
 
 
@@ -5791,8 +6071,25 @@ def run_probe(args):
             print("\nCouldn't find a URL in the media object -- paste this back.")
 
 
+#: Printed by every --delete-task run (2026-09-06). Deletion converged on the per-image
+#: path: the gallery reads the task back and sends whichever mutation PixAI accepts, and its
+#: Actions dropdown still takes whole tasks in bulk. This flag is a third road to the same
+#: place with none of the reading, so it is deprecated -- still working this release, but no
+#: longer the answer.
+_DELETE_TASK_DEPRECATED = (
+    "NOTE: --delete-task is DEPRECATED and will be removed in a later release.\n"
+    "  To delete one image, open it in the gallery and use Delete from PixAI -- it checks\n"
+    "  with PixAI first and removes just that image when the rest of its batch is still\n"
+    "  there. To delete whole generations, select them in the gallery and use Delete from\n"
+    "  PixAI in the Actions dropdown. Both remove the local copy to your trash folder too,\n"
+    "  so your library and your account stay in step; this flag never touches local files.")
+
+
 def run_delete_tasks(args):
     """Delete one or more generation tasks from your PixAI account (IRREVERSIBLE).
+
+    DEPRECATED 2026-09-06 -- see `_DELETE_TASK_DEPRECATED`, printed on every run. It still
+    works exactly as it did; it is simply no longer the road deletion is maintained on.
 
     Guards, in order:
       1. Dry-run by default -- prints the target list and stops. Requires --apply.
@@ -5802,6 +6099,7 @@ def run_delete_tasks(args):
     Local backups (image files + catalog.db) are NOT touched -- this only removes
     the generation from your account on PixAI's servers.
     """
+    print(_DELETE_TASK_DEPRECATED)
     raw = getattr(args, "delete_task", None) or []
     seen, ids = set(), []
     for t in raw:
@@ -5932,6 +6230,80 @@ def artwork_list_gql(session, before=None, last=50):
     return find_connection(data or {})
 
 
+def artwork_views_bulk(session, page_size=40, delay=0.4, max_pages=60):
+    """{artwork_id: views} for the owner's whole published library, in paced bulk pages.
+    Returns (views, complete) -- `complete` False means a page failed and the map is a
+    partial answer, never a total to present as whole.
+
+    WHY THIS EXISTS AT ALL. Views are the one engagement number PixAI does not put on the
+    `listArtworks` node the sync already pages, and `listArtworks` is a PERSISTED query --
+    a fixed hash lifted from PixAI's own site, whose selection set cannot be edited. So
+    views could only ever be fetched one-artwork-at-a-time, live, which is exactly what
+    made the My Art panel slow and its totals a subtotal. PROBE_2026-09-06 settled the open
+    question: the AD-HOC bulk form `artworks(authorId, first:N)` -- already proven for
+    field-probing by PROBE_2026-08-24 -- accepts `views`. A hundred works cost three calls
+    here instead of a hundred, and they are paid once per sync rather than once per open.
+
+    READING A VIEW COUNT COSTS A VIEW. The same probe measured it directly: a page that
+    selects `views` increments the counter for EVERY artwork it returns (40 rows read, all
+    40 up by one, repeatedly); a page that does not select `views` costs nothing. There is
+    no way to observe this number without perturbing it, so the design goal is to observe
+    it RARELY AND PREDICTABLY -- once per deliberate --sync-artworks -- rather than on
+    every idle glance at a panel. views_spike() subtracts the sweep's own read before
+    calling anything a spike; do not remove that subtraction on the theory that it is a
+    rounding error, it is the difference between "nobody looked" and "+1 forever".
+
+    SINGLE ATTEMPT, and that is not a style choice. Because the read PERTURBS the thing it
+    reads, this is the same class of call `gql_mutate` exists for even though it is
+    technically a query: a lost RESPONSE looks exactly like a lost REQUEST (a read timeout,
+    a proxy's 502 arriving after PixAI already answered and already bumped the counters),
+    so a retry re-reads -- and re-increments -- the same forty artworks inside one sweep.
+    Those rows then carry +2 of the sweep's own making while views_spike subtracts exactly
+    SPIKE_SELF_READ = 1, which permanently inflates their stored count and can push a
+    borderline work over the floor into a false "is taking off" note. `retries=0` is
+    therefore passed by hand here, the same way delete_batch_media_gql does for its own
+    non-idempotent call; a page that fails falls into the except below and reports the
+    sweep incomplete, which is the honest answer.
+
+    Read-only in the sense that matters for the account: a query, never a mutation, and
+    nothing here spends credits."""
+    try:
+        author = str(_client_of(session).user_id or "")
+    except AttributeError:
+        return {}, False
+    if not author:
+        return {}, False
+    doc = ('query($a: ID!, $n: Int, $after: String) {'
+           ' artworks(authorId: $a, first: $n, after: $after) {'
+           ' edges { node { id views } } pageInfo { hasNextPage endCursor } } }')
+    views, cursor, pages = {}, None, 0
+    while pages < max_pages:
+        pages += 1
+        try:
+            data = gql_adhoc(session, doc,
+                             {"a": author, "n": int(page_size), "after": cursor}, retries=0)
+        except (requests.RequestException, PixAIError, ValueError, TypeError):
+            return views, False
+        conn = ((data or {}).get("artworks")) or {}
+        edges = conn.get("edges") or []
+        for e in edges:
+            n = (e or {}).get("node") or {}
+            aid = str(n.get("id") or "")
+            if aid and n.get("views") is not None:
+                try:
+                    views[aid] = int(n["views"])
+                except (TypeError, ValueError):
+                    pass
+        pi = conn.get("pageInfo") or {}
+        if not edges or not pi.get("hasNextPage"):
+            return views, True
+        cursor = pi.get("endCursor")
+        if not cursor:
+            return views, True
+        time.sleep(delay)
+    return views, False               # ran out of pages: partial, and says so
+
+
 def extract_artwork_meta(node):
     """Pull the published-artwork fields we store from a listArtworks node.
     Keyed by media_id so it merges onto the existing catalog row.
@@ -5977,6 +6349,11 @@ def run_sync_artworks(args):
     onto matching catalog rows by media_id. Published artworks are a subset of
     generations, so unmatched/undownloaded ones are simply skipped.
 
+    The merge is a set of NARROW per-row UPDATEs (apply_artwork_meta) of the eleven
+    PixAI-owned columns, not a read-modify-write of the whole table -- see the long note
+    at the merge itself for why that distinction is the difference between a refresh and
+    a silent revert of everything another writer did while this walk was running.
+
     Returns {"artworks", "matched", "videos", "fail"} (B15) -- "fail" counts a
     pagination fetch that failed mid-run (artwork_list_gql has no retry of its own,
     unlike gql()) plus any video that failed to download after retries; a non-zero
@@ -5993,6 +6370,16 @@ def run_sync_artworks(args):
         raise PixAIError("USER_ID is missing and could not be resolved from your API key. "
                          "Add USER_ID to config.json as a fallback.")
 
+    # VIEWS-ONLY: the narrow run behind the Panel's own "View counts" job (owner's call,
+    # 2026-09-06). The view read is the one part of this command that COSTS something --
+    # one view on every published work -- so it gets its own cadence rather than riding
+    # whatever cadence the metadata refresh happens to be on. In this mode the listing is
+    # not walked at all: the counts join the catalog by artwork_id, which apply_artwork_meta
+    # wrote on some earlier run, so nothing here needs the listing to have just happened.
+    # It beats --no-views on purpose: a run whose whole purpose is the counts must not be
+    # talked out of them by a flag the Panel adds for the OTHER job.
+    views_only = bool(getattr(args, "views_only", False))
+
     by_mid = {}                      # media_id -> artwork fields
     by_video_mid = {}                # videoMediaId -> artwork fields. An animation's
                                      # catalog row is keyed by its MP4's media_id (is_video
@@ -6007,8 +6394,11 @@ def run_sync_artworks(args):
     incomplete = False               # B15: True if pagination stopped on a failed
                                       # fetch rather than legitimately running out of pages
     _prog = getattr(args, "progress", None)
-    print("Syncing published artworks (listArtworks)...")
-    while True:
+    if views_only:
+        print("Reading view counts only -- the artwork listing is not walked this run.")
+    else:
+        print("Syncing published artworks (listArtworks)...")
+    while not views_only:
         page += 1
         conn = artwork_list_gql(session, before=before, last=50)
         if not conn:
@@ -6048,23 +6438,88 @@ def run_sync_artworks(args):
         before = pi.get("startCursor")
         time.sleep(getattr(args, "delay", 0.4))
 
-    # Merge onto existing catalog rows by media_id.
-    rows = load_catalog(db_path)
-    matched = 0
-    for r in rows:
-        # match a row by its own media_id (still artworks) OR by a videoMediaId
-        # (animations, whose row is keyed by the mp4) -- #20.
-        m = by_mid.get(r.get("media_id")) or by_video_mid.get(r.get("media_id"))
-        if not m:
-            continue
-        for k, v in m.items():
-            if k != "media_id":
-                r[k] = v
-        matched += 1
-    if matched:
-        save_catalog(db_path, rows)
-    print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
-          "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+    # VIEWS SWEEP (2026-09-06). A SECOND, ad-hoc pass over the same library, because the
+    # persisted listArtworks above cannot be asked for `views` -- see artwork_views_bulk.
+    # Runs only when the listing itself found something (no point pricing a sweep against a
+    # library we failed to enumerate).
+    #
+    # A SUPPLEMENTARY READ IN ITS OWN GUARD, exactly like /api/account's credit-split call:
+    # it must never turn a successful metadata sync into a failed run. `incomplete` above
+    # means one specific thing -- the ARTWORK LISTING is partial, so the counts printed
+    # below are not the whole library -- and a views sweep that could not reach PixAI says
+    # nothing about that. It reports itself separately (`views_complete` in the return) and
+    # merges whatever it did get; the rows it missed keep their previous reading.
+    views_map, views_ok = {}, False
+    want_views = views_only or (artworks and not getattr(args, "no_views", False))
+    if want_views and (READ_ONLY or _read_only_now()):
+        # READ_ONLY IS A PROMISE ABOUT THE ACCOUNT, and this read changes it. Asking PixAI
+        # how many views a work has ADDS ONE to that number, for every work the query
+        # returns -- there is no way to look without it counting -- so the sweep is an
+        # account-touching call and belongs on the same side of the switch as publishing
+        # and deleting. Refused out loud rather than silently, and the metadata half below
+        # keeps working: READ_ONLY has never stopped browsing, backing up or searching.
+        # Skipped rather than raised, because the rest of this run is a plain read and
+        # taking it down with the sweep would be its own bug.
+        print("READ_ONLY is set in config.json -- skipping the view-count sweep. "
+              "Reading a view count adds one to it on PixAI, so it is a change to your "
+              "own numbers there, not just a look.")
+        want_views = False
+    if want_views:
+        print("Sweeping view counts (bulk artworks query)...")
+        views_map, views_ok = artwork_views_bulk(
+            session, delay=getattr(args, "delay", 0.4))
+        print("  views for {} artwork(s){}".format(
+            len(views_map), "" if views_ok else "  -- INCOMPLETE, a page failed"))
+
+    # THE MERGE -- narrow per-row UPDATEs, never a whole-catalog round trip.
+    #
+    # This used to be `load_catalog -> edit the matched rows in memory -> save_catalog`:
+    # read all ~36k rows, then upsert EVERY column of EVERY row back from a snapshot taken
+    # after a walk that can run for minutes. That is correct only while this process is the
+    # library's ONLY writer -- and since the living library (2026-09-06) it plainly is not.
+    # The artworks sweep writes these same rows every fifteen minutes, on every publish and
+    # at boot; the owner's ratings and collections land from the browser at any moment. Any
+    # write that landed between this run's read and its save was silently reverted, across
+    # EVERY column of EVERY row -- ratings and collections included, which this sync has no
+    # business touching at all. It is the same lost-update class the September carry fixes
+    # closed for the download writers, still open here because this function predates them.
+    #
+    # apply_artwork_meta (moonglade_gallery) is the row-level twin the sweep already uses:
+    # one UPDATE per artwork actually seen, of exactly the eleven PixAI-owned columns
+    # extract_artwork_meta fills, keyed by media_id. Rows this sync never saw are not
+    # written at all, so they cannot be reverted; a locally-authored column is not in the
+    # statement, so it cannot be reached. It also never invents a row, so "unmatched
+    # artworks have no downloaded image" still holds by construction rather than by the
+    # merge loop happening not to add any.
+    #
+    # `matched` means exactly what it always did: SQLite's rowcount for an UPDATE is the
+    # number of rows whose WHERE matched, which is the number of catalog rows this artwork
+    # listing reached.
+    metas = {}
+    for vmid, m in by_video_mid.items():
+        # An animation's catalog row is keyed by its MP4's media_id, not the poster
+        # `mediaId` the node carries (#20) -- so it wants the same metadata under THAT key.
+        metas[vmid] = dict(m, media_id=vmid)
+    for mid, m in by_mid.items():
+        # A still's own row wins any collision between the two maps, exactly as the old
+        # `by_mid.get(...) or by_video_mid.get(...)` did.
+        metas[mid] = m
+    matched = apply_artwork_meta(db_path, list(metas.values())) if metas else 0
+
+    # The views half of the same merge, in its own narrow statement (apply_artwork_views).
+    # It runs AFTER the meta write on purpose: the sweep is keyed by ARTWORK id and the
+    # catalog row is keyed by media_id, so the artwork_id apply_artwork_meta has just
+    # written is the join -- including for an animation, whose mp4 row learns its
+    # artwork_id from the re-keying above (#20). Rows the sweep missed are not in the map
+    # and are not written, so a partial sweep leaves the last reading anyone took.
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    viewed = apply_artwork_views(db_path, views_map, now_iso) if views_map else 0
+    if not views_only:
+        print("\nArtworks fetched: {}.  Matched to catalog rows: {}.  "
+              "(Unmatched artworks have no downloaded image.)".format(artworks, matched))
+    if viewed:
+        print("View counts written to {} row(s).  Note: reading a view count registers "
+              "a view, so this sweep added 1 to each.".format(viewed))
 
     # Optionally download animated-artwork video files (videoMediaId) into videos/.
     vids_ok = 0
@@ -6122,7 +6577,8 @@ def run_sync_artworks(args):
         if os.environ.get("MOONGLADE_PROGRESS") == "1":
             print("{}{}".format(PANEL_WARN_PREFIX, fail), flush=True)
 
-    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail}
+    return {"artworks": artworks, "matched": matched, "videos": vids_ok, "fail": fail,
+            "views": viewed, "views_complete": views_ok}
 
 
 def run_sync_videos(args):
@@ -8550,7 +9006,14 @@ def _task_image_media(outputs):
     Per-image seed comes from batch[].seed, else the shared outputs.seed. Deduped, order-kept.
 
     This is why batch generations were previously under-captured: the old path read
-    outputs.batchMediaIds (which is null on modern tasks) and saved only the grid."""
+    outputs.batchMediaIds (which is null on modern tasks) and saved only the grid.
+
+    A member PixAI has DELETED keeps its place in the array and gains a `deletedAt`
+    (2026-09-06). It is not one of the task's images any more, so it is skipped here --
+    otherwise every re-sync would list it and download the deleted image straight back in.
+    A batch whose members are ALL deleted therefore yields nothing, and deliberately does
+    not fall back to outputs.mediaId: on a batch task that is the combined preview picture,
+    never one of the images."""
     outputs = outputs or {}
     batch = outputs.get("batch") or []
     shared_seed = str(outputs.get("seed") or "")
@@ -8558,7 +9021,7 @@ def _task_image_media(outputs):
     if batch:                                        # modern batch: save the individuals
         for b in batch:
             mid = str((b or {}).get("mediaId") or "")
-            if mid:
+            if mid and not (b or {}).get("deletedAt"):
                 pairs.append((mid, str((b or {}).get("seed") or shared_seed)))
     else:                                            # single image (or legacy shape)
         if outputs.get("mediaId"):
@@ -10333,12 +10796,26 @@ def source_media_of_task(task):
 
 def task_media_index(session, task_id, media_id):
     """Which image of a task a given media_id IS -- the `mediaIndex` the publish mutation
-    needs. Derived from the task's own ordered output list (`_task_image_media`, the same
-    enumeration the downloader uses), never guessed from a filename: a batchSize>1 task
-    stores individuals under outputs.batch[] and their ORDER is the index PixAI means.
-    Read-only. Returns the int index, or None if the task/media can't be resolved -- the
-    caller decides whether that's fatal (it is, for publishing: publishing the wrong image
-    of a batch is not a recoverable mistake)."""
+    needs. Never guessed from a filename: a batchSize>1 task stores its individuals under
+    outputs.batch[] and their ORDER is the index PixAI means.
+
+    It is PixAI's OWN output number -- the RAW position in that array, counted with deleted
+    members still occupying their slots, the same number `batch_position` reports and the
+    same <n> the site's own from-PixAI-<taskId>-<n> download names use. Counting only the
+    members PixAI still has (`_task_image_media`, which skips them, is the right enumeration
+    for DOWNLOADING and the wrong one here) shifts every image after a deletion down one
+    slot: on a batch whose first picture was deleted, publishing the third would send index
+    1, which is the second picture's slot, and the wrong picture would go to the owner's
+    public profile with nothing saying so.
+
+    Read-only. Returns the int index, or None -- publish nothing -- when the task can't be
+    read, when the batch does not list this image at all (a stale row, or the batch's
+    combined preview picture), or when PixAI has already deleted this image: a member with a
+    `deletedAt` is no longer one of the task's outputs, so it has no number to publish at.
+    A task with no batch array (a single-image generation, an edit, an upscale) resolves
+    from its own ordered outputs instead, where the lone image is index 0. The caller decides
+    whether None is fatal (it is, for publishing: publishing the wrong image of a batch is
+    not a recoverable mistake)."""
     if not task_id or not media_id:
         return None
     try:
@@ -10347,8 +10824,14 @@ def task_media_index(session, task_id, media_id):
         return None
     if not task:
         return None
-    pairs = _task_image_media(task.get("outputs") or {})
-    for i, (mid, _seed) in enumerate(pairs):
+    outputs = task.get("outputs") or {}
+    batch = outputs.get("batch")
+    if isinstance(batch, list) and batch:
+        # batch_position answers blank for BOTH "not one of this task's outputs" and "PixAI
+        # deleted this one", and neither may be published -- so both land on None here.
+        bi, _size = batch_position(batch, media_id)
+        return int(bi) if bi != "" else None
+    for i, (mid, _seed) in enumerate(_task_image_media(outputs)):
         if str(mid) == str(media_id):
             return i
     return None
@@ -13418,10 +13901,13 @@ def run_download(args, progress=None):
 # ---------------------------------------------------------------------------
 def run_rebuild_thumbs(args):
     """--rebuild-thumbs: one uniform thumbnail pass over the whole catalog.
-    Images are re-rendered from their originals at today's size/quality settings
-    (OVERWRITTEN in place, so the gallery never goes blank mid-run -- this is
-    what kills years of quality drift), poster-less videos get a local ffmpeg
-    frame extract, and thumbs whose media left the catalog are swept."""
+    Images are re-rendered from their originals at today's size/quality settings and
+    REPLACED IN PLACE -- each one rendered to a temp file beside its destination and
+    os.replace()d over the old one (make_thumbnail), so the gallery never goes blank
+    mid-run and an interruption can never leave a truncated .jpg sitting at a real
+    thumbnail's name for the exists-check to mistake for a finished one. This is what
+    kills years of quality drift. Poster-less videos get a local ffmpeg frame extract,
+    and thumbs whose media left the catalog are swept."""
     out = Path(args.out)
     db_path = _ensure_db(out)
     from moonglade_gallery import build_thumbnails, load_catalog
@@ -13523,10 +14009,12 @@ def main():
                     help="Bearer token for PixAI API auth (overrides PIXAI_TOKEN env var "
                          "and token.txt)")
     ap.add_argument("--delete-task", nargs="+", metavar="TASK_ID", default=None,
-                    help="DELETE the given generation task id(s) from your PixAI account "
-                         "(irreversible). Dry-run unless --apply is also given; then asks "
-                         "for typed confirmation unless --yes. Local backups are untouched. "
-                         "(DELETE_TASK_HASH ships with a working default; no config.json setup needed.)")
+                    help="DEPRECATED (use the gallery's Delete from PixAI, on one image or "
+                         "on a selection). DELETE the given generation task id(s) from your "
+                         "PixAI account (irreversible). Dry-run unless --apply is also "
+                         "given; then asks for typed confirmation unless --yes. Local "
+                         "backups are untouched. (DELETE_TASK_HASH ships with a working "
+                         "default; no config.json setup needed.)")
     ap.add_argument("--yes", action="store_true",
                     help="skip the interactive confirmation for --delete-task --apply "
                          "(use with care; deletion cannot be undone)")
@@ -13647,11 +14135,21 @@ def main():
                          "this run processes. Videos are skipped. Then exit.")
     ap.add_argument("--sync-artworks", action="store_true",
                     help="fetch your published-artwork metadata (title, NSFW flag, likes, "
-                         "comments, aes score, tags) via listArtworks and merge it onto "
-                         "matching catalog rows by media_id, then exit")
+                         "comments, views, aes score, tags) via listArtworks and merge it "
+                         "onto matching catalog rows by media_id, then exit")
     ap.add_argument("--with-videos", action="store_true",
                     help="with --sync-artworks, also download animated-artwork video files "
                          "(videoMediaId) into a videos/ folder")
+    ap.add_argument("--no-views", action="store_true",
+                    help="with --sync-artworks, skip the view-count sweep. Reading a view "
+                         "count registers a view on PixAI's side (one per work, per sweep), "
+                         "so this is the opt-out for a run where you want the metadata "
+                         "refreshed without touching your own view numbers")
+    ap.add_argument("--views-only", dest="views_only", action="store_true",
+                    help="with --sync-artworks, read ONLY the view counts and skip the "
+                         "artwork listing. The counts join your catalog by artwork id, so "
+                         "they do not need the listing walked again. This is what the "
+                         "Control Panel's weekly \"View counts\" job runs")
     ap.add_argument("--sync-videos", action="store_true",
                     help="back up your image-to-video generations: find i2v tasks, download "
                          "each mp4 into videos/, and catalog them (is_video), then exit. This is "

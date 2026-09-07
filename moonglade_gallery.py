@@ -19,6 +19,7 @@ Usage:
 import argparse
 import csv
 import json
+import math
 import os
 import re
 import secrets
@@ -81,7 +82,17 @@ CATALOG_FIELDS = [
     "source",
     # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
     # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
+    # TASK-level: written onto every row of the task, and it says nothing about which
+    # individual images survive -- see cloud_deleted_at below for the per-image fact.
     "deleted_remote",
+    # PER-IMAGE (2026-09-06): the ISO stamp PixAI puts on THIS image's entry in its task's
+    # outputs.batch once the image itself is deleted (from the gallery's per-image delete,
+    # or from PixAI's own site). Blank means PixAI still has it. Deliberately NOT
+    # deleted_remote: that one is task-level and is cleared again on the next
+    # --reconcile-deleted, while this is per-row and permanent. A row carrying this is one
+    # whose LOCAL copy is the only copy left anywhere, so the whole-task delete path leaves
+    # such rows and their files alone.
+    "cloud_deleted_at",
     # User collections: comma-joined names (no moving files, survives organize).
     # Names may contain spaces but not commas. Set/filtered in the gallery.
     "collections",
@@ -128,6 +139,27 @@ CATALOG_FIELDS = [
     # is true) and NEVER inferred from media_id order (which can swap outputs). Blank
     # means "not a batch output" (edits, upscales, videos, imports) -- not "unknown".
     "batch_index", "batch_size",
+    # VIEWS, SYNCED (2026-09-06). Views used to be LIVE-only: twelve GraphQL calls on
+    # every My Art open, thrown away after summing. PROBE_2026-09-06 settled that the
+    # ad-hoc bulk `artworks(authorId, first:N)` form accepts a `views` field (the
+    # persisted listArtworks cannot be edited), so views now ride --sync-artworks in a
+    # handful of paced calls and land here like liked_count does.
+    #
+    # FOUR columns, not one, and the reason is the spike rule: a single `views` number
+    # can only ever say "how many", never "is this taking off". The previous sweep's
+    # reading and BOTH timestamps are what make a rate comparable to the work's own
+    # normal rate. See views_spike().
+    #
+    # THE READ COSTS A VIEW. The same probe measured it: selecting `views` increments
+    # the counter for EVERY artwork the query returns (a page of 40 moves all 40 by
+    # one; a read that does not select `views` costs nothing). So consecutive sweep
+    # readings always carry exactly +1 of our own making, and views_spike() subtracts
+    # it. This is also why the sweep is bounded to --sync-artworks and never runs per
+    # page-open.
+    "views",           # latest swept count, '' = never swept (NOT zero)
+    "views_prev",      # the sweep before that -- the spike baseline
+    "views_at",        # ISO timestamp of the sweep that wrote `views`
+    "views_prev_at",   # ISO timestamp of the sweep that wrote `views_prev`
 ]
 
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"})
@@ -177,6 +209,7 @@ CREATE TABLE IF NOT EXISTS catalog (
     video_duration  TEXT DEFAULT '',
     source          TEXT DEFAULT '',
     deleted_remote  TEXT DEFAULT '',
+    cloud_deleted_at TEXT DEFAULT '',
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
@@ -198,7 +231,11 @@ CREATE TABLE IF NOT EXISTS catalog (
     video_mode        TEXT DEFAULT '',
     video_model       TEXT DEFAULT '',
     batch_index       TEXT DEFAULT '',
-    batch_size        TEXT DEFAULT ''
+    batch_size        TEXT DEFAULT '',
+    views             TEXT DEFAULT '',
+    views_prev        TEXT DEFAULT '',
+    views_at          TEXT DEFAULT '',
+    views_prev_at     TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_created_at ON catalog(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name ON catalog(model_name);
@@ -307,6 +344,16 @@ _MIGRATIONS = [
     # listArtworks node, distinct from the binary is_nsfw (a work can be sensitive but not
     # nsfw). Already on the wire; the app just never read it. Blank until a --sync-artworks.
     "ALTER TABLE catalog ADD COLUMN is_sensitive TEXT DEFAULT ''",
+    # SYNCED VIEWS (2026-09-06) -- see CATALOG_FIELDS for why this is four columns and
+    # why the reading is self-inflating. Blank until a --sync-artworks sweeps them.
+    "ALTER TABLE catalog ADD COLUMN views TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_prev TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_at TEXT DEFAULT ''",
+    "ALTER TABLE catalog ADD COLUMN views_prev_at TEXT DEFAULT ''",
+    # PER-IMAGE CLOUD DELETION (2026-09-06) -- the deletedAt stamp PixAI puts on this one
+    # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
+    # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
+    "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1029,12 +1076,40 @@ def task_media(db_path, task_id):
     query -- the live-mirror's "a concurrent collect already finished, read the
     result back" path, /api/import-task's already-catalogued precheck, and the bulk
     delete's per-task local purge -- so they share one verb and one column list.
-    Empty list for a task this library never downloaded."""
+    Empty list for a task this library never downloaded.
+
+    `cloud_deleted_at` rides along for the third caller: a row carrying it is one
+    whose local copy is the only copy left anywhere, so the bulk purge has to know
+    which rows to walk around before it takes the rest."""
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id, is_video, filename FROM catalog WHERE task_id=?",
+            "SELECT media_id, is_video, filename, cloud_deleted_at "
+            "FROM catalog WHERE task_id=?",
             (str(task_id),)).fetchall()
         return [dict(r) for r in rows]
+
+
+def mark_cloud_deleted(db_path, media_id, when):
+    """Record that PixAI no longer has THIS image: the `deletedAt` stamp its entry in the
+    task's outputs.batch carries.
+
+    Per-ROW and permanent, which is why it is not `deleted_remote` -- that one is a
+    task-level advisory --reconcile-deleted rewrites on every run. Nothing local is removed
+    by this: a row carrying the stamp is one whose local copy is now the only copy anywhere.
+    Fails soft to 0 written; a marker that could break the delete dialog would be worse than
+    a marker that is late."""
+    mid = str(media_id or "").strip()
+    stamp = str(when or "").strip()
+    if not mid or not stamp:
+        return 0
+    try:
+        with catalog(db_path) as con:
+            n = con.execute("UPDATE catalog SET cloud_deleted_at=? WHERE media_id=?",
+                            (stamp, mid)).rowcount
+            con.commit()
+            return n
+    except sqlite3.Error:
+        return 0
 
 
 def task_media_count(db_path, task_id):
@@ -1137,16 +1212,50 @@ def myart_items(db_path):
     --sync-artworks), public AND private -- the My Art gallery's whole population,
     newest first. Pure catalog read: title/likes/comments/tags/nsfw all arrive via
     --sync-artworks, so nothing here touches the network. `likes` and `comments` come
-    back as ints (the columns are TEXT and blank means zero)."""
+    back as ints (the columns are TEXT and blank means zero).
+
+    `views` joins them as of 2026-09-06 and is the reason My Art can now draw a real
+    number on EVERY card rather than a summed twelve. It keeps its raw text alongside
+    (`views_raw`) precisely because blank and zero are different answers here: '' is "this
+    library has never been swept", 0 is "swept, and nobody has looked at it". A card must
+    be able to say the first without drawing the second."""
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, artwork_id, title, prompt_preview, is_video, is_nsfw,"
             " is_sensitive, created_at, art_tags, is_published,"
             " CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes,"
-            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments"
+            " CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments,"
+            " CAST(COALESCE(NULLIF(views,''),'0') AS INTEGER) AS views,"
+            " views AS views_raw"
             " FROM catalog WHERE COALESCE(artwork_id,'') != '' AND media_id != ''"
             " ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
+
+
+def myart_coverage(db_path):
+    """WHY My Art is empty, when it is (#42) -- the two counts that tell "you have
+    published nothing" apart from "--sync-artworks has never run on this library".
+
+    `artworks` is the population myart_items() returns: catalog rows carrying an
+    artwork_id. `media` is the whole catalog. artwork_id and is_published are written
+    EXCLUSIVELY by --sync-artworks (moonglade_backup.py's run_sync_artworks), so a
+    catalog holding media with zero artworks has simply never been synced -- a state the
+    rows alone cannot distinguish from a genuinely unpublished library, which is exactly
+    the silence the empty state used to answer with.
+
+    Two counts and not one because the pair is what makes the claim honest: `media` alone
+    would have the surface blame a sync on an empty library, and `artworks` alone cannot
+    tell an unsynced library from an unpopulated one. Fails soft to zeros -- an empty
+    state that cannot explain itself is only the state it already had."""
+    with catalog(db_path) as con:
+        try:
+            r = con.execute(
+                "SELECT COUNT(*) AS media,"
+                " COALESCE(SUM(CASE WHEN COALESCE(artwork_id,'') != '' THEN 1 ELSE 0 END),0)"
+                " AS artworks FROM catalog").fetchone()
+            return {"media": int(r["media"] or 0), "artworks": int(r["artworks"] or 0)}
+        except sqlite3.Error:
+            return {"media": 0, "artworks": 0}
 
 
 def artwork_media_ids(db_path, artwork_ids):
@@ -1215,6 +1324,114 @@ def publish_state(db_path, media_id, artwork_id=None, published=None,
                     params)
         con.commit()
     return len(sets)
+
+
+# The eleven columns extract_artwork_meta() fills. Named here, once, because
+# apply_artwork_meta below writes a column list into SQL and a typo'd or drifting
+# name would either raise or -- worse -- silently stop writing a field. Every one is
+# owned by PixAI (it is what listArtworks says about the work), so overwriting them
+# from a sweep is a refresh, never a loss: nothing locally-authored lives in here.
+ARTWORK_META_FIELDS = ("artwork_id", "title", "is_published", "is_nsfw", "is_sensitive",
+                       "liked_count", "comment_count", "aes_score", "art_tags",
+                       "blurhash", "nsfw_scores")
+
+
+def apply_artwork_meta(db_path, metas):
+    """Merge extract_artwork_meta() dicts onto existing catalog rows, one narrow UPDATE
+    each, keyed by the media_id already on the dict.
+
+    The row-level twin of --sync-artworks' merge step, and the reason the periodic
+    living-library sweep is cheap enough to run every fifteen minutes: run_sync_artworks
+    reads the WHOLE catalog into memory, edits the matched rows and upserts every row
+    back (`load_catalog` -> `save_catalog`, moonglade_backup.py). That is correct but it
+    rewrites ~36k rows to touch a handful. This writes only the rows the sweep actually
+    saw, only the eleven PixAI-owned columns above, and never invents a row: a media_id
+    with no catalog row (an artwork whose image was never downloaded) simply matches
+    nothing, exactly as the full sync's own "unmatched artworks are skipped" does.
+
+    `metas` may key the SAME artwork under two media_ids -- an animation's poster id and
+    its mp4's id (see run_sync_artworks' by_video_mid, issue #20) -- and that is fine:
+    they are two real catalog rows and both want the metadata.
+
+    Returns the number of rows actually changed."""
+    metas = [m for m in (metas or []) if m and m.get("media_id")]
+    if not metas:
+        return 0
+    sql = "UPDATE catalog SET {} WHERE media_id=?".format(
+        ", ".join("{}=?".format(f) for f in ARTWORK_META_FIELDS))
+    changed = 0
+    with catalog(db_path) as con:
+        for m in metas:
+            cur = con.execute(sql, [str(m.get(f, "") or "") for f in ARTWORK_META_FIELDS]
+                              + [str(m["media_id"])])
+            changed += cur.rowcount or 0
+        con.commit()
+    return changed
+
+
+# The four view columns, folded by their own verb rather than by ARTWORK_META_FIELDS.
+# Deliberately NOT part of the meta list: the meta fields ride the fifteen-minute
+# living-library sweep, and reading a view count on PixAI ADDS one to it (PROBE_2026-09-06
+# measured it: a page that selects `views` moves every row it returns by +1). So views are
+# read ONCE per deliberate --sync-artworks and never on the sweep's cadence -- a rule that
+# only holds while the two writes stay two separate statements.
+ARTWORK_VIEW_FIELDS = ("views", "views_prev", "views_at", "views_prev_at")
+
+
+def apply_artwork_views(db_path, views_by_artwork_id, now_iso):
+    """Fold a bulk views sweep onto the catalog rows it names, one narrow UPDATE each,
+    keyed by artwork_id (the id the sweep returns; media_id is what the row is keyed by).
+
+    The row-level twin of apply_artwork_meta for the four view columns, and it exists for
+    the same reason: run_sync_artworks used to fold views inside a whole-catalog
+    `load_catalog -> save_catalog` round trip, which reverted every write that landed
+    while the walk was running. This touches only the rows the sweep actually saw and only
+    the four columns above, in ONE transaction, so nothing else in the table can be
+    reached.
+
+    The per-row rule, and the whole of it: a reading only slides
+    down into `views_prev` when a genuinely new one arrives to replace it, so `views_prev`
+    always holds THE PREVIOUS SWEEP's number and the spike rule's window keeps its meaning.
+    A row whose `views` is still blank has nothing to slide, and keeps its (blank) baseline.
+    Rows the sweep missed are not in the map and are not written at all, so a partial sweep
+    leaves the last reading anyone actually took.
+
+    Returns the number of rows actually changed."""
+    fresh_by_aid = {}
+    for aid, fresh in (views_by_artwork_id or {}).items():
+        aid = str(aid or "")
+        if aid and fresh is not None:
+            fresh_by_aid[aid] = fresh
+    if not fresh_by_aid:
+        return 0
+    ids = list(fresh_by_aid)
+    changed = 0
+    with catalog(db_path) as con:
+        # Chunked so a library-sized sweep cannot walk into SQLite's bound-parameter
+        # limit; idx_artwork_id makes each chunk an index lookup, never a table scan.
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            rows = con.execute(
+                "SELECT media_id, artwork_id, views, views_at, views_prev, views_prev_at "
+                "FROM catalog WHERE artwork_id IN ({})".format(
+                    ", ".join("?" for _ in chunk)), chunk).fetchall()
+            for r in rows:
+                fresh = fresh_by_aid.get(str(r["artwork_id"] or ""))
+                if fresh is None:
+                    continue
+                cur = str(r["views"] or "")
+                prev = str(r["views_prev"] or "")
+                prev_at = str(r["views_prev_at"] or "")
+                if cur != "":
+                    prev = cur
+                    prev_at = str(r["views_at"] or "")
+                upd = con.execute(
+                    "UPDATE catalog SET views=?, views_prev=?, views_at=?,"
+                    " views_prev_at=? WHERE media_id=?",
+                    (str(int(fresh)), prev, now_iso, prev_at, str(r["media_id"])))
+                changed += upd.rowcount or 0
+        con.commit()
+    return changed
 
 
 def lineage(db_path, media_id):
@@ -4228,34 +4445,766 @@ def _contest_sync_kick(out_dir, force=False):
         _contest_sync_lock.release()
 
 
-def top_published_rows(db_path, limit=12):
-    """The owner's top published artworks by likes -> rows with artwork_id + engagement.
-    Feeds the 'Your Art' panel (live views are fetched per artwork_id on top of this)."""
+# ======================================================================================
+# THE LIVING LIBRARY (2026-09-06)
+# ======================================================================================
+# "It's not just a backup dump. It's a living library that should update itself and its
+# data without my need to clicky click." -- the owner, 2026-09-04. Scoped in
+# ../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md and answered by him on
+# 2026-09-06; this is that scope's five answers in code.
+#
+# Two halves, and they are deliberately different animals:
+#
+#   * THE ARTWORKS SWEEP (below) is IN-PROCESS, modelled line for line on the contest
+#     sweep above -- one single-flight lock, a "ran recently" guard, a boot kick and a
+#     FORCED publish kick. It is in-process because it must be quiet: it runs every
+#     fifteen minutes, and a subprocess would occupy the Panel's one job slot, spawn a
+#     python, and write a row into the Activity ledger on every one of those ticks.
+#     It announces only when it CHANGED something.
+#
+#   * THE JOB LIST (further down) is the existing scheduler, widened from one
+#     {action, interval_hours} pair to several. Each entry still runs through
+#     _panel_run -- the same whitelisted argv, the same one-job-at-a-time slot, the same
+#     destructive/advanced refusal. A schema change, not a redesign.
+#
+# BOTH obey the standing rule "the library stands still -- nothing moves the owner's view
+# except his own hands" (DECISIONS.md, 2026-09-05, which names living-library jobs as an
+# inheritor by name). Neither half has any path to the gallery's own loaders: a finished
+# job ANNOUNCES through the toast/Activity idiom the jobs ledger already drives, and never
+# rebuilds the page, the search, the address or the selection. tests/test_living_library.py
+# walks these functions' source to keep it that way.
+
+ARTWORKS_SWEEP_S = 900.0        # owner call 3: "15 Works, I was going to say 20. Go with 15"
+ARTWORKS_YOUNG_DAYS = 90        # owner call 4: works this young ride EVERY sweep
+ARTWORKS_DEEP_S = 172800.0      # owner call 4: older works refresh at most once per 48h
+ARTWORKS_GRACE = 2              # consecutive spent pages before stopping -- run_download's
+                                # own `update_grace` default (moonglade_backup.py), mirrored
+ARTWORKS_PAGE = 50              # listArtworks page size run_sync_artworks already uses
+ARTWORKS_PAUSE = 0.4            # paced: run_sync_artworks' own inter-page delay
+ARTWORKS_MAX_PAGES = 1000       # a hard stop (50,000 published works at 50 a page), so a
+                                # pageInfo that never says "no more" cannot turn a
+                                # background sweep into an endless walk. Reaching it is
+                                # reported as INCOMPLETE, never as a finish.
+ARTWORKS_STARTUP_DELAY = 25.0   # after the contest sweep's 20s, so the two never race at boot
+_artworks_lock = threading.Lock()
+# `at` is the last sweep that COMPLETED (the recent-guard); `deep_at` is the last one that
+# was allowed to refresh works older than ARTWORKS_YOUNG_DAYS. Both are mirrored into
+# schedule.json by the sweep itself so they survive a restart -- an in-memory-only deep
+# stamp would make every boot a full walk, which is exactly what the tier exists to avoid.
+# `kicks` counts how many times a TRIGGER asked for a sweep -- boot, tick, publish, Run
+# now -- whether or not one actually started. It is the only record that a trigger fired
+# at all: a kick that stands down (a Panel job in the slot, the background gate off, a
+# sweep already in flight) leaves no other trace anywhere, which made "did the publish
+# route really ask?" unanswerable except by reading the source.
+_artworks_state = {"at": 0.0, "deep_at": 0.0, "changed": 0, "pages": 0, "kicks": 0}
+
+
+def published_index(db_path):
+    """media_id -> (artwork_id, created_epoch_or_None) for every catalog row that already
+    claims an artwork. The sweep's whole idea of "do I already know this work, and is it
+    young?" -- one indexed read, no network, ~36k rows of two small values."""
+    idx = {}
+    try:
+        with catalog(db_path) as con:
+            for r in con.execute(
+                    "SELECT media_id, artwork_id, created_at FROM catalog "
+                    "WHERE COALESCE(artwork_id,'') != ''"):
+                idx[str(r["media_id"])] = (str(r["artwork_id"] or ""),
+                                           _series_ts(r["created_at"]))
+    except sqlite3.Error:
+        return {}
+    return idx
+
+
+def published_local_ids(db_path):
+    """Every media_id the catalog holds -- the sweep's "is there a local row at all?" set.
+
+    The companion to published_index, and the difference between the two is the whole of
+    the short-circuit's convergence. published_index only holds rows that ALREADY claim an
+    artwork, so a work missing from it is either brand new (a downloaded generation just
+    published) or permanently unmatched (published on the website, never downloaded here).
+    The sweep cannot write the second kind at all -- apply_artwork_meta only UPDATEs rows
+    that exist -- so treating it as "might be new" made it hold the walk open forever.
+
+    One indexed column scan, no row bodies, the same shape published_index already is."""
+    ids = set()
+    try:
+        with catalog(db_path) as con:
+            for r in con.execute("SELECT media_id FROM catalog"):
+                ids.add(str(r["media_id"]))
+    except sqlite3.Error:
+        return set()
+    return ids
+
+
+def artworks_page_needed(nodes, index, now, deep, local=None):
+    """Does this page of listArtworks nodes contain anything this sweep needs to write?
+
+    THE SHORT-CIRCUIT AND THE TIER, in one predicate -- and the reason a quiet sweep costs
+    one or two pages instead of the whole walk. `run_download --update` stops after
+    `update_grace` consecutive pages whose every media_id was already on disk
+    (moonglade_backup.py's `page_new`); listArtworks pages newest-first exactly like the
+    generation feed, so the same stop works here. What "already known" means is where the
+    owner's tier (call 4) lives:
+
+      * an artwork with no catalog row claiming its artwork_id, but WITH a local row ->
+        NEEDED. Newly published work is why the sweep exists, and it arrives at the
+        newest end.
+      * an artwork with NO LOCAL ROW AT ALL -> spent, not needed. This one is the
+        difference between a sweep that converges and one that does not. Such a work is
+        published on PixAI and was never downloaded here, so apply_artwork_meta has
+        nothing to update and the sweep can never write it -- no number of pages will
+        change that. Read as "never merged" it was NEEDED on every sweep forever, and a
+        run of them before the stable tail meant every fifteen-minute sweep walked the
+        whole published history rather than the one or two pages the design promises.
+        `local` (published_local_ids) is what tells "brand new" from "confirmed miss";
+        without it the old, non-converging answer stands.
+      * a work younger than ARTWORKS_YOUNG_DAYS -> NEEDED on every sweep. Its like and
+        comment counts are the ones still moving.
+      * an older work -> needed only when `deep`, i.e. when ARTWORKS_DEEP_S has passed
+        since the last deep pass. That is "older than 90 days refresh at most once every
+        48 hours" stated as a walk rather than as ~36k per-row timestamps: the sweep
+        always starts at the newest end, so one global stamp says the same thing and
+        costs one integer instead of a schema migration.
+
+    A node with no mediaId is ignored rather than treated as new -- it can never be
+    matched to a row, so it must not be able to hold the walk open forever."""
+    young_s = ARTWORKS_YOUNG_DAYS * 86400.0
+    for node in nodes or []:
+        mid = str((node or {}).get("mediaId") or "")
+        vmid = str((node or {}).get("videoMediaId") or "")
+        known = index.get(mid) or index.get(vmid)
+        if not known:
+            if local is not None and mid not in local and vmid not in local:
+                continue                     # confirmed miss: no row here to write
+            return True                      # never merged this artwork -> fetch it
+        if deep:
+            return True                      # the 48h pass refreshes every age
+        ts = known[1]
+        if ts is None or (now - ts) <= young_s:
+            # No parseable creation date is treated as YOUNG on purpose: the sweep would
+            # rather pay for a row it could not date than silently stop refreshing it.
+            return True
+    return False
+
+
+def artworks_sweep(out_dir, db_path, force=False, now=None, log_event=None):
+    """One pass of the published-artwork sweep. Returns {changed, pages, artworks, deep,
+    incomplete} -- or None when it refused to run (recent enough, and not forced).
+
+    THE THREE TRIGGERS, exactly the contest sweep's: a boot kick, a periodic kick from the
+    scheduler's own 60-second tick, and a FORCED kick the instant something is published,
+    unpublished or re-tagged from this app. Same lock discipline, same "PixAI is the truth,
+    the client's word is not" stance -- the publish route already wrote what it believes
+    into the catalog; this reads back what PixAI actually says.
+
+    Writes go through apply_artwork_meta: one narrow UPDATE per row it actually saw,
+    eleven PixAI-owned columns, no full-catalog rewrite. Nothing here can create, move or
+    delete a row or a file.
+
+    `log_event` is the announcement seam (the create_app closure's _log_job). It is called
+    ONLY when the sweep changed something -- a fifteen-minute heartbeat that wrote a row
+    into the Activity ledger every time would bury the events that matter under its own
+    noise. It is the ONLY thing this function tells the browser; there is no path from
+    here to the gallery's loaders."""
+    import logging as _logging
+    import uuid as _uuid
+    import moonglade_backup as core
+    log = _logging.getLogger(__name__)
+    now = time.time() if now is None else now
+    if not force and (now - _artworks_state["at"]) < ARTWORKS_SWEEP_S:
+        return None
+    deep = (now - _artworks_state["deep_at"]) >= ARTWORKS_DEEP_S
+    try:
+        session = core._make_session(None)
+        if not core._client_of(session).user_id:
+            log.info("artworks sweep: no account id resolved -- nothing to read")
+            return None
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("artworks sweep: no session: %s: %s", type(e).__name__,
+                    _redact_host_paths_cli(out_dir, str(e))[:200])
+        return None
+
+    index = published_index(db_path)
+    local = published_local_ids(db_path)
+    metas, before, pages, artworks, spent = [], None, 0, 0, 0
+    incomplete = False
+    while True:
+        if pages >= ARTWORKS_MAX_PAGES:
+            # A hard stop, so a pageInfo that never says "no more" cannot turn a background
+            # sweep into an endless walk. Reaching it is INCOMPLETE, not a finish: the tail
+            # of the history was never read, so this run must not stamp the 48-hour tier as
+            # satisfied and must not buy itself fifteen minutes of quiet.
+            log.warning("artworks sweep: hit the %d-page cap -- the walk is incomplete",
+                        ARTWORKS_MAX_PAGES)
+            incomplete = True
+            break
+        conn = core.artwork_list_gql(session, before=before, last=ARTWORKS_PAGE)
+        if not conn:
+            # artwork_list_gql fails SOFT to None (no retry of its own). Whatever was
+            # collected is real and is written below; the run is simply incomplete, and
+            # an incomplete sweep must NOT buy fifteen minutes of silence -- see the
+            # `at` stamp at the end, which only a clean finish reaches.
+            log.warning("artworks sweep: page %d fetch failed -- stopping early", pages + 1)
+            incomplete = True
+            break
+        pages += 1
+        edges = conn.get("edges") or []
+        if not edges:
+            break
+        nodes = [(e.get("node", e) or {}) for e in edges]
+        if artworks_page_needed(nodes, index, now, deep, local=local):
+            spent = 0
+            for node in nodes:
+                # PER NODE, not per page or per run. extract_artwork_meta reads a dict PixAI
+                # sent us -- a shape this app does not control and has already seen change
+                # (isSensitive and the nsfwPredict block both arrived without notice). One
+                # malformed node raising here used to abort the whole walk through
+                # artworks_sweep_kick's catch-all, discarding every meta collected so far
+                # AND leaving the run unstamped. A skip costs one row until the next sweep;
+                # the alternative costs the entire pass, every fifteen minutes, forever.
+                try:
+                    meta = core.extract_artwork_meta(node)
+                    if meta.get("media_id"):
+                        metas.append(meta)
+                        artworks += 1
+                    vmid = str(node.get("videoMediaId") or "")
+                    if vmid:
+                        # The animation's own row is keyed by its mp4's media_id (#20), so
+                        # it wants the same metadata under that key.
+                        vmeta = dict(meta)
+                        vmeta["media_id"] = vmid
+                        metas.append(vmeta)
+                except Exception as e:                       # noqa: BLE001
+                    log.warning("artworks sweep: skipping a malformed artwork node: %s: %s",
+                                type(e).__name__, str(e)[:160])
+        else:
+            spent += 1
+            if spent >= ARTWORKS_GRACE:
+                break
+        pi = conn.get("pageInfo") or {}
+        if not pi.get("hasPreviousPage"):
+            break
+        before = pi.get("startCursor")
+        time.sleep(ARTWORKS_PAUSE)
+
+    changed = 0
+    if metas:
+        try:
+            changed = apply_artwork_meta(db_path, metas)
+        except sqlite3.Error as e:
+            log.warning("artworks sweep: catalog write failed: %s", str(e)[:200])
+    # ONLY A CLEAN FINISH STAMPS, exactly as the contest sweep's own last_ok does. A run
+    # that stopped on a failed page or hit the page cap never saw the tail of the history:
+    # buying itself fifteen minutes of quiet would delay the retry, and stamping the
+    # 48-hour tier would tell the next two days' worth of sweeps that old works had been
+    # refreshed when they had not.
+    #
+    # Stamped with `now` -- the moment the sweep DECIDED, not the moment it finished. Two
+    # reasons: a deep pass can take minutes, and measuring the guard from the end would let
+    # every sweep drift later than the cadence the owner set; and `now` is the same clock
+    # the tier and the guard were read from, so the function has exactly one idea of time
+    # (which is what makes a mock clock able to prove any of this).
+    if not incomplete:
+        _artworks_state["at"] = now
+        if deep:
+            _artworks_state["deep_at"] = now
+    _artworks_state["changed"] = changed
+    _artworks_state["pages"] = pages
+    if changed and log_event:
+        # THE ANNOUNCEMENT, and the whole of it. The Activity card already polls /api/jobs;
+        # a finished sweep lands there as a row exactly like a Panel job does. It does not
+        # touch the grid, the page, the address or the selection -- the library stands still.
+        try:
+            log_event("living-artworks-" + _uuid.uuid4().hex[:12], status="done",
+                      type="panel", action="artworks-sweep",
+                      label="Published-artwork sweep — {} row(s) refreshed".format(changed),
+                      rc=0)
+        except Exception:                                    # noqa: BLE001
+            pass
+    return {"changed": changed, "pages": pages, "artworks": artworks, "deep": deep,
+            "incomplete": incomplete}
+
+
+def artworks_sweep_fresh(interval_s, now):
+    """Has a sweep COMPLETED inside this cadence already? The boot kick's answer to the
+    tick, and the reason the tick's kick is not unconditionally forced.
+
+    THE BOOT DOUBLE-SWEEP this closes: the boot kick fires 25 seconds after start
+    (ARTWORKS_STARTUP_DELAY) and the first tick lands 35 seconds after that, with the sweep
+    row's last_run still unset -- so it read as due, and a forced kick re-ran the whole
+    thing. On a fresh install that is the FIRST-BOOT DEEP WALK (every page of the published
+    history, 0.4s apiece) twice inside one minute, over a library that could not have
+    changed in between.
+
+    Measured against _artworks_state["at"], which ONLY A CLEAN FINISH stamps -- so a run of
+    failing sweeps can never read as fresh, and the retry keeps its cadence. Module-level
+    and a plain function of (interval, now) for the same reason living_due and
+    artworks_page_needed are: a timer that cannot be read on a mock clock cannot be
+    proven."""
+    return (now - _artworks_state["at"]) < max(1.0, float(interval_s or ARTWORKS_SWEEP_S))
+
+
+def artworks_sweep_in_flight():
+    """Is a published-artwork sweep running in THIS process right now?
+
+    THE SECOND DIRECTION of the sweep-vs-Panel-job exclusion, and the whole of the shared
+    state it needs. `_artworks_job_busy` (in create_app) already lets the sweep stand down
+    for a catalog-writing Panel job; this is the same question asked the other way round,
+    so a Panel job can stand down for a sweep. One lock answers both -- there is no second
+    flag to keep in step.
+
+    A non-blocking probe: acquire-and-release rather than `locked()`, because a plain
+    `locked()` read is the same information with no memory barrier discipline, and this is
+    read from a different thread than the one that holds it. Never blocks, so a caller
+    holding another lock cannot deadlock on it."""
+    if _artworks_lock.acquire(False):
+        _artworks_lock.release()
+        return False
+    return True
+
+
+def artworks_sweep_kick(out_dir, db_path, force=False, log_event=None, busy=None):
+    """Run one artworks sweep under the single-flight lock, or skip if one is running.
+
+    The lock is the whole contract, the same way it is for the contest sweep: the boot
+    kick, the fifteen-minute tick, the publish kick and the Run now button all reach the
+    same work, and a caller that loses the race has nothing to do. Returns the sweep's
+    result dict, or None when it did not run.
+
+    `busy` is the caller's "a catalog-writing Panel job is in the slot" check
+    (create_app's _artworks_job_busy), and it is asked HERE, after the lock, rather than
+    only before the kick. Before the lock there was a window: the kick read the slot, found
+    it free, and a Panel job claimed it before this sweep actually started. Asked inside the
+    lock it is the same instant _panel_run's own probe finds this lock held, so whichever of
+    the two arrives first, the other one stands down. Passed in rather than imported because
+    the slot is a create_app closure and this function is module-level and testable."""
+    import logging as _logging
+    if not _artworks_lock.acquire(False):
+        return None
+    try:
+        if busy is not None and busy():
+            return None
+        return artworks_sweep(out_dir, db_path, force=force, log_event=log_event)
+    except Exception as e:                                   # noqa: BLE001 -- a sweep must
+        _logging.getLogger(__name__).warning(               # never kill its caller
+            "artworks sweep: gave up: %s: %s", type(e).__name__,
+            _redact_host_paths_cli(out_dir, str(e))[:200])
+        return None
+    finally:
+        _artworks_lock.release()
+
+
+# --- the job list -------------------------------------------------------------------
+# schedule.json used to hold exactly ONE {action, interval_hours} pair: you could schedule
+# one Panel action on one cadence, and that is the whole reason a published piece could
+# vanish from My Art -- nothing on the machine ever re-read PixAI's list of published works
+# unless a button was pressed. It now holds a LIST (owner call 1), each entry with its own
+# cadence and its own last-run. The legacy pair SURVIVES UNTOUCHED as the "standing order"
+# the Panel's ledger already draws; the list is additive, so no existing schedule changes
+# meaning and no existing setting is rewritten under the owner.
+#
+# `interval_s`, not interval_hours: the artworks sweep is a fifteen-MINUTE job, and hours
+# cannot say that. The legacy pair keeps its own hours field and its own clamp.
+STALE_BACKSTOP_S = 60 * 86400.0     # owner call 5: a full-cost job runs by itself ONLY when
+                                    # it has not run in 60 days -- a staleness backstop,
+                                    # not a calendar slot.
+LIVING_JOBS = (
+    # action              interval        on by default   what it is
+    {"action": "artworks-sweep", "interval_s": ARTWORKS_SWEEP_S, "enabled": True,
+     "label": "Published-artwork sweep",
+     "note": "reads back what PixAI says you have published — short-circuits after two "
+             "known pages, so it usually costs one or two"},
+    {"action": "sync", "interval_s": 6 * 3600.0, "enabled": True, "then": "backfill-phash",
+     "label": "Sync now", "note": "pull new + fill metadata, then backfill perceptual hashes"},
+    # THE VIEW READ ON ITS OWN TIMER (owner's call, 2026-09-06). It is the one part of the
+    # published-artwork refresh that COSTS something: asking PixAI how many views a work
+    # has adds one to that number, for every published work, every time. Riding the
+    # metadata refresh's cadence made that a daily +1 across the whole library. On its own
+    # row it is the owner's to set, to turn off, and to see -- and the fifteen-minute
+    # sweep still never reads a view count at all.
+    {"action": "sync-artwork-views", "interval_s": 7 * 86400.0, "enabled": True,
+     "label": "View counts",
+     "note": "weekly — reads how many views each published work has. Asking adds one "
+             "view to each, so this is the only job that touches those numbers"},
+    {"action": "sync-videos", "interval_s": 24 * 3600.0, "enabled": True,
+     "label": "Sync i2v videos", "note": "nightly — downloads mp4s for your animated works"},
+    {"action": "reconcile-deleted", "interval_s": 7 * 86400.0, "enabled": True,
+     "label": "Reconcile deleted", "note": "weekly — flags rows whose task is gone from PixAI"},
+    {"action": "sync-similar", "interval_s": 24 * 3600.0, "enabled": True, "needs": "torch",
+     "label": "Top up Similar", "note": "nightly, when the ML stack is installed"},
+)
+# THE STALENESS BACKSTOP (owner call 5). These three are the scope's "safe but wasteful on
+# a timer" row: full re-walk, rebuild Similar, rebuild thumbnails. They have no incremental
+# form, so they are never on a short cadence -- but a library whose Similar index or
+# thumbnails have not been rebuilt in two months is drifting, and the owner asked for a
+# floor under that. Sixty days, measured from the last run of THAT job.
+#
+# A job with no recorded run does NOT fire: the first tick that sees one stamps `now` as
+# its baseline and runs nothing. Otherwise every fresh install would open by re-walking its
+# whole history, rebuilding every thumbnail and re-embedding every image -- the exact
+# opposite of a backstop.
+LIVING_STALE_JOBS = (
+    {"action": "resync-full", "interval_s": STALE_BACKSTOP_S, "enabled": True,
+     "label": "Full re-walk", "note": "only if it has not run in 60 days"},
+    {"action": "rebuild-similar", "interval_s": STALE_BACKSTOP_S, "enabled": True,
+     "needs": "torch", "label": "Rebuild Similar", "note": "only if it has not run in 60 days"},
+    {"action": "rebuild-thumbs", "interval_s": STALE_BACKSTOP_S, "enabled": True,
+     "label": "Rebuild ALL thumbnails", "note": "only if it has not run in 60 days"},
+)
+LIVING_ALL = LIVING_JOBS + LIVING_STALE_JOBS
+LIVING_BY_ACTION = {j["action"]: j for j in LIVING_ALL}
+LIVING_STALE_ACTIONS = frozenset(j["action"] for j in LIVING_STALE_JOBS)
+# THE ONE THING AN IN-PROCESS LOCK CANNOT COVER: a SUBPROCESS. Every Panel action runs as
+# its own interpreter (_panel_run -> subprocess.Popen of the CLI) with its own SQLite
+# connection, so _artworks_lock -- a threading.Lock in the server process -- is invisible to
+# it. These are the actions whose subprocess writes the same catalog rows the sweep writes:
+#
+#   sync / resync-full / test-pull -> run_download, which builds rows and save_catalog()s
+#                                     them (carry-protected, but a carry still restores from
+#                                     a snapshot taken when the job STARTED)
+#   sync-videos                    -> run_sync_videos, same shape
+#   sync-artworks                  -> run_sync_artworks, the sweep's own full re-walk
+#
+# The sweep defers to any of them rather than trying to interleave narrow UPDATEs with a
+# job that is rebuilding rows from its own older snapshot. Deferring costs at most one
+# cadence; the alternative costs whichever writer lost the race. Nothing DESTRUCTIVE is in
+# here, because nothing destructive is reachable from the tick in the first place.
+ARTWORKS_TOUCHING_ACTIONS = frozenset({"sync", "resync-full", "test-pull",
+                                       "sync-videos", "sync-artworks"})
+# The sweep is not a PANEL_ACTIONS key -- it is in-process, and the CLI has no
+# short-circuiting equivalent to spawn. Named here so every caller agrees.
+LIVING_SWEEP_ACTION = "artworks-sweep"
+LIVING_MIN_INTERVAL_S = 60.0
+LIVING_MAX_INTERVAL_S = 120 * 86400.0
+
+
+def _torch_present():
+    """Is the ML stack installed? `find_spec`, never `import torch` -- moonglade_similar's
+    own is_available() imports it, which costs seconds and hundreds of MB, and this is
+    asked on a sixty-second tick."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("torch") is not None
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+def living_clamp_interval(action, value, default=None):
+    """One job's cadence, clamped to what this build actually allows. The ONE place that
+    rule lives, so the settings route and the schedule-file normalizer cannot disagree.
+
+    THE SIXTY-DAY FLOOR IS SERVER-SIDE, and that is the whole point of this function. The
+    staleness backstop (full re-walk, rebuild Similar, rebuild ALL thumbnails) is a floor
+    under a job with no incremental form -- the price of running one is the whole library,
+    every time -- so it is not a dial. The Panel renders no cadence selector for those rows
+    for exactly that reason. But "the client draws no control" has never been an
+    enforcement: schedule.json is a plain file the owner can open, and /api/panel/schedule
+    takes a jobs patch. Either could ask for a full re-walk every sixty SECONDS, and before
+    this the server would have written it down and the tick would have obeyed. So the floor
+    lives here, where a hand-edited file and a hand-rolled POST both have to pass through
+    it, rather than in the UI that happens not to offer it."""
+    spec = LIVING_BY_ACTION.get(action) or {}
+    if default is None:
+        default = spec.get("interval_s", LIVING_MIN_INTERVAL_S)
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        v = float(default)
+    floor = STALE_BACKSTOP_S if action in LIVING_STALE_ACTIONS else LIVING_MIN_INTERVAL_S
+    return max(floor, min(v, LIVING_MAX_INTERVAL_S))
+
+
+def living_defaults():
+    """The shipped job list as plain, saveable dicts (action / enabled / interval_s /
+    last_run). Static defaults are a tuple of frozen specs; this is the mutable copy
+    schedule.json stores and the owner edits."""
+    return [{"action": j["action"], "enabled": bool(j["enabled"]),
+             "interval_s": float(j["interval_s"]), "last_run": None}
+            for j in LIVING_ALL]
+
+
+def living_merge(saved):
+    """Normalize whatever is in schedule.json against the shipped list.
+
+    Unknown actions are DROPPED (a hand-edited or downgraded file must not be able to name
+    a job this build does not have), missing ones are added at their defaults, intervals
+    are clamped THROUGH living_clamp_interval (so a hand-edited file cannot put a full
+    re-walk on a one-minute timer any more than a POST can), and the shipped order is what
+    comes back so the Panel's rows never reshuffle under the owner. This is the same
+    discipline the legacy pair already had -- the loop re-checks PANEL_ACTIONS rather than
+    trusting the file."""
+    by_action = {}
+    for row in (saved or []):
+        if not isinstance(row, dict):
+            continue
+        action = str(row.get("action") or "")
+        if action in LIVING_BY_ACTION:
+            by_action[action] = row
+    out = []
+    for spec in LIVING_ALL:
+        row = by_action.get(spec["action"]) or {}
+        interval = living_clamp_interval(
+            spec["action"],
+            row.get("interval_s") if row.get("interval_s") is not None else spec["interval_s"],
+            default=spec["interval_s"])
+        try:
+            last = None if row.get("last_run") in (None, "") else float(row["last_run"])
+        except (TypeError, ValueError):
+            last = None
+        out.append({
+            "action": spec["action"],
+            "enabled": bool(row["enabled"]) if "enabled" in row else bool(spec["enabled"]),
+            "interval_s": interval,
+            "last_run": last,
+        })
+    return out
+
+
+def living_due(jobs, now, torch=None, is_runnable=None):
+    """THE CADENCE, as one pure function of (jobs, now) -- which is what makes every timer
+    in this feature testable on a mock clock instead of a real sleep.
+
+    Returns (due, baselined): the actions that should fire on this tick, and the STALENESS
+    jobs whose last_run was unknown and has just been baselined to `now` (they do not fire;
+    the caller persists the stamp so they fire sixty days from now instead of on the first
+    tick of a fresh install).
+
+    One job per tick, at most -- the list returns in shipped order and the caller takes the
+    first it can actually start, because there is exactly one Panel job slot and a tick that
+    tried to start four things would spawn one and silently drop three.
+
+    `is_runnable` is the caller's PANEL_ACTIONS check (non-destructive, non-advanced, real
+    key). It is a parameter and not a lookup so this stays importable and pure."""
+    due, baselined = [], []
+    stale_actions = {j["action"] for j in LIVING_STALE_JOBS}
+    torch = _torch_present() if torch is None else torch
+    for row in jobs or []:
+        action = row.get("action")
+        spec = LIVING_BY_ACTION.get(action)
+        if not spec or not row.get("enabled"):
+            continue
+        if spec.get("needs") == "torch" and not torch:
+            continue
+        if action in stale_actions and row.get("last_run") in (None, ""):
+            baselined.append(action)          # first sight: stamp, do not run
+            continue
+        if is_runnable is not None and not is_runnable(action):
+            continue
+        if (now - (row.get("last_run") or 0)) >= row.get("interval_s", 0):
+            due.append(action)
+    return due, baselined
+
+
+# --- THE BLOW-UP RULE (owner's addition to the community scope, 2026-09-06) -------------
+#
+# The ask, verbatim: "if something BLOWS up can there be a trigger or metric for that?"
+#
+# What makes this answerable honestly rather than decoratively is that a raw view count
+# cannot say it. 40 new views is enormous for a work that has sat at 3/day for a month and
+# unremarkable for one pulling 200/day. So the rule compares a work's RECENT PACE against
+# ITS OWN lifetime pace, and gates that ratio behind an absolute floor so a quiet work
+# going from 1 view to 4 does not get to shout.
+#
+# THE SELF-READ SUBTRACTION is the part that keeps it from lying. PROBE_2026-09-06 measured
+# that selecting `views` increments the counter for every artwork the query returns -- so
+# two consecutive sweeps ALWAYS differ by at least one view that the sweep itself caused.
+# Without SPIKE_SELF_READ every single work in the library shows a permanent +1 trickle,
+# and any threshold low enough to be sensitive would fire on the owner's own looking.
+#
+# Every constant here is a judgement call, deliberately conservative, and meant to be
+# tuned once the owner has watched it against a real week.
+SPIKE_MIN_GAIN = 25            # real new views in the window, below which nothing is a spike
+SPIKE_RATE_MULTIPLE = 3.0      # the window's pace must beat the work's lifetime pace by this
+SPIKE_MIN_WINDOW_H = 1.0       # floor on the window, so a double-sync minutes apart can't divide by ~0
+SPIKE_MIN_LIFETIME_H = 24.0    # floor on the work's age, so a day-old work has no absurd baseline
+SPIKE_SELF_READ = 1            # views the sweep's own read added -- measured, not assumed
+
+
+def views_spike(row):
+    """Is this published work blowing up? -> a dict describing the spike, or None.
+
+    Pure and side-effect free: it reads one catalog row's four view columns plus
+    created_at and answers from those alone, so it unit-tests without a database and
+    without a network. Callers decide what to do about a spike; this only names one.
+
+    Returns None -- deliberately, and these are the cases that matter most:
+      * never swept, or swept only ONCE (no `views_prev`). A first sweep has nothing to
+        compare against and must announce nothing. This is the no-announce baseline case.
+      * the window's real gain (after SPIKE_SELF_READ) is under SPIKE_MIN_GAIN.
+      * the work's own lifetime pace is >= a third of the window's pace -- i.e. it is
+        simply popular, not blowing up.
+      * a counter that went DOWN or sideways (PixAI recount, a work re-published):
+        clamped to zero gain, never a negative "spike".
+      * an unusable window (no timestamps, or one that runs backwards) -- a spike is a
+        claim about a RATE, and the denominator is never invented.
+      * for the ratio test only, a creation date that will not parse: there is no
+        lifetime to measure the window against.
+
+    A PREVIOUS READING OF 0 IS A SPIKE, not a None (owner's call, 2026-09-06). Going from
+    nothing to something is the plainest "a quiet picture suddenly found an audience" there
+    is, and the rule used to decline it outright: a zero baseline gives the ratio nothing
+    to divide by, and the guard read that as a reason for silence rather than as the ratio
+    simply not applying. It now clears on the absolute floor alone -- SPIKE_MIN_GAIN is
+    what keeps it honest at the bottom of the library -- and reports `multiple: None`,
+    because there is no usual pace to be a multiple OF. Callers must not print a number
+    there; spikeStore.js says "up from nothing" instead. A BLANK previous reading is
+    unchanged and still silent: that is "never swept twice", not "swept and saw zero".
+    """
+    def _int(v):
+        try:
+            return int(str(v).strip() or "")
+        except (TypeError, ValueError):
+            return None
+
+    now_v, prev_v = _int(row.get("views")), _int(row.get("views_prev"))
+    if now_v is None or prev_v is None:
+        return None                                  # never swept, or only once: silence
+    gained = max(0, now_v - prev_v - SPIKE_SELF_READ)
+    if gained < SPIKE_MIN_GAIN:
+        return None
+
+    t_now, t_prev = _series_ts(row.get("views_at")), _series_ts(row.get("views_prev_at"))
+    if t_now is None or t_prev is None or t_now <= t_prev:
+        return None                                  # unusable window; never guess one
+    window_h = max(SPIKE_MIN_WINDOW_H, (t_now - t_prev) / 3600.0)
+    rate = gained / window_h                         # real views per hour, this window
+
+    t_made = _series_ts(row.get("created_at"))
+    if prev_v <= 0:
+        # THE BLOW-UP FROM ZERO. The floor above is the whole gate here: there is no pace
+        # to beat, so the ratio test is skipped rather than failed, and `multiple` is None
+        # because there is no usual pace to be a multiple of.
+        baseline, multiple = 0.0, None
+    else:
+        if t_made is None:
+            return None                              # no lifetime: nothing to compare to
+        lifetime_h = max(SPIKE_MIN_LIFETIME_H, (t_prev - t_made) / 3600.0)
+        baseline = prev_v / lifetime_h               # the work's own all-time views/hour
+        if baseline <= 0 or rate < baseline * SPIKE_RATE_MULTIPLE:
+            return None
+        multiple = round(rate / baseline, 1)
+
+    return {
+        "media_id": row.get("media_id") or "",
+        "artwork_id": row.get("artwork_id") or "",
+        "title": (row.get("title") or "").strip(),
+        "views": now_v,
+        "gained": gained,
+        "window_hours": round(window_h, 1),
+        "rate_per_hour": round(rate, 2),
+        "baseline_per_hour": round(baseline, 3),
+        "multiple": multiple,
+    }
+
+
+def top_published_rows(db_path, limit=12, order="likes"):
+    """The owner's top published artworks -> rows with artwork_id + engagement + views.
+
+    `order` is "likes" (the historical default) or "views". Views are now a CATALOG
+    column filled by --sync-artworks, not twelve live calls made while the panel opens;
+    a library that has never been swept simply reads views=0 with views_at blank, which
+    is what lets the panel say "not swept yet" instead of drawing a bar of zeroes."""
+    col = "views" if order == "views" else "likes"
     with catalog(db_path) as con:
         try:
             rows = con.execute(
-                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, "
+                "SELECT media_id, artwork_id, title, prompt_preview, aes_score, created_at, "
                 "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) AS likes, "
-                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments "
+                "CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER) AS comments, "
+                "CAST(COALESCE(NULLIF(views,''),'0') AS INTEGER) AS views, "
+                "views AS views_raw, views_prev, views_at, views_prev_at "
                 "FROM catalog WHERE is_published = '1' AND COALESCE(artwork_id,'') != '' "
-                "ORDER BY likes DESC, comments DESC LIMIT ?", (int(limit),)).fetchall()
+                "ORDER BY {} DESC, likes DESC, comments DESC LIMIT ?".format(col),
+                (int(limit),)).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.Error:
             return []
 
 
 def published_totals(db_path):
-    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks)."""
+    """At-a-glance totals across ALL the owner's published artworks (from --sync-artworks).
+
+    `views` here is the real LIFETIME total across the whole published library -- the
+    thing the panel could not show while views were fetched live for a top twelve. It
+    sums only rows that have actually been swept; `views_rows` says how many that was,
+    so a partially-swept library reports an honest subtotal rather than a total that
+    silently counts blanks as zero.
+
+    ONE ROW PER ARTWORK, and that is not a nicety. An ANIMATED artwork is two catalog
+    rows -- the poster keyed by `mediaId` and the mp4 keyed by `videoMediaId` -- and both
+    the sync and the sweep write the SAME artwork_id, likes, comments and views onto both
+    on purpose (#20: the Animations tab needs the mp4 row tagged). Summing every published
+    row therefore doubled the count, the likes, the comments and the headline lifetime
+    views for every animation in the library. The dedup key is the artwork_id; a published
+    row that has never been merged has none, so it keys on its own media_id and still
+    counts exactly once rather than folding every unmerged row under one blank key.
+
+    Which of an animation's two rows represents it does not matter here -- they carry the
+    same PixAI-owned numbers by construction -- so the lowest rowid is representative
+    enough. published_spikes, which shows a media_id to the owner, is fussier."""
     with catalog(db_path) as con:
         try:
             r = con.execute(
                 "SELECT COUNT(*) AS c, "
                 "COALESCE(SUM(CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER)),0) AS likes, "
-                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments "
-                "FROM catalog WHERE is_published = '1'").fetchone()
-            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0)}
+                "COALESCE(SUM(CAST(COALESCE(NULLIF(comment_count,''),'0') AS INTEGER)),0) AS comments, "
+                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' "
+                "                  THEN CAST(views AS INTEGER) ELSE 0 END),0) AS views, "
+                "COALESCE(SUM(CASE WHEN COALESCE(views,'') != '' THEN 1 ELSE 0 END),0) AS views_rows, "
+                "MAX(COALESCE(views_at,'')) AS views_at "
+                "FROM catalog WHERE is_published = '1' AND rowid IN ("
+                "  SELECT MIN(rowid) FROM catalog WHERE is_published = '1' "
+                "  GROUP BY CASE WHEN COALESCE(artwork_id,'') = '' "
+                "                THEN 'mid:' || media_id ELSE 'aid:' || artwork_id END)"
+            ).fetchone()
+            return {"count": int(r[0] or 0), "likes": int(r[1] or 0), "comments": int(r[2] or 0),
+                    "views": int(r[3] or 0), "views_rows": int(r[4] or 0),
+                    "views_at": r[5] or ""}
         except sqlite3.Error:
-            return {"count": 0, "likes": 0, "comments": 0}
+            return {"count": 0, "likes": 0, "comments": 0,
+                    "views": 0, "views_rows": 0, "views_at": ""}
+
+
+def published_spikes(db_path, limit=5):
+    """Every published work that views_spike() calls a blow-up, hottest first.
+
+    A pure catalog read over the swept rows -- no network, no live call. Capped because
+    this feeds a corner note, not a feed: the owner asked to be TOLD when something takes
+    off, and a note naming twenty works tells him nothing.
+
+    ONE SLOT PER ARTWORK. An animation is two rows carrying the same numbers (see
+    published_totals), so both spiked identically and ONE work could fill a two-slot note
+    twice while a genuinely different spiking work never appeared at all. The poster row
+    wins the slot over the mp4 -- the note names a picture, and the still is what the
+    owner recognises. A row that has never been merged has no artwork_id and keys on its
+    own media_id, so it is never folded in with any other."""
+    with catalog(db_path) as con:
+        try:
+            rows = con.execute(
+                "SELECT media_id, artwork_id, title, created_at, views, views_prev, "
+                "views_at, views_prev_at, is_video FROM catalog "
+                "WHERE is_published = '1' AND COALESCE(views_prev,'') != '' "
+                "ORDER BY CASE WHEN COALESCE(is_video,'') = '1' THEN 1 ELSE 0 END, "
+                "         rowid").fetchall()
+        except sqlite3.Error:
+            return []
+    seen, hits = set(), []
+    for r in rows:
+        row = dict(r)
+        key = "aid:" + str(row.get("artwork_id") or "") if row.get("artwork_id") \
+            else "mid:" + str(row.get("media_id") or "")
+        if key in seen:
+            continue                                 # the same work's other row
+        seen.add(key)
+        s = views_spike(row)
+        if s:
+            hits.append(s)
+    # A blow-up from ZERO has no multiple to rank by -- and is the most dramatic thing on
+    # the list, so it sorts to the top rather than to the bottom of a None comparison.
+    hits.sort(key=lambda s: (float("inf") if s["multiple"] is None else s["multiple"],
+                             s["gained"]), reverse=True)
+    return hits[:int(limit)]
 
 
 def distinct_task_count(db_path):
@@ -5465,16 +6414,48 @@ def compute_dhash(img_path, hash_size=DHASH_SIZE):
 
 
 def make_thumbnail(img_path, thumb_path):
+    """Render one gallery thumbnail. ATOMIC: Pillow writes a same-directory temp file and
+    the finished JPEG is os.replace()d into position -- the idiom download's own `.part`
+    file, the telemetry ledger and every other persistence path in this app already use.
+
+    Saving straight onto the final path was the bug. A kill, a crash or a full disk part-way
+    through `im.save` left a TRUNCATED .jpg sitting at the real name, and every "is it built
+    yet?" check in this app is `thumb_path.exists()` -- so a half-written thumbnail is
+    treated as done and never rebuilt. That was survivable while the only way to run a
+    thumbnail pass was to press a button and watch it; it stopped being survivable when
+    --rebuild-thumbs joined the sixty-day staleness backstop (2026-09-06) and became
+    something that starts by itself, unattended, with nobody to notice a torn file. Sixty
+    days is now how long a corrupt thumbnail can sit there.
+
+    The swap also keeps the OLD thumbnail readable until the new one is complete, which is
+    what makes --rebuild-thumbs' "the gallery never goes blank mid-run" literally true
+    rather than nearly true."""
     if Image is None:
         return False
+    tmp = None
     try:
+        import moonglade_backup as core
         thumb_path.parent.mkdir(parents=True, exist_ok=True)
+        # Same directory (os.replace is only atomic within one filesystem) and pid-tagged,
+        # so two processes rebuilding the same library cannot collide on one temp name.
+        # It does not end in .jpg, so --rebuild-thumbs' orphan sweep (thumb_dir.glob
+        # ("*.jpg")) cannot mistake a live temp file for a stale thumbnail.
+        tmp = thumb_path.with_name(thumb_path.name + ".tmp-%d" % os.getpid())
         with Image.open(img_path) as im:
             im = im.convert("RGB")
             im.thumbnail(THUMB_SIZE, Image.LANCZOS)
-            im.save(thumb_path, "JPEG", quality=THUMB_QUALITY)
+            im.save(tmp, "JPEG", quality=THUMB_QUALITY)
+        # _atomic_replace, not a bare os.replace: on Windows an antivirus or the Search
+        # Indexer briefly opens a file the instant it is created, and renaming it then
+        # raises PermissionError for a few hundred ms. Same helper download() uses.
+        core._atomic_replace(tmp, thumb_path)
         return True
     except Exception:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         return False
 
 
@@ -6442,9 +7423,13 @@ _AUTH_401_GUARD_JS = r"""<script>/* Global 401 guard -- see _AUTH_401_GUARD_JS i
 # calls to paint) and, per the tool's own integration notes, swaps window.storage onto
 # the gallery backend so a board persists server-side (shared across devices) instead
 # of per-browser localStorage.
+# viewport-fit=cover for the same reason APP_PAGE carries it (2026-09-06): the Loom is
+# reachable from the phone (AppMobile's Loom sheet links straight here) and
+# master-storyboard.jsx's own chrome reads env(safe-area-inset-top/bottom) in five places,
+# every one of which resolved to 0 while this meta stayed narrow.
 _LOOM_SHELL = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>The Loom - Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 """ + _PREPAINT_BOOT_JS + _AUTH_401_GUARD_JS + r"""
@@ -7742,9 +8727,28 @@ def create_app(out_dir: Path):
         # They now HAVE buttons (web parity: nothing should need the CLI), but the labels
         # say "full re-walk" out loud so the cost is visible before clicking rather than
         # discovered afterwards. ---
+        # A SCHEDULED RUN OF THIS ONE DOES NOT READ VIEW COUNTS (owner's call,
+        # 2026-09-06). Asking PixAI how many views a work has ADDS ONE to that number, for
+        # every published work the sweep returns -- so an unattended refresh on a timer is
+        # a daily +1 across the whole library, forever, that nobody asked for. `scheduled_args`
+        # is what splits the two cases without splitting the action: a Run now click is the
+        # owner asking by hand and still reads views; every automatic start (the living
+        # library's list, the legacy standing order, a follow-on in a `then` chain) appends
+        # --no-views. The counts have their own weekly job instead -- see
+        # "sync-artwork-views" below and LIVING_JOBS.
         "sync-artworks":     {"args": ["--sync-artworks"],
+                              "scheduled_args": ["--no-views"],
                               "label": "Sync published-artwork metadata (full re-walk)",
                               "destructive": False},
+        # The view read on its own timer, and nothing else: no listing re-walk, just the
+        # counts. Its own key rather than a flag the client can add, the same discipline
+        # audit-full and dedup-delete follow. No Panel button (panel_visible False) -- it
+        # is a "Runs itself" row with its own Run now, and a second button for the same
+        # work in the manual grid would invite running it twice.
+        "sync-artwork-views": {"args": ["--sync-artworks", "--views-only"],
+                               "label": "View counts — read how many views your published "
+                                        "works have (adds one view to each)",
+                               "destructive": False, "panel_visible": False},
         "sync-videos":       {"args": ["--sync-videos"],
                               "label": "Sync i2v videos — back up mp4s (full re-walk)",
                               "destructive": False},
@@ -7781,7 +8785,7 @@ def create_app(out_dir: Path):
                            "destructive": True},
     }
 
-    def _panel_reader(proc):
+    def _panel_reader(proc, then=None):
         with _panel_lock:
             jid = _panel_job.get("job_id")
         last_pct = -1
@@ -7838,8 +8842,32 @@ def create_app(out_dir: Path):
                      error=("exited {}".format(rc) if status == "failed" else
                            "{} file(s) failed to download".format(warn_n) if status == "done_with_errors"
                            else None))
+        # THE CHAIN (the living library's "Backfill phash after each Sync"). The follow-on
+        # starts only after this one has genuinely finished -- the slot was released three
+        # lines up -- and only when the first job SUCCEEDED: chaining a phash backfill onto
+        # a sync that failed would just be a second failure. Best-effort by design: if the
+        # slot has already been claimed by the owner's own click in the meantime, the
+        # follow-on is simply skipped. Both halves are idempotent, so the next scheduled
+        # sync brings it around again; blocking here to wait for the slot would pin this
+        # reader thread on a job it has no business owning.
+        if then and status == "done":
+            try:
+                # A follow-on nobody clicked: scheduled, so it takes the action's own
+                # unattended argv (the view-count opt-out) exactly as the tick would.
+                _panel_run(then, scheduled=True)
+            except Exception:                             # noqa: BLE001
+                pass
 
-    def _panel_run(action, int_arg=None):
+    def _panel_run(action, int_arg=None, then=None, scheduled=False):
+        """Start one whitelisted Panel job as a subprocess.
+
+        `scheduled` means NOBODY CLICKED THIS. It is the living library's tick, the legacy
+        standing order, or a follow-on in a `then` chain -- and it is the one difference
+        that can change the argv, through the action's own `scheduled_args`. Today that is
+        the view-count opt-out on "sync-artworks" (owner's call, 2026-09-06: a view read
+        adds one view to every published work, so an unattended refresh must not do it).
+        Declared per action rather than decided here, so "what does an automatic run do
+        differently" is answerable by reading the action table."""
         import subprocess
         spec = PANEL_ACTIONS[action]
         # Worker count is a persisted panel setting (schedule.json), so BOTH manual
@@ -7862,6 +8890,8 @@ def create_app(out_dir: Path):
             except (TypeError, ValueError):
                 n = spec.get("int_default", lo)
             action_args = action_args + [str(n)]
+        if scheduled:
+            action_args = action_args + list(spec.get("scheduled_args") or [])
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
@@ -7878,6 +8908,19 @@ def create_app(out_dir: Path):
         # its twin -- exactly what "one job runs at a time" exists to prevent.
         with _panel_lock:
             if _panel_job["status"] == "running":
+                return False
+            # THE SECOND DIRECTION of the sweep exclusion, claimed under the SAME lock that
+            # claims the slot -- which is what makes the pair airtight rather than merely
+            # narrow. The sweep takes _artworks_lock and only THEN reads this slot
+            # (artworks_sweep_kick's `busy`); this reads _artworks_lock while holding the
+            # slot's own lock. So one of the two always sees the other, whichever order
+            # they arrive in, and the loser stands down. The probe never blocks, so holding
+            # _panel_lock across it cannot deadlock.
+            #
+            # Without this, run_download's per-page save silently reverted every column the
+            # sweep wrote: it rebuilds each row from a snapshot taken when the JOB started,
+            # and the upsert writes the whole row back.
+            if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
                 return False
             _panel_job.update(status="running", action=action, label=spec["label"],
                               lines=["$ " + " ".join(action_args)], rc=None,
@@ -7901,7 +8944,8 @@ def create_app(out_dir: Path):
         # for per-action last-run lookups and its "run again" control. Merge semantics
         # (_reconstruct_jobs' cur.update) keep it through every later event.
         _log_job(job_id, status="running", type="panel", label=spec["label"], action=action)
-        threading.Thread(target=_panel_reader, args=(proc,), daemon=True).start()
+        threading.Thread(target=_panel_reader, args=(proc,), kwargs={"then": then},
+                         daemon=True).start()
         return True
 
     def _update_busy():
@@ -7949,21 +8993,215 @@ def create_app(out_dir: Path):
         return out_dir / "schedule.json"
 
     def _load_sched():
+        """schedule.json, normalized. The legacy quartet (enabled/action/interval_hours/
+        last_run) is UNCHANGED -- it is still the one "standing order" the Panel's ledger
+        draws and /api/panel/schedule writes. `jobs` is the living library's list, added
+        beside it rather than replacing it, so a schedule saved by an older build keeps
+        meaning exactly what it meant. `artworks_deep_at` is the sweep's 48-hour tier
+        stamp: it lives here so a restart does not turn every boot into a full walk."""
+        s = None
         try:
             if _sched_path().exists():
-                s = json.loads(_sched_path().read_text(encoding="utf-8"))
-                if isinstance(s, dict):
-                    return s
+                loaded = json.loads(_sched_path().read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    s = loaded
         except (OSError, ValueError):
             pass
-        return {"enabled": False, "action": "sync", "interval_hours": 6,
-                "last_run": None, "workers": 4}
+        if s is None:
+            s = {"enabled": False, "action": "sync", "interval_hours": 6,
+                 "last_run": None, "workers": 4}
+        s["jobs"] = living_merge(s.get("jobs"))
+        try:
+            s["artworks_deep_at"] = float(s.get("artworks_deep_at") or 0.0)
+        except (TypeError, ValueError):
+            s["artworks_deep_at"] = 0.0
+        return s
 
     def _save_sched(s):
         try:
             _sched_path().write_text(json.dumps(s), encoding="utf-8")
         except OSError:
             pass
+
+    def _sched_stamp(**fields):
+        """Re-read under the lock, apply `fields`, save. The read-modify-write every
+        stamping caller needs: `s` in a loop body was loaded up to a minute ago, so
+        writing that whole copy back would silently revert any setting the owner saved
+        through /api/panel/schedule in the meantime."""
+        with _sched_lock:
+            s = _load_sched()
+            for k, v in fields.items():
+                s[k] = v
+            _save_sched(s)
+            return s
+
+    def _living_stamp(action, when):
+        """Record one living job's last run, under the same re-read-first discipline."""
+        with _sched_lock:
+            s = _load_sched()
+            for row in s["jobs"]:
+                if row["action"] == action:
+                    row["last_run"] = when
+            _save_sched(s)
+
+    # THE ONE PLACE THE AUTOMATION POLICY LIVES. Everything the loop is allowed to start
+    # by itself passes through here, and nothing else does.
+    #
+    #   * The artworks sweep is in-process, reads PixAI and writes eleven columns of rows
+    #     it already has. Always runnable.
+    #   * An INTERVAL job must be a real PANEL_ACTIONS key that is neither destructive nor
+    #     advanced -- the existing refusal, carried over word for word from the single-job
+    #     scheduler. A full re-walk on a six-hour timer is a foot-gun; test-pull needs an N
+    #     the scheduler cannot supply; and nothing destructive is ever automatic.
+    #   * The STALENESS BACKSTOP is the one deliberate widening, and it is a CLOSED set:
+    #     exactly the three jobs the owner named in call 5 (full re-walk, rebuild Similar,
+    #     rebuild thumbnails), each only after sixty days without a run. The scope's own
+    #     safety audit puts all three in "safe but wasteful on a timer" -- idempotent,
+    #     non-destructive to originals, carry-proven -- and separates them from the four
+    #     that must stay manual (organize, undo organize, dedup quarantine/delete, restore
+    #     orphans), which are NOT in this set and can never enter it: the set is a literal
+    #     in this file, not anything a client, a config file or a route can name.
+    #
+    #     TWO OF THE THREE ARE FLAGGED IN PANEL_ACTIONS, and it is worth being exact about
+    #     what that widening actually costs, because "nothing destructive is ever automatic"
+    #     is a promise this file has to keep:
+    #       - `resync-full` is advanced=True. "Advanced" means "not a thing to put on a
+    #         SHORT timer" (a full re-walk every six hours is a foot-gun) -- a sixty-day
+    #         floor is the case that flag was guarding for, not against. It is read/append
+    #         and deletes nothing.
+    #       - `rebuild-thumbs` is destructive=True. That flag is the confirm + localhost
+    #         GATE on a job that deletes and re-renders every thumbnail; thumbnails are
+    #         DERIVED files, regenerated from the originals, and no original, catalog row,
+    #         rating or collection can be reached by it. It is why the scope's audit lists
+    #         it under "safe but wasteful" and NOT under "must stay manual", and why the
+    #         owner named it in call 5. It is the one action where the code flag and the
+    #         scope's automation classification differ, and this comment is the whole of
+    #         that difference -- the four jobs that can really lose the owner's data are
+    #         still unreachable from here by construction.
+    _LIVING_STALE_ACTIONS = LIVING_STALE_ACTIONS      # the module-level literal, verbatim
+
+    def _living_runnable(action):
+        if action == LIVING_SWEEP_ACTION:
+            return True
+        if action not in PANEL_ACTIONS:
+            return False
+        if action in _LIVING_STALE_ACTIONS:
+            return True
+        spec = PANEL_ACTIONS[action]
+        return not spec["destructive"] and not spec.get("advanced")
+
+    def _standing_runnable(action):
+        """Can the LEGACY standing-order scheduler actually start this action?
+
+        Its own tick's refusal, stated once so three readers agree: a real PANEL_ACTIONS
+        key, not destructive, not advanced. (The staleness backstop's widening belongs to
+        the living library's list, not to this path -- the legacy scheduler has always
+        refused an advanced action outright.)"""
+        spec = PANEL_ACTIONS.get(action)
+        return bool(spec) and not spec["destructive"] and not spec.get("advanced")
+
+    def _standing_action(s):
+        """The action the legacy standing order is really running, or None.
+
+        NAMING ONE IS NOT RUNNING ONE, and that gap is what made a job disappear from both
+        schedulers. `resync-full` could be SAVED here (the route only rejected unknown and
+        destructive keys) while _scheduler_loop's own tick refused to start it for being
+        advanced -- and _living_tick then stood aside for it, forever, while the Panel told
+        the owner "the standing order below runs this one". The save route rejects an
+        advanced action now; this is the backstop for a schedule.json written by an older
+        build or by hand, so such a row falls through to the living library instead of
+        vanishing from both."""
+        action = s.get("action") if s.get("enabled") else None
+        return action if action and _standing_runnable(action) else None
+
+    def _artworks_job_busy():
+        """The artworks-touching Panel job in the slot right now, or "" when there is none.
+
+        WHY THE IN-PROCESS LOCK IS NOT ENOUGH, and why this exists beside it. _artworks_lock
+        makes the sweep single-flight within THIS process, which is all a threading.Lock can
+        ever do. Every Panel action, though, runs as a SUBPROCESS: _panel_run spawns the CLI
+        with subprocess.Popen, so it is a separate interpreter with its own SQLite connection
+        and no possible knowledge of a lock object living in the server's memory. A sweep and
+        a `--sync` can therefore be writing the same rows at the same instant and neither
+        lock will notice; SQLite's own file locking serialises the two STATEMENTS, which is a
+        different and much weaker promise than serialising the two JOBS.
+
+        So the sweep defers, by looking at the one piece of shared state that does cross the
+        boundary: the Panel's single job slot, which this process owns and fills before it
+        spawns anything (_panel_run claims it under _panel_lock, before Popen). Reading it is
+        the whole mechanism -- there is no new lock, no new file, and no new state.
+
+        Returns the action name (so a refusal can say what is in the way) rather than a
+        bool, exactly as _job_busy and _update_busy already do."""
+        with _panel_lock:
+            if _panel_job["status"] != "running":
+                return ""
+            action = _panel_job.get("action") or ""
+        return action if action in ARTWORKS_TOUCHING_ACTIONS else ""
+
+    def _artworks_kick(force=False):
+        """Fire one published-artwork sweep OFF-THREAD -- the one entry point all four
+        triggers use (boot, the fifteen-minute tick, the publish kick, Run now).
+
+        Off-thread because none of the four can afford to wait on it: the publish kick
+        happens inside a route that has already committed an irreversible publish, Run now
+        must answer the click, and the tick must not stall the release check while a
+        once-per-48-hours deep pass walks the whole published history at 0.4s a page.
+
+        The single-flight lock inside artworks_sweep_kick is what makes that safe: a
+        trigger that loses the race has nothing to do, because the sweep already in flight
+        reads the same account from the same list.
+
+        Rides MOONGLADE_DISABLE_WATCH (as _bg_release_check) for the same reason the live
+        mirror, the contest sweep and the release check do: it is background work that
+        reaches PixAI with whatever real credentials this machine's config.json holds, and
+        the suite's conftest sets that flag precisely so no test can make that request.
+
+        DEFERS to a catalog-writing Panel job (see _artworks_job_busy for why the sweep's
+        own lock cannot see one). ALL FOUR triggers defer, the publish kick included: the
+        job in the slot is itself re-reading PixAI into these rows, so the kick would be
+        racing a writer to publish the same truth. Nothing is lost by waiting -- the next
+        tick sweeps, and a `--sync` or a `--sync-artworks` writes the publish back itself.
+
+        Returns whether a sweep was actually started."""
+        _artworks_state["kicks"] += 1        # a trigger asked; see the counter's own note
+        if not _bg_release_check:
+            return False
+        if _artworks_job_busy():
+            return False
+
+        def _go():
+            try:
+                # Seed the 48-hour tier stamp from disk before deciding, then write back
+                # whatever this sweep concluded -- so a restart cannot turn every boot into
+                # a deep walk, and a deep walk that just happened is remembered.
+                with _sched_lock:
+                    saved = float(_load_sched().get("artworks_deep_at") or 0.0)
+                if saved > _artworks_state["deep_at"]:
+                    _artworks_state["deep_at"] = saved
+                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_log_job,
+                                    busy=_artworks_job_busy)
+                _sched_stamp(artworks_deep_at=_artworks_state["deep_at"])
+            except Exception:                                # noqa: BLE001
+                pass
+        threading.Thread(target=_go, daemon=True).start()
+        return True
+
+    def _living_run(action):
+        """Start one living job. Returns whether it actually started -- a False means the
+        Panel's single slot was taken, and the tick simply tries again in sixty seconds."""
+        if action == LIVING_SWEEP_ACTION:
+            # ALWAYS "started": the tick's own fifteen-minute cadence is the authority
+            # here, so a sweep that declines (one already in flight, no resolvable account)
+            # must not make the loop retry every sixty seconds forever. Forced past the
+            # sweep's OWN fifteen-minute recent-guard, because the cadence the owner set on
+            # this row is the one that governs here and it may be shorter than that guard --
+            # the tick decides freshness itself, in artworks_sweep_fresh, before it gets
+            # here (and that is what stops the first tick repeating the boot kick).
+            _artworks_kick(force=True)
+            return True
+        return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"),
+                          scheduled=True)
 
     # Read ONCE, here, exactly as the live-mirror gate is read once further down: a daemon
     # that re-read the environment every minute could catch the instant BETWEEN two tests
@@ -7994,6 +9232,91 @@ def create_app(out_dir: Path):
         except Exception:              # noqa: BLE001 -- a check must never kill the loop
             pass
 
+    def _living_tick():
+        """THE LIVING LIBRARY'S HEARTBEAT -- the job LIST, riding the same sixty-second tick
+        as everything else in this process. No new thread, no second poll loop: the standing
+        rule ("web surfaces register jobs, they never add a second poll loop", DECISIONS.md
+        2026-07-24) reads the same on this side of the wire, which is why the release check
+        already lives on this tick too.
+
+        Its own function, above _scheduler_loop and called from it, for two reasons: the
+        loop body must stay free of nested defs and thread spawns (a test walks it), and the
+        sweep genuinely does need to be off-thread -- its once-per-48-hours deep pass walks
+        the whole published history at 0.4s a page, and stalling the tick for minutes would
+        stall the release check and the whole job list with it.
+
+        ONE JOB PER TICK. There is exactly one Panel slot, and a tick that started four
+        things would spawn one and silently drop three. The list is in shipped order, so the
+        first due job that can actually start is the one that goes.
+
+        THE GATE IS THIS FUNCTION; the work is _living_tick_once below. Split so the loop's
+        heartbeat keeps its gate while the decision itself can be driven directly on a
+        stubbed subprocess seam -- a job list whose one-per-tick rule is only ever asserted
+        by reading source text is a rule nothing proves at runtime."""
+        if not _bg_release_check:
+            # The same gate the contest sweep and the live mirror ride, for the same
+            # reason: this reaches PixAI with the machine's real credentials, and the
+            # suite's conftest sets that flag precisely so create_app() cannot.
+            return
+        _living_tick_once()
+
+    def _living_tick_once():
+        """One pass of the job list -- see _living_tick above for the whole account."""
+        try:
+            import time as _t
+            with _sched_lock:
+                s = _load_sched()
+            # The sweep's 48-hour tier stamp survives restarts through schedule.json --
+            # re-seed the in-memory state from it on the first tick that reads a newer one,
+            # so a boot does not turn every start into a deep walk.
+            if s.get("artworks_deep_at", 0.0) > _artworks_state["deep_at"]:
+                _artworks_state["deep_at"] = float(s["artworks_deep_at"])
+            now = _t.time()
+            due, baselined = living_due(s["jobs"], now, is_runnable=_living_runnable)
+            for action in baselined:
+                # First sight of a staleness job: stamp `now` as its floor and run nothing.
+                # A fresh install must not open by re-walking its whole history.
+                _living_stamp(action, now)
+            if not due:
+                return
+            if _update_busy():
+                return                          # an update is mid-flight -- next tick
+            # The legacy standing order still owns whatever action it names, so the list
+            # never doubles up on it: two paths starting the same job would just take
+            # turns losing the single slot. The row is NOT silently skipped on screen --
+            # /api/panel/schedule marks it `deferred` and the Panel says so in the row's
+            # own note line, because a row displaying a cadence it is not running is a lie
+            # the owner has no way to catch.
+            standing = _standing_action(s)
+            for action in due:
+                if action == standing:
+                    continue
+                if action == LIVING_SWEEP_ACTION:
+                    # Belt and braces around the subprocess the sweep's own lock cannot
+                    # see, and around the boot kick it would otherwise repeat. Neither is
+                    # stamped: last_run must keep meaning "when this job last ran", so a
+                    # deferral retries on the next tick instead of buying a whole cadence
+                    # of silence.
+                    if _artworks_job_busy():
+                        continue
+                    row = next((r for r in s["jobs"] if r.get("action") == action), None)
+                    if artworks_sweep_fresh((row or {}).get("interval_s"), now):
+                        continue
+                if _living_run(action):
+                    _living_stamp(action, now)
+                    return                      # one job per tick
+        except Exception:              # noqa: BLE001 -- a bad schedule must not kill the loop
+            pass
+
+    # Test seam, same rationale as app.extensions["mg_panel_job"] above: the job list's
+    # decision and the automation policy are closures over out_dir/db_path, so calling them
+    # is the only way to prove at RUNTIME that two due jobs start exactly ONE subprocess,
+    # or that `organize` is refused by the policy rather than merely absent from a list.
+    # Exposes the functions, not a way around any gate: _artworks_kick keeps its own
+    # background-network gate, so nothing here can reach PixAI.
+    app.extensions["mg_living"] = {"tick": _living_tick_once,
+                                   "runnable": _living_runnable}
+
     def _scheduler_loop():
         import time as _time
         while True:
@@ -8003,6 +9326,10 @@ def create_app(out_dir: Path):
             # first `continue` down there (schedule disabled -- the default) would
             # otherwise skip the update tick on every install that never set one up.
             _update_check_tick()
+            # Same reason, same place: the living library's job list is not the legacy
+            # standing order, and that `continue` would skip it on every install that
+            # never configured one.
+            _living_tick()
             try:
                 # Same lock /api/panel/schedule writes under -- reading the file while a
                 # save is mid-write otherwise hands this loop a truncated (or stale) copy.
@@ -8021,7 +9348,14 @@ def create_app(out_dir: Path):
                     continue
                 if _update_busy():
                     continue                   # an update is mid-flight -- next tick
-                if not _panel_run(action):
+                # Same follow-on table the tick and the manual click read: an owner whose
+                # standing order was already set to "sync" (the schedule's own default
+                # action) runs that job through THIS path forever, and the list's own
+                # "sync" row is permanently deferred to it -- so without this the chain
+                # never fired for him at all.
+                if not _panel_run(action,
+                                  then=LIVING_BY_ACTION.get(action, {}).get("then"),
+                                  scheduled=True):
                     continue                   # panel busy -- retry on the next tick
                 # Re-read under the lock before stamping: `s` was loaded up to a minute
                 # ago, so writing that whole copy back would silently revert any setting
@@ -8501,6 +9835,23 @@ def create_app(out_dir: Path):
         time.sleep(_CONTEST_SYNC_STARTUP_DELAY)
         _contest_sync_kick(out_dir)
 
+    def _artworks_sync_startup():
+        """THE BOOT KICK -- one published-artwork sweep shortly after start.
+
+        This is the trigger that answers the incident the whole living library was scoped
+        from: a piece published from the app vanished from My Art because nothing on the
+        machine ever re-read PixAI's list of published works. Publishing is written to the
+        LOCAL catalog only, so the other install learns of it exactly when something reads
+        PixAI back -- and startup is the one moment guaranteed to follow a gap in which the
+        app was closed.
+
+        Sleeps past the contest sweep's own delay so the two never compete at boot, and
+        goes through the same single-flight wrapper every other trigger uses. No `force`:
+        at boot there is no specific publish to confirm, so the recent-guard is exactly the
+        right bound, and a restart loop cannot become a request storm."""
+        time.sleep(ARTWORKS_STARTUP_DELAY)
+        _artworks_kick(force=False)
+
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
     # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
     # whatever real credentials happen to be in this machine's config.json. The contest
@@ -8510,6 +9861,7 @@ def create_app(out_dir: Path):
     if os.environ.get("MOONGLADE_DISABLE_WATCH") != "1":
         threading.Thread(target=_watch_loop, daemon=True).start()
         threading.Thread(target=_contest_sync_startup, daemon=True).start()
+        threading.Thread(target=_artworks_sync_startup, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -9551,12 +10903,28 @@ def create_app(out_dir: Path):
         # running job, and a job must not start under a changing codebase.
         if _update_busy():
             return _update_busy_refusal()
+        # The published-artwork sweep writes the same catalog rows these jobs do, and it is
+        # in-process rather than in the job slot, so _panel_run refuses one while the other
+        # is in flight. The refusal is re-stated here only so the click gets a reason it can
+        # read: _panel_run answers False for "the slot is taken" too, and "a job is already
+        # running" would be the wrong sentence for a sweep that has no slot.
+        if action in ARTWORKS_TOUCHING_ACTIONS and artworks_sweep_in_flight():
+            return jsonify({"error": "the published-artwork sweep is reading PixAI into "
+                                     "these same rows right now — wait a moment and press "
+                                     "Run now again"}), 409
         try:
             # `n` is only consumed by an int_param action (test-pull); _panel_run
             # clamps it into range and ignores it otherwise, so passing it always is safe.
             # The busy check lives INSIDE _panel_run, under the same lock that claims the
             # slot -- checking it here first would just be the race again.
-            if not _panel_run(action, int_arg=body.get("n")):
+            # THE FOLLOW-ON IS A PROPERTY OF THE ACTION, not of who started it. The wiki
+            # states the chain as a plain fact about Sync now -- "the one-shot refresh,
+            # then a perceptual-hash backfill straight after it" -- and it was true only
+            # when the living library's own tick was the trigger. A click got the sync
+            # alone. Looked up from the same table _living_run reads, so there is one
+            # answer to "what follows this job".
+            if not _panel_run(action, int_arg=body.get("n"),
+                              then=LIVING_BY_ACTION.get(action, {}).get("then")):
                 return jsonify({"error": "a job is already running"}), 409
             return jsonify({"ok": True, "action": action, "label": spec["label"]})
         except Exception as e:
@@ -9745,40 +11113,176 @@ def create_app(out_dir: Path):
                         s["workers"] = max(1, min(int(body.get("workers")), 16))
                     except (TypeError, ValueError):
                         s["workers"] = 4
-                if s.get("action") not in PANEL_ACTIONS or PANEL_ACTIONS[s["action"]]["destructive"]:
-                    return jsonify({"error": "only safe jobs can be scheduled"}), 400
+                if "jobs" in body:
+                    # THE LIVING LIBRARY'S LIST. A PATCH, exactly like every other field
+                    # here: the client sends only the rows it is changing, and only the
+                    # two things it may change -- whether a job runs by itself, and how
+                    # often. `action` and `last_run` are never taken from the body: an
+                    # unknown action is dropped by living_merge (the shipped list is the
+                    # only list), and a client that could write last_run could make a
+                    # sixty-day staleness job fire on demand.
+                    rows = {r["action"]: r for r in s["jobs"]}
+                    for patch in (body.get("jobs") or []):
+                        if not isinstance(patch, dict):
+                            continue
+                        row = rows.get(str(patch.get("action") or ""))
+                        if not row:
+                            continue
+                        if "enabled" in patch:
+                            row["enabled"] = bool(patch.get("enabled"))
+                        if "interval_s" in patch:
+                            # THE FLOOR IS ENFORCED HERE, not in the browser. The Panel
+                            # renders no cadence selector for a staleness job -- but a
+                            # POST is not the Panel, and living_clamp_interval is the one
+                            # place that knows sixty days is a floor rather than a
+                            # default. A patch asking for a full re-walk every minute
+                            # comes back clamped, saved clamped, and answered clamped.
+                            row["interval_s"] = living_clamp_interval(
+                                row["action"], patch["interval_s"],
+                                default=row.get("interval_s"))
+                if not _standing_runnable(s.get("action")):
+                    # ADVANCED IS REFUSED HERE TOO, not only at the tick. The tick has
+                    # always skipped an advanced action -- a full re-walk on a six-hour
+                    # timer is a foot-gun, and test-pull needs an N this path cannot
+                    # supply -- but the save route did not, so the pair could be SAVED
+                    # and then never run by anyone: _living_tick stood aside for a
+                    # standing order that refuses the job, and the Panel said "the
+                    # standing order below runs this one" about a job neither path would
+                    # ever start. Both halves say the same thing now.
+                    return jsonify({"error": "only safe jobs can be scheduled — a full "
+                                             "re-walk, an inventory count and a test pull "
+                                             "stay in Advanced, by hand"}), 400
                 _save_sched(s)
-            return jsonify(s)
+            # `catalog` is what the Panel draws the "runs itself" rows from: the shipped
+            # label, note and cadence beside each saved row, so the client never has to
+            # keep its own copy of the job list (and never disagrees with the server's).
+            #
+            # `deferred` is the honest half of a collision the tick has always handled
+            # silently: the legacy standing order still owns whatever action it names, so
+            # _living_tick skips that action's row -- correctly, since two paths starting
+            # one job would just take turns losing the single Panel slot. But the row went
+            # on displaying its own cadence and its own "next in 3h", which is a schedule
+            # it is NOT running. The skip stays; the row now says why.
+            #
+            # Read through _standing_action, the same function the tick defers by, so the
+            # row and the tick can never disagree: a standing order naming a job that path
+            # refuses to start owns nothing, and the row is not marked deferred to it.
+            standing = _standing_action(s)
+            return jsonify(dict(s, catalog=[
+                {"action": j["action"], "label": j["label"], "note": j["note"],
+                 "default_interval_s": j["interval_s"],
+                 "stale": j["action"] in _LIVING_STALE_ACTIONS,
+                 "needs_torch": j.get("needs") == "torch",
+                 "deferred": j["action"] == standing,
+                 "available": _living_runnable(j["action"])
+                              and (j.get("needs") != "torch" or _torch_present())}
+                for j in LIVING_ALL]))
+
+    @app.route("/api/panel/sweep", methods=["POST"])
+    @tier(LOCALHOST)
+    def api_panel_sweep():
+        """RUN NOW for the published-artwork sweep -- the one living job that is not a
+        PANEL_ACTIONS key, because it runs in-process (the CLI's --sync-artworks is the
+        full re-walk and has no short-circuiting equivalent to spawn).
+
+        LOCALHOST for the same reason /api/panel/schedule's writes are: this starts real,
+        paced PixAI traffic on the owner's own credentials, and a logged-in LAN session
+        unlocks browsing, not background work on his account. Forced -- the owner pressing
+        Run now is asking past the fifteen-minute guard, exactly as the publish kick does.
+
+        Answers immediately; the sweep runs off-thread and announces itself through the
+        Activity ledger if it changed anything. It never touches the page the owner is
+        looking at.
+
+        `deferred` names the catalog-writing Panel job that held the sweep off, when one
+        did (_artworks_job_busy) -- so an ok:false is never a silent nothing."""
+        deferred = _artworks_job_busy()
+        return jsonify({"ok": bool(_artworks_kick(force=True)),
+                        "deferred": deferred,
+                        "action": LIVING_SWEEP_ACTION})
 
     def _batch_sibling_count(task_id):
-        """How many catalog rows share this task. Used to say, before anything is deleted,
-        whether the picture is one of a batch or the only one this task made -- because
-        `deleteBatchMedia` on a task's last image is a different act from trimming one frame
-        out of four, and the dialog should not make them look the same."""
+        """How many catalog rows share this task, for the Details view's own display.
+
+        NOT what the delete dialog is worded from -- that has to come from the live read
+        (/api/delete-image with confirm false), because this number counts LOCAL rows and
+        cannot see a sibling deleted from PixAI's own website."""
         return task_media_count(db_path, task_id)
+
+    def _delete_image_rows(plan, task_id, media_id):
+        """Which catalog rows this delete takes with it, as [{media_id, filename}].
+
+        Per-image: the one named image. Whole-task: every row of the task EXCEPT the ones
+        whose image PixAI had already deleted -- their local copy is the only copy left
+        anywhere, and removing the generation record on PixAI does not change that. The
+        branch comes off the plan the delete itself reported, never off a local count."""
+        if plan.plan == "per-image":
+            row = get_row(db_path, media_id) or {}
+            return [{"media_id": media_id, "filename": row.get("filename") or ""}]
+        if plan.plan == "whole-task":
+            keep = {str(m) for m in plan.keep_media}
+            return [{"media_id": str(r["media_id"]), "filename": r.get("filename") or ""}
+                    for r in task_media(db_path, task_id)
+                    if str(r["media_id"]) not in keep]
+        return []
+
+    def _delete_image_message(plan, rows):
+        """The dialog's own words, in plain language, off the live read.
+
+        Every number here is PixAI's answer about this task, never a count of local rows."""
+        if plan.plan == "per-image":
+            n = plan.live_siblings
+            return ("This removes only this image from PixAI. {} other image{} in its "
+                    "batch stay.".format(n, "" if n == 1 else "s"))
+        if plan.plan == "whole-task":
+            names = [Path(r["filename"] or r["media_id"]).name for r in rows]
+            shown = ", ".join(names[:6]) + (
+                " and {} more".format(len(names) - 6) if len(names) > 6 else "")
+            msg = ("This is the last image of its generation on PixAI, so PixAI removes "
+                   "the whole generation record. Locally, {} file{} move{} to your trash "
+                   "folder: {}.".format(len(names), "" if len(names) == 1 else "s",
+                                        "s" if len(names) == 1 else "", shown))
+            if plan.keep_media:
+                msg += (" The {} image{} of this generation you already deleted on PixAI "
+                        "stay here — your copy is the only one left.".format(
+                            len(plan.keep_media),
+                            "" if len(plan.keep_media) == 1 else "s"))
+            return msg
+        return plan.reason
 
     @app.route("/api/delete-image", methods=["POST"])
     @tier(LOCALHOST)
     def api_delete_image():
-        """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
+        """Delete ONE image from its task on PixAI -- in TWO phases, ask then act.
 
         The finer-grained partner to /delete-tasks-bulk, which is task-level: deleting any
         image there takes the whole batch. Same trust tier and for the same reason --
         LOCALHOST-only, because this destroys on the owner's real cloud account, and a
         logged-in LAN session unlocks browsing and spending, not irreversible deletion.
 
+        `POST {media_id, confirm: false}` is the PREVIEW: it reads the live task and answers
+        `{plan, reason, live_siblings, local_rows, message}` with nothing deleted. The dialog
+        is worded from THAT answer. It has to be: which mutation PixAI accepts, and how many
+        images of the batch survive, are facts only PixAI holds -- the local catalog cannot
+        see a sibling deleted from PixAI's own website, and for years this dialog promised
+        "the rest of its batch stays" on deletes that took the whole generation.
+
+        `POST {media_id, confirm: true, plan}` DELETES. It reads and routes again, and
+        refuses when the fresh plan differs from the one the dialog showed, so the user
+        cannot be made to agree to one thing and get another. `confirm` must be present
+        either way: the typed-DELETE prompt is the client's half of the same gate, and a
+        route that acted on a body without it would make that prompt decorative.
+
         Local purge follows the cloud delete, exactly as the task-level path does, so cloud
         and catalog never drift. Order matters: if the cloud call fails, nothing local is
-        touched and the image is still there to try again. The reverse order would leave a
-        hole in the catalog for an image that still exists on PixAI.
-
-        `confirm` is required -- the typed-DELETE prompt is the client's half of the same
-        gate, and a route that acted without it would make that prompt decorative.
+        touched and the image is still there to try again. WHICH rows go is the plan's to
+        say (`_delete_image_rows`), never this route's to re-derive from local counts.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
-        if not body.get("confirm"):
+        if "confirm" not in body:
             return jsonify({"error": "not confirmed"}), 400
+        preview = not body.get("confirm")
         mid = str(body.get("media_id") or "").strip()
         row = get_row(db_path, mid) if mid else None
         if not row:
@@ -9796,21 +11300,60 @@ def create_app(out_dir: Path):
             # except below turned into a 200 error body -- so the feature was dead while
             # looking like a PixAI-side failure.
             _core_session = core._make_session(None)
-            core.delete_batch_media_gql(_core_session, tid, mid)
+            if preview:
+                plan = core.plan_image_delete(_core_session, tid, mid)
+            else:
+                plan = core.delete_image_routed(_core_session, tid, mid,
+                                                confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
-        try:
-            purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
-        except OSError as e:
-            # The cloud delete above already happened and cannot be taken back, so a local
-            # purge that fails has to come back through this route's own error contract
-            # rather than a 500: the row (and the file) are still here, now pointing at an
-            # image PixAI no longer has, and only the user can decide to retry.
-            return jsonify({"error": "Deleted on PixAI, but the local copy could not be "
-                                     "moved to the trash folder: "
-                                     + _redact_host_paths(str(e))[:160]}), 200
+
+        # The read this plan was made from is the only place the app learns that PixAI has
+        # dropped an image, so every row it names is marked here -- on the preview as much as
+        # on the confirm, and whichever branch the plan took. Nothing local is removed by it:
+        # a marked row is one whose local copy is now the only copy anywhere, and it stays.
+        # It cannot be left to --backfill-full-meta, which only re-fetches a row missing its
+        # prompt or model detail: a complete row is never revisited, so in the ordinary case
+        # that pass would never set this at all.
+        for gone_media, when in plan.keep_media_deleted_at:
+            mark_cloud_deleted(db_path, gone_media, when)
+
+        if plan.plan == "refuse":
+            answer = {"plan": "refuse", "reason": plan.reason, "live_siblings": 0,
+                      "local_rows": [], "message": plan.reason}
+            if not preview:
+                answer["error"] = plan.reason
+            return jsonify(answer), 200
+
+        rows = _delete_image_rows(plan, tid, mid)
+        if preview:
+            return jsonify({"plan": plan.plan, "reason": plan.reason,
+                            "live_siblings": plan.live_siblings,
+                            "local_rows": [r["media_id"] for r in rows],
+                            "message": _delete_image_message(plan, rows)})
+
+        purged, failed = [], []
+        for r in rows:
+            try:
+                purge_media_local(out_dir, thumb_dir, db_path, r["media_id"], r["filename"])
+                purged.append(r["media_id"])
+            except OSError as e:
+                # The cloud delete above already happened and cannot be taken back, so a
+                # local purge that fails has to come back through this route's own error
+                # contract rather than a 500: the row (and the file) are still here, now
+                # pointing at an image PixAI no longer has, and only the user can decide to
+                # retry. The loop keeps going -- one file the OS will not release must not
+                # strand the rest of a whole-task purge.
+                failed.append(_redact_host_paths(str(e))[:160])
+        if failed:
+            return jsonify({"error": "Deleted on PixAI, but {} local file{} could not be "
+                                     "moved to the trash folder: {}".format(
+                                         len(failed), "" if len(failed) == 1 else "s",
+                                         "; ".join(failed[:3])),
+                            "plan": plan.plan, "local_rows": purged}), 200
         telem_bump("culled", out_dir=out_dir)
-        return jsonify({"ok": True, "media_id": mid, "task_id": tid})
+        return jsonify({"ok": True, "media_id": mid, "task_id": tid, "plan": plan.plan,
+                        "local_rows": purged})
 
     @app.route("/api/delete-local", methods=["POST"])
     @tier(LOGIN)
@@ -9851,6 +11394,43 @@ def create_app(out_dir: Path):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
+
+    def _rows_the_bulk_purge_must_keep(session, task_id, rows):
+        """Which of one task's local rows the bulk delete must leave exactly where they are.
+
+        The same rule the single-image path follows through ImageDeletePlan.keep_media, and
+        it is here for the same reason: an image the owner deleted on PixAI's own website is
+        gone THERE, so this library's copy is the only one left anywhere. PixAI removing the
+        generation record does not change that, and neither does deleting its siblings --
+        so those rows and their files stay, and the whole-task purge walks around them.
+
+        Two sources, deliberately both:
+          * the live task, read once here. It fails SOFT: a read that could not be made must
+            never WIDEN what a purge takes, so a blip leaves the catalog's own answer standing
+            rather than replacing it with silence.
+          * `cloud_deleted_at` on the rows themselves, which stands whether or not the read
+            worked -- it was written the last time the app read this task.
+
+        The read is also where the marker gets WRITTEN: every member PixAI reports deleted
+        has its own row stamped here, so the catalog learns it from the read the delete was
+        making anyway rather than from a network call of its own.
+
+        Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
+        generation record is gone and there is nothing left to read."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        keep = {str(r["media_id"]) for r in rows
+                if str(r.get("cloud_deleted_at") or "").strip()}
+        try:
+            task = core.task_detail_gql(session, str(task_id)) if session is not None else None
+        except Exception:                            # noqa: BLE001 -- fail soft, see above
+            task = None
+        batch = ((task or {}).get("outputs") or {}).get("batch")
+        for mid in core.deleted_batch_media(batch):
+            keep.add(str(mid))
+            stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+            if stamp:
+                mark_cloud_deleted(db_path, mid, stamp)
+        return keep
 
     def _preview_entry(row, selected_ids):
         """One /api/delete-preview media entry: what it is, whether the user actually
@@ -9970,6 +11550,7 @@ def create_app(out_dir: Path):
 
         def _work():
             deleted = failed = removed = done = 0
+            kept = []
             step = max(1, total // 50)          # throttle progress writes (~every 2%)
             def _tick():
                 if done % step == 0 or done == total:
@@ -9977,6 +11558,12 @@ def create_app(out_dir: Path):
             try:
                 session = core._make_session(None) if task_ids else None
                 for tid in task_ids:
+                    # BEFORE the cloud delete: once the generation record is gone there is
+                    # nothing left to read, and this is the read that says which local rows
+                    # hold the only copy of their image left anywhere.
+                    rows = task_media(db_path, tid) if purge_local else []
+                    keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
+                            if purge_local else set())
                     try:
                         core.delete_task_gql(session, tid)      # cloud delete (irreversible)
                         deleted += 1
@@ -9984,7 +11571,12 @@ def create_app(out_dir: Path):
                         failed += 1
                         done += 1; _tick(); continue
                     if purge_local:
-                        for m in task_media(db_path, tid):
+                        for m in rows:
+                            if str(m["media_id"]) in keep:
+                                # PixAI had already deleted this one; this library holds the
+                                # last copy in existence. Named on the card, never purged.
+                                kept.append(str(m["media_id"]))
+                                continue
                             try:
                                 _purge_local(m["media_id"], m["filename"]); removed += 1
                             except OSError:
@@ -10001,10 +11593,16 @@ def create_app(out_dir: Path):
                         failed += 1
                     done += 1; _tick()
                 summary = "Deleted {} · purged {} local · {} failed".format(deleted, removed, failed)
+                if kept:
+                    # Said out loud rather than left as a silent difference in the numbers:
+                    # these files are still in the library on purpose.
+                    summary += " · kept {} file{} PixAI had already deleted".format(
+                        len(kept), "" if len(kept) == 1 else "s")
                 # ANY failure is a non-clean result -- surface it RED on the card. Don't bury
                 # "3 failed" inside a green 'done': those tasks still exist on PixAI (drift).
                 status = "failed" if failed else "done"
                 _log_job(job_id, status=status, label=summary, done=total, total=total,
+                         kept_media=(kept or None),
                          error=(summary if failed else None))
             except Exception as e:                               # noqa: BLE001
                 _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
@@ -12632,32 +14230,50 @@ def create_app(out_dir: Path):
     @app.route("/api/your-art")
     @tier(LOGIN)
     def api_your_art():
-        """'Your Art' panel: the owner's top published works ranked by likes (from the catalog,
-        so it works over LAN) enriched with LIVE view counts (fetched per artwork_id, using the
-        owner's key -- same trust level as /api/artwork-views, which this loop is really just a
-        batched version of). Read-only, no spend.
+        """'Your Art' panel: the owner's top published works plus the library's real
+        lifetime totals. Pure CATALOG read -- no network, no spend, works over LAN.
+
+        THIS ROUTE USED TO MAKE TWELVE LIVE GRAPHQL CALLS ON EVERY OPEN, six at a time,
+        to fetch view counts that no column existed for -- the lag saga, and the reason the
+        panel could only ever report a "top 12" subtotal. PROBE_2026-09-06 established that
+        the ad-hoc bulk `artworks(authorId, first:N)` query accepts `views`, so
+        --sync-artworks now sweeps them into the catalog in a handful of paced calls and
+        this route reads a column like every other number on the panel.
+
+        That is not merely faster, it is more HONEST in two ways. The totals are now
+        lifetime sums over the whole published library rather than a dozen rows. And the
+        same probe measured that reading a view count COSTS a view -- so the old design
+        inflated the owner's own twelve most-looked-at works by twelve views every single
+        time he opened the panel to look at them. A sweep he runs deliberately still costs
+        one view per work, but bounded to that sweep instead of to his curiosity.
+
+        `views_synced` now means "the catalog has been swept", not "the live calls
+        happened to succeed"; `?order=views` ranks by views instead of likes.
 
         No `_is_authorized_request()` conjunct here: this whole route is now covered by the
         global front-door hook (see _enforce_front_door()'s docstring), so reaching this line
         already guarantees it -- an explicit re-check here would be dead-always-true, the same
         class of redundant check removed from the 43 individually-gated routes."""
-        top = top_published_rows(db_path, 12)
+        order = "views" if (request.args.get("order") or "") == "views" else "likes"
+        try:
+            limit = max(1, min(int(request.args.get("limit") or 12), 200))
+        except (TypeError, ValueError):
+            limit = 12
         totals = published_totals(db_path)
-        views_synced = False
-        if top:
-            try:
-                core, session = _gen_session()
-                import concurrent.futures as _cf
-                with _cf.ThreadPoolExecutor(max_workers=6) as ex:
-                    vs = list(ex.map(lambda r: core.artwork_views(session, r["artwork_id"]), top))
-                for r, v in zip(top, vs):
-                    r["views"] = v
-                top.sort(key=lambda r: (r.get("views") or 0, r.get("likes") or 0), reverse=True)
-                totals["views_top"] = sum(vs)
-                views_synced = True
-            except Exception:
-                pass
-        return jsonify({"items": top, "totals": totals, "views_synced": views_synced})
+        top = top_published_rows(db_path, limit, order=order)
+        views_synced = totals.get("views_rows", 0) > 0
+        for r in top:
+            # '' and 0 are different answers (see myart_items): a never-swept row must not
+            # render as a real zero, so it goes to the client as null.
+            swept = (r.pop("views_raw", "") or "") != ""
+            r["views"] = r["views"] if swept else None
+            for k in ("views_prev", "views_at", "views_prev_at"):
+                r.pop(k, None)
+        return jsonify({"items": top, "totals": totals, "views_synced": views_synced,
+                        "views_at": totals.get("views_at", ""),
+                        # The blow-up note's payload. A LIST, capped, never a feed --
+                        # see published_spikes() and views_spike().
+                        "spikes": published_spikes(db_path)})
 
     @app.route("/api/myart/items")
     @tier(LOGIN)
@@ -12668,7 +14284,12 @@ def create_app(out_dir: Path):
         Visibility filter distinguishes them ('everything you've made, published or
         held back'). Pure catalog read, no network: title/likes/comments/tags/nsfw
         arrive via --sync-artworks; thumbs are the local /thumbs/<mid>.jpg the grid
-        already serves. The Artworks/Animations tab split is the is_video flag."""
+        already serves. The Artworks/Animations tab split is the is_video flag.
+
+        `coverage` rides along (#42) so the overlay's empty state can say WHY it is
+        empty: an unsynced library and a genuinely unpublished one produce the same
+        zero rows here, and only the catalog-wide counts separate them. See
+        myart_coverage()."""
         items = []
         for r in myart_items(db_path):
             mid, title, preview = r["media_id"], r["title"], r["prompt_preview"]
@@ -12684,11 +14305,15 @@ def create_app(out_dir: Path):
                 "public": r["is_published"] == "1",
                 "sensitive": r["is_sensitive"] == "1",
                 "likes": r["likes"], "comments": r["comments"],
+                # null (never swept) vs 0 (swept, nobody looked) -- the card draws a
+                # dash for the first and a real 0 for the second.
+                "views": r["views"] if (r["views_raw"] or "") != "" else None,
             })
         # The card actions POST to /api/myart/publish, which is in the explicit-token
         # CSRF class; MG_BOOT doesn't carry the token, so it rides along here rather
         # than making the overlay fetch the whole Control Panel summary for one field.
-        return jsonify({"items": items, "csrf": session.get("csrf", "")})
+        return jsonify({"items": items, "csrf": session.get("csrf", ""),
+                        "coverage": myart_coverage(db_path)})
 
     @app.route("/api/myart/publish", methods=["POST"])
     @tier(LOGIN)
@@ -12888,6 +14513,21 @@ def create_app(out_dir: Path):
             if title is not None:
                 changed["title"] = title
             publish_state(db_path, mid, **changed)
+        # THE PUBLISH KICK (the living library, owner call 2). publish_state above wrote
+        # what THIS route believes into THIS machine's catalog, and nothing else on earth
+        # heard about it: publishing is a local UPDATE, and the only way any install learns
+        # a publish is by re-reading PixAI's own list. So re-read it, now -- the machine the
+        # owner published from is authoritative at once instead of within one sweep, and
+        # what lands in the catalog is what PixAI says, not what this route assumed.
+        #
+        # Forced (past the fifteen-minute guard), off-thread and outside the try above, for
+        # the same reasons the contest sweep's own publish kick is: nothing it does may
+        # delay this response or turn an irreversible publish into a failure. Fires for
+        # unpublish, re-tag and delete too -- each is a change to what listArtworks returns.
+        try:
+            _artworks_kick(force=True)
+        except Exception:                                    # noqa: BLE001
+            pass
         result["unmatched_tags"] = unmatched
         return jsonify(result)
 
@@ -14694,9 +16334,18 @@ def create_app(out_dir: Path):
     # carries no <script src="/static/mg-*.js"> tags and no anchors.
     # __UPSCALE_CONST__ serves MG_LORA / MG_UPSCALE from their one Python source,
     # same idiom as the classic pages.
+    # viewport-fit=cover (2026-09-06, the phone audit's foundational finding). Without it a
+    # notched phone lays the page out INSIDE the safe area and every
+    # env(safe-area-inset-*) resolves to 0 -- so the tab bar's home-indicator gutter, the
+    # sheets' footer padding, the hero's notch guard and every other inset the mobile
+    # stylesheets carry were quietly doing nothing on exactly the hardware they were
+    # written for. It is inert everywhere else: a browser reporting no insets resolves the
+    # same env() to 0 with or without it, which is what the desktop shell has always
+    # measured. The same line rides LOGIN_PAGE and _LOOM_SHELL, the other two shells a
+    # phone reaches, and gallery/index.html, the dev twin of this one.
     APP_PAGE = """<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
@@ -14752,9 +16401,12 @@ __UPSCALE_CONST__
     #      both App and LoginPage, so Vite ships one file) -- only the SHELL
     #      differs, and the shell is what decides which one actually needs to
     #      reach an unauthenticated browser.
+    # viewport-fit=cover, same reason as APP_PAGE's own note above: this shell serves
+    # LoginPageMobile.jsx on a phone, and login-mobile.css cannot read an inset the
+    # viewport never opened.
     LOGIN_PAGE = """<!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Moonglade Athenaeum</title>
 <link rel="icon" type="image/png" href="/branding/favicon.png">
 <link rel="manifest" href="/next/assets/manifest.json">
@@ -15561,6 +17213,81 @@ __DESIGN_TOKENS__
             return jsonify({"duration": round(_dur, 2) if _dur is not None else None})
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "duration": None}), 200
+
+    # The per-project spend ledger's one server call. A cap, not a guess: rows_for_media_ids
+    # already chunks at 400 for SQLite's variable limit, so the number here only bounds how
+    # much a single request may ask for. 2000 media ids is far past any real board (a project
+    # would need ~2000 rendered shots plus re-rolls) and keeps a hostile body finite.
+    _LOOM_SPEND_MAX_IDS = 2000
+
+    @app.route("/api/loom/spend", methods=["POST"])
+    @tier(LOGIN)
+    def loom_spend():
+        """What a Loom project has ALREADY spent: catalog `paid_credit` for a list of result
+        media_ids. Read-only and local -- one SELECT against the backup catalog, no PixAI
+        session, no network, nothing written. The historical sibling of /api/price, which
+        quotes what UNRENDERED shots would cost; this reports what finished ones really did.
+
+        The client sends the ids (loom-core.js's collectSpendMids walks the board -- a
+        resultMid-and-attempts-only walk, deliberately NOT _loom_collect_media_ids, which also
+        gathers frame slots and cast images: those are reused INPUTS, not spend) and does the
+        arithmetic itself, so the whole ledger stays under loom/test's node --test. This route
+        is the join and nothing else.
+
+        Answers {"rows": {media_id: {"paid_credit": int|None, "task_id": str}}}. The three
+        states are distinct and the client keeps them apart all the way to the tooltip:
+          - an int          -> PixAI's actual charge for the task that made this media
+          - None            -> the row exists but paid_credit is '' (PixAI never reported one)
+          - key ABSENT      -> no catalog row at all (local file deleted, id never resolved)
+        `task_id` rides along because paid_credit is TASK-level: two media ids from one task
+        carry the same charge, and the client dedups on it rather than summing twice."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        p = request.get_json(silent=True) or {}
+        raw = p.get("media_ids")
+        if not isinstance(raw, list):
+            return jsonify({"error": "media_ids must be a list"}), 400
+        ids, seen = [], set()
+        for m in raw:
+            s = str(m or "").strip()
+            if s and s not in seen:
+                seen.add(s)
+                ids.append(s)
+        if len(ids) > _LOOM_SPEND_MAX_IDS:
+            return jsonify({"error": "too many media_ids (max %d)" % _LOOM_SPEND_MAX_IDS}), 400
+        # as_int mirrors /api/next/history's own paid_credit reading exactly ('' -> None, a
+        # real number -> int): one interpretation of that column across both surfaces.
+        #
+        # NON-FINITE IS NOT A CHARGE, and it must not take the batch down with it. This
+        # caught ValueError only -- but int(float("Infinity")) raises OverflowError, and
+        # float("nan") converts to a meaningless integer rather than raising at all. One
+        # such row answered the whole request with a 500, so every OTHER media id in the
+        # batch lost its number too: the three states this route keeps apart mean nothing
+        # if one bad row can delete all of them at once. A value that is not a real,
+        # finite number degrades to "unpriced" -- the row exists, and nothing usable was
+        # reported for it -- which is exactly what that state is for.
+        def as_int(s):
+            s = str(s or "").strip()
+            if not s:
+                return None
+            try:
+                v = float(s)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(v):
+                return None
+            try:
+                return int(v)
+            except (OverflowError, ValueError):
+                return None
+        out = {}
+        for r in rows_for_media_ids(db_path, ids):
+            out[str(r.get("media_id") or "")] = {
+                "paid_credit": as_int(r.get("paid_credit")),
+                "task_id": str(r.get("task_id") or ""),
+            }
+        return jsonify({"rows": out})
 
     @app.route("/api/loom/generate", methods=["POST"])
     @tier(LOGIN)

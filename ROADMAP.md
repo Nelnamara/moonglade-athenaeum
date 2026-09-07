@@ -23,20 +23,26 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Next — scoped, not started
 
+- **The Loom as its own arena — the half you can see** *(owner, 2026-09-06: "I think it works
+  best as its own arena connected to the gallery")* The question "does the Loom become part of
+  the same app?" is answered: **no, and it does not need to be** — one sign-in, one library, one
+  job list, one look, one price road, two rooms. The plumbing half is built (a storyboard's own
+  address, the return trip's memory, phones opening the phone layout), so what is left is
+  everything that has to *say* something and therefore waits on the Design Handoff: what the
+  hero's **▰ The Loom** button shows about the open board, what the crossing chrome says in both
+  directions, whether a storyboard's address gets a visible home, and what a phone user meets
+  when the Loom opens its phone layout by itself. Brief:
+  `../moonglade-internal/design/BRIEF_2026-09-06_loom-arena.md`; scope and the owner's eight
+  calls: `../moonglade-internal/scopes/SCOPE_2026-09-06_loom-arena.md`. The one-build/two-entries
+  unification is **banked, not refused** — it deletes two fiddly React bridges but changes how a
+  spend-path page is served, so it is its own reviewed piece, later or not at all.
+
 - **Full mobile-surface audit against the designs.** *(owner, 2026-09-05, after the wave
   walkthrough)* "The next audit is going to be the full mobile surface against the designs."
   The walkthrough surfaced real phone breakage (contest detail scroll bleeding into the
   Control screen; a false "no search field on mobile" claim) — sweep every phone screen
   against its design source and the desktop behavior it mirrors, screen by screen, in a
   driven browser at phone size. The design-queue wave has merged, so nothing gates this.
-
-- **The living library — maintenance runs itself** *(scoped 2026-09-04; owner's ask that day)*
-  "It's not just a backup dump. It's a living library that should update itself and its data
-  without my need to clicky click." The artworks sync gets the contest sweep's triggers (publish
-  kick, boot kick, periodic sweep with a ran-recently guard) plus the image pull's stop-when-known
-  short-circuit; the scheduler becomes a small list of safe jobs on their own cadences; the Panel's
-  safe buttons demote to "Run now." Nothing destructive ever automatic. Scope + owner calls:
-  `../moonglade-internal/scopes/SCOPE_2026-09-04_living-library.md`. Builds after the 3.7.1 wave.
 
 - **Does a tablet tier exist?** *(tabled — owner wants to play in the app on the iPad first, 2026-08-23)*
   Today one hook (`MOBILE_QUERY` 430px + a coarse-pointer fallback that also requires width ≤ 430)
@@ -64,7 +70,13 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
-  - Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.
+  - ~~Hero → slim banner: collapse is smooth, but expanding back has a single jump then a slide.~~
+    **Fixed 2026-09-06.** The banner's `height` is `auto` as a hero and `auto` cannot be
+    interpolated, so the snap landed in the expand's first frame while the `min-height` that
+    *can* animate was left sliding the remainder. Banner.jsx now pins the height at the slim
+    62px for the length of the expand; `gallery/src/styles/shell.css`'s `.mgx-bnr.expanding`
+    block holds the measurements and the one case it does not reach (a viewport under ~780px,
+    where the content is taller than the clamp and the last stretch still settles at the end).
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
     auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
   - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
@@ -99,12 +111,11 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
-- **The restart card's mascot: kill the spin, keep the pulse.** *(owner, 2026-09-05)* "I don't
-  want the mascot to spin anymore. it just looks wrong. I like the pulse, we can keep that and
-  maybe think of a new effect instead of the spin... or not." The spin is
-  `.mgcp-pwr-mascot.spin` (`cpSpin`, 1.9s infinite) in `gallery/src/styles/control-panel.css`;
-  the pulse halo beside it stays. Removing the spin is the decided part; whether a replacement
-  effect exists at all is open — a quick workshop, not a full session.
+- **The restart card's mascot: does anything replace the spin?** *(owner, 2026-09-05; the spin
+  itself came out 2026-09-06)* The decided half shipped — `.mgcp-pwr-mascot.spin` is gone and the
+  pulse halo beside it stays. What is left is only the open half of the ruling: "maybe think of a
+  new effect instead of the spin… or not." A quick workshop, not a full session, and *no effect*
+  is a real answer.
 
 - **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
   v3.0 — revisit what Moonglade should get now the React app is the whole front end.
@@ -113,11 +124,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
   (possibly alongside the final naming pass, which may move `branding/` once more).
-- **Community read-only surface** *(audited + scoped 2026-09-04)*
-  Followers/following and per-card comment counts are already fetched and never shown (free to
-  show); the top-12 view counts are paid for on every My Art open and thrown away; a real views
-  column needs one read-only probe first, then rides the artworks sync instead of live calls.
-  Scope + owner calls: `../moonglade-internal/scopes/SCOPE_2026-09-04_community-surface.md`.
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
@@ -133,13 +139,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   app now that it has grown to this level")* — a proper audit of the auth surface: login and the
   no-accounts mode, session/JWT/cookie handling, the localhost trust model, mirror/write gating,
   and what "grown to this level" changes about the threat picture. Runs on the owner's go.
-
-- **Does the Loom become part of the same app?**
-  Today they are two separate builds: the gallery app (`gallery/dist/app.js`) and the Loom
-  (`loom/dist/master-storyboard.bundle.js`), with the gallery reaching the Loom by full-page
-  navigation to `/loom`. Nothing says whether they should merge. This is not a wiring task — the
-  two load React by incompatible means, and the Loom's root component would have to be broken up
-  before it could be embedded. Worth deciding deliberately, not drifting into.
 
 ---
 

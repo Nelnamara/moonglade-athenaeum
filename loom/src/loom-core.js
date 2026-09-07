@@ -686,6 +686,218 @@ export const costTooltip = ({ free = 0, paid = 0, credits = 0, unknown = 0, pend
   `Cost to finish: ${free} free-card, ${paid} paid (≈${credits.toLocaleString()} credits), ` +
   `${unknown} unpriced${pending ? `, ${pending} still estimating` : ""}.`;
 
+/* ---------- per-project spend ledger: what this project ALREADY spent ----------
+   The historical sibling of the cost-to-finish pill above. That one is a QUOTE -- it asks
+   /api/price what the unrendered shots would cost. This one is a RECORD: every finished
+   shot's result media_id joined to the catalog's `paid_credit`, which is PixAI's own
+   server-reported actual charge for the task that made it.
+
+   The two marks are not interchangeable and the house already separates them: `≈` is an
+   estimate (formatCostEstimate, above), `~` is a settled actual (historyCore.costText, the
+   DECISIONS-locked one settled-cost formatter the Runs reel and History both render
+   through). A ledger wears `~`. costText itself is not imported here -- this file is
+   inlined by the Flask /loom route and may import nothing (see the header) -- so the shape
+   is re-derived, the same way mediaRefIndex re-derives _loom_collect_media_ids below.
+
+   Three things this walk gets right that a naive one does not:
+
+   1. DEDUP BY MEDIA ID. splitCardAt (loom-mutations.js) leaves BOTH halves of a split shot
+      holding the same resultMid. Counting per card would bill one clip twice for every cut
+      the owner makes.
+   2. DEDUP BY TASK. `paid_credit` is TASK-level on every catalog row (DECISIONS,
+      2026-08-16: "PixAI's server-reported actual spend, task-level on every catalog row"),
+      so two media ids from one task carry the SAME charge and summing both would double it.
+      The first act to reach a task owns its charge; later ones see it already counted.
+   3. IMPORTED FOOTAGE IS NOT THIS PROJECT'S SPEND. A card landed via importedFootagePatch
+      carries `imported: true` precisely so "re-roll/cost/debugging logic can tell the two
+      apart" (that field's own comment). Its clip was paid for somewhere else, at some other
+      time; billing it to this project would inflate the number. It is excluded from the sum
+      and NAMED in the tooltip -- excluded, never silently dropped.
+
+   Deliberately NOT reusing mediaRefIndex/_loom_collect_media_ids: those walk frame slots and
+   cast/asset images too, which are reused INPUTS, not spend. The ledger needs its own
+   resultMid-only walk, and this is it. */
+
+// Every media id whose charge belongs to this project, in board order, deduped, with the act
+// each one was first seen in. `attempts` (loom-mutations.js's withResult) carries the shots
+// a re-roll superseded -- money that was really spent and that resultMid alone forgets.
+export const collectSpendMids = (project) => {
+  // Object.create(null), not {} -- these are SETS keyed by ids that arrive from data, and a
+  // plain object inherits Object.prototype, so an id spelled "constructor" or "toString"
+  // would read back truthy and be treated as already-seen. Vanishingly unlikely against real
+  // media ids, and not a bug worth risking in the one place that adds up money.
+  const seen = Object.create(null);
+  const byAct = [];
+  let imported = 0;
+  ((project || {}).acts || []).forEach((act, ai) => {
+    const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
+    ((act || {}).cards || []).forEach((c) => {
+      if (!c) return;
+      if (c.imported) { if (c.resultMid) imported++; return; }
+      const own = [];
+      if (c.resultMid) own.push(String(c.resultMid));
+      (c.attempts || []).forEach((a) => { if (a && a.media_id) own.push(String(a.media_id)); });
+      own.forEach((m) => { if (!seen[m]) { seen[m] = true; bucket.mids.push(m); } });
+    });
+    byAct.push(bucket);
+  });
+  return { mids: byAct.reduce((all, b) => all.concat(b.mids), []), byAct, imported };
+};
+
+// Join the collected ids against the server's catalog answer -> the buckets the pill reads.
+// `rows` is {media_id: {paid_credit: n|null, task_id}} from POST /api/loom/spend. The two
+// "no number" cases are kept APART all the way to the tooltip, because they have different
+// causes and only one of them is fixable: a row that exists with a blank paid_credit is
+// `unpriced` (PixAI never told us), and an id with no catalog row at all is `missing` (the
+// local file was deleted, or the id never resolved). Neither is ever folded into 0 -- the
+// hard rule formatCostEstimate states above applies here identically: a displayed "0 cr"
+// must only ever mean a genuinely settled, zero-cost result.
+export const tallySpend = (collected, rows) => {
+  const src = rows || {};
+  const col = collected || { byAct: [], imported: 0 };
+  // task_id -> the act NAME that was billed for it (see note 2 above). The name, not just
+  // a flag: an act whose only results were billed to a sibling has to be able to say WHICH
+  // sibling, or its line reads as a free act.
+  const counted = Object.create(null);
+  const zeroB = () => ({ paid: 0, credits: 0, zero: 0, unpriced: 0, missing: 0, results: 0,
+                         sharedElsewhere: 0, sharedWith: "" });
+  const total = zeroB();
+  const byAct = (col.byAct || []).map((b) => {
+    const acc = zeroB();
+    (b.mids || []).forEach((m) => {
+      const row = Object.prototype.hasOwnProperty.call(src, m) ? (src[m] || {}) : null;
+      const add = (k, n) => { acc[k] += n; total[k] += n; };
+      add("results", 1);
+      if (row === null) { add("missing", 1); return; }
+      const tid = String(row.task_id || "");
+      // hasOwnProperty, not truthiness: an act named "" is still an act that was billed.
+      if (tid && Object.prototype.hasOwnProperty.call(counted, tid)) {
+        /* SAME TASK AS AN ID ALREADY BILLED -- one charge, and this act is not the one
+           that carries it. Its own bucket, because falling through to the all-zero shape
+           made formatSpend print "0 cr" for an act whose shot really did cost money, and
+           the hard rule above is that a displayed "0 cr" only ever means a genuinely
+           settled, zero-cost result. */
+        add("sharedElsewhere", 1);
+        if (!acc.sharedWith) acc.sharedWith = counted[tid];
+        return;
+      }
+      if (tid) counted[tid] = b.name || "";
+      const pc = row.paid_credit;
+      if (typeof pc !== "number" || !isFinite(pc)) { add("unpriced", 1); return; }
+      if (pc <= 0) { add("zero", 1); return; }
+      add("paid", 1);
+      add("credits", pc);
+    });
+    return { ...acc, name: b.name };
+  });
+  return { ...total, imported: col.imported || 0, byAct };
+};
+
+// The pill's face. Branch-for-branch the same exhaustive ladder as formatCostEstimate, minus
+// the buckets a RECORD cannot have (there is no "pending" price and no free-card pool to
+// track -- a card-covered shot simply settled at paid_credit 0). "" means nothing has
+// rendered yet, and the caller hides the pill rather than printing a hopeful zero.
+export const formatSpend = ({ paid = 0, credits = 0, zero = 0, unpriced = 0, missing = 0 } = {}) => {
+  const unknown = unpriced + missing;
+  if (credits > 0) return `~${Math.round(credits).toLocaleString()} cr${unknown ? ` (+${unknown} unk)` : ""}`;
+  if (unknown > 0) return `${unknown} unpriced`;
+  if (paid > 0 || zero > 0) return "0 cr";   // settled, genuinely zero-cost (free cards covered it)
+  return "";
+};
+
+/* WHICH SHOTS NEED A POLL RE-ATTACHED, and nothing about when to ask.
+
+   A generation submitted before a reload leaves its card at status "wip" with a
+   pendingTaskId, but its in-memory poll loop died with the page -- or with the "📱 Mobile
+   view" toggle, which unmounts LoomV2 and any <mg-generate-drawer> inside it outright. An
+   unmount fires no 'mg-paused' event, so the card silently freezes on "Rendering…" with
+   nothing left polling.
+
+   Deduped by TASK ID, not by card and not by why we are asking, so re-running the scan is a
+   genuine no-op for every task already resumed or still actively polling: no double-poll,
+   whatever fires it. `resumed` is the caller's own record and is UPDATED here, so a caller
+   that scans twice in one commit cannot start two loops for one task.
+
+   Pure and side-effect free apart from that record, so the rule can be proven with a plain
+   object instead of a mounted React tree. */
+export const cardsToResume = (project, resumed) => {
+  const seen = resumed || Object.create(null);
+  const out = [];
+  ((project || {}).acts || []).forEach((a) => {
+    ((a || {}).cards || []).forEach((c) => {
+      if (!c || c.status !== "wip" || !c.pendingTaskId) return;
+      const tid = String(c.pendingTaskId);
+      if (Object.prototype.hasOwnProperty.call(seen, tid)) return;
+      seen[tid] = true;
+      out.push({ id: c.id, taskId: c.pendingTaskId, startedAt: c.genStartedAt });
+    });
+  });
+  return out;
+};
+
+/* ONLY THE LATEST REQUEST WINS -- a tiny gate for a read whose answer can arrive stale.
+
+   The spend read's staleness check used to be "is this still the same board?", keyed on the
+   joined media-id list. That is IDENTICAL for every request about one board, so it could not
+   tell an earlier in-flight read from a later one -- and two reads of the same board overlap
+   routinely, because refreshSpend (the pill's own click) deliberately bypasses the
+   short-circuit that would otherwise stop a second concurrent fetch. If the network returned
+   them out of order, whichever landed second won regardless of which was issued last, and a
+   paid_credit backfill landing in between would be silently rolled back on screen.
+
+   `begin()` hands out a token and makes it the only winner; `wins(token)` answers whether
+   that request is still the newest; `cancel()` retires every token in flight (the
+   board-emptied path, where there is no request to wait for at all). A closure rather than a
+   pure function because "newest" is state by definition -- but state a test can drive
+   directly, with no DOM and no React. */
+export const makeLatestOnly = () => {
+  let latest = 0;
+  return {
+    begin() { latest += 1; return latest; },
+    wins(token) { return token === latest; },
+    cancel() { latest += 1; },
+  };
+};
+
+/* IS THERE ANYTHING TO SHOW? The pill's own gate, here rather than inline at the toolbar,
+   because it is a claim about the LEDGER and not about the layout.
+
+   `results > 0` alone was wrong for one real, first-class board: a project assembled
+   purely from the Footage tab's "Browse library" import. An imported card never
+   contributes to `results` (that is the whole point of the exclusion), so such a board
+   rendered no pill -- and the tooltip is the ONLY place imported clips are ever disclosed,
+   so "the hover names it instead of silently dropping it" was untrue on exactly the boards
+   where every clip was imported. An empty board still shows nothing. */
+export const spendPillShown = (s) =>
+  ((s || {}).results || 0) > 0 || ((s || {}).imported || 0) > 0;
+
+// The pill's hover: the one sentence, then the per-act breakdown, then the standing caveat.
+// The caveat is not decoration -- a board only remembers the attempts it recorded, so a shot
+// re-rolled before this ledger existed spent money nothing on the board can still point at.
+// Saying so is cheaper than a number the owner would otherwise have to trust blindly.
+export const spendTooltip = (s = {}) => {
+  const paid = s.paid || 0, credits = s.credits || 0;
+  const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ` +
+    `${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ` +
+    `${s.missing || 0} with no catalog row` +
+    (s.imported ? `, plus ${s.imported} imported clip(s) not counted — paid for elsewhere` : "") + ".";
+  const acts = (s.byAct || []).filter((a) => a.results > 0);
+  /* An act whose every result was billed to a sibling has no number of its own to show,
+     and "0 cr" would be a lie about it (that mark means settled and free). Say where the
+     charge went instead -- the money is on the board, just under another act's name. */
+  const actLine = (a) => {
+    const own = formatSpend(a);
+    if (own) return own;
+    if (a.sharedElsewhere > 0) {
+      return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
+    }
+    return "0 cr";
+  };
+  const lines = acts.length > 1 ? acts.map((a) => `  ${a.name}: ${actLine(a)}`) : [];
+  return [head].concat(lines).join("\n") +
+    "\n" + "Counts every attempt this board recorded; re-rolls from before the ledger existed aren't in it.";
+};
+
 // ---------- duration / pricing math feeding the timeline reel ----------
 
 // reel uses the ACTUAL generated length when a shot has rendered, else the planned duration

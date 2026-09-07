@@ -1128,8 +1128,32 @@ _READ_SCRIM_JS = """() => {
   };
 }"""
 
-_SCRIM_BLURRED = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
-                  "/blur\\(/.test(getComputedStyle(s).backdropFilter || ''); }")
+# WAIT FOR THE SETTLED VALUE, NOT THE FIRST FRAME THAT HAS ONE (#54, 2026-09-06).
+# The blur reaches this scrim from a KEYFRAME -- `mgvScrimBlur .01s linear .3s forwards`
+# (overlays.css) -- so "is it blurred yet" and "has the blur ARRIVED" are two different
+# questions, and this predicate only ever asked the first: /blur\(/ matches the interpolated
+# blur(0.042px) exactly as happily as the final blur(7px). Both reads below (`before` in
+# phase 1, `restored` in phase 5) are taken the instant it goes true, so a read that landed
+# inside those 10ms carried a half-grown radius and phase 5's restored == before comparison
+# failed on a value that was merely measured too early -- twice on 2026-09-05, in two
+# independent full-module runs, green in isolation every time.
+# The gate is now the element's OWN animation clock: every CSS animation on the scrim
+# reporting `finished`. That is the settled-value poll in its exact form -- an answer from
+# the engine rather than a sample-it-twice heuristic that a fast raf could still fool -- and
+# it is the same discipline _freeze_motion() enforces for the geometry reads elsewhere in
+# this file, applied where freezing is not allowed (the note above: `animation: none` would
+# kill the very keyframe under test).
+# Strengthening it does not weaken phase 4, which requires this predicate to TIME OUT: the
+# same predicate has to have gone true in phase 1 before phase 4 is reached, so it cannot
+# quietly become unsatisfiable and pass that step vacuously.
+# An engine without getAnimations() reads an empty list and falls back to the plain check.
+_SCRIM_BLURRED = ("() => { const s = document.querySelector('.mgv-scrim'); if (!s) return false; "
+                  "const a = s.getAnimations ? s.getAnimations() : []; "
+                  "if (a.some((x) => x.playState !== 'finished')) return false; "
+                  "return /blur\\(/.test(getComputedStyle(s).backdropFilter || ''); }")
+# No settle gate on this one, and none needed: `none` here is the author !important of
+# html.mg-noblur (overlays.css), which outranks the keyframe outright -- there is no
+# interpolation to catch it mid-way, at any moment of the animation's life.
 _SCRIM_SHARP = ("() => { const s = document.querySelector('.mgv-scrim'); return !!s && "
                 "(getComputedStyle(s).backdropFilter || 'none') === 'none'; }")
 
@@ -1138,6 +1162,80 @@ def _open_panel(page):
     _dismiss_any_achievement_toast(page)
     page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
     page.wait_for_selector('[aria-label="Control Panel"]')
+
+
+def test_the_living_librarys_runs_itself_block_renders_and_really_toggles(logged_in_page):
+    """The living library on the Panel, in a real browser (2026-09-06).
+
+    Four things, in the order the owner meets them:
+      1. the "Runs itself" block exists and leads -- it sits ABOVE the manual grid, which
+         is the demotion the scope asked for ("the manual-jobs block shrinks");
+      2. every shipped job has a row, each saying how often it runs, when it last ran,
+         when it next will, and carrying its own Run now;
+      3. a toggle is a REAL round trip to /api/panel/schedule and it sticks across a
+         reopen -- not local component state that evaporates;
+      4. the rows are the vocabulary that already existed (.mgcp-standing), and none of
+         them is wider than the console that holds them -- an element-level assertion
+         cannot see a row that has silently overflowed its container, and that is exactly
+         the class of break this harness exists for.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-living")
+
+    # 1. it leads: the block's bottom edge is above the manual grid's top edge.
+    box = page.locator(".mgcp-living").bounding_box()
+    grid = page.locator(".mgcp-grid").bounding_box()
+    assert box["y"] + box["height"] <= grid["y"] + 1, (
+        "the Runs-itself block must sit above the manual grid -- that ordering IS the "
+        "Control Panel demoting (block {}, grid {})".format(box, grid))
+
+    # 2. a row per shipped job, each with a Run now
+    text = page.inner_text(".mgcp-living")
+    for label in ("Published-artwork sweep", "Sync now", "Sync i2v videos",
+                  "Reconcile deleted", "Top up Similar", "Full re-walk",
+                  "Rebuild ALL thumbnails"):
+        assert label in text, "%r has no row in the Runs-itself block" % label
+    assert "last ran" in text and "60 days" in text     # the staleness backstop, in words
+    rows = page.locator(".mgcp-living .mgcp-standing")
+    assert rows.count() >= 7
+    assert page.locator('.mgcp-living button.mgcp-run:has-text("Run now")').count() >= 7
+
+    # 3. a REAL toggle: flip the sweep off, and it is still off after closing and
+    #    reopening the Panel (i.e. it went to the server, not to component state).
+    sweep = page.locator('.mgcp-living .mgcp-standing:has-text("Published-artwork sweep")')
+    assert sweep.locator("button.mgcp-standing-toggle").inner_text().strip() == "on"
+    sweep.locator("button.mgcp-standing-toggle").click()
+    page.wait_for_function(
+        "() => { const r = [...document.querySelectorAll('.mgcp-living .mgcp-standing')]"
+        ".find((e) => e.textContent.includes('Published-artwork sweep')); "
+        "const b = r && r.querySelector('button.mgcp-standing-toggle'); "
+        "return b && b.textContent.trim() === 'off'; }")
+    page.click('[aria-label="Control Panel"] button[aria-label="Close"]')
+    page.wait_for_selector('[aria-label="Control Panel"]', state="detached")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-living")
+    assert page.locator(
+        '.mgcp-living .mgcp-standing:has-text("Published-artwork sweep") '
+        "button.mgcp-standing-toggle").inner_text().strip() == "off"
+    # put it back, so this test leaves the harness's shared server as it found it
+    page.locator('.mgcp-living .mgcp-standing:has-text("Published-artwork sweep") '
+                 "button.mgcp-standing-toggle").click()
+    page.wait_for_function(
+        "() => { const r = [...document.querySelectorAll('.mgcp-living .mgcp-standing')]"
+        ".find((e) => e.textContent.includes('Published-artwork sweep')); "
+        "const b = r && r.querySelector('button.mgcp-standing-toggle'); "
+        "return b && b.textContent.trim() === 'on'; }")
+
+    # 4. no row overflows the console that holds it
+    overflow = page.evaluate(
+        "() => { const host = document.querySelector('.mgcp-living'); "
+        "const w = host.getBoundingClientRect().width; "
+        "return [...host.querySelectorAll('.mgcp-standing')]"
+        ".filter((r) => r.scrollWidth > Math.ceil(w) + 1).length; }")
+    assert overflow == 0, "%d Runs-itself row(s) overflow the block" % overflow
 
 
 def test_blur_behind_popups_toggles_the_real_backdrop_filter(logged_in_page):
@@ -2933,5 +3031,851 @@ def test_a_completion_never_out_races_the_owners_own_page_change_on_the_phone(
         assert after["library"] == before["library"] + 1, (
             "a second library load arrived after the owner's own ({} -> {} calls)".format(
                 before["library"], after["library"]))
+    finally:
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# The Loom as its own arena -- the crossing, measured (2026-09-06)
+# ---------------------------------------------------------------------------
+# SCOPE_2026-09-06_loom-arena.md's own test note: "Steps 2-3 want a new case here -- cross
+# to the Loom and back, and land where you started." These are the assertions no source
+# guard can make, because every one is about what a REAL browser does across a REAL
+# whole-page navigation between two separately-built bundles: a snapshot written by the
+# library's pagehide and read back in the Loom's own document, an address the Loom rewrites
+# only after its store has answered, and a phone rule evaluated by an actual matchMedia.
+#
+# Deliberately catalog-independent. The library's address is SET on the page rather than
+# arrived at by paging, so these measure the crossing itself and not how many pictures the
+# throwaway catalog happens to hold -- assertions that move with fixture data are exactly
+# what this file's own docstring warns about.
+
+_LOOM_READY = ".lv-top, .lm-root"   # whichever skin of the Loom mounted
+
+
+def _loom_board_param(page):
+    return page.evaluate("() => new URLSearchParams(location.search).get('board')")
+
+
+def test_the_loom_gives_a_storyboard_its_own_address(logged_in_page):
+    """A bare /loom grows a ?board= for whatever it opened, and that address opens it again.
+
+    The first half is what makes a storyboard copyable at all; the second is what makes it a
+    place rather than a decoration -- and together they are what stops the address and the
+    server-side pointer from becoming two different ideas of "which board is open".
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom")
+    page.wait_for_selector(_LOOM_READY)
+    page.wait_for_function("() => new URLSearchParams(location.search).get('board')")
+
+    board = _loom_board_param(page)
+    assert board, "the Loom opened but put no storyboard in the address"
+
+    # Go somewhere else entirely, then follow the address back: the SAME board must open.
+    _visit(page, "/")
+    _visit(page, "/loom?board=" + board)
+    page.wait_for_selector(_LOOM_READY)
+    _settle(page)
+    assert _loom_board_param(page) == board, (
+        "following a storyboard's own address did not open that storyboard -- the address "
+        "is now {!r}".format(_loom_board_param(page)))
+
+
+def test_an_unknown_storyboard_address_opens_a_real_board_and_says_so(logged_in_page):
+    """No blank page and no invented screen: the board you would have got anyway, the app's
+    ordinary corner note, and an address that corrects itself to what actually opened."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom?board=nosuchboard")
+    page.wait_for_selector(_LOOM_READY)
+    page.wait_for_function(
+        "() => { const b = new URLSearchParams(location.search).get('board');"
+        " return b && b !== 'nosuchboard'; }")
+    _settle(page)
+
+    assert _loom_board_param(page) != "nosuchboard"
+    toast = page.locator(".mg-toast", has_text="No storyboard at that address")
+    assert toast.count() >= 1, "an unknown board id opened silently -- no corner note"
+
+
+def test_the_return_trip_lands_where_the_library_was(logged_in_page):
+    """Cross to the Loom and back, and land where you started -- the whole of owner call 2.
+
+    Measured across the real navigation both ways, because that is the only place it can
+    break: the library writes the snapshot as its page goes away, and a different document
+    entirely reads it back.
+    """
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    page.wait_for_selector(".mgx-actrow")
+    # The library, somewhere other than its front door.
+    page.evaluate("() => history.replaceState(null, '', '/?page=3&image=demo-mid-42')")
+
+    # Out through the hero's own Loom button -- a plain anchor that runs no JS of its own,
+    # which is exactly why the snapshot rides pagehide rather than a click handler.
+    page.click("a.mgx-metal-loom")
+    page.wait_for_selector(_LOOM_READY)
+
+    back = page.get_attribute("a.lv-close[href]", "href")
+    assert back == "/?page=3&image=demo-mid-42", (
+        "the back link points at {!r} -- the crossing forgot the page and the open "
+        "picture".format(back))
+
+    page.click("a.lv-close[href]")
+    page.wait_for_selector(".mgx-actrow")
+    assert "page=3" in page.url and "image=demo-mid-42" in page.url, (
+        "came back to {!r} instead of the address the library was at".format(page.url))
+
+
+def test_a_loom_opened_cold_still_offers_the_library_front_door(logged_in_page):
+    """A tab that was never in the library has nothing to remember, and must say nothing
+    untrue about it -- the link falls back to the front door, exactly what it always was."""
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/loom")
+    page.wait_for_selector(_LOOM_READY)
+    assert page.get_attribute("a.lv-close[href]", "href") == "/"
+
+
+def test_a_phone_opens_the_phone_layout_and_a_tablet_does_not(logged_in_page):
+    """Owner call 5, and the constraint attached to it: "I want to be mindful of the tablet
+    still being able to use desktop."
+
+    Both halves in one test on purpose -- the promise IS the pair, and a threshold that
+    drifted would break them together while either alone still passed.
+    """
+    phone = logged_in_page(width=390, height=844)
+    _visit(phone, "/loom")
+    phone.wait_for_selector(_LOOM_READY)
+    assert phone.locator(".lm-root").count() == 1, (
+        "a 390px phone got the wide desktop board")
+
+    tablet = logged_in_page(width=768, height=1024)
+    _visit(tablet, "/loom")
+    tablet.wait_for_selector(_LOOM_READY)
+    assert tablet.locator(".lm-root").count() == 0, (
+        "a 768px tablet was pulled onto the phone layout -- the auto-open is keyed on a "
+        "threshold of its own instead of useIsMobile's phone rule")
+    assert tablet.locator(".lv-top").count() == 1
+
+
+def test_the_manual_switch_still_overrules_the_phone_auto_open(logged_in_page):
+    """Never a one-way trip: a phone that asks for the wide board gets it, and keeps it."""
+    phone = logged_in_page(width=390, height=844)
+    _visit(phone, "/loom")
+    phone.wait_for_selector(".lm-root")
+    phone.click(".lm-chip:has-text('Desktop')")
+    phone.wait_for_selector(".lv-top")
+    assert phone.locator(".lm-root").count() == 0
+
+    # ...and it is remembered, so the auto-open does not simply undo it on the next visit.
+    _visit(phone, "/loom")
+    phone.wait_for_selector(_LOOM_READY)
+    _settle(phone)
+    assert phone.locator(".lv-top").count() == 1, (
+        "the phone auto-open overruled a choice the owner actually made")
+
+
+# ---------------------------------------------------------------------------
+# THE PHONE'S FOUNDATIONS (2026-09-06) -- the mobile audit's four confirmed defects
+# ---------------------------------------------------------------------------
+# Each of the four below was independently re-reproduced on a driven 390x844 chromium
+# before it was fixed, and each fails on the pre-fix source. The source-shape guards for
+# the wiring these rest on are loom/test/phone-back-layers.test.js.
+
+# What the phone's own scroller is doing, in one read. .glm-body is the tab's scroller
+# (gallery-mobile.css gives it overflow-y:auto) and the ONE element every finding here
+# turns on -- the pager's landing, the sheet's containment and the per-tab memory are all
+# statements about this number.
+_BODY_SCROLL_JS = """() => {
+    const el = document.querySelector('.glm-body');
+    if (!el) return null;
+    return { top: el.scrollTop, range: el.scrollHeight - el.clientHeight };
+}"""
+
+
+def _body_top(page):
+    return page.evaluate(_BODY_SCROLL_JS)["top"]
+
+
+def _wheel_over(page, x, y, times=8, dy=600):
+    """A real wheel burst, well past the end of anything under the pointer."""
+    page.mouse.move(x, y)
+    for _ in range(times):
+        page.mouse.wheel(0, dy)
+    _settle(page)
+
+
+# HOW DEEP THE BACK LEDGER IS, read off the browser rather than off the app. Each entry the
+# layer manager pushes carries its own depth in the history state ({mgLayer: n} --
+# gallery/src/hooks/useLayerHistory.js), so the current entry's number IS the number of open
+# layers, and the base entry the shell opened on carries none at all.
+#   Not `history.length`: that is a high-water mark. It never shrinks on a back, and a
+# pushState after one overwrites the forward entry rather than adding to the count -- so a
+# second layer opened after any earlier back reads as no growth at all. Measured, not
+# assumed: this test's own two-deep stack read 5 against a 4 that had already been reached.
+_LAYER_DEPTH_JS = ("() => (window.history.state && window.history.state.mgLayer) || 0")
+
+
+def _layer_depth(page):
+    return page.evaluate(_LAYER_DEPTH_JS)
+
+
+def test_the_back_gesture_closes_one_layer_at_a_time_and_never_leaves_the_app(
+        logged_in_page):
+    """THE 2026-09-06 AUDIT'S FIRST FINDING, and an app-wide one.
+
+    The phone half of Similar was the only surface on this shell that guarded the Back
+    gesture (AppMobile pushed one same-address entry when it opened). Every OTHER layer it
+    stacks over the library -- the full-screen viewer, the picture screen, all six Menu
+    destinations, the Folio, the contact sheet, the contest entry screen, and the three
+    local drill-ins -- consumed zero history depth, so the phone's own "go up one" walked
+    past all of them and straight out of Moonglade.
+
+    Three shapes, in the order a person meets them: one layer, a SWAP of two mutually
+    exclusive ones (the viewer and the picture screen null each other, mirroring App.jsx's
+    own pairing -- so "Details" trades one layer for another and the depth never moves),
+    and a genuine two-deep stack (the Folio opened over a pushed Menu screen: the hero is
+    still reachable above .glm-body while a screen is up). The ledger's own depth is read
+    at each step, because the defect was never visible in the DOM -- the layers always
+    rendered, they simply held no entry to consume.
+    """
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    home = page.url
+    assert _layer_depth(page) == 0, "the bare gallery is holding a layer entry"
+
+    # --- one layer: the full-screen viewer -----------------------------------------
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    _settle(page)
+    assert _layer_depth(page) == 1, (
+        "the viewer took no history entry -- Back will walk past it and out of the app")
+    page.go_back()
+    page.wait_for_selector(".lbm-root", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "Back left the app instead of closing the viewer"
+    _settle(page)
+    assert _layer_depth(page) == 0, "the viewer's entry outlived the viewer"
+
+    # --- a SWAP: viewer -> picture screen is one layer the whole way through --------
+    page.locator(_DOOR_TILE).click()
+    page.wait_for_selector(".lbm-root")
+    page.click(".lbm-actsrow >> text=Details")
+    page.wait_for_selector(".idm-root")
+    _settle(page)
+    assert _layer_depth(page) == 1, (
+        "the viewer and the picture screen are mutually exclusive, so trading one for the "
+        "other must not stack a second entry -- the depth is {}".format(_layer_depth(page)))
+    page.go_back()
+    page.wait_for_selector(".idm-root", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "Back left the app instead of closing the picture screen"
+    assert page.locator(".lbm-root").count() == 0, (
+        "closing the picture screen re-opened the viewer -- the two are mutually "
+        "exclusive, so the trade was one layer and Back lands on the library")
+
+    # --- a genuine two-deep stack: the Folio over a pushed Menu screen --------------
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("My Art")')
+    page.wait_for_selector(".glm-screen")
+    _settle(page)
+    assert _layer_depth(page) == 1, "the pushed Menu screen took no history entry"
+    page.click('button[title="Folio of Honors"]')
+    page.wait_for_selector(".fm-root")
+    _settle(page)
+    assert _layer_depth(page) == 2, (
+        "two stacked layers did not take two entries -- one Back would close both, or "
+        "neither")
+
+    page.go_back()
+    page.wait_for_selector(".fm-root", state="detached")
+    assert page.locator(".glm-screen").count() == 1, (
+        "Back closed the Folio AND the screen underneath it -- one press, one layer")
+    assert page.url == home
+    _settle(page)
+    assert _layer_depth(page) == 1, "the ledger did not come down with the Folio"
+
+    page.go_back()
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    assert page.url == home, "the second Back left the app instead of closing the screen"
+    _settle(page)
+    assert _layer_depth(page) == 0
+
+    # --- and the bare gallery is exactly as it was: no trap ------------------------
+    # With nothing open the manager holds no entries, so a Back here does what it always
+    # did -- leaves. Proven by landing back on the login page the harness came in through,
+    # which is the entry immediately before this one.
+    page.go_back()
+    page.wait_for_load_state("domcontentloaded")
+    assert "/login" in page.url, (
+        "Back on the bare gallery did not leave the app -- the manager is holding an "
+        "entry for a layer that is not open, which is a trap: {}".format(page.url))
+
+
+_BANNER_EXPAND_JS = """
+() => new Promise((resolve) => {
+  /* Sample the expand while it is RUNNING. Everything this measures is mid-transition, so
+     nothing here may wait for it to settle: the banner's box, the mark's box, and whether
+     a point inside the mark that lies BELOW the banner's own bottom edge still belongs to
+     the mark. elementFromPoint is the honest test of a clip -- a clipped element keeps its
+     layout rect, so a rect alone can never see one. */
+  const bnr = document.querySelector(".mgx-bnr");
+  const mark = document.querySelector(".mgx-mark");
+  const band = document.querySelector(".mgx-bottom");
+  const frames = [];
+  const t0 = performance.now();
+  const sample = (again) => {
+    const b = bnr.getBoundingClientRect();
+    const m = mark.getBoundingClientRect();
+    const r = band.getBoundingClientRect();
+    const x = Math.round(m.left + m.width / 2);
+    const y = Math.round(Math.min(m.bottom - 2, b.bottom + 2));
+    const hit = document.elementFromPoint(x, y);
+    frames.push({
+      t: Math.round(performance.now() - t0),
+      expanding: bnr.classList.contains("expanding"),
+      overflow: getComputedStyle(bnr).overflowY,
+      bandOverflow: getComputedStyle(band).overflowY,
+      bandMaxH: getComputedStyle(band).maxHeight,
+      bnrH: Math.round(b.height * 10) / 10,
+      markH: Math.round(m.height * 10) / 10,
+      markBelow: Math.round((m.bottom - b.bottom) * 10) / 10,
+      // is the point inside the mark, but below the banner's edge, still the mark's?
+      belowEdge: m.bottom > b.bottom + 2,
+      hitsMark: !!(hit && (hit === mark || mark.contains(hit))),
+      bandPaints: r.height > 0 && r.bottom > b.bottom + 2,
+    });
+    if (!again) return;
+    if (performance.now() - t0 < 620) requestAnimationFrame(() => sample(true));
+    else resolve(frames);
+  };
+  sample(false);            // t=0, before a frame has been yielded: the pin at its tightest
+  requestAnimationFrame(() => sample(true));
+})
+"""
+
+
+def test_the_banner_expand_never_crops_the_mark_and_never_spills_the_band(logged_in_page):
+    """RED TEAM #14 and #24, in a real engine and mid-animation.
+
+    The expand's height pin (`.mgx-bnr.expanding { height: 62px }`) carried an
+    `overflow: hidden` on the BANNER, and the mark runs its own independent .5s size
+    transition -- 56px to 96px -- inside that still-pinned 62px box. So the pin cropped the
+    mark, its halo and its moondust field for the whole animation, contradicting in every
+    frame the invariant `.mgx-bnr { overflow: visible }` exists for and that
+    loom/test/mark-anim-containment.test.js states in as many words. That suite measures
+    static hero-size overhang budgets only; a transitional state is invisible to it, and no
+    real-browser test measured this geometry at all.
+
+    The clip is scoped to the returning band now, so this holds both ends at once: the mark
+    may spill, and the band still may not.
+
+    Motion is deliberately NOT frozen here -- the animation IS the subject.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.goto("/", wait_until="domcontentloaded")     # no _freeze_motion: see the docstring
+    page.wait_for_selector(".mgx-bnr")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+    collapse = page.locator('.mgx-sqbtn[title="Collapse the banner to its slim bar"]')
+    collapse.click()
+    page.wait_for_selector(".mgx-bnr.slim")
+    page.wait_for_timeout(700)                        # let the collapse finish entirely
+
+    page.evaluate("() => { window.__mgFrames = null; }")
+    page.locator('.mgx-sqbtn[title="Expand the banner to its hero height"]').click()
+    frames = page.evaluate(_BANNER_EXPAND_JS)
+
+    pinned = [f for f in frames if f["expanding"]]
+    assert len(pinned) >= 5, (
+        "the expand's pin was never observed -- nothing below measures anything: "
+        "{}".format(frames[:6]))
+
+    # 1. THE BANNER IS NOT A CLIP while it expands. This is the invariant the mark's own
+    #    halo and moondust rely on at every other moment too.
+    assert all(f["overflow"] == "visible" for f in pinned), (
+        "the banner clipped itself during the expand: "
+        "{}".format(sorted({f["overflow"] for f in pinned})))
+
+    # 2. THE CLIP MOVED, it did not simply go. The band is what the pin has to hold, and
+    #    the guard is only narrowed if the band is still clipped in the same frames.
+    assert all(f["bandOverflow"] == "hidden" and f["bandMaxH"] == "0px" for f in pinned), (
+        "the pin's clip was dropped rather than scoped to the band: {}".format(
+            sorted({(f["bandOverflow"], f["bandMaxH"]) for f in pinned})))
+
+    # 3. WHERE THE MARK DOES outgrow the pinned box, it still belongs to the mark --
+    #    elementFromPoint below the banner's own edge is what a clip would take away.
+    #    Not required to happen: min-height leaves 62px within a few milliseconds, so the
+    #    overhang is a handful of pixels for a handful of frames and a slow runner can
+    #    step over it. Assertion 1 is the deterministic half; this is the direct evidence
+    #    when the timing offers it.
+    cropped = [f for f in pinned if f["belowEdge"] and not f["hitsMark"]]
+    assert not cropped, (
+        "the mark was cropped by the banner mid-expand at {}".format(
+            [(f["t"], f["markBelow"]) for f in cropped]))
+
+    # 4. AND THE BAND STILL DOES NOT SPILL. That is what the pin's clip was for, and
+    #    narrowing it must not give that up.
+    spilling = [f for f in pinned if f["bandPaints"]]
+    assert not spilling, (
+        "the hero band painted below the pinned banner at {}".format(
+            [f["t"] for f in spilling]))
+
+    # 5. and the expand itself is still ONE motion: it starts at the slim row, not at
+    #    content height, which is the fix this pin exists for.
+    assert pinned[0]["bnrH"] <= 80, (
+        "the expand jumped to content height in its first frame again: "
+        "{}".format([(f["t"], f["bnrH"]) for f in pinned[:4]]))
+    assert max(f["bnrH"] for f in frames) > 200, "the banner never reached its hero height"
+
+
+_DONE_JOB = {"jobs": [{
+    "job_id": "77", "type": "generate", "label": "Generated", "status": "done",
+    "media_ids": ["100"], "ts": 0, "started_at": 0,
+}]}
+
+
+def test_the_phone_activity_thumbnail_really_opens_the_picture(logged_in_page):
+    """RED TEAM #24. The phone's ONE route from "your image is done" to the image.
+
+    Under the library-stands-still policy nothing restacks the grid when a generation
+    lands, so the Activity row's thumbnail is the whole of the way there. ActivityRow
+    cancels its own anchor for a plain tap and dispatches `mg-open-details` instead -- and
+    until this branch the only listener lived in App.jsx, so on the phone the tap was
+    swallowed whole: the link cancelled, nothing opened in its place.
+
+    That fix shipped with a regex over the JSX and its own docstring saying the behaviour
+    "belongs in tests/test_render_harness.py if it is ever measured live". This is that.
+    """
+    page = logged_in_page(**PHONE)
+    page.route("**/api/jobs", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(_DONE_JOB)))
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+    page.click('button[title="Activity"]')
+    page.wait_for_selector(".glm-sheet .at-row")
+    thumb = page.locator(".glm-sheet .at-row .at-thumb")
+    assert thumb.count() == 1, (
+        "a finished job with a media id must offer its thumbnail -- there is no other way "
+        "to the picture from here")
+    before = page.url
+
+    thumb.click()
+    page.wait_for_selector(".idm-root")
+    assert page.url == before, (
+        "the tap followed the desktop shell's /?image= address and reloaded the app "
+        "instead of opening the phone's own picture record: {}".format(page.url))
+    # ...and the sheet it was tapped in got out of the way, rather than being what the
+    # owner lands back on when the picture closes
+    assert page.locator('.glm-sheet:has(.at-row)').count() == 0
+
+
+_MASCOT_PROBE_JS = """
+() => {
+  /* The restart mascot's own markup, mounted against the SHIPPED stylesheet rather than by
+     restarting the harness's server. What is being read is a CSS fact -- whether the rule
+     the owner's ruling removed is still gone from the bundle the browser actually loaded --
+     and the modal is unreachable here without a real restart. */
+  const host = document.createElement("div");
+  host.className = "mgcp-pwr-card";
+  host.style.cssText = "position:fixed;left:-9999px;top:0;";
+  host.innerHTML = '<div class="mgcp-pwr-mascotwrap">'
+    + '<div class="mgcp-pwr-halo busy"></div>'
+    + '<div class="mgcp-pwr-mascot"></div></div>';
+  document.body.appendChild(host);
+  const mascot = host.querySelector(".mgcp-pwr-mascot");
+  const halo = host.querySelector(".mgcp-pwr-halo");
+  const out = {
+    mascotAnim: getComputedStyle(mascot).animationName,
+    haloAnim: getComputedStyle(halo).animationName,
+    // the greyed-out state the ruling explicitly kept
+    offFilter: (() => {
+      mascot.classList.add("off");
+      const f = getComputedStyle(mascot).filter;
+      mascot.classList.remove("off");
+      return f;
+    })(),
+    // ...and a class nothing renders any more must not be quietly resurrected in CSS
+    spinAnim: (() => {
+      mascot.classList.add("spin");
+      const a = getComputedStyle(mascot).animationName;
+      mascot.classList.remove("spin");
+      return a;
+    })(),
+  };
+  host.remove();
+  return out;
+}
+"""
+
+
+def test_the_restart_mascot_holds_still_and_the_halo_keeps_pulsing(logged_in_page):
+    """RED TEAM #24, and the owner's own words: "I don't want the mascot to spin anymore.
+    it just looks wrong. I like the pulse, we can keep that."
+
+    Both halves of that ruling, read off the stylesheet the browser really loaded: the
+    mascot has no animation of its own, the halo's pulse is untouched, and the `spin` class
+    the removal took out of the JSX does not quietly still exist in CSS waiting for someone
+    to put the class back. Nothing measured this in a browser before -- and cpSpin itself
+    is still defined and still used by the job console's spinner, so a stray selector here
+    would animate again with no source change anyone would notice.
+
+    Mounted directly rather than by opening the modal: reaching it needs a real restart of
+    the harness's own server, and what is under test is a CSS fact, not the route to it.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.goto("/", wait_until="domcontentloaded")     # no motion freeze: it would zero these
+    page.wait_for_selector(".mgx-bnr")
+    _settle(page)
+    seen = page.evaluate(_MASCOT_PROBE_JS)
+
+    assert seen["mascotAnim"] == "none", (
+        "the restart mascot is animating again: {}".format(seen["mascotAnim"]))
+    assert seen["spinAnim"] == "none", (
+        "a .spin rule survived in the stylesheet: {}".format(seen["spinAnim"]))
+    assert seen["haloAnim"] == "cpPulse", (
+        "the pulse the owner kept is gone: {}".format(seen["haloAnim"]))
+    assert "grayscale" in seen["offFilter"], (
+        "the greyed stopped-server state went with it: {}".format(seen["offFilter"]))
+
+
+def test_two_fast_backs_inside_a_layers_exit_animation_do_not_leave_the_app(
+        logged_in_page):
+    """RED TEAM #13. The ledger and the visible layer disagreed for 200-220ms every time.
+
+    Five of the ten registered layers -- the Menu screens, Branding, the composer's Advanced
+    screen, Duplicates and the Folio -- keep their `open` flag true for another fifth of a
+    second after being told to close, because that is how long their exit takes to play.
+    onPop dropped its entry the instant the FIRST Back arrived, so for that whole window
+    `depth` read 0 while a full-screen layer still covered the display -- and a second real
+    Back inside it found nothing of ours to consume and went straight to the browser. The
+    app closed with the screen still on screen: the exact defect the manager exists to fix.
+
+    Two presses, thirty milliseconds apart, driven from inside the page so they really land
+    inside the window -- a wait_for_selector(state="detached") between them would step over
+    the whole bug. The layer's exit is a JS timer, not a CSS transition, so the harness's
+    motion freeze does not shorten it.
+    """
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    home = page.url
+
+    page.click('button[title="More"]')
+    page.click('.glm-menu-item:has-text("My Art")')
+    page.wait_for_selector(".glm-screen")
+    _settle(page)
+    assert _layer_depth(page) == 1
+
+    page.evaluate("""() => new Promise((r) => {
+        window.history.back();
+        setTimeout(() => { window.history.back(); setTimeout(r, 80); }, 30);
+    })""")
+    assert page.url == home, (
+        "a second Back inside the exit animation left the app while the screen was still "
+        "on it: {}".format(page.url))
+
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_selector(".glm-grid .glm-tile")
+    _settle(page)
+    assert _layer_depth(page) == 0, "the ledger did not come down with the screen"
+    # ...and the gallery underneath is not a trap: with nothing open, Back leaves as always
+    page.go_back()
+    page.wait_for_load_state("domcontentloaded")
+    assert "/login" in page.url, (
+        "the swallowed press was never handed back -- the manager is holding an entry for "
+        "a layer that is not open: {}".format(page.url))
+
+
+def test_the_pager_lands_each_page_at_its_top(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S SECOND FINDING: tap Next from halfway down page 1 and page 2
+    opened already halfway down -- the search field, the media pills and the whole first row
+    of pictures scrolled away above a page not one word of which had been read.
+
+    GalleryMobile's Prev/Next just calls load(page +/- 1, true); nothing ever touched
+    .glm-body's offset, so the scroller kept whatever the READER had left it at while the
+    tiles under it were replaced wholesale. The fix rides the owner's own load (AppMobile's
+    userLoad, the intent path the library-stands-still policy already runs everything
+    through), so a background refresh is untouched -- and it fires only when the page really
+    changed.
+
+    Needs a library that pages, so it takes `paged_library_server`'s 120 rows rather than
+    the module fixture's six.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        page.wait_for_selector(".glm-pager")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        assert page.evaluate(_PHONE_PAGE_JS) == 1, "the phone did not open at page 1"
+
+        start = page.evaluate(_BODY_SCROLL_JS)
+        assert start["range"] > 400, (
+            "the phone's library has only {:.0f}px of scroll range at 390x844 -- there is "
+            "no 'halfway down' for this test to leave the reader at".format(start["range"]))
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 400; }")
+        _settle(page)
+        assert _body_top(page) == 400, (
+            "the library scroller would not take a test offset -- nothing below measures "
+            "anything")
+        # ...and from there the pill row really is scrolled away, which is the complaint.
+        away = page.evaluate("""() => {
+            const body = document.querySelector('.glm-body').getBoundingClientRect();
+            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
+            return pills.bottom <= body.top;
+        }""")
+        assert away, (
+            "the media pills are still on screen at 400px down, so 'the pill row scrolled "
+            "away' is not the state this test starts from")
+
+        page.click('.glm-pager button:has-text("Next")')
+        _phone_on_page(page, 2)
+        _settle(page)
+
+        landed = _body_top(page)
+        assert landed == 0, (
+            "page 2 opened {:.0f}px down -- the reader lands mid-page on a page they have "
+            "not read".format(landed))
+        geo = page.evaluate("""() => {
+            const body = document.querySelector('.glm-body').getBoundingClientRect();
+            const bar = document.querySelector('.glm-bar').getBoundingClientRect();
+            const pills = document.querySelector('.glm-bar2').getBoundingClientRect();
+            return {bodyTop: body.top, barTop: bar.top, pillsTop: pills.top,
+                    pillsBottom: pills.bottom};
+        }""")
+        assert geo["barTop"] >= geo["bodyTop"] - 1 and geo["pillsBottom"] > geo["bodyTop"], (
+            "the search bar and the media pills are not on screen on the page that just "
+            "landed: {!r}".format(geo))
+
+        # Prev, the other direction, is the same hand and lands the same way.
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 300; }")
+        _settle(page)
+        page.click('.glm-pager button:has-text("Prev")')
+        _phone_on_page(page, 1)
+        _settle(page)
+        assert _body_top(page) == 0, (
+            "Prev kept the offset -- the landing is the owner's page change, either way "
+            "he asked for it")
+    finally:
+        ctx.close()
+
+
+def test_an_open_sheet_holds_the_library_still_behind_it(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S THIRD FINDING, and the one the measurement does not agree
+    with -- recorded here rather than quietly dressed up, because a guard that claims a bite
+    it does not have is worse than no guard.
+
+    THE REPORT: a wheel or flick over an open Sort / Advanced Search / Actions sheet
+    scrolled the library GRID behind the dim, because the 2026-09-05 pass latched the pushed
+    SCREENS (`.glm-body:has(.glm-screen)` + `overscroll-behavior: contain`) and left the
+    sheets one layer shallower.
+
+    WHAT THIS BROWSER DOES, probed before the fix was written and again after: the library
+    does not move. Wheel burst and real CDP touch drag, over the scrim and over the slab, on
+    a 120-row library with 9057px of range, with the new rules in place and with them
+    overridden back off -- 200px in, 200px out, every time. The reason is in the same probe:
+    every sheet surface is position:fixed with no containing-block ancestor
+    (`sheet.offsetParent === null`), so it scroll-chains to the document and never to
+    .glm-body, DOM descendant or not. So the leak is not reproducible from here, and this
+    test does not pretend otherwise -- there is no revert phase, because nothing flips.
+
+    WHAT IT DOES PIN, all of it real and all of it new: the sheet does not move the reader
+    on its way up, the tab's scroller is genuinely latched while the sheet is up (the
+    `:has(.glm-sheet)` rule -- without it that read is "auto"), the sheet contains its own
+    overscroll, and the latch comes off with the sheet leaving the library exactly where it
+    was. gallery-mobile.css's own block states the same thing in full.
+
+    Measured on the paged fixture because the module's six rows do not fill a 390x844 phone,
+    and a containment test on a surface with nothing to scroll proves nothing.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+
+        assert page.evaluate(_BODY_SCROLL_JS)["range"] > 400, (
+            "the library does not scroll at 390x844 here -- nothing could leak")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 200; }")
+        _settle(page)
+        held = _body_top(page)
+        assert held == 200
+
+        # Advanced Search rather than Sort, and for a reason worth stating: the Sort pill
+        # lives in .glm-bar2, which has scrolled away by 200px, so driving it would make
+        # Playwright scroll it into view and move the very number this test is watching.
+        # "Advanced" sits in .glm-bar, which is position:sticky and always on screen. All
+        # three sheets are the same shared .glm-sheet chrome (MobileSheet.jsx) mounted in
+        # the same place (inside .glm-tab-gallery), so the containment measured on one is
+        # the containment all three have.
+        page.click(".glm-search-adv")
+        page.wait_for_selector(".glm-sheet")
+        _settle(page)
+        # The sheet must not have moved the reader on its way up, either.
+        assert _body_top(page) == held, "opening the sheet moved the library by itself"
+
+        # A burst over the dim, where the grid is showing through...
+        _wheel_over(page, 195, 200)
+        assert _body_top(page) == held, (
+            "a flick over the scrim scrolled the library behind it")
+        # ...and one over the sheet's own body, which is where a thumb actually lands.
+        sheet_y = page.evaluate(
+            "() => { const r = document.querySelector('.glm-sheet').getBoundingClientRect();"
+            " return Math.round(r.top + Math.min(60, r.height / 2)); }")
+        _wheel_over(page, 195, sheet_y)
+        assert _body_top(page) == held, (
+            "a flick over the sheet chained out into the library behind it")
+        assert page.locator(".glm-sheet").count() == 1, "the sheet closed under the wheel"
+
+        # THE LOCK IS REAL, and this is what CAN be proven from here: while the sheet is up
+        # the tab's scroller is latched, and the moment it closes the library is both
+        # scrollable again AND exactly where it was left. Without the `:has(.glm-sheet)`
+        # rule the first read below is "auto" and the assertion fails.
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-body')).overflowY"
+        ) == "hidden", "the tab's scroller is not latched while a sheet is up"
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-sheet')).overscrollBehaviorY"
+        ) == "contain", "the sheet does not contain its own overscroll"
+        page.keyboard.press("Escape")            # no-op; the scrim is the real dismiss
+        page.click(".glm-scrim", position={"x": 195, "y": 60}, force=True)
+        page.wait_for_selector(".glm-sheet", state="detached")
+        _settle(page)
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.glm-body')).overflowY"
+        ) == "auto", "the latch outlived the sheet -- the library can no longer be scrolled"
+        assert _body_top(page) == held, (
+            "the library did not come back to where the reader left it: {:.0f} vs {:.0f}"
+            .format(_body_top(page), held))
+    finally:
+        ctx.close()
+
+
+def test_each_tab_keeps_its_own_scroll(
+        paged_library_server, render_browser, monkeypatch):
+    """THE 2026-09-06 AUDIT'S FOURTH FINDING: all three tabs share ONE scroller (.glm-body),
+    so a deep read of the library opened the Create tab a thousand pixels down its own
+    composer, and coming back put you somewhere neither tab had chosen.
+
+    The shell keeps a per-tab memory now: leaving a tab records its offset, entering one
+    puts it back. Driven as a person drives it -- the real bottom nav, a real round trip --
+    on the paged fixture, because the module's six rows do not give the Gallery tab enough
+    range for "deep" to mean anything (with 120 it has 8682px of it).
+
+    The BLEED half is measured on the pair the report named, Gallery -> Create. The
+    KEEPS-ITS-OWN half is measured on Gallery <-> Control instead, and that is a fixture
+    fact rather than a scope call: measured at 390x844, the composer runs 30px past the
+    frame and Control 984, so Create has no offset of its own to hold and Control does. The
+    memory itself is per-tab and keyed on nothing but the tab name.
+    """
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+
+        assert page.evaluate(_BODY_SCROLL_JS)["range"] > 500, (
+            "the library does not run deep enough at 390x844 for this to mean anything")
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 500; }")
+        _settle(page)
+        assert _body_top(page) == 500
+
+        # Over to Create -- the exact bleed the report named: it opens at ITS top, not
+        # 500px down someone else's tab.
+        page.click('.glm-navitem:has-text("Create")')
+        page.wait_for_selector(".cm-pad", timeout=10_000)
+        _settle(page)
+        assert _body_top(page) == 0, (
+            "the Create tab opened {:.0f}px down -- the Gallery's depth bled into it"
+            .format(_body_top(page)))
+
+        # Control is the tab deep enough to hold a place of its own (see the docstring).
+        page.click('.glm-navitem:has-text("Control")')
+        page.wait_for_selector(".ctm-statcard", timeout=10_000)
+        _settle(page)
+        arrived = page.evaluate(_BODY_SCROLL_JS)
+        assert arrived["top"] == 0, (
+            "the Control tab opened {:.0f}px down".format(arrived["top"]))
+        assert arrived["range"] > 300, (
+            "the Control panel has only {:.0f}px of range here, so 'Control keeps its own "
+            "place' cannot be measured".format(arrived["range"]))
+        page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 300; }")
+        _settle(page)
+        assert _body_top(page) == 300
+
+        # Back to the library: deep stays deep.
+        page.click('.glm-navitem:has-text("Gallery")')
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _settle(page)
+        assert _body_top(page) == 500, (
+            "the library came back at {:.0f} instead of the 500 it was left at"
+            .format(_body_top(page)))
+
+        # ...and Control kept its own, separately.
+        page.click('.glm-navitem:has-text("Control")')
+        page.wait_for_selector(".ctm-statcard")
+        _settle(page)
+        assert _body_top(page) == 300, (
+            "Control came back at {:.0f} instead of the 300 it was left at"
+            .format(_body_top(page)))
+
+        # A PUSHED SCREEN PARKS THIS SCROLLER, and the memory stands down while it does --
+        # MobileScreen.jsx has held .glm-body at 0 since the 2026-09-05 contest fix, so a
+        # tab switch under an open screen must not record that 0 as the tab's place.
+        page.click('.glm-navitem:has-text("Gallery")')
+        page.wait_for_selector(".glm-grid .glm-tile")
+        _settle(page)
+        page.click('button[title="More"]')
+        page.click('.glm-menu-item:has-text("My Art")')
+        page.wait_for_selector(".glm-screen")
+        _settle(page)
+        assert _body_top(page) == 0, "the screen did not park the scroller"
+        page.click('.glm-navitem:has-text("Create")')
+        _settle(page)
+        page.click('.glm-navitem:has-text("Gallery")')
+        _settle(page)
+        page.click(".glm-screen-back")
+        page.wait_for_selector(".glm-screen", state="detached")
+        _settle(page)
+        assert _body_top(page) == 500, (
+            "a tab round trip UNDER an open screen overwrote the library's place with the "
+            "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
         ctx.close()

@@ -48,6 +48,16 @@ appears as a centred panel, with finger-sized dock and close buttons. (Before 20
 drawer left a dead strip down one side and the model browser opened half off the top of the
 screen — if that is what you remember seeing, update.)
 
+**How the phone's Back gesture behaves.** Anything the phone opens *over* your library —
+a picture full-screen, a picture's own record, anything from the **☰** menu, the Folio, the
+contact sheet, the contest entry screen, and the drill-ins inside Branding, the composer's
+Advanced and Duplicates — closes on one Back, leaving whatever was underneath it standing.
+Two things stacked take two presses, one each. With nothing open, Back leaves the app, the
+same as any other page. Bottom sheets (Sort, Advanced Search, Actions, the menu) are the
+exception on purpose: they dim the screen and close when you tap outside them, so Back is
+not their way out. (Before 2026-09-06 only the lookalikes view held its place, and Back from
+anything else walked straight out of Moonglade — if that is what you remember, update.)
+
 **As of v2.0.0 this needs a login, and a signed-in device can do real work.** The gallery
 requires an account on every path — including on the machine running it. Sign in from your
 phone and you can browse *and* generate, which is the point: the login exists so tablet

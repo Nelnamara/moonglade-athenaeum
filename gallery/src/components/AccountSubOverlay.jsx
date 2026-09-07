@@ -116,6 +116,22 @@ export default function AccountSubOverlay({ onClose }) {
             <div><div className={"acct-splitnum" + (splitUnknown ? " unknown" : "")}>{splitUnknown ? "— unknown" : nfmt(acct && acct.credits_free)}</div><div className="acct-kick">of which free</div></div>
             <div><div className="acct-midnum">{acct ? nfmt(acct.cards) : "…"}</div><div className="acct-kick">free cards on hand</div></div>
             <div><div className="acct-midnum">{coupCount == null ? "…" : coupCount}</div><div className="acct-kick">coupons</div></div>
+            {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06 -- "BOTH beside the credits chip
+                and in the account popup"). Two more cells in the strip that is already
+                here, in the strip's own .acct-midnum/.acct-kick idiom; both numbers ride
+                the same GET /api/account the four cells to their left do, so this costs
+                nothing new. Read-only like everything else on this panel: there is no
+                follow button here and there will not be one -- following is a WRITE to
+                PixAI, which this overlay's own header line rules out.
+                "—" rather than 0 when the account read could not answer. */}
+            <div>
+              <div className="acct-midnum">{acct ? (acct.followers == null ? "—" : nfmt(acct.followers)) : "…"}</div>
+              <div className="acct-kick">followers</div>
+            </div>
+            <div>
+              <div className="acct-midnum">{acct ? (acct.following == null ? "—" : nfmt(acct.following)) : "…"}</div>
+              <div className="acct-kick">following</div>
+            </div>
           </div>
 
           {/* Tabs */}

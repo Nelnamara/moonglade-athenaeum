@@ -44,7 +44,13 @@
 
 /* ---- scrollable body (hero + tabs live inside, matching the design's own
    sc-if gate -- everything below the top bar waits for real data) ---- */
-.fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* `overscroll-behavior: contain` (2026-09-06): the Folio covers the whole shell, and a
+   flick that runs past the end of the record must stop there rather than chain into the
+   tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
+   contest detail took on 2026-09-05; this surface and the picture screen were the two the
+   sweep missed. */
+.fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; }
 .fm-loading { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
 
 /* ---- hero header ---- */

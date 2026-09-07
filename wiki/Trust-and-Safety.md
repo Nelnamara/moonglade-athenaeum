@@ -20,9 +20,13 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   confirm counts tickets against your pool and names which shots will spend before you confirm.
   The guarantee is honesty, not refusal: a paid clip is never shown as free. Details and the
   exact preview wording are in [Generating → Free cards and videos](Generating#free-cards-and-videos).
-- **Delete a task from your PixAI account** — irreversible on PixAI's side. Gated behind
-  `--apply` plus typing the word `delete` on the CLI (skippable with `--yes` only if you pass
-  it explicitly), or typing `DELETE` in the gallery's confirm dialog.
+- **Delete from your PixAI account** — irreversible on PixAI's side. Gated behind typing
+  `DELETE` in the gallery's confirm dialog, or (on the deprecated `--delete-task`) `--apply`
+  plus typing the word `delete` on the CLI, skippable with `--yes` only if you pass it
+  explicitly. A **single-image** delete asks PixAI what it still has of that generation
+  first and tells you which of two things the click will do — remove just this picture, or,
+  when it is the last one that generation still has on PixAI, remove the whole generation
+  record. It never sends a delete on a generation it could not read.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
   that costs you anything, but it's still a real account change, so it's covered by the same
   guarantees below.
@@ -153,6 +157,14 @@ exist to skip prompts on a run you already trust; `READ_ONLY` is for a run you d
 trust yet, so it overrides them rather than just changing their default. Browsing, backing up,
 and searching your existing catalog all keep working normally — only the account-mutating
 paths refuse.
+
+**View counts are covered too**, and they are the one case that does not look like a write.
+Asking PixAI how many views a published work has **adds one to that number** — PixAI's
+behaviour, and there is no way to look without it counting. So it is a change to your
+account's own numbers, not just a look, and with `READ_ONLY` set the view read is skipped
+everywhere: the weekly **View counts** job, a hand-run `--sync-artworks`, and its **Run now**
+button alike. The rest of that command — titles, tags, likes, comments, visibility — is a
+plain read and keeps working, so backing up is not blocked, only the counting is.
 
 Contests deserve a word of their own, because they used to be read-only and are not any
 more. Browsing the contest board still changes nothing. But **entering** one is a real,
