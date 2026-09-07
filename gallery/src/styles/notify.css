@@ -290,6 +290,10 @@
   background:var(--surface0);border-bottom:1px solid var(--accent);
   font-family:var(--font-system,system-ui,sans-serif);}
 .mgub-line{flex:1;min-width:0;font-size:12.5px;color:var(--text);}
+/* Where the Update button would be on a shell that cannot open the confirm -- the setup
+   wizard registers no host and is already "/", so it says why instead of drawing a button
+   that presses nothing (2026-09-07, later the same day). */
+.mgub-why{flex:none;font-size:11px;color:var(--subtext);font-style:italic;}
 button.mgub-go{flex:none;padding:6px 15px;border-radius:9px;font-size:12px;font-weight:800;
   cursor:pointer;font-family:inherit;color:#241a05;border:1px solid rgba(212,175,55,.7);
   background:linear-gradient(180deg,#e2c04a,#a8871f);}
@@ -317,5 +321,53 @@ html.mg-updbanner-on .mgx-hdr{top:var(--mg-updbanner-h,0px);}
 html.mg-updbanner-on .glm-stage{top:var(--mg-updbanner-h,0px);}
 html.mg-updbanner-on .glm-hero{--glm-safetop:0px;}
 html.mg-updbanner-on .glm-hero-icons{top:12px;}
+/* .sb-root is the Loom's in-flow wrapper -- it moves the boundary's fallback text, but NOT
+   the fixed .lv-overlay/.lm-root shells it normally holds; those are offset in the block
+   below (2026-09-07, later the same day). */
 html.mg-updbanner-on .sb-root{padding-top:var(--mg-updbanner-h,0px);}
 html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(--mg-updbanner-h,0px);}
+
+/* EVERY FIXED FULL-SCREEN LAYER, NOT A LIST OF THE ONES WE REMEMBERED (2026-09-07, later the
+   same day, refining the block above -- which moved only the shells that sit in normal flow).
+   A `position:fixed; inset:0` root is pinned to the VIEWPORT: no padding on any ancestor can
+   push it down, so `.sb-root`'s padding-top left the Loom's real shells (.lv-overlay on the
+   desktop, .lm-root on the phone) starting at y=0 with the z-509 strip painting over their top
+   bar -- the phone Loom's only "< Gallery" link among them -- and the full-screen viewer (.lbx)
+   was covered the same way. The rule is therefore stated for the whole class: every fixed
+   inset:0 layer that ranks BELOW the strip starts where the strip ends. Its `bottom:0` stays,
+   so the layer shrinks rather than sliding off the bottom.
+
+   The two deliberate exceptions, both above or beneath the argument rather than in it:
+     .mgx-veil   -- z-index 2, pointer-events:none, a decorative bottom gradient that must
+                    reach the viewport edge; it covers nothing and eats no click.
+     .ach-m2     -- z-index 520, ABOVE the strip on purpose: an earned achievement owns the
+                    whole screen for its few seconds, strip included.
+   loom/test/mg-updbanner-layers.test.js re-derives this list from the stylesheets and fails on
+   any new fixed inset:0 root that is neither offset here nor named in its exemption list. */
+html.mg-updbanner-on .lbx,
+html.mg-updbanner-on .mgv-scrim, html.mg-updbanner-on .mgv-host,
+html.mg-updbanner-on .mgai-scrim,
+html.mg-updbanner-on .mgss-scrim,
+html.mg-updbanner-on .upscale-panel:not(.inline),
+html.mg-updbanner-on .mgcp-sub-scrim, html.mg-updbanner-on .mgcp-sub-host,
+html.mg-updbanner-on .mgcp-pwr-scrim, html.mg-updbanner-on .mgcp-pwr-host,
+html.mg-updbanner-on .mgct-subscrim, html.mg-updbanner-on .mgct-subhost,
+html.mg-updbanner-on .mgclaim-scrim, html.mg-updbanner-on .mgclaim-host,
+html.mg-updbanner-on .mgl-scrim,
+html.mg-updbanner-on .mgpal-scrim, html.mg-updbanner-on .mgpal-host,
+html.mg-updbanner-on .mgks-scrim, html.mg-updbanner-on .mgks-host,
+html.mg-updbanner-on .mg-gallery-picker,
+html.mg-updbanner-on .mgdock-scrim, html.mg-updbanner-on .mgdk,
+html.mg-updbanner-on .glm-scrim,
+html.mg-updbanner-on .csm-root,
+html.mg-updbanner-on .cmb-entry,
+html.mg-updbanner-on .fm-root,
+html.mg-updbanner-on .idm-root, html.mg-updbanner-on .idm-sheet-scrim,
+html.mg-updbanner-on .lbm-root, html.mg-updbanner-on .lbm-sheet-scrim,
+html.mg-updbanner-on .mgdrm-automodal-scrim,
+html.mg-updbanner-on .lgn-welcome, html.mg-updbanner-on .lgnm-welcome,
+html.mg-updbanner-on .lv-overlay, html.mg-updbanner-on .lm-root,
+html.mg-updbanner-on .lv-df-veil, html.mg-updbanner-on .lv-mpick-veil,
+html.mg-updbanner-on .lv-fc-veil, html.mg-updbanner-on .lv-fc-host,
+html.mg-updbanner-on .sb-projveil,
+html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov{top:var(--mg-updbanner-h,0px);}
