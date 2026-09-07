@@ -120,7 +120,10 @@ TIER_SNAPSHOT = [
     "/api/account/card-history [GET] LOGIN",
     "/api/account/coupons [GET] LOGIN",
     "/api/account/credit-log [GET] LOGIN",
-    "/api/ach-event [POST] LOCALHOST",
+    # LOCALHOST -> LOGIN, 2026-09-07 ruling: the per-render nonce replaced the loopback
+    # gate, so a phone can earn the three feat beacons honestly again.
+    "/api/ach-event [POST] LOGIN",
+    "/api/ach-nonce [GET] LOGIN",       # the nonce top-up that ruling needed
     "/api/achievements [GET] LOGIN",
     "/api/artwork-views [GET] LOGIN",
     "/api/assets/fetch [POST] LOGIN",

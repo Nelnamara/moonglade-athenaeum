@@ -729,6 +729,9 @@ _PREVIOUSLY_UNGATED_JSON_POST = [
     "/api/rate/does-not-exist",
     "/api/edit-prompt/does-not-exist",
     "/api/skin",
+    # LOGIN again since the 2026-09-07 nonce ruling (LOCALHOST 2026-08-26..2026-09-07).
+    # The gate proved here is the front door's, which comes FIRST for either tier, so this
+    # line held through both -- an anonymous LAN caller has never reached the handler.
     "/api/ach-event",
     # The surviving JSON counterparts of the cut classic form routes -- the
     # subjects (delete/collect/replace) moved here, so the gate proof does too.
@@ -842,15 +845,24 @@ def test_loom_serves_the_same_page_with_or_without_a_board_address(tmp_path):
     (see SCOPE_2026-09-06_loom-arena.md, risk 3).
 
     Also covers the junk case at the route level: an unusable id is not a server error.
+
+    "Byte-for-byte" has ONE deliberate exception since 2026-09-07: the shell carries the
+    feat beacon's per-render nonce (window.MG_ACH_NONCE), which is a fresh random value on
+    every render BY DESIGN -- it is what let /api/ach-event go back to LOGIN. It is blanked
+    on both sides here rather than dropping the comparison, so everything else in the shell
+    is still compared whole and a real branch on ?board= would still fail this.
     """
+    import re as _re
     from tests.conftest import login_client
     cli = login_client(tmp_path)
+    same = lambda r: _re.sub(rb'MG_ACH_NONCE = "[^"]*"', b'MG_ACH_NONCE = ""', r.get_data())
     plain = cli.get("/loom")
     withboard = cli.get("/loom?board=k3f9q2z")
     junk = cli.get("/loom?board=%2Fetc%2Fpasswd&cast=..%2F")
     assert plain.status_code == withboard.status_code == junk.status_code
-    assert withboard.get_data() == plain.get_data()
-    assert junk.get_data() == plain.get_data()
+    assert same(plain) != plain.get_data(), "the shell stopped carrying a per-render nonce"
+    assert same(withboard) == same(plain)
+    assert same(junk) == same(plain)
 
 
 @pytest.mark.parametrize("path", _PREVIOUSLY_UNGATED_JSON_GET + _PREVIOUSLY_UNGATED_HTML_GET)

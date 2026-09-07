@@ -13,7 +13,7 @@ import pytest
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
-from tests.conftest import login_client, _SEALED_DONOR
+from tests.conftest import ach_event, ach_nonce, login_client, login_test_client, _SEALED_DONOR
 
 # The roster is sealed in the container (built from the private donor), not in source.
 # Gate ONLY the tests that assert sealed roster/skin/criteria CONTENT -- NOT the whole
@@ -241,26 +241,136 @@ def test_badge_thumb_cache(tmp_path):
     assert not (g.branding_root() / "_thumbs").exists()
 
 
+# ---- the feat beacon and its nonce ------------------------------------------
+# Rewritten 2026-09-07: /api/ach-event moved back from LOCALHOST to LOGIN ("triggered
+# should be obtainable easily on a phone just like desktop. For sure build the nonce"),
+# and the per-render nonce is what stands in for loopback now. These tests own that
+# contract -- one event per nonce, 60 seconds, this session only, a 400ms debounce and 30
+# calls a minute -- because nothing else in the suite would notice it silently stopping.
+#
+# Two of them turn the debounce off (monkeypatch _ACH_DEBOUNCE_S) rather than sleeping:
+# a test client's calls land microseconds apart, which is a double-FIRE, not the five
+# separate human clicks Triggered is about. The debounce has its own test below, with real
+# time, and that is where it belongs.
+
+
 @needs_donor
-def test_api_ach_event_beacon(tmp_path):
+def test_api_ach_event_beacon(tmp_path, monkeypatch):
+    """The three events still earn what they always earned, now each with a nonce."""
+    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    assert cli.post("/api/ach-event", json={"event": "konami"}).status_code == 200
+    r = ach_event(cli, "konami")
+    assert r.status_code == 200
     assert g.telemetry_metrics(out)["konami_triggered"] == 1
-    cli.post("/api/ach-event", json={"event": "docs"})
+    ach_event(cli, "docs")
     assert g.telemetry_metrics(out)["docs_opened"] == 1
-    # narrator pokes count up and snap at 5 (Triggered)
+    # narrator pokes count up and snap at 5 (Triggered). Each poke spends the nonce the
+    # previous one handed back -- the rotation IS the client contract, so ride it here.
+    nonce = ach_nonce(cli)
     for i in range(1, 5):
-        r = cli.post("/api/ach-event", json={"event": "narrator"}).get_json()
+        r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
         assert r["pokes"] == i and r["snapped"] is False
-    r = cli.post("/api/ach-event", json={"event": "narrator"}).get_json()
-    assert r["pokes"] == 5 and r["snapped"] is True
+        nonce = r["next_nonce"]
+    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
+    assert r["pokes"] == 5 and r["snapped"] is True and r["next_nonce"]
     d = cli.get("/api/achievements").get_json()
     trg = [a for a in d["achievements"] if a["id"] == "triggered"][0]
     assert trg["earned"] and trg["name"] == "Triggered"
     assert d["feats_revealed"] is True and d["unleash_available"] is True
-    # unknown events are rejected
+    # unknown events are rejected, nonce or no nonce
     assert cli.post("/api/ach-event", json={"event": "nope"}).status_code == 400
+    assert ach_event(cli, "nope").status_code == 400
+
+
+def test_ach_nonce_route_hands_out_a_usable_one(tmp_path):
+    """/api/ach-nonce is the top-up a page idle past the 60s window asks for."""
+    cli = login_client(tmp_path)
+    d = cli.get("/api/ach-nonce").get_json()
+    assert d["nonce"] and isinstance(d["nonce"], str)
+    r = cli.post("/api/ach-event", json={"event": "konami", "nonce": d["nonce"]})
+    assert r.status_code == 200 and r.get_json()["next_nonce"] != d["nonce"]
+
+
+def test_ach_event_without_a_nonce_is_refused(tmp_path):
+    """The console POST the 2026-08-26 LOCALHOST gate existed to stop."""
+    cli = login_client(tmp_path)
+    r = cli.post("/api/ach-event", json={"event": "konami"})
+    assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
+    assert "konami_triggered" not in g.telemetry_metrics(tmp_path)
+
+
+def test_ach_nonce_is_spent_once(tmp_path):
+    """A replayed nonce earns nothing -- the whole point of minting per event."""
+    cli = login_client(tmp_path)
+    nonce = ach_nonce(cli)
+    assert cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}
+                    ).get_json()["pokes"] == 1
+    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1   # no counter change
+
+
+def test_ach_nonce_expires(tmp_path):
+    """Older than the 60s window and it is not a nonce any more. Injected rather than
+    slept: the table is a plain module dict of nonce -> (issued_at, sid)."""
+    cli = login_client(tmp_path)
+    nonce = ach_nonce(cli)
+    issued, sid = g._ach_nonces[nonce]
+    g._ach_nonces[nonce] = (issued - (g._ACH_NONCE_TTL_S + 1), sid)
+    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
+    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+
+
+def test_ach_nonce_is_bound_to_its_session(tmp_path):
+    """A nonce read off someone else's page is not this session's to spend -- and is not
+    consumed either, so its real owner can still use it (a foreign POST must not be a way
+    to blank another session's page)."""
+    # Two ACCOUNTS, not two clients on one account: add_or_update_web_user() stamps a fresh
+    # sess_epoch on the record it writes, so logging the same username in twice would
+    # invalidate the first client's cookie and this would read as a 401, not a refusal.
+    app = g.create_app(tmp_path)
+    mine = login_test_client(app)
+    theirs = login_test_client(app, username="other", password="a-real-test-password-2")
+    nonce = ach_nonce(theirs)
+    r = mine.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    assert r.status_code == 403 and r.get_json()["error"] == "stale page — reload"
+    assert "narrator_pokes" not in g.telemetry_metrics(tmp_path)
+    assert theirs.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}
+                       ).get_json()["pokes"] == 1
+
+
+def test_ach_event_debounces_a_double_fire(tmp_path):
+    """Two pokes inside 400ms are one click fired twice. The second is accepted (and still
+    hands back a nonce, or the page would be left with none) but counts nothing."""
+    cli = login_client(tmp_path)
+    first = cli.post("/api/ach-event", json={"event": "narrator", "nonce": ach_nonce(cli)}
+                     ).get_json()
+    assert first["pokes"] == 1
+    second = cli.post("/api/ach-event",
+                      json={"event": "narrator", "nonce": first["next_nonce"]}).get_json()
+    assert second["debounced"] is True and second["next_nonce"]
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
+    # ...and the debounce is per (session, event): a different event is not held back.
+    cli.post("/api/ach-event", json={"event": "docs", "nonce": second["next_nonce"]})
+    assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+
+
+def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
+    """30 beacon calls a rolling minute, the mint included. Past that: 429 and nothing
+    moves -- the replay loop the nonce alone would only slow down."""
+    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    cli = login_client(tmp_path)
+    nonce = ach_nonce(cli)                       # call 1 of 30
+    for i in range(2, g._ACH_RATE_MAX + 1):      # calls 2..30
+        d = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce}).get_json()
+        assert d["pokes"] == i - 1, "call %d should still be accepted" % i
+        nonce = d["next_nonce"]
+    r = cli.post("/api/ach-event", json={"event": "narrator", "nonce": nonce})
+    assert r.status_code == 429 and r.get_json()["error"] == "slow down"
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == g._ACH_RATE_MAX - 1
+    assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
 
 
 @needs_donor
