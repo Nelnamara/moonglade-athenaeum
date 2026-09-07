@@ -82,7 +82,17 @@ CATALOG_FIELDS = [
     "source",
     # '1' if --reconcile-deleted found this row's task is gone from your live PixAI
     # feed (i.e. you deleted it on the website). Advisory; cleared on re-reconcile.
+    # TASK-level: written onto every row of the task, and it says nothing about which
+    # individual images survive -- see cloud_deleted_at below for the per-image fact.
     "deleted_remote",
+    # PER-IMAGE (2026-09-06): the ISO stamp PixAI puts on THIS image's entry in its task's
+    # outputs.batch once the image itself is deleted (from the gallery's per-image delete,
+    # or from PixAI's own site). Blank means PixAI still has it. Deliberately NOT
+    # deleted_remote: that one is task-level and is cleared again on the next
+    # --reconcile-deleted, while this is per-row and permanent. A row carrying this is one
+    # whose LOCAL copy is the only copy left anywhere, so the whole-task delete path leaves
+    # such rows and their files alone.
+    "cloud_deleted_at",
     # User collections: comma-joined names (no moving files, survives organize).
     # Names may contain spaces but not commas. Set/filtered in the gallery.
     "collections",
@@ -199,6 +209,7 @@ CREATE TABLE IF NOT EXISTS catalog (
     video_duration  TEXT DEFAULT '',
     source          TEXT DEFAULT '',
     deleted_remote  TEXT DEFAULT '',
+    cloud_deleted_at TEXT DEFAULT '',
     collections     TEXT DEFAULT '',
     blurhash        TEXT DEFAULT '',
     nsfw_scores     TEXT DEFAULT '',
@@ -339,6 +350,10 @@ _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN views_prev TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN views_at TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN views_prev_at TEXT DEFAULT ''",
+    # PER-IMAGE CLOUD DELETION (2026-09-06) -- the deletedAt stamp PixAI puts on this one
+    # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
+    # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
+    "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1061,12 +1076,40 @@ def task_media(db_path, task_id):
     query -- the live-mirror's "a concurrent collect already finished, read the
     result back" path, /api/import-task's already-catalogued precheck, and the bulk
     delete's per-task local purge -- so they share one verb and one column list.
-    Empty list for a task this library never downloaded."""
+    Empty list for a task this library never downloaded.
+
+    `cloud_deleted_at` rides along for the third caller: a row carrying it is one
+    whose local copy is the only copy left anywhere, so the bulk purge has to know
+    which rows to walk around before it takes the rest."""
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id, is_video, filename FROM catalog WHERE task_id=?",
+            "SELECT media_id, is_video, filename, cloud_deleted_at "
+            "FROM catalog WHERE task_id=?",
             (str(task_id),)).fetchall()
         return [dict(r) for r in rows]
+
+
+def mark_cloud_deleted(db_path, media_id, when):
+    """Record that PixAI no longer has THIS image: the `deletedAt` stamp its entry in the
+    task's outputs.batch carries.
+
+    Per-ROW and permanent, which is why it is not `deleted_remote` -- that one is a
+    task-level advisory --reconcile-deleted rewrites on every run. Nothing local is removed
+    by this: a row carrying the stamp is one whose local copy is now the only copy anywhere.
+    Fails soft to 0 written; a marker that could break the delete dialog would be worse than
+    a marker that is late."""
+    mid = str(media_id or "").strip()
+    stamp = str(when or "").strip()
+    if not mid or not stamp:
+        return 0
+    try:
+        with catalog(db_path) as con:
+            n = con.execute("UPDATE catalog SET cloud_deleted_at=? WHERE media_id=?",
+                            (stamp, mid)).rowcount
+            con.commit()
+            return n
+    except sqlite3.Error:
+        return 0
 
 
 def task_media_count(db_path, task_id):
@@ -11159,34 +11202,87 @@ def create_app(out_dir: Path):
                         "action": LIVING_SWEEP_ACTION})
 
     def _batch_sibling_count(task_id):
-        """How many catalog rows share this task. Used to say, before anything is deleted,
-        whether the picture is one of a batch or the only one this task made -- because
-        `deleteBatchMedia` on a task's last image is a different act from trimming one frame
-        out of four, and the dialog should not make them look the same."""
+        """How many catalog rows share this task, for the Details view's own display.
+
+        NOT what the delete dialog is worded from -- that has to come from the live read
+        (/api/delete-image with confirm false), because this number counts LOCAL rows and
+        cannot see a sibling deleted from PixAI's own website."""
         return task_media_count(db_path, task_id)
+
+    def _delete_image_rows(plan, task_id, media_id):
+        """Which catalog rows this delete takes with it, as [{media_id, filename}].
+
+        Per-image: the one named image. Whole-task: every row of the task EXCEPT the ones
+        whose image PixAI had already deleted -- their local copy is the only copy left
+        anywhere, and removing the generation record on PixAI does not change that. The
+        branch comes off the plan the delete itself reported, never off a local count."""
+        if plan.plan == "per-image":
+            row = get_row(db_path, media_id) or {}
+            return [{"media_id": media_id, "filename": row.get("filename") or ""}]
+        if plan.plan == "whole-task":
+            keep = {str(m) for m in plan.keep_media}
+            return [{"media_id": str(r["media_id"]), "filename": r.get("filename") or ""}
+                    for r in task_media(db_path, task_id)
+                    if str(r["media_id"]) not in keep]
+        return []
+
+    def _delete_image_message(plan, rows):
+        """The dialog's own words, in plain language, off the live read.
+
+        Every number here is PixAI's answer about this task, never a count of local rows."""
+        if plan.plan == "per-image":
+            n = plan.live_siblings
+            return ("This removes only this image from PixAI. {} other image{} in its "
+                    "batch stay.".format(n, "" if n == 1 else "s"))
+        if plan.plan == "whole-task":
+            names = [Path(r["filename"] or r["media_id"]).name for r in rows]
+            shown = ", ".join(names[:6]) + (
+                " and {} more".format(len(names) - 6) if len(names) > 6 else "")
+            msg = ("This is the last image of its generation on PixAI, so PixAI removes "
+                   "the whole generation record. Locally, {} file{} move{} to your trash "
+                   "folder: {}.".format(len(names), "" if len(names) == 1 else "s",
+                                        "s" if len(names) == 1 else "", shown))
+            if plan.keep_media:
+                msg += (" The {} image{} of this generation you already deleted on PixAI "
+                        "stay here — your copy is the only one left.".format(
+                            len(plan.keep_media),
+                            "" if len(plan.keep_media) == 1 else "s"))
+            return msg
+        return plan.reason
 
     @app.route("/api/delete-image", methods=["POST"])
     @tier(LOCALHOST)
     def api_delete_image():
-        """Delete ONE image from its task on PixAI, leaving the task and its siblings alone.
+        """Delete ONE image from its task on PixAI -- in TWO phases, ask then act.
 
         The finer-grained partner to /delete-tasks-bulk, which is task-level: deleting any
         image there takes the whole batch. Same trust tier and for the same reason --
         LOCALHOST-only, because this destroys on the owner's real cloud account, and a
         logged-in LAN session unlocks browsing and spending, not irreversible deletion.
 
+        `POST {media_id, confirm: false}` is the PREVIEW: it reads the live task and answers
+        `{plan, reason, live_siblings, local_rows, message}` with nothing deleted. The dialog
+        is worded from THAT answer. It has to be: which mutation PixAI accepts, and how many
+        images of the batch survive, are facts only PixAI holds -- the local catalog cannot
+        see a sibling deleted from PixAI's own website, and for years this dialog promised
+        "the rest of its batch stays" on deletes that took the whole generation.
+
+        `POST {media_id, confirm: true, plan}` DELETES. It reads and routes again, and
+        refuses when the fresh plan differs from the one the dialog showed, so the user
+        cannot be made to agree to one thing and get another. `confirm` must be present
+        either way: the typed-DELETE prompt is the client's half of the same gate, and a
+        route that acted on a body without it would make that prompt decorative.
+
         Local purge follows the cloud delete, exactly as the task-level path does, so cloud
         and catalog never drift. Order matters: if the cloud call fails, nothing local is
-        touched and the image is still there to try again. The reverse order would leave a
-        hole in the catalog for an image that still exists on PixAI.
-
-        `confirm` is required -- the typed-DELETE prompt is the client's half of the same
-        gate, and a route that acted without it would make that prompt decorative.
+        touched and the image is still there to try again. WHICH rows go is the plan's to
+        say (`_delete_image_rows`), never this route's to re-derive from local counts.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
         body = request.get_json(silent=True) or {}
-        if not body.get("confirm"):
+        if "confirm" not in body:
             return jsonify({"error": "not confirmed"}), 400
+        preview = not body.get("confirm")
         mid = str(body.get("media_id") or "").strip()
         row = get_row(db_path, mid) if mid else None
         if not row:
@@ -11204,21 +11300,60 @@ def create_app(out_dir: Path):
             # except below turned into a 200 error body -- so the feature was dead while
             # looking like a PixAI-side failure.
             _core_session = core._make_session(None)
-            core.delete_batch_media_gql(_core_session, tid, mid)
+            if preview:
+                plan = core.plan_image_delete(_core_session, tid, mid)
+            else:
+                plan = core.delete_image_routed(_core_session, tid, mid,
+                                                confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
             return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
-        try:
-            purge_media_local(out_dir, thumb_dir, db_path, mid, row.get("filename"))
-        except OSError as e:
-            # The cloud delete above already happened and cannot be taken back, so a local
-            # purge that fails has to come back through this route's own error contract
-            # rather than a 500: the row (and the file) are still here, now pointing at an
-            # image PixAI no longer has, and only the user can decide to retry.
-            return jsonify({"error": "Deleted on PixAI, but the local copy could not be "
-                                     "moved to the trash folder: "
-                                     + _redact_host_paths(str(e))[:160]}), 200
+
+        # The read this plan was made from is the only place the app learns that PixAI has
+        # dropped an image, so every row it names is marked here -- on the preview as much as
+        # on the confirm, and whichever branch the plan took. Nothing local is removed by it:
+        # a marked row is one whose local copy is now the only copy anywhere, and it stays.
+        # It cannot be left to --backfill-full-meta, which only re-fetches a row missing its
+        # prompt or model detail: a complete row is never revisited, so in the ordinary case
+        # that pass would never set this at all.
+        for gone_media, when in plan.keep_media_deleted_at:
+            mark_cloud_deleted(db_path, gone_media, when)
+
+        if plan.plan == "refuse":
+            answer = {"plan": "refuse", "reason": plan.reason, "live_siblings": 0,
+                      "local_rows": [], "message": plan.reason}
+            if not preview:
+                answer["error"] = plan.reason
+            return jsonify(answer), 200
+
+        rows = _delete_image_rows(plan, tid, mid)
+        if preview:
+            return jsonify({"plan": plan.plan, "reason": plan.reason,
+                            "live_siblings": plan.live_siblings,
+                            "local_rows": [r["media_id"] for r in rows],
+                            "message": _delete_image_message(plan, rows)})
+
+        purged, failed = [], []
+        for r in rows:
+            try:
+                purge_media_local(out_dir, thumb_dir, db_path, r["media_id"], r["filename"])
+                purged.append(r["media_id"])
+            except OSError as e:
+                # The cloud delete above already happened and cannot be taken back, so a
+                # local purge that fails has to come back through this route's own error
+                # contract rather than a 500: the row (and the file) are still here, now
+                # pointing at an image PixAI no longer has, and only the user can decide to
+                # retry. The loop keeps going -- one file the OS will not release must not
+                # strand the rest of a whole-task purge.
+                failed.append(_redact_host_paths(str(e))[:160])
+        if failed:
+            return jsonify({"error": "Deleted on PixAI, but {} local file{} could not be "
+                                     "moved to the trash folder: {}".format(
+                                         len(failed), "" if len(failed) == 1 else "s",
+                                         "; ".join(failed[:3])),
+                            "plan": plan.plan, "local_rows": purged}), 200
         telem_bump("culled", out_dir=out_dir)
-        return jsonify({"ok": True, "media_id": mid, "task_id": tid})
+        return jsonify({"ok": True, "media_id": mid, "task_id": tid, "plan": plan.plan,
+                        "local_rows": purged})
 
     @app.route("/api/delete-local", methods=["POST"])
     @tier(LOGIN)
@@ -11259,6 +11394,43 @@ def create_app(out_dir: Path):
         """Remove a media's catalog row + thumbnail; quarantine its file to _deleted/
         (recoverable) rather than destroying it."""
         purge_media_local(out_dir, thumb_dir, db_path, media_id, filename)
+
+    def _rows_the_bulk_purge_must_keep(session, task_id, rows):
+        """Which of one task's local rows the bulk delete must leave exactly where they are.
+
+        The same rule the single-image path follows through ImageDeletePlan.keep_media, and
+        it is here for the same reason: an image the owner deleted on PixAI's own website is
+        gone THERE, so this library's copy is the only one left anywhere. PixAI removing the
+        generation record does not change that, and neither does deleting its siblings --
+        so those rows and their files stay, and the whole-task purge walks around them.
+
+        Two sources, deliberately both:
+          * the live task, read once here. It fails SOFT: a read that could not be made must
+            never WIDEN what a purge takes, so a blip leaves the catalog's own answer standing
+            rather than replacing it with silence.
+          * `cloud_deleted_at` on the rows themselves, which stands whether or not the read
+            worked -- it was written the last time the app read this task.
+
+        The read is also where the marker gets WRITTEN: every member PixAI reports deleted
+        has its own row stamped here, so the catalog learns it from the read the delete was
+        making anyway rather than from a network call of its own.
+
+        Returns a set of media ids. Called BEFORE the cloud delete fires -- afterwards the
+        generation record is gone and there is nothing left to read."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        keep = {str(r["media_id"]) for r in rows
+                if str(r.get("cloud_deleted_at") or "").strip()}
+        try:
+            task = core.task_detail_gql(session, str(task_id)) if session is not None else None
+        except Exception:                            # noqa: BLE001 -- fail soft, see above
+            task = None
+        batch = ((task or {}).get("outputs") or {}).get("batch")
+        for mid in core.deleted_batch_media(batch):
+            keep.add(str(mid))
+            stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+            if stamp:
+                mark_cloud_deleted(db_path, mid, stamp)
+        return keep
 
     def _preview_entry(row, selected_ids):
         """One /api/delete-preview media entry: what it is, whether the user actually
@@ -11378,6 +11550,7 @@ def create_app(out_dir: Path):
 
         def _work():
             deleted = failed = removed = done = 0
+            kept = []
             step = max(1, total // 50)          # throttle progress writes (~every 2%)
             def _tick():
                 if done % step == 0 or done == total:
@@ -11385,6 +11558,12 @@ def create_app(out_dir: Path):
             try:
                 session = core._make_session(None) if task_ids else None
                 for tid in task_ids:
+                    # BEFORE the cloud delete: once the generation record is gone there is
+                    # nothing left to read, and this is the read that says which local rows
+                    # hold the only copy of their image left anywhere.
+                    rows = task_media(db_path, tid) if purge_local else []
+                    keep = (_rows_the_bulk_purge_must_keep(session, tid, rows)
+                            if purge_local else set())
                     try:
                         core.delete_task_gql(session, tid)      # cloud delete (irreversible)
                         deleted += 1
@@ -11392,7 +11571,12 @@ def create_app(out_dir: Path):
                         failed += 1
                         done += 1; _tick(); continue
                     if purge_local:
-                        for m in task_media(db_path, tid):
+                        for m in rows:
+                            if str(m["media_id"]) in keep:
+                                # PixAI had already deleted this one; this library holds the
+                                # last copy in existence. Named on the card, never purged.
+                                kept.append(str(m["media_id"]))
+                                continue
                             try:
                                 _purge_local(m["media_id"], m["filename"]); removed += 1
                             except OSError:
@@ -11409,10 +11593,16 @@ def create_app(out_dir: Path):
                         failed += 1
                     done += 1; _tick()
                 summary = "Deleted {} · purged {} local · {} failed".format(deleted, removed, failed)
+                if kept:
+                    # Said out loud rather than left as a silent difference in the numbers:
+                    # these files are still in the library on purpose.
+                    summary += " · kept {} file{} PixAI had already deleted".format(
+                        len(kept), "" if len(kept) == 1 else "s")
                 # ANY failure is a non-clean result -- surface it RED on the card. Don't bury
                 # "3 failed" inside a green 'done': those tasks still exist on PixAI (drift).
                 status = "failed" if failed else "done"
                 _log_job(job_id, status=status, label=summary, done=total, total=total,
+                         kept_media=(kept or None),
                          error=(summary if failed else None))
             except Exception as e:                               # noqa: BLE001
                 _log_job(job_id, status="failed", error=_redact_host_paths(str(e))[:200])
