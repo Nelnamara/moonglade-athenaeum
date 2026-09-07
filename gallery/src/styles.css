@@ -256,8 +256,6 @@ button:disabled { cursor: default; }
 .mfly.open { display: flex; }
 .mfly > div:not(.mfly-head) { flex: 1 1 auto; overflow-y: auto; }
 .mfly-head { display: flex; gap: 7px; align-items: center; }
-.pickwrap { max-width: min(880px, 94vw); max-height: 90vh; overflow: auto;
-  background: var(--mantle); border: 1px solid var(--surface1); border-radius: 12px; padding: 10px; }
 
 /* ===== The Konami Code easter egg — ported verbatim from the classic BASE_HTML,
    which /next never inherited (that CSS lives only in the classic's inline
