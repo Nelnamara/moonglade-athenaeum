@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FILES = ["App.jsx", "AppMobile.jsx"].map(f => path.join(here, "..", "..", "gallery", "src", f));
+const FILES = ["App.jsx", path.join("components", "AppMobile.jsx")].map(f => path.join(here, "..", "..", "gallery", "src", f));
 
 function declaredSetters(src) {
   const out = new Set();
