@@ -7487,9 +7487,32 @@ window.storage = {
   list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
   delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
+/* The Read the Manual beacon, and the nonce it needs (2026-09-07 ruling -- see
+   api_ach_event()). The classic Loom shell has no bundle seam to import
+   gallery/src/notify/achNonce.js from, so it carries the same three rules by hand:
+   send the nonce, adopt the next_nonce an accepted event returns, and on a stale-page
+   403 ask /api/ach-nonce once and retry once. Anything else is a quiet no-op -- the
+   feat stays earnable on the next open. The value below is a PLACEHOLDER the /loom route
+   substitutes on the way out -- a fresh mint per render, exactly as app_page puts one in
+   MG_BOOT. (Naming the placeholder token in this comment would substitute it here too.) */
+window.MG_ACH_NONCE = "__ACH_NONCE__";
+window.mgAchDocs = function (retried) {
+  fetch('/api/ach-event', {method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({event:'docs', nonce: window.MG_ACH_NONCE})})
+    .then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d || {}}; },
+                                              function () { return {status: r.status, body: {}}; }); })
+    .then(function (x) {
+      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce; return; }
+      if (x.status !== 403 || retried) return;      // 429 or anything else: give up quietly
+      return fetch('/api/ach-nonce').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.mgAchDocs(true); }
+      });
+    })
+    .catch(function () {});
+};
 </script>
 __RUNTIME_SCRIPT_BLOCK__
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{window.mgAchDocs()}catch(e){}"
   style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
@@ -8489,6 +8512,117 @@ def scene_row(sc):
             "shape": shape,
             "detail": _scene_detail(shape, keys),
             "thumb": scene_thumb_url(sc.get("images"))}
+
+
+# ---- the feat-beacon nonce, debounce and rate limit (2026-09-07) ------------------------
+# What replaced the LOCALHOST gate on /api/ach-event. The gate's problem was that the
+# beacon is the ONLY witness a feat gesture happened, so any signed-in session could POST
+# {"event": "konami"} from a console and arm the feat. Loopback made the gesture witnessable
+# but cost every phone and LAN device the three feats outright. The owner's call
+# (2026-09-07): "triggered should be obtainable easily on a phone just like desktop. For
+# sure build the nonce."
+#
+# So the witness moves from WHERE the request came from to WHETHER IT CAME FROM A PAGE THE
+# SERVER RENDERED. A nonce is minted into each render, is good for exactly one event inside
+# 60 seconds, and is bound to the session it was minted for. A console POST has no nonce; a
+# replayed one is already spent; one lifted from another session's page is not this
+# session's to spend. That is a real (if soft) witness, and unlike loopback it is one a
+# phone passes.
+#
+# Process-local by design, exactly like _login_attempts: one process, `python
+# moonglade_gallery.py`. Under a multi-worker server each worker would keep its own table
+# and a nonce minted by worker A would read as unknown at worker B -- the page would refresh
+# once and carry on, so the failure mode is a wasted round trip, not a lost feat.
+_ACH_NONCE_TTL_S = 60.0       # a nonce is good for one event inside this window
+_ACH_NONCE_MAX = 4000         # hard cap on the table (sweep-first, then evict oldest)
+_ACH_DEBOUNCE_S = 0.4         # the same (session, event) inside this counts once
+_ACH_RATE_MAX = 30            # beacon calls per session per window (mint + event both count)
+_ACH_RATE_WINDOW_S = 60.0
+_ach_lock = threading.Lock()
+_ach_nonces = {}   # nonce -> (issued_at, sid)
+_ach_last = {}     # (sid, event) -> epoch of the last event that COUNTED
+_ach_rate = {}     # sid -> [epoch, ...] of calls inside the rolling window
+
+
+def _ach_sweep(now):
+    """Drop expired nonces, stale debounce stamps and spent rate rows. The caller holds
+    _ach_lock. Runs on every mint AND every check, so the tables cannot grow between two
+    cold periods -- there is no other reaper."""
+    for nonce, (issued, _sid) in list(_ach_nonces.items()):
+        if now - issued > _ACH_NONCE_TTL_S:
+            _ach_nonces.pop(nonce, None)
+    for key, stamp in list(_ach_last.items()):
+        if now - stamp > _ACH_RATE_WINDOW_S:
+            _ach_last.pop(key, None)
+    for sid, hits in list(_ach_rate.items()):
+        fresh = [t for t in hits if now - t <= _ACH_RATE_WINDOW_S]
+        if fresh:
+            _ach_rate[sid] = fresh
+        else:
+            _ach_rate.pop(sid, None)
+
+
+def _ach_mint(sid, now=None):
+    """A fresh nonce for `sid`. Sweeps first; if the table is somehow still at its cap
+    (a burst inside one 60s window), evicts the oldest entries rather than growing --
+    an unbounded dict fed by any logged-in session is a memory vector, and losing the
+    oldest nonce costs its page one refresh."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        overflow = len(_ach_nonces) - _ACH_NONCE_MAX + 1
+        if overflow > 0:
+            for nonce, _rec in sorted(_ach_nonces.items(), key=lambda kv: kv[1][0])[:overflow]:
+                _ach_nonces.pop(nonce, None)
+        nonce = secrets.token_urlsafe(16)
+        _ach_nonces[nonce] = (now, sid)
+        return nonce
+
+
+def _ach_consume(nonce, sid, now=None):
+    """True when `nonce` was minted for THIS session and is still inside its window.
+    A match is spent whether or not it had expired (one event per nonce, always). A
+    nonce belonging to another session is NOT spent -- refusing it is right, but burning
+    it would let any logged-in session invalidate another's page at will."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        rec = _ach_nonces.get(nonce) if nonce else None
+        if not rec:
+            return False
+        issued, owner = rec
+        if owner != sid:
+            return False
+        _ach_nonces.pop(nonce, None)
+        return (now - issued) <= _ACH_NONCE_TTL_S
+
+
+def _ach_debounced(sid, event, now=None):
+    """True when the same (session, event) already counted less than 400ms ago -- a double
+    fire of one gesture, not two gestures. Records this event's stamp when it is not."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        prev = _ach_last.get((sid, event))
+        if prev is not None and (now - prev) < _ACH_DEBOUNCE_S:
+            return True
+        _ach_last[(sid, event)] = now
+        return False
+
+
+def _ach_rate_ok(sid, now=None):
+    """False once `sid` has spent its 30 beacon calls in the rolling minute. Counts the
+    call it admits, so a mint and an event draw on the same budget -- five pokes plus the
+    odd refresh is nowhere near it, a scripted replay loop is."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        hits = [t for t in _ach_rate.get(sid, ()) if now - t <= _ACH_RATE_WINDOW_S]
+        if len(hits) >= _ACH_RATE_MAX:
+            _ach_rate[sid] = hits
+            return False
+        hits.append(now)
+        _ach_rate[sid] = hits
+        return True
 
 
 def create_app(out_dir: Path):
@@ -15018,50 +15152,97 @@ def create_app(out_dir: Path):
             telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
 
+    def _ach_sid():
+        """This session's beacon identity: a random id minted once and kept in the
+        session cookie, the same way `csrf` is. Nonces are bound to it, and the
+        debounce and rate limit are keyed on it."""
+        return session.setdefault("ach_sid", secrets.token_hex(16))
+
+    @app.route("/api/ach-nonce")
+    @tier(LOGIN)
+    def api_ach_nonce():
+        """A fresh beacon nonce for a page whose own has gone stale (idle past the 60s
+        window, or spent). Same session budget as the events themselves -- see
+        _ach_rate_ok(). The render seams (app_page, /loom) mint their first one inline;
+        this is the top-up."""
+        sid = _ach_sid()
+        if not _ach_rate_ok(sid):
+            return jsonify({"error": "slow down"}), 429
+        return jsonify({"nonce": _ach_mint(sid)})
+
     @app.route("/api/ach-event", methods=["POST"])
-    @tier(LOCALHOST)
+    @tier(LOGIN)
     def api_ach_event():
         """Feat-event beacon from the front-end: the Starfall konami egg, the
         in-app manual, and narrator pokes. Whitelisted event names only; each is
         a cosmetic local counter (no spend).
 
-        LOCALHOST since 2026-08-26 (was LOGIN). The beacon is the ONLY thing
-        standing between a feat and being earned -- there is no server-side
-        re-check that the gesture actually happened, so any signed-in session
-        could POST {"event": "konami"} straight from a console and arm the feat
-        without ever entering the code. Narrowing to loopback means a feat can
-        only be armed at the server's own keyboard, which is the one place the
-        gesture can be witnessed.
+        LOGIN again since 2026-09-07, on the owner's ruling ("I feel like
+        triggered should be obtainable easily on a phone just like desktop. For
+        sure build the nonce."). The per-render nonce this route now requires is
+        what makes LOGIN honest, and it is the work the 2026-08-26 comment here
+        listed as "NOT DONE HERE".
 
-        WHAT A LAN DEVICE LOSES, AND WHY THAT'S THE POINT. These events
-        ANNOUNCE; they never gate capability. A LAN session that loses them
-        keeps every route, every image, every credit-spending path it had --
-        it just can't arm a cosmetic counter it didn't earn. Losing that on LAN
-        is the intended outcome, not collateral.
+        THE HISTORY, kept because the reasoning still stands. LOCALHOST from
+        2026-08-26 to 2026-09-07: the beacon is the ONLY thing standing between a
+        feat and being earned -- there is no server-side re-check that the
+        gesture actually happened, so any signed-in session could POST
+        {"event": "konami"} straight from a console and arm the feat without ever
+        entering the code. Narrowing to loopback meant a feat could only be armed
+        at the server's own keyboard, the one place the gesture can be witnessed.
+        The cost was that a phone or any other LAN device lost all three feats,
+        and the owner judged that cost too high once the nonce was buildable.
 
-        The clients treat a refusal as a no-op by design: api.js never throws
-        (a 403 comes back as an {error} body), App.jsx's konami handler is
+        WHAT THE NONCE WITNESSES INSTEAD. Not where the request came from, but
+        that it came from a page THIS SERVER RENDERED FOR THIS SESSION: the
+        nonce is minted into the render (window.MG_BOOT.ach_nonce, or the Loom
+        shell's own inline mint), is good for exactly one event inside 60
+        seconds, and is refused when presented by another session. A console POST
+        has none. A replay has a spent one. A nonce lifted from someone else's
+        page is not this session's to spend. That is a softer witness than
+        loopback -- someone determined can still read their own page's nonce out
+        of MG_BOOT and curl it -- but it is the same class of witness CSRF gives
+        us everywhere else, and it costs a phone nothing.
+
+        Also here, so five real pokes stay five real pokes: a 400ms debounce per
+        (session, event) -- a double-fired click counts once -- and 30 beacon
+        calls per session per rolling minute, beyond which the answer is 429 and
+        no counter moves.
+
+        The clients still treat a refusal as a no-op by design: api.js never
+        throws (a 403 comes back as an {error} body), App.jsx's konami handler is
         explicitly fail-soft (the stars and toast still play), useFolio.js's
-        pokeNarrator() early-returns on res.error before any Toast, and the
-        in-app manual's beacon is a bare fire-and-forget fetch with no handler
-        attached. A LAN device sees the egg and hears nothing about the gate.
-
-        NOT DONE HERE, deliberately: the per-render nonce / rate-limit /
-        debounce that would let a LAN device earn these HONESTLY. That is a
-        design remainder, tracked internally, not a gap in this gate."""
+        pokeNarrator() early-returns on res.error before any Toast. What is new
+        is that every caller now goes through notify/achNonce.js, which adopts
+        the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
+        once on a stale-page 403 before giving up quietly."""
+        sid = _ach_sid()
+        if not _ach_rate_ok(sid):
+            return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
+        if ev not in ("konami", "docs", "narrator"):
+            return jsonify({"error": "unknown event"}), 400
+        # One refusal wording for missing, unknown, expired and foreign alike: which
+        # check failed is exactly the thing a replay probe would want to learn, and
+        # every one of them has the same fix for a real page.
+        if not _ach_consume(str(body.get("nonce") or ""), sid):
+            return jsonify({"error": "stale page — reload"}), 403
+        # A consumed nonce always buys the next one, debounced or not -- otherwise the
+        # second half of a double-fire leaves the page with no nonce at all.
+        nxt = _ach_mint(sid)
+        if _ach_debounced(sid, ev):
+            return jsonify({"ok": True, "debounced": True, "next_nonce": nxt})
         if ev == "konami":
             telem_flag("konami_triggered", out_dir=out_dir)
-            return jsonify({"ok": True})
+            return jsonify({"ok": True, "next_nonce": nxt})
         if ev == "docs":
             telem_bump("docs_opened", out_dir=out_dir)
-            return jsonify({"ok": True})
-        if ev == "narrator":
-            telem_bump("narrator_pokes", out_dir=out_dir)
-            pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-            return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5})
-        return jsonify({"error": "unknown event"}), 400
+            return jsonify({"ok": True, "next_nonce": nxt})
+        telem_bump("narrator_pokes", out_dir=out_dir)
+        pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+        return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5,
+                        "next_nonce": nxt})
 
     @app.route("/api/mirror/status")
     @tier(LOGIN)
@@ -16474,6 +16655,11 @@ __DESIGN_TOKENS__
             "is_local": True,
             "is_true_local": _is_local_request(),
             "csrf": session["csrf"],
+            # The feat beacon's per-render nonce (2026-09-07 ruling -- see
+            # api_ach_event()'s own comment). One event per nonce, 60 seconds,
+            # bound to this session; notify/achNonce.js seeds itself from here and
+            # rotates on each accepted event.
+            "ach_nonce": _ach_mint(_ach_sid()),
             "build_stamp": build_stamp,
             # The locked default; becomes a Branding-panel setting later
             # (docs/DECISIONS.md "Banner controls join the Branding panel").
@@ -16962,7 +17148,11 @@ __DESIGN_TOKENS__
         if not bundle_file.is_file():
             return ("The Loom bundle is not built. Run `npm run build` in loom/ to "
                     "generate loom/dist/master-storyboard.bundle.js."), 503
-        return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
+        # __ACH_NONCE__ is the Read the Manual beacon's per-render nonce (2026-09-07
+        # ruling). token_urlsafe is [A-Za-z0-9_-] only, so it cannot break out of the
+        # double-quoted JS string it lands in.
+        return (LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
+                                .replace("__ACH_NONCE__", _ach_mint(_ach_sid())))
 
     @app.route("/api/loom/get")
     @tier(LOGIN)

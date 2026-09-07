@@ -347,3 +347,20 @@ def login_client(tmp_path, username=_TEST_USERNAME, password=_TEST_PASSWORD):
     from moonglade_gallery import create_app
     return login_test_client(create_app(tmp_path), username=username, password=password)
 
+
+def ach_nonce(cli):
+    """A fresh feat-beacon nonce for `cli`'s session. Since the 2026-09-07 nonce ruling
+    /api/ach-event refuses a POST that carries none, so a test that just wants the
+    counter to move mints one the same way a real page does."""
+    return ((cli.get("/api/ach-nonce").get_json() or {}).get("nonce") or "")
+
+
+def ach_event(cli, event, nonce=None):
+    """POST one feat event with a valid nonce -- the shape every real client sends since
+    2026-09-07. Tests that are ABOUT the nonce (replay, expiry, foreign session, the
+    debounce, the rate limit) post by hand instead; this is for the many tests that only
+    need the earn to land."""
+    return cli.post("/api/ach-event",
+                    json={"event": event, "nonce": nonce if nonce is not None
+                          else ach_nonce(cli)})
+

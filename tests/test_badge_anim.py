@@ -28,7 +28,7 @@ from PIL import Image, ImageSequence
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import ach_event, login_client
 
 
 @pytest.fixture(autouse=True)
@@ -174,7 +174,7 @@ def test_hidden_feat_animation_is_gated_exactly_like_its_still(tmp_path, sealed_
     _anim("the-konami-code")
     assert cli.get("/badge-thumb/the-konami-code.webp").status_code == 404
     assert cli.get("/badge-thumb/the-konami-code.png").status_code == 404
-    cli.post("/api/ach-event", json={"event": "konami"})
+    ach_event(cli, "konami")
     assert cli.get("/badge-thumb/the-konami-code.webp").status_code == 200
     assert cli.get("/badge-thumb/the-konami-code.png").status_code == 200
 

@@ -33,6 +33,7 @@ import {
   fetchAccount, fetchCollections,
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
+import { sendAchEvent } from "./notify/achNonce.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
@@ -615,7 +616,10 @@ export default function App({ boot }) {
       // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
       // public source, so a clone can't read the egg's payoff before finding it -- a
       // failed read answers {error}, and the sub-line falls back to its generic string.
-      apiPost("/api/ach-event", { event: "konami" })
+      // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
+      // adopts the next one (notify/achNonce.js), which is what let the route go back to
+      // LOGIN so a phone can find this egg too.
+      sendAchEvent("konami")
         .then(() => apiGet("/api/achievements"))
         .then((data) => {
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
