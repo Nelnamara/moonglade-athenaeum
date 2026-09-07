@@ -86,12 +86,7 @@ button:disabled { cursor: default; }
 
 .stats { font-size: 12px; color: var(--subtext); white-space: nowrap; }
 .stats b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
-.bkd { border-radius: 12px; font-size: 10.5px; padding: 3px 10px; white-space: nowrap;
-  color: var(--emerald); border: 1px solid color-mix(in srgb, var(--emerald) 42%, transparent);
-  background: rgba(8, 6, 18, .6); }
 
-.hug { display: flex; align-items: center; gap: 7px; margin-inline: auto;
-  flex-wrap: wrap; row-gap: 5px; justify-content: center; }
 .srch { position: relative; flex: 1 1 250px; min-width: 180px; max-width: 470px; }
 .srch i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
   font-style: normal; font-size: 11px; color: var(--overlay0); }
@@ -100,13 +95,11 @@ button:disabled { cursor: default; }
   background: rgba(20, 17, 40, .55); backdrop-filter: blur(14px);
   box-shadow: 0 0 34px -10px color-mix(in srgb, var(--cyan) 45%, transparent); }
 .srch input::placeholder { color: var(--overlay0); }
-.adv { position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
-  font-size: 10px; white-space: nowrap; color: var(--cyan);
-  border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent); border-radius: 14px;
-  padding: 3px 10px; background: rgba(71, 203, 195, .10); }
-.adv.has { background: color-mix(in srgb, var(--cyan) 26%, transparent); color: #fff; }
 
-/* ---- the Advanced flyout: ANCHORED to the search slab, never placed ---- */
+/* ---- the Advanced flyout: ANCHORED to the search slab, never placed ----
+   Its old trigger pill .adv/.adv.has was removed 2026-09-07: FiltersPanel.jsx:281
+   renders the caret as .mgl-scaret (librarybar.css) now. .fly itself is still live,
+   rendered by Flyout.jsx:96. ---- */
 .fly { position: absolute; left: 0; top: calc(100% + 8px); width: 440px; z-index: 60;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 12px; padding: 12px 13px 11px; text-align: left;
