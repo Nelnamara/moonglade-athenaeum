@@ -94,13 +94,12 @@ key or launcher icon still require a request from the server's own machine, beca
 touch local files or delete from PixAI irreversibly.
 
 Those controls are simply **not drawn** for a browser that reached the gallery across the
-network, so the header tells you when you're that browser: a small dashed
-**🌐 LAN session · local-only tools hidden** chip appears beside the nav, and its tooltip
-lists exactly what's missing (**↑ Import**, **Delete from PixAI**, **Set launcher icon**,
-the destructive Panel jobs). It's easy to leave a tab open on `http://<your-pc>:5000` and
-forget you're not on `localhost` — the chip is there so a missing button reads as a tier
-rather than a bug. Open the gallery from the serving machine's own `localhost` address and
-the chip disappears along with the restriction.
+network: **↑ Import**, **Delete from PixAI**, **Set launcher icon** and the destructive Panel
+jobs are missing, not broken. It's easy to leave a tab open on `http://<your-pc>:5000` and
+forget you're not on `localhost`, so if a button you expect is not there, check the address
+bar first. Open the gallery from the serving machine's own `localhost` address and the
+restriction lifts. (Earlier builds showed a **🌐 LAN session** chip naming what was hidden;
+the current shell does not.)
 
 ## Browsing & filtering
 

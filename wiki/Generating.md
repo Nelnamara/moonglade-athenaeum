@@ -542,14 +542,11 @@ the button comes back — the app will tell you it doesn't know rather than leav
   membership and shown as `LORAS · n/max` — it is not a fixed number, and Generate blocks
   rather than letting you submit over it), aspect/mode/count, live credit cost with the
   free-card check up front.
-- **Edit** — instruct edits ("make it night") and the drag-a-box hand/face **Fixer**, in
-  sub-tabs over one source image. The **Enhance** sub-tab holds PixAI's one-click presets and
-  the door to **the Darkroom**, where the **art filters** live: gradient overlays applied right
-  in your browser, so they cost nothing, make no request, and work offline.
-  The Fixer shows its live credit cost as soon as you mark a region, and always asks before
-  it submits: unlike everything else in the drawer, a fix can't be covered by a free card, so
-  it always spends. Fixed images are filed under the name of the image they repaired plus a
-  `fix-face` / `fix-hand` marker, so a repair sits next to its original in the folder.
+- **Edit** — instruct edits ("make it night") over one source image. The **Enhance** sub-tab
+  holds PixAI's one-click presets and the door to **the Darkroom**, where the **art filters**
+  live: gradient overlays applied right in your browser, so they cost nothing, make no request,
+  and work offline. The drag-a-box hand/face **Fixer** is not built yet: the computer's Edit
+  tab has no Fixer control, and the phone's Edit tab shows a "coming next" placeholder for it.
   The two edit models take different numbers of reference images (Edit Pro up to 4,
   Reference Pro up to 10, and the picture being edited counts as one of them), so switching
   from the roomier one to the tighter one can't keep everything you picked. **It now tells
