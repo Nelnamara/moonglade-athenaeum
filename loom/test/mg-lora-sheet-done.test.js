@@ -27,7 +27,7 @@ const css = src("gallery/src/styles/create-mobile.css");
 
 describe("the phone sheet's head ends in Done; the desktop's still ends in ✕", () => {
   test("the label is ONE exported constant, so PixAI's wording is a one-line change", () => {
-    assert.match(flyout, /export const LORA_SHEET_DONE_LABEL = "Done";/);
+    assert.match(flyout, /export const LORA_SHEET_DONE_LABEL = "Confirm selection";/, "PixAI's own wording, captured 2026-09-07");
     assert.ok(flyout.includes("{LORA_SHEET_DONE_LABEL}"),
       "the button must render the constant, not a second literal that can drift from it");
   });

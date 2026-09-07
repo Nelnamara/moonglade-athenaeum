@@ -16,9 +16,11 @@ import ModelPicker from "./ModelPicker.jsx";
    media query in here -- CreateMobile is the phone mount and GenerateDrawer is the
    desktop one, so the two mounts already know which they are. */
 
-/* The label, in one place: PixAI's own wording for this control is not recorded in
-   the repo, so matching it exactly is a one-line change here rather than a hunt. */
-export const LORA_SHEET_DONE_LABEL = "Done";
+/* The label, in one place. PixAI's own LoRA dialog ends its "Selected LoRAs" pane with
+   one full-width button that reads "Confirm selection" (captured from the site, read-only,
+   2026-09-07; moonglade-internal/probes/PROBE_2026-09-07_lora-picker-wording-and-refresh.md).
+   The owner's ruling was "Done button matches pixai", so that is the word. */
+export const LORA_SHEET_DONE_LABEL = "Confirm selection";
 
 export default function ModelFlyout({
   open, kind, setKind, baseType, value, selected, onBasePick, onLoraPick, onClose,
