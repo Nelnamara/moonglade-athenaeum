@@ -685,7 +685,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
 
       <div className="cm-subhead">Tuning</div>
       <div className="cm-lbl">Mode</div>
-      {/* Same profile gate the dock's mode bars carry (SCOPE 2026-08-17 4b), through the
+      {/* Same profile gate the dock's mode bars carry (SCOPE 2026-08-17 §4b), through the
           SAME genCore.modeOffered -- a chip for a mode this model does not offer is DIMMED,
           never removed, so the row keeps its shape, and it says why. The phone was left out
           of the first cut (red team 2026-09-07) even though it already gates steps/CFG/
