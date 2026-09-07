@@ -308,7 +308,14 @@ button:disabled { cursor: default; }
   box-shadow: 0 0 30px -6px color-mix(in srgb, var(--accent) 75%, transparent); }
 .gen.soon { opacity: .55; }
 
-/* ---- the grid ---- */
+/* ---- the grid ----
+   The CLASSIC .grid card block (.grid, .grid figure/img/figcaption, .grid .model/
+   .date/.dim/.fname and the .blur-on privacy-blur trio) was removed 2026-09-07:
+   nothing that loads this sheet carries a bare `grid` class any more. Grid.jsx
+   renders .mgg-grid and grid.css owns the cards -- as that file's own header
+   (grid.css:6) already said, it "detaches the old styles.css .grid card rules
+   wholesale". .gridwrap, .tipbar, .stars, .vbadge, .tick, .sentinel and .srcbadge
+   below are NOT part of that block and are still live. ---- */
 .gridwrap { padding: 0 0 60px; }
 /* the separator bar: a real band, not a floating caption */
 .tipbar { display: flex; align-items: center; gap: 12px; padding: 6px 16px;
@@ -317,33 +324,7 @@ button:disabled { cursor: default; }
 .tb-count { color: var(--subtext); font-variant-numeric: tabular-nums; }
 .tb-tip { font-style: italic; }
 @media (max-width: 860px) { .tb-tip { display: none; } }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px; padding: 12px 12px 0; }
-/* .gcard, NOT .card: the strip's glass-button class was leaking onto figures and its
-   inline-flex silently pushed the captions out of the overflow-hidden card. */
-.grid figure { margin: 0; display: flex; flex-direction: column;
-  position: relative; border-radius: 12px; overflow: hidden; cursor: pointer;
-  background: var(--base); border: 1px solid var(--surface0);
-  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease; }
-.grid figure:hover { transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, .9),
-    0 0 22px -8px color-mix(in srgb, var(--accent) 45%, transparent); }
-.grid figure.sel { border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 24px -6px color-mix(in srgb, var(--accent) 60%, transparent); }
-.grid img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
-/* Privacy blur, CLASSIC semantics (parity with body.privacy-blur in the old gallery):
-   eye ON blurs ALL thumbnails 16px, flagged ones heavier at 28px, hover reveals. */
-.blur-on .grid figure img { filter: blur(16px); transition: filter .12s; }
-.blur-on .grid figure.nsfw img { filter: blur(28px); }
-.blur-on .grid figure:hover img { filter: none; }
-.grid figcaption { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 9px;
-  background: linear-gradient(180deg, rgba(12, 10, 28, .2), rgba(12, 10, 28, .9)); }
-.grid .model { font-size: 11.5px; color: var(--text); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
-.grid .date { font-size: 10px; color: var(--overlay0); }
 .stars { font-size: 11px; color: var(--gold); letter-spacing: 1px; }
-.grid .dim { color: var(--surface1); }
 .vbadge { position: absolute; top: 8px; right: 8px; z-index: 2; font-size: 10px;
   color: var(--cyan); background: rgba(8, 6, 18, .75); border-radius: 10px; padding: 2px 8px;
   border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent); }
@@ -357,8 +338,6 @@ button:disabled { cursor: default; }
   letter-spacing: .08em; text-transform: uppercase; color: var(--subtext);
   background: rgba(8, 6, 18, .75); border-radius: 8px; padding: 2px 7px;
   border: 1px solid var(--surface1); }
-.grid .fname { font-size: 9.5px; color: var(--overlay0); font-family: ui-monospace, Menlo, monospace;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- real pagination: Prev/Next + windowed numbers, replacing infinite scroll ---- */
 .pagebar { display: flex; justify-content: center; align-items: center; gap: 6px;
