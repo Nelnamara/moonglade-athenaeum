@@ -446,7 +446,12 @@ def _login(page):
     page.goto("/login", wait_until="domcontentloaded")
     page.fill("input[name=username]", _USERNAME)
     page.fill("input[name=password]", _PASSWORD)
-    with page.expect_navigation(wait_until="networkidle"):
+    # The login's own budget, wider than the context default: on a two-core CI runner the
+    # gallery's first load after sign-in (its data calls, then the quiet stretch
+    # "networkidle" waits for) took longer than the ~3s left of the 10s default and failed
+    # a geometry test that had not even started (2026-09-06). Signing in is not the thing
+    # under test; a slow sign-in must not fail it.
+    with page.expect_navigation(wait_until="networkidle", timeout=30_000):
         page.click("button[type=submit]")
     assert "/login" not in page.url, (
         "the harness failed to authenticate -- most likely core._config_path() is not "
