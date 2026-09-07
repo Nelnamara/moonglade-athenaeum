@@ -1169,8 +1169,12 @@ def _members_of_tasks(con, task_ids):
     for i in range(0, len(task_ids), _TASK_CHUNK):
         chunk = task_ids[i:i + _TASK_CHUNK]
         rows = con.execute(
-            "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
-            "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+            # cloud_deleted_at rides along (2026-09-07) for the delete preview's live
+            # check: it is one of the two sources _rows_the_bulk_purge_must_keep keeps
+            # rows back from, and reading it here costs nothing -- same statement, one
+            # more column, so the chunked-pass guarantee above is untouched.
+            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at "
+            "FROM catalog WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
         for r in rows:
             out.setdefault(r["task_id"], []).append(dict(r))
     for members in out.values():
@@ -6282,6 +6286,31 @@ def find_image_file(out_dir, media_id, filename):
 # anyone reads in a confirm dialog; selecting a thousand images would otherwise build a
 # megabyte of JSON and a thumbnail wall the modal cannot scroll through.
 DELETE_PREVIEW_TASK_CAP = 24
+
+# How many selected tasks /api/delete-preview will READ BACK FROM PIXAI before it stops
+# checking and says the counts are an estimate (owner, 2026-09-07: "one live read per
+# selected task, capped at 40; above that the preview says it is an estimate, and the
+# delete still keeps back what the live read finds").
+#
+# Unlike DELETE_PREVIEW_TASK_CAP above -- a DISPLAY bound -- this one changes what the
+# numbers MEAN. At or below it the preview is exact against the cloud: an image the owner
+# deleted on PixAI's own website is reported as already gone rather than counted among the
+# files this delete will take. Above it nothing is read and the modal says so, which is
+# honest and costs nothing; the delete itself still reads every task before it acts
+# (_rows_the_bulk_purge_must_keep), so nothing is at risk either way.
+#
+# 40 is the owner's number. Note it is ABOVE the display cap, deliberately: tasks 25-40 are
+# never drawn as strips but their images are still counted, and the totals are what he reads
+# to decide.
+DELETE_PREVIEW_LIVE_CAP = 40
+# The same pool width build_thumbnails() has used for its own fan-out (workers=8). 40 reads
+# eight at a time is five rounds, not forty round trips in a row.
+DELETE_PREVIEW_LIVE_WORKERS = 8
+# A wall-clock ceiling on the whole fan-out. api.js's deletePreview has no fetch timeout of
+# its own (it goes through the plain apiPost), so the ONLY thing standing between a slow
+# PixAI and a confirm dialog that never opens is this. Whatever has not answered by then is
+# reported unverified, exactly like a read that failed.
+DELETE_PREVIEW_LIVE_BUDGET_S = 12.0
 
 
 def _trash_meta_path(out_dir, media_id):
@@ -11436,12 +11465,89 @@ def create_app(out_dir: Path):
                 mark_cloud_deleted(db_path, mid, stamp)
         return keep
 
-    def _preview_entry(row, selected_ids):
+    def _preview_live_gone(task_ids):
+        """Ask PixAI, once per task, which of these tasks' images it has already dropped.
+
+        The preview's whole job is to say what "Delete from PixAI" would take before it
+        fires, and until 2026-09-07 it answered entirely from the local catalog -- which
+        cannot know about an image the owner deleted on PixAI's own website. The delete
+        itself has always known (_rows_the_bulk_purge_must_keep reads every task and keeps
+        those rows back), so the preview over-reported the blast radius against the one
+        thing it was supposed to describe exactly. This is that same read, moved forward.
+
+        Read-only and it stays read-only: getTaskById, nothing else. It deliberately does
+        NOT write cloud_deleted_at the way the delete's own read does -- a confirm dialog
+        the owner may well cancel is not a place to mutate the catalog from.
+
+        FAILS SOFT, and in the SAFE direction. A task whose read raises, comes back
+        empty, or never answers inside the budget is `unverified`: it keeps its local rows
+        and is counted as if nothing had been read, so a blip can only ever make the
+        preview say MORE will be deleted than really will. It can never quietly shrink an
+        irreversible action's reported scope.
+
+        WHY AN EMPTY ANSWER IS "unverified" AND NOT "already gone whole" -- this differs
+        from the brief that ordered the work, on the module's own evidence. The ruling
+        said a task the read cannot find at all should be reported as already gone whole.
+        It cannot be: core.task_detail_gql collapses a transport failure to None (it
+        catches PixAIError/RequestException and returns None), and the 2026-09-06
+        read-only probe recorded at moonglade_backup.py's DELETING ONE IMAGE header found
+        that "getTaskById still resolves a whole-task-deleted task, so it cannot be used
+        to ask whether a task is gone". So None means "no answer", never "gone", and
+        reading it as gone would take a network blip and turn it into a smaller reported
+        delete -- the one direction this file's fail-soft rule forbids. What CAN be
+        established, and is, is per-image: a deleted batch member keeps its place and
+        gains `deletedAt`.
+
+        retries=1, not the default 3: the caller here is a confirm dialog the owner is
+        watching, and the fallback is a visible "could not be checked" rather than the
+        lost-generation sentence task_detail_gql's own retries exist to prevent.
+
+        Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
+        that answered, and the set of task ids that did not."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        ids = [str(t) for t in task_ids]
+        try:
+            session = core._make_session(None)
+        except Exception:                            # noqa: BLE001 -- no key, bad config
+            # Nothing to read WITH. Every task is unverified; the preview still answers
+            # from the catalog exactly as it did before this existed.
+            return {}, set(ids)
+
+        deadline = time.monotonic() + DELETE_PREVIEW_LIVE_BUDGET_S
+
+        def _one(tid):
+            if time.monotonic() >= deadline:
+                return tid, None                     # budget spent: don't start another
+            try:
+                task = core.task_detail_gql(session, tid, retries=1)
+            except Exception:                        # noqa: BLE001 -- fail soft, see above
+                return tid, None
+            if task is None:
+                return tid, None
+            batch = (task.get("outputs") or {}).get("batch")
+            return tid, {str(m) for m in core.deleted_batch_media(batch) if m}
+
+        gone, unverified = {}, set()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS) as ex:
+            for tid, res in ex.map(_one, ids):
+                if res is None:
+                    unverified.add(tid)
+                else:
+                    gone[tid] = res
+        return gone, unverified
+
+    def _preview_entry(row, selected_ids, gone_ids=()):
         """One /api/delete-preview media entry: what it is, whether the user actually
         picked it, and the media_id whose thumbnail exists on disk -- or None for
         `thumb`, so the client renders an id chip instead of a broken image. Videos fall
         back to their still-frame poster's thumb exactly as the gallery grid does (older
-        sync runs never generated the video's own)."""
+        sync runs never generated the video's own).
+
+        `already_gone` (2026-09-07) is the live read's answer for this one image: PixAI has
+        already dropped it, so the delete will leave this row and its file alone
+        (_rows_the_bulk_purge_must_keep). Always present and False when nothing was read,
+        so the strip never has to guess which of the two it is looking at."""
         mid = row["media_id"]
         thumb = None
         if (thumb_dir / "{}.jpg".format(mid)).exists():
@@ -11451,13 +11557,15 @@ def create_app(out_dir: Path):
             if (thumb_dir / "{}.jpg".format(poster)).exists():
                 thumb = poster
         return {"media_id": mid, "is_video": row["is_video"] == "1",
-                "selected": mid in selected_ids, "thumb": thumb}
+                "selected": mid in selected_ids, "thumb": thumb,
+                "already_gone": mid in gone_ids}
 
     @app.route("/api/delete-preview", methods=["POST"])
     @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
-        anything fires. Read-only: a few catalog reads, no network, no PixAI call.
+        anything fires. Read-only in the sense that matters: it deletes nothing and writes
+        nothing. It is no longer offline, though -- see THE LIVE CHECK below.
 
         Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
         whole batch, cloud AND local. The confirm dialog said that in prose but never
@@ -11476,7 +11584,25 @@ def create_app(out_dir: Path):
         an entry point. Weakens nothing: /delete-tasks-bulk still re-checks for itself.
 
         Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
-        the entire selection, because the totals are what the user reads to decide."""
+        the entire selection, because the totals are what the user reads to decide.
+
+        THE LIVE CHECK (owner, 2026-09-07). "One live read per selected task, capped at
+        40; above that the preview says it is an estimate, and the delete still keeps back
+        what the live read finds." At or below DELETE_PREVIEW_LIVE_CAP every selected task
+        is read back from PixAI (_preview_live_gone), so an image the owner deleted on
+        PixAI's own website is reported as ALREADY GONE instead of being counted among the
+        files this delete will take -- which is what the catalog alone could never know,
+        and what made the preview disagree with the delete it was previewing. Above the
+        cap nothing is read and `estimate` says so.
+
+        `totals` is UNCHANGED in meaning: it is still the full membership of the blast
+        radius. The four new fields sit beside it, top-level, so nothing that reads
+        `totals` today can be surprised:
+          live_checked  how many tasks really were read back
+          unverified    how many could not be (a blip, no credentials, or the budget)
+          already_gone  IMAGES PixAI has already dropped -- subtract from totals.media for
+                        "will be deleted"
+          estimate      True when the selection was over the cap and nothing was read"""
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -11490,14 +11616,34 @@ def create_app(out_dir: Path):
         sel_rows, task_ids = blast["sel_rows"], blast["task_ids"]
         local_only = blast["local_only"]
         selected = {r["media_id"] for r in sel_rows}
-        tasks, total_media = [], 0
+
+        # The live check, before the loop that spends it. Over the cap it does not happen
+        # at all -- estimate, and the modal says so.
+        estimate = len(task_ids) > DELETE_PREVIEW_LIVE_CAP
+        gone_by_task, unverified = ({}, set()) if estimate else _preview_live_gone(task_ids)
+
+        tasks, total_media, already_gone = [], 0, 0
         for tid in task_ids:
             members = blast["members_by_task"].get(tid, [])
             total_media += len(members)
+            # A task that answered: the union of what the read says PixAI has dropped and
+            # what the catalog was already told the last time anything read this task --
+            # exactly the two sources _rows_the_bulk_purge_must_keep keeps back from, so
+            # the count the owner reads here is the count the delete will honour. A task
+            # that did NOT answer contributes nothing: it stands on its local rows whole,
+            # which can only over-report the delete, never under-report it.
+            gone = set()
+            if tid in gone_by_task:
+                gone = set(gone_by_task[tid])
+                gone |= {str(m["media_id"]) for m in members
+                         if str(m["cloud_deleted_at"] or "").strip()}
+                gone &= {str(m["media_id"]) for m in members}
+                already_gone += len(gone)
             if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
                 continue          # keep counting, stop describing
             tasks.append({"task_id": tid,
-                          "media": [_preview_entry(m, selected) for m in members]})
+                          "unverified": tid in unverified,
+                          "media": [_preview_entry(m, selected, gone) for m in members]})
         # Imports have no task, so nothing about them is task-level -- but they ARE
         # part of what the button removes, and the dialog has to show them or its
         # file count won't add up. Capped on the same DISPLAY budget as the tasks.
@@ -11508,6 +11654,12 @@ def create_app(out_dir: Path):
             "local_only": local_entries,
             "truncated": (len(task_ids) > len(tasks)
                           or len(local_only) > len(local_entries)),
+            # The live check's own answer, beside `totals` rather than inside it (see the
+            # docstring). live_checked + unverified == len(task_ids) whenever it ran.
+            "live_checked": len(gone_by_task),
+            "unverified": len(unverified),
+            "already_gone": already_gone,
+            "estimate": estimate,
             "totals": {
                 "selected": len(sel_rows),
                 "tasks": len(task_ids),

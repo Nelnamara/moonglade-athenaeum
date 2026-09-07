@@ -58,6 +58,15 @@ function toastErr(title, msg) {
 
 function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
   const t = data.totals;
+  /* THE LIVE CHECK (owner, 2026-09-07). The preview reads each selected task back from
+     PixAI, up to 40 of them, so an image already deleted on PixAI's own website is
+     reported as already gone rather than counted among the files this will take. Read
+     defensively: an older server answers this route without any of these fields, and the
+     dialog must still open and still be true. */
+  const goneNow = Number(data.already_gone) || 0;
+  const unchecked = Number(data.unverified) || 0;
+  const estimate = data.estimate === true;
+  const willDelete = Math.max(0, t.media - goneNow);
   let head;
   if (t.tasks === 0) {
     head = (
@@ -66,7 +75,7 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
     );
   } else {
     head = (
-      <><b>{plural(t.media, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>{" "}
+      <><b>{plural(willDelete, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>{" "}
       will be deleted from your PixAI account <b>and</b> from your backup.
       {t.unselected > 0 && (
         <> You picked {plural(t.selected, "file", "files")}; the other{" "}
@@ -84,8 +93,10 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       {media.map((m) => (
         <div
           key={m.media_id}
-          className={"cd-thumb" + (m.selected ? " on" : "")}
-          title={m.media_id + (m.selected ? " (you selected this)" : " (comes with the batch)")}
+          className={"cd-thumb" + (m.selected ? " on" : "") + (m.already_gone ? " gone" : "")}
+          title={m.media_id + (m.already_gone
+            ? " (already gone on PixAI — this copy stays)"
+            : m.selected ? " (you selected this)" : " (comes with the batch)")}
         >
           {m.thumb
             ? <img src={"/thumbs/" + encodeURIComponent(m.thumb) + ".jpg"} alt="" loading="lazy" />
@@ -100,12 +111,30 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       <div className="cd-inner" onClick={(e) => e.stopPropagation()}>
         <div className="cd-head">Delete from PixAI — the whole blast radius</div>
         <p className="cd-summary">{head}</p>
+        {/* The live check's three sentences, in the same plain voice as the counts above
+            and only when there is something to say. */}
+        {goneNow > 0 && (
+          <p className="cd-summary">{goneNow === 1
+            ? <>One of them is already gone on PixAI — deleted there, not here. That file stays in your backup, because this is the last copy of it anywhere.</>
+            : <>{goneNow} of them are already gone on PixAI — deleted there, not here. Those files stay in your backup, because these are the last copies of them anywhere.</>}</p>
+        )}
+        {unchecked > 0 && (
+          <p className="cd-summary">{unchecked === 1
+            ? <>One task could not be checked on PixAI just now, so it is counted from your library. The delete checks it again before it acts.</>
+            : <>{unchecked} tasks could not be checked on PixAI just now, so they are counted from your library. The delete checks each of them again before it acts.</>}</p>
+        )}
+        {estimate && (
+          <p className="cd-summary">These counts are an <b>estimate</b> from your library — too many tasks
+          to check each one on PixAI first. The delete itself still checks every task before it acts, and
+          still keeps back anything PixAI has already deleted.</p>
+        )}
         <div className="cd-tasks">
           {data.tasks.map((tk) => (
             <div className="cd-task" key={tk.task_id}>
               <div className="cd-tlbl">whole batch
                 <span className="cd-tid">task {tk.task_id}</span>
                 <span>{plural(tk.media.length, "file", "files")}</span>
+                {tk.unverified && <span className="cd-unver">not checked on PixAI</span>}
               </div>
               {strip(tk.media)}
             </div>
