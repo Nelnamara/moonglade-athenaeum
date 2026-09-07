@@ -13,14 +13,15 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **badge** — the picture on an achievement's card in [The Folio of Honors](Folio-of-Honors), and
   the picture in the moment that plays when you earn one.
 - **the banner** — the wide art across the top of a screen: the gallery's, the sign-in page's and
-  The Loom's. Its slots are in the Control Panel's **✦ Branding** tab.
+  The Loom's. Its slots are in the Control Panel's **✦ Branding** tab, which appears once you
+  have earned **Under the Hood**; before that there are no banner slots to fill.
 - **collection** — a named set of pictures you gather yourself. Filter to one from the filter bar's
   **Collection** dropdown; see [Collections](Collections).
 - **composite** — the filtered image: the result pane the Darkroom hands you beside your source,
   and what **Save to library** bakes out.
-- **the Control Panel** — the **⚙ Panel** overlay. Its tab is **Maintenance**; **Accounts**,
-  **Trash** and **PixAI account** open as further windows on top of it. See
-  [Control Panel](Control-Panel).
+- **the Control Panel** — the **⚙ Panel** overlay. Its tab is **Maintenance**, joined by a
+  second, **✦ Branding**, once you have earned **Under the Hood**. **Accounts**, **Trash** and
+  **PixAI account** open as further windows on top of it. See [Control Panel](Control-Panel).
 - **the Darkroom** — the full-screen room the art filters live in: the dock → **Edit** → **Enhance**
   → **Open the Darkroom ▸**.
 - **the detail page** — a picture's own page, reached from the lightbox's **Details**: the whole
@@ -37,7 +38,8 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   what do that job today.
 - **The Folio of Honors** — the **🏆** overlay: achievements, ladders, points and skins.
 - **the Identity strip** — the mark and skin, shown as a pair, at the foot of the Control Panel's
-  Maintenance tab.
+  Maintenance tab. It is what an install has **before Under the Hood is earned**; earn it and the
+  strip is replaced by the **✦ Branding** tab, so the two are never both there.
 - **ladder** — one of the Folio's ten tracks, climbed rung by rung from common to legendary.
 - **LAN session** — a browser that reached the gallery across your network rather than from the
   machine running it — a phone or a laptop on your own Wi-Fi. Nothing on screen announces it;
@@ -51,7 +53,8 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   generation into your library as it lands.
 - **The Loom** — the **▰** storyboard for multi-clip video: acts, shots, cast and the reel bar. See
   [The Loom](The-Loom).
-- **the mark** — the small emblem beside the title, picked in the Control Panel's Identity strip.
+- **the mark** — the small emblem beside the title, picked in the Control Panel: from the
+  Identity strip before **Under the Hood** is earned, from the **✦ Branding** tab after.
 - **Mirror to PixAI** — the Maintenance switch that files what you make here out to your pixai.art
   web library. It runs the opposite way from Live Mirror.
 - **My Art** — the **📈** overlay: how your published works are doing — views, likes and comments.
@@ -79,8 +82,9 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
 - **the Similar door** — the **◈** mark that finds lookalikes. On a card in the grid, in the
   lightbox, on the detail page, and on the phone viewer's button row. **◈** never means anything
   else.
-- **skin** — the palette the whole suite wears. Two ship free and three are earned; applied from the
-  Identity strip.
+- **skin** — the palette the whole suite wears. Two ship free and three are earned; applied from
+  the Control Panel — the Identity strip before **Under the Hood** is earned, the **✦ Branding**
+  tab after.
 - **the standing order** — the single **⏱** scheduled job in the job console's **Ledger** view. It
   is older than Runs itself and separate from it.
 - **toast** — a notice that appears in the corner and goes by itself: a finished generation, a work

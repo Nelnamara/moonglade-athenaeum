@@ -267,3 +267,44 @@ def test_glossary_puts_activity_where_the_shell_actually_mounts_it():
         "Activity; it sits at an end of the bar under the banner")
     assert "banner" in entry and "Loom" in entry, (
         "the Activity entry no longer says where the button is on either host")
+
+
+# ---------------------------------------------------------------------------
+# The Identity strip and the ✦ Branding tab are EITHER/OR states of one install,
+# not two places that both exist: ControlPanelOverlay renders one or the other on
+# a single brandingUnlocked ternary, and hides the tab button entirely while it is
+# locked. Glossary entries that name either as a fixed location are therefore
+# wrong for whichever state the reader's install is in -- on any given install at
+# least two of them pointed at a screen that is not there (red team 2026-09-07).
+# The wiki's own Control-Panel.md always carried the condition; the Glossary lost
+# it. These pin both halves: the code's exclusivity, and the entries stating it.
+# ---------------------------------------------------------------------------
+
+def test_the_branding_tab_and_the_identity_strip_are_still_mutually_exclusive():
+    """If this ever stops being one either/or, the Glossary wording below is the thing
+    to revisit -- so the guard starts at the code, not at the prose."""
+    cp = _read("gallery/src/components/ControlPanelOverlay.jsx")
+    assert re.search(r"brandingUnlocked\s*&&\s*\(", cp), (
+        "the ✦ Branding tab button is no longer gated on brandingUnlocked")
+    assert re.search(r"brandingUnlocked\s*\?[\s\S]{0,900}<IdentityStrip", cp), (
+        "the Identity strip is no longer the ELSE of a brandingUnlocked ternary -- if the "
+        "strip and the tab can now coexist, the Glossary entries should say so instead")
+    assert re.search(r'tab === "brand"\s*&&\s*brandingUnlocked', cp), (
+        "the ✦ Branding tab body is no longer gated on brandingUnlocked")
+
+
+def test_every_glossary_entry_about_branding_says_which_state_it_belongs_to():
+    """Four entries locate controls in the Identity strip or the ✦ Branding tab (plus the
+    Control Panel entry, which used to name Maintenance as the only tab). Each must carry
+    the earned/unearned condition, or it is false for half the installs that read it."""
+    for term in ("the banner", "the Control Panel", "the Identity strip", "the mark", "skin"):
+        entry = _glossary_entry(term)
+        assert "Under the Hood" in entry, (
+            "wiki/Glossary.md's \"" + term + "\" entry locates a branding control without "
+            "saying whether it means an install that has earned Under the Hood or one that "
+            "has not -- the strip and the ✦ Branding tab never both exist")
+
+    strip = _glossary_entry("the Identity strip")
+    assert re.search(r"replaced by", strip), (
+        "the Identity strip entry no longer says the ✦ Branding tab replaces it, so a reader "
+        "who has earned Under the Hood will still go looking for the strip")
