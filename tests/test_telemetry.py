@@ -3,6 +3,7 @@ its flattening into the metric namespace, the roster compute post-passes, the
 hidden-feat masking on /api/achievements, and the /api/ach-event beacon. All
 local + fail-soft -- a telemetry hiccup must never break a page or a backup."""
 import json
+import time
 
 import datetime as _dt
 from pathlib import Path
@@ -245,7 +246,7 @@ def test_badge_thumb_cache(tmp_path):
 # Rewritten 2026-09-07: /api/ach-event moved back from LOCALHOST to LOGIN ("triggered
 # should be obtainable easily on a phone just like desktop. For sure build the nonce"),
 # and the per-render nonce is what stands in for loopback now. These tests own that
-# contract -- one event per nonce, 60 seconds, this session only, a 400ms debounce and 30
+# contract -- one event per nonce, 60 seconds, this session only, a 150ms debounce and 30
 # calls a minute -- because nothing else in the suite would notice it silently stopping.
 #
 # Two of them turn the debounce off (monkeypatch _ACH_DEBOUNCE_S) rather than sleeping:
@@ -342,8 +343,9 @@ def test_ach_nonce_is_bound_to_its_session(tmp_path):
 
 
 def test_ach_event_debounces_a_double_fire(tmp_path):
-    """Two pokes inside 400ms are one click fired twice. The second is accepted (and still
-    hands back a nonce, or the page would be left with none) but counts nothing."""
+    """Two pokes inside the window are one click fired twice. The second is accepted (and
+    still hands back a nonce, or the page would be left with none) but counts nothing --
+    and it carries the count it did NOT move, so the client can hold its line."""
     cli = login_client(tmp_path)
     first = cli.post("/api/ach-event", json={"event": "narrator", "nonce": ach_nonce(cli)}
                      ).get_json()
@@ -351,10 +353,45 @@ def test_ach_event_debounces_a_double_fire(tmp_path):
     second = cli.post("/api/ach-event",
                       json={"event": "narrator", "nonce": first["next_nonce"]}).get_json()
     assert second["debounced"] is True and second["next_nonce"]
+    # The debounced reply carries the LAST COUNTED value, read not bumped (2026-09-07):
+    # without it useFolio.js's `res.pokes || 1` fell back to 1 and rewound the escalating
+    # toast to its first line on the swallowed half of every double-fire.
+    assert second["pokes"] == first["pokes"] and second["snapped"] is False
     assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 1
     # ...and the debounce is per (session, event): a different event is not held back.
     cli.post("/api/ach-event", json={"event": "docs", "nonce": second["next_nonce"]})
     assert g.telemetry_metrics(tmp_path)["docs_opened"] == 1
+
+
+def test_ach_debounce_window_is_narrower_than_a_hand(tmp_path):
+    """The window is a wall-clock gap and can tell nothing else apart, so its WIDTH is the
+    whole claim the comments make. Real time, deliberately: two taps 200ms apart are two
+    taps and must both count; 50ms apart is one gesture fired twice and counts once.
+
+    It shipped at 400ms on 2026-09-07 and this is what that cost -- an ordinary phone
+    tap-rate of ~3/sec landed every second poke inside the window, so Triggered wanted
+    about ten taps for its five, while three separate comments said separate clicks were
+    never touched. 150ms is over a double-fired DOM event and under a hand."""
+    cli = login_client(tmp_path)
+    n = ach_nonce(cli)
+    a = cli.post("/api/ach-event", json={"event": "narrator", "nonce": n}).get_json()
+    assert a["pokes"] == 1
+    time.sleep(0.2)                                  # two separate taps at ~5/sec
+    b = cli.post("/api/ach-event", json={"event": "narrator", "nonce": a["next_nonce"]}
+                 ).get_json()
+    assert b.get("debounced") is not True, "a real second tap must not be swallowed"
+    assert b["pokes"] == 2
+    time.sleep(0.2)                                  # clear the window again
+    c = cli.post("/api/ach-event", json={"event": "narrator", "nonce": b["next_nonce"]}
+                 ).get_json()
+    assert c["pokes"] == 3
+    time.sleep(0.05)                                 # the second half of ONE click
+    d = cli.post("/api/ach-event", json={"event": "narrator", "nonce": c["next_nonce"]}
+                 ).get_json()
+    assert d["debounced"] is True and d["pokes"] == 3
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == 3
+    # A hand cannot do this; that is the whole basis of the window.
+    assert g._ACH_DEBOUNCE_S <= 0.15
 
 
 def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
@@ -371,6 +408,45 @@ def test_ach_event_rate_limited_per_session(tmp_path, monkeypatch):
     assert r.status_code == 429 and r.get_json()["error"] == "slow down"
     assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == g._ACH_RATE_MAX - 1
     assert cli.get("/api/ach-nonce").status_code == 429   # the top-up draws on the same budget
+
+
+def test_ach_rate_limit_binds_across_a_replayed_cookie(tmp_path, monkeypatch):
+    """The budget follows the LOGIN, not the copy of the cookie the client is holding.
+
+    The Flask session is a client-held signed cookie, and _is_authorized_request() only
+    re-validates user/sess_epoch -- so a client can keep presenting the copy it was handed
+    at login for as long as that login lives. _ach_sid() used to lazily setdefault a random
+    id INTO that cookie, so every replay of a copy taken before the id existed minted a new
+    id, and with it a fresh 30-call budget and a clean debounce slate: the limit the route's
+    own docstring calls the stop for a scripted replay loop did not bind at all (probed
+    2026-09-07: 60 rounds, 60 sids, no 429). Keyed on the login's own stable identity, the
+    replays all draw on one budget."""
+    monkeypatch.setattr(g, "_ACH_DEBOUNCE_S", 0.0)
+    app = g.create_app(tmp_path)
+    cli = login_test_client(app)
+    c0 = cli.get_cookie("session").value          # captured before any beacon call
+
+    def replay():
+        """A brand-new client that knows nothing but the captured cookie -- what a script
+        replaying its own POST /api/login response has."""
+        c = app.test_client()
+        c.set_cookie("session", c0)
+        return c
+
+    rounds = g._ACH_RATE_MAX // 2                 # a top-up + an event is two calls
+    for i in range(rounds):
+        c = replay()
+        d = c.get("/api/ach-nonce").get_json()
+        assert d.get("nonce"), "round %d refused early: %r" % (i + 1, d)
+        r = c.post("/api/ach-event", json={"event": "narrator", "nonce": d["nonce"]})
+        assert r.status_code == 200, "round %d: %r" % (i + 1, r.get_json())
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
+    # call 31 of the window, on a cookie as fresh as every other replay: still refused.
+    c = replay()
+    assert c.get("/api/ach-nonce").status_code == 429
+    assert c.post("/api/ach-event",
+                  json={"event": "narrator", "nonce": "anything"}).status_code == 429
+    assert g.telemetry_metrics(tmp_path)["narrator_pokes"] == rounds
 
 
 @needs_donor
