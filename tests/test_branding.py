@@ -894,3 +894,69 @@ def test_the_shortcut_route_accepts_an_uploaded_custom_mark(tmp_path, monkeypatc
     r = cli.post("/api/branding/shortcut", json={"mark": mark_id})
     assert r.status_code == 200 and r.get_json()["ok"] is True
     assert mark_id + ".ico" in captured["argv"][-1]
+
+
+# ---- mark reward gate (2026-09-08): a mark bound to an achievement is pickable only once
+# earned, the marks half of the same gate /api/skin gives skins. Mirrors the skin tests. ----
+def _cut_bound_marks(tmp_path):
+    """A free mark (mark_4) and one bound to `archivist` (mark_ms), both with art."""
+    mdir = g._role_dir("marks"); mdir.mkdir(parents=True)
+    for i in ("mark_4", "mark_ms"):
+        (mdir / (i + ".png")).write_bytes(b"\x89PNG fake")
+        (mdir / (i + ".ico")).write_bytes(b"\x00\x00icofake")
+    (mdir / "marks.json").write_text(json.dumps({"marks": [
+        {"id": "mark_4", "label": "Void Sentinel", "kind": "tile"},
+        {"id": "mark_ms", "label": "Moonlit Stacks", "kind": "tile", "unlock": "archivist"},
+    ]}), encoding="utf-8")
+
+
+def test_list_marks_annotates_unlock_and_earned(tmp_path):
+    _cut_bound_marks(tmp_path)
+    # no earned set -> everything earned:True (the pre-gate callers: upload response, launcher)
+    by = {m["id"]: m for m in g.list_marks(tmp_path)}
+    assert by["mark_4"]["earned"] is True and by["mark_ms"]["earned"] is True
+    assert by["mark_4"]["unlock"] == "" and by["mark_ms"]["unlock"] == "archivist"
+    # with an earned set that lacks archivist, the bound mark is locked, the free one is not
+    by = {m["id"]: m for m in g.list_marks(tmp_path, earned_ids=set())}
+    assert by["mark_4"]["earned"] is True          # free: always earned
+    assert by["mark_ms"]["earned"] is False        # bound + not earned -> locked
+    assert by["mark_ms"]["unlock_name"]            # a needle string, name or id fallback
+    by = {m["id"]: m for m in g.list_marks(tmp_path, earned_ids={"archivist"})}
+    assert by["mark_ms"]["earned"] is True         # bound + earned -> unlocked
+
+
+def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch):
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())
+    cli = _client(tmp_path)
+    marks = {m["id"]: m for m in cli.get("/api/branding").get_json()["marks"]}
+    assert marks["mark_4"]["earned"] is True
+    assert marks["mark_ms"]["earned"] is False and marks["mark_ms"]["unlock"] == "archivist"
+
+
+def test_set_locked_mark_is_refused_403(tmp_path, monkeypatch):
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # archivist NOT earned
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding", json={"mark": "mark_ms"})
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "mark locked"
+    # the active mark did not change to the locked one
+    assert cli.get("/api/branding").get_json()["mark"] != "mark_ms"
+
+
+def test_set_bound_mark_allowed_once_earned(tmp_path, monkeypatch):
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: {"archivist"})
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding", json={"mark": "mark_ms"})
+    assert r.status_code == 200
+    assert cli.get("/api/branding").get_json()["mark"] == "mark_ms"
+
+
+def test_free_mark_and_logo_never_gated(tmp_path, monkeypatch):
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # nothing earned
+    cli = _client(tmp_path)
+    assert cli.post("/api/branding", json={"mark": "mark_4"}).status_code == 200   # free
+    assert cli.post("/api/branding", json={"mark": "logo"}).status_code == 200     # legacy

@@ -2548,7 +2548,7 @@ def mark_art_ext(mark_id):
     return ""
 
 
-def list_marks(out_dir):
+def list_marks(out_dir, earned_ids=None):
     """Marks available on THIS machine: marks/marks.json entries whose art
     actually exists, resolved loose-then-container (_branding_bytes) so the
     shipped defaults show up even though branding/ itself is deliberately empty
@@ -2558,7 +2558,17 @@ def list_marks(out_dir):
     Art is .png OR .webp (see MARK_EXTS). The payload key stays `png` even for a
     webp mark: it is the shipped contract every client already reads (and
     brand_context's mark_url comes straight off it), so renaming it would be a
-    breaking change for a field that was only ever a URL."""
+    breaking change for a field that was only ever a URL.
+
+    `unlock` (2026-09-08): a mark entry may carry `unlock: "<achievement id>"`,
+    the mark's reward binding -- empty/absent means a free pick, the marks-are-
+    pure-data default the 2026-08 rewire plan set. `earned_ids` is the set of
+    currently-earned achievement ids (from _earned_ach_ids); pass it and each
+    mark reports `earned` (free, or its unlock is in the set) plus `unlock_name`
+    for the "Unlocks with <name>" needle. Pass None -- the many callers that
+    don't gate (the custom-mark upload response, the launcher-icon path) -- and
+    every mark reports earned:True, exactly the pre-gate behaviour. This is the
+    marks half of the same reward gate `/api/skin` already applies to skins."""
     raw = _branding_bytes(_role_rel("marks", "marks.json"))
     if raw is None:
         return []
@@ -2579,12 +2589,43 @@ def list_marks(out_dir):
         # role form (the /branding/ route translates on the way back in).
         ext = mark_art_ext(mid) if mid else ""
         if ext:
+            unlock = str(m.get("unlock") or "")
+            earned = (not unlock) or (earned_ids is None) or (unlock in earned_ids)
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s%s" % (mid, ext),
                         "animated": ext == ".webp",
+                        "unlock": unlock,
+                        "unlock_name": _ach_name(unlock) if unlock else "",
+                        "earned": earned,
                         "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
     return out
+
+
+def _ach_name(aid):
+    """The display name of one achievement id, or the id itself if the roster
+    has no entry (a mark bound to an id the current pack does not carry still
+    shows *something* rather than an empty needle)."""
+    if not aid:
+        return ""
+    for a in _roster():
+        if (a.get("id") if isinstance(a, dict) else a) == aid:
+            return (a.get("name") if isinstance(a, dict) else "") or aid
+    return aid
+
+
+def _earned_ach_ids(out_dir, db_path):
+    """The set of currently-earned achievement ids, by the exact same recipe
+    /api/achievements, /api/skin and _mark_earned() use (metrics + telemetry +
+    earned_at, through compute_achievements). One computation the gated callers
+    share, so the marks a Branding request offers can never disagree with what
+    the Folio shows unlocked."""
+    metrics = achievement_metrics(db_path)
+    metrics.update(telemetry_metrics(out_dir))
+    result = compute_achievements(metrics, load_ach_state(out_dir).get("seen"),
+                                  sets=load_telemetry(out_dir).get("sets", {}),
+                                  earned_at=load_ach_state(out_dir).get("earned_at"))
+    return {a["id"] for a in result["achievements"] if a["earned"]}
 
 
 # The 4 Branding-tab slots Control Panel.dc.html specs beyond Icons & marks
@@ -16100,11 +16141,13 @@ def create_app(out_dir: Path):
             cfg = load_branding(out_dir)
             return jsonify(dict(_branding_tuning(cfg),
                                 mark=cfg["mark"], anim=cfg["anim"],
-                                anims=MARK_ANIMS, marks=list_marks(out_dir),
+                                anims=MARK_ANIMS,
+                                marks=list_marks(out_dir, _earned_ach_ids(out_dir, db_path)),
                                 slots=branding_slots_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
-        have = {m["id"] for m in list_marks(out_dir)}
+        _marks = list_marks(out_dir, _earned_ach_ids(out_dir, db_path))
+        have = {m["id"] for m in _marks}
         if "anim" in body:
             anim = str(body["anim"])
             # A retired id is refused here rather than silently accepted: the picker
@@ -16119,6 +16162,17 @@ def create_app(out_dir: Path):
             mark = str(body["mark"])
             if mark != "logo" and mark not in have:
                 return jsonify({"error": "unknown mark"}), 400
+            # Reward gate (2026-09-08): a mark bound to an achievement may be set
+            # only once that achievement is earned -- the same refusal /api/skin
+            # gives a locked skin, so a client can't force a locked mark. `logo`
+            # and every free (unlock:"") mark pass; earned is computed above in
+            # `_marks` off the shared recipe.
+            locked = next((m for m in _marks
+                           if m["id"] == mark and not m["earned"]), None)
+            if locked is not None:
+                return jsonify({"error": "mark locked",
+                                "unlock": locked.get("unlock_name") or locked.get("unlock"),
+                                "mark": cfg["mark"]}), 403
             cfg["mark"] = mark
         # The tuning fields: clamped, never refused. A slider that sends 4.0 gets
         # 3.0 back and the UI settles onto it -- an error toast for dragging too far
