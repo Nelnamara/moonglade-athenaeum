@@ -149,8 +149,14 @@ describe("the completion toast follows the app's own generate rule", () => {
       "same rule as any other generation the owner started");
     assert.match(store, /if \(j\.type === "claim"\)/);
     assert.match(store, /if \(j\.type === "update" && st === "done"\)/);
-    assert.equal((store.match(/j\.type === /g) || []).length, 2,
+    // Count ABSTENTIONS -- a type test that returns before toasting -- not every type test:
+    // since 2026-09-07 a delete row's toast reads the row's type to pick its words ("Gone from
+    // PixAI." instead of "Added to your gallery."), which is copy, not silence.
+    // Both abstentions are one-liners of the shape `if (j.type === "x" ...) { last[...] = st; return; }`.
+    const abstentions = (store.match(/^\s*if \(j\.type === "[a-z]+".*\{ last\[j\.job_id\] = st; return; \}/gm) || []).length;
+    assert.equal(abstentions, 2,
       "a third type-based toast abstention appeared -- if it is 'generate' or a website run, " +
       "the owner's own runs just went silent");
+    assert.doesNotMatch(store, /j\.type === "generate"/, "a generate row must never be singled out");
   });
 });
