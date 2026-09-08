@@ -97,6 +97,7 @@ export default function ModelPicker({
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const gridRef = useRef(null);
+  const sentinelRef = useRef(null);   // the end-of-list marker the IntersectionObserver watches
   const lastKeyRef = useRef(null);
   const previewTimerRef = useRef(null);
   const scrollRafRef = useRef(null);
@@ -155,6 +156,25 @@ export default function ModelPicker({
       setRows((old) => old.concat((d && d.results) || []));
     }).catch(() => { loadingMoreRef.current = false; setLoadingMore(false); });
   }, [searchUrl]);
+
+  // LOAD MORE, the way that survives the layout. The grid's own onScroll below only fires when
+  // .mg-grid itself is the scroller -- and on the phone sheet and the desktop dock palette it is
+  // NOT: the ancestor `.mfly > div:not(.mfly-head)` scrolls (styles.css / create-mobile.css /
+  // dock.css all give it overflow-y:auto and min-height:0), so the grid never scrolled, the
+  // handler never ran, and every list stopped dead at its first page of 24 (owner, 2026-09-07,
+  // desktop and phone, every tab and sort). An IntersectionObserver on a 1px sentinel after the
+  // grid sees the sentinel come into view through ANY clipping ancestor, so it does not care
+  // which element scrolls. root: null = the viewport, intersected with every overflow ancestor.
+  useEffect(() => {
+    if (!visible || typeof IntersectionObserver === "undefined") return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore();
+    }, { root: null, rootMargin: "160px 0px", threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible, loadMore, rows.length]);
 
   // browse-on-open + re-search on any filter change, but NOT on a plain re-reveal (ensureSearched
   // + _stale semantics): the search key is the fresh-list url; unchanged key => skip.
@@ -221,6 +241,9 @@ export default function ModelPicker({
     setPreview({ m, x, y });
   };
   const schedulePreview = (m, anchorEl) => {
+    // A touch screen has no hover: a tap fires mouseenter, nothing ever fires mouseleave, and the
+    // preview card would stand over the sheet for good (owner, phone, 2026-09-07).
+    if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(hover: none)").matches) return;
     clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => showPreview(m, anchorEl), 130);
   };
@@ -357,6 +380,7 @@ export default function ModelPicker({
         })}
       </div>
 
+      <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
       <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
 
       <div className={"mg-preview" + (p ? " open" : "")} aria-hidden={p ? "false" : "true"}

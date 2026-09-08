@@ -2070,3 +2070,65 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
         "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"
 
 
+
+
+# --- The name hunt on the Bookmarked and Mine tabs (owner, 2026-09-07: "search is still shit") ----
+def _hunt_pages():
+    """Two bookmark pages the way PixAI answers them: the keyword narrows nothing."""
+    p1 = {"results": [
+        {"model_id": "1", "title": "Special Eyes XL", "description": ""},
+        {"model_id": "2", "title": "whimsical style", "description": "soft pastels"},
+        {"model_id": "3", "title": "Breathtaking scenery", "description": ""},
+    ], "has_more": True, "next_cursor": "c2"}
+    p2 = {"results": [
+        {"model_id": "4", "title": "Aesthetic Details", "description": "beautiful eyes and skin"},
+        {"model_id": "5", "title": "Elden Ring style", "description": ""},
+    ], "has_more": False, "next_cursor": ""}
+    return {None: p1, "c2": p2}
+
+
+def test_bookmark_tab_search_keeps_only_rows_that_carry_the_words(tmp_path, monkeypatch):
+    calls = []
+    pages = _hunt_pages()
+
+    def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
+        calls.append(after)
+        return pages[after]
+    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=eyes&src=bookmark").get_json()
+    assert [r["model_id"] for r in d["results"]] == ["1", "4"], d
+    assert d["has_more"] is False and d["next_cursor"] == ""
+    assert calls == [None, "c2"], "the hunt walks every page of the list"
+
+
+def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_path, monkeypatch):
+    pages = _hunt_pages()
+
+    def fake_market(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
+        assert kw.get("author_id") is not None, "the Mine tab is the market connection filtered by author"
+        return pages[after]
+    monkeypatch.setattr(core, "model_search_market_gql", fake_market)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    class _C:
+        user_id = "u1"
+    monkeypatch.setattr(core, "_client_of", lambda s: _C())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=beautiful%20eyes&src=mine").get_json()
+    assert [r["model_id"] for r in d["results"]] == ["4"], d
+
+
+def test_bookmark_tab_without_a_keyword_is_one_plain_page(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
+        calls.append(after)
+        return _hunt_pages()[None]
+    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()
+    assert len(d["results"]) == 3 and d["has_more"] is True and d["next_cursor"] == "c2"
+    assert calls == [None], "no keyword, no hunt: the page and its cursor come back as they always did"

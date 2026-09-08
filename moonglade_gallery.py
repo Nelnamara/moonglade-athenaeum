@@ -8775,6 +8775,40 @@ def _ach_rate_ok(sid, now=None):
         return True
 
 
+# --- The name hunt on the Bookmarked and Mine tabs (owner, 2026-09-07: "search is still
+# shit"). Measured that day with the app's own client: the bookmarks operation takes a
+# keyword and answers 24 rows that mostly do NOT carry it ("eyes" -> "Special Eyes XL" then
+# a page of unrelated titles), and the author-filtered market connection ignores the keyword
+# outright (the same four rows for "eyes" and for nothing). So neither tab searched. Both
+# lists are the owner's OWN (a few hundred bookmarks, a handful of his LoRAs), so the honest
+# search is to walk the list and keep the rows whose title or description carries the words --
+# bounded, and the whole answer comes back in one page (no cursor), because a filtered walk
+# cannot hand out a cursor that means anything to the next call.
+_HUNT_MAX_PAGES = 20
+
+
+def _hunt_by_name(fetch_page, q, size):
+    """Walk `fetch_page(after)` (a callable returning the picker's payload shape: results /
+    has_more / next_cursor) and keep the rows whose title or description contains every word
+    of `q`, case-insensitively. Stops at the source's end, at _HUNT_MAX_PAGES, or once
+    `size * 4` matches are in hand. Answers has_more False: the hunt is one page."""
+    words = [w for w in (q or "").lower().split() if w]
+    keep, after, pages = [], None, 0
+    while pages < _HUNT_MAX_PAGES:
+        page = fetch_page(after) or {}
+        if page.get("error") and not page.get("results"):
+            return page
+        for row in page.get("results") or []:
+            hay = ((row.get("title") or "") + " " + (row.get("description") or "")).lower()
+            if all(w in hay for w in words):
+                keep.append(row)
+        pages += 1
+        if not page.get("has_more") or not page.get("next_cursor") or len(keep) >= size * 4:
+            break
+        after = page["next_cursor"]
+    return {"results": keep, "has_more": False, "next_cursor": "", "hunted_pages": pages}
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -13165,17 +13199,21 @@ def create_app(out_dir: Path):
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
-                payload = core.model_bookmarks_gql(
-                    session, keyword=q, usage=usage, limit=size, after=(cursor or None),
-                    lora_base_type=server_lora_type)
+                def _bookmark_page(after):
+                    return core.model_bookmarks_gql(
+                        session, keyword=q, usage=usage, limit=size, after=after,
+                        lora_base_type=server_lora_type)
+                payload = _hunt_by_name(_bookmark_page, q, size) if q else _bookmark_page(cursor or None)
             elif src == "mine":
                 # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
                 # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
-                payload = core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage,
-                    limit=size, after=(cursor or None),
-                    lora_base_type=server_lora_type,
-                    author_id=core._client_of(session).user_id or "")
+                def _mine_page(after):
+                    return core.model_search_market_gql(
+                        session, keyword=q, category=category, sort=sort, usage=usage,
+                        limit=size, after=after,
+                        lora_base_type=server_lora_type,
+                        author_id=core._client_of(session).user_id or "")
+                payload = _hunt_by_name(_mine_page, q, size) if q else _mine_page(cursor or None)
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
             # to fall through to REST, whose own docstring says it "silently ignores market

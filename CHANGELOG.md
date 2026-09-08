@@ -16,6 +16,9 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **The model and LoRA pickers page past their first 24 again, on every tab and sort, computer and phone.** Scrolling to the bottom of a list stopped loading more because the picker listened for scrolling on its grid while the element that actually scrolls is the grid's wrapper. It now watches a marker at the end of the list, which works whichever ancestor scrolls. On a phone the hover preview no longer opens on a tap and stands over the sheet. (2026-09-07)
+- **Search on the Bookmarked and Mine tabs searches.** PixAI answers a bookmark search with rows that mostly do not carry the word, and ignores it entirely on your own LoRAs; those two lists are your own, so the app now walks them and keeps the rows whose title or description carries every word you typed. (2026-09-07)
+
 - **The widest phones get the phone build again.** The phone build switched on at 430 CSS pixels of width; the Pro Max class has been 440 since the iPhone 16, and Safari's page zoom widens the number further, so a real phone could land on the desktop build, as the owner's did on a fresh install on 2026-09-07. The line is 520 now: every phone made is under it, and the narrowest tablet held upright, an iPad mini at 744, is still well above it. (2026-09-07)
 - On the phone, a feat's detail sheet shows the whole badge instead of cropping it. (2026-09-07)
 - The library's five-minute catch-up no longer re-collects pictures it already has; the log stops claiming they were never mirrored. (2026-09-07)
