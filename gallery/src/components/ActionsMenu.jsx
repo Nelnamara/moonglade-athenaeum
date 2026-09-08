@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
+import { cloudDeleteCounts } from "../lib/cloudDeleteCounts.js";
 import "../styles/librarybar.css";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
@@ -58,24 +59,53 @@ function toastErr(title, msg) {
 
 function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
   const t = data.totals;
+  /* THE LIVE CHECK (owner, 2026-09-07). The preview reads each selected task back from
+     PixAI, up to 40 of them, so an image already deleted on PixAI's own website is
+     reported as already gone rather than counted among the files this will take. Read
+     defensively: an older server answers this route without any of these fields, and the
+     dialog must still open and still be true. */
+  const { willDelete, alreadyGone: goneNow, inBatches, picked, alongside, localOnly } =
+    cloudDeleteCounts(t, data.already_gone);
+  const unchecked = Number(data.unverified) || 0;
+  const estimate = data.estimate === true;
+  /* THE NUMBERS HAVE TO ADD UP (corrected 2026-09-07, the day the live check landed).
+     Three quantities, and a reader has to be able to put them together:
+       willDelete + goneNow === inBatches      what goes, plus what is already gone
+       picked     + alongside === inBatches    what he picked, plus what rides along
+     So the membership is named out loud the moment goneNow makes it differ from the
+     headline -- the first build left "you picked 2; the other 3" standing under a
+     headline of 4 -- and the already-gone sentence says "more", never "of them": those
+     files are NOT among the ones the headline just said were going. */
   let head;
   if (t.tasks === 0) {
     head = (
-      <><b>{plural(t.media, "file", "files")}</b> will be removed from your backup.
+      <><b>{plural(inBatches, "file", "files")}</b> will be removed from your backup.
       None of them is on PixAI (local imports), so nothing is deleted from your account.</>
+    );
+  } else if (willDelete === 0 && goneNow > 0) {
+    // Everything in the blast radius is already gone on PixAI, so there is no headline
+    // number to state: "0 files will be deleted" followed by "1 more is already gone" is
+    // arithmetic nobody should have to do. (Imports cannot be already-gone, so this case
+    // can only arise with none of them in the selection.)
+    head = (
+      <>Nothing will be deleted. PixAI has already deleted{" "}
+      <b>{plural(goneNow, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>
+      {" "}— deleted there, not here — and {goneNow === 1 ? "it stays" : "they stay"} in your
+      backup, because {goneNow === 1 ? "this is the last copy of it" : "these are the last copies of them"} anywhere.</>
     );
   } else {
     head = (
-      <><b>{plural(t.media, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>{" "}
+      <><b>{plural(willDelete, "file", "files")}</b> across <b>{plural(t.tasks, "task", "tasks")}</b>{" "}
       will be deleted from your PixAI account <b>and</b> from your backup.
-      {t.unselected > 0 && (
-        <> You picked {plural(t.selected, "file", "files")}; the other{" "}
-        {t.unselected === 1 ? "1 comes with its batch." : t.unselected + " come with their batches."}</>
-      )}
-      {t.local_only > 0 && (
-        t.local_only === 1
+      {alongside > 0 && (goneNow > 0
+        ? <> Those tasks hold {plural(inBatches, "file", "files")} in all: you picked{" "}
+          {picked}, and the other {alongside === 1 ? "1 comes with its batch." : alongside + " come with their batches."}</>
+        : <> You picked {plural(picked, "file", "files")}; the other{" "}
+          {alongside === 1 ? "1 comes with its batch." : alongside + " come with their batches."}</>)}
+      {localOnly > 0 && (
+        localOnly === 1
           ? <> One is a local import with no PixAI task — that one only leaves your backup.</>
-          : <> {t.local_only} are local imports with no PixAI task — those only leave your backup.</>
+          : <> {localOnly} are local imports with no PixAI task — those only leave your backup.</>
       )}</>
     );
   }
@@ -84,8 +114,10 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       {media.map((m) => (
         <div
           key={m.media_id}
-          className={"cd-thumb" + (m.selected ? " on" : "")}
-          title={m.media_id + (m.selected ? " (you selected this)" : " (comes with the batch)")}
+          className={"cd-thumb" + (m.selected ? " on" : "") + (m.already_gone ? " gone" : "")}
+          title={m.media_id + (m.already_gone
+            ? " (already gone on PixAI — this copy stays)"
+            : m.selected ? " (you selected this)" : " (comes with the batch)")}
         >
           {m.thumb
             ? <img src={"/thumbs/" + encodeURIComponent(m.thumb) + ".jpg"} alt="" loading="lazy" />
@@ -95,17 +127,48 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       ))}
     </div>
   );
+  /* WHAT THIS TASK IS (owner's walk, 2026-09-07: the strips said "whole batch" over a
+     single thumbnail). "whole batch" is not a title -- it is a claim about the OTHER files
+     coming along with the one you picked, which is exactly right for a task that made
+     several images and simply untrue for a task that made one. A one-file task names its
+     file instead, so the label and the strip beneath it say the same thing. Video, because
+     the strip already marks it with ▶ and calling it an image under its own ▶ is the same
+     mistake one size smaller. */
+  const taskLabel = (media) => {
+    if (media.length !== 1) return "whole batch";
+    return media[0] && media[0].is_video ? "single video" : "single image";
+  };
   return (
     <div className="lb" role="dialog" aria-modal="true" onClick={onCancel}>
       <div className="cd-inner" onClick={(e) => e.stopPropagation()}>
         <div className="cd-head">Delete from PixAI — the whole blast radius</div>
         <p className="cd-summary">{head}</p>
+        {/* The live check's three sentences, in the same plain voice as the counts above
+            and only when there is something to say. "MORE", not "of them": these files are
+            not among the ones the headline just said were going -- add them to it. The
+            all-gone case says this in the headline itself, so it is not said twice. */}
+        {goneNow > 0 && willDelete > 0 && (
+          <p className="cd-summary">{goneNow === 1
+            ? <>One more is already gone on PixAI — deleted there, not here — so it stays in your backup, because this is the last copy of it anywhere.</>
+            : <>{goneNow} more are already gone on PixAI — deleted there, not here — so they stay in your backup, because these are the last copies of them anywhere.</>}</p>
+        )}
+        {unchecked > 0 && (
+          <p className="cd-summary">{unchecked === 1
+            ? <>One task could not be checked on PixAI just now, so it is counted from your library. The delete checks it again before it acts.</>
+            : <>{unchecked} tasks could not be checked on PixAI just now, so they are counted from your library. The delete checks each of them again before it acts.</>}</p>
+        )}
+        {estimate && (
+          <p className="cd-summary">These counts are an <b>estimate</b> from your library — too many tasks
+          to check each one on PixAI first. The delete itself still checks every task before it acts, and
+          still keeps back anything PixAI has already deleted.</p>
+        )}
         <div className="cd-tasks">
           {data.tasks.map((tk) => (
             <div className="cd-task" key={tk.task_id}>
-              <div className="cd-tlbl">whole batch
+              <div className="cd-tlbl">{taskLabel(tk.media)}
                 <span className="cd-tid">task {tk.task_id}</span>
                 <span>{plural(tk.media.length, "file", "files")}</span>
+                {tk.unverified && <span className="cd-unver">not checked on PixAI</span>}
               </div>
               {strip(tk.media)}
             </div>
@@ -298,11 +361,16 @@ export default function ActionsMenu({
 
   const askCloud = run(async () => {
     const data = await deletePreview(ids);
-    if (data) { setPreview({ data, ids }); return; }
+    // `totals` is what makes it a preview -- an answer carrying only {error} (the 15s
+    // timeout above the server's own 12s ceiling is the one that says so in words) is a
+    // failure wearing an object, and must not open a dialog with nothing in it.
+    if (data && data.totals) { setPreview({ data, ids }); return; }
     // Fail-soft, verbatim from the classic: an unreachable preview falls back to
-    // the prose-only confirm rather than a dead click or a silent skip.
+    // the prose-only confirm rather than a dead click or a silent skip. The reason, when
+    // there is one, is said out loud rather than left as an unexplained fallback.
     if (window.confirm(
       "Delete " + ids.length + " selected file(s) from your PixAI account AND locally?\n\n" +
+      (data && data.error ? data.error + "\n\n" : "") +
       "The preview of exactly what that takes could not be loaded, so: this deletes the whole " +
       "TASK behind each selection (every image in the batch, including ones you did not " +
       "select), from the cloud AND your backup. It is IRREVERSIBLE."

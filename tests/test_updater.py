@@ -13,6 +13,7 @@ import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
 
 from tests.conftest import login_test_client
+import moonglade_backup as core
 
 
 def _row(**kw):
@@ -103,13 +104,22 @@ def test_the_release_picker_skips_asset_packs():
 
 # ---- the check route -------------------------------------------------------
 
+def _one_minor_ahead():
+    """A release tag one minor above the running version -- derived, not hard-coded: the
+    fixture once said "v3.10.0", which was 'newer' until the day 3.10.0 was cut and the
+    test flipped red on the release commit itself (2026-09-08)."""
+    major, minor, _patch = (int(x) for x in core.__version__.split("."))
+    return "v%d.%d.0" % (major, minor + 1)
+
+
 def test_check_reports_behind_with_the_release_details(tmp_path, monkeypatch):
     _fresh_cache(monkeypatch)
+    ahead = _one_minor_ahead()
     monkeypatch.setattr(g, "fetch_releases", lambda **k: [
-        _rel("assets-2026-08-30"), _rel("v3.10.0", "The Tenth", "https://example.invalid/v3100")])
+        _rel("assets-2026-08-30"), _rel(ahead, "The Tenth", "https://example.invalid/v3100")])
     cli = _client(tmp_path)
     d = cli.get("/api/update/check").get_json()
-    assert d["latest"] == "v3.10.0" and d["behind"] is True
+    assert d["latest"] == ahead and d["behind"] is True
     assert d["title"] == "The Tenth" and d["notes_url"] == "https://example.invalid/v3100"
     assert d["current"] and d["checked_at"] > 0
     assert "error" not in d

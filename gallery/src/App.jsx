@@ -33,11 +33,15 @@ import {
   fetchAccount, fetchCollections,
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
+import { sendAchEvent } from "./notify/achNonce.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
 import { buildUrl, readPage, readImage, readSeries } from "./gen/urlState.js";
 import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
+import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
+import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
+import { registerUpdateHost } from "./notify/bannerStore.js";
 
 /* ============================ THE APP SHELL =================================
    Redesigned per the Frontend Gallery DC (design_handoff_moonglade_suite):
@@ -63,6 +67,50 @@ import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
      separator bar's compact <CostBadge> is its (dormant) price chip.
    - Grid refit: receives `thumb` (SIZE slider) — also exposed as --thumb on
      <main>; shell.css maps it onto the existing .grid columns until then. */
+
+/* The grid card for one picture, by id (Grid.jsx writes data-id on every .mgg-card).
+   The one DOM half of the viewer-landing ruling; the decision it feeds is
+   lib/viewerLanding.js, which has no DOM in it and is tested without one. Returns null
+   for a picture with no card of its own -- filtered out, or hidden under a stack cover. */
+function cardFor(mediaId) {
+  if (!mediaId) return null;
+  const q = typeof CSS !== "undefined" && CSS.escape
+    ? CSS.escape(String(mediaId))
+    : String(mediaId).replace(/["\\]/g, "\\$&");
+  try { return document.querySelector('.mgg-card[data-id="' + q + '"]'); } catch { return null; }
+}
+
+/* Does this element scroll its own children? overflow-y that can scroll AND content taller
+   than the box -- a pane with `auto` and nothing overflowing is not a scroller, and
+   treating it as one would send the landing to a container that cannot move. The document
+   scrollers (<html>/<body>) are deliberately NOT matched: those ARE the window, which is
+   what cardScroller falls back to. */
+function isOwnScroller(el) {
+  if (!el || el === document.body || el === document.documentElement) return false;
+  let oy = "";
+  try { oy = window.getComputedStyle(el).overflowY; } catch { return false; }
+  return (oy === "auto" || oy === "scroll" || oy === "overlay")
+    && el.scrollHeight > el.clientHeight + 1;
+}
+
+/* THE CONTAINER THAT ACTUALLY SCROLLS THE CARDS (2026-09-07, correcting the same day's
+   build). Masonry, grid and hero let the document scroll -- the window is the scroller,
+   which is why Grid's own page flip calls window.scrollTo. TIMELINE does not: .mgg-tl-cols
+   is a real scroll context (grid.css), so window.scrollTo({top:0}) moves nothing and the
+   pane keeps the offset it had on the page the owner never saw.
+
+   Walked from the card rather than read off the layout state, so it is right for any
+   layout that grows a pane of its own later. With no card to walk from -- the page changed,
+   and the answer is the top of it -- the timeline pane is looked up by name, because that
+   is the only layout that has one today. */
+function cardScroller(card) {
+  for (let n = card && card.parentElement; n; n = n.parentElement) {
+    if (isOwnScroller(n)) return n;
+  }
+  const pane = document.querySelector(".mgg-tl-cols");
+  if (isOwnScroller(pane)) return pane;
+  return window;
+}
 
 export default function App({ boot }) {
   // ?page=N on first load (#31, "Where the Refit Broke" #7): the classic addressed
@@ -101,12 +149,12 @@ export default function App({ boot }) {
   const [collections, setCollections] = useState(boot.collections || []);
   // ui -- blur shares the classic gallery's localStorage key on purpose: one
   // setting, both surfaces, exactly the classic semantics (all thumbs 16px,
-  // flagged 28px, hover reveals).
-  const [blur, setBlurState] = useState(
-    () => localStorage.getItem("gallery_privacy_blur") === "1"
-  );
+  // flagged 28px, hover reveals). The key moved into lib/privacyBlur.js on
+  // 2026-09-07 so the gallery picker and the generate drawer can read the SAME
+  // preference instead of the `body.privacy-blur` rules that never matched.
+  const [blur, setBlurState] = useState(isPrivacyBlurOn);
   const setBlur = (v) => {
-    localStorage.setItem("gallery_privacy_blur", v ? "1" : "");
+    setPrivacyBlurOn(v);
     setBlurState(v);
   };
   const [lbIndex, setLbIndex] = useState(null);
@@ -199,6 +247,13 @@ export default function App({ boot }) {
   const openOverlay = useCallback((key) => {
     setOverlay(key);
   }, []);
+  /* WHAT "UPDATE" MEANS ON THIS SHELL (owner ruling 2026-09-07). The standing update strip
+     is portaled to document.body from the notify root and has no idea what a Control Panel
+     is; this is the desktop's own answer to its button, registered once. The Panel then
+     reads the intent on mount and opens its update modal (ControlPanelOverlay.jsx) -- one
+     registration and one flag, rather than a prop chain from the body-level banner down
+     into the overlay's own state. */
+  useEffect(() => registerUpdateHost(() => setOverlay("panel")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection
@@ -379,15 +434,16 @@ export default function App({ boot }) {
 
      viewRef -- THE SURFACES THAT CARRY AN UNTOUCHED-LIBRARY CONTRACT. ◈ Similar (the grid
      is not even mounted under it, and the token's ✕ has to restore the library EXACTLY),
-     the series stack (B3: same filters, same page, same scroll), and the full-screen
-     viewer -- which indexes the array POSITIONALLY (Lightbox.jsx: `const it =
-     items[index]`, and the filmstrip and neighbour-warm read the same way). Swap `items`
-     at page 1, which is exactly where a finished picture arrives at the TOP, and every
-     index shifts by one: the picture on screen silently becomes its neighbour, mid-look.
+     the stack modal -- series or batch alike (B3 and 2026-09-07: same filters, same
+     page, same scroll under both) -- and the full-screen viewer, which indexes the
+     array POSITIONALLY (Lightbox.jsx: `const it = items[index]`, and the filmstrip and
+     neighbour-warm read the same way). Swap `items` at page 1, which is exactly where a
+     finished picture arrives at the TOP, and every index shifts by one: the picture on
+     screen silently becomes its neighbour, mid-look.
      The phone already refuses under its own Similar for the first of these reasons
      (AppMobile.jsx); the desktop has all three. */
   const navRef = useRef({ want: Math.max(1, initialPage | 0), inFlight: 0 });
-  const viewRef = useRef({ similar: null, series: null, lb: null });
+  const viewRef = useRef({ similar: null, stack: null, lb: null });
   /* The owner's own load. Marks the intent BEFORE the request leaves, counts it in the
      air, and hands back the same promise load() gives (the response, or undefined when a
      newer request superseded it) so every caller reads the answer exactly as before. */
@@ -400,7 +456,7 @@ export default function App({ boot }) {
     return load(p, replace).then((d) => { settle(); return d; }, (e) => { settle(); throw e; });
   }, [load]);
   const userLoadRef = useRef(userLoad);
-  /* One mirror, after every render. similarFor/seriesFor are declared further down the
+  /* One mirror, after every render. similarFor/stackFor are declared further down the
      file (the ◈ section and B3's); an effect body runs after the whole render has, so both
      are initialized by the time this line reads them -- the same reach paletteUpRef's own
      mirror effect makes for `palette`. */
@@ -409,14 +465,18 @@ export default function App({ boot }) {
     loadRef.current = load;
     userLoadRef.current = userLoad;
     if (!navRef.current.inFlight && total != null) navRef.current.want = page;
-    viewRef.current = { similar: similarFor, series: seriesFor, lb: lbIndex };
+    viewRef.current = { similar: similarFor, stack: stackFor, lb: lbIndex };
   });
   useEffect(() => {
     const onPop = () => {
       setDetailsFor(readImage(window.location.search));
-      // B3: the open series stack is addressable too, so Back closes it (or reopens
-      // the one the entry it landed on had up) exactly like it does for Details.
-      setSeriesFor(readSeries(window.location.search));
+      // B3: the open SERIES stack is addressable too, so Back closes it (or reopens
+      // the one the entry it landed on had up) exactly like it does for Details. A
+      // BATCH stack has no address (2026-09-07), so the address answering 'no series'
+      // simply closes whatever stack was up -- which is the honest read of a Back that
+      // was never told a batch was open.
+      const popSid = readSeries(window.location.search);
+      setStackFor(popSid ? { kind: "series", id: popSid } : null);
       const p = readPage(window.location.search);
       // Back/Forward is the owner's hand as surely as the pager is, and the address
       // already says p -- so the intent is p whether or not the grid needs a load to
@@ -449,6 +509,10 @@ export default function App({ boot }) {
     closeDetails();
     setAdv((old) => ({ ...old, model: name }));
   }, [closeDetails, setAdv]);
+  /* The ?batch= library drill-down. Since 2026-09-07 this is NO LONGER what a batch
+     CARD click does (see openBatch below) -- it is the Details record's own "View
+     batch" chip (DetailsView.jsx, ImageDetailsMobile.jsx), which is a different verb:
+     from one picture, show me the whole library filtered to its siblings. */
   const filterByBatch = useCallback((batch) => {
     closeDetails();
     setAdv((old) => ({ ...old, batch, series: "" }));
@@ -471,20 +535,36 @@ export default function App({ boot }) {
 
      `adv.series` itself is deliberately left in place and still rides every listing
      request -- the CSV export writes it, and it is the parameter this modal's own
-     fetch uses. What went away is the one caller that SET it from a click. */
-  const [seriesFor, setSeriesFor] = useState(() => readSeries(window.location.search));
+     fetch uses. What went away is the one caller that SET it from a click.
+
+     2026-09-07 (owner) extends that ruling to the OTHER stack kind. A batch card
+     still did the thing B3 retired -- filterByBatch, the whole library re-loaded as
+     ?batch=<task_id> -- and it opens the same modal now, "separately tagged so you
+     know what you're looking at, batch or series". So this state is the OPEN STACK,
+     not the open series: { kind: "series" | "batch", id }. Only the series kind is
+     addressable (?series=<sid>, the deterministic sid); a batch has no address of
+     its own, so opening one writes no history and Back simply closes it. */
+  const [stackFor, setStackFor] = useState(() => {
+    const sid = readSeries(window.location.search);
+    return sid ? { kind: "series", id: sid } : null;
+  });
   const openSeries = useCallback((sid) => {
     closeDetails();
     setLbIndex(null);
     setUrl({ series: sid });
-    setSeriesFor(sid);
+    setStackFor({ kind: "series", id: sid });
   }, [closeDetails, setUrl]);
-  const closeSeries = useCallback(() => {
-    setUrl({ series: null });
-    setSeriesFor(null);
+  const openBatch = useCallback((taskId) => {
+    closeDetails();
+    setLbIndex(null);
+    setStackFor({ kind: "batch", id: taskId });
+  }, [closeDetails]);
+  const closeStack = useCallback(() => {
+    setUrl({ series: null });   // a no-op for a batch: setUrl skips a write that changes nothing
+    setStackFor(null);
   }, [setUrl]);
   /* Opening a picture from inside the stack is ONE navigation, so it must leave ONE
-     history entry. It used to be closeSeries() then openDetails(): two setUrl calls,
+     history entry. It used to be closeStack() then openDetails(): two setUrl calls,
      two pushStates, and a middle entry -- the bare library with neither the stack nor
      the record -- that the owner never saw and that Back landed on. The address is
      written ONCE here, with both keys in the same patch (buildUrl takes a multi-key
@@ -492,11 +572,11 @@ export default function App({ boot }) {
      STATE work, and their own setUrl calls fall through setUrl's already-matches
      guard because the address is by then exactly what they would have written. So
      Back from the record goes straight to the stack that was open. */
-  const openDetailsFromSeries = useCallback((mid) => {
+  const openDetailsFromStack = useCallback((mid) => {
     setUrl({ series: null, image: mid });
-    closeSeries();
+    closeStack();
     openDetails(mid);
-  }, [setUrl, closeSeries, openDetails]);
+  }, [setUrl, closeStack, openDetails]);
 
   /* Generation completions refresh the credits chip -- and the library, but only from
      the perch where refreshing it moves nothing (see THE POLICY below).
@@ -531,11 +611,11 @@ export default function App({ boot }) {
       const nav = navRef.current;
       if (nav.inFlight || nav.want !== 1) return;
       /* ...and not even at the perch while a surface with an untouched-library contract is
-         up: the ◈ lookalikes, the series stack, or the full-screen viewer -- which reads
+         up: the ◈ lookalikes, the stack modal, or the full-screen viewer -- which reads
          `items` by INDEX, so a swap at page 1 slides a different picture under the one
          being looked at. See viewRef above. */
       const view = viewRef.current;
-      if (view.similar || view.series || view.lb != null) return;
+      if (view.similar || view.stack || view.lb != null) return;
       load(1, true).then((data) => {
         // undefined = a newer request superseded this one (useLibrary's reqSeq guard).
         if (data) pruneSelected(setSelected, data.items);
@@ -614,7 +694,10 @@ export default function App({ boot }) {
       // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
       // public source, so a clone can't read the egg's payoff before finding it -- a
       // failed read answers {error}, and the sub-line falls back to its generic string.
-      apiPost("/api/ach-event", { event: "konami" })
+      // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
+      // adopts the next one (notify/achNonce.js), which is what let the route go back to
+      // LOGIN so a phone can find this egg too.
+      sendAchEvent("konami")
         .then(() => apiGet("/api/achievements"))
         .then((data) => {
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
@@ -919,7 +1002,7 @@ export default function App({ boot }) {
     if (libScrollRef.current === null) libScrollRef.current = window.scrollY || 0;
     setLbIndex(null);
     closeDetails();
-    setSeriesFor(null);
+    setStackFor(null);
     setSimilarFor(mid);
   }, [closeDetails]);
   /* The other half, on EVERY dismiss path -- the token's ✕, Escape, and the empty
@@ -934,6 +1017,106 @@ export default function App({ boot }) {
     libScrollRef.current = null;
     window.scrollTo(0, y);
   }, [similarFor]);
+
+  /* WHERE THE VIEWER PUTS YOU DOWN (owner, 2026-09-07).
+
+     "Land on the picture you were viewing; if it is off-page -- the viewer stepped onto
+     another page -- the top of its page." A refinement of "the library stands still"
+     (2026-09-05), not a hole in it: closing the viewer is the owner's own hands, and the
+     view handed back was WRONG before this. The viewer's ← / → past either end of a page
+     rolls to the next one through userLoad (Lightbox.jsx's step), which is a real,
+     recorded page change -- so the grid re-rendered as page 8 under the offset he had on
+     page 7 and dropped him in the middle of a page he had never seen.
+
+     WHY THE SNAPSHOT IS TAKEN IN THE CLOSE HANDLER and not on the lbIndex -> null
+     transition: five other paths clear lbIndex and go somewhere else entirely (Edit, To
+     Video, Similar -- which does its own save/restore above -- Details, the deep-link
+     reset). Only the viewer's own ✕/Esc means "put me back in the library".
+
+     WHY A PASSIVE EFFECT and not the useLayoutEffect the Similar restore above uses:
+     the viewer holds a body-overflow scroll lock (useScrollLock), and while it is on the
+     viewport is not scrollable at all -- a scrollTo fired from the layout phase, before
+     the unmounting Lightbox's passive teardown has released it, is simply swallowed. So
+     this waits for the lock to lift, then measures, then moves. Once per close.
+
+     The decision itself is lib/viewerLanding.js, with no DOM in it. */
+  const lbLandRef = useRef(null);       // { openPage, page, mediaId } while the viewer is up
+  const lbLandPending = useRef(null);   // the snapshot the close handler hands to the effect
+  useEffect(() => {
+    if (lbIndex == null) { lbLandRef.current = null; return; }
+    const it = items[lbIndex];
+    const prev = lbLandRef.current;
+    lbLandRef.current = {
+      // The page it OPENED on, kept across every step: two steps forward and one back is
+      // still the page he started on, and still not a page change.
+      openPage: prev ? prev.openPage : page,
+      page,
+      mediaId: (it && it.media_id) || null,
+    };
+  }, [lbIndex, page, items]);
+
+  const closeLightbox = useCallback(() => {
+    lbLandPending.current = lbLandRef.current;
+    setLbIndex(null);
+  }, []);
+
+  useEffect(() => {
+    if (lbIndex != null) return;
+    const snap = lbLandPending.current;
+    if (!snap) return;
+    lbLandPending.current = null;
+
+    // Instant, never smooth: a close is not a journey. Asked for outright (2026-09-07,
+    // correcting the same day's build, which copied Grid.jsx's feature test for the word
+    // `instant` in the root element's style object. That test is ALWAYS false --
+    // CSSStyleDeclaration carries one member per CSS PROPERTY, and `instant` is a VALUE of
+    // scroll-behavior, not a property of its own -- so it always said "auto", which only
+    // happens to be non-smooth while no stylesheet sets scroll-behavior: smooth on these
+    // scrollers.) Every browser this app supports takes "instant"; one that did not would
+    // fall back to "auto" on its own, which is the same answer the dead guard gave.
+    const behavior = "instant";
+    const chromeTop = () => {
+      const v = parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--mgx-chrome-h"));
+      return Number.isFinite(v) ? v : 0;    // the sticky header App publishes (grid.css:54)
+    };
+    const pageChanged = snap.page !== snap.openPage;
+    let raf = 0, waited = 0;
+    const run = () => {
+      // Two reasons to wait a frame, both bounded at 20 so a close can never hang: the
+      // lock is still on, or the card has not painted yet. The card wait is skipped when
+      // the page changed -- the answer there is the top of the page, which needs no card,
+      // and waiting for one that will never appear would cost a third of a second of
+      // visible delay on the very case this whole thing exists to fix.
+      if ((document.body.style.overflow === "hidden"
+           || (!pageChanged && snap.mediaId && !cardFor(snap.mediaId))) && ++waited < 20) {
+        raf = requestAnimationFrame(run);
+        return;
+      }
+      const card = snap.mediaId ? cardFor(snap.mediaId) : null;
+      const box = card ? card.getBoundingClientRect() : null;
+      // The pane that holds the cards, not the window -- see cardScroller. "Already on
+      // screen" is asked about THAT box: in Timeline a card can be well inside the window
+      // and still below the fold of the pane it lives in.
+      const scroller = cardScroller(card);
+      const where = landingAfterViewer({
+        pageChanged,
+        cardTop: box ? box.top : null,
+        cardBottom: box ? box.bottom : null,
+        ...viewportOfScroller(scroller, {
+          viewportTop: chromeTop(),
+          viewportBottom: window.innerHeight || document.documentElement.clientHeight || 0,
+        }),
+      });
+      // "top" moves the scroller itself; "card" rides the card's own scrollIntoView, whose
+      // block:"nearest" scrolls that same pane and lets scroll-margin-top on .mgg-card
+      // (grid.css:54) keep it clear of the sticky header, exactly as the grid's own
+      // arrow-key focus does.
+      landInScroller(where, { scroller, card, behavior });
+    };
+    run();
+    return () => cancelAnimationFrame(raf);
+  }, [lbIndex]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* THE SAME PROMISE, ACROSS THE CROSSING (owner call 2, 2026-09-06).
 
@@ -1053,7 +1236,7 @@ export default function App({ boot }) {
     setOverlay(null);
     setLbIndex(null);
     setSimilarFor(null);
-    setSeriesFor(null);
+    setStackFor(null);
     if (dockStateRef.current.open) closeDock();
     setUrl({ image: null, series: null });
     setDetailsFor(null);
@@ -1235,7 +1418,7 @@ export default function App({ boot }) {
      them, this is the explicit half of the same rule. `similarFor` is in the list
      for a second reason since B2: the grid isn't even mounted then. */
   const gridKeys = lbIndex == null && !detailsFor && !overlay && !ctxMenu
-    && !similarFor && !seriesFor && !dockActive && !claimModal.open
+    && !similarFor && !stackFor && !dockActive && !claimModal.open
     && !palette.active && !palette.sheetActive;
 
   /* BUG FIX 2026-08-04: this object was previously an inline literal at
@@ -1381,7 +1564,7 @@ export default function App({ boot }) {
             onFocusCard={setGridFocus}
             onSimilar={showSimilar}
             onOpenSeries={openSeries}
-            onOpenBatch={filterByBatch}
+            onOpenBatch={openBatch}
           />
         )}
       </main>
@@ -1389,12 +1572,12 @@ export default function App({ boot }) {
       {ctxMenu && (
         <GridContextMenu target={ctxMenu} actions={ctxActions} onClose={() => setCtxMenu(null)} />
       )}
-      {/* B3: a series stack, over the gallery. Opening a picture from inside it closes
+      {/* B3: a stack -- series or batch -- over the gallery. Opening a picture from it closes
           the modal first -- the record is the deeper view, not a third layer stacked on
-          a second one -- and does it as ONE history entry (openDetailsFromSeries). */}
-      {seriesFor && (
-        <SeriesModal sid={seriesFor} onClose={closeSeries}
-          onOpenDetails={openDetailsFromSeries} />
+          a second one -- and does it as ONE history entry (openDetailsFromStack). */}
+      {stackFor && (
+        <SeriesModal stack={stackFor} onClose={closeStack}
+          onOpenDetails={openDetailsFromStack} />
       )}
 
       {/* the DC's veil: keeps the column bottom legible under the (future) dock */}
@@ -1403,7 +1586,10 @@ export default function App({ boot }) {
       {lbIndex != null && (
         <Lightbox
           items={items} index={lbIndex} setIndex={setLbIndex}
-          onClose={() => setLbIndex(null)}
+          /* closeLightbox, not a bare setLbIndex(null): this is the ONE exit that lands
+             the owner back on the library, so it is the one that takes the landing
+             snapshot (owner, 2026-09-07 -- see the effect above). */
+          onClose={closeLightbox}
           onRate={rate}
           /* userLoad, not load: stepping past the end of a page in the viewer is the
              owner asking for the next page as surely as the pager is, so it goes on the

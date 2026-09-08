@@ -8,7 +8,10 @@ happy-path build (container reads back byte-for-byte + manifest keyed to the who
 file + the achievements payload), the version-bump and url-carry-forward rules,
 explicit --version/--url override, the empty/missing-branding refusals, and the
 verification-failure-deletes-the-output safety (a silently-wrong container is worse
-than none).
+than none). Since 2026-09-07 also the BUILD STAMP: the provenance the packer writes
+into the TOC, that the verify step refuses a pack whose stamp did not round-trip, and
+the one consequence of putting a clock inside the file -- an unpinned rebuild is new
+bytes, so it fails closed without a --url exactly as any other byte change does.
 
 The conftest's autouse _isolated_branding + _isolated_asset_manifest fixtures point
 branding_root() AND manifest_path() at each test's tmp_path, so main() -- whose
@@ -19,11 +22,13 @@ real main() here at all."""
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 import moonglade_assets as ma
+import moonglade_backup as core
 import moonglade_container as mc
 import moonglade_gallery as g
 
@@ -145,11 +150,17 @@ def test_changed_bytes_without_url_fails_closed(monkeypatch):
 def test_version_bumps_and_urls_carry_forward_on_identical_bytes(monkeypatch):
     """Carry the prior URL forward ONLY when the rebuild is byte-identical (same sha) --
     then the existing URL genuinely still serves those bytes. First build sets the URL;
-    an identical rebuild with no --url keeps it and bumps the version."""
+    an identical rebuild with no --url keeps it and bumps the version.
+
+    --built-at is PINNED on both builds (build stamp, 2026-09-07): the build time is now
+    inside the container, so reproducing bytes means reproducing that too. Without the pin
+    this test passed or failed on whether the two builds landed in the same wall-clock
+    second -- see the next test, which asserts the unpinned rebuild fails closed."""
     _seed_branding({"banner.png": PNG_1PX})
-    _run(monkeypatch, "--url", "https://old.example/moonglade.dat")   # establishes url + real sha
+    pin = ["--built-at", "2026-09-07T12:00:00Z"]
+    _run(monkeypatch, "--url", "https://old.example/moonglade.dat", *pin)  # url + real sha
     v1 = ma.read_manifest()
-    _run(monkeypatch)                                 # rebuild identical bytes, no --url
+    _run(monkeypatch, *pin)                           # rebuild identical bytes, no --url
     man = ma.read_manifest()
     assert man["urls"] == ["https://old.example/moonglade.dat"]    # carried forward (same bytes)
     assert man["sha256"] == v1["sha256"]                          # identical
@@ -193,3 +204,67 @@ def test_verification_failure_deletes_output_and_writes_no_manifest(monkeypatch)
         _run(monkeypatch)
     assert not _out_path().exists()
     assert ma.read_manifest() is None
+
+
+# ---------------------------------------------------------------------------
+# The build stamp (moonglade_container TOC schema 1, 2026-09-07)
+# ---------------------------------------------------------------------------
+def test_the_build_stamps_provenance_into_the_container(monkeypatch):
+    """The packer writes `built_at` (ISO-8601 UTC) and `builder` (its own version string,
+    with the app version) into the TOC, alongside the `schema` and `content_sha256` the
+    format writes for itself -- so a pack can be traced to when and what cut it."""
+    _seed_branding({"banner.png": PNG_1PX})
+    _run(monkeypatch, "--built-at", "2026-09-07T12:00:00Z")
+
+    stamp = mc.open_container(_out_path()).stamp()
+    assert stamp["schema"] == mc.SUPPORTED_SCHEMA
+    assert stamp["built_at"] == "2026-09-07T12:00:00Z"
+    assert stamp["builder"] == bc.builder_stamp() == "build_container.py/1 moonglade/%s" % (
+        core.__version__)
+    assert len(stamp["content_sha256"]) == 64        # a real digest, not a placeholder
+
+
+def test_the_default_build_time_is_utc_now(monkeypatch):
+    """No --built-at means the clock: second-resolution ISO-8601 UTC, Z-suffixed."""
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", bc.utc_now_iso())
+    before = bc.utc_now_iso()
+    _seed_branding({"banner.png": PNG_1PX})
+    _run(monkeypatch)
+    after = bc.utc_now_iso()
+    got = mc.open_container(_out_path()).stamp()["built_at"]
+    assert before <= got <= after                    # ISO-8601 UTC sorts as text
+
+
+def test_verification_fails_loudly_if_the_stamp_does_not_round_trip(monkeypatch):
+    """The stamp is verified on the same terms as the bytes: a container whose provenance
+    did not survive the cold re-open is deleted, not published."""
+    _seed_branding({"banner.png": PNG_1PX})
+
+    real_write = bc.mc.write_container
+
+    def drop_the_stamp(out, assets, payloads=None, builder="", built_at=""):
+        return real_write(out, assets, payloads)     # writes schema/digest, no provenance
+
+    monkeypatch.setattr(bc.mc, "write_container", drop_the_stamp)
+    with pytest.raises(SystemExit) as e:
+        _run(monkeypatch)
+    assert "build stamp mismatch" in str(e.value)
+    assert not _out_path().exists()                  # and the bad container is gone
+    assert ma.read_manifest() is None
+
+
+def test_an_unpinned_rebuild_is_new_bytes_and_fails_closed_without_a_url(monkeypatch):
+    """The consequence of stamping the build time INSIDE the file, stated out loud: two
+    builds of the same tree are no longer byte-identical unless --built-at is pinned. The
+    release-integrity rule then does exactly what it should -- the sha moved, so the prior
+    URL no longer serves these bytes, so the manifest is not written."""
+    _seed_branding({"banner.png": PNG_1PX})
+    _run(monkeypatch, "--url", "https://old.example/moonglade.dat",
+         "--built-at", "2026-09-07T12:00:00Z")
+    first = ma.read_manifest()
+
+    with pytest.raises(SystemExit) as e:
+        _run(monkeypatch, "--built-at", "2026-09-07T12:00:01Z")   # one second later
+    assert "no --url was given" in str(e.value)
+    assert "--built-at" in str(e.value)              # the message names the way out
+    assert ma.read_manifest() == first              # prior manifest untouched

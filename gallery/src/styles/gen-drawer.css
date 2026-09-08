@@ -152,10 +152,13 @@
 .mgd-preview.open{display:block;}
 .mgd-preview.open.in{opacity:1;transform:none;}
 .mgd-preview img{width:100%;max-height:300px;object-fit:cover;display:block;}
-/* Reference-slot thumbnails follow the host page's privacy blur (audit 2026-07-21 S5). */
-body.privacy-blur .gen-drawer .mgd-slot img{filter:blur(16px);transition:filter .12s;}
-body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img{filter:blur(28px);}
-body.privacy-blur .gen-drawer .mgd-slot:hover img{filter:none;}
+/* Reference-slot thumbnails follow the privacy blur (audit 2026-07-21 S5). Re-keyed
+   2026-09-07: these were body-scoped and nothing in the app has ever set a class on
+   <body>, so the slots never blurred at all. VideoDrawer.jsx appends .mg-blur to the
+   drawer's own root from lib/privacyBlur.js -- the same preference the grid reads. */
+.gen-drawer.mg-blur .mgd-slot img{filter:blur(16px);transition:filter .12s;}
+.gen-drawer.mg-blur .mgd-slot[data-nsfw="1"] img{filter:blur(28px);}
+.gen-drawer.mg-blur .mgd-slot:hover img{filter:none;}
 /* The reference / frame slot (DC slotBox 2842-2843): 54px, radius 9, dashed + dark while empty,
    solid once filled (the thumb is the fill); empty caption 9.5px subtext; the '@imageN'/'@videoN'
    badge (DC 1369) sits bottom-left in mauve. Clicking a filled slot removes it (DC), so no ×. */

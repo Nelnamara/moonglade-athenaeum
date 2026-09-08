@@ -5,7 +5,9 @@ import {
   MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
+import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
 import { apiGet } from "../api.js";
 import "../styles/control-panel.css";
 import "../styles/create-mobile.css";
@@ -112,6 +114,7 @@ export default function ControlMobile({ account }) {
     testPullN, setTestPullN,
     taskId, setTaskId, taskState, importTask,
     power, powerConfirm, powerPhase, powerErr, clickPower, closePower,
+    update, updTarget, updPhase, updRefusal, updSteps, applyUpdate, closeUpdate,
   } = useControlPanel();
   // Newest event per action key -- same derivation as ControlPanelOverlay's; kept
   // per-file like timeAgo below rather than a shared util for a 3-line loop.
@@ -151,6 +154,46 @@ export default function ControlMobile({ account }) {
      early returns below, as every hook in this file must be. */
   useLayerHistory(brandOpen, closeBrand);
 
+  /* ---- THE UPDATE, on the phone (owner ruling 2026-09-07: "phone gets update") ---------
+     Nothing about updates showed on this surface before today -- the apply flow was the
+     desktop Panel's modal and only that, so a person holding the phone could be told a
+     release was out and have nowhere to go with it. The apply route is already @tier(LOGIN),
+     so this is a surface, not a policy change: the SAME useControlPanel() applyUpdate the
+     desktop modal calls -- that hook is the one module in gallery/src allowed to name the
+     apply route, and still owns the POST, its explicit CSRF token and its confirm -- drawn
+     through the SAME UpdatePhases.jsx card, with the reload and the receipt already working
+     here because notify/index.jsx claims the receipt once per boot on whichever shell booted
+     (main.jsx mounts NotifyRoot on both).
+
+     A drill-in, like Branding: the confirm and the running phases are a place you go from
+     the Control tab and come back from, which is exactly MobileScreen.jsx's shape and
+     exactly what the tab-body/drill-in split at the top of this file already says. */
+  const [updScreen, setUpdScreen] = useState(false);
+  const [updClosing, setUpdClosing] = useState(false);
+  // The standing banner is what says a release is out (notify/bannerStore.js) -- the same
+  // one strip on every surface. This tab reads it for whether to offer the tile at all.
+  const [pending, setPending] = useState(null);
+  useEffect(() => subscribeBanner((b) => setPending(b)), []);
+  const updBusy = updPhase === "applying" || updPhase === "done";
+  const closeUpdScreen = () => {
+    // INERT MID-APPLY, the same rule the desktop modal's Escape follows: the update is
+    // running whatever this chevron does, and closing the one surface that reports it would
+    // leave the person watching nothing. useLayerHistory re-pushes its entry while the layer
+    // stays open, so the phone's Back is swallowed here too rather than leaving the app.
+    if (updBusy) return;
+    setUpdClosing(true);
+    setTimeout(() => { setUpdScreen(false); setUpdClosing(false); closeUpdate(); }, 220);
+  };
+  useLayerHistory(updScreen, closeUpdScreen);
+  /* OPENED BY THE BANNER. Its Update button asks the shell (AppMobile.jsx registers
+     "switch to Control") and leaves an intent behind; this reads it once on mount, for the
+     usual case where this tab was not even rendered when the button was pressed, and
+     subscribes for the case where it already was. */
+  useEffect(() => {
+    if (takeOpenIntent()) setUpdScreen(true);
+    return subscribeOpenIntent(() => { takeOpenIntent(); setUpdScreen(true); });
+  }, []);
+
   if (summaryErr) {
     return (
       <div className="glm-tab glm-placeholder">
@@ -183,9 +226,28 @@ export default function ControlMobile({ account }) {
         ].filter(Boolean).join(" · ")
       : (watch.last_error ? "reconnecting… (" + watch.last_error + ")" : "connecting…");
 
+  // What the update screen is talking about: the frozen target once an apply is under way
+  // (the hourly check can land mid-apply and must not rewrite what is being installed --
+  // useControlPanel.js's own updTarget rule), the live payload before that, and the banner's
+  // bare version if this tab's own fresh check has not answered yet.
+  const updShown = (updBusy && updTarget) ? updTarget
+    : update || (pending ? { latest: pending.version, current: "" } : null);
+
   return (
     <div className="glm-tab">
       <div className="cm-pad">
+      {/* ABOVE "At a glance", because a release being out is the one thing on this tab that
+          is news rather than status. Same tile primitive as Branding below. */}
+      {pending && (
+        <div className="ctm-sec">
+          <div className="mgcp-tile click" onClick={() => setUpdScreen(true)}>
+            <div className="mgcp-mkick">Update available</div>
+            <div className="mgcp-tilebig">{pending.version}</div>
+            <button type="button" className="mgcp-smallchip">Update…</button>
+          </div>
+        </div>
+      )}
+
       <div className="ctm-sec">
         <div className="mgcp-sidehead">At a glance</div>
         <div className="ctm-statgrid">
@@ -510,6 +572,58 @@ export default function ControlMobile({ account }) {
       <MobileScreen open={brandOpen} closing={brandClosing} onClose={closeBrand} title="BRANDING">
         <BrandingTab summary={summary} onSaved={fetchSummary} isLocal={isLocal}
           skins={skins} activeSkin={activeSkin} onPickSkin={pickSkin} achievements={achievements} />
+      </MobileScreen>
+
+      {/* The apply itself. Same card the desktop modal draws (UpdatePhases.jsx), same hook
+          call behind the one button -- this file never posts to the apply route; it asks
+          useControlPanel()'s applyUpdate, which owns the confirm, the CSRF token and the
+          status poll. The reload at the end and the receipt on the boot after it are the
+          ones already shipped (hooks/useControlPanel.js, notify/index.jsx): no second path
+          is added here. */}
+      <MobileScreen open={updScreen} closing={updClosing} onClose={closeUpdScreen}
+        title={"Update to " + ((updShown && updShown.latest) || "")}>
+        <div className="cm-pad">
+          <div className="ctm-sec">
+            {!updShown ? (
+              <div className="mgcp-tilenote">Checking…</div>
+            ) : (
+              <>
+                {updBusy ? (
+                  <div className="mgcp-updsub">The library stays put; only the app restarts.</div>
+                ) : (
+                  <div className="mgcp-updver">
+                    <span className="cur">{updShown.current || "?"}</span>
+                    <span className="arr" aria-hidden="true">→</span>
+                    <span className="new">{updShown.latest}</span>
+                  </div>
+                )}
+                {!updBusy && updShown.title ? <div className="mgcp-updname">{updShown.title}</div> : null}
+                {!updBusy && updShown.notes_url ? (
+                  <a className="mgcp-updnotes" href={updShown.notes_url} target="_blank"
+                    rel="noopener noreferrer">Release notes ↗</a>
+                ) : null}
+
+                {updBusy && updSteps ? (
+                  <UpdatePhases steps={updSteps} phase={updPhase} />
+                ) : updRefusal ? (
+                  <UpdateRefusal refusal={updRefusal} />
+                ) : (
+                  <ul className="mgcp-updwhat">
+                    {UPDATE_WHAT.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                )}
+
+                {!(updBusy && updSteps) && (
+                  <div className="mgcp-updacts">
+                    <button type="button" className="mgcp-updgo" onClick={applyUpdate}>
+                      {updRefusal ? "Try again" : "Update now"}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </MobileScreen>
     </div>
   );

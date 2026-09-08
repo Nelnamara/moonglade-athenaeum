@@ -992,6 +992,26 @@ def _series_member_task_ids(db_path, sid):
     return out
 
 
+def batch_member_order(rows):
+    """One task's surviving catalog rows in #33's BATCH order -- PixAI's own output
+    number (`batch_index`) when EVERY row carries one, else media_id ascending.
+
+    The all-or-nothing rule is compute_series' own (see its "member media_ids are
+    ordered the way /api/siblings orders them" note): a partly-numbered task would
+    otherwise interleave numbered and unnumbered rows into an order nothing else in
+    the app agrees with. Keeping the rule here means a BATCH stack lists a task's
+    pictures in exactly the order its sibling strip and its series run already do.
+    Pure -- no db, so tests/test_batch_stack.py drives it directly."""
+    def _bi(r):
+        try:
+            return int(str(r.get("batch_index") or "").strip())
+        except ValueError:
+            return None
+    if rows and all(_bi(r) is not None for r in rows):
+        return sorted(rows, key=lambda r: (_bi(r), str(r.get("media_id") or "")))
+    return sorted(rows, key=lambda r: str(r.get("media_id") or ""))
+
+
 def _filters_from_args(args):
     """Pull the gallery grid's filter set out of a request query string, keyed by
     query_catalog()'s own parameter names (the index route reads exactly these args --
@@ -1169,8 +1189,12 @@ def _members_of_tasks(con, task_ids):
     for i in range(0, len(task_ids), _TASK_CHUNK):
         chunk = task_ids[i:i + _TASK_CHUNK]
         rows = con.execute(
-            "SELECT media_id, task_id, is_video, poster_media_id FROM catalog "
-            "WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
+            # cloud_deleted_at rides along (2026-09-07) for the delete preview's live
+            # check: it is one of the two sources _rows_the_bulk_purge_must_keep keeps
+            # rows back from, and reading it here costs nothing -- same statement, one
+            # more column, so the chunked-pass guarantee above is untouched.
+            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at "
+            "FROM catalog WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
         for r in rows:
             out.setdefault(r["task_id"], []).append(dict(r))
     for members in out.values():
@@ -2785,6 +2809,50 @@ def _mark_earned(out_dir, db_path, ach_id):
     return any(a["id"] == ach_id and a["earned"] for a in result["achievements"])
 
 
+ICO_SIZES = (16, 32, 48, 256)
+
+
+def _cut_mark_ico(mdir, mark_id, art_bytes):
+    """Cut <mark_id>.ico beside an uploaded mark's art. Returns True if the file was
+    written, False if it could not be (and the caller keeps the mark either way).
+
+    WHY: the Desktop launcher shortcut is the app's real icon (make_launcher_shortcut --
+    a .pyw cannot carry one, the .lnk can), and it reads a mark's .ico off disk. The
+    shipped tile marks are delivered with one already cut; an UPLOADED mark never had one,
+    so POST /api/branding/shortcut answered "no .ico cut" for it and a custom mark could
+    never become the launcher's icon. Cutting it at upload time is what closes that.
+
+    The art is padded to a SQUARE on transparency (an icon is square; letterboxing beats
+    stretching), and scaled to 256 when it is smaller, so all four of ICO_SIZES really land
+    in the file rather than Pillow silently dropping the ones larger than the source. An
+    animated webp contributes its FIRST frame -- an .ico has no animation to keep it in.
+
+    FAILS SOFT on everything: no Pillow, unreadable art, a write that cannot happen. The
+    mark itself is already saved by the time this runs, and losing the icon is not a reason
+    to lose the mark."""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(art_bytes)) as im:
+            im.load()
+            rgba = im.convert("RGBA")
+        side = max(rgba.width, rgba.height)
+        if side <= 0:
+            return False
+        if rgba.width != rgba.height:
+            square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            square.paste(rgba, ((side - rgba.width) // 2, (side - rgba.height) // 2))
+            rgba = square
+        biggest = max(ICO_SIZES)
+        if side < biggest:
+            rgba = rgba.resize((biggest, biggest), Image.LANCZOS)
+        rgba.save(mdir / (str(mark_id) + ".ico"), format="ICO",
+                  sizes=[(s, s) for s in ICO_SIZES])
+        return True
+    except Exception:
+        return False
+
+
 def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     """Save The Great Library's custom-mark upload into branding/marks/ and make
     it the active mark. Same manifest shape list_marks() already reads
@@ -2796,8 +2864,12 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
 
     There is only ONE custom-mark slot (the design's single 6th tile), so a
     second upload REPLACES the first -- any existing kind:'upload' entry (and
-    its .png) is dropped here first, rather than accumulating orphaned marks
-    the picker would need de-duping logic to hide."""
+    its .png/.webp/.ico) is dropped here first, rather than accumulating
+    orphaned marks the picker would need de-duping logic to hide.
+
+    Also cuts the mark's launcher .ico (2026-09-07, see _cut_mark_ico) -- the
+    returned `ico` is True when that file was written and False when the cut
+    failed, and the mark is saved either way."""
     mdir = _role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     _seed_loose_manifest(_role_rel("marks", "marks.json"))   # keep shipped defaults in the picker
@@ -2807,13 +2879,21 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     except (OSError, ValueError):
         marks = []
     for old in [m for m in marks if isinstance(m, dict) and (m.get("kind") or "tile") == "upload"]:
-        for old_ext in MARK_EXTS:        # the replaced upload may be either format
+        # ".ico" joins MARK_EXTS here (2026-09-07): an upload now gets one cut for it, so
+        # the replaced upload's icon has to go with its art -- otherwise a stale .ico
+        # outlives the mark it was cut from and list_marks would keep claiming it.
+        for old_ext in MARK_EXTS + (".ico",):   # the replaced upload may be either format
             old_art = mdir / (str(old.get("id")) + old_ext)
             if old_art.exists():
                 old_art.unlink()
     marks = [m for m in marks if not (isinstance(m, dict) and (m.get("kind") or "tile") == "upload")]
     new_id = secrets.token_hex(4)
     (mdir / (new_id + ext)).write_bytes(png_bytes)
+    # Cut the launcher icon too (2026-09-07). Before this an upload always reported
+    # ico:False and POST /api/branding/shortcut refused it, so a custom mark could never
+    # become the app's Desktop icon. Best effort: the mark is already on disk, and a
+    # failed cut costs the icon, never the mark.
+    ico = _cut_mark_ico(mdir, new_id, png_bytes)
     marks.append({"id": new_id, "label": label, "kind": "upload"})
     (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
     cfg = load_branding(out_dir)
@@ -2821,7 +2901,7 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     save_branding(out_dir, cfg)
     return {"id": new_id, "label": label, "kind": "upload",
             "png": "/branding/marks/%s%s" % (new_id, ext),
-            "animated": ext == ".webp", "ico": False}
+            "animated": ext == ".webp", "ico": ico}
 
 
 def remove_custom_mark(out_dir, mark_id):
@@ -2842,7 +2922,10 @@ def remove_custom_mark(out_dir, mark_id):
         return False
     keep = [m for m in marks if m is not target]
     (mdir / "marks.json").write_text(json.dumps({"marks": keep}, indent=2), encoding="utf-8")
-    for ext in MARK_EXTS:                # an uploaded mark may be png or webp
+    # ".ico" joins the sweep (2026-09-07): an upload gets a launcher icon cut for it, and
+    # it must not outlive the mark -- a left-behind .ico is an icon path pointing at a
+    # mark that no longer exists.
+    for ext in MARK_EXTS + (".ico",):    # an uploaded mark may be png or webp
         art = mdir / (str(mark_id) + ext)
         if art.exists():
             art.unlink()
@@ -4182,7 +4265,11 @@ def first_sync_complete(out_dir, db_path, telem=None):
     the rungs earned during the first sync fire together AFTER it completes, not during.
 
     Set by `--sync`'s completion (telem flag 'first_sync_done') -- the CLI path AND the
-    wizard's sync job both run `--sync`, so one setter covers both.
+    wizard's sync job both run `--sync`, so one setter covers both. Refined 2026-09-07
+    (owner report): --sync used to set it on EVERY exit, so a first backup stopped
+    part-way plus a two-page Sync claimed a finished first sync over a mostly-empty
+    library. It is now set only once that library's walk has reached the end of history
+    (moonglade_backup.WALK_END_FLAG), so this gate says what its name says.
 
     Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
     prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
@@ -6283,6 +6370,39 @@ def find_image_file(out_dir, media_id, filename):
 # megabyte of JSON and a thumbnail wall the modal cannot scroll through.
 DELETE_PREVIEW_TASK_CAP = 24
 
+# How many selected tasks /api/delete-preview will READ BACK FROM PIXAI before it stops
+# checking and says the counts are an estimate (owner, 2026-09-07: "one live read per
+# selected task, capped at 40; above that the preview says it is an estimate, and the
+# delete still keeps back what the live read finds").
+#
+# Unlike DELETE_PREVIEW_TASK_CAP above -- a DISPLAY bound -- this one changes what the
+# numbers MEAN. At or below it the preview is exact against the cloud: an image the owner
+# deleted on PixAI's own website is reported as already gone rather than counted among the
+# files this delete will take. Above it nothing is read and the modal says so, which is
+# honest and costs nothing; the delete itself still reads every task before it acts
+# (_rows_the_bulk_purge_must_keep), so nothing is at risk either way.
+#
+# 40 is the owner's number. Note it is ABOVE the display cap, deliberately: tasks 25-40 are
+# never drawn as strips but their images are still counted, and the totals are what he reads
+# to decide.
+DELETE_PREVIEW_LIVE_CAP = 40
+# The same pool width build_thumbnails() has used for its own fan-out (workers=8). 40 reads
+# eight at a time is five rounds, not forty round trips in a row.
+DELETE_PREVIEW_LIVE_WORKERS = 8
+# A wall-clock ceiling on the whole fan-out, and a real one (2026-09-07): _preview_live_gone
+# spends it three ways -- it starts no read after the deadline, gives each read a socket
+# timeout no longer than the budget has LEFT, and stops collecting at the deadline without
+# waiting for the pool to drain. The first of those was the whole enforcement until this
+# date, which bounded only when a read STARTED: one connection that stalled after the
+# handshake could run out the transport's own 60s and then retry for another, so the route
+# could block for ~2 minutes against the 12 it promised. Whatever has not answered by the
+# deadline is reported unverified, exactly like a read that failed.
+#
+# api.js's deletePreview carries a fetch timeout a little ABOVE this (DELETE_PREVIEW_MS),
+# so the dialog always gets an answer -- the server's, in the ordinary case, and the
+# client's plain "PixAI did not answer in time" only if the server itself goes silent.
+DELETE_PREVIEW_LIVE_BUDGET_S = 12.0
+
 
 def _trash_meta_path(out_dir, media_id):
     """Sidecar path for a quarantined item's snapshotted catalog row (see
@@ -7487,9 +7607,45 @@ window.storage = {
   list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
   delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
+/* The Read the Manual beacon, and the nonce it needs (2026-09-07 ruling -- see
+   api_ach_event()). The classic Loom shell has no bundle seam to import
+   gallery/src/notify/achNonce.js from, so it carries the same three rules by hand:
+   send the nonce, adopt the next_nonce an accepted event returns, and on a stale-page
+   403 ask /api/ach-nonce once and retry once -- but ONLY when the nonce it just lost is
+   missing or older than the 60s window (2026-09-07, refining the same day's ruling; see
+   achNonce.js's own writeup). A double-fired click on the ? button sends one nonce twice;
+   the twin that loses is refused 403 as consumed, and retrying THAT one with a fresh nonce
+   counts one press as two the moment the round trip outruns the server's 150ms debounce.
+   Anything else is a quiet no-op -- the feat stays earnable on the next open. The value
+   below is a PLACEHOLDER the /loom route substitutes on the way out -- a fresh mint per
+   render, exactly as app_page puts one in MG_BOOT. (Naming the placeholder token in this
+   comment would substitute it here too.) */
+window.MG_ACH_NONCE = "__ACH_NONCE__";
+window.MG_ACH_NONCE_AT = Date.now();     // when the nonce we hold was minted
+window.mgAchDocs = function (retried) {
+  // Read the age BEFORE the request: a twin that beat us may adopt its own next_nonce
+  // while ours is in flight, and reset the clock this decision reads.
+  var stale = !window.MG_ACH_NONCE || (Date.now() - window.MG_ACH_NONCE_AT) >= 60000;
+  fetch('/api/ach-event', {method:'POST',headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({event:'docs', nonce: window.MG_ACH_NONCE})})
+    .then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d || {}}; },
+                                              function () { return {status: r.status, body: {}}; }); })
+    .then(function (x) {
+      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce;
+                               window.MG_ACH_NONCE_AT = Date.now(); return; }
+      // 429, anything else, or a 403 on a nonce young enough to have been spent by this
+      // click's own twin: give up quietly.
+      if (x.status !== 403 || retried || !stale) return;
+      return fetch('/api/ach-nonce').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.MG_ACH_NONCE_AT = Date.now();
+                            window.mgAchDocs(true); }
+      });
+    })
+    .catch(function () {});
+};
 </script>
 __RUNTIME_SCRIPT_BLOCK__
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{fetch('/api/ach-event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:'docs'})})}catch(e){}"
+<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{window.mgAchDocs()}catch(e){}"
   style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
   title="How The Loom works">?</button>
 <div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
@@ -8491,6 +8647,168 @@ def scene_row(sc):
             "thumb": scene_thumb_url(sc.get("images"))}
 
 
+# ---- the feat-beacon nonce, debounce and rate limit (2026-09-07) ------------------------
+# What replaced the LOCALHOST gate on /api/ach-event. The gate's problem was that the
+# beacon is the ONLY witness a feat gesture happened, so any signed-in session could POST
+# {"event": "konami"} from a console and arm the feat. Loopback made the gesture witnessable
+# but cost every phone and LAN device the three feats outright. The owner's call
+# (2026-09-07): "triggered should be obtainable easily on a phone just like desktop. For
+# sure build the nonce."
+#
+# So the witness moves from WHERE the request came from to WHETHER IT CAME FROM A PAGE THE
+# SERVER RENDERED. A nonce is minted into each render, is good for exactly one event inside
+# 60 seconds, and is bound to the session it was minted for. A console POST has no nonce; a
+# replayed one is already spent; one lifted from another session's page is not this
+# session's to spend. That is a real (if soft) witness, and unlike loopback it is one a
+# phone passes.
+#
+# Process-local by design, exactly like _login_attempts: one process, `python
+# moonglade_gallery.py`. Under a multi-worker server each worker would keep its own table
+# and a nonce minted by worker A would read as unknown at worker B -- the page would refresh
+# once and carry on, so the failure mode is a wasted round trip, not a lost feat.
+_ACH_NONCE_TTL_S = 60.0       # a nonce is good for one event inside this window
+_ACH_NONCE_MAX = 4000         # hard cap on the table (sweep-first, then evict oldest)
+_ACH_DEBOUNCE_S = 0.15        # the same (session, event) inside this counts once
+_ACH_RATE_MAX = 30            # beacon calls per session per window (mint + event both count)
+_ACH_RATE_WINDOW_S = 60.0
+_ach_lock = threading.Lock()
+_ach_nonces = {}   # nonce -> (issued_at, sid)
+_ach_last = {}     # (sid, event) -> epoch of the last event that COUNTED
+_ach_rate = {}     # sid -> [epoch, ...] of calls inside the rolling window
+
+
+def _ach_sweep(now):
+    """Drop expired nonces, stale debounce stamps and spent rate rows. The caller holds
+    _ach_lock. Runs on every mint AND every check, so the tables cannot grow between two
+    cold periods -- there is no other reaper."""
+    for nonce, (issued, _sid) in list(_ach_nonces.items()):
+        if now - issued > _ACH_NONCE_TTL_S:
+            _ach_nonces.pop(nonce, None)
+    for key, stamp in list(_ach_last.items()):
+        if now - stamp > _ACH_RATE_WINDOW_S:
+            _ach_last.pop(key, None)
+    for sid, hits in list(_ach_rate.items()):
+        fresh = [t for t in hits if now - t <= _ACH_RATE_WINDOW_S]
+        if fresh:
+            _ach_rate[sid] = fresh
+        else:
+            _ach_rate.pop(sid, None)
+
+
+def _ach_mint(sid, now=None):
+    """A fresh nonce for `sid`. Sweeps first; if the table is somehow still at its cap
+    (a burst inside one 60s window), evicts the oldest entries rather than growing --
+    an unbounded dict fed by any logged-in session is a memory vector, and losing the
+    oldest nonce costs its page one refresh."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        overflow = len(_ach_nonces) - _ACH_NONCE_MAX + 1
+        if overflow > 0:
+            for nonce, _rec in sorted(_ach_nonces.items(), key=lambda kv: kv[1][0])[:overflow]:
+                _ach_nonces.pop(nonce, None)
+        nonce = secrets.token_urlsafe(16)
+        _ach_nonces[nonce] = (now, sid)
+        return nonce
+
+
+def _ach_consume(nonce, sid, now=None):
+    """True when `nonce` was minted for THIS session and is still inside its window.
+    A match is spent whether or not it had expired (one event per nonce, always). A
+    nonce belonging to another session is NOT spent -- refusing it is right, but burning
+    it would let any logged-in session invalidate another's page at will."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        rec = _ach_nonces.get(nonce) if nonce else None
+        if not rec:
+            return False
+        issued, owner = rec
+        if owner != sid:
+            return False
+        _ach_nonces.pop(nonce, None)
+        return (now - issued) <= _ACH_NONCE_TTL_S
+
+
+def _ach_debounced(sid, event, now=None):
+    """True when the same (session, event) already counted less than _ACH_DEBOUNCE_S ago.
+    Records this event's stamp when it is not.
+
+    This is a WALL-CLOCK gap and nothing else: it cannot see whether one gesture fired
+    twice or a person tapped twice, so the window is the whole of the distinction. At the
+    400ms it shipped with on 2026-09-07 it was not one -- a phone user tapping the narrator
+    at an ordinary ~3 taps/sec had every second REAL poke discarded, so Triggered wanted
+    about ten taps instead of five, while this docstring, the route's, and useFolio.js's
+    all claimed separate clicks were never touched. Narrowed to 150ms the same day: a
+    double-fired DOM event arrives inside a few milliseconds, and a hand cannot tap the
+    same control twice inside 150ms, so the window now catches what those comments say it
+    catches. Faster than a hand, not faster than a bug.
+
+    A double fire also means one nonce sent twice -- the twin that loses the race is
+    refused 403 as consumed, BEFORE reaching here. That refusal must stay silent on the
+    client: gallery/src/notify/achNonce.js (and the Loom shell's own mgAchDocs) refresh and
+    retry only when their nonce is missing or older than the 60s window, never on the
+    immediate twin, or the retry would arrive with a fresh nonce and count the gesture a
+    second time on any round trip slower than this window."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        prev = _ach_last.get((sid, event))
+        if prev is not None and (now - prev) < _ACH_DEBOUNCE_S:
+            return True
+        _ach_last[(sid, event)] = now
+        return False
+
+
+def _ach_rate_ok(sid, now=None):
+    """False once `sid` has spent its 30 beacon calls in the rolling minute. Counts the
+    call it admits, so a mint and an event draw on the same budget -- five pokes plus the
+    odd refresh is nowhere near it, a scripted replay loop is."""
+    now = time.time() if now is None else now
+    with _ach_lock:
+        _ach_sweep(now)
+        hits = [t for t in _ach_rate.get(sid, ()) if now - t <= _ACH_RATE_WINDOW_S]
+        if len(hits) >= _ACH_RATE_MAX:
+            _ach_rate[sid] = hits
+            return False
+        hits.append(now)
+        _ach_rate[sid] = hits
+        return True
+
+
+# --- The name hunt on the Bookmarked and Mine tabs (owner, 2026-09-07: "search is still
+# shit"). Measured that day with the app's own client: the bookmarks operation takes a
+# keyword and answers 24 rows that mostly do NOT carry it ("eyes" -> "Special Eyes XL" then
+# a page of unrelated titles), and the author-filtered market connection ignores the keyword
+# outright (the same four rows for "eyes" and for nothing). So neither tab searched. Both
+# lists are the owner's OWN (a few hundred bookmarks, a handful of his LoRAs), so the honest
+# search is to walk the list and keep the rows whose title or description carries the words --
+# bounded, and the whole answer comes back in one page (no cursor), because a filtered walk
+# cannot hand out a cursor that means anything to the next call.
+_HUNT_MAX_PAGES = 20
+
+
+def _hunt_by_name(fetch_page, q, size):
+    """Walk `fetch_page(after)` (a callable returning the picker's payload shape: results /
+    has_more / next_cursor) and keep the rows whose title or description contains every word
+    of `q`, case-insensitively. Stops at the source's end, at _HUNT_MAX_PAGES, or once
+    `size * 4` matches are in hand. Answers has_more False: the hunt is one page."""
+    words = [w for w in (q or "").lower().split() if w]
+    keep, after, pages = [], None, 0
+    while pages < _HUNT_MAX_PAGES:
+        page = fetch_page(after) or {}
+        if page.get("error") and not page.get("results"):
+            return page
+        for row in page.get("results") or []:
+            hay = ((row.get("title") or "") + " " + (row.get("description") or "")).lower()
+            if all(w in hay for w in words):
+                keep.append(row)
+        pages += 1
+        if not page.get("has_more") or not page.get("next_cursor") or len(keep) >= size * 4:
+            break
+        after = page["next_cursor"]
+    return {"results": keep, "has_more": False, "next_cursor": "", "hunted_pages": pages}
+
+
 def create_app(out_dir: Path):
     app = Flask(__name__)
 
@@ -8895,7 +9213,12 @@ def create_app(out_dir: Path):
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
-        env = dict(os.environ, MOONGLADE_PROGRESS="1")
+        # PYTHONIOENCODING: the reader below decodes this pipe as UTF-8, but a child whose
+        # stdout is a pipe picks the locale encoding (cp1252 on this box), so any non-ASCII
+        # the CLI prints arrived as a replacement character in the transcript. Sync's
+        # closing line now carries an em dash (2026-09-07), so make the two agree at the
+        # source rather than mangling the one sentence that says whether the walk finished.
+        env = dict(os.environ, MOONGLADE_PROGRESS="1", PYTHONIOENCODING="utf-8")
         import uuid
         job_id = "panel-" + uuid.uuid4().hex[:12]
         # CLAIM the single job slot -- check and mark in ONE lock acquisition, BEFORE any
@@ -8947,7 +9270,17 @@ def create_app(out_dir: Path):
         # key alongside the display label -- the Panel's run-history ledger needs it
         # for per-action last-run lookups and its "run again" control. Merge semantics
         # (_reconstruct_jobs' cur.update) keep it through every later event.
-        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action)
+        #
+        # `scheduled` rides it for the same reason and by the same merge: the client cannot
+        # tell an unattended run from a clicked one, and from the owner's walk (2026-09-07)
+        # it must -- an automatic job produces NO completion toast at all, only the Activity
+        # line (gallery/src/notify/jobsStore.js's toastTransitions). Written once, on the
+        # START event; cur.update carries it onto the terminal event the reader writes.
+        # `or None` rather than the bare False because append_job_event drops None fields,
+        # so a clicked run's row is byte-for-byte what it has always been -- absence means
+        # "somebody pressed this", which is what every row written before today means too.
+        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action,
+                 scheduled=(scheduled or None))
         threading.Thread(target=_panel_reader, args=(proc,), kwargs={"then": then},
                          daemon=True).start()
         return True
@@ -9143,9 +9476,16 @@ def create_app(out_dir: Path):
             action = _panel_job.get("action") or ""
         return action if action in ARTWORKS_TOUCHING_ACTIONS else ""
 
-    def _artworks_kick(force=False):
+    def _artworks_kick(force=False, scheduled=False):
         """Fire one published-artwork sweep OFF-THREAD -- the one entry point all four
         triggers use (boot, the fifteen-minute tick, the publish kick, Run now).
+
+        `scheduled` means NOBODY CLICKED THIS, exactly as it does on _panel_run -- and it
+        is passed per trigger rather than derived from `force`, which looks like the same
+        question and is not: three of the four triggers force past the fifteen-minute
+        guard, and only ONE of those three (Run now) is a click. It rides the sweep's own
+        `log_event` onto the row it writes, so an unattended sweep lands in the Activity
+        window without a corner toast (owner's walk, 2026-09-07).
 
         Off-thread because none of the four can afford to wait on it: the publish kick
         happens inside a route that has already committed an irreversible publish, Run now
@@ -9183,7 +9523,14 @@ def create_app(out_dir: Path):
                     saved = float(_load_sched().get("artworks_deep_at") or 0.0)
                 if saved > _artworks_state["deep_at"]:
                     _artworks_state["deep_at"] = saved
-                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_log_job,
+                # The sweep bypasses _panel_run entirely (it is in-process work, not a
+                # subprocess in the job slot), so this wrapper is where its row learns
+                # whether anybody asked for it. Same `or None` as _panel_run's: a Run now
+                # writes the row it always wrote.
+                def _sweep_log(job_id, **fields):
+                    _log_job(job_id, scheduled=(scheduled or None), **fields)
+
+                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_sweep_log,
                                     busy=_artworks_job_busy)
                 _sched_stamp(artworks_deep_at=_artworks_state["deep_at"])
             except Exception:                                # noqa: BLE001
@@ -9202,7 +9549,9 @@ def create_app(out_dir: Path):
             # this row is the one that governs here and it may be shorter than that guard --
             # the tick decides freshness itself, in artworks_sweep_fresh, before it gets
             # here (and that is what stops the first tick repeating the boot kick).
-            _artworks_kick(force=True)
+            # Scheduled: this IS the living library's tick, the same as the _panel_run
+            # branch below it.
+            _artworks_kick(force=True, scheduled=True)
             return True
         return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"),
                           scheduled=True)
@@ -9558,7 +9907,8 @@ def create_app(out_dir: Path):
         in-memory-only, gone on restart and invisible to anyone reading moonglade.log
         after the fact. Found live: a task stuck failing every catch-up sweep for
         hours produced nothing but repeated "N finished task(s) were never mirrored"
-        warnings in the log -- true, but silent about WHY, because the actual
+        warnings in the log (that wording is historic -- the sweep says "are missing media
+        from the catalog" since 2026-09-07) -- true, but silent about WHY, because the actual
         exception only ever reached last_error. A restart cleared the symptom (fresh
         process, fresh attempt) without anyone learning the cause."""
         import logging as _logging
@@ -9589,7 +9939,13 @@ def create_app(out_dir: Path):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
         generation whose Generate-card poller was closed (you navigated into the panel)
         still lands as done/failed instead of hanging at 'running' forever. Only touches a
-        job we already track -- never invents one for a task generated on the website."""
+        job we already track -- never invents one.
+
+        That last clause used to read "never invents one for a task generated on the
+        website", and the abstention was the whole point (2026-07-06). It still describes
+        THIS function exactly -- what changed on 2026-09-07 is that a website run now HAS a
+        row by the time this runs, written by _website_job_seen below off the same event.
+        So this closes a website row without knowing or caring that it is one."""
         import moonglade_backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
@@ -9599,6 +9955,123 @@ def create_app(out_dir: Path):
                 _log_job(str(tid), status=term,
                          error=(ws_status if term == "failed" else None))
         except Exception:                          # noqa: BLE001 -- reconciling must not kill the watcher
+            pass
+
+    # ---- A run started on pixai.art gets an Activity row of its own -------------------
+    # Owner ruling, 2026-09-07: "I often have things going from the app and website, so the
+    # generations I start on the website I would like to see on the app with the usual
+    # spinner." A website run is to look like an app run in the Activity window -- spinner
+    # while it renders, its pictures once the mirror lands them -- and differ only by a
+    # source mark.
+    #
+    # This REVERSES the 2026-07-06 contract the two writers above were built to keep
+    # (_reconcile_job's "never invents one for a task generated on the website",
+    # _log_mirrored_media's matching abstention "or every pixai.art generation would sprout a
+    # new Activity row"). That was the right call while nothing on this side had anything to
+    # build a row FROM; the socket's own taskUpdated frame supplies one now, so a website run
+    # can be a real row instead of an unexplained arrival in the library.
+    #
+    # The reversal is SCOPED to the two paths that hold a live frame -- the event stream and
+    # the catch-up sweep. Neither _reconcile_job nor _log_mirrored_media gained the power to
+    # invent: they still touch only what they find already logged, so _watch_mirror called on
+    # its own for an untracked task still writes nothing at all (pinned by
+    # tests/test_jobs.py::test_mirror_never_invents_a_job_for_a_task_we_do_not_track).
+    #
+    # THE JOB ID IS THE TASK ID, exactly as an app run's is (see _note_gen_phase's writer and
+    # _reconcile_job / _log_mirrored_media, which both look a job up by str(tid)). That is the
+    # whole derivation: it makes the event writer and the catch-up writer converge on ONE row
+    # instead of two, and it lets every existing terminal writer close a website row without
+    # needing to know such a thing exists.
+    _WEBSITE_JOB_SOURCE = "pixai"     # the app's own rows carry source "web"; this is the other one
+    _WEBSITE_JOB_LABEL = "From the website"
+    # PixAI's task lifecycle is waiting -> running -> completed (_WS_SUBSCRIPTION's own note in
+    # moonglade_backup.py). The pre-dispatch spellings are the same set core._never_dispatched()
+    # keys on, so "accepted, no worker yet" means the same thing here as it does there -- and
+    # that is precisely what the app's own rows record as started:false.
+    _WEBSITE_QUEUED_STATUSES = ("waiting", "pending", "queued")
+
+    def _website_job_label(frame):
+        """The row's label: the prompt's first words when the frame carries any, else a plain
+        "From the website".
+
+        NOTE (2026-09-07): the live subscription does NOT ask for `parameters` --
+        _WS_SUBSCRIPTION selects id/status/updatedAt/mediaId/media/priority/userId
+        (moonglade_backup.py) -- so today every live frame takes the fallback. Written as a
+        read of whatever the frame happens to carry rather than as a widening of that query,
+        deliberately: PixAI answers a subscription it dislikes with an `error` frame, which
+        _watch_events_async RAISES on, which would take the whole live mirror down. Widening
+        it is a probe-first change of its own, not a side effect of this one. The catch-up's
+        task nodes come through the same helper, so whichever path first carries a prompt
+        gets a real label for free.
+
+        Reads both spellings, and both nestings, for the same reason video_outputs() does: an
+        i2v / reference-video task keeps its prompt inside its own block, never at the top."""
+        params = (frame or {}).get("parameters")
+        if not isinstance(params, dict):
+            return _WEBSITE_JOB_LABEL
+        text = params.get("prompts") or params.get("prompt") or ""
+        if not text:
+            inner = params.get("referenceVideo") or params.get("i2vPro") or {}
+            if isinstance(inner, dict):
+                text = inner.get("prompt") or inner.get("prompts") or ""
+        words = str(text or "").split()
+        if not words:
+            return _WEBSITE_JOB_LABEL
+        return " ".join(words[:8])[:60].rstrip() or _WEBSITE_JOB_LABEL
+
+    def _website_job_seen(tid, ws_status, frame=None, terminal=False):
+        """Give a task with NO row of its own the row the ruling above asks for, and keep the
+        queued/rendering phase of one we already invented in step with the live frame.
+
+        Reads the RAW reconstructed log rather than read_jobs(), for the same reason
+        _log_mirrored_media does: a row the owner dismissed, or one already aged past
+        JOBS_MAX_AGE, is still a row. Inventing a second one for that task would resurrect
+        what he cleared and would be exactly the "two rows for one run" the shared job id
+        exists to prevent.
+
+        An APP run is left completely alone. It already has a row -- its Generate card
+        registers one through /api/jobs the moment the gen is submitted -- so the create
+        branch never fires for it, and the phase branch refuses anything whose source is not
+        ours. (The one window where that is not yet true is the sliver between PixAI accepting
+        an app submit and the browser's own POST landing. If a `waiting` frame wins that race
+        we write the row first and the browser's POST then merges source "web" over ours --
+        _reconstruct_jobs merges later events onto the current one -- so the row self-corrects
+        to an app row rather than staying mislabelled.)
+
+        `terminal` is the catch-up's case: the task finished while we were not listening, so
+        there is no spinner left to run and the row is born done.
+
+        Fails soft. This runs on the WebSocket's own event loop and in the catch-up's daemon
+        thread, and neither may die because logging did."""
+        import moonglade_backup as core
+        try:
+            tid = str(tid or "")
+            if not tid:
+                return
+            started = str(ws_status or "").lower() not in _WEBSITE_QUEUED_STATUSES
+            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            j = jobs_by_id.get(tid)
+            if j is None:
+                if terminal:
+                    # Born done -- and _log_mirrored_media then adds the media it collects to
+                    # this same row, which is precisely the "job already sitting at a bare
+                    # 'done'" case that helper was written for.
+                    _log_job(tid, status="done", type="generate",
+                             label=_website_job_label(frame), source=_WEBSITE_JOB_SOURCE)
+                else:
+                    _log_job(tid, status="running", type="generate",
+                             label=_website_job_label(frame), source=_WEBSITE_JOB_SOURCE,
+                             started=started)
+                return
+            # A row exists. Only ever nudge OUR OWN invention, only while it is still running,
+            # and only when the phase actually changed -- the terminal writers (_reconcile_job,
+            # _log_mirrored_media) own everything from done/failed onward.
+            if (j.get("source") != _WEBSITE_JOB_SOURCE or j.get("dismissed")
+                    or j.get("status") in core._JOBS_TERMINAL
+                    or bool(j.get("started")) == started):
+                return
+            _log_job(tid, status="running", started=started)
+        except Exception:                          # noqa: BLE001 -- logging must not kill the watcher
             pass
 
     def _reconcile_orphan_jobs(min_age=0):
@@ -9682,26 +10155,51 @@ def create_app(out_dir: Path):
                     WATCH_CATCHUP_TASKS, core._client_of(session).user_id)))
             edges = (conn or {}).get("edges") or []
             missed = []
+            nodes = {}
             for edge in edges:
                 node = edge.get("node", edge)
                 tid = str(node.get("id") or "")
                 if not tid or str(node.get("status") or "") not in core._GEN_DONE:
                     continue
-                mids = [str(m) for m in (core.media_ids_for(node) or [])]
-                if not mids:
-                    continue
                 # Absent from the catalog is the ONLY trigger. A task whose media is already
                 # here needs nothing, and re-collecting it would be pure waste.
+                #
+                # Asked of the ids the catalog is actually KEYED by (2026-09-07). This test
+                # used to run on media_ids_for, which is every id the summary
+                # NAMES -- and on the two commonest shapes those are ids no row ever holds:
+                # a batch task's `mediaId` is the composite preview grid (the members are
+                # the batch), and a video task's is the poster still (the row is keyed by
+                # the mp4). So the test was false forever for both, and every sweep relisted
+                # the same finished tasks and re-collected them for nothing -- the owner's
+                # "the app no longer picks up tracking of generations run from the website".
+                # The skip-only-when-really-present ruling is unchanged; this is the id set
+                # it always meant.
+                if core._is_video_task_node(node):
+                    # A summary names none of a video's cataloged ids, so ask by task: its
+                    # video row carries this task id.
+                    if get_row_by_task(db_path, tid):
+                        continue
+                    missed.append(tid)
+                    continue
+                mids = [str(m) for m in (core.cataloged_media_ids(node) or [])]
+                if not mids:
+                    continue
+                # EVERY one, so a half-collected batch is still finished off.
                 if all(get_row(db_path, m) for m in mids):
                     continue
                 missed.append(tid)
+                nodes[tid] = node
             if not missed:
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
                 return
             _log.warning(
-                "live mirror: catch-up after %s -- %d finished task(s) were never mirrored, "
-                "collecting now: %s", reason, len(missed), ", ".join(missed[:10]))
+                "live mirror: catch-up after %s -- %d finished task(s) are missing media "
+                "from the catalog, collecting now: %s",
+                reason, len(missed), ", ".join(missed[:10]))
             for tid in missed:
+                # The Activity row this task never got, the socket having been down when it
+                # finished (see _website_job_seen). Before the mirror, and born done.
+                _website_job_seen(tid, "completed", nodes.get(tid), terminal=True)
                 _watch_mirror(tid)
                 _time.sleep(1.0)          # paced -- be polite to their servers
         except Exception as e:
@@ -9728,6 +10226,73 @@ def create_app(out_dir: Path):
             _time.sleep(WATCH_CATCHUP_MIN_GAP)
             _watch_catchup("periodic")
 
+    # Task ids already mirrored this process's lifetime (a 'completed' event can repeat, and
+    # a reconnect can replay one). Process-scoped, not per-connection: it lived inside
+    # _watch_loop before 2026-09-07 and meant exactly this then too.
+    _watch_backed = set()
+
+    def _watch_on_event(ev):
+        """Everything the live mirror does with ONE frame off the socket.
+
+        Lifted out of _watch_loop's inner `while True` on 2026-09-07 -- same body, same
+        order, now a closure a test can call directly. The reason it had to move is the
+        website-row ruling of that day: the row is written HERE, off the frame, and the rule
+        that a website run must be indistinguishable from an app run in the Activity window
+        is a claim about a SEQUENCE of frames (waiting -> running -> completed + the mirror
+        receipt), which nothing could exercise while this lived in a background thread's
+        inner loop. tests/test_watch.py's fake event stream drives it through the
+        mg_watch_on_event seam; the source-level pin on the collect/reconcile agreement moved
+        with it."""
+        import logging as _logging
+        import time as _time
+        import moonglade_backup as core
+        _log = _logging.getLogger(__name__)
+        if ev.get("__meta__") == "subscribed":
+            with _watch_lock:
+                _watch_status["connected"] = True
+                _watch_status["last_error"] = None
+            _log.info("live mirror: connected and subscribed")
+            # Every connect covers a window we were blind for -- the gap since the
+            # last one. Rate-limited inside, so a flapping socket cannot turn this
+            # into a request storm, and threaded so it never blocks this callback
+            # (which is running on the WebSocket's own event loop).
+            threading.Thread(target=_watch_catchup, args=("reconnect",),
+                             daemon=True).start()
+            return
+        tu = ev.get("taskUpdated")
+        if not tu:
+            return
+        with _watch_lock:
+            _watch_status["events_seen"] += 1
+            _watch_status["last_event_at"] = _time.time()
+        status = tu.get("status")
+        tid = str(tu.get("id") or "")
+        # The website run's own Activity row (owner ruling 2026-09-07) -- FIRST, and
+        # synchronously on this callback. The mirror thread started just below records what
+        # it collected through _log_mirrored_media, which writes only for a task that
+        # ALREADY has a row, so the row has to exist before that thread does. An app run
+        # already has one and is left untouched; see _website_job_seen.
+        if tid:
+            _website_job_seen(tid, status, tu)
+        # `in _GEN_DONE`, not `== _WS_DONE_STATUS`. This branch used to match ONE
+        # exact string while the reconcile branch below accepts five, off the same
+        # event -- so a done-status PixAI spells any other way would skip mirroring
+        # while still resolving the Activity row. Every task checked on 2026-07-26
+        # reports "completed", so this was not that day's cause, but the asymmetry
+        # produces exactly that symptom and is just as invisible.
+        if status in core._GEN_DONE and tid and tid not in _watch_backed:
+            _watch_backed.add(tid)
+            _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
+            threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
+        # Reconcile the Activity log from the SAME event stream, so a job resolves
+        # even if the Generate card that was polling /api/task-status is gone.
+        if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
+            _reconcile_job(tid, status)
+
+    # Test seam (same rationale as mg_watch_mirror / mg_watch_catchup above): the frame
+    # handler is only ever called from the WebSocket the suite never opens.
+    app.extensions["mg_watch_on_event"] = _watch_on_event
+
     def _watch_loop():
         import asyncio
         import logging as _logging
@@ -9740,8 +10305,6 @@ def create_app(out_dir: Path):
         # out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
         # this stream can carry a lot of traffic and a per-event line would bury the signal.
         _log = _logging.getLogger(__name__)
-        backed = set()   # task ids already mirrored this process's lifetime (a
-                         # 'completed' event can repeat)
         with _watch_lock:
             _watch_status["started_at"] = _time.time()
         _log.info("live mirror: starting")
@@ -9758,44 +10321,9 @@ def create_app(out_dir: Path):
                 # header, so there's nothing else to check here before subscribing.
                 session = core._make_session(None)
                 auth = session.headers.get("Authorization")
-
-                def on_event(ev):
-                    if ev.get("__meta__") == "subscribed":
-                        with _watch_lock:
-                            _watch_status["connected"] = True
-                            _watch_status["last_error"] = None
-                        _log.info("live mirror: connected and subscribed")
-                        # Every connect covers a window we were blind for -- the gap since the
-                        # last one. Rate-limited inside, so a flapping socket cannot turn this
-                        # into a request storm, and threaded so it never blocks this callback
-                        # (which is running on the WebSocket's own event loop).
-                        threading.Thread(target=_watch_catchup, args=("reconnect",),
-                                         daemon=True).start()
-                        return
-                    tu = ev.get("taskUpdated")
-                    if not tu:
-                        return
-                    with _watch_lock:
-                        _watch_status["events_seen"] += 1
-                        _watch_status["last_event_at"] = _time.time()
-                    status = tu.get("status")
-                    tid = str(tu.get("id") or "")
-                    # `in _GEN_DONE`, not `== _WS_DONE_STATUS`. This branch used to match ONE
-                    # exact string while the reconcile branch below accepts five, off the same
-                    # event -- so a done-status PixAI spells any other way would skip mirroring
-                    # while still resolving the Activity row. Every task checked on 2026-07-26
-                    # reports "completed", so this was not that day's cause, but the asymmetry
-                    # produces exactly that symptom and is just as invisible.
-                    if status in core._GEN_DONE and tid and tid not in backed:
-                        backed.add(tid)
-                        _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
-                        threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
-                    # Reconcile the Activity log from the SAME event stream, so a job resolves
-                    # even if the Generate card that was polling /api/task-status is gone.
-                    if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
-                        _reconcile_job(tid, status)
-
-                asyncio.run(core._watch_events_async(auth, on_event, None))
+                # The frame handler itself is _watch_on_event, above -- see its docstring for
+                # why it is a create_app closure rather than a nested one.
+                asyncio.run(core._watch_events_async(auth, _watch_on_event, None))
                 _log.info("live mirror: disconnected cleanly; reconnecting in %ss", backoff)
                 backoff = 5   # a clean disconnect resets the backoff
             except core.WatchStaleError as e:
@@ -9852,9 +10380,11 @@ def create_app(out_dir: Path):
         Sleeps past the contest sweep's own delay so the two never compete at boot, and
         goes through the same single-flight wrapper every other trigger uses. No `force`:
         at boot there is no specific publish to confirm, so the recent-guard is exactly the
-        right bound, and a restart loop cannot become a request storm."""
+        right bound, and a restart loop cannot become a request storm. Scheduled: starting
+        the app is not asking for a sweep, so it announces itself in the Activity window
+        and nowhere else (owner's walk, 2026-09-07)."""
         time.sleep(ARTWORKS_STARTUP_DELAY)
-        _artworks_kick(force=False)
+        _artworks_kick(force=False, scheduled=True)
 
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
     # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
@@ -11199,7 +11729,11 @@ def create_app(out_dir: Path):
         looking at.
 
         `deferred` names the catalog-writing Panel job that held the sweep off, when one
-        did (_artworks_job_busy) -- so an ok:false is never a silent nothing."""
+        did (_artworks_job_busy) -- so an ok:false is never a silent nothing.
+
+        NOT `scheduled`, and it is the only one of the four triggers that is not: this is a
+        button the owner pressed, so it still toasts when it finishes, exactly like every
+        other job he starts himself (owner's walk, 2026-09-07)."""
         deferred = _artworks_job_busy()
         return jsonify({"ok": bool(_artworks_kick(force=True)),
                         "deferred": deferred,
@@ -11281,12 +11815,37 @@ def create_app(out_dir: Path):
         and catalog never drift. Order matters: if the cloud call fails, nothing local is
         touched and the image is still there to try again. WHICH rows go is the plan's to
         say (`_delete_image_rows`), never this route's to re-derive from local counts.
+
+        A CONFIRMED delete writes one Activity row (`del-<hex>`, `type: "delete"`) -- owner's
+        walk 2026-09-07, "single delete did NOT show in the Activity tracker". A bulk delete
+        has written one since it existed (`_start_bulk_delete`'s `bulkdel-<hex>`), so the
+        finer-grained partner writes the same kind of row for the same event, and this
+        library's whole record of what left it stops depending on which button was used. The
+        PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
+        import uuid
         body = request.get_json(silent=True) or {}
         if "confirm" not in body:
             return jsonify({"error": "not confirmed"}), 400
         preview = not body.get("confirm")
+
+        def _log_delete(status, label, error=None):
+            """The one Activity row this delete leaves behind.
+
+            Born terminal, unlike the bulk delete's two events: a single delete is one
+            mutation and there is no progress to report between them. Everything else follows
+            _start_bulk_delete exactly -- `type: "delete"` so the tray labels it Delete, and
+            NO `scheduled` field, because the owner pressed this button and a job you press
+            toasts its outcome (jobsStore.js's toastTransitions swallows only `scheduled`
+            rows). `media_ids` carries the one image so the row can show its thumbnail, and it
+            is written BEFORE the local purge, while that thumbnail is still on disk.
+
+            Never on the preview -- callers check that themselves rather than this swallowing
+            it, so the one caller that must not log reads as a decision at its own call site.
+            """
+            _log_job("del-" + uuid.uuid4().hex[:12], status=status, type="delete",
+                     label=label, error=error, media_ids=[mid] if mid else None)
         mid = str(body.get("media_id") or "").strip()
         row = get_row(db_path, mid) if mid else None
         if not row:
@@ -11310,7 +11869,12 @@ def create_app(out_dir: Path):
                 plan = core.delete_image_routed(_core_session, tid, mid,
                                                 confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
-            return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
+            line = _redact_host_paths(str(e))[:240]
+            if not preview:
+                # A delete he pressed that came back with an error is exactly the outcome the
+                # tracker must not be silent about -- READ_ONLY, a PixAI 500, a lost token.
+                _log_delete("failed", "PixAI delete failed", error=line)
+            return jsonify({"error": line}), 200
 
         # The read this plan was made from is the only place the app learns that PixAI has
         # dropped an image, so every row it names is marked here -- on the preview as much as
@@ -11327,6 +11891,9 @@ def create_app(out_dir: Path):
                       "local_rows": [], "message": plan.reason}
             if not preview:
                 answer["error"] = plan.reason
+                # A refusal is a real outcome of a button he pressed, not a non-event: the
+                # image is still on PixAI and the row says in the plan's own words why.
+                _log_delete("failed", "Refused: " + plan.reason, error=plan.reason)
             return jsonify(answer), 200
 
         rows = _delete_image_rows(plan, tid, mid)
@@ -11335,6 +11902,13 @@ def create_app(out_dir: Path):
                             "live_siblings": plan.live_siblings,
                             "local_rows": [r["media_id"] for r in rows],
                             "message": _delete_image_message(plan, rows)})
+
+        # The cloud delete has already fired and cannot be taken back, so the row goes in now
+        # -- what it records is what PixAI did, in the plan's own words. A local purge that
+        # fails afterwards is a different fact and comes back through this route's own error
+        # contract; it does not make the PixAI delete un-happen, so it does not rewrite this.
+        _log_delete("done", "Deleted 1 image from PixAI" if plan.plan == "per-image"
+                    else "Deleted the whole generation from PixAI (last image)")
 
         purged, failed = [], []
         for r in rows:
@@ -11436,12 +12010,140 @@ def create_app(out_dir: Path):
                 mark_cloud_deleted(db_path, mid, stamp)
         return keep
 
-    def _preview_entry(row, selected_ids):
+    def _preview_live_gone(task_ids):
+        """Ask PixAI, once per task, which of these tasks' images it has already dropped.
+
+        The preview's whole job is to say what "Delete from PixAI" would take before it
+        fires, and until 2026-09-07 it answered entirely from the local catalog -- which
+        cannot know about an image the owner deleted on PixAI's own website. The delete
+        itself has always known (_rows_the_bulk_purge_must_keep reads every task and keeps
+        those rows back), so the preview over-reported the blast radius against the one
+        thing it was supposed to describe exactly. This is that same read, moved forward.
+
+        Read-only ON PIXAI, and it stays that way: getTaskById, nothing else. It does
+        write `cloud_deleted_at` on the rows the read finds already deleted, exactly as
+        the delete's own read does (mark_cloud_deleted) -- REFINING this function's own
+        2026-09-07 note, which held that a confirm dialog the owner may well cancel is no
+        place to mutate the catalog from. It is, for this one column. The preview's whole
+        promise is "that file stays in your backup, because this is the last copy of it
+        anywhere", and a promise made from an answer nobody wrote down is only as good as
+        the SECOND read that has to be made at delete time: if that one fails where this
+        one succeeded, _rows_the_bulk_purge_must_keep falls back to the catalog, finds
+        nothing, and purges the very rows this dialog named. Stamping here makes the
+        catalog the one place both reads answer from, so the preview can only ever become
+        a source of the same truth, never a different one. The stamp is not a deletion and
+        does not become one if the owner cancels: `cloud_deleted_at` records what PIXAI
+        did to its own copy, which is true whatever this dialog decides, and every path
+        that reads it (the keep-back, the single-image plan) only ever keeps a row.
+
+        FAILS SOFT, and in the SAFE direction. A task whose read raises, comes back
+        empty, or never answers inside the budget is `unverified`: it keeps its local rows
+        and is counted as if nothing had been read, so a blip can only ever make the
+        preview say MORE will be deleted than really will. It can never quietly shrink an
+        irreversible action's reported scope.
+
+        WHY AN EMPTY ANSWER IS "unverified" AND NOT "already gone whole" -- this differs
+        from the brief that ordered the work, on the module's own evidence. The ruling
+        said a task the read cannot find at all should be reported as already gone whole.
+        It cannot be: core.task_detail_gql collapses a transport failure to None (it
+        catches PixAIError/RequestException and returns None), and the 2026-09-06
+        read-only probe recorded at moonglade_backup.py's DELETING ONE IMAGE header found
+        that "getTaskById still resolves a whole-task-deleted task, so it cannot be used
+        to ask whether a task is gone". So None means "no answer", never "gone", and
+        reading it as gone would take a network blip and turn it into a smaller reported
+        delete -- the one direction this file's fail-soft rule forbids. What CAN be
+        established, and is, is per-image: a deleted batch member keeps its place and
+        gains `deletedAt`.
+
+        retries=1, not the default 3: the caller here is a confirm dialog the owner is
+        watching, and the fallback is a visible "could not be checked" rather than the
+        lost-generation sentence task_detail_gql's own retries exist to prevent. Each read
+        also gets the budget's REMAINING time as its socket timeout, so the confirm dialog
+        is bounded by DELETE_PREVIEW_LIVE_BUDGET_S rather than by the transport's 60s.
+
+        Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
+        that answered, and the set of task ids that did not."""
+        import moonglade_backup as core   # lazy: avoid import cycle
+        ids = [str(t) for t in task_ids]
+        try:
+            session = core._make_session(None)
+        except Exception:                            # noqa: BLE001 -- no key, bad config
+            # Nothing to read WITH. Every task is unverified; the preview still answers
+            # from the catalog exactly as it did before this existed.
+            return {}, set(ids)
+
+        # THE CEILING IS WALL-CLOCK, and it is enforced in three places because one is not
+        # enough (2026-09-07, correcting the same day's build, which checked it only here):
+        #   * before a read STARTS -- the budget is spent, don't start another;
+        #   * on the read ITSELF -- each one is given no more socket time than the budget
+        #     has left, so a connection that stalls after the handshake cannot run out the
+        #     transport's own 60s (and then retry for another 60);
+        #   * on the COLLECTION -- as_completed stops at the deadline and the pool is left
+        #     to drain on its own, so a worker still in flight cannot hold the route.
+        # Anything not back by then is `unverified`, exactly like a read that failed.
+        deadline = time.monotonic() + DELETE_PREVIEW_LIVE_BUDGET_S
+
+        def _one(tid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return tid, None                     # budget spent: don't start another
+            try:
+                task = core.task_detail_gql(session, tid, retries=1, timeout=remaining)
+            except Exception:                        # noqa: BLE001 -- fail soft, see above
+                return tid, None
+            if task is None:
+                return tid, None
+            batch = (task.get("outputs") or {}).get("batch")
+            gone_ids = {str(m) for m in core.deleted_batch_media(batch) if m}
+            # WRITE IT DOWN, right here, with the same verb the delete's own read uses.
+            # See the docstring: this is what stops the delete-time read's failure from
+            # taking the rows this preview is about to promise would stay.
+            for mid in gone_ids:
+                stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
+                if stamp:
+                    mark_cloud_deleted(db_path, mid, stamp)
+            return tid, gone_ids
+
+        # Every task starts unverified and EARNS its way out, so a task whose worker never
+        # answers -- the case the deadline exists for -- is counted the safe way by default
+        # rather than by remembering to add it.
+        gone, unverified = {}, set(ids)
+        from concurrent.futures import (ThreadPoolExecutor, as_completed,
+                                        TimeoutError as _FutureTimeout)
+        # NOT a `with` block: its __exit__ is shutdown(wait=True), which waits for every
+        # in-flight read and would put the whole ceiling back where it was.
+        ex = ThreadPoolExecutor(max_workers=DELETE_PREVIEW_LIVE_WORKERS)
+        try:
+            futures = [ex.submit(_one, tid) for tid in ids]
+            try:
+                for fut in as_completed(futures,
+                                        timeout=max(0.0, deadline - time.monotonic())):
+                    try:
+                        tid, res = fut.result()
+                    except Exception:                # noqa: BLE001 -- a dead worker is unverified
+                        continue
+                    if res is not None:
+                        gone[tid] = res
+                        unverified.discard(tid)
+            except _FutureTimeout:
+                pass                                 # the ceiling; the rest stay unverified
+        finally:
+            # Don't wait. A stalled read is already bounded by its own socket timeout and
+            # writes nothing anyone is still listening to; the route answers now.
+            ex.shutdown(wait=False, cancel_futures=True)
+        return gone, unverified
+
+    def _preview_entry(row, selected_ids, gone_ids=()):
         """One /api/delete-preview media entry: what it is, whether the user actually
         picked it, and the media_id whose thumbnail exists on disk -- or None for
         `thumb`, so the client renders an id chip instead of a broken image. Videos fall
         back to their still-frame poster's thumb exactly as the gallery grid does (older
-        sync runs never generated the video's own)."""
+        sync runs never generated the video's own).
+
+        `already_gone` (2026-09-07) is the live read's answer for this one image: PixAI has
+        already dropped it, so the delete will leave this row and its file alone
+        (_rows_the_bulk_purge_must_keep). Always present and False when nothing was read,
+        so the strip never has to guess which of the two it is looking at."""
         mid = row["media_id"]
         thumb = None
         if (thumb_dir / "{}.jpg".format(mid)).exists():
@@ -11451,13 +12153,18 @@ def create_app(out_dir: Path):
             if (thumb_dir / "{}.jpg".format(poster)).exists():
                 thumb = poster
         return {"media_id": mid, "is_video": row["is_video"] == "1",
-                "selected": mid in selected_ids, "thumb": thumb}
+                "selected": mid in selected_ids, "thumb": thumb,
+                "already_gone": mid in gone_ids}
 
     @app.route("/api/delete-preview", methods=["POST"])
     @tier(LOCALHOST, message="deleting from PixAI is localhost-only")
     def api_delete_preview():
         """What "Delete from PixAI" would actually take, listed image by image, before
-        anything fires. Read-only: a few catalog reads, no network, no PixAI call.
+        anything fires. Read-only in the sense that matters: it deletes nothing, here or
+        on PixAI. It is no longer offline, and no longer writes NOTHING either -- the one
+        thing it records is `cloud_deleted_at` on the rows PixAI says it has already
+        dropped, so the delete keeps them back whether or not its own read works
+        (_preview_live_gone). See THE LIVE CHECK below.
 
         Deleting on PixAI is TASK-level -- selecting one image of a batch deletes the
         whole batch, cloud AND local. The confirm dialog said that in prose but never
@@ -11476,7 +12183,25 @@ def create_app(out_dir: Path):
         an entry point. Weakens nothing: /delete-tasks-bulk still re-checks for itself.
 
         Truncation is DISPLAY-only (DELETE_PREVIEW_TASK_CAP): `totals` always describes
-        the entire selection, because the totals are what the user reads to decide."""
+        the entire selection, because the totals are what the user reads to decide.
+
+        THE LIVE CHECK (owner, 2026-09-07). "One live read per selected task, capped at
+        40; above that the preview says it is an estimate, and the delete still keeps back
+        what the live read finds." At or below DELETE_PREVIEW_LIVE_CAP every selected task
+        is read back from PixAI (_preview_live_gone), so an image the owner deleted on
+        PixAI's own website is reported as ALREADY GONE instead of being counted among the
+        files this delete will take -- which is what the catalog alone could never know,
+        and what made the preview disagree with the delete it was previewing. Above the
+        cap nothing is read and `estimate` says so.
+
+        `totals` is UNCHANGED in meaning: it is still the full membership of the blast
+        radius. The four new fields sit beside it, top-level, so nothing that reads
+        `totals` today can be surprised:
+          live_checked  how many tasks really were read back
+          unverified    how many could not be (a blip, no credentials, or the budget)
+          already_gone  IMAGES PixAI has already dropped -- subtract from totals.media for
+                        "will be deleted"
+          estimate      True when the selection was over the cap and nothing was read"""
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -11490,14 +12215,34 @@ def create_app(out_dir: Path):
         sel_rows, task_ids = blast["sel_rows"], blast["task_ids"]
         local_only = blast["local_only"]
         selected = {r["media_id"] for r in sel_rows}
-        tasks, total_media = [], 0
+
+        # The live check, before the loop that spends it. Over the cap it does not happen
+        # at all -- estimate, and the modal says so.
+        estimate = len(task_ids) > DELETE_PREVIEW_LIVE_CAP
+        gone_by_task, unverified = ({}, set()) if estimate else _preview_live_gone(task_ids)
+
+        tasks, total_media, already_gone = [], 0, 0
         for tid in task_ids:
             members = blast["members_by_task"].get(tid, [])
             total_media += len(members)
+            # A task that answered: the union of what the read says PixAI has dropped and
+            # what the catalog was already told the last time anything read this task --
+            # exactly the two sources _rows_the_bulk_purge_must_keep keeps back from, so
+            # the count the owner reads here is the count the delete will honour. A task
+            # that did NOT answer contributes nothing: it stands on its local rows whole,
+            # which can only over-report the delete, never under-report it.
+            gone = set()
+            if tid in gone_by_task:
+                gone = set(gone_by_task[tid])
+                gone |= {str(m["media_id"]) for m in members
+                         if str(m["cloud_deleted_at"] or "").strip()}
+                gone &= {str(m["media_id"]) for m in members}
+                already_gone += len(gone)
             if len(tasks) >= DELETE_PREVIEW_TASK_CAP:
                 continue          # keep counting, stop describing
             tasks.append({"task_id": tid,
-                          "media": [_preview_entry(m, selected) for m in members]})
+                          "unverified": tid in unverified,
+                          "media": [_preview_entry(m, selected, gone) for m in members]})
         # Imports have no task, so nothing about them is task-level -- but they ARE
         # part of what the button removes, and the dialog has to show them or its
         # file count won't add up. Capped on the same DISPLAY budget as the tasks.
@@ -11508,6 +12253,12 @@ def create_app(out_dir: Path):
             "local_only": local_entries,
             "truncated": (len(task_ids) > len(tasks)
                           or len(local_only) > len(local_entries)),
+            # The live check's own answer, beside `totals` rather than inside it (see the
+            # docstring). live_checked + unverified == len(task_ids) whenever it ran.
+            "live_checked": len(gone_by_task),
+            "unverified": len(unverified),
+            "already_gone": already_gone,
+            "estimate": estimate,
             "totals": {
                 "selected": len(sel_rows),
                 "tasks": len(task_ids),
@@ -12397,6 +13148,8 @@ def create_app(out_dir: Path):
              was the actual complaint (the standing workaround was keyword-searching "sdxl"
              on PixAI's own site). Approximate, not strict, and only applied for architecture
              values on core's whitelist -- anything else falls through unfiltered.
+             BROWSE ONLY since the owner's second walk (2026-09-07), which REFINES the
+             2026-07-24 ruling rather than reversing it: see `server_lora_type` below.
           2. per-page soft SORT (compatible-or-unknown first, confirmed-mismatch last).
           3. per-row `compat` tag -- the PRECISE layer, see annotate_lora_compat(). Kept
              deliberately: layer 1 is a coarse browse hint, so only this one can be trusted
@@ -12428,22 +13181,45 @@ def create_app(out_dir: Path):
             size = max(1, min(int(request.args.get("size") or 24), 50))
         except ValueError:
             size = 24
+        # The base-type filter is a BROWSE hint, not a SEARCH one -- owner's second walk
+        # (2026-09-07: "searching for a known LoRA still fails"), REFINING the 2026-07-24
+        # ruling that added layer 1, not reversing it. Typing a name is a hunt for a LoRA he
+        # already knows, and the server filter answers that hunt by leaving the match OUT of
+        # the results entirely: an SDXL LoRA searched for while Tsubaki.3 (MMDIT26B) is the
+        # picked base simply is not there, the page fills up with other loosely-relevant
+        # LoRAs, and the empty state never fires -- so the search reads as broken. With a
+        # keyword we send NO filter and let layer 3 (annotate_lora_compat, the precise one)
+        # show the match greyed with its "needs <arch>" badge instead of hiding it. Browsing
+        # with no keyword keeps the filter exactly as 2026-07-24 set it: that wall
+        # (24-of-24 SD 1.5 rows) is the whole reason layer 1 exists. `base_type` itself is
+        # untouched -- it still feeds the sort and the badge on every LoRA search.
+        server_lora_type = base_type if (usage == "LORA" and not q) else ""
         try:
+            # The market is browsed AS THE WEBSITE (core.present_as_web): PixAI filters what it
+            # returns by the client it believes it is talking to, and the API-key session's own
+            # identity gets the stricter mobile-app policy -- a search that fills pages on the
+            # site came back empty here (owner, 2026-09-07). Same key, same query, website
+            # identity: the same rows the site shows.
             core, session = _gen_session()
+            session = core.present_as_web(session)
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
-                payload = core.model_bookmarks_gql(
-                    session, keyword=q, usage=usage, limit=size, after=(cursor or None),
-                    lora_base_type=(base_type if usage == "LORA" else ""))
+                def _bookmark_page(after):
+                    return core.model_bookmarks_gql(
+                        session, keyword=q, usage=usage, limit=size, after=after,
+                        lora_base_type=server_lora_type)
+                payload = _hunt_by_name(_bookmark_page, q, size) if q else _bookmark_page(cursor or None)
             elif src == "mine":
                 # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
                 # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
-                payload = core.model_search_market_gql(
-                    session, keyword=q, category=category, sort=sort, usage=usage,
-                    limit=size, after=(cursor or None),
-                    lora_base_type=(base_type if usage == "LORA" else ""),
-                    author_id=core._client_of(session).user_id or "")
+                def _mine_page(after):
+                    return core.model_search_market_gql(
+                        session, keyword=q, category=category, sort=sort, usage=usage,
+                        limit=size, after=after,
+                        lora_base_type=server_lora_type,
+                        author_id=core._client_of(session).user_id or "")
+                payload = _hunt_by_name(_mine_page, q, size) if q else _mine_page(cursor or None)
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
             # to fall through to REST, whose own docstring says it "silently ignores market
@@ -12455,10 +13231,11 @@ def create_app(out_dir: Path):
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
-                    # Same caller-supplied value that feeds the compat sort/badge below --
-                    # resolved once by the client, used at every layer. core ignores it for
-                    # a base-model search and for any architecture off its whitelist.
-                    lora_base_type=(base_type if usage == "LORA" else ""),
+                    # The same caller-supplied value that feeds the compat sort/badge
+                    # below, resolved once by the client -- but only on a keywordless BROWSE
+                    # (see server_lora_type). core ignores it for a base-model search and for
+                    # any architecture off its whitelist.
+                    lora_base_type=server_lora_type,
                     source=source, permitted_use=license_,
                     time_range=core.posted_at_range(posted),
                     model_types=model_types)
@@ -12497,6 +13274,7 @@ def create_app(out_dir: Path):
         if version_id:
             try:
                 core, session = _gen_session()
+                session = core.present_as_web(session)   # same policy as the search that found it
                 return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
@@ -12505,9 +13283,15 @@ def create_app(out_dir: Path):
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
+            session = core.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
                 return jsonify({"versions": core.list_model_versions(session, mid)})
-            return jsonify(core.resolve_version_meta(session, mid))
+            # with_profiles: this is a BASE-model resolve whose answer feeds the composer's
+            # mode bar, so it is one of the two places that pays the second, version-keyed
+            # inference-profiles read (the ?all=1 branch's own is_latest row is the other).
+            # Every other caller of resolve_version_meta -- the LoRA/remix path below --
+            # leaves it off and stays at one read (red team 2026-09-07).
+            return jsonify(core.resolve_version_meta(session, mid, with_profiles=True))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
 
@@ -12570,6 +13354,10 @@ def create_app(out_dir: Path):
                         unresolved += 1
                         continue
                     if base not in meta_cache:
+                        # No with_profiles here on purpose: nothing below reads `profiles`
+                        # and a LoRA never renders a mode bar, so asking for it would cost a
+                        # second PixAI GET per unique LoRA base for a field this route drops
+                        # (red team 2026-09-07).
                         meta_cache[base] = core.resolve_version_meta(session, base) or {}
                     meta = meta_cache[base]
                     lbt = str(meta.get("lora_base_model_type") or "")
@@ -12958,8 +13746,10 @@ def create_app(out_dir: Path):
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
         # The celebration toast asks for 384px so the enlarged medallion stays crisp
-        # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
-        # the cache can't be spammed into unbounded sizes.
+        # on HiDPI, and since 2026-09-07 so does the phone Folio's detail sheet, which
+        # now shows the badge whole at the frame's full height; the Folio grid keeps the
+        # 256 default. Allowlisted to those two so the cache can't be spammed into
+        # unbounded sizes.
         size = 384 if request.args.get("size") == "384" else 256
         p = _badge_thumb(out_dir, aid, size)
         if isinstance(p, (bytes, bytearray)):
@@ -14528,8 +15318,14 @@ def create_app(out_dir: Path):
         # the same reasons the contest sweep's own publish kick is: nothing it does may
         # delay this response or turn an irreversible publish into a failure. Fires for
         # unpublish, re-tag and delete too -- each is a change to what listArtworks returns.
+        #
+        # Scheduled, even though a click reached this route: what the owner pressed was
+        # Publish, and he has the publish's own answer in front of him. The sweep is the
+        # library keeping itself honest afterwards, so it belongs in the Activity window
+        # rather than in a second corner notice about a job he never started (owner's
+        # walk, 2026-09-07).
         try:
-            _artworks_kick(force=True)
+            _artworks_kick(force=True, scheduled=True)
         except Exception:                                    # noqa: BLE001
             pass
         result["unmatched_tags"] = unmatched
@@ -14702,6 +15498,61 @@ def create_app(out_dir: Path):
         if not s:
             return jsonify({"error": "unknown series id"}), 404
         return jsonify(s)
+
+    @tier(LOGIN)
+    @app.route("/api/batch/<task_id>")
+    def api_batch_detail(task_id):
+        """One BATCH's struct in the SAME shape /api/series/<sid> returns.
+
+        Owner ruling, 2026-09-07: a batch card opens in the SERIES modal now,
+        "separately tagged so you know what you're looking at, batch or series" --
+        it no longer takes the library over the way the ?batch= drill-down did. One
+        modal wants one payload shape, so this answers the series struct: a batch is
+        simply a series of ONE run, so `steps` holds exactly one entry, count_tasks
+        is 1, and its label is "one generation" rather than a dial-in delta.
+
+        The rows are the task's SURVIVING catalog rows -- read through query_catalog's
+        own `batch` predicate, which is `(batch = ? OR task_id = ?)`, so this and the
+        pictures listing the modal fetches next (/api/next/library?batch=<id>) see
+        exactly the same set and their counts cannot disagree. Order is #33's batch
+        order (batch_member_order).
+
+        404 for an unknown id AND for a LONE image: one surviving row is not a batch.
+        The grouped grid marks a batch stack only at >= 2 survivors (see the folded-BATCH
+        arm of /api/next/library), so nothing can open one -- answering 200 here would
+        invent a stack the library never draws. Pure catalog read, no network."""
+        tid = str(task_id or "").strip()
+        rows = []
+        if tid:
+            rows, _ = query_catalog(db_path, batch=tid, page_size=None)
+        if len(rows) < 2:
+            return jsonify({"error": "unknown batch id"}), 404
+        rows = batch_member_order(rows)
+        first = rows[0]
+        # The title is derived the way a series' is (_series_title over the same
+        # capped prompt text), so the two stack kinds name themselves by one rule;
+        # the row's own `title` column is the fallback when the prompt says nothing.
+        title = _series_title(_series_text(first)) or str(first.get("title") or "").strip()
+        stamps = sorted(str(r.get("created_at") or "") for r in rows
+                        if str(r.get("created_at") or ""))
+        return jsonify({
+            "sid": tid,                 # the modal keys on this the same way it does a sid
+            "task_id": tid,
+            "title": title,
+            "model": (str(first.get("model_name") or "")
+                      or str(first.get("model_id") or "")),
+            "count_tasks": 1,
+            "count_images": len(rows),
+            "span": [stamps[0], stamps[-1]] if stamps else ["", ""],
+            "steps": [{
+                "task_id": tid,
+                "v": 1,
+                "reroll": False,
+                "label": "one generation",
+                "first_media_id": str(first.get("media_id") or ""),
+                "n": len(rows),
+            }],
+        })
 
     @app.route("/api/train/recent-tasks")
     @tier(LOGIN)
@@ -15018,50 +15869,147 @@ def create_app(out_dir: Path):
             telem_bump("skin_changed_runs", out_dir=out_dir)
         return jsonify({"skin": skin})
 
+    def _ach_sid():
+        """This session's beacon identity: the LOGIN's own stable identity -- the account
+        name plus the `csrf` token _establish_session() mints AT LOGIN -- fingerprinted,
+        with the caller's address as a second key. Nonces are bound to it, and the debounce
+        and the rate limit are keyed on it.
+
+        REPLACING (2026-09-07, refining the same day's nonce ruling) a lazy
+        `session.setdefault("ach_sid", secrets.token_hex(16))`. The Flask session is a
+        client-held signed cookie, and _is_authorized_request() re-validates only
+        user/sess_epoch -- so the cookie handed out at login is still valid, still
+        authorized, and carries NO ach_sid. setdefault therefore minted a fresh one on
+        every replay of it, and with it a fresh 30-call budget and a fresh debounce slate:
+        the limit this route's own docstring calls the stop for a scripted replay loop did
+        not bind at all (60 rounds, 60 sids, no 429). The key had to be something a client
+        cannot vary by replaying an OLDER cookie, and both halves of this one are written
+        once, at login, by the single _establish_session() that defines what a session is
+        -- a replayed cookie carries the same pair, so it draws on the same budget. The
+        address is a second key so two devices signed into one account keep budgets of
+        their own rather than sharing (and colliding on) one.
+
+        The csrf token is HASHED rather than used raw: it is the same token that guards the
+        write routes, and a long-lived process dict is not a place to leave it lying about.
+        The lazy random id survives only as the fallback for a session with no login
+        identity at all -- nothing behind @tier(LOGIN) can reach that, but the render seams
+        call this too, and a no-accounts first render has no `user` to key on."""
+        import hashlib
+        user = str(session.get("user") or "")
+        tok = str(session.get("csrf") or "")
+        if user and tok:
+            who = hashlib.sha256(("%s\x00%s" % (user, tok)).encode("utf-8")).hexdigest()[:16]
+        else:
+            who = "anon:" + session.setdefault("ach_sid", secrets.token_hex(16))
+        return "%s@%s" % (who, _client_ip())
+
+    @app.route("/api/ach-nonce")
+    @tier(LOGIN)
+    def api_ach_nonce():
+        """A fresh beacon nonce for a page whose own has gone stale (idle past the 60s
+        window, or spent). Same session budget as the events themselves -- see
+        _ach_rate_ok(). The render seams (app_page, /loom) mint their first one inline;
+        this is the top-up."""
+        sid = _ach_sid()
+        if not _ach_rate_ok(sid):
+            return jsonify({"error": "slow down"}), 429
+        return jsonify({"nonce": _ach_mint(sid)})
+
     @app.route("/api/ach-event", methods=["POST"])
-    @tier(LOCALHOST)
+    @tier(LOGIN)
     def api_ach_event():
         """Feat-event beacon from the front-end: the Starfall konami egg, the
         in-app manual, and narrator pokes. Whitelisted event names only; each is
         a cosmetic local counter (no spend).
 
-        LOCALHOST since 2026-08-26 (was LOGIN). The beacon is the ONLY thing
-        standing between a feat and being earned -- there is no server-side
-        re-check that the gesture actually happened, so any signed-in session
-        could POST {"event": "konami"} straight from a console and arm the feat
-        without ever entering the code. Narrowing to loopback means a feat can
-        only be armed at the server's own keyboard, which is the one place the
-        gesture can be witnessed.
+        LOGIN again since 2026-09-07, on the owner's ruling ("I feel like
+        triggered should be obtainable easily on a phone just like desktop. For
+        sure build the nonce."). The per-render nonce this route now requires is
+        what makes LOGIN honest, and it is the work the 2026-08-26 comment here
+        listed as "NOT DONE HERE".
 
-        WHAT A LAN DEVICE LOSES, AND WHY THAT'S THE POINT. These events
-        ANNOUNCE; they never gate capability. A LAN session that loses them
-        keeps every route, every image, every credit-spending path it had --
-        it just can't arm a cosmetic counter it didn't earn. Losing that on LAN
-        is the intended outcome, not collateral.
+        THE HISTORY, kept because the reasoning still stands. LOCALHOST from
+        2026-08-26 to 2026-09-07: the beacon is the ONLY thing standing between a
+        feat and being earned -- there is no server-side re-check that the
+        gesture actually happened, so any signed-in session could POST
+        {"event": "konami"} straight from a console and arm the feat without ever
+        entering the code. Narrowing to loopback meant a feat could only be armed
+        at the server's own keyboard, the one place the gesture can be witnessed.
+        The cost was that a phone or any other LAN device lost all three feats,
+        and the owner judged that cost too high once the nonce was buildable.
 
-        The clients treat a refusal as a no-op by design: api.js never throws
-        (a 403 comes back as an {error} body), App.jsx's konami handler is
+        WHAT THE NONCE WITNESSES INSTEAD. Not where the request came from, but
+        that it came from a page THIS SERVER RENDERED FOR THIS SESSION: the
+        nonce is minted into the render (window.MG_BOOT.ach_nonce, or the Loom
+        shell's own inline mint), is good for exactly one event inside 60
+        seconds, and is refused when presented by another session. A console POST
+        has none. A replay has a spent one. A nonce lifted from someone else's
+        page is not this session's to spend. That is a softer witness than
+        loopback -- someone determined can still read their own page's nonce out
+        of MG_BOOT and curl it -- but it is the same class of witness CSRF gives
+        us everywhere else, and it costs a phone nothing.
+
+        Also here, so five real pokes stay five real pokes: a 150ms debounce per
+        (session, event), and 30 beacon calls per session per rolling minute,
+        beyond which the answer is 429 and no counter moves. The debounce is a
+        wall-clock gap, so its width IS its meaning: 150ms is under a hand and
+        over a double-fired DOM event, which is the only thing it should fold
+        together. It shipped at 400ms earlier the same day and swallowed every
+        second tap of an ordinary phone tap-rate -- see _ach_debounced(). A
+        debounced reply is accepted, hands back a nonce, counts nothing, and
+        carries the current counter so the client holds its line rather than
+        rewinding its toast.
+
+        The other half of one double-fired click is one nonce sent twice: the
+        twin that loses is refused 403 as consumed. The clients do NOT refresh
+        and retry that one -- see achNonce.js -- or the retry would count the
+        same gesture twice from the other side.
+
+        The clients still treat a refusal as a no-op by design: api.js never
+        throws (a 403 comes back as an {error} body), App.jsx's konami handler is
         explicitly fail-soft (the stars and toast still play), useFolio.js's
-        pokeNarrator() early-returns on res.error before any Toast, and the
-        in-app manual's beacon is a bare fire-and-forget fetch with no handler
-        attached. A LAN device sees the egg and hears nothing about the gate.
-
-        NOT DONE HERE, deliberately: the per-render nonce / rate-limit /
-        debounce that would let a LAN device earn these HONESTLY. That is a
-        design remainder, tracked internally, not a gap in this gate."""
+        pokeNarrator() early-returns on res.error before any Toast. What is new
+        is that every caller now goes through notify/achNonce.js, which adopts
+        the `next_nonce` an accepted event returns and re-asks /api/ach-nonce
+        once on a stale-page 403 before giving up quietly."""
+        sid = _ach_sid()
+        if not _ach_rate_ok(sid):
+            return jsonify({"error": "slow down"}), 429
         body = request.get_json(silent=True) or {}
         ev = str(body.get("event") or "").strip()
+        if ev not in ("konami", "docs", "narrator"):
+            return jsonify({"error": "unknown event"}), 400
+        # One refusal wording for missing, unknown, expired and foreign alike: which
+        # check failed is exactly the thing a replay probe would want to learn, and
+        # every one of them has the same fix for a real page.
+        if not _ach_consume(str(body.get("nonce") or ""), sid):
+            return jsonify({"error": "stale page — reload"}), 403
+        # A consumed nonce always buys the next one, debounced or not -- otherwise the
+        # second half of a double-fire leaves the page with no nonce at all.
+        nxt = _ach_mint(sid)
+        if _ach_debounced(sid, ev):
+            # ...and it carries the CURRENT counter, READ not bumped (2026-09-07, refining
+            # the same day's debounce ruling). A debounced reply used to be the three keys
+            # above and nothing else, so useFolio.js's `res.pokes || 1` fell back to 1 and
+            # re-showed POKES[0] -- the escalating toast visibly REWOUND on the swallowed
+            # half of a double-fire. The client holds its line on `debounced` now; sending
+            # the true count as well means a client that does read it cannot be misled.
+            held = {"ok": True, "debounced": True, "next_nonce": nxt}
+            if ev == "narrator":
+                pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+                held["pokes"] = pokes
+                held["snapped"] = pokes >= 5
+            return jsonify(held)
         if ev == "konami":
             telem_flag("konami_triggered", out_dir=out_dir)
-            return jsonify({"ok": True})
+            return jsonify({"ok": True, "next_nonce": nxt})
         if ev == "docs":
             telem_bump("docs_opened", out_dir=out_dir)
-            return jsonify({"ok": True})
-        if ev == "narrator":
-            telem_bump("narrator_pokes", out_dir=out_dir)
-            pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
-            return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5})
-        return jsonify({"error": "unknown event"}), 400
+            return jsonify({"ok": True, "next_nonce": nxt})
+        telem_bump("narrator_pokes", out_dir=out_dir)
+        pokes = telemetry_metrics(out_dir).get("narrator_pokes", 0)
+        return jsonify({"ok": True, "pokes": pokes, "snapped": pokes >= 5,
+                        "next_nonce": nxt})
 
     @app.route("/api/mirror/status")
     @tier(LOGIN)
@@ -16474,6 +17422,11 @@ __DESIGN_TOKENS__
             "is_local": True,
             "is_true_local": _is_local_request(),
             "csrf": session["csrf"],
+            # The feat beacon's per-render nonce (2026-09-07 ruling -- see
+            # api_ach_event()'s own comment). One event per nonce, 60 seconds,
+            # bound to this session; notify/achNonce.js seeds itself from here and
+            # rotates on each accepted event.
+            "ach_nonce": _ach_mint(_ach_sid()),
             "build_stamp": build_stamp,
             # The locked default; becomes a Branding-panel setting later
             # (docs/DECISIONS.md "Banner controls join the Branding panel").
@@ -16962,7 +17915,11 @@ __DESIGN_TOKENS__
         if not bundle_file.is_file():
             return ("The Loom bundle is not built. Run `npm run build` in loom/ to "
                     "generate loom/dist/master-storyboard.bundle.js."), 503
-        return LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
+        # __ACH_NONCE__ is the Read the Manual beacon's per-render nonce (2026-09-07
+        # ruling). token_urlsafe is [A-Za-z0-9_-] only, so it cannot break out of the
+        # double-quoted JS string it lands in.
+        return (LOOM_PAGE_BUNDLE.replace("__UPSCALE_CONST__", _upscale_const_js())
+                                .replace("__ACH_NONCE__", _ach_mint(_ach_sid())))
 
     @app.route("/api/loom/get")
     @tier(LOGIN)

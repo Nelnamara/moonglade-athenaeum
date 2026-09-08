@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
+import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
 import "../styles/model-picker.css";
 
 /* Faithful React port of static/mg-model-picker.js (2026-08-08, the vanilla static/ -> React
@@ -97,6 +98,7 @@ export default function ModelPicker({
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const gridRef = useRef(null);
+  const sentinelRef = useRef(null);   // the end-of-list marker the IntersectionObserver watches
   const lastKeyRef = useRef(null);
   const previewTimerRef = useRef(null);
   const scrollRafRef = useRef(null);
@@ -134,7 +136,7 @@ export default function ModelPicker({
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
       setErr(d && d.error ? d.error : "");
-      setRows((d && d.results) || []);
+      setRows(uniqueRows((d && d.results) || []));
       setDim(false);
     }).catch(() => {
       if (mine !== seqRef.current) return;
@@ -152,9 +154,37 @@ export default function ModelPicker({
       if (d && d.error) return;              // transient: leave hasMore/cursor, next scroll retries
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
-      setRows((old) => old.concat((d && d.results) || []));
+      // One row per model (picker/mergeRows.js): the feeds repeat a model across pages, and a
+      // repeated key leaves React a card it can never remove again -- the "always the SAME
+      // LoRA" pile at the top of every later list (owner, 2026-09-07).
+      setRows((old) => appendRows(old, (d && d.results) || []));
     }).catch(() => { loadingMoreRef.current = false; setLoadingMore(false); });
   }, [searchUrl]);
+
+  // LOAD MORE, the way that survives the layout. The grid's own onScroll below only fires when
+  // .mg-grid itself is the scroller -- and on the phone sheet and the desktop dock palette it is
+  // NOT: the ancestor `.mfly > div:not(.mfly-head)` scrolls (styles.css / create-mobile.css /
+  // dock.css all give it overflow-y:auto and min-height:0), so the grid never scrolled, the
+  // handler never ran, and every list stopped dead at its first page of 24 (owner, 2026-09-07,
+  // desktop and phone, every tab and sort). An IntersectionObserver on a 1px sentinel after the
+  // grid sees the sentinel come into view through ANY clipping ancestor, so it does not care
+  // which element scrolls. The root is that scrolling ancestor when there is one (the viewport
+  // otherwise), because only then does the margin mean "this far before the END OF THE LIST":
+  // with root:null the margin widens the viewport, but the pane's clip is applied first, so the
+  // sentinel only ever intersected once it was physically on screen and every page cost a full
+  // server round trip (0.6-0.9 s, measured) spent looking at the bottom of the list ("it does but
+  // its slow" -- owner, 2026-09-07). 720px is about one page of cards: the next page is on its way
+  // while the current one is still being read, which is what the vanilla picker felt like.
+  useEffect(() => {
+    if (!visible || typeof IntersectionObserver === "undefined") return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore();
+    }, { root: scrollParentOf(el), rootMargin: "720px 0px", threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible, loadMore, rows.length]);
 
   // browse-on-open + re-search on any filter change, but NOT on a plain re-reveal (ensureSearched
   // + _stale semantics): the search key is the fresh-list url; unchanged key => skip.
@@ -221,6 +251,9 @@ export default function ModelPicker({
     setPreview({ m, x, y });
   };
   const schedulePreview = (m, anchorEl) => {
+    // A touch screen has no hover: a tap fires mouseenter, nothing ever fires mouseleave, and the
+    // preview card would stand over the sheet for good (owner, phone, 2026-09-07).
+    if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(hover: none)").matches) return;
     clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => showPreview(m, anchorEl), 130);
   };
@@ -230,6 +263,23 @@ export default function ModelPicker({
 
   const filtersHidden = market && src === "bookmark";
   const p = preview && preview.m;
+
+  // A keyword search under a base filter has TWO ways to come back empty -- nothing is called
+  // that, or nothing called that is built for this base -- and "No results — try another
+  // search." answers only the first, so the second reads as the search being broken (owner walk,
+  // 2026-09-07). When a base filter is on, say so and offer both ways out. The label is
+  // archLabel's own, fed a row carrying just the base type, so the sentence names the base in
+  // exactly the words the cards' ⚠ badge and their "needs <arch>" line already use.
+  const baseFilterLabel = kind === "lora" && baseType
+    ? archLabel({ lora_base_model_type: baseType }, kind) : "";
+  // Since 2026-09-07 a NAME search is not filtered by the base at all -- a match the picked base
+  // cannot run shows greyed with what it needs -- so an empty result means nothing matched the
+  // words. Browsing without a search term is still base-filtered, and its empty line says so.
+  const emptyLine = (kind === "lora" && qDebounced)
+    ? "No LoRAs match “" + qDebounced + "” — try other words."
+    : (baseFilterLabel && !qDebounced
+        ? "No LoRAs for " + baseFilterLabel + " here — pick another base or search by name."
+        : "No results — try another search.");
 
   return (
     <div className="model-picker" style={style}>
@@ -296,12 +346,12 @@ export default function ModelPicker({
       )}
 
       {err ? <div className="mg-empty" style={{ display: "block" }}>⚠ {err}</div>
-        : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>No results — try another search.</div>
+        : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>{emptyLine}</div>
         : <div className="mg-empty" />}
 
       <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
         style={{ opacity: dim ? 0.45 : 1 }}>
-        {rows.map((m) => {
+        {rows.map((m, i) => {
           const incompat = m.compat === "no";
           const arch = archLabel(m, kind);
           const sel = isSelected(m);
@@ -317,7 +367,7 @@ export default function ModelPicker({
               })();
           const clickable = !incompat || sel;   // an already-selected incompatible LoRA can still be removed
           return (
-            <div key={m.model_id} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
+            <div key={rowKey(m) || "row-" + i} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
               data-mid={m.model_id} title={tip || undefined}
               onClick={clickable ? () => pick(m) : undefined}
               onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}
@@ -340,6 +390,7 @@ export default function ModelPicker({
         })}
       </div>
 
+      <div ref={sentinelRef} className="mg-sentinel" aria-hidden="true" />
       <div className={"mg-loadmore" + (loadingMore ? " on" : "")} aria-hidden="true">loading more…</div>
 
       <div className={"mg-preview" + (p ? " open" : "")} aria-hidden={p ? "false" : "true"}

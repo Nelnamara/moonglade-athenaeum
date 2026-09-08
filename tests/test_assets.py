@@ -152,7 +152,10 @@ def test_needs_download_marker_stale_is_true(tmp_path):
 # ---------------------------------------------------------------------------
 # AssetFetchJob
 # ---------------------------------------------------------------------------
-def _wait_done(job, timeout=5):
+_WAIT_DONE_TIMEOUT = 5.0   # the terminal-state deadline every job test below is judged by
+
+
+def _wait_done(job, timeout=_WAIT_DONE_TIMEOUT):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         st = job.status()
@@ -176,15 +179,60 @@ def test_successful_fetch_writes_verified_file_and_marker(tmp_path):
     assert marker == {"version": "1", "sha256": manifest["sha256"]}
 
 
+# The fake stream the progress test runs on. Named, because the guard below is what stops
+# them drifting back into a budget that races _wait_done rather than measuring progress.
+_PROGRESS_DATA = REAL_BYTES * 50   # big enough to see multiple chunks land
+_PROGRESS_CHUNK = 4096
+_PROGRESS_DELAY = 0.01             # _FakeResponse.read sleeps this once per read
+
+
+def _progress_fixture_reads():
+    """How many `.read()` calls the progress fixture's stream costs -- every full chunk,
+    the short tail if there is one, and the final empty read that ends the loop."""
+    full, tail = divmod(len(_PROGRESS_DATA), _PROGRESS_CHUNK)
+    return full + (1 if tail else 0) + 1
+
+
+def test_the_progress_fixture_stays_well_inside_its_deadline():
+    """The progress test must fail on PROGRESS, never on the clock.
+
+    2026-09-07: it used to spend ~4.0s of fixture sleeps against `_wait_done`'s 5s
+    deadline, and under a loaded machine it was `_wait_done`'s "job never reached a
+    terminal state" that fired -- a failure that says nothing about the thing the test
+    is for. This pins both halves of the fix from the same constants the test itself
+    passes to `_opener`, so neither can move without the other: the sleep budget stays a
+    small fraction of the deadline, AND the stream stays a real multi-chunk one with
+    plenty of mid-download moments for the poller to catch.
+    """
+    reads = _progress_fixture_reads()
+    budget = reads * _PROGRESS_DELAY
+    assert budget < _WAIT_DONE_TIMEOUT / 2, (
+        "the progress fixture sleeps {:.2f}s of a {:.1f}s terminal deadline ({} reads x "
+        "{}s) -- that is a race with the clock, not a measurement of progress".format(
+            budget, _WAIT_DONE_TIMEOUT, reads, _PROGRESS_DELAY))
+    assert reads >= 8, (
+        "the progress fixture streams in {} reads -- too few to guarantee the poller a "
+        "mid-download window, which is the whole point of chunking it".format(reads))
+
+
 def test_progress_updates_during_download(tmp_path):
     target = tmp_path / "moonglade.dat"
-    data = REAL_BYTES * 50   # big enough to see multiple chunks land
+    data = _PROGRESS_DATA
     manifest = _manifest_for(data)
     job = ma.AssetFetchJob(target)
     # A small per-chunk delay so the poller below is guaranteed a window to
     # observe an in-flight state -- an instant fake download can finish
     # between two poll iterations and make this assertion vacuous.
-    job.start(manifest=manifest, opener=_opener(data, chunk=512, delay=0.01))
+    #
+    # 2026-09-07: chunk was 512, which is 401 sleeps == ~4.0s of fixture delay against
+    # _wait_done's 5s deadline below -- under 20% headroom, and it was _wait_done's
+    # "job never reached a terminal state" that fired under load in this wave, not the
+    # seen_partial assertion this test is about. _PROGRESS_CHUNK keeps the same shape (a
+    # real multi-chunk loop, a mid-download window the 5ms poller cannot miss) at a
+    # fraction of the deadline; test_the_progress_fixture_stays_well_inside_its_deadline
+    # below holds that margin so it cannot quietly erode again.
+    job.start(manifest=manifest, opener=_opener(
+        data, chunk=_PROGRESS_CHUNK, delay=_PROGRESS_DELAY))
     seen_partial = False
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:

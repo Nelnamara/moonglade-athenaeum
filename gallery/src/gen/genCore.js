@@ -32,6 +32,48 @@ export const MODES = [
   ["pro", "Pro"], ["ultra", "Ultra"],
 ];
 
+/* Does this model offer that mode? (SCOPE 2026-08-17 §4b, capture 2026-08-25.)
+
+   The five bars above are a FIXED list; the real allowed set is per model VERSION and
+   comes back from the server as `model.profiles` (a list of profileName strings) --
+   Tsubaki.2 offers lite/standard/pro/ultra, Tsubaki.3 offers only pro/ultra. Before this,
+   every bar was always clickable, so you could pick a mode the model rejects; the submit
+   then dropped the profile and re-ran on the model's own default, which is not the tier
+   the cost badge quoted (the divergence genCore's own rule at "quote == spend" forbids).
+
+   FAILS OPEN, deliberately, on every uncertain input:
+   - `auto` is ALWAYS offered -- it is our word for "let the server choose", not a
+     profileName, so no model can fail to have it.
+   - profiles null/undefined (server could not determine them) -> everything offered.
+   - profiles [] (an SDXL model: definitively no inference profiles) -> everything
+     offered; that architecture is handled by the submit/price gate, not by this bar.
+   A `membershipOnly` profile IS in the list and so stays offered -- the site's own
+   rejection path owns membership, and a second copy of that rule here would drift. */
+export function modeOffered(mode, profiles) {
+  if (mode === "auto") return true;
+  if (!Array.isArray(profiles) || profiles.length === 0) return true;
+  return profiles.some((p) => String(p).toLowerCase() === String(mode).toLowerCase());
+}
+
+/* The mode that SURVIVES applying a model version (red team 2026-09-07, refining the
+   2026-08-17 §4b ruling above rather than reversing it).
+
+   Dimming a bar only governs the NEXT click. A mode picked on one model stayed selected
+   when you switched to a model whose profiles omit it: the bar dimmed but still painted
+   filled, buildPayload still sent that mode, /api/price still quoted that tier, and the
+   submit was then rejected and silently re-run on the model's own default -- the exact
+   quote-vs-charge divergence the dimming exists to close, reached by a model switch
+   instead of a click. So the mode is re-checked at the moment a version applies and drops
+   back to `auto` when the newly applied version does not offer it.
+
+   `auto` is the only safe landing: it is always offered (see modeOffered) and it is what
+   GEN_DEFAULTS starts on, so this can only ever move a selection to the state a fresh
+   session is already in -- never onto another priced tier the user did not choose. Fails
+   open exactly as modeOffered does: an unknown/empty profile set keeps the mode untouched. */
+export function modeAfterApply(mode, profiles) {
+  return modeOffered(mode, profiles) ? mode : "auto";
+}
+
 // The classic's blank-steps fallback: `+el('gen-steps').value||25`.
 export const STEPS_FALLBACK = 25;
 

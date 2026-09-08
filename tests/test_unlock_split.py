@@ -23,7 +23,7 @@ import pytest
 import moonglade_gallery as g
 from moonglade_gallery import CATALOG_FIELDS, save_catalog
 
-from tests.conftest import login_client
+from tests.conftest import ach_event, login_client
 
 
 class _FixedNoon(_dt.datetime):
@@ -120,7 +120,7 @@ def test_sealed_paths_serve_once_earned(tmp_path, sealed_donor_present):
     _seed(tmp_path, g._role_rel("starfall", "ee_starfall_cast.ogg"))
     _seed(tmp_path, g._role_rel("starfall", "ee_starfall_loop.ogg"))
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 404
-    assert cli.post("/api/ach-event", json={"event": "konami"}).status_code == 200
+    assert ach_event(cli, "konami").status_code == 200
     assert cli.get("/branding/ee_nelstarfall.png").status_code == 200
     assert cli.get("/branding/ee_starfall_cast.ogg").status_code == 200
     assert cli.get("/branding/ee_starfall_loop.ogg").status_code == 200
@@ -144,7 +144,7 @@ def test_earned_banner_gated_and_void_banner_never_serves(tmp_path, sealed_donor
     save_catalog(tmp_path / "catalog.db",
                  [_row(media_id=str(i), filename="a_%d.png" % i,
                        created_at="2025-01-01T00:00:00") for i in range(1, 50001)])
-    cli.post("/api/ach-event", json={"event": "konami"})   # pile on more earns
+    ach_event(cli, "konami")   # pile on more earns
     assert cli.get("/branding/earned_banners/great_library.png").status_code == 200
     assert cli.get("/branding/earned_banners/void_banner.png").status_code == 404
 
@@ -177,7 +177,7 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / "loremaster.png")
     assert cli.get("/badge-thumb/the-konami-code.png").status_code == 404
     assert cli.get("/badge-thumb/loremaster.png").status_code == 200
-    cli.post("/api/ach-event", json={"event": "konami"})
+    ach_event(cli, "konami")
     assert cli.get("/badge-thumb/the-konami-code.png").status_code == 200
 
 

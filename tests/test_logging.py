@@ -103,6 +103,37 @@ def test_werkzeug_request_lines_reach_the_file_regardless_of_root_ceiling(tmp_pa
     assert 'GET / HTTP/1.1" 200' in moonglade_logging.log_path(tmp_path).read_text(encoding="utf-8")
 
 
+def test_the_web_servers_own_module_logger_reaches_the_file(tmp_path):
+    """FAILS before 2026-09-07: the live mirror's whole life -- "connected and subscribed",
+    "task N reported completed -- mirroring", "disconnected cleanly; reconnecting" -- is
+    logged from inside moonglade_gallery.py through logging.getLogger(__name__), which is
+    "__main__" when the server runs as a script (how it always runs: "Serve Gallery.pyw"
+    launches `python moonglade_gallery.py`) and "moonglade_gallery" when it is imported.
+    Neither name is LOGGER_NAME, so both inherited root's WARNING ceiling and every one of
+    those INFO lines was absent from moonglade.log -- the one record that could answer "was
+    the socket up when that generation finished?" after the fact.
+
+    The module name is read off the module itself rather than typed as a string, so renaming
+    the file cannot leave this passing against a logger nothing uses."""
+    import moonglade_gallery
+
+    moonglade_logging.setup_logging(tmp_path, verbose=False)
+    for name in (moonglade_gallery.__name__, "__main__"):
+        assert name in moonglade_logging.GALLERY_LOGGER_NAMES, (
+            "%s is a name the web server's own logger really takes, and it is not levelled"
+            % name)
+        assert logging.getLogger(name).getEffectiveLevel() == logging.DEBUG
+
+    logging.getLogger(moonglade_gallery.__name__).info(
+        "live mirror: connected and subscribed")
+    logging.getLogger("__main__").info("live mirror: disconnected cleanly; reconnecting in 5s")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    text = moonglade_logging.log_path(tmp_path).read_text(encoding="utf-8")
+    assert "connected and subscribed" in text
+    assert "disconnected cleanly" in text
+
+
 def test_uncaught_exception_is_logged_before_the_normal_crash_behavior_runs(tmp_path):
     """FAILS before the fix: Python's default excepthook only prints to
     stderr -- there was no permanent record of a crash at all."""

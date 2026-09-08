@@ -351,6 +351,9 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-modebar { flex: 1 1 0; height: 6px; border-radius: 3px; border: 0;
   cursor: pointer; padding: 0; background: var(--surface1); transition: background .2s; }
 .mgdock-modebar.on { background: var(--accent); }
+/* A quality mode this model does not offer: dimmed in place, never removed -- the same
+   .35 the disabled STEPS/CFG sliders use (SCOPE 2026-08-17 §4b). */
+.mgdock-modebar:disabled { opacity: .35; cursor: default; }
 
 .mgdock-sliderrow { display: flex; align-items: center; gap: 8px; }
 .mgdock-sliderrow .mgdock-lbl { flex: none; width: 38px; }
@@ -504,25 +507,6 @@ html.mg-noblur .mgdock-scrim {
   cursor: crosshair; touch-action: none; }
 .mgdock-fixrow { display: flex; align-items: center; gap: 8px; }
 .mgdock-fixrow .sp { flex: 1 1 auto; }
-
-/* ---- slab 2 under the ENHANCE sub-tab: ART FILTERS (DC 1509-1516) ---- */
-/* the DC's column (1510): flex col, gap 9 */
-.mgdock-enhancecol { display: flex; flex-direction: column; gap: 9px; }
-/* the sub-label (1511): 9px 700 .1em overlay0 -- NO text-transform, its tail is
-   lowercase in the DC ('ART FILTERS · free, no generation') */
-.mgdock-enhancesub { font-size: 9px; font-weight: 700; letter-spacing: .1em;
-  color: var(--overlay0); }
-/* ◉ Open filters (1512, openFiltersBtnStyle 2947) */
-.mgdock-openfilters { text-align: center; padding: 10px; border-radius: 10px;
-  font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
-  border: 1px solid var(--surface1); background: rgba(182, 146, 230, .14);
-  color: var(--accent); }
-/* paragraph 1 (1513): 10px / 1.55 subtext, <b> in var(--text) */
-.mgdock-enhancecopy { font-size: 10px; line-height: 1.55; color: var(--subtext); }
-.mgdock-enhancecopy b { color: var(--text); font-weight: 700; }
-/* paragraph 2 (1514): 10px / 1.55 overlay0, <b> in var(--subtext) */
-.mgdock-enhancecopy2 { font-size: 10px; line-height: 1.55; color: var(--overlay0); }
-.mgdock-enhancecopy2 b { color: var(--subtext); font-weight: 700; }
 
 /* ---- The Bridge Enhance sub-tab (EnhanceTab), rebuilt 2026-09-04 to
    moonglade-internal/design/enhance/"Enhance Family Handoff.dc.html" comps A2 + A3
@@ -1138,6 +1122,17 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   animation: mgSlab .42s cubic-bezier(.2, .9, .24, 1) both;
   transition: bottom .45s cubic-bezier(.2, .9, .24, 1); }
 .mgx-dock-host:has(.mgdock.expanded) .mfly { bottom: 470px; }
+
+/* ...and the palette's scroller has to be ALLOWED to shrink to that cap (owner walk,
+   2026-09-07: "LoRA picker in gen drawer does not scroll past first few"). The palette
+   above is the clipper (max-height:46vh; overflow:hidden); the element that actually
+   scrolls is ModelFlyout's non-head child -- styles.css's `.mfly > div:not(.mfly-head)`,
+   already flex:1 1 auto; overflow-y:auto. A flex ITEM defaults to min-height:auto, i.e.
+   never smaller than its content, so that child stayed full-list height and the palette
+   clipped it instead of it scrolling. min-height:0 lifts the automatic minimum.
+   The phone sheet got exactly this on 2026-08-24 (create-mobile.css, `.cm-modelwrap .mfly >
+   div:not(.mfly-head)`); this dock rule predates it and never picked it up. */
+.mgx-dock-host .mfly > div:not(.mfly-head) { min-height: 0; overflow-y: auto; }
 
 /* ============================ reduced motion ================================ */
 @media (prefers-reduced-motion: reduce) {

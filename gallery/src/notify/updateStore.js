@@ -8,6 +8,17 @@
    "I dislike that"). That answer has to reach a person who is looking at the gallery, not
    only one who happens to open the Control Panel.
 
+   A BANNER, NOT A TOAST (owner ruling 2026-09-07, refining the 2026-09-04 one above:
+   "update should be noticed anywhere", "just a reworked banner on the toast"). Until this
+   date the announcement was ONE sticky corner toast per version, deduped per browser
+   through a localStorage key -- so it could be dismissed, or missed while nobody was at the
+   keyboard, and then the Control Panel was the only place left to learn a release existed.
+   It now sets notify/bannerStore.js instead: a strip that STANDS until the update is
+   actually applied, on every surface the notify root mounts on. The whole per-browser
+   "already announced" ledger (SEEN_KEY, its memory-first mirror, its cross-tab `storage`
+   listener) went with the toast -- a standing strip has nothing to dedupe: two tabs showing
+   the same banner is the correct answer, not a duplicate.
+
    ANNOUNCE ONLY. This module says a release exists. It cannot install one: applying is the
    Control Panel's Update button and its confirm, and there is no call from here into the
    apply route -- pinned by loom/test/mg-update-announce.test.js, which asserts this file
@@ -15,41 +26,24 @@
    asked for the background check -- "I don't want that" -- so this has no business growing one.
 
    A MODULE SINGLETON, deliberately outside any React lifecycle, for the same reason
-   jobsStore.js is one: the memory of "this version has already been announced" must survive
-   every mount and unmount in the app, or opening and closing a screen would re-toast.
+   jobsStore.js is one: the announcement must survive every mount and unmount in the app.
 
-   No new surface. Three existing designed elements carry the news, and this feeds them:
+   No new surface beyond the strip. The other two designed elements carry the news as
+   before, and this feeds them:
      * the Control Panel's version stamp, which already turns gold and reads
-       "vX.Y.Z available -- view" (owner ruling 2026-09-01, Variant A: no new chrome, the
-       stamp that was always there becomes the notice);
+       "vX.Y.Z available -- view" (owner ruling 2026-09-01, Variant A);
      * the Panel's update modal, unchanged -- the Identity Chrome C2 handoff owns every
-       pixel of the apply flow;
-     * one corner toast, through the standard toastStore idiom.
+       pixel of the apply flow.
 
    The server hands the announcement over on the /api/jobs poll -- the one server-truth
    channel every open tab already runs (jobsStore.js) -- rather than by opening a second
    loop for it. */
 
 import { show as toastShow } from "./toastStore.js";
-
-// The last version this BROWSER was told about. Remembered in localStorage so a reload
-// cannot re-announce the same release: "one toast per new version" is a promise to the
-// person, not to the page. Per-browser, like the popup-blur switch and the restart
-// estimate -- there is nothing here worth putting in the account.
-const SEEN_KEY = "mg_update_announced";
+import { setBanner } from "./bannerStore.js";
 
 let current = null;         // the announcement payload, or null when nothing is out
 const subs = new Set();
-
-/* FAIL CLOSED, NOT OPEN. localStorage is the CROSS-RELOAD layer only; this variable is
-   the one that actually holds the promise. A browser with storage blocked (private mode,
-   "block third-party cookies" on an embedded view, a locked-down profile) throws on both
-   getItem and setItem -- and the guarded reads used to swallow that and answer "", which
-   read as "never announced". The poll behind this store runs every 2.5-7 seconds, so the
-   same release announced a fresh sticky toast on EVERY tick, stacking forever. Checked
-   and written FIRST, before storage is consulted at all: at most one announcement per
-   version per tab, whatever storage does. */
-let memSeen = "";
 
 function emit() { subs.forEach((fn) => fn(current)); }
 
@@ -62,13 +56,12 @@ export function subscribe(fn) {
 export function getUpdate() { return current; }
 
 /* Versions COMPARED, not string-matched. A rollback -- the owner pulling a bad release, so
-   the hourly check answers v3.7.1 an hour after it answered v3.7.2 -- is not news, and
-   under plain inequality it both fired a second toast and wrote the LOWER version into the
-   seen key, which then made the real newer release look already-announced.
+   the hourly check answers v3.7.1 an hour after it answered v3.7.2 -- must not raise a
+   banner against a build that is already newer than it.
 
    Returns 1/0/-1, or null when either side is not a plain dotted number (with an optional
    leading v, which is how the tags are shaped). Null is answered CONSERVATIVELY by every
-   caller: no announcement, and nothing overwritten. */
+   caller: no banner. */
 function parseVersion(v) {
   const s = String(v == null ? "" : v).trim().replace(/^v/i, "");
   if (!/^\d+(\.\d+)*$/.test(s)) return null;
@@ -84,92 +77,46 @@ export function cmpVersions(a, b) {
   return 0;
 }
 
-function readStored() {
-  try { return localStorage.getItem(SEEN_KEY) || ""; } catch { return ""; }
-}
-
-/* The highest version known to have been announced: memory OR storage, whichever is
-   higher. Memory is authoritative when storage is unreadable or holds something that does
-   not parse; storage wins when it is genuinely ahead (another tab got there first). */
-function highestSeen() {
-  const stored = readStored();
-  if (!memSeen) return stored;
-  if (!stored) return memSeen;
-  const c = cmpVersions(stored, memSeen);
-  if (c === null) return memSeen;
-  return c > 0 ? stored : memSeen;
-}
-
-/* Never downward. Memory first (it is the layer that cannot fail), storage after. */
-function markSeen(v) {
-  memSeen = v;
-  const stored = readStored();
-  if (stored) {
-    const c = cmpVersions(v, stored);
-    if (c === null || c <= 0) return;      // malformed, equal or older: leave storage alone
-  }
-  try { localStorage.setItem(SEEN_KEY, v); } catch { /* private mode: memory carries it */ }
-}
-
-/* CROSS-TAB. Two tabs both polling can each read "not announced" and each toast; the
-   `storage` event is how a browser tells the other tabs what one of them just wrote, so
-   the memory here follows it upward and the re-check immediately before toastShow (below)
-   catches the sibling that got there first. A millisecond-wide race survives -- two tabs
-   writing inside the same event-loop turn -- and is accepted: the cost is one duplicate
-   toast in a window narrower than the 2.5s poll that opens it, and closing it properly
-   would mean a lock this store has no business owning. */
-if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
-  window.addEventListener("storage", (e) => {
-    if (!e || e.key !== SEEN_KEY) return;
-    const v = String(e.newValue || "");
-    if (!v) return;
-    if (!memSeen) { memSeen = v; return; }
-    const c = cmpVersions(v, memSeen);
-    if (c !== null && c > 0) memSeen = v;
-  });
+/* WHAT THIS PROCESS IS REALLY RUNNING, which is the only honest thing to compare a release
+   against now that the notice stands instead of firing once. window.MG_BOOT.build_stamp is
+   the version this bundle was served by (the same value the receipt is judged against, and
+   the same one the Panel's version stamp prints); the server's own `current` in the payload
+   is the fallback for a shell that has no boot stamp at all. */
+function runningVersion(payload) {
+  let stamp = "";
+  try { stamp = (typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.build_stamp) || ""; }
+  catch { stamp = ""; }
+  const v = versionFromStamp(stamp);
+  if (v && parseVersion(v) !== null) return v;
+  return (payload && payload.current) || "";
 }
 
 /* Hand the store an update payload -- from the /api/jobs poll's `update` field, or from the
    Control Panel's own fresh check on open. Anything that is not a real "you are behind"
-   answer (null, an offline check, an up-to-date one) CLEARS the announcement, so a stamp
-   watching this store stops offering an update that has already been applied.
+   answer (null, an offline check, an up-to-date one) CLEARS both the announcement and the
+   banner, so a stamp or a strip watching this store stops offering an update that has
+   already been applied.
 
-   The toast fires on the TRANSITION to a version this browser has not been told about, once
-   -- and only ever FORWARD: a version equal to or lower than the highest already announced
-   (the hourly tick repeating itself, or a pulled release) is not news, and never overwrites
-   what has been announced.
-   It is sticky on purpose: the hourly check can land while nobody is at the keyboard, and it
-   only ever fires once for a given release -- a notice that auto-dismissed into an empty room
-   would leave the Panel as the only place to learn about it, which is exactly the behaviour
-   the owner rejected. It carries an ×, like every other sticky toast in the app. */
+   The banner is set on EVERY tick that finds a release newer than the running build, and
+   the store behind it treats a repeat as a no-op -- that is what makes the notice
+   persistent rather than once-per-version. Equal or lower is not news and takes the strip
+   down: an up-to-date answer, or a rollback the running build is already past.
+
+   AND NOT WHILE AN APPLY IS IN FLIGHT. armReceipt() has written down the version this
+   browser is on its way to; the poll behind this store keeps running for the second or two
+   before the reload, and a strip saying "3.10 is ready" over a modal installing 3.10 is
+   just noise. The reload is what really clears the banner; this keeps it from flickering
+   back in the meantime. */
 export function note(payload) {
   const next = (payload && payload.behind && payload.latest) ? payload : null;
   const version = next ? String(next.latest) : "";
   const was = current ? String(current.latest) : "";
   current = next;
   if (version !== was) emit();
-  if (!version) return false;
-  // ONLY EVER FORWARD, and memory first because memory is the layer that cannot fail.
-  // Equal is the hourly tick finding what it found an hour ago; lower is a rollback;
-  // unparseable is something nobody should be toasted about either way.
-  if (memSeen) {
-    const m = cmpVersions(version, memSeen);
-    if (m === null || m <= 0) return false;
-  }
-  // Then the shared layer, read as late as possible -- immediately before the toast --
-  // because a sibling tab may have announced this version since this one last looked.
-  // (Nothing can interleave INSIDE this function, so "as late as possible" means since the
-  // previous turn; the residual millisecond race, two tabs passing this line before either
-  // writes, is accepted: one duplicate toast in a window far narrower than the poll that
-  // opens it, against a lock this store has no business owning.)
-  const c = cmpVersions(version, highestSeen() || "0");
-  if (c === null || c <= 0) return false;
-  markSeen(version);
-  toastShow({
-    sticky: true,
-    title: "Moonglade " + version + " is ready",
-    msg: "Open the Control Panel to update.",
-  });
+  if (!version || receiptArmed()) { setBanner(null); return false; }
+  const c = cmpVersions(version, runningVersion(next));
+  if (c === null || c <= 0) { setBanner(null); return false; }
+  setBanner({ version, notes: next.notes_url || "" });
   return true;
 }
 
@@ -205,6 +152,14 @@ export function versionFromStamp(stamp) {
 
 function clearReceipt() {
   try { localStorage.removeItem(RECEIPT_KEY); } catch { /* private mode: nothing to clear */ }
+}
+
+/* Is an apply already on its way to a reload in this browser? Read by note() above, which
+   must not put a "3.10 is ready" strip back over the modal that is installing 3.10. A
+   browser with storage blocked answers false and simply keeps the strip up for the second
+   or two until the reload takes it -- the same fail-quiet the receipt itself takes. */
+export function receiptArmed() {
+  try { return !!localStorage.getItem(RECEIPT_KEY); } catch { return false; }
 }
 
 /* Write down what this apply is going for. A version nobody can parse is not written at

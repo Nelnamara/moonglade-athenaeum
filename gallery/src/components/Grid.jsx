@@ -122,9 +122,11 @@ function Grid({
   // focus is DOM focus on the card element itself -- which the palette's search field
   // takes away the instant it opens. App remembers the last one instead (its focusItem).
   onFocusCard,
-  // #34 direction B: opening a stacked card NAVIGATES (never the lightbox) --
-  // a series to its members (onOpenSeries(sid) -> the ?series filter), a batch to
-  // its outputs (onOpenBatch(task_id) -> the existing View-batch ?batch filter).
+  // #34 direction B: opening a stacked card never opens the lightbox -- it opens the
+  // STACK. Both kinds land in the same modal over an untouched library now
+  // (onOpenSeries(sid), onOpenBatch(task_id); owner ruling 2026-09-07 brought the
+  // batch across, B3 having brought the series across on 2026-09-04). Neither one
+  // sets a library filter any more.
   onOpenSeries, onOpenBatch,
   // B2 (Gallery Chrome Handoff, 2026-09-04): the ◈ hover door. It is the SAME verb
   // the right-click menu's "Find similar" row, the lightbox row's chip and the
@@ -142,8 +144,8 @@ function Grid({
     window.scrollTo({ top: 0, behavior: "instant" in document.documentElement.style ? "instant" : "auto" });
   };
 
-  /* Open a stacked card's view (#34 direction B). A series navigates to its
-     members via the ?series filter; a batch reuses the existing View-batch path.
+  /* Open a stacked card's view (#34 direction B). Both kinds open the stack MODAL
+     over the library, tagged SERIES or BATCH so the two are never confused.
      Shared by the cover click, the caption "Open" chip, and Enter on a focused
      stack -- so every "open" affordance on a stack goes to the same place. */
   const openStackFor = (it) => {
@@ -656,6 +658,14 @@ function Grid({
       <figure
         key={it.media_id}
         data-laid-index={i}
+        /* data-laid-index is the LAYOUT's index (into `cells`, stacks included), which is
+           the only thing marquee hit-testing and the arrow handler need. Landing the owner
+           back on one particular picture after the viewer closes needs the other question
+           answered -- WHICH picture is this card -- so the id rides along
+           (lib/viewerLanding.js, owner 2026-09-07). A stack cover carries its own cover's
+           id; the landing simply finds no card for a member hidden under one, which is the
+           "stay" case there by design. */
+        data-id={it.media_id}
         // keyboard-reachable (Tab) and the arrow handler's focus target (#31, Refit #7)
         tabIndex={0}
         onFocus={(ev) => {

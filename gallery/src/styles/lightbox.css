@@ -173,8 +173,7 @@
 @media (max-width: 760px) { .lbx-hint { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .lbx-shell, .lbx.closing, .lbx.closing .lbx-shell,
-  .lbx-slab-rows, .lbx-slab-rows.closing { animation-duration: .01s; }
+  .lbx-shell, .lbx.closing, .lbx.closing .lbx-shell { animation-duration: .01s; }
   .lbx-chip-metal, .lbx-chip-metal:hover { animation: none; }
   .lbx-herowrap { transition: none !important; }
   .lbx-stars .stars .st:hover { transform: none; }

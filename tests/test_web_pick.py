@@ -150,21 +150,28 @@ def test_privacy_blur_covers_the_picker_and_drawer_reference_surfaces():
     # The picker is the React GalleryPicker since 2026-08-08 (ported out of
     # static/mg-gallery-picker.js); the is_nsfw/data-nsfw handling moved with it, the
     # privacy-blur CSS to gallery-picker.css (element selector -> .mg-gallery-picker class).
+    # RE-KEYED 2026-09-07: the rule used to be body-scoped, and nothing in the app has ever
+    # put a class on <body>, so it never actually fired -- the assertion below passed on a
+    # selector that could not match. It is scoped to the picker's OWN root now, and the
+    # component is pinned to carry that class (loom/test/privacy-blur-surfaces.test.js).
     picker_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "GalleryPicker.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={m.is_nsfw === "1" ? "1" : undefined}' in picker_jsx
     assert 'is_nsfw: m.is_nsfw === "1"' in picker_jsx
     picker_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gallery-picker.css").read_text(encoding="utf-8")
-    assert 'body.privacy-blur .mg-gallery-picker .mg-pk-cell[data-nsfw="1"] img' in picker_css
+    assert '.mg-gallery-picker.mg-blur .mg-pk-cell[data-nsfw="1"] img' in picker_css
+    assert "body.privacy-blur" not in picker_css
 
     # The video drawer is the React <VideoDrawer> since 2026-08-08 (no-vanilla port); its slot
     # nsfw handling moved with it -- one shared slotBox() sets data-nsfw, the pick-request's
     # respond() still forwards is_nsfw, and the privacy-blur CSS moved to gen-drawer.css
-    # (element selector -> .gen-drawer class).
+    # (element selector -> .gen-drawer class). Re-keyed off <body> onto the drawer's own
+    # root 2026-09-07, same reason as the picker above.
     drawer_jsx = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "components" / "VideoDrawer.jsx").read_text(encoding="utf-8")
     assert 'data-nsfw={item && item.is_nsfw ? "1" : undefined}' in drawer_jsx
     assert "respond: (media_id, thumb, is_nsfw) =>" in drawer_jsx
     drawer_css = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "styles" / "gen-drawer.css").read_text(encoding="utf-8")
-    assert 'body.privacy-blur .gen-drawer .mgd-slot[data-nsfw="1"] img' in drawer_css
+    assert '.gen-drawer.mg-blur .mgd-slot[data-nsfw="1"] img' in drawer_css
+    assert "body.privacy-blur" not in drawer_css
 
     loom_jsx = (Path(__file__).resolve().parents[1] / "loom" / "master-storyboard.jsx").read_text(encoding="utf-8")
     # onGalleryPick (the React onPick prop) forwards the media fields as m.* now -- was the
@@ -305,6 +312,48 @@ def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, mo
     # a base-model search never sends it, even if a client passes one
     cli.get("/api/model-search?kind=base&sort=newest&base_type=MMDIT26A_MODEL")
     assert gql[-1]["lora_base_type"] == ""
+
+
+def test_a_keyword_search_does_not_send_the_server_side_base_filter(tmp_path, monkeypatch, pixai):
+    """Owner's second walk, 2026-09-07: "searching for a known LoRA still fails". The route's
+    half of that fix -- what it hands each search path.
+
+    A keyword is a hunt for a LoRA the owner already knows, and the server filter answers it
+    by leaving the match out of the results. So with a keyword the route passes
+    lora_base_type="" and lets annotate_lora_compat grey the mismatch instead; `base_type`
+    itself is untouched and still feeds the compat sort and badge, which is the whole point --
+    the row has to arrive before it can be badged. Pinned on all THREE search paths
+    (market / bookmarked / mine), because a filter dropped in one place and left in another is
+    the same report again on a different tab.
+
+    Browsing with no keyword is unchanged (test_model_search_threads_base_type_into_the_
+    server_side_filter above still pins that), which is the 2026-07-24 ruling refined, not
+    reversed."""
+    gql, bmk = [], []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
+                          "has_more": False, "next_cursor": ""}))
+    monkeypatch.setattr(core, "model_bookmarks_gql", lambda *a, **k: (
+        bmk.append(k) or {"results": [], "has_more": False, "next_cursor": ""}))
+    cli = _authed_client(tmp_path, [])
+
+    d = cli.get("/api/model-search?kind=lora&q=Perfect+Hands"
+                "&base_type=MMDIT26B_MODEL").get_json()
+    assert gql[-1]["lora_base_type"] == "", (
+        "the keyword search still asked PixAI to hide every other architecture")
+    assert gql[-1]["keyword"] == "Perfect Hands"
+    # ...and the badge layer still ran, off the SAME base_type the filter was denied.
+    assert d["results"][0]["compat"] == "no"
+
+    # Bookmarked and Mine are the same search with a different scope -- and the same report.
+    cli.get("/api/model-search?kind=lora&src=bookmark&q=Perfect+Hands&base_type=MMDIT26B_MODEL")
+    assert bmk[-1]["lora_base_type"] == ""
+    cli.get("/api/model-search?kind=lora&src=bookmark&base_type=MMDIT26B_MODEL")
+    assert bmk[-1]["lora_base_type"] == "MMDIT26B_MODEL"
+    cli.get("/api/model-search?kind=lora&src=mine&q=Perfect+Hands&base_type=MMDIT26B_MODEL")
+    assert gql[-1]["lora_base_type"] == ""
+    cli.get("/api/model-search?kind=lora&src=mine&base_type=MMDIT26B_MODEL")
+    assert gql[-1]["lora_base_type"] == "MMDIT26B_MODEL"
 
 
 def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch, pixai):
@@ -2021,3 +2070,65 @@ def test_price_route_prices_the_loom_image_edit_and_reference_bodies(tmp_path, m
         "edit-pro and reference-pro priced to identical params -- edit_model didn't thread through"
 
 
+
+
+# --- The name hunt on the Bookmarked and Mine tabs (owner, 2026-09-07: "search is still shit") ----
+def _hunt_pages():
+    """Two bookmark pages the way PixAI answers them: the keyword narrows nothing."""
+    p1 = {"results": [
+        {"model_id": "1", "title": "Special Eyes XL", "description": ""},
+        {"model_id": "2", "title": "whimsical style", "description": "soft pastels"},
+        {"model_id": "3", "title": "Breathtaking scenery", "description": ""},
+    ], "has_more": True, "next_cursor": "c2"}
+    p2 = {"results": [
+        {"model_id": "4", "title": "Aesthetic Details", "description": "beautiful eyes and skin"},
+        {"model_id": "5", "title": "Elden Ring style", "description": ""},
+    ], "has_more": False, "next_cursor": ""}
+    return {None: p1, "c2": p2}
+
+
+def test_bookmark_tab_search_keeps_only_rows_that_carry_the_words(tmp_path, monkeypatch):
+    calls = []
+    pages = _hunt_pages()
+
+    def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
+        calls.append(after)
+        return pages[after]
+    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=eyes&src=bookmark").get_json()
+    assert [r["model_id"] for r in d["results"]] == ["1", "4"], d
+    assert d["has_more"] is False and d["next_cursor"] == ""
+    assert calls == [None, "c2"], "the hunt walks every page of the list"
+
+
+def test_mine_tab_search_walks_the_authors_own_list_and_matches_every_word(tmp_path, monkeypatch):
+    pages = _hunt_pages()
+
+    def fake_market(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
+        assert kw.get("author_id") is not None, "the Mine tab is the market connection filtered by author"
+        return pages[after]
+    monkeypatch.setattr(core, "model_search_market_gql", fake_market)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+    class _C:
+        user_id = "u1"
+    monkeypatch.setattr(core, "_client_of", lambda s: _C())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=beautiful%20eyes&src=mine").get_json()
+    assert [r["model_id"] for r in d["results"]] == ["4"], d
+
+
+def test_bookmark_tab_without_a_keyword_is_one_plain_page(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_bookmarks(session, keyword="", usage="MODEL", limit=24, after=None, lora_base_type=""):
+        calls.append(after)
+        return _hunt_pages()[None]
+    monkeypatch.setattr(core, "model_bookmarks_gql", fake_bookmarks)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-search?kind=lora&size=24&q=&src=bookmark").get_json()
+    assert len(d["results"]) == 3 and d["has_more"] is True and d["next_cursor"] == "c2"
+    assert calls == [None], "no keyword, no hunt: the page and its cursor come back as they always did"

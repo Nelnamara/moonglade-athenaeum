@@ -50,7 +50,7 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
   });
 
   test("doSearch() captures has_more/next_cursor from the response", () => {
-    assert.match(src, /hasMoreRef\.current = !!\(d && d\.has_more\);\s*\n\s*cursorRef\.current = \(d && d\.next_cursor\) \|\| "";\s*\n\s*setErr\(d && d\.error \? d\.error : ""\);\s*\n\s*setRows\(\(d && d\.results\) \|\| \[\]\);/);
+    assert.match(src, /hasMoreRef\.current = !!\(d && d\.has_more\);\s*\n\s*cursorRef\.current = \(d && d\.next_cursor\) \|\| "";\s*\n\s*setErr\(d && d\.error \? d\.error : ""\);\s*\n\s*setRows\(uniqueRows\(\(d && d\.results\) \|\| \[\]\)\);/);
   });
 
   test("loadMore() is guarded against firing with no more results or while already loading", () => {
@@ -60,14 +60,20 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
   });
 
   test("loadMore() APPENDS results and never clears the grid or the empty-state message", () => {
-    assert.match(src, /setRows\(\(old\) => old\.concat\(\(d && d\.results\) \|\| \[\]\)\);/,
-      "the continuation must CONCAT onto the existing rows, not replace them");
-    assert.match(src, /setRows\(\(d && d\.results\) \|\| \[\]\);/,
+    // Since 2026-09-07 the append goes through appendRows (picker/mergeRows.js), which keeps the
+    // existing rows and adds only ids they do not already hold -- still an append, never a
+    // replace; mg-model-picker-unique-rows.test.js owns the one-row-per-model rule.
+    assert.match(src, /setRows\(\(old\) => appendRows\(old, \(d && d\.results\) \|\| \[\]\)\);/,
+      "the continuation must APPEND onto the existing rows (through appendRows), not replace them");
+    assert.match(src, /setRows\(uniqueRows\(\(d && d\.results\) \|\| \[\]\)\);/,
       "a FRESH search (doSearch) replaces the row list outright -- the replace-vs-concat split " +
       "is what the vanilla `if (!append) g.innerHTML = ''` used to do; clearing on a continuation " +
       "would defeat the entire feature, wiping what's already loaded");
-    assert.match(src, /!rows\.length \? <div className="mg-empty"[^\n]*>No results/,
-      "the 'No results' empty-state is gated on !rows.length -- because loadMore concats onto " +
+    // The SENTENCE moved into the `emptyLine` const on 2026-09-07 (it now names the base filter
+    // when one is on -- mg-lora-search-empty-state.test.js owns its wording); the gate this test
+    // is about is unchanged.
+    assert.match(src, /!rows\.length \? <div className="mg-empty"[^\n]*>\{emptyLine\}</,
+      "the empty-state is gated on !rows.length -- because loadMore concats onto " +
       "the existing rows, an empty continuation page can never blank a grid that already holds " +
       "real results (the additive-continuation contract)");
   });

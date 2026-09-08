@@ -10,8 +10,9 @@ cross-platform tool with real external users, and a rotating file is the
 portable "robust and standard" choice every platform can read the same way.
 Root's own level is left at WARNING so third-party libraries (requests,
 urllib3, PIL, ...) that never set their own logger level stay quiet; this
-app's own logger and werkzeug's request-line logger explicitly override that
-ceiling, so their messages reach the handlers regardless. Flask's own internal
+app's own logger, the web server module's own logger (both names it can have --
+see GALLERY_LOGGER_NAMES) and werkzeug's request-line logger explicitly override
+that ceiling, so their messages reach the handlers regardless. Flask's own internal
 `app.logger.error(..., exc_info=...)` call on an unhandled request exception
 already logs at ERROR -- above the WARNING ceiling -- so it reaches the file
 with no bespoke @app.errorhandler needed, and it works under whatever name
@@ -25,6 +26,21 @@ import threading
 from pathlib import Path
 
 LOGGER_NAME = "moonglade"
+
+# The web server's OWN module logger, under both names it can have. moonglade_gallery.py's
+# background workers do not use get_logger() -- they use logging.getLogger(__name__), which
+# resolves to "__main__" when the server runs as a script (which is how it always runs in
+# production: "Serve Gallery.pyw" launches `python moonglade_gallery.py` as a child) and to
+# "moonglade_gallery" when it is imported. Neither name is LOGGER_NAME, so until 2026-09-07
+# every one of those lines inherited root's WARNING ceiling and reached the file only if it
+# happened to be a warning. The live mirror is the case that made it matter: its whole
+# lifecycle -- "connected and subscribed", "task N reported completed -- mirroring",
+# "disconnected cleanly; reconnecting" -- is logged at INFO and was therefore absent from
+# moonglade.log entirely, which is the one record that could answer "was the socket up when
+# that generation finished?" after the fact. Both names are levelled because both are real:
+# the script name in production, the module name under the test suite and anything that
+# imports the app.
+GALLERY_LOGGER_NAMES = ("moonglade_gallery", "__main__")
 
 _configured = False
 _file_handler = None
@@ -78,6 +94,8 @@ def setup_logging(out_dir, verbose=False):
     # among others) from ever reaching the file even when not verbose --
     # exactly the "forgot -v, nothing on record" problem this exists to fix.
     app_logger.setLevel(logging.DEBUG)
+    for _name in GALLERY_LOGGER_NAMES:                     # the web server's own module logger
+        logging.getLogger(_name).setLevel(logging.DEBUG)
     logging.getLogger("werkzeug").setLevel(logging.INFO)   # request lines, always
 
     _install_crash_hook(app_logger)
@@ -175,6 +193,8 @@ def _reset_for_tests():
             pass
     root.setLevel(logging.WARNING)
     logging.getLogger(LOGGER_NAME).setLevel(logging.NOTSET)
+    for name in GALLERY_LOGGER_NAMES:
+        logging.getLogger(name).setLevel(logging.NOTSET)
     logging.getLogger("werkzeug").setLevel(logging.NOTSET)
     _configured = False
     _file_handler = None

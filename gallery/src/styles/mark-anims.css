@@ -36,10 +36,12 @@
   --glow-x: 50%;
   --glow-y: 50%;
   /* The em base: a quarter of the rendered mark, times the size setting. Every em
-     offset below is therefore a fraction of the mark itself. */
-  font-size: calc(96px * var(--anim-scale) / 4);
+     offset below is therefore a fraction of the mark itself. The mark's own size is
+     --mark-hero / --mark-slim (shell.css :root, the marks ruling of 2026-08-31) -- read,
+     never re-typed, so the engine cannot drift from the box it is animating. */
+  font-size: calc(var(--mark-hero) * var(--anim-scale) / 4);
 }
-.mgx-bnr.slim .mgx-mark { font-size: calc(56px * var(--anim-scale) / 4); }
+.mgx-bnr.slim .mgx-mark { font-size: calc(var(--mark-slim) * var(--anim-scale) / 4); }
 
 /* The base treatment's own durations now ride the speed setting too (the board's
    a-header cell: 9s tilt, 6.2s sheen). */

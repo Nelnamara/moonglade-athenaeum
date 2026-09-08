@@ -54,14 +54,28 @@ const shell = stripComments(src("styles/shell.css"));
 
 /* ---- the geometry the budget comes from ---------------------------------------- */
 
+/** A `--mark-*` size token's px value, off shell.css's `:root`. The two mark sizes stopped
+    being literals in the rules on 2026-09-07 (marks ruling 2026-08-31, "All scales from
+    Hero"): --mark-hero / --mark-slim are declared once and every other surface that renders
+    a mark states its own size as a ratio of the hero. The budget below is still READ rather
+    than typed -- it just reads the token now instead of the rule. */
+function markTokenPx(name) {
+  const root = shell.match(/(?:^|\n):root\s*\{([^}]*)\}/);
+  assert.ok(root, "shell.css no longer has a bare `:root` block");
+  const v = root[1].match(new RegExp("--" + name + ":\\s*(\\d+(?:\\.\\d+)?)px"));
+  assert.ok(v, "shell.css's :root no longer states --" + name + " as a px length");
+  return parseFloat(v[1]);
+}
+
 /** `.mgx-mark`'s own width, from shell.css. Line-anchored so `.mgx-bnr.slim .mgx-mark`
-    (the 56px slim override) cannot be mistaken for it. */
+    (the slim override) cannot be mistaken for it. The rule must resolve to the hero token:
+    a literal typed back in here is exactly the drift the token exists to stop. */
 function markWidthPx() {
   const m = shell.match(/(?:^|\n)\.mgx-mark\s*\{([^}]*)\}/);
   assert.ok(m, "shell.css no longer has a bare `.mgx-mark` rule");
-  const w = m[1].match(/width:\s*(\d+(?:\.\d+)?)px/);
-  assert.ok(w, "`.mgx-mark` no longer states its width in px");
-  return parseFloat(w[1]);
+  const w = m[1].match(/width:\s*var\(\s*--mark-hero\s*\)/);
+  assert.ok(w, "`.mgx-mark` no longer takes its width from var(--mark-hero)");
+  return markTokenPx("mark-hero");
 }
 
 /** The hero banner's right-hand padding: the only thing between the mark's right edge

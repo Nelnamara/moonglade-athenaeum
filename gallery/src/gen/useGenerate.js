@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
-import { buildPayload, clampLoras, GEN_DEFAULTS, goGate } from "./genCore.js";
+import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply } from "./genCore.js";
 import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
@@ -58,6 +58,10 @@ export default function useGenerate({ costRef }) {
       compat_steps: cget(v, "samplingSteps"),
       compat_cfg: cget(v, "cfgScale"),
       compat_upscale: cget(v, "upscale"),
+      // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
+      // null = the server could not determine them -> the drawer dims nothing, exactly as
+      // before. An array (including []) is a real answer.
+      profiles: Array.isArray(v.profiles) ? v.profiles : null,
       restrictions: v.restrictions || {},
       preset: {
         negative: v.negative_prompt || "", steps: v.sampling_steps,
@@ -110,6 +114,12 @@ export default function useGenerate({ costRef }) {
         loras: clampLoras(old.loras, model.model_type),
         boosters: model.compat_upscale === false
           ? { ...old.boosters, hires: false } : old.boosters,
+        // ...and a quality mode this version does not offer drops back to `auto`
+        // (genCore.modeAfterApply). Dimming the bar only stops the next CLICK; a mode
+        // carried in on a model switch would still be priced and still be submitted,
+        // then silently re-run on the model's default tier -- the very divergence the
+        // dimming closes (red team 2026-09-07).
+        mode: modeAfterApply(old.mode, model.profiles),
         ...presetPatch(latest),
       }));
       return model;
@@ -137,6 +147,9 @@ export default function useGenerate({ costRef }) {
         loras: clampLoras(old.loras, model.model_type),
         boosters: model.compat_upscale === false
           ? { ...old.boosters, hires: false } : old.boosters,
+        // Same reset as applyModelRow: picking another VERSION of the same model changes
+        // the offered profile set too (Tsubaki.2 -> .3 is one model, two sets).
+        mode: modeAfterApply(old.mode, model.profiles),
         ...presetPatch(v),
       };
     });

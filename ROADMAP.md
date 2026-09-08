@@ -19,7 +19,19 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   sealed pack, public source holds only opaque ids) landed in 3.5.0; this session's toast polish and
   video-Remix fix are in `CHANGELOG.md` (the 3.6.0 release), per the rule at the top of this file.
 
+- **The restart card's mascot.** Settled 2026-09-07 on a live board: the halo pulses and glows
+  together, cyan, on a quicker beat, with a bigger Nel; text unchanged. Builds in 3.10.
+
 ---
+
+## In review — built, not merged
+
+Every branch that is built but not on `master` is listed here with its review sheet, so work in
+flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
+why this section exists.
+
+- **`staging/wave-3.10`** — the 3.10 wave, in build. Lanes A–C per the internal plan
+  (`../moonglade-internal/scopes/PLAN_2026-09-07_lanes.md`); sheet to follow.
 
 ## Next — scoped, not started
 
@@ -65,17 +77,16 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 - **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself
   shipped — see `CHANGELOG.md` [3.8.1])* Two era-mismatches the census surfaced, both design-adjacent:
   a **batch** card still takes over the whole library the way series cards did before the 3.8.0
-  series modal (asymmetric siblings; likely wants the same modal treatment), and the viewer's
+  series modal (asymmetric siblings), and the viewer's
   page-stepping and its scroll-lock came from different months — stepping past a page boundary
   swaps the grid behind the viewer while scroll is frozen, not remembered, so closing it can
-  strand the reader. Diagnosis + full 23-trigger census in the 2026-09-05 session record.
+  strand the reader. The batch card **builds in 3.10: the series popup, marked BATCH.**
+  Diagnosis + full 23-trigger census in the 2026-09-05 session record.
 
 - **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
   batched here per triage protocol (S4 = never issues):
   - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
-    auto-closes) — reads as "stuck"; consider an explicit Done affordance or auto-close-on-single.
-  - Loom draft-vs-professional shot marking (sweep R10): owner questions whether it matters —
-    candidate to drop at the next Loom pass.
+    auto-closes) — reads as "stuck". **Builds in 3.10: a Done button.**
 
 - **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
   The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
@@ -100,19 +111,17 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Design-pass reworks — rescope, don't just build
 
-- **The restart card's mascot: does anything replace the spin?** *(owner, 2026-09-05; the spin
-  itself came out 2026-09-06)* The decided half shipped — `.mgcp-pwr-mascot.spin` is gone and the
-  pulse halo beside it stays. What is left is only the open half of the ruling: "maybe think of a
-  new effect instead of the spin… or not." A quick workshop, not a full session, and *no effect*
-  is a real answer.
+- **PixAI inbox and comment replies.** Likes, bookmarks and follows are dropped (owner,
+  2026-09-07: no reason to like or bookmark his own work). What stays: being told about comments
+  and likes on his works, and replying to comments. A probe first, then a design session, then the
+  build; a reply is the first write to PixAI other than generate and delete.
 
-- **Community features YES-list revisit.** The 2026-07-26 pick-list (like/react etc.) predates
-  v3.0 — revisit what Moonglade should get now the React app is the whole front end.
 ## Scoped-but-unbuilt — decided once, never executed
 
 - **Install-folder tidy.** "A tidy install folder says a lot" — achievement/branding files
   still sit loose at the install root. Partly addressed by the container; finish the thought
-  (possibly alongside the final naming pass, which may move `branding/` once more).
+  (possibly alongside the final naming pass, which may move `branding/` once more). Folds into the
+  naming pass's Phase 2, scoped after 3.10 (owner, 2026-09-07).
 - **Dead-code sweep.** With the React rebuild done, sweep for orphaned code the classic cut
   left behind (e.g. `--faststart-videos` is deprecated in place; what else is dead?). **Partly
   overtaken, not done (2026-08-24):** the architecture refactor wasn't a dedicated dead-code pass, but
@@ -128,6 +137,7 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   app now that it has grown to this level")* — a proper audit of the auth surface: login and the
   no-accounts mode, session/JWT/cookie handling, the localhost trust model, mirror/write gating,
   and what "grown to this level" changes about the threat picture. Runs on the owner's go.
+  Runs after 3.10 (owner, 2026-09-07).
 
 ---
 
@@ -179,6 +189,14 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 ---
 
 ## Backlog — needs scoping
+
+- **First run, before the pack: the sign-in page is bare.** Until the setup wizard has downloaded
+  the art pack, every branding image 404s by design, so a fresh install's sign-in page shows no
+  banner and no mascot; the only art the code carries is the wizard's own downloader mascot
+  (`gallery/src/art/nelWizard.js`). Owner, 2026-09-07, walking a fresh install: look at embedding the
+  login banner (and the login mascot) the same way, since the pack's default login banner is small
+  enough to carry in the bundle. A scoping question, not a defect: which art, at what size, and
+  whether the sign-in page should say the pack is still to come.
 
 - **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
   internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
@@ -232,6 +250,6 @@ above, tagged "Scope":
 
 Small integrity fixes the sweep surfaced (issue-candidates, not features): the mobile Details
 "k of N" index counts one loaded page, not the true result total; Contact Sheet Mobile renders
-placeholder thumbs where real art exists; `deleted_remote` (archive-only) pieces aren't badged and
-can be swept by a bulk quarantine; Loom Draft-vs-professional quality isn't marked on rendered
-shots. Detail in the sweep doc §3.
+placeholder thumbs where real art exists; and `deleted_remote` (archive-only) pieces aren't badged
+and can be swept by a bulk quarantine. Detail in the sweep doc §3. (The sweep's fourth item, Loom
+draft-vs-professional marking on rendered shots, was dropped by the owner on 2026-09-07.)

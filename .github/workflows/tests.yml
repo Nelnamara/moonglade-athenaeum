@@ -44,6 +44,24 @@ jobs:
       - name: Install the Playwright browser
         run: python -m playwright install --with-deps chromium
 
+      # THE GALLERY BUNDLE MUST BE THE SOURCE'S.
+      #
+      # The Flask app serves the COMMITTED gallery/dist (Vite build), and the render harness
+      # measures that bundle. tests/test_js_syntax.py::test_committed_gallery_bundle_matches_a_fresh_build
+      # rebuilds gallery/src into a temp folder and compares, but it skips itself when
+      # gallery/node_modules is absent -- which it was on CI until 2026-09-08, so a source edit
+      # pushed without `npm run build` sailed through with the harness green against the OLD
+      # bundle (red team on the phone-sheet fix). Node + `npm ci` here lets that test run.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: gallery/package-lock.json
+
+      - name: Install the gallery build tooling
+        run: npm ci
+        working-directory: gallery
+
       - name: Run test suite
         run: python -m pytest -q --ignore=tests/test_similar.py
 

@@ -48,6 +48,13 @@ html.mg-noblur .mgss-scrim {
 /* ---- header: title · counts · sort · Esc hint · close ---------------------- */
 .mgss-head { flex: none; display: flex; align-items: center; gap: 10px;
   padding: 13px 16px; border-bottom: 1px solid var(--surface1); }
+/* The stack KIND, said out loud (owner, 2026-09-07): the batch stack opens in this
+   same modal now, "separately tagged so you know what you're looking at, batch or
+   series". The app's standard mono kicker -- 11px, .1em, uppercase, --overlay0 (see
+   .wz-kicker, .mgdock-lbl, .fm-titlechip) -- so it reads as a label, not a title. */
+.mgss-kicker { flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--overlay0); white-space: nowrap; }
 .mgss-title { font-family: Georgia, "Times New Roman", serif; font-style: italic;
   font-size: 17px; color: var(--text); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; min-width: 0; }

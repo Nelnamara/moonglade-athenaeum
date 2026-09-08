@@ -88,11 +88,33 @@ function toastTransitions(rows) {
     // falls through to the sticky "see the activity card" toast like any other job, and
     // the tracker line stays either way.
     if (j.type === "update" && st === "done") { last[j.job_id] = st; return; }
+    // NOBODY CLICKED IT, SO NOBODY IS TOLD (owner's walk, 2026-09-07: "The automated tasks
+    // in the living library stack up completion toasts in the corner -- with the new
+    // tracking window I would like to remove the notice toasts completely").
+    //
+    // ALL FOUR terminal states, not just the successful one -- and that is the difference
+    // between this rule and the `update` rule right above it. A retired success toast leans
+    // on something else having been watched (the update modal is the receipt); there is
+    // nothing to watch for a job the library started by itself at 4am, and the ruling is
+    // that the Activity window IS where you see it. So a scheduled sweep that fails, stalls
+    // or finishes with errors is a LINE in that window rather than a corner notice, exactly
+    // like one that succeeds. Owner-started jobs are untouched: a job you pressed still
+    // toasts every one of its outcomes.
+    //
+    // `scheduled` is server truth -- moonglade_gallery.py's _panel_run writes it onto the
+    // job's start event, and the artworks sweep's own log_event carries it for the boot
+    // kick, the fifteen-minute tick and the publish kick (Run now, being a click, does not).
+    // The tracker reads the same rows and is unaffected.
+    if (j.scheduled) { last[j.job_id] = st; return; }
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";
+        // A delete row (2026-09-07: single deletes write one, bulk deletes always did) says what
+        // it did; "Added to your gallery." is a generation's sentence and was wrong on both.
+        const isDelete = j.type === "delete";
         toastShow({
-          kind: "ok", title: (j.label || "Generation") + " — done", msg: "Added to your gallery.",
+          kind: "ok", title: (j.label || "Generation") + (isDelete ? "" : " — done"),
+          msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
           thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null,
         });
       } else if (st === "done_with_errors") {
@@ -109,7 +131,8 @@ function toastTransitions(rows) {
         });
       } else {
         toastShow({
-          kind: "err", sticky: true, title: (j.label || "Job") + " failed",
+          // a refused delete's label already reads "Refused: <reason>"; "failed" on top of it is noise
+          kind: "err", sticky: true, title: (j.label || "Job") + (j.type === "delete" ? "" : " failed"),
           msg: j.error || "See the activity card.",
         });
       }

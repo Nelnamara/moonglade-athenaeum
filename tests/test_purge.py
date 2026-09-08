@@ -8,6 +8,7 @@ import contextlib
 
 import pytest
 
+import moonglade_backup as core
 import moonglade_gallery as g
 from moonglade_gallery import (CATALOG_FIELDS, save_catalog, load_catalog,
                            purge_media_local, create_app)
@@ -402,3 +403,328 @@ def test_bulk_delete_cloud_refuses_authenticated_lan_session(tmp_path, monkeypat
     r2 = client.post("/api/delete-tasks", json={"media_ids": ["z2"]})
     body2 = r2.get_json()
     assert r2.status_code == 200 and body2["ok"] is True and body2["job_id"]
+
+
+# ---------------------------------------------------------------------------
+# /api/delete-preview -- THE LIVE CHECK (owner, 2026-09-07): "one live read per
+# selected task, capped at 40; above that the preview says it is an estimate, and the
+# delete still keeps back what the live read finds."
+#
+# The preview was 100% local until now, and the local catalog cannot know about an
+# image the owner deleted on PixAI's own website. The DELETE has always known -- it
+# reads every task before it acts (_rows_the_bulk_purge_must_keep) and keeps those rows
+# back -- so the preview over-reported the blast radius of the one action it exists to
+# describe exactly. These pin the read, the cap, and the fail-soft direction.
+# ---------------------------------------------------------------------------
+
+_LIVE_GONE = "2026-09-07T09:00:00.000Z"
+
+
+def _live_task(tid, members, gone=()):
+    """A getTaskById answer: a batch whose deleted members carry `deletedAt` and keep
+    their place, which is what a read-only probe of the owner's own tasks found on
+    2026-09-06 (moonglade_backup.py, DELETING ONE IMAGE)."""
+    return {"id": tid, "status": "completed", "outputs": {
+        "mediaId": "GRID-" + tid,
+        "batch": [({"mediaId": m, "deletedAt": _LIVE_GONE} if m in gone
+                   else {"mediaId": m}) for m in members]}}
+
+
+def _fake_session(monkeypatch):
+    """A session object the preview can hold but never actually use: every read below is
+    monkeypatched at core.task_detail_gql, so nothing reaches the network."""
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+
+
+def test_delete_preview_reads_each_selected_task_back_from_pixai_once(tmp_path, monkeypatch):
+    """One read per task, no more, and the answer changes the numbers: the member PixAI
+    already dropped moves out of "will be deleted" and into its own count."""
+    _seed(tmp_path, [
+        _row(media_id="a1", task_id="T1", filename="a1.png"),
+        _row(media_id="a2", task_id="T1", filename="a2.png"),
+        _row(media_id="a3", task_id="T1", filename="a3.png"),
+        _row(media_id="b1", task_id="T2", filename="b1.png"),
+        _row(media_id="b2", task_id="T2", filename="b2.png"),
+    ], {})
+    _fake_session(monkeypatch)
+
+    reads = []
+    live = {"T1": _live_task("T1", ["a1", "a2", "a3"], gone=("a3",)),
+            "T2": _live_task("T2", ["b1", "b2"])}
+
+    def _read(sess, tid, **k):
+        reads.append(str(tid))
+        return live[str(tid)]
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview",
+                       json={"media_ids": ["a1", "b1"]}).get_json()
+
+    assert sorted(reads) == ["T1", "T2"], (
+        "expected exactly one live read per selected task, got {}".format(reads))
+    assert body["estimate"] is False
+    assert body["live_checked"] == 2 and body["unverified"] == 0
+    assert body["already_gone"] == 1, (
+        "the member carrying deletedAt is not reported as already gone on PixAI")
+    # `totals` keeps its old meaning -- the whole membership -- so nothing that reads it
+    # today is surprised; the modal subtracts already_gone for "will be deleted".
+    assert body["totals"]["media"] == 5
+    marks = {m["media_id"]: m["already_gone"]
+             for tk in body["tasks"] for m in tk["media"]}
+    assert marks == {"a1": False, "a2": False, "a3": True, "b1": False, "b2": False}
+    assert [tk["unverified"] for tk in body["tasks"]] == [False, False]
+
+
+def test_delete_preview_counts_a_row_the_catalog_already_marked_gone(tmp_path, monkeypatch):
+    """The delete keeps rows back from TWO sources -- the live read AND the
+    cloud_deleted_at the catalog was stamped with the last time anything read this task.
+    A preview that used only the first would still disagree with the delete."""
+    _seed(tmp_path, [
+        _row(media_id="c1", task_id="T9", filename="c1.png"),
+        _row(media_id="c2", task_id="T9", filename="c2.png",
+             cloud_deleted_at=_LIVE_GONE),
+    ], {})
+    _fake_session(monkeypatch)
+    # The live read no longer lists c2 as deleted; the catalog's own marker still stands
+    # on its own, exactly as it does at delete time.
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda sess, tid, **k: _live_task("T9", ["c1", "c2"]))
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={"media_ids": ["c1"]}).get_json()
+
+    assert body["already_gone"] == 1
+    marks = {m["media_id"]: m["already_gone"] for m in body["tasks"][0]["media"]}
+    assert marks == {"c1": False, "c2": True}
+
+
+def test_delete_preview_over_the_cap_reads_nothing_and_says_it_is_an_estimate(
+        tmp_path, monkeypatch):
+    """Above DELETE_PREVIEW_LIVE_CAP the preview does not call PixAI at all. The counts
+    are the library's, the response says so, and the delete still checks every task
+    before it acts."""
+    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
+                 filename="e{}.png".format(i)) for i in range(n)]
+    _seed(tmp_path, rows, {})
+    _fake_session(monkeypatch)
+
+    reads = []
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda sess, tid, **k: reads.append(tid))
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={
+        "media_ids": ["e{}".format(i) for i in range(n)]}).get_json()
+
+    assert reads == [], (
+        "{} tasks is over the cap of {} -- the preview must not call PixAI at all, and "
+        "it made {} reads".format(n, g.DELETE_PREVIEW_LIVE_CAP, len(reads)))
+    assert body["estimate"] is True
+    assert body["live_checked"] == 0 and body["unverified"] == 0
+    assert body["already_gone"] == 0
+    assert body["totals"]["tasks"] == n and body["totals"]["media"] == n
+
+
+def test_delete_preview_at_exactly_the_cap_still_reads(tmp_path, monkeypatch):
+    """The cap is inclusive: 40 tasks is checked, 41 is an estimate. Pinned so the
+    boundary cannot drift by one without somebody noticing."""
+    n = g.DELETE_PREVIEW_LIVE_CAP
+    rows = [_row(media_id="f{}".format(i), task_id="F{}".format(i),
+                 filename="f{}.png".format(i)) for i in range(n)]
+    _seed(tmp_path, rows, {})
+    _fake_session(monkeypatch)
+
+    reads = []
+
+    def _read(sess, tid, **k):
+        reads.append(str(tid))
+        return _live_task(str(tid), [str(tid).replace("F", "f")])
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={
+        "media_ids": ["f{}".format(i) for i in range(n)]}).get_json()
+
+    assert len(reads) == n and body["estimate"] is False
+    assert body["live_checked"] == n and body["unverified"] == 0
+
+
+def test_delete_preview_counts_a_task_whose_read_failed_from_the_catalog(
+        tmp_path, monkeypatch):
+    """FAIL SOFT, in the safe direction. A read that could not be made leaves the task on
+    its local rows -- so the preview can only ever over-report an irreversible delete,
+    never quietly shrink it -- and says out loud that it could not be checked."""
+    _seed(tmp_path, [
+        _row(media_id="g1", task_id="G1", filename="g1.png"),
+        _row(media_id="g2", task_id="G1", filename="g2.png"),
+        _row(media_id="h1", task_id="H1", filename="h1.png"),
+        _row(media_id="h2", task_id="H1", filename="h2.png"),
+    ], {})
+    _fake_session(monkeypatch)
+
+    def _read(sess, tid, **k):
+        if str(tid) == "G1":
+            raise core.PixAIError("network error reading task")
+        return _live_task("H1", ["h1", "h2"], gone=("h2",))
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview",
+                       json={"media_ids": ["g1", "h1"]}).get_json()
+
+    assert body["unverified"] == 1 and body["live_checked"] == 1
+    assert body["already_gone"] == 1, (
+        "the task that DID answer must still be counted exactly -- one blip does not "
+        "throw the whole preview back to guessing")
+    assert body["totals"]["media"] == 4          # the failed task keeps all its rows
+    by_task = {tk["task_id"]: tk for tk in body["tasks"]}
+    assert by_task["G1"]["unverified"] is True
+    assert by_task["H1"]["unverified"] is False
+    assert all(m["already_gone"] is False for m in by_task["G1"]["media"]), (
+        "a task nobody could read must not have any of its images written off as gone")
+
+
+def test_delete_preview_reads_nothing_when_there_is_no_session_to_read_with(
+        tmp_path, monkeypatch):
+    """No credentials, bad config, PixAI unreachable at the session seam: every task is
+    unverified and the preview answers from the catalog exactly as it did before the live
+    check existed. It must not 500 the confirm dialog."""
+    _seed(tmp_path, [
+        _row(media_id="i1", task_id="I1", filename="i1.png"),
+        _row(media_id="i2", task_id="I1", filename="i2.png"),
+    ], {})
+
+    def _no_session(*a, **k):
+        raise core.PixAIError("No API key found.")
+
+    monkeypatch.setattr(core, "_make_session", _no_session)
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={"media_ids": ["i1"]}).get_json()
+
+    assert body["live_checked"] == 0 and body["unverified"] == 1
+    assert body["already_gone"] == 0 and body["estimate"] is False
+    assert body["totals"]["media"] == 2
+
+
+def test_delete_preview_writes_down_what_pixai_said_so_the_delete_keeps_it(
+        tmp_path, monkeypatch):
+    """The preview's answer is PERSISTED, not just displayed (2026-09-07, refining the
+    same day's "the preview mutates nothing" note).
+
+    The dialog promises, by name, that an image PixAI has already deleted stays in the
+    backup because this copy is the last one anywhere. The delete makes its OWN read a
+    moment later, and that read can fail where this one worked -- a blip, a 401, a 5xx
+    past its retries. When it does, _rows_the_bulk_purge_must_keep falls back to the
+    catalog alone; if nothing wrote the preview's answer there, the fallback finds no
+    marker and purges exactly the row the dialog named. So the preview stamps
+    cloud_deleted_at when it sees deletedAt, and the promise survives the second read."""
+    import time
+    db = _seed(tmp_path, [
+        _row(media_id="k1", task_id="K1", filename="k1.png"),
+        _row(media_id="k2", task_id="K1", filename="k2.png"),
+        _row(media_id="k3", task_id="K1", filename="k3.png"),
+    ], {"k1.png": b"a", "k2.png": b"b", "k3.png": b"c"})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda sess, tid, **k: _live_task(
+        "K1", ["k1", "k2", "k3"], gone=("k3",)))
+
+    client = login_client(tmp_path)
+    body = client.post("/api/delete-preview", json={"media_ids": ["k1"]}).get_json()
+    assert body["already_gone"] == 1
+
+    rows = {r["media_id"]: r for r in load_catalog(db)}
+    assert rows["k3"]["cloud_deleted_at"] == _LIVE_GONE, (
+        "the preview saw PixAI's deletedAt and threw it away -- the delete's own read is "
+        "now the only thing standing between that promise and the purge")
+    assert not rows["k1"]["cloud_deleted_at"] and not rows["k2"]["cloud_deleted_at"], (
+        "only the member PixAI really dropped may be stamped")
+
+    # The delete, with its own live read failing where the preview's succeeded.
+    monkeypatch.setattr(core, "delete_task_gql", lambda sess, tid: None)
+
+    def _blip(sess, tid, **k):
+        raise core.PixAIError("network error reading task")
+
+    monkeypatch.setattr(core, "task_detail_gql", _blip)
+
+    assert client.post("/api/delete-tasks",
+                       json={"media_ids": ["k1"]}).get_json()["ok"] is True
+    job = None
+    for _ in range(300):
+        jobs = client.get("/api/jobs").get_json()["jobs"]
+        job = next((j for j in jobs if j.get("type") == "delete"), None)
+        if job and job["status"] in ("done", "failed"):
+            break
+        time.sleep(0.02)
+    assert job is not None and job["status"] == "done", job
+
+    assert (tmp_path / "images" / "k3.png").exists(), (
+        "the file the modal promised would stay was quarantined by the delete")
+    assert {r["media_id"] for r in load_catalog(db)} == {"k3"}, (
+        "the row the modal promised would stay was purged with the task")
+    assert job.get("kept_media") == ["k3"]
+
+
+def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, monkeypatch):
+    """DELETE_PREVIEW_LIVE_BUDGET_S is a WALL-CLOCK ceiling on the route, not just on when
+    reads are allowed to START (2026-09-07).
+
+    Checking the deadline only before dispatching a read bounds nothing that is already in
+    flight: one connection stalled after the handshake ran to the transport's own 60s and
+    then retried, and the pool was drained inside a `with` block, so the confirm dialog
+    could sit there for about two minutes against the twelve seconds the constant, its
+    comment and the changelog all promise. The read now gets no more socket time than the
+    budget has left, and the collection stops at the deadline with whatever has not
+    answered counted `unverified` -- the same answer a read that failed gets."""
+    import threading
+    import time as _time
+    _seed(tmp_path, [
+        _row(media_id="s1", task_id="S1", filename="s1.png"),
+        _row(media_id="s2", task_id="S1", filename="s2.png"),
+        _row(media_id="t1", task_id="S2", filename="t1.png"),
+        _row(media_id="t2", task_id="S2", filename="t2.png"),
+    ], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(g, "DELETE_PREVIEW_LIVE_BUDGET_S", 0.3)
+
+    release = threading.Event()
+    given = {}
+
+    def _read(sess, tid, retries=3, timeout=60):
+        given[str(tid)] = timeout
+        if str(tid) == "S2":
+            # A stalled connection that does NOT honour its own socket timeout: the only
+            # thing that can end the route here is the collection deadline.
+            release.wait(5.0)
+            raise core.PixAIError("read timed out")
+        return _live_task("S1", ["s1", "s2"], gone=("s2",))
+
+    monkeypatch.setattr(core, "task_detail_gql", _read)
+
+    client = login_client(tmp_path)
+    try:
+        t0 = _time.monotonic()
+        body = client.post("/api/delete-preview",
+                           json={"media_ids": ["s1", "t1"]}).get_json()
+        elapsed = _time.monotonic() - t0
+    finally:
+        release.set()                    # let the stalled worker go rather than leaking it
+
+    assert elapsed < 2.0, (
+        "the route waited {:.1f}s on a stalled read against a 0.3s budget -- the ceiling "
+        "bounds only when reads start".format(elapsed))
+    assert body["unverified"] == 1 and body["live_checked"] == 1
+    by_task = {tk["task_id"]: tk for tk in body["tasks"]}
+    assert by_task["S2"]["unverified"] is True
+    assert by_task["S1"]["unverified"] is False
+    assert body["already_gone"] == 1, (
+        "the task that DID answer inside the budget must still be counted exactly")
+    assert 0 < given["S2"] <= 0.3, (
+        "the read was handed the transport's own 60s ({}) instead of what the budget had "
+        "left".format(given["S2"]))

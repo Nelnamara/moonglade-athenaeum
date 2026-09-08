@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
-  dims, goGate, loraIncompat, loraRange, loraStep,
+  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered,
 } from "../gen/genCore.js";
 import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
@@ -244,6 +245,17 @@ export default function CreateMobile({
   canSubmit: priceOk,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
+  // The model/LoRA sheet and its scrim are PORTALED out of the scrolling body (owner's 5059
+  // screenshot, 2026-09-07: the sheet with no head, no search box, the hero above it and the
+  // tab bar below, both undimmed). iPhone Safari confines a position:fixed element that lives
+  // inside a touch scroller to that scroller's box -- .glm-body here -- and sizes `vh` against
+  // the screen with its toolbars hidden, so the 78vh sheet grew up past the body's top edge and
+  // lost exactly its head and search row. Neither desktop engine does either, which is why the
+  // 390x844 proof passed while his phone did not. The sheet's host is the app stage (the fixed,
+  // non-scrolling shell, so font and tokens still inherit), resolved after mount; document.body
+  // is the fallback for a render outside the phone shell.
+  const [sheetHost, setSheetHost] = useState(null);
+  useEffect(() => { setSheetHost(document.querySelector(".glm-stage") || document.body); }, []);
   const [flyKind, setFlyKind] = useState("base");
   const [editSub, setEditSub] = useState("edit"); // Edit's own Edit/Fixer sub-tab -- local, no draft to lose
   // Advanced screen -- local (nothing here needs to survive a Gallery/Control
@@ -600,16 +612,24 @@ export default function CreateMobile({
           : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} />}
       </MobileScreen>
 
-      {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
-      <div className="cm-modelwrap">
-        <ModelFlyout
-          open={flyOpen} kind={flyKind} setKind={setFlyKind}
-          baseType={m ? m.model_type : ""}
-          value={m} selected={s.loras}
-          onBasePick={onBasePick} onLoraPick={onLoraPick}
-          onClose={() => setFlyOpen(false)}
-        />
-      </div>
+      {sheetHost && createPortal(
+        <>
+          {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
+          <div className="cm-modelwrap">
+            {/* phone: the head's right-hand control is Done, not the desktop's ✕/Esc
+                (owner, 2026-09-07) -- a LoRA pick only toggles, so without it the sheet
+                never closes on its own. */}
+            <ModelFlyout
+              phone
+              open={flyOpen} kind={flyKind} setKind={setFlyKind}
+              baseType={m ? m.model_type : ""}
+              value={m} selected={s.loras}
+              onBasePick={onBasePick} onLoraPick={onLoraPick}
+              onClose={() => setFlyOpen(false)}
+            />
+          </div>
+        </>,
+        sheetHost)}
     </div>
   );
 }
@@ -681,12 +701,23 @@ function ImageAdvanced({ s, set, setLora, m }) {
 
       <div className="cm-subhead">Tuning</div>
       <div className="cm-lbl">Mode</div>
+      {/* Same profile gate the dock's mode bars carry (SCOPE 2026-08-17 §4b), through the
+          SAME genCore.modeOffered -- a chip for a mode this model does not offer is DIMMED,
+          never removed, so the row keeps its shape, and it says why. The phone was left out
+          of the first cut (red team 2026-09-07) even though it already gates steps/CFG/
+          upscale/negative off the same `m` two rows down. The reset half lives in
+          useGenerate (modeAfterApply), which AppMobile shares with the dock, so a model
+          switch clears a stale pick here too with no second copy of the rule. */}
       <div className="cm-chiprow">
-        {GEN_MODES.map(([v, l]) => (
-          <button key={v} type="button" title={l}
-            className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
-            onClick={() => set({ mode: v })}>{l}</button>
-        ))}
+        {GEN_MODES.map(([v, l]) => {
+          const off = !modeOffered(v, m && m.profiles);
+          return (
+            <button key={v} type="button" disabled={off}
+              title={off ? "Not offered for this model" : l}
+              className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
+              onClick={() => set({ mode: v })}>{l}</button>
+          );
+        })}
       </div>
 
       <div className="cm-adv-sliderrow">

@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.9.0"
+__version__ = "3.10.0"
 
 import argparse
 import base64
@@ -1587,14 +1587,18 @@ class PixAIClient:
 
     # -- persisted-hash GET --------------------------------------------------
     def persisted(self, op_name, variables=None, sha256=None, retries=4,
-                  client_library=None, headers=None):
+                  client_library=None, headers=None, timeout=60):
         """Replay one of PixAI's own persisted operations as a GET, with the Apollo CSRF
         params their frontend sends. `sha256=None` resolves the captured hash for
         `op_name` (the history feed is the operation that rides this road out of the box);
         every other captured op rides here by passing its OWN `sha256=`. `client_library`
         overrides the Apollo `clientLibrary` block for the one op that sends its own
         (`listArtworks`), and `headers` adds request headers for this single call
-        (`listArtworks`' `x-apollo-operation-name`). Returns the `data` dict; raises
+        (`listArtworks`' `x-apollo-operation-name`). `timeout` is the per-ATTEMPT socket
+        timeout in seconds (60, this road's long-standing value, unless a caller says
+        otherwise): a caller working against a wall-clock ceiling of its own -- the
+        delete preview's live check is the one today -- passes the time it has left, so a
+        stalled connection cannot outlive the budget it was started under. Returns the `data` dict; raises
         PixAIError with a recapture hint if the hash went stale, and PixAIError -- never a
         bare KeyError -- if the reply is a non-GraphQL body carrying no `data` key (a stale
         credential or an edge refusal answered in its own JSON)."""
@@ -1618,7 +1622,8 @@ class PixAIClient:
         for attempt in range(retries + 1):
             try:
                 _t = time.monotonic()
-                r = self._session.get(API_URL, params=params, timeout=60, headers=headers)
+                r = self._session.get(API_URL, params=params, timeout=timeout,
+                                      headers=headers)
             except requests.exceptions.SSLError:
                 raise PixAIError(_ssl_help())
             except requests.RequestException as e:
@@ -1988,6 +1993,12 @@ def _same_pixels(a, b):
 
 
 def media_ids_for(node):
+    """Every media id a task summary NAMES: `mediaId` plus `batchMediaIds`, deduped.
+
+    NOT the ids the catalog is keyed by -- on a batch task `mediaId` is the composite
+    preview grid and on a video task it is the poster still, and no row is keyed by
+    either. Anything asking "is this already collected?" wants `cataloged_media_ids`
+    below; asking it here answers "no" forever for both shapes (2026-09-07)."""
     ids = []
     if node.get("mediaId"):
         ids.append(str(node["mediaId"]))
@@ -1995,6 +2006,55 @@ def media_ids_for(node):
         if b:
             ids.append(str(b))
     return list(dict.fromkeys(ids))
+
+
+def cataloged_media_ids(node):
+    """The media ids this task's catalog rows are actually keyed by.
+
+    `media_ids_for` answers a DIFFERENT question -- every media id a task names -- and the
+    two sets are not the same. On a batch task `mediaId` is the composite preview grid,
+    which is never one of the batch members and is never cataloged (probe 2026-09-06); on a
+    video task `mediaId` is the poster STILL, while the catalog's row is keyed by the mp4's
+    own media id. Anything asking "has this task already been collected?" off
+    media_ids_for therefore answered "no" forever for both shapes -- which is what made the
+    live mirror's catch-up relist the same tasks every five minutes and claim in the log
+    they had never been mirrored (fixed 2026-09-07; the ruling that catch-up skips a task
+    only when the catalog is actually missing its media is unchanged, this is the id set
+    that ruling always meant).
+
+    Reads whichever shape it is handed:
+
+    * A full `getTaskById` result (it has `outputs`): videos via `video_outputs`, images via
+      `_task_image_media` -- the same two helpers `collect_generation` catalogs from, so the
+      answer is by construction the ids the rows carry.
+    * A `listUserTaskSummaries` node (a `TaskSummary`: no `outputs` at all, only
+      `mediaId` / `batchMediaIds` / `i2vProModel`): `batchMediaIds` when the task HAS a
+      batch, else `mediaId`. That is PixAI's own frontend rule for a summary, and it lands
+      on the same ids `_task_image_media` reaches from the detail. A member PixAI has
+      deleted comes through as a hole in `batchMediaIds` and is dropped here, matching
+      `_task_image_media` skipping a `deletedAt` member -- so a batch whose members are ALL
+      deleted yields nothing and deliberately does NOT fall back to `mediaId`, exactly as
+      that helper refuses to.
+
+    A VIDEO summary returns [] -- honestly nothing, because a summary names none of the ids
+    the catalog holds (only getTaskById carries the video's own media id). [] therefore
+    means "this node cannot tell you", not "there is nothing to collect", and a caller that
+    must decide about a video task from a summary has to ask by task id instead:
+    `_watch_catchup` checks `_is_video_task_node` first and uses `get_row_by_task`."""
+    node = node or {}
+    outputs = node.get("outputs")
+    if outputs is not None:                          # full task detail
+        vouts, _shared = video_outputs(node)
+        if vouts:
+            return list(dict.fromkeys(
+                str(o["video_media_id"]) for o in vouts if o.get("video_media_id")))
+        return [mid for mid, _seed in _task_image_media(outputs)]
+    if _is_video_task_node(node):                    # summary: only the poster still
+        return []
+    batch = node.get("batchMediaIds")
+    if isinstance(batch, (list, tuple)) and len(batch) > 0:
+        return list(dict.fromkeys(str(b) for b in batch if b))
+    return [str(node["mediaId"])] if node.get("mediaId") else []
 
 
 def _is_video_task_node(node):
@@ -2419,8 +2479,13 @@ def _paid_credit_str(task):
     return "" if v is None else str(v)
 
 
-def task_detail_gql(session, task_id, retries=3):
+def task_detail_gql(session, task_id, retries=3, timeout=60):
     """GET getTaskById for one task. Returns the task dict or None on failure.
+
+    `timeout` is the per-attempt socket timeout, handed straight to the transport. A
+    caller under a wall-clock ceiling passes the time it has left rather than letting a
+    stalled read run out the transport's own 60s (the delete preview's live check does
+    exactly that -- moonglade_gallery.py's DELETE_PREVIEW_LIVE_BUDGET_S).
 
     RETRIED with backoff -- the same 3-retry shape `gql_adhoc` gives any query -- because a
     single blip here is read downstream as a LOST GENERATION. The moment that matters is the
@@ -2453,7 +2518,8 @@ def task_detail_gql(session, task_id, retries=3):
     # gone" -- the seam's raise is caught here and turned back into None.
     try:
         data = _client_of(session).persisted(
-            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries)
+            "getTaskById", {"id": str(task_id)}, sha256=TASK_DETAIL_HASH, retries=retries,
+            timeout=timeout)
     except (PixAIError, requests.RequestException) as e:
         print("  could not read task {} back from PixAI ({}). Nothing was spent and nothing "
               "is lost -- this call only READS a task, so the generation and its credits are "
@@ -3101,11 +3167,17 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
 # (`last`/`before`) while meilisearch pages forward (`first`/`after`). This app pages forward
 # everywhere, which the connection accepts for all four, and switching direction per sort would
 # mean two cursor conventions in one picker for no user-visible gain.
+#
+# `relevance` is the fifth pair and NOT one of the four the picker offers: it is where a
+# KEYWORD search under Trending or Latest goes instead (owner walk 2026-09-07, "searching for a
+# known LoRA fails"). meilisearch with an EMPTY orderBy is PixAI's relevance ranking; see
+# model_search_market_gql's keyword handling for the measurements that establish it.
 MARKET_SORTS = {
     "trending":   ("trending", ""),
     "liked":      ("meilisearch", "-markInfo.likedCount"),
     "used":       ("meilisearch", "-markInfo.refCount"),
     "newest":     ("latest", "-createdAt"),
+    "relevance":  ("meilisearch", ""),
 }
 # What the old two-button UI sent, kept working so an older client or a bookmarked URL does not
 # silently lose its sort.
@@ -3333,8 +3405,10 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     empty and the card hides them), plus GraphQL-only extras: tags + created_at + author.
 
     category: one of MARKET_CATEGORIES (ignored if not). sort: 'newest' -> orderBy -createdAt;
-    anything else -> the connection's default order. usage MODEL/LORA splits base vs LoRA rows
-    (the connection conflates them). Read-only, no spend.
+    anything else -> the connection's default order. A non-empty `keyword` re-points a RANKING
+    feed (trending/latest) at the relevance one -- see the feed selection below for why and for
+    the 2026-09-07 measurements. usage MODEL/LORA splits base vs LoRA rows (the connection
+    conflates them). Read-only, no spend.
 
     `latestVersion` also requests modelType/loraBaseModelType (picker-parity-round2,
     2026-07-24) -- confirmed live: real rows come back e.g. modelType:"MULTI_LORA",
@@ -3395,6 +3469,22 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     # Sort is a FEED plus an orderBy, both from a fixed table -- safe to interpolate, and an
     # unrecognised name falls back to Trending rather than producing a broken query.
     feed, order_by = market_sort(sort)
+    # A KEYWORD goes to a search index, never to a ranking feed (owner walk 2026-09-07:
+    # "searching for a known LoRA fails" / "it's always the SAME LoRA"). `trending` and `latest`
+    # are RANKINGS: the connection accepts `keyword` alongside them and returns the ranking
+    # anyway, so every term produced the same head row -- which is exactly what "always the same
+    # LoRA" is. Measured live 2026-09-07 under lora_base_type=MMDIT26A_MODEL: on the trending
+    # feed "Perfect Hands" -> "Extremely detailed...", "Large Bust"; "eyes" -> "Extremely
+    # detailed..." again; and "qwxzv nonsense" -- a term nothing can match -- still returned
+    # eight rows. On the meilisearch feed with an EMPTY orderBy (relevance), the same three:
+    # "Perfect Hands" -> "JP Anime Perfect Hands", "perfect hand..."; "eyes" -> "beautiful eyes",
+    # "miyako eyes"; "qwxzv nonsense" -> nothing. So a keyword under Trending or Latest is served
+    # by MARKET_SORTS["relevance"] instead. `liked`/`used` are already meilisearch and keep their
+    # orderBy -- they were measured returning exact matches first ("Perfect Hands SDXL") -- and a
+    # search with no keyword is untouched, so plain browsing still gets the ranking feeds. The
+    # base-type filter is orthogonal and stays on either way; its rows measured correct.
+    if (keyword or "").strip() and feed in ("trending", "latest"):
+        feed, order_by = MARKET_SORTS["relevance"]
     args.append('feed:"%s"' % feed)
     if order_by:
         args.append('orderBy:"%s"' % order_by)
@@ -3661,7 +3751,7 @@ def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
-            "compatibility": {}, "restrictions": {}}
+            "compatibility": {}, "restrictions": {}, "profiles": None}
 
 
 def _version_row_to_meta(r):
@@ -3684,7 +3774,11 @@ def _version_row_to_meta(r):
       key" as "unknown, don't restrict" (fail open), same convention as capabilities above.
     - restrictions: real min/max bounds for the params above (e.g.
       {samplingSteps:{min:16,max:50}}) -- clamp the drawer's own hardcoded bounds to these
-      when present instead of a one-size-fits-all guess."""
+      when present instead of a one-size-fits-all guess.
+    - profiles: PLACEHOLDER ONLY here (always None). The allowed inference-profile set is
+      NOT in this row -- it comes from a second, version-keyed route, so the CALLERS fill it
+      via _attach_profiles (see below). Kept in the shape so every row a caller hands out
+      has the same keys whether or not that caller ran the second read."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     compat = extra.get("compatibility")
@@ -3701,10 +3795,46 @@ def _version_row_to_meta(r):
         "capabilities": [c for c in caps if isinstance(c, str)] if isinstance(caps, list) else [],
         "compatibility": compat if isinstance(compat, dict) else {},
         "restrictions": restrictions if isinstance(restrictions, dict) else {},
+        "profiles": None,
     }
 
 
-def resolve_version_meta(session, model_id):
+def _attach_profiles(session, meta):
+    """Fill a version meta's `profiles` -- the profileName list the model VERSION actually
+    offers -- and return the same dict (mutated in place).
+
+    SCOPE §4b, 2026-08-17 (per-model inference profiles), captured 2026-08-25: the allowed
+    set is per VERSION, not fixed -- Tsubaki.2 offers lite/standard/pro/ultra while
+    Tsubaki.3 offers only pro/ultra. The drawer's five mode bars were always all clickable,
+    so a mode the model rejects could be quoted and then silently retried on the model's
+    own default (submit_generation's drop-and-retry), which is the quote-vs-charge
+    divergence this closes at the source.
+
+    The read is _model_profiles: the SAME version-keyed GET the price/submit gate already
+    uses, so this shares its cache (one call per version per hour, not one per pick) and
+    its fail-soft contract.
+
+    FAIL SOFT -> None. No version id, a failed read, or a body we could not parse all leave
+    `profiles = None`, which the drawer reads as "unknown -- dim nothing". An empty list
+    `[]` is a real answer (SDXL: definitively no profiles) and is NOT None; the drawer
+    leaves the bars alone for it too, because an SDXL model's modes are handled by the
+    submit gate, not by this display gate. A `membershipOnly` profile IS listed: the site's
+    own rejection path handles membership, and hiding it here would be a second, weaker
+    copy of that rule."""
+    vid = str(meta.get("version_id") or "")
+    if not vid:
+        meta["profiles"] = None
+        return meta
+    rows = _model_profiles(session, vid)
+    if not isinstance(rows, list):
+        meta["profiles"] = None
+        return meta
+    meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
+                        if isinstance(p, dict) and p.get("profileName")]
+    return meta
+
+
+def resolve_version_meta(session, model_id, with_profiles=False):
     """Resolve a model's latest generatable version AND the metadata we were throwing away.
     One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
     resolve_latest_version() kept only the id. Read-only.
@@ -3721,7 +3851,17 @@ def resolve_version_meta(session, model_id):
     reverted). This function still always takes rows[0] (presumed latest) -- it's the
     fast path used right after a pick, where "latest" is the right default. To offer a
     real choice among the other rows, see list_model_versions() below (picker-parity-round2,
-    2026-07-24), which maps the FULL list through the same per-row shape."""
+    2026-07-24), which maps the FULL list through the same per-row shape.
+
+    `with_profiles=True` adds the SECOND, version-keyed read that fills `profiles` (SCOPE
+    2026-08-17 §4b). It is OPT-IN and OFF by default, because `profiles` is only ever
+    LOOKED AT by a caller that renders the drawer's mode bar. The first cut attached it here
+    unconditionally, which quietly charged every other caller of this shared resolver a
+    second PixAI GET for a field it never reads: /api/task-params' Remix loop resolves one
+    LoRA base per unique LoRA and reads only lora_base_model_type/model_type, so a four-LoRA
+    remix went from four reads to eight (red team 2026-09-07). `profiles` is still always
+    PRESENT in the returned shape; without the flag it is None, which the drawer reads as
+    "unknown -- dim nothing"."""
     try:
         data = _rest_get(session, "/generation-model/" + str(model_id) + "/versions")
     except PixAIError:
@@ -3729,7 +3869,12 @@ def resolve_version_meta(session, model_id):
     rows = data if isinstance(data, list) else (data or {}).get("data") or []
     if not rows:
         return _empty_version_meta()
-    return _version_row_to_meta(rows[0])
+    meta = _version_row_to_meta(rows[0])
+    # SECOND read (SCOPE 2026-08-17 §4b): the resolved version's allowed inference
+    # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
+    # ONLY for a caller that asked -- see the docstring: the LoRA/remix resolves never read
+    # `profiles`, and paying a PixAI GET for them was pure cost (red team 2026-09-07).
+    return _attach_profiles(session, meta) if with_profiles else meta
 
 
 def list_model_versions(session, model_id):
@@ -3763,6 +3908,12 @@ def list_model_versions(session, model_id):
         tag = "Latest" if i == 0 else "v{}".format(n - i)
         meta["label"] = tag + (" · " + created[:10] if created else "")
         meta["is_latest"] = (i == 0)
+        # SCOPE 2026-08-17 §4b: ONE second read, for the row the drawer actually applies
+        # (applyModelRow takes is_latest, useGenerate.js:97). Every other row keeps
+        # profiles=None -- "unknown, dim nothing" -- deliberately, because a read per row
+        # would be exactly the N+1 this function's own contract above rules out.
+        if meta["is_latest"]:
+            _attach_profiles(session, meta)
         out.append(meta)
     return out
 
@@ -5907,6 +6058,35 @@ def _mirror_session_from(jwt):
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
     })
+    return session
+
+
+# PixAI applies its CONTENT POLICY by the client it believes it is talking to, not by the
+# credential. Measured 2026-09-07, owner's walk (a LoRA search for "cum" that fills pages on
+# the site came back "No LoRAs match" in the app): the same API key and the same meilisearch
+# query returned 0 rows presenting as `pixai-personal-backup/1.0`, and 24 rows -- identical to
+# the browser-token session's -- presenting the website's identity. The strict tier is the
+# mobile-app one _mirror_session_from already describes. So a read that browses the market on
+# the owner's behalf presents as the website, which is exactly what his own browser does with
+# the same account. The credential is not in this set: Authorization is left as built.
+WEB_IDENTITY_HEADERS = {
+    "User-Agent": MIRROR_WEB_USER_AGENT,
+    "Origin": MIRROR_WEB_ORIGIN,
+    "Referer": MIRROR_WEB_ORIGIN + "/",
+}
+
+
+def present_as_web(session):
+    """`session`, now presenting the website's client identity (WEB_IDENTITY_HEADERS), so
+    PixAI applies the website content policy to what it returns. Mutates and returns the SAME
+    object -- a PixAIClient delegates `headers` to the Session it holds -- and leaves a stand-in
+    without headers (tests) untouched. Only the identity changes; the credential does not."""
+    headers = getattr(session, "headers", None)
+    if headers is not None:
+        try:
+            headers.update(WEB_IDENTITY_HEADERS)
+        except Exception:
+            pass
     return session
 
 
@@ -9185,7 +9365,14 @@ def _bump_card_use(params):
 # model whose profiles PixAI later changes is picked up within the hour (a restart clears it
 # too). conftest clears it between tests so no model's profiles leak across them.
 _PROFILE_CACHE_TTL = 3600.0                  # seconds; inference profiles change very rarely
-_profile_cache = {}                          # version_id -> (fetched_at_monotonic, profiles_list)
+# A FAILED read is cached too, on a much shorter clock (red team 2026-09-07, refining the
+# original "only a SUCCESSFUL result is cached" rule in _model_profiles below). Caching
+# nothing meant a version whose /inference-profiles route does not answer 200 re-fired that
+# GET on EVERY call -- every /api/price keystroke, every drawer open -- for as long as the
+# failure lasted. Sixty seconds keeps a transient failure transient while bounding the
+# repeat to once a minute.
+_PROFILE_FAIL_TTL = 60.0
+_profile_cache = {}                          # version_id -> (fetched_at_monotonic, profiles_list|None)
 
 
 def _model_profiles(session, version_id):
@@ -9204,21 +9391,32 @@ def _model_profiles(session, version_id):
 
     CACHED per version_id across ALL sessions (see _profile_cache) with a TTL, because
     /api/price runs this on every keystroke on a FRESH session (gallery _gen_session) -- a
-    session-keyed memo re-hit the network each time. Only a SUCCESSFUL result is cached (None
-    is not, so a transient failure re-attempts rather than sticking)."""
+    session-keyed memo re-hit the network each time. A FAILURE is cached too, but only for
+    _PROFILE_FAIL_TTL (red team 2026-09-07, refining the original "only a SUCCESSFUL result
+    is cached" rule): caching nothing at all meant a version PixAI will not answer for
+    re-fired the GET on every single call for as long as that lasted. A minute is short
+    enough that a transient failure is still transient -- the next call after it tries again,
+    and a recovered route is picked up then -- and long enough that the repeat is bounded.
+    The fail-soft contract is unchanged: a cached failure returns the SAME None a fresh one
+    does, so every caller behaves exactly as it did."""
     vid = str(version_id)
     now = time.monotonic()
     hit = _profile_cache.get(vid)
-    if hit is not None and (now - hit[0]) < _PROFILE_CACHE_TTL:
-        return hit[1]
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
     try:
         data = _rest_get(session, "/generation-model/" + vid + "/inference-profiles")
     except Exception:
+        _profile_cache[vid] = (now, None)
         return None
     if not isinstance(data, dict):
+        _profile_cache[vid] = (now, None)
         return None
     profiles = data.get("profiles")
     if not isinstance(profiles, list):
+        _profile_cache[vid] = (now, None)
         return None
     _profile_cache[vid] = (now, profiles)
     return profiles
@@ -13433,6 +13631,39 @@ def _check_time_capsule(created_at, out_dir):
         pass
 
 
+# THE WALK-END MARKER (owner report, 2026-09-07). "This should have picked up where it
+# left off and continued pulling 37k images." One fact, per library: has any pass over
+# this history ever reached the oldest page? Everything --update's early stop assumes
+# rests on it, and until 2026-09-07 nothing recorded it, so a first backup stopped
+# part-way left two known pages at the newest end and every later Sync read those two as
+# "the whole library is already here".
+#
+# It lives in the library's own telemetry.json -- the same store `first_sync_done` uses --
+# and NOT in config.json: it is a fact about this backup folder, not a setting of the app,
+# and two out_dirs must never share it. Fail-soft both ways, and the READ fails to False on
+# purpose: an unreadable marker means "keep walking", which costs pages, where the opposite
+# default means silently declaring an unfinished library finished.
+WALK_END_FLAG = "walk_reached_end"
+
+
+def walk_end_reached(out_dir):
+    """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
+    try:
+        import moonglade_gallery as _mg
+        return bool(_mg.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
+    except Exception:
+        return False
+
+
+def mark_walk_end_reached(out_dir):
+    """Record that a pass walked all the way to the oldest page. Idempotent."""
+    try:
+        import moonglade_gallery as _mg
+        _mg.telem_flag(WALK_END_FLAG, out_dir=out_dir)
+    except Exception:
+        pass
+
+
 def run_download(args, progress=None):
     """Run the full paginated download + catalog loop.
 
@@ -13564,6 +13795,16 @@ def run_download(args, progress=None):
     update_mode = getattr(args, "update", False)
     update_grace = getattr(args, "update_grace", 2)
     consecutive_known_pages = 0
+    # THE RESUME GATE (owner report, 2026-09-07). This REFINES the incremental-stop ruling
+    # rather than reversing it: a run of already-on-disk pages still ends the walk, but only
+    # once this library has PROVEN where the end of history is (walk_end_reached above).
+    # Without that proof the walk pages to the true end exactly as a full re-walk does --
+    # still skipping every file already on disk, so it costs page listings, not downloads --
+    # which is what makes a first backup that was stopped part-way finish on the next Sync
+    # instead of stopping after the two pages it happened to have.
+    end_known = walk_end_reached(out)
+    reached_end = False      # this run saw pageInfo.hasPreviousPage == False
+    stopped_early = False    # this run took the consecutive-known-pages stop
 
     # Parallel downloads: only for the common flat-download case. collect_only does
     # no downloads, so it falls back to the serial path.
@@ -13724,16 +13965,19 @@ def run_download(args, progress=None):
                 if update_mode:
                     if page_new == 0:
                         consecutive_known_pages += 1
-                        if consecutive_known_pages >= update_grace:
+                        # `end_known`: the resume gate. See where it is set, above.
+                        if end_known and consecutive_known_pages >= update_grace:
                             print("\n--update: {} consecutive pages already on disk; "
                                   "stopping (older items are already downloaded)."
                                   .format(consecutive_known_pages))
+                            stopped_early = True
                             break
                     else:
                         consecutive_known_pages = 0
                 raw_f.flush()
                 pi = conn.get("pageInfo", {})
                 if not pi.get("hasPreviousPage"):
+                    reached_end = True
                     break
                 before = pi.get("startCursor")
                 time.sleep(args.delay)
@@ -13858,25 +14102,37 @@ def run_download(args, progress=None):
             # a run of pages where everything is already on disk, the rest of the
             # history is older and already downloaded -> stop early. The grace
             # window tolerates occasional gaps (a few missing/failed items).
+            # Gated on `end_known` since 2026-09-07 -- "already on disk" only implies
+            # "already downloaded" for a library whose tail was reached at least once.
             if update_mode:
                 if page_new == 0:
                     consecutive_known_pages += 1
-                    if consecutive_known_pages >= update_grace:
+                    if end_known and consecutive_known_pages >= update_grace:
                         print("\n--update: {} consecutive pages already on disk; "
                               "stopping (older items are already downloaded)."
                               .format(consecutive_known_pages))
+                        stopped_early = True
                         break
                 else:
                     consecutive_known_pages = 0
 
             pi = conn.get("pageInfo", {})
             if not pi.get("hasPreviousPage"):
+                reached_end = True
                 break
             before = pi.get("startCursor")
             time.sleep(args.delay)
 
     finally:
         raw_f.close()
+
+    if reached_end:
+        # ONLY a page that actually reported "no previous page" arms the marker. A --max
+        # cut-off, a --update early stop, an empty/absent connection and a run killed
+        # mid-page all leave it exactly as it was -- which is the whole point: the marker
+        # is proof the tail was seen, not a record that a walk happened.
+        mark_walk_end_reached(out)
+        end_known = True
 
     if not progress and sys.stdout.isatty() and processed:
         print()  # move past the \r progress bar line
@@ -13895,6 +14151,14 @@ def run_download(args, progress=None):
               "design. ***".format(dl["fail"]))
         if os.environ.get("MOONGLADE_PROGRESS") == "1":
             print("{}{}".format(PANEL_WARN_PREFIX, dl["fail"]), flush=True)
+    # How the walk ENDED, alongside what it moved -- the counters were already the return
+    # value (D-4), and --sync's closing line is the one caller that has to tell "walked to
+    # the end" from "caught up" apart (2026-09-07). Extra keys only; dl["ok"]/["skip"]/
+    # ["missing"]/["fail"] mean exactly what they meant.
+    dl["pages"] = page
+    dl["reached_end"] = reached_end
+    dl["stopped_early"] = stopped_early
+    dl["end_known"] = end_known
     return dl
 
 
@@ -14034,10 +14298,13 @@ def main():
     ap.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
-                         "downloaded). Much faster than re-walking the whole history.")
+                         "downloaded). Much faster than re-walking the whole history. The "
+                         "early stop waits until one pass has reached the end of your "
+                         "history, so an interrupted first backup resumes to the end.")
     ap.add_argument("--update-grace", type=int, default=2,
                     help="with --update, number of consecutive all-on-disk pages before "
-                         "stopping (default 2; raise if your history has gaps)")
+                         "stopping (default 2; raise if your history has gaps). Ignored "
+                         "until this library's walk has reached the end of history once.")
     ap.add_argument("--accurate-count", action="store_true",
                     help="walk the whole API to count library size for the progress bar "
                          "(slow). Default uses the catalog size as a fast estimate.")
@@ -14643,14 +14910,29 @@ def main():
                     run_reconcile_deleted(args)
                 except Exception as e:                   # noqa: BLE001 -- advisory step, never fatal
                     print("  reconcile skipped: {}".format(e))
-                print("Sync complete.")
+                # WHICH ENDING (owner report, 2026-09-07). Both endings used to print the
+                # same "Sync complete." -- so a Sync that stopped two pages into an
+                # unfinished library announced itself exactly like one that had walked the
+                # whole 37k. Say which happened, in the owner's own terms.
+                if (dl or {}).get("reached_end"):
+                    print("Sync complete — walked to the end of your history ({} pages)."
+                          .format((dl or {}).get("pages") or 0))
+                else:
+                    print("Sync complete — caught up (nothing new in the last {} pages)."
+                          .format(getattr(args, "update_grace", 2)))
                 # Mark the first full sync done so the gallery stops withholding achievement
                 # unlock toasts (first-light etc. fire on completion, not seconds into the
                 # very first sync). Idempotent; covers the wizard too (its "Sync now" job
                 # runs this same --sync). Fail-soft: a telemetry hiccup must not fail the sync.
+                #
+                # Gated on the walk-end marker since 2026-09-07: it used to be set on EVERY
+                # --sync exit, so an interrupted first backup followed by a two-page Sync
+                # told first_sync_complete() the first sync was done when most of the library
+                # was still missing. Now the flag means what its name says.
                 try:
                     import moonglade_gallery as _mg
-                    _mg.telem_flag("first_sync_done", out_dir=out)
+                    if walk_end_reached(out):
+                        _mg.telem_flag("first_sync_done", out_dir=out)
                 except Exception:
                     pass
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged

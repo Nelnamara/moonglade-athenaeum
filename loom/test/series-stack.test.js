@@ -85,36 +85,51 @@ describe("(b) a series||batch unit renders the stack markup + the right badge (G
   });
 });
 
-describe("(c) opening a stack: series -> the B3 modal, batch -> View-batch", () => {
+describe("(c) opening a stack: BOTH kinds -> the one stack modal", () => {
   test("Grid routes a stack open to onOpenSeries(sid) / onOpenBatch(task_id)", () => {
     assert.ok(grid.includes("if (kind === \"series\" && onOpenSeries) onOpenSeries(it.series.sid);"));
     assert.ok(grid.includes("else if (kind === \"batch\" && onOpenBatch) onOpenBatch(it.batch.task_id);"));
   });
   test("B3: a series opens the MODAL -- openSeries, not the retired ?series= takeover", () => {
-    // openSeries is useCallback'd like filterByBatch beside it: both are props on the
+    // openSeries is useCallback'd like openBatch beside it: both are props on the
     // memoized <Grid>, and a fresh identity per render would defeat that memo.
     assert.ok(app.includes("const openSeries = useCallback((sid) => {"));
-    assert.ok(app.includes("const closeSeries = useCallback(() => {"));
+    assert.ok(app.includes("const closeStack = useCallback(() => {"));
     // it opens the modal and addresses it -- it does NOT push the sid into the filters
-    assert.ok(app.includes("setSeriesFor(sid);"));
+    assert.ok(app.includes('setStackFor({ kind: "series", id: sid });'));
     assert.ok(app.includes("setUrl({ series: sid });"));
     assert.ok(!app.includes("setAdv((old) => ({ ...old, series, batch:"),
       "the ?series= drill-down must no longer be SET from a stack click");
     assert.ok(!app.includes("filterBySeries"), "filterBySeries is retired");
-    // the batch open is the EXISTING path, reused exactly and untouched
-    assert.ok(app.includes("const filterByBatch = useCallback((batch) => {"));
-    // both handed to the grid
+    // ...and the modal is mounted on the open STACK, closing straight back
+    assert.ok(app.includes("<SeriesModal stack={stackFor} onClose={closeStack}"));
+  });
+  test("2026-09-07: a BATCH card opens the same modal, and sets no filter", () => {
+    // The owner's ruling: batch cards reuse the series modal, tagged BATCH. The card
+    // click used to be filterByBatch -- the whole library re-loaded as ?batch=<task_id>,
+    // the takeover B3 had already retired for a series.
+    assert.ok(app.includes("const openBatch = useCallback((taskId) => {"));
+    assert.ok(app.includes('setStackFor({ kind: "batch", id: taskId });'));
     assert.ok(app.includes("onOpenSeries={openSeries}"));
-    assert.ok(app.includes("onOpenBatch={filterByBatch}"));
-    // ...and the modal is mounted on the sid, closing straight back
-    assert.ok(app.includes("<SeriesModal sid={seriesFor} onClose={closeSeries}"));
+    assert.ok(app.includes("onOpenBatch={openBatch}"));
+    assert.ok(!app.includes("onOpenBatch={filterByBatch}"),
+      "a batch CARD must not set the library filter any more");
+    // openBatch must not touch adv: its body sets the stack and nothing else
+    const h = app.slice(app.indexOf("const openBatch = useCallback((taskId) => {"));
+    const body = h.slice(0, h.indexOf("}, ["));
+    assert.ok(!body.includes("setAdv("), "opening a batch must not move the library");
+    // the ?batch= FILTER itself stays -- Details' own "View batch" chip is a different
+    // verb (from one picture, filter the library to its siblings) and still uses it.
+    assert.ok(app.includes("const filterByBatch = useCallback((batch) => {"));
+    assert.ok(app.includes("onFilterByBatch={filterByBatch}"));
   });
   test("B3: the modal is a place -- ?series=<sid> is read, written and popstate-restored", () => {
     const url = src("gallery/src/gen/urlState.js");
     assert.ok(url.includes("export function readSeries(search)"));
     assert.ok(url.includes('p.set("series", String(patchObj.series));'));
-    assert.ok(app.includes("useState(() => readSeries(window.location.search))"));
-    assert.ok(app.includes("setSeriesFor(readSeries(window.location.search));"));
+    assert.ok(app.includes("const sid = readSeries(window.location.search);"));
+    assert.ok(app.includes("const popSid = readSeries(window.location.search);"));
+    assert.ok(app.includes('setStackFor(popSid ? { kind: "series", id: popSid } : null);'));
   });
   test("B3: the rail, the sort and the run badge are the handoff's own (SeriesModal.jsx)", () => {
     const modal = src("gallery/src/components/SeriesModal.jsx");
@@ -133,8 +148,38 @@ describe("(c) opening a stack: series -> the B3 modal, batch -> View-batch", () 
     // Esc goes STRAIGHT back -- one key, one level
     assert.ok(modal.includes('if (e.key !== "Escape") return;'));
     assert.ok(modal.includes("Esc \u21a9 gallery"));
-    // it reads the series itself; the library's own state is never touched
-    assert.ok(modal.includes("fetchSeriesStack(sid)"));
+    // it reads the stack itself; the library's own state is never touched
+    assert.ok(modal.includes("fetchBatchStack(sid) : fetchSeriesStack(sid)"));
+  });
+  test("2026-09-07: ONE modal, two stack kinds -- the KICKER is what tells them apart", () => {
+    const modal = src("gallery/src/components/SeriesModal.jsx");
+    const mcss = src("gallery/src/styles/series-modal.css");
+    const api = src("gallery/src/api.js");
+    // the stack prop carries the kind; the id is read off it either way
+    assert.ok(modal.includes("export default function SeriesModal({ stack, onClose, onOpenDetails })"));
+    assert.ok(modal.includes('const isBatch = !!stack && stack.kind === "batch";'));
+    assert.ok(modal.includes("const sid = stack ? stack.id : null;"));
+    // the kicker: BATCH or SERIES, inside .mgss-head, BEFORE the title
+    assert.ok(modal.includes('const kicker = isBatch ? "BATCH" : "SERIES";'));
+    assert.ok(modal.includes('<span className="mgss-kicker">{kicker}</span>'));
+    assert.ok(modal.indexOf('className="mgss-kicker"') < modal.indexOf('className="mgss-title"'));
+    // the title and the meta line say which kind too
+    assert.ok(modal.includes('const noun = isBatch ? "batch" : "series";'));
+    assert.ok(modal.includes('<span className="mgss-title">{title} \u2014 the {noun}</span>'));
+    assert.ok(modal.includes('? "one generation"'));
+    // the kicker is the app's standard mono kicker
+    const ki = mcss.indexOf(".mgss-kicker {");
+    assert.ok(ki > 0, ".mgss-kicker rule present");
+    const krule = mcss.slice(ki, mcss.indexOf("}", ki));
+    assert.match(krule, /font-family: ui-monospace/);
+    assert.match(krule, /font-size: 11px;/);
+    assert.match(krule, /letter-spacing: \.1em;/);
+    assert.match(krule, /text-transform: uppercase;/);
+    // a BATCH never asks /api/series/ anything -- its own route, its own listing param
+    assert.ok(api.includes('return fetchStack("/api/batch/", "batch", taskId);'));
+    assert.ok(api.includes('return fetchStack("/api/series/", "series", sid);'));
+    const fb = api.slice(api.indexOf("export async function fetchBatchStack("));
+    assert.ok(!fb.includes("/api/series/"), "the batch loader must never touch /api/series/");
   });
   test("the tray toggle flips group and lights when on", () => {
     assert.ok(tray.includes('onClick={() => setGroup(group !== "series")}'));
@@ -166,11 +211,11 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
     return { state, pushed, setUrl };
   };
 
-  test("openDetailsFromSeries: one push, and the address carries both changes", () => {
+  test("openDetailsFromStack: one push, and the address carries both changes", () => {
     const { state, pushed, setUrl } = makeShell("?page=3&series=s7");
-    // App.jsx's openDetailsFromSeries, in its own order
+    // App.jsx's openDetailsFromStack, in its own order
     setUrl({ series: null, image: "m9" });   // the ONE navigation
-    setUrl({ series: null });                // closeSeries's own write -> no-op
+    setUrl({ series: null });                // closeStack's own write -> no-op
     setUrl({ image: "m9" });                 // openDetails's own write -> no-op
     assert.deepEqual(pushed, ["/?page=3&image=m9"]);
     // ...and the page the library was on is still there, as ever
@@ -178,7 +223,7 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
   });
 
   test("the retired two-step pushed TWICE, and the middle entry was a place nobody visited", () => {
-    // closeSeries() then openDetails(mid) -- what the modal used to be handed. Back from
+    // closeStack() then openDetails(mid) -- what the modal used to be handed. Back from
     // the record landed on the bare library, with neither the stack nor the picture up.
     const { pushed, setUrl } = makeShell("?page=3&series=s7");
     setUrl({ series: null });
@@ -188,15 +233,15 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
   });
 
   test("App hands the modal the atomic handler, not the two-call arrow", () => {
-    assert.ok(app.includes("const openDetailsFromSeries = useCallback((mid) => {"));
+    assert.ok(app.includes("const openDetailsFromStack = useCallback((mid) => {"));
     assert.ok(app.includes("setUrl({ series: null, image: mid });"));
-    assert.ok(app.includes("onOpenDetails={openDetailsFromSeries}"));
-    assert.ok(!app.includes("onOpenDetails={(mid) => { closeSeries(); openDetails(mid); }}"),
-      "the two-push series -> details transition is gone");
+    assert.ok(app.includes("onOpenDetails={openDetailsFromStack}"));
+    assert.ok(!app.includes("onOpenDetails={(mid) => { closeStack(); openDetails(mid); }}"),
+      "the two-push stack -> details transition is gone");
     // both verbs still run for their non-URL state work
-    const h = app.slice(app.indexOf("const openDetailsFromSeries = useCallback((mid) => {"));
+    const h = app.slice(app.indexOf("const openDetailsFromStack = useCallback((mid) => {"));
     const body = h.slice(0, h.indexOf("}, ["));
-    assert.ok(body.includes("closeSeries();"));
+    assert.ok(body.includes("closeStack();"));
     assert.ok(body.includes("openDetails(mid);"));
   });
 });

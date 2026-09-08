@@ -629,7 +629,151 @@ def test_the_publish_kick_fires_for_unpublish_and_retag_too(tmp_path, monkeypatc
     src = inspect.getsource(g.create_app)
     publish = src[src.index("def api_myart_publish():"):]
     publish = publish[:publish.index("def _lineage_card(")]
-    assert publish.index("_artworks_kick(force=True)") > publish.index("publish_state(")
+    assert (publish.index("_artworks_kick(force=True, scheduled=True)")
+            > publish.index("publish_state("))
+
+
+# =====================================================================================
+# 5b. WHO STARTED IT -- the flag the browser reads to decide whether to toast
+#
+# OWNER'S WALK, 2026-09-07: "The automated tasks in the living library stack up completion
+# toasts in the corner -- with the new tracking window I would like to remove the notice
+# toasts completely." The ruling is about WHO STARTED THE JOB, not about what the job is,
+# so it cannot be answered from the action name: `sync` is the tick's job at 4am and the
+# owner's own button at noon, and only one of the two may toast. The server is the only
+# side that knows, so the server says so, once, on the job's own row.
+#
+# `scheduled` is written ONLY when nobody clicked. A clicked run's row is byte-for-byte
+# what it has always been (append_job_event drops None fields), which is also what every
+# row written before today looks like -- so absence means "somebody pressed this", and no
+# old row can be mistaken for an automatic one.
+# =====================================================================================
+
+def test_a_job_the_tick_started_says_so_and_a_clicked_one_does_not(tmp_path):
+    """The Panel-job half, driven through both real starters onto the real jobs.jsonl.
+
+    Same action both times, deliberately: `sync-videos` started by the fifteen-minute tick
+    and `sync-videos` started by the owner's button differ in exactly one thing, and this
+    is that thing. Read back through read_jobs() -- the same call /api/jobs serves from --
+    so this asserts what the browser actually receives, not a raw log line."""
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.StringIO("")
+
+        def wait(self):
+            return 0
+
+    import subprocess as _sp
+
+    def _await_panel_row(action, exclude):
+        """The row for `action` once its TERMINAL event has landed (rc is not None) --
+        the same wait test_panel.py uses, for the same loaded-runner race."""
+        for _ in range(200):                  # up to ~4s, breaks the instant it lands
+            row = next((j for j in core.read_jobs(tmp_path)
+                        if j.get("action") == action and j["job_id"] not in exclude
+                        and j.get("rc") is not None), None)
+            if row is not None:
+                return row
+            time.sleep(0.02)
+        raise AssertionError("the %s job never reached jobs.jsonl" % action)
+
+    _due_schedule(tmp_path, ["sync-videos"])
+    cli = _client(tmp_path)
+
+    # THE TICK -- nobody pressed anything.
+    with _mock.patch.object(_sp, "Popen", lambda argv, **kw: _FakeProc()):
+        cli.application.extensions["mg_living"]["tick"]()
+        ticked = _await_panel_row("sync-videos", exclude=())
+    assert ticked["scheduled"] is True, \
+        "a job the library started by itself must say so, or the browser toasts it"
+
+    # THE CLICK -- the same job, the same argv, the same log.
+    seen = {j["job_id"] for j in core.read_jobs(tmp_path)}
+    with _mock.patch.object(_sp, "Popen", lambda argv, **kw: _FakeProc()):
+        assert cli.post("/api/panel/run", json={"action": "sync-videos"}
+                        ).get_json()["ok"] is True
+        clicked = _await_panel_row("sync-videos", exclude=seen)
+    assert "scheduled" not in clicked, \
+        "a job the owner pressed must carry no flag at all -- absence is what every row " \
+        "written before this existed carries, and it must keep meaning 'he pressed it'"
+
+
+def test_only_run_now_leaves_a_sweep_row_the_browser_will_toast(tmp_path, monkeypatch):
+    """The sweep half. It bypasses _panel_run entirely -- in-process work, never a
+    subprocess in the job slot -- so its row learns this from the `log_event` wrapper
+    _artworks_kick builds, and the flag is passed per TRIGGER rather than derived from
+    `force`: three of the four triggers force past the fifteen-minute guard and only one of
+    those three (Run now) is a click.
+
+    Two of the four are driven here. The kick's worker thread is captured rather than
+    started (the shape test_panel.py's watch-autostart test uses) and run by hand, with the
+    sweep itself replaced by one that announces exactly once -- the background gate this
+    suite sets would otherwise stand the kick down before it ever reached the sweep, and a
+    real sweep would reach PixAI. The boot kick is the one trigger that cannot be driven
+    (see test_the_sweep_has_all_four_triggers_wired for why), so it is read; the publish
+    kick's own behavioural test is directly above."""
+    import threading
+    monkeypatch.delenv("MOONGLADE_DISABLE_WATCH", raising=False)
+    spawned = []
+
+    class _RecordingThread:
+        def __init__(self, *a, **kw):
+            self.target = kw.get("target") or (a[0] if a else None)
+
+        def start(self):
+            spawned.append(self.target)
+
+    monkeypatch.setattr(threading, "Thread", _RecordingThread)
+
+    jid = {"v": ""}
+
+    def _fake_sweep(out_dir, db_path, force=False, log_event=None, busy=None):
+        # Exactly what the real sweep announces, and it announces only once.
+        log_event(jid["v"], status="done", type="panel", action="artworks-sweep",
+                  label="Published-artwork sweep — 1 row(s) refreshed", rc=0)
+        return {"changed": 1, "pages": 1, "artworks": 1, "deep": False, "incomplete": False}
+
+    monkeypatch.setattr(g, "artworks_sweep_kick", _fake_sweep)
+
+    def _run_the_kick():
+        assert len(spawned) == 1, \
+            "the kick must spawn exactly its own worker (got %r)" % (spawned,)
+        go = spawned.pop()
+        assert go.__name__ == "_go", "the kick no longer spawns _go -- re-point this test"
+        go()
+
+    def _row(job_id):
+        return next((j for j in core.read_jobs(tmp_path) if j["job_id"] == job_id), None)
+
+    # RUN NOW -- the owner's own button, and the only trigger of the four that toasts.
+    cli = _client(tmp_path)
+    spawned.clear()
+    jid["v"] = "sweep-by-hand"
+    assert cli.post("/api/panel/sweep", json={}).get_json()["ok"] is True
+    _run_the_kick()
+    assert "scheduled" not in _row("sweep-by-hand"), \
+        "Run now is a click -- it must still toast when it finishes"
+
+    # THE FIFTEEN-MINUTE TICK -- the living library, running itself.
+    _due_schedule(tmp_path, ["artworks-sweep"])
+    cli2 = _client(tmp_path)
+    spawned.clear()
+    jid["v"] = "sweep-by-tick"
+    cli2.application.extensions["mg_living"]["tick"]()
+    _run_the_kick()
+    assert _row("sweep-by-tick")["scheduled"] is True, \
+        "an unattended sweep must announce itself in the Activity window and nowhere else"
+
+    # THE BOOT KICK and THE PUBLISH KICK -- read, narrowly, for the one argument that is
+    # the whole point. Starting the app is not asking for a sweep, and neither is pressing
+    # Publish: the owner has the publish's own answer in front of him already.
+    src = inspect.getsource(g.create_app)
+    boot = src[src.index("def _artworks_sync_startup():"):]
+    boot = boot[:boot.index("# MOONGLADE_DISABLE_WATCH=1 skips auto-start")]
+    assert "_artworks_kick(force=False, scheduled=True)" in boot
+    publish = src[src.index("def api_myart_publish():"):]
+    publish = publish[:publish.index("def _lineage_card(")]
+    assert "_artworks_kick(force=True, scheduled=True)" in publish
 
 
 def test_the_living_tick_rides_the_existing_sixty_second_loop_and_adds_no_thread():
@@ -965,7 +1109,7 @@ def test_no_living_job_path_can_reach_the_librarys_own_loaders():
             assert name not in src, "%s reaches for %s" % (fn.__name__, name)
     app_src = inspect.getsource(g.create_app)
     for start, end in (("def _living_tick():", "def _scheduler_loop():"),
-                       ("def _artworks_kick(force=False):", "def _living_run(action):"),
+                       ("def _artworks_kick(force=False, scheduled=False):", "def _living_run(action):"),
                        ("def _living_run(action):", "# Read ONCE, here")):
         body = app_src[app_src.index(start):]
         body = body[:body.index(end)]

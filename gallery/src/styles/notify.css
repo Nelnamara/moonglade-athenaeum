@@ -230,6 +230,9 @@
 .at-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;color:var(--overlay0);}
 .at-sub .at-kind{color:var(--subtext);text-transform:capitalize;}
 .at-sub .at-phase{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;}
+/* The website source mark (2026-09-07). Same quiet pill as .at-phase on purpose -- it says
+   WHERE a run came from, not that anything is wrong with it, so nothing warning-coloured. */
+.at-sub .at-src{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;color:var(--subtext);}
 .at-errmsg{color:var(--red);font-size:10.5px;margin-top:5px;white-space:normal;}
 .at-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:7px;overflow:hidden;}
 .at-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
@@ -269,4 +272,105 @@
 .mg-toast .mt-x:hover{color:var(--text);}
 @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}
-@media (prefers-reduced-motion: reduce){ #jobs-fab.busy .jf-dot{animation:none;} .mg-toast,.mg-toast.out{animation:none;} }
+@media (prefers-reduced-motion: reduce){ .mg-toast,.mg-toast.out{animation:none;} }
+
+/* ---- the update BANNER (owner ruling 2026-09-07, "update should be noticed anywhere":
+   the once-per-version sticky toast above became a strip that stands until the update is
+   applied). Lives in THIS file, beside the toast it reworks, because notify.css is the one
+   stylesheet every shell already loads through notify/index.jsx -- desktop, phone, Loom and
+   setup wizard alike. Tokens only; the Update button wears the same gold face as the Panel's
+   own .mgcp-updgo, restated here rather than reached for across control-panel.css, which the
+   Loom and the wizard never load.
+
+   IT PUSHES THE SHELL DOWN, IT NEVER COVERS IT. BannerHost.jsx measures the strip (safe-area
+   padding included -- the phone's own top inset is the strip's, so the hero stops claiming it
+   again below) and publishes --mg-updbanner-h on <html>; each shell's top chrome moves by
+   exactly that. z-index sits just under the toasts, which stack from 64px down the right and
+   never meet it. */
+.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:509;box-sizing:border-box;
+  display:flex;align-items:center;gap:10px;
+  padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
+  background:var(--surface0);border-bottom:1px solid var(--accent);
+  font-family:var(--font-system,system-ui,sans-serif);}
+.mgub-line{flex:1;min-width:0;font-size:12.5px;color:var(--text);}
+/* Where the Update button would be on a shell that cannot open the confirm -- the setup
+   wizard registers no host and is already "/", so it says why instead of drawing a button
+   that presses nothing (2026-09-07, later the same day). */
+.mgub-why{flex:none;font-size:11px;color:var(--subtext);font-style:italic;}
+button.mgub-go{flex:none;padding:6px 15px;border-radius:9px;font-size:12px;font-weight:800;
+  cursor:pointer;font-family:inherit;color:#241a05;border:1px solid rgba(212,175,55,.7);
+  background:linear-gradient(180deg,#e2c04a,#a8871f);}
+button.mgub-later{flex:none;padding:6px 11px;border-radius:9px;font-size:11.5px;cursor:pointer;
+  font-family:inherit;color:var(--subtext);border:1px solid var(--surface1);background:transparent;}
+button.mgub-later:hover{color:var(--text);border-color:var(--accent);}
+/* "Not now" folds the strip to this pill -- for this tab only, never written down. There is
+   no dismiss that makes the news vanish; the pill re-expands on tap. */
+.mg-updbanner.small{background:transparent;border-bottom-color:transparent;pointer-events:none;
+  padding:calc(4px + env(safe-area-inset-top)) 14px 4px;}
+button.mgub-pill{pointer-events:auto;padding:3px 10px;border-radius:999px;font-size:10.5px;
+  cursor:pointer;font-family:inherit;color:var(--text);background:var(--surface0);
+  border:1px solid var(--accent);}
+.mg-updbanner{transition:padding .18s cubic-bezier(.4,0,.2,1),background .18s cubic-bezier(.4,0,.2,1);}
+@media (prefers-reduced-motion: reduce){ .mg-updbanner{transition:none;} }
+
+/* Each shell's own top chrome, moved down by the strip's real height. The desktop header is
+   position:sticky;top:0 (shell.css .mgx-hdr) and the phone shell is position:fixed;inset:0
+   (gallery-mobile.css .glm-stage) -- both would otherwise render underneath the strip. The
+   phone hero re-derives its own notch padding from env(safe-area-inset-top); with the strip
+   above it already holding that inset, it is zeroed here so the hero does not pay for it
+   twice. */
+html.mg-updbanner-on .app{padding-top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .mgx-hdr{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .glm-stage{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .glm-hero{--glm-safetop:0px;}
+html.mg-updbanner-on .glm-hero-icons{top:12px;}
+/* .sb-root is the Loom's in-flow wrapper -- it moves the boundary's fallback text, but NOT
+   the fixed .lv-overlay/.lm-root shells it normally holds; those are offset in the block
+   below (2026-09-07, later the same day). */
+html.mg-updbanner-on .sb-root{padding-top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(--mg-updbanner-h,0px);}
+
+/* EVERY FIXED FULL-SCREEN LAYER, NOT A LIST OF THE ONES WE REMEMBERED (2026-09-07, later the
+   same day, refining the block above -- which moved only the shells that sit in normal flow).
+   A `position:fixed; inset:0` root is pinned to the VIEWPORT: no padding on any ancestor can
+   push it down, so `.sb-root`'s padding-top left the Loom's real shells (.lv-overlay on the
+   desktop, .lm-root on the phone) starting at y=0 with the z-509 strip painting over their top
+   bar -- the phone Loom's only "< Gallery" link among them -- and the full-screen viewer (.lbx)
+   was covered the same way. The rule is therefore stated for the whole class: every fixed
+   inset:0 layer that ranks BELOW the strip starts where the strip ends. Its `bottom:0` stays,
+   so the layer shrinks rather than sliding off the bottom.
+
+   The two deliberate exceptions, both above or beneath the argument rather than in it:
+     .mgx-veil   -- z-index 2, pointer-events:none, a decorative bottom gradient that must
+                    reach the viewport edge; it covers nothing and eats no click.
+     .ach-m2     -- z-index 520, ABOVE the strip on purpose: an earned achievement owns the
+                    whole screen for its few seconds, strip included.
+   loom/test/mg-updbanner-layers.test.js re-derives this list from the stylesheets and fails on
+   any new fixed inset:0 root that is neither offset here nor named in its exemption list. */
+html.mg-updbanner-on .lbx,
+html.mg-updbanner-on .mgv-scrim, html.mg-updbanner-on .mgv-host,
+html.mg-updbanner-on .mgai-scrim,
+html.mg-updbanner-on .mgss-scrim,
+html.mg-updbanner-on .upscale-panel:not(.inline),
+html.mg-updbanner-on .mgcp-sub-scrim, html.mg-updbanner-on .mgcp-sub-host,
+html.mg-updbanner-on .mgcp-pwr-scrim, html.mg-updbanner-on .mgcp-pwr-host,
+html.mg-updbanner-on .mgct-subscrim, html.mg-updbanner-on .mgct-subhost,
+html.mg-updbanner-on .mgclaim-scrim, html.mg-updbanner-on .mgclaim-host,
+html.mg-updbanner-on .mgl-scrim,
+html.mg-updbanner-on .mgpal-scrim, html.mg-updbanner-on .mgpal-host,
+html.mg-updbanner-on .mgks-scrim, html.mg-updbanner-on .mgks-host,
+html.mg-updbanner-on .mg-gallery-picker,
+html.mg-updbanner-on .mgdock-scrim, html.mg-updbanner-on .mgdk,
+html.mg-updbanner-on .glm-scrim,
+html.mg-updbanner-on .csm-root,
+html.mg-updbanner-on .cmb-entry,
+html.mg-updbanner-on .fm-root,
+html.mg-updbanner-on .idm-root, html.mg-updbanner-on .idm-sheet-scrim,
+html.mg-updbanner-on .lbm-root, html.mg-updbanner-on .lbm-sheet-scrim,
+html.mg-updbanner-on .mgdrm-automodal-scrim,
+html.mg-updbanner-on .lgn-welcome, html.mg-updbanner-on .lgnm-welcome,
+html.mg-updbanner-on .lv-overlay, html.mg-updbanner-on .lm-root,
+html.mg-updbanner-on .lv-df-veil, html.mg-updbanner-on .lv-mpick-veil,
+html.mg-updbanner-on .lv-fc-veil, html.mg-updbanner-on .lv-fc-host,
+html.mg-updbanner-on .sb-projveil,
+html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov{top:var(--mg-updbanner-h,0px);}

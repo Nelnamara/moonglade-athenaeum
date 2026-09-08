@@ -153,6 +153,58 @@ def test_media_ids_for_falsy_batch_entries_skipped():
 
 
 # ---------------------------------------------------------------------------
+# cataloged_media_ids -- the ids a task's ROWS are keyed by, which is NOT the set
+# media_ids_for names. Asking the catalog with the wrong set is what made the live
+# mirror's catch-up relist the same finished tasks every five minutes (2026-09-07).
+# ---------------------------------------------------------------------------
+
+def test_cataloged_media_ids_batch_summary_drops_the_composite_grid():
+    """A batch task's `mediaId` is the combined preview picture and is never one of the
+    batch (probe 2026-09-06), so no row is keyed by it. The members are."""
+    node = {"id": "T", "mediaId": "GRID", "batchMediaIds": ["b1", "b2", "b3", "b4"]}
+    assert core.cataloged_media_ids(node) == ["b1", "b2", "b3", "b4"]
+    assert "GRID" in core.media_ids_for(node)          # the old set, for contrast
+
+
+def test_cataloged_media_ids_single_image_summary_is_its_media_id():
+    assert core.cataloged_media_ids(
+        {"id": "T", "mediaId": "solo", "batchMediaIds": None}) == ["solo"]
+    assert core.cataloged_media_ids(
+        {"id": "T", "mediaId": "solo", "batchMediaIds": []}) == ["solo"]
+    assert core.cataloged_media_ids({}) == []
+
+
+def test_cataloged_media_ids_all_deleted_batch_yields_nothing_not_the_grid():
+    """A member PixAI deleted comes through as a hole. A batch whose members are ALL gone
+    has nothing to collect, and must NOT fall back to the grid -- the same refusal
+    _task_image_media makes on the detail shape."""
+    node = {"id": "T", "mediaId": "GRID", "batchMediaIds": [None, "", None]}
+    assert core.cataloged_media_ids(node) == []
+
+
+def test_cataloged_media_ids_video_summary_names_nothing_the_catalog_holds():
+    """The summary carries only the poster still; the video's own media id lives in
+    getTaskById. [] here means "this node cannot tell you", not "nothing to collect"."""
+    node = {"id": "T", "mediaId": "POSTER", "i2vProModel": "v4.0.1"}
+    assert core.cataloged_media_ids(node) == []
+
+
+def test_cataloged_media_ids_reads_a_full_task_detail_too():
+    """Handed a getTaskById result it resolves through the same two helpers the collectors
+    catalog from, so the answer is the ids the rows carry -- images from outputs.batch[]
+    (deleted members skipped), videos from outputs.videos[]."""
+    task = {"id": "T", "outputs": {"mediaId": "GRID", "batch": [
+        {"mediaId": "b1"}, {"mediaId": "b2", "deletedAt": "2026-09-06T00:00:00Z"},
+        {"mediaId": "b3"}]}}
+    assert core.cataloged_media_ids(task) == ["b1", "b3"]
+
+    vid = {"id": "T", "parameters": {"i2vPro": {"prompts": "p"}},
+           "outputs": {"mediaId": "POSTER",
+                       "videos": [{"mediaId": "V1", "thumbnailMediaId": "POSTER"}]}}
+    assert core.cataloged_media_ids(vid) == ["V1"]
+
+
+# ---------------------------------------------------------------------------
 # extract_meta
 # ---------------------------------------------------------------------------
 

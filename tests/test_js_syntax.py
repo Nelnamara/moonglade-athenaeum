@@ -208,3 +208,52 @@ def test_committed_loom_bundle_matches_a_fresh_build(tmp_path):
         .format(len(committed), len(fresh)))
 
 
+
+
+def test_committed_gallery_bundle_matches_a_fresh_build(tmp_path):
+    """gallery/dist/app.js and app.css are COMMITTED and served verbatim by the React shell,
+    and nothing forces a rebuild -- the 3.10 wave hit this twice in one day: a label change
+    that never reached the served bundle, and a CSS verdict whose harness test read the
+    stale stylesheet. The Loom has had this guard since 3.7; the gallery gets the same one.
+
+    Vite is built to a temporary outDir here (it takes one), so nothing is rebuilt in place
+    and the checkout is never touched. Rollup's output is deterministic for the same source
+    and the same pinned toolchain; only line endings are normalized. Skips unless node and
+    gallery/node_modules are present, like the Loom test. Set MOONGLADE_SKIP_GALLERY_BUILD=1
+    to opt out."""
+    root = Path(__file__).resolve().parent.parent
+    gallery = root / "gallery"
+    vite = gallery / "node_modules" / "vite" / "bin" / "vite.js"
+    committed = {name: (gallery / "dist" / name).read_bytes() for name in ("app.js", "app.css")
+                 if (gallery / "dist" / name).is_file()}
+
+    if os.environ.get("MOONGLADE_SKIP_GALLERY_BUILD"):
+        pytest.skip("MOONGLADE_SKIP_GALLERY_BUILD is set")
+    if NODE is None:
+        pytest.skip("node not installed")
+    if not vite.is_file() or len(committed) != 2:
+        pytest.skip("gallery/ build tooling or dist bundle not present in this checkout")
+
+    outdir = tmp_path / "dist"
+    log_path = tmp_path / "build.out"
+    try:
+        with open(log_path, "w", encoding="utf-8") as fh, open(os.devnull) as nul:
+            rc = subprocess.call([NODE, str(vite), "build", "--outDir", str(outdir), "--emptyOutDir",
+                                  "--logLevel", "warn"], cwd=str(gallery),
+                                 stdin=nul, stdout=fh, stderr=subprocess.STDOUT)
+    except OSError as e:
+        pytest.skip("cannot spawn node in this environment: {}".format(e))
+    log = log_path.read_text(encoding="utf-8", errors="replace")
+    assert rc == 0, "gallery's `npm run build` failed, so the bundle can't be checked:\n" + log
+
+    def _norm(b):
+        return b.replace(b"\r\n", b"\n")
+
+    for name, was in committed.items():
+        fresh = (outdir / name).read_bytes()
+        assert _norm(fresh) == _norm(was), (
+            "gallery/dist/{} is STALE -- it does not match a fresh build of gallery/src.\n"
+            "  committed: {:,} bytes\n  rebuilt  : {:,} bytes\n"
+            "The shell serves the committed file, so it is serving code that no longer "
+            "matches the source.\nFix: `cd gallery && npm run build`, then commit gallery/dist/."
+            .format(name, len(was), len(fresh)))

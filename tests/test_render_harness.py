@@ -75,10 +75,10 @@ the day it was written.
 
 The CI gap, and what covers it
 ------------------------------
-This module SKIPS without playwright + chromium, and `.github/workflows/tests.yml`
-installs neither -- so on CI these guards do not run at all. That is a deliberate
-trade (see the marker note in `pytest.ini`), but it means defect 3 above would have
-regressed on a `push` unseen. `tests/csshelp.py` covers exactly that one axis in pure
+This module SKIPS without playwright + a browser. `.github/workflows/tests.yml` installs
+playwright and chromium for the pytest job, so on CI these guards RUN on chromium (the
+WebKit profile is local-only: `MG_HARNESS_BROWSER=webkit`). Before 2026-09 CI installed
+neither and defect 3 above regressed on a `push` unseen. `tests/csshelp.py` covers that one axis in pure
 stdlib: it resolves which declaration WINS the cascade (!important, specificity,
 document order) with no browser, and
 `tests/test_web_pick.py::test_portrait_mobile_drawer_rules_actually_win` asserts on
@@ -90,6 +90,7 @@ import json
 import re
 import threading
 
+import os
 import pytest
 
 from tests.conftest import _SEALED_DONOR
@@ -101,8 +102,8 @@ from moonglade_gallery import (
     telem_flag, telemetry_metrics, load_telemetry,
 )
 
-# No playwright (or no browser) => this whole module skips. It is not installed by
-# .github/workflows/tests.yml, so these tests SKIP in CI today and run locally.
+# No playwright (or no browser) => this whole module skips. .github/workflows/tests.yml installs
+# playwright + chromium, so on CI this module runs; a checkout without them skips it cleanly.
 _pw = pytest.importorskip(
     "playwright.sync_api",
     reason="the rendering harness needs playwright + a chromium binary")
@@ -117,8 +118,22 @@ _PASSWORD = "a-real-test-password-1"
 DESKTOP = {"width": 1280, "height": 900}
 
 # 390x844 phone: the width Login Mobile.dc.html proves the design at, and comfortably
-# inside useIsMobile.js's own 430px breakpoint, so main.jsx mounts AppMobile.jsx here.
+# inside useIsMobile.js's own 520px breakpoint (430 until 2026-09-07), so main.jsx mounts AppMobile.jsx here.
 PHONE = {"width": 390, "height": 844}
+# The owner's phone, as a browser sees it (2026-09-07, from his 5059 screenshot: a Pro Max
+# class iPhone in Safari with its toolbars up). 430 CSS px wide; 740 tall is the VISIBLE
+# viewport with Safari's address bar and bottom toolbar on screen -- the screen's full 932 is
+# what iOS hands `vh`, and the gap between the two is where a 78vh bottom sheet loses its
+# head. Touch, the iOS user agent and the 3x ratio come with it, so the phone shell's own
+# device gates run the way they run in his hand. The ENGINE is a separate choice: chromium by
+# default (CI's only engine); `MG_HARNESS_BROWSER=webkit` runs this module on the engine iPhone
+# Safari uses (`python -m playwright install webkit` once). Neither engine reproduces the two
+# iOS-only behaviours the sheet fix answers, which is why that test also pins them structurally.
+IPHONE_PRO_MAX = {
+    "width": 430, "height": 740, "device_scale_factor": 3, "is_mobile": True, "has_touch": True,
+    "user_agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                   "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"),
+}
 
 # Kill every transition/animation so a geometry read can never catch an interpolated
 # mid-flight value. `*` + !important beats the app's id-selector rules; applied to the
@@ -153,13 +168,21 @@ def render_browser():
 
     pw = sync_playwright().start()
     try:
-        browser = pw.chromium.launch()
+        # MG_HARNESS_BROWSER=webkit runs this whole module on the engine iPhone Safari uses
+        # (`python -m playwright install webkit`); chromium is the default and CI's only engine.
+        engine = (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower()
+        if engine not in ("chromium", "firefox", "webkit"):
+            # A typo here must not turn the whole harness into a SKIP with a reason that
+            # blames a missing chromium binary (red team, 2026-09-08).
+            pw.stop()
+            pytest.fail("MG_HARNESS_BROWSER=%r is not one of chromium, firefox, webkit" % engine)
+        browser = getattr(pw, engine).launch()
     except Exception as exc:                                  # pragma: no cover
         pw.stop()
         # First line only: playwright's own message trails a multi-line ASCII banner that
         # would swamp the -rs summary.
-        pytest.skip("no usable chromium binary (run `playwright install chromium`): "
-                    "{}".format(str(exc).splitlines()[0]))
+        pytest.skip("no usable %s binary (run `playwright install %s`): "
+                    "%s" % (engine, engine, str(exc).splitlines()[0]))
     try:
         yield browser
     finally:
@@ -303,12 +326,15 @@ def logged_in_page(render_server, render_browser, monkeypatch):
     assert core._config_path() == render_server.config_path
     contexts = []
 
-    def _open(width=DESKTOP["width"], height=DESKTOP["height"]):
+    def _open(width=DESKTOP["width"], height=DESKTOP["height"], **device):
         # base_url makes page.goto("/loom") resolve against the ephemeral port, so no test
-        # has to carry the port around.
+        # has to carry the port around. `device` carries a real phone's identity when a test
+        # opens one (IPHONE_PRO_MAX below): user agent, touch, mobile viewport semantics and
+        # pixel ratio -- the owner's phone is not a 390-wide desktop window (2026-09-07).
+        opts = {"device_scale_factor": 1}
+        opts.update(device)
         ctx = render_browser.new_context(viewport={"width": width, "height": height},
-                                         device_scale_factor=1,
-                                         base_url=render_server.base_url)
+                                         base_url=render_server.base_url, **opts)
         # Playwright's 30s default turns "the fix is broken" into a 30s stall per test.
         # 10s is ~6x the slowest real wait here (the Loom bundle boot, ~1.7s) and keeps a
         # genuine regression failing in seconds.
@@ -414,8 +440,8 @@ def no_confirmed_contest_entry(render_browser):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _dismiss_any_achievement_toast(page):
-    """Click-dismiss a real achievement celebration (.ach-m2) if one happens to be up.
+def _dismiss_any_achievement_toast(page, rounds=4):
+    """Click-dismiss EVERY real achievement celebration (.ach-m2) that is up, in turn.
 
     render_server's fixture pre-seeds `seen` from the harness's INITIAL catalog state
     (suppresses the page-load toast), but a test's own real actions -- a job run, an
@@ -425,11 +451,68 @@ def _dismiss_any_achievement_toast(page):
     not a bug -- see `_play()` in gallery/src/notify/ach.js, the 2026-08-08 React-port home
     of the celebration engine), so left alone it blocks every click under it for its real
     4.2-6.4s hold. A no-op when nothing is showing.
+
+    2026-09-07: this used to dismiss ONE moment and return, which is not the same thing as
+    clearing the screen -- `celebrate()` pushes onto `_q`, so two achievements earned at
+    once are two moments, and the old one-shot's very next click went to the successor
+    overlay instead of the control under it. It now loops until the screen is genuinely
+    clear, bounded, and says so loudly rather than silently giving up.
+
+    2026-09-07, second pass -- REFINES the loop above, whose stated model of ach.js was
+    wrong. That first rewrite waited for `.ach-m2` to reach `state="detached"` and treated
+    a following `state="attached"` as "another one is queued", on the belief that `_play()`
+    calls `_next()` 500ms AFTER the clicked moment is removed. It does not. `_play()`'s
+    `done()` (ach.js:264-268) schedules ONE callback that removes the clicked moment and
+    calls `after()` -- which IS `_next` (ach.js:444) -- in the same task, and `_next`
+    (ach.js:437-445) is plain synchronous code that ends in `_play()`'s
+    `document.body.appendChild(m)` (ach.js:259-260). Old node out, new node in, one tick,
+    same `.ach-m2` class. So when a moment really is queued there is NO observable moment
+    at which `.ach-m2` matches zero elements, `state="detached"` can never resolve, and the
+    helper raised a Playwright TimeoutError in exactly the queued-parade case it was
+    written to fix.
+
+    What the loop waits for now is "the moment I clicked is gone", not "the screen went
+    empty": hold the clicked element's own handle, then wait until that node is off the
+    document OR the front `.ach-m2` is a different node. That is satisfied by both real
+    shapes -- the last moment leaving (nothing replaces it) and a queued successor being
+    swapped in on the same tick -- so the loop advances to the successor instead of timing
+    out on a state ach.js never enters.
+
+    Call it before any interaction a full-screen overlay could swallow, not just once after
+    boot. NOT a match for the >3 flood parade (`_floodParade`, owner ruling 2026-09-03):
+    there a click RECEDES the moment into the `_trail` instead of removing it, so the node
+    keeps its `.ach-m2` class and the count climbs rather than falling. Receded layers drop
+    their scrim and pointer events, so they swallow nothing -- but this helper is not the
+    thing that clears them.
     """
-    toast = page.locator(".ach-m2")
-    if toast.count():
-        toast.first.click(timeout=1000)
-        page.wait_for_selector(".ach-m2", state="detached", timeout=2000)
+    for _ in range(rounds):
+        toast = page.locator(".ach-m2")
+        if not toast.count():
+            return
+        try:
+            handle = toast.first.element_handle(timeout=1000)
+        except _PlaywrightTimeout:
+            continue                       # it left on its own between the count and here
+        if handle is None:
+            continue
+        try:
+            toast.first.click(timeout=1000)
+            # Bounded, and deliberately NOT a `.ach-m2` count/detached check: a queued
+            # successor is appended in the same task the clicked one is removed in.
+            # 500ms removal + the successor's own append, with room for a loaded runner.
+            page.wait_for_function(
+                "el => !el.isConnected || document.querySelector('.ach-m2') !== el",
+                arg=handle, timeout=3000)
+        except _PlaywrightTimeout:
+            break                          # the assert below reports it
+        finally:
+            handle.dispose()
+    assert not page.locator(".ach-m2").count(), (
+        "still an .ach-m2 celebration up after dismissing up to {} of them -- either the "
+        "app is firing an unbounded parade or the overlay stopped closing on click".format(
+            rounds))
+
+
 def _login(page):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
@@ -992,6 +1075,12 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
     page.click('nav[aria-label="Destinations"] button:has-text("Panel")')
     page.wait_for_selector('[aria-label="Control Panel"]')
     _settle(page)
+    # The panel paints "opening the panel..." until /api/panel/summary answers; under load
+    # that outlasts _settle (seen 2026-09-07 with a test workflow running beside the
+    # harness), so wait for the summary's own text rather than a fixed pause.
+    page.wait_for_function(
+        "() => /THE LIBRARY/.test(document.querySelector('[aria-label=\"Control Panel\"]')?.innerText || '')",
+        timeout=20_000)
     # innerText reflects the CSS text-transform:uppercase on .mgcp-sidekick, not the raw
     # JSX literal ("The library") -- assert what actually renders.
     assert "THE LIBRARY" in page.inner_text('[aria-label="Control Panel"]')
@@ -1603,15 +1692,30 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     tiles_before = page.locator(".glm-grid .glm-tile").count()
 
     # A tap opens the full-screen viewer (GalleryMobile's tapView -> LightboxMobile).
+    # Clear the screen first: a full-screen .ach-m2 swallows this tap, and this test's own
+    # page load can cross a threshold the module fixture's `seen` pre-seed never saw.
+    _dismiss_any_achievement_toast(page)
     page.locator(_DOOR_TILE).click()
     page.wait_for_selector(".lbm-root")
     # Put the library at a known offset UNDER the viewer -- the offset is set here rather
     # than before the tap because Playwright scrolls the tile into view to click it, which
     # moves .glm-body itself. This is the number that has to come back.
-    page.evaluate("() => { document.querySelector('.glm-body').scrollTop = 40; }")
+    #
+    # 2026-09-07, order-independence: the offset used to be a hardcoded 40, which only fits
+    # because SOME EARLIER TEST grew the module-scoped catalog (the import-overlay test
+    # writes real rows into the same render_server catalog). On the fixture's own six rows
+    # .glm-body overscrolls by 15px, so scrollTop clamped to 15 and this assertion failed --
+    # alone, and under any -k that deselected the importer. The number now comes from the
+    # live scroller, capped at the same 40; what the assertion actually needs is a non-zero
+    # offset that survives the round trip, and that is what it now demands.
+    scroll_before = page.evaluate("""() => {
+        const b = document.querySelector('.glm-body');
+        b.scrollTop = Math.min(40, b.scrollHeight - b.clientHeight);
+        return b.scrollTop;
+    }""")
     _settle(page)
     scroll_before = page.evaluate("() => document.querySelector('.glm-body').scrollTop")
-    assert scroll_before == 40, (
+    assert scroll_before > 0, (
         "the phone's library scroller would not take a test offset ({!r}) -- the restore "
         "assertion below would be vacuous".format(scroll_before))
 
@@ -1619,6 +1723,9 @@ def test_phone_similar_door_opens_results_and_the_token_puts_the_library_back(
     chip = page.locator(".lbm-actsrow .lbm-similar")
     assert chip.count() == 1
     assert "◈" in chip.inner_text()
+    # Same guard again: the tile tap itself is a real action, so a fresh moment can be up
+    # over the viewer by now and the chip click would land on the overlay instead.
+    _dismiss_any_achievement_toast(page)
     chip.click()
 
     # The viewer closes, the lookalikes take the GRID's place, and the token is up.
@@ -1726,7 +1833,7 @@ def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
 # 9. Contests on the phone (Contest Mobile Handoff.dc.html, Session D 2026-09-04)
 # ---------------------------------------------------------------------------
 # 390x844 is the frame the handoff is drawn at (an iPhone-class CSS viewport) and it is
-# under useIsMobile.js's 430px breakpoint, so the REAL mobile build mounts -- these drive
+# under useIsMobile.js's 520px breakpoint (430 until 2026-09-07), so the REAL mobile build mounts -- these drive
 # AppMobile.jsx, not App.jsx behind a narrow window.
 MOBILE = {"width": 390, "height": 844}
 
@@ -3113,8 +3220,26 @@ def test_the_return_trip_lands_where_the_library_was(logged_in_page):
     page = logged_in_page(**DESKTOP)
     _visit(page, "/")
     page.wait_for_selector(".mgx-actrow")
+    # 2026-09-07: wait for the library's FIRST load to land before faking the address.
+    # `.mgx-actrow` is painted from boot-time data (Banner.jsx), so it is up long before
+    # the grid's own request resolves -- and App's page-mirror effect (App.jsx:465-468,
+    # "whenever the loaded page settles somewhere the URL doesn't say") fires the moment
+    # `loading` goes false and `total` arrives, calling setUrl({page: 1}); buildUrl
+    # deletes `page` for n <= 1 and leaves `image` alone (urlState.js:47-54), so a
+    # replaceState made mid-flight came back as `/?image=demo-mid-42` and the test failed
+    # on its own setup. Flaked twice in the 3.10 wave on exactly that; a real visit to
+    # /?page=3 cannot hit it, because readPage() seeds React's `page` from the real
+    # address at mount and the mirror writes back the same 3.
+    page.wait_for_selector(".mgg-card")
+    page.wait_for_load_state("networkidle")
+    _settle(page)
+
     # The library, somewhere other than its front door.
     page.evaluate("() => history.replaceState(null, '', '/?page=3&image=demo-mid-42')")
+    _settle(page)
+    assert page.url.endswith("/?page=3&image=demo-mid-42"), (
+        "the app rewrote the address to {!r} before the crossing even started -- the "
+        "library's own first load was still in flight".format(page.url))
 
     # Out through the hero's own Loom button -- a plain anchor that runs no JS of its own,
     # which is exactly why the snapshot rides pagehide rather than a click handler.
@@ -3546,8 +3671,10 @@ def test_the_restart_mascot_holds_still_and_the_halo_keeps_pulsing(logged_in_pag
         "the restart mascot is animating again: {}".format(seen["mascotAnim"]))
     assert seen["spinAnim"] == "none", (
         "a .spin rule survived in the stylesheet: {}".format(seen["spinAnim"]))
-    assert seen["haloAnim"] == "cpPulse", (
-        "the pulse the owner kept is gone: {}".format(seen["haloAnim"]))
+    # The pulse the owner kept, now with the ember the 2026-09-07 restart-card verdict
+    # layered beside it on the same beat. Both names, in that order, on the one element.
+    assert [a.strip() for a in seen["haloAnim"].split(",")] == ["cpPulse", "cpEmber"], (
+        "the halo's pulse+ember pair is not what ships: {}".format(seen["haloAnim"]))
     assert "grayscale" in seen["offFilter"], (
         "the greyed stopped-server state went with it: {}".format(seen["offFilter"]))
 
@@ -3884,3 +4011,631 @@ def test_each_tab_keeps_its_own_scroll(
             "parked 0: it came back at {:.0f}".format(_body_top(page)))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# A branding file DROPPED into a slot folder, all the way to the browser
+# ---------------------------------------------------------------------------
+# tests/test_branding.py already covers the sweep as a FUNCTION (adopt, delete the raw
+# file, register the asset, fire the feat) against Flask's test client. Nothing covered
+# the trip the owner actually takes: put a picture in the folder, reload the page, and
+# see the app wearing it. That is three mechanisms in a row, and a unit test can see none
+# of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
+# -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
+# friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
+_UNDER_THE_HOOD = "under-the-hood"     # the hidden feat sweep_branding_drops() fires
+_DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
+#                                        served pixel PROVES it came from this exact drop
+_DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the
+#                                        whole picture and the colour check stays meaningful
+
+
+def _png_of(size, rgb):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, rgb).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _decode(raw):
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(raw))
+    im.load()
+    return im
+
+
+def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
+        logged_in_page, render_server, tmp_path):
+    """Drop a PNG into a slot folder; reload; the app is wearing it.
+
+    Order-independent by construction, and that is worth spelling out because this test
+    writes to two trees, one of which OUTLIVES it:
+
+      * the branding tree is `tmp_path/branding` -- conftest's autouse `_isolated_branding`
+        re-points branding_root() there for the duration of THIS test, so the folder the
+        drop lands in (and the adopted asset, the manifest and the rendered flat that
+        follow it) evaporates with the test. Asserted below rather than assumed: a test
+        that drops files into a real folder must prove first that the folder is the
+        throwaway one.
+      * the feat's earn-state lives in the module server's out_dir, which every later test
+        in this file shares. So this one snapshots the two files it disturbs -- the
+        telemetry flags and the achievement state -- and restores them in a `finally`,
+        whether it passes or not.
+
+    THREE preconditions have to be undone for the celebration to be a real earn rather
+    than a re-run of an already-recognized one, and each is a fixture decision made for an
+    unrelated reason:
+      1. render_server pre-seeds the `branding_custom_file` flag, to unlock the Branding
+         tab for the Control Panel test -- cleared here, so the sweep is what sets it;
+      2. it pre-marks every earned achievement `seen`, to stop boot toasts -- this feat is
+         un-seen here, so its own toast is allowed to fire;
+      3. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
+         library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
+         and the fixture computes those BEFORE conftest's per-test sealed container exists
+         -- module-scoped fixtures set up ahead of function-scoped autouse ones -- so they
+         land empty and the gate reads "still syncing" for the life of the module. An
+         install with a fully swept catalog, which is exactly what this harness serves, has
+         that flag set; it is set here for the same reason the API key above it is.
+
+    The achievement half is donor-gated exactly like the Branding tab in
+    test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
+    moonglade.dat, so donor-absent (public CI) there is no `under-the-hood` to earn and no
+    toast to wait for. The adoption half -- the part with no coverage at all -- runs either
+    way.
+    """
+    import moonglade_gallery as _g
+    from moonglade_gallery import list_slot_assets, load_ach_state
+
+    slot = "banner_main"
+    sdir = _g._slot_dir(slot)          # asked of the app's own ROLE_CODE map, never retyped
+    assert tmp_path in sdir.parents, (
+        "branding_root() is {} -- not under this test's tmp_path. Refusing to write a "
+        "drop into a real branding tree.".format(_g.branding_root()))
+    sdir.mkdir(parents=True, exist_ok=True)
+
+    root = render_server.root
+    before_ids = {a["id"] for a in list_slot_assets(root, slot)}
+    flags_before = dict(load_telemetry(root)["flags"])
+    ach_before = load_ach_state(root)
+
+    try:
+        # --- put the feat back to genuinely-unearned, and open the celebration gate ---
+        _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
+        telem_flag("first_sync_done", out_dir=root)
+        save_ach_state(root, dict(ach_before, seen=[
+            i for i in (ach_before.get("seen") or []) if i != _UNDER_THE_HOOD]))
+        assert not load_telemetry(root)["flags"].get("branding_custom_file")
+
+        page = logged_in_page(**DESKTOP)
+
+        # --- the drop itself: a picture, by hand, into the slot folder ---
+        drop = sdir / "my_own_banner.png"
+        drop.write_bytes(_png_of(_DROP_SIZE, _DROP_RGB))
+        assert drop.exists()
+
+        # --- the reload the owner would do. The boot fetch is what runs the sweep, so
+        # wait on THAT response, not on a wall-clock guess: when it lands, so has the
+        # adoption -- and its body is the payload the celebration engine reads.
+        with page.expect_response(
+                lambda r: "/api/achievements" in r.url and r.request.method == "GET") as boot:
+            _visit(page, "/")
+
+        # 1. the raw drop is consumed, not left sitting beside the adopted copy
+        assert not drop.exists(), (
+            "the dropped file is still in the slot folder -- the sweep never adopted it")
+
+        # 2. the slot now holds exactly one NEW asset, and the app really serves it
+        after = [a for a in list_slot_assets(root, slot) if a["id"] not in before_ids]
+        assert len(after) == 1, "expected one newly adopted asset, got {}".format(after)
+        asset = after[0]
+        assert asset["png"] == "/branding/%s/%s.png" % (slot, asset["id"])
+
+        # Fetched through the BROWSER's own context (its session cookie, its base_url), so
+        # this is the URL the page itself asks for -- coded-rel translation included.
+        got = page.request.get(asset["png"])
+        assert got.status == 200, "{} served {}".format(asset["png"], got.status)
+        im = _decode(got.body())
+        assert im.format == "PNG"
+        assert im.size == _DROP_SIZE, (
+            "the served asset is {}, not the dropped picture's own {}".format(
+                im.size, _DROP_SIZE))
+        assert im.convert("RGB").getpixel((600, 150)) == _DROP_RGB, (
+            "the slot serves SOMETHING, but not the file that was dropped")
+
+        # 3. ...and the flat the header actually paints was re-rendered from it, which is
+        # the difference between "stored" and "worn" (add_slot_asset -> _write_banner_flat).
+        flat = page.request.get("/branding/banner.png")
+        assert flat.status == 200, "/branding/banner.png served {}".format(flat.status)
+        flat_im = _decode(flat.body()).convert("RGB")
+        assert flat_im.size == (1920, 480), "banner_main's flat is {}".format(flat_im.size)
+        assert flat_im.getpixel((960, 240)) == _DROP_RGB, (
+            "the header's flat did not re-render from the adopted drop")
+
+        # 4. the sweep really fired the feat, and it really paid out ON SCREEN.
+        # Donor-gated: no sealed roster, no achievement to earn and nothing to celebrate.
+        assert load_telemetry(root)["flags"].get("branding_custom_file"), (
+            "the adoption did not fire branding_custom_file")
+        if _SEALED_DONOR.is_file():
+            payload = boot.value.json()
+            assert _UNDER_THE_HOOD in (payload.get("newly") or []), (
+                "the boot fetch did not report the feat as newly earned: newly={!r}"
+                .format(payload.get("newly")))
+            page.wait_for_selector(".ach-m2")
+            shown = page.locator(".ach-m2").first.inner_text()
+            assert "Under the Hood" in shown, (
+                "a celebration fired, but not the one the drop earns: {!r}".format(shown))
+            # Leave the screen clear for whatever runs next -- see the helper's docstring.
+            _dismiss_any_achievement_toast(page)
+            assert page.locator(".ach-m2").count() == 0
+    finally:
+        # The module's shared out_dir goes back byte-for-byte, pass or fail: the flags this
+        # test cleared and set, and the `seen`/`earned_at` the ?mark=1 above rewrote.
+        _g._telem_mutate(root, lambda d: d.__setitem__("flags", dict(flags_before)))
+        save_ach_state(root, ach_before)
+
+
+# ---------------------------------------------------------------------------
+# The dismiss helper vs a QUEUE of celebrations (2026-09-07, second pass)
+# ---------------------------------------------------------------------------
+# _dismiss_any_achievement_toast's whole reason to exist is the parade: two achievements
+# earned in one pass are two moments, and the helper must leave the screen clear, not
+# hand the next click to the successor overlay. Its first rewrite was written against a
+# model of ach.js that ach.js does not implement -- `_play()`'s done() removes the clicked
+# moment and calls `_next()` in the SAME task, so `.ach-m2` never matches zero elements
+# between them -- and so it timed out on exactly the case it was meant to fix. Nothing
+# pinned that, because every existing call site happens to be single-moment.
+#
+# The queue is driven through the REAL engine (installNotify -> ach.check() -> GET
+# /api/achievements?mark=1 -> toastNew -> celebrate x2 -> _q/_next), with only the boot
+# payload faked -- the achievements themselves are irrelevant to what is under test and
+# a real two-at-once earn would have to mutate the module server's shared out_dir. The
+# unmarked /api/achievements calls the rest of the app makes are passed straight through.
+#
+# Two ORDINARY tiers deliberately: `_fanfare` (legendary/feat only) seats a mascot off a
+# canvas alpha sample and rains 84 confetti nodes, none of which the queue handoff cares
+# about.
+_QUEUED_ACH = [
+    {"id": "harness-queued-one", "name": "First In The Queue", "tier": "epic",
+     "desc": "the moment that gets clicked first", "points": 10, "icon": "\U0001F3C6"},
+    {"id": "harness-queued-two", "name": "Second In The Queue", "tier": "rare",
+     "desc": "the moment appended in the same task the first one leaves in",
+     "points": 5, "icon": "\U0001F3C5"},
+]
+
+# Records every .ach-m2 the engine appends, by its name line, so the test can prove the
+# SECOND moment really presented rather than inferring it from an empty screen.
+_WATCH_MOMENTS_JS = """
+window.__achSeen = [];
+document.addEventListener('DOMContentLoaded', () => {
+  new MutationObserver((recs) => {
+    recs.forEach((r) => Array.prototype.forEach.call(r.addedNodes, (n) => {
+      if (n.nodeType === 1 && n.classList && n.classList.contains('ach-m2')) {
+        const el = n.querySelector('.n');
+        window.__achSeen.push(el ? el.textContent : '');
+      }
+    }));
+  }).observe(document.body, { childList: true });
+});
+"""
+
+
+def test_the_dismiss_helper_clears_a_queue_of_celebrations(logged_in_page):
+    """Two achievements earned at once, both dismissed through the helper, no timeout.
+
+    This is the shape the helper's own docstring promises to handle and the shape its
+    2026-09-07 first rewrite could not: ach.js swaps the successor in on the same tick the
+    clicked moment leaves on, so a helper that waits for `.ach-m2` to detach waits for a
+    state the engine never enters.
+    """
+    page = logged_in_page(**DESKTOP)
+    page.add_init_script(_WATCH_MOMENTS_JS)
+
+    payload = {"achievements": list(_QUEUED_ACH), "skins": [], "skin": "moonglade",
+               "newly": [a["id"] for a in _QUEUED_ACH]}
+
+    def _boot(route):
+        # ONLY the mark-and-toast boot fetch is faked; the Folio's and the Panel's own
+        # unmarked reads go to the real server untouched.
+        if "mark=1" in route.request.url:
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload))
+        else:
+            route.continue_()
+
+    _is_ach = lambda url: "/api/achievements" in url   # noqa: E731 -- unroute needs the identity
+    page.route(_is_ach, _boot)
+    try:
+        _visit(page, "/")
+        page.wait_for_selector(".ach-m2")
+        assert page.locator(".ach-m2").count() == 1, (
+            "the engine put {} moments on screen at once -- this test is meant to drive "
+            "the QUEUE (_q/_next), not the flood parade".format(
+                page.locator(".ach-m2").count()))
+        assert _QUEUED_ACH[0]["name"] in page.locator(".ach-m2").first.inner_text()
+
+        try:
+            _dismiss_any_achievement_toast(page)
+        except _PlaywrightTimeout as exc:
+            pytest.fail(
+                "the dismiss helper timed out on a two-deep celebration queue -- ach.js "
+                "removes the clicked moment and appends its successor in one task, so "
+                "`.ach-m2` is never absent between them: {}".format(exc))
+
+        assert page.locator(".ach-m2").count() == 0, (
+            "the helper returned with a celebration still on screen")
+        seen = page.evaluate("() => window.__achSeen")
+        assert seen == [a["name"] for a in _QUEUED_ACH], (
+            "the queue did not present both moments in turn -- saw {!r}".format(seen))
+    finally:
+        page.unroute(_is_ach, _boot)
+
+
+# ---------------------------------------------------------------------------
+# The Bridge §1 -- the Control Panel's Mirror tile, at rest
+# ---------------------------------------------------------------------------
+# ROADMAP-internal.md kept one Bridge follow-on open: "a render-harness guard". The tile
+# (ControlPanelOverlay.jsx's MirrorTile, control-panel.css's "The Bridge §1" block) is a
+# credential gate, so the two things worth guarding are what it SAYS at rest and what it
+# REFUSES to do. Its colour ladder -- emerald >7 days / peach <=7 / ruby <=0 / grey off --
+# lives entirely in CSS class rules, which is exactly the shape of thing a substring test
+# can confirm exists while the rendered ring paints something else.
+#
+# Nothing in this test may reach pixai.art. It cannot by construction: the resting state
+# is `connected: false` (no mirror_session.json under the harness's own config path), and
+# MirrorTile.toggle() short-circuits BEFORE any fetch when the switch is asked to arm with
+# no session. That is asserted, not assumed, and a route abort backs it up.
+
+# Read the ring's rendered stroke against the two tokens the ladder names, resolved by the
+# browser from real probe elements -- comparing a computed rgb() to a raw token string
+# would be the substring test this file exists to replace.
+_READ_MIRROR_RING_JS = """() => {
+  const probe = (tok) => {
+    const d = document.createElement('div');
+    d.style.color = 'var(' + tok + ')';
+    document.body.appendChild(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  };
+  const ring = document.querySelector('.mgbr-ring');
+  const fg = ring.querySelector('.mgbr-ring-fg');
+  return {
+    ringClass: ring.className,
+    stroke: getComputedStyle(fg).stroke,
+    grey: probe('--overlay0'),
+    emerald: probe('--emerald'),
+    dasharray: fg.getAttribute('stroke-dasharray'),
+    dashoffset: fg.getAttribute('stroke-dashoffset'),
+  };
+}"""
+
+
+def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_page):
+    """The Bridge §1's gate, rendered: grey ring, empty ring, pill off, and a toggle that
+    goes nowhere.
+
+    Four assertions, in the order the owner meets the tile:
+      1. it is there and it is NOT armed -- .mgbr-tile without .armed;
+      2. the JWT ring is in its OFF state, measured rather than read off a class name: the
+         rendered stroke is the ladder's grey (--overlay0) and not its emerald, and the arc
+         is drawn at zero length (dashoffset == the full circumference), which is what "no
+         session, no days" looks like;
+      3. the pill toggle exists, is off, and says so to a screen reader (aria-pressed);
+      4. pressing it ARMS NOTHING. MirrorTile.toggle() refuses a want-on with no connected
+         session before it fetches anything, so the tile stays off, the refusal appears in
+         its own message line, and no /api/mirror write -- and no request to any host but
+         this harness's own server -- ever leaves the page.
+
+    The Connect button is deliberately never pressed: /api/mirror/connect makes the SERVER
+    read this machine's real browser cookie store. Reading the tile's resting state is the
+    guard the roadmap asked for; arming it is not.
+    """
+    from urllib.parse import urlparse
+
+    page = logged_in_page(**DESKTOP)
+    # Belt and braces under the assertion below: even a regression that tried could not
+    # actually reach the site from this page.
+    page.route("**/*pixai.art/**", lambda route: route.abort())
+    seen = []
+    page.on("request", lambda r: seen.append((r.method, r.url)))
+
+    _visit(page, "/")
+    page.wait_for_selector("header")
+    _open_panel(page)
+    page.wait_for_selector(".mgcp-bridge .mgbr-tile")
+    # The pill is disabled until /api/mirror/status answers, so this is also the wait for
+    # the tile to be driven by the SERVER's real state rather than its null-state placeholder.
+    page.wait_for_selector(".mgbr-pill:not([disabled])")
+    _settle(page)
+
+    # 1. present, and off
+    tile = page.locator(".mgcp-bridge .mgbr-tile")
+    assert tile.count() == 1
+    assert "armed" not in (tile.get_attribute("class") or ""), (
+        "the Mirror tile is armed on a harness server that has no session at all")
+    assert "Off · tier hidden" in page.locator(".mgbr-status").inner_text()
+    assert "Not connected" in page.locator(".mgbr-session-sub").inner_text()
+
+    # 2. the ring's OFF rung of the ladder, as rendered
+    ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert "off" in ring["ringClass"].split(), (
+        "the ring is on the {!r} rung with no session".format(ring["ringClass"]))
+    assert ring["stroke"] == ring["grey"], (
+        "the OFF ring paints {} -- the ladder's grey (--overlay0) is {}".format(
+            ring["stroke"], ring["grey"]))
+    assert ring["stroke"] != ring["emerald"], "the OFF ring paints the ARMED colour"
+    assert ring["dashoffset"] == ring["dasharray"], (
+        "the OFF ring draws an arc ({} of {}) -- with no session there are no days to show"
+        .format(ring["dashoffset"], ring["dasharray"]))
+    assert page.locator(".mgbr-days").inner_text().strip() == "0"
+
+    # --- phase 2: prove that ladder is LIVE css, not a rule nothing reaches. Flip the rung
+    # in the page only (never a committed change) and the same stroke must move to emerald.
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('off'); r.classList.add('healthy'); }")
+    _settle(page)
+    armed_ring = page.evaluate(_READ_MIRROR_RING_JS)
+    assert armed_ring["stroke"] == armed_ring["emerald"], (
+        "the healthy rung does not repaint the ring ({}) -- the OFF assertion above is "
+        "vacuous".format(armed_ring["stroke"]))
+    page.evaluate("() => { const r = document.querySelector('.mgbr-ring');"
+                  " r.classList.remove('healthy'); r.classList.add('off'); }")
+
+    # 3. the pill, off
+    pill = page.locator(".mgbr-pill")
+    assert pill.count() == 1
+    assert "on" not in (pill.get_attribute("class") or "").split()
+    assert pill.get_attribute("aria-pressed") == "false"
+
+    # 4. pressing it arms nothing and calls nothing
+    before = len(seen)
+    pill.click()
+    page.wait_for_selector(".mgbr-msg")
+    assert "Connect a session first" in page.locator(".mgbr-msg").inner_text(), (
+        "the toggle did something other than refuse: {!r}".format(
+            page.locator(".mgbr-msg").inner_text()))
+    _settle(page)
+    assert "armed" not in (tile.get_attribute("class") or ""), "the tile armed itself"
+    assert "on" not in (pill.get_attribute("class") or "").split(), "the pill flipped on"
+    assert page.evaluate(_READ_MIRROR_RING_JS)["stroke"] == ring["grey"]
+
+    after = seen[before:]
+    assert not after, "pressing the toggle fired {} request(s): {}".format(len(after), after)
+    # And over the WHOLE test: the tile read its status and wrote nothing, and nothing at
+    # all went anywhere but this harness's own ephemeral port.
+    host = urlparse(page.url).hostname
+    foreign = [u for (m, u) in seen
+               if urlparse(u).hostname not in (None, "", host)]
+    assert not foreign, "requests left the harness server: {}".format(foreign)
+    writes = [(m, u) for (m, u) in seen if "/api/mirror/" in u and m != "GET"]
+    assert not writes, "a mirror WRITE left the page: {}".format(writes)
+    assert any(m == "GET" and "/api/mirror/status" in u for (m, u) in seen), (
+        "the tile never read /api/mirror/status -- it is rendering a placeholder, so every "
+        "assertion above is about nothing")
+
+
+# --- The pickers page past 24 (owner, 2026-09-07, twice: "still do not scroll past a set
+# selection of models and lora in all tabs and sorts", desktop and phone). Two fixes were
+# claimed from code reads before this test existed; this is the browser proof, on both shells,
+# with the market faked so PixAI is never called. -----------------------------------------
+def _fake_market_pages(monkeypatch, per_page=24, pages=3, overlap=0):
+    """Three pages of LoRA rows the way /api/model-search hands them to the picker.
+
+    `overlap` = how many of a page's first rows REPEAT the previous page's last rows (same
+    model_id, same title), the way PixAI's ranking feeds actually page (measured live 2026-09-07:
+    288 trending rows, 281 distinct). A keyword search answers with five "Hands LoRA" hits."""
+    def _row(n, i):
+        return {"model_id": "fake-%d-%d" % (n, i), "title": "Fake LoRA %d.%02d" % (n, i),
+                "preview_url": "", "liked_count": i, "lora_base_model_type": "",
+                "description": "", "official": False, "should_blur": False}
+
+    def page(n):
+        rows = [_row(n, i) for i in range(per_page)]
+        if overlap and n > 1:
+            rows[:overlap] = [_row(n - 1, i) for i in range(per_page - overlap, per_page)]
+        return {"results": rows, "has_more": n < pages, "next_cursor": ("p%d" % (n + 1)) if n < pages else ""}
+
+    def hits(keyword):
+        rows = [{"model_id": "hit-%d" % i, "title": "Hands LoRA %d" % i, "preview_url": "",
+                 "liked_count": 0, "lora_base_model_type": "", "description": keyword,
+                 "official": False, "should_blur": False} for i in range(1, 6)]
+        return {"results": rows, "has_more": False, "next_cursor": ""}
+    calls = []
+
+    def fake_search(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
+        calls.append(after)
+        if keyword:
+            return hits(keyword)
+        n = int(after[1:]) if after else 1
+        return page(n)
+    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    return calls
+
+
+def _scroll_pane_to_bottom(page):
+    """Scroll whichever element actually scrolls the open picker: the flyout's non-head pane."""
+    page.evaluate("""() => {
+        const fly = document.querySelector('.mfly.open');
+        const panes = [...fly.querySelectorAll(':scope > div:not(.mfly-head)')].filter(d => d.style.display !== 'none');
+        const pane = panes[0];
+        pane.scrollTop = pane.scrollHeight;
+        const grid = pane.querySelector('.mg-grid');
+        if (grid) grid.scrollTop = grid.scrollHeight;
+    }""")
+
+
+def _cards(page):
+    return page.locator(".mfly.open .mg-card").count()
+
+
+def test_desktop_lora_picker_pages_past_its_first_24(logged_in_page, monkeypatch):
+    calls = _fake_market_pages(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    # the LoRA row lives in the dock's settings; expand if the + LoRA control is not on screen
+    if not page.locator(".mgdock-addlora").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-addlora", state="visible")
+    page.click(".mgdock-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    # >= 24, not == 24: the next page is prefetched a page early, so the list may already be past
+    # its first page by the time this looks
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 72", timeout=8000)
+    assert _cards(page) == 72, "three pages of 24 must all be in the list"
+    assert calls[:3] == [None, "p2", "p3"], calls
+
+
+def test_desktop_lora_search_replaces_the_list_with_no_leftover_cards(logged_in_page, monkeypatch):
+    """The feed repeats a model across pages; a repeated model_id is a repeated React key, and the
+    card behind it can never be removed again -- it stayed at the top of every later list, above
+    the real results. Owner, 2026-09-07: "its always the SAME lora exactly", "Search is still
+    shit". Twenty-two such leftovers sat in his tab over the 24 "Perfect Hands" hits React held.
+    The list must carry each model once, and a search must leave nothing of the old list behind."""
+    _fake_market_pages(monkeypatch, overlap=2)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    if not page.locator(".mgdock-addlora").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-addlora", state="visible")
+    page.click(".mgdock-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
+    _scroll_pane_to_bottom(page)
+    # page 2 repeats page 1's last two rows: 48 rows handed over, 46 distinct models
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 46", timeout=8000)
+    mids = page.evaluate("() => [...document.querySelectorAll('.mfly.open .mg-card')].map(c => c.dataset.mid)")
+    assert len(mids) == len(set(mids)), "a model is in the list twice: %s" % [m for m in mids if mids.count(m) > 1]
+    # now a search: the whole list must be the five hits, the first card the first hit, nothing left over
+    page.locator(".mfly.open .mg-q").locator("visible=true").fill("hands")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.mfly.open .mg-card')].some(c => c.textContent.includes('Hands LoRA 1'))",
+        timeout=8000)
+    page.wait_for_timeout(400)   # let any straggling continuation land before counting
+    cards = page.evaluate("() => [...document.querySelectorAll('.mfly.open .mg-card')].map(c => c.textContent.trim().slice(0, 12))")
+    assert len(cards) == 5, "leftover cards from the old list are still in the grid: %s" % cards
+    assert cards[0].startswith("Hands LoRA 1"), cards
+    assert not any(c.startswith("Fake LoRA") for c in cards), cards
+
+
+def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_in_page, monkeypatch):
+    calls = _fake_market_pages(monkeypatch)
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-addlora")
+    page.click(".cm-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
+    assert calls[:2] == [None, "p2"], calls
+    # the way out: the sheet head's Confirm selection, visible inside the viewport, closes the sheet
+    done = page.locator(".mfly.open .mfly-done")
+    assert done.count() == 1, "the phone sheet head carries the Confirm selection button"
+    box = done.bounding_box()
+    vw, vh = PHONE["width"], PHONE["height"]
+    assert box and 0 <= box["y"] and box["y"] + box["height"] <= vh and box["x"] + box["width"] <= vw, box
+    assert done.inner_text().strip() == "Confirm selection"
+    # a tap on a card keeps the sheet open (multi-select) and the button still reachable
+    page.locator(".mfly.open .mg-card").first.click()
+    assert page.locator(".mfly.open").count() == 1
+    assert done.is_visible()
+    done.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+
+
+# --- The phone's LoRA sheet, on the owner's actual phone profile (2026-09-07, his 5059
+# screenshot: the sheet with no head at all -- no Models/LoRAs tabs, no Confirm selection, no
+# search box -- the page's hero sitting above it and the tab bar below). The 390x844 desktop-
+# Chromium proof above passed while his phone showed this, so the proof was not the phone. ----
+def _sheet_geometry(page):
+    """Everything about where the open sheet and its head actually are, from the page's side."""
+    return page.evaluate("""() => {
+        const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+            return {x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height)}; };
+        const hit = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+            const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+            if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return "off-screen";
+            const at = document.elementFromPoint(cx, cy);
+            return at && (at === el || el.contains(at)) ? "hit" : (at ? (at.className || at.tagName).toString().slice(0, 40) : "nothing"); };
+        const fly = document.querySelector('.mfly.open');
+        const pane = fly && [...fly.querySelectorAll(':scope > div:not(.mfly-head)')].find(d => d.style.display !== 'none');
+        const head = fly && fly.querySelector('.mfly-head');
+        const done = fly && fly.querySelector('.mfly-done');
+        const q = pane && pane.querySelector('.mg-q');
+        const chain = []; let e = fly && fly.parentElement;
+        while (e && e !== document.documentElement) { const s = getComputedStyle(e);
+            if (s.transform !== 'none' || s.contain !== 'none' || s.filter !== 'none' || s.overflow !== 'visible' || s.position === 'fixed')
+                chain.push({cls: (e.className || e.tagName).toString().split(' ')[0], transform: s.transform !== 'none', contain: s.contain, overflow: s.overflow, position: s.position, z: s.zIndex, rect: r(e)});
+            e = e.parentElement; }
+        const scrim = document.querySelector('.glm-scrim'); const hero = document.querySelector('.glm-hero');
+        const chainOf = (el) => { const out = []; while (el && el !== document.body) { out.push((el.className || el.tagName).toString().split(' ')[0]); el = el.parentElement; } return out.join('<'); };
+        const oy = fly ? Math.round(fly.getBoundingClientRect().y + 4) : -1;
+        const overlapTopmost = oy >= 0 ? chainOf(document.elementFromPoint(215, oy)).slice(0, 120) : null;
+        const body = document.querySelector('.glm-body');
+        const insideScroller = !!(fly && body && body.contains(fly));
+        const scrimInsideScroller = !!(scrim && body && body.contains(scrim));
+        // the hero's centre: the scrim must be the topmost thing there while the sheet is open
+        const hb = hero && hero.getBoundingClientRect();
+        const atHero = hb ? document.elementFromPoint(hb.x + hb.width / 2, hb.y + hb.height / 2) : null;
+        const scrimOverHero = !!(scrim && atHero === scrim);
+        return {viewport: {w: innerWidth, h: innerHeight}, insideScroller, scrimInsideScroller, scrimOverHero, overlapProbeY: oy, overlapTopmost, scrimZ: scrim ? getComputedStyle(scrim).zIndex : null,
+            heroStack: hero ? getComputedStyle(hero).position + '/' + getComputedStyle(hero).zIndex : null, sheet: r(fly), sheetOffsetParent: fly && fly.offsetParent ? (fly.offsetParent.className || 'el').toString().split(' ')[0] : null,
+            head: r(head), headHit: hit(head), done: r(done), doneHit: hit(done), search: r(q), searchHit: hit(q),
+            hero: r(document.querySelector('.glm-hero')), nav: r(document.querySelector('.glm-nav')), chain};
+    }""")
+
+
+def _open_phone_lora_sheet(page):
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-addlora")
+    page.click(".cm-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+
+
+@pytest.mark.parametrize("profile", ["PHONE", "IPHONE_PRO_MAX"])
+def test_phone_lora_sheet_head_and_search_box_are_on_screen_and_tappable(logged_in_page, monkeypatch, profile):
+    """The sheet's head (Models / LoRAs / Confirm selection) and its search box must be on
+    screen and the topmost thing at their own centre, on the owner's phone profile as on the
+    390-wide one. His screenshot had neither: the hero sat where the head should be."""
+    _fake_market_pages(monkeypatch)
+    page = logged_in_page(**globals()[profile])
+    _visit(page, "/")
+    _settle(page)
+    _open_phone_lora_sheet(page)
+    g = _sheet_geometry(page)
+    engine = page.context.browser.browser_type.name
+    print("\nSHEET GEOMETRY", profile, "on", engine, g)
+    assert g["head"] and g["headHit"] == "hit", "the sheet head is not on screen or something covers it: %r" % g
+    assert g["search"] and g["searchHit"] == "hit", "the search box is not on screen or something covers it: %r" % g
+    assert g["doneHit"] == "hit", "Confirm selection is not tappable: %r" % g
+    assert g["sheet"]["y"] >= 0, "the sheet's top is above the screen: %r" % g["sheet"]
+    # The second half of his report: hero and tab bar UNDIMMED, i.e. the scrim was confined too.
+    assert g["scrimOverHero"], "the scrim is not the topmost thing over the hero while the sheet is open: %r" % g
+    assert str(g["overlapTopmost"]).startswith("mfly"), "where the sheet overlaps the hero, the hero paints on top: %r" % g
+    # The rule no desktop engine can prove for us, so it is pinned structurally: iPhone Safari
+    # confines a fixed element inside a touch scroller to the scroller's box (his screenshot).
+    # Neither the sheet nor its scrim may be a DOM descendant of the scrolling body.
+    assert g["insideScroller"] is False, "the sheet lives inside the scrolling .glm-body again -- iPhone Safari clips it there"
+    assert g["scrimInsideScroller"] is False, "the scrim lives inside the scrolling .glm-body again -- iPhone Safari confines it there"
+    # Negative control (the module's own contract: each test proves itself). On these engines
+    # every geometry number above is the same with the old code, so the structural probe is
+    # the discriminating one -- prove it discriminates: put the sheet back inside the scroller
+    # and the probe must say so.
+    page.evaluate("() => document.querySelector('.glm-body').appendChild(document.querySelector('.cm-modelwrap'))")
+    assert _sheet_geometry(page)["insideScroller"] is True, "the scroller probe cannot see a sheet that IS inside .glm-body -- it proves nothing"

@@ -214,6 +214,168 @@ def test_resolve_version_meta_and_list_model_versions_agree_on_rows0(monkeypatch
     assert listed[0]["model_type"] == single["model_type"]
 
 
+# ---- the version meta carries the model's ALLOWED inference profiles ---------------------
+# SCOPE 2026-08-17 §4b, capture PROBE 2026-08-25: the profile set is per VERSION, not fixed
+# (Tsubaki.2 = lite/standard/pro/ultra incl. a membershipOnly Ultra; Tsubaki.3 = pro/ultra
+# only). It is NOT in the /versions row, so the resolver runs a SECOND, version-keyed read
+# (_model_profiles, the same one the price/submit gate uses) and hands the drawer the plain
+# profileName list it needs to dim a bar. That read is OPT-IN (with_profiles=True) as of
+# 2026-09-07: only the callers that render a mode bar pay it, because a caller that never
+# looks at `profiles` was silently paying a second PixAI GET per resolve. PixAI is read-only
+# here; the REST call is faked.
+
+_VERSIONS = [{"id": "V7", "modelType": "MMDIT26A_MODEL", "loraBaseModelType": None,
+              "createdAt": "2026-08-25T00:00:00Z", "extra": {}},
+             {"id": "V6", "modelType": "MMDIT26A_MODEL", "loraBaseModelType": None,
+              "createdAt": "2026-08-01T00:00:00Z", "extra": {}}]
+
+_TSUBAKI2 = {"profiles": [
+    {"profileName": "lite", "title": "Lite", "samplingSteps": 4, "profileFlag": "default",
+     "negativePrompt": "off"},
+    {"profileName": "standard", "title": "Standard", "samplingSteps": 8,
+     "profileFlag": "custom", "negativePrompt": "off"},
+    {"profileName": "pro", "title": "Pro", "samplingSteps": 35, "profileFlag": "custom",
+     "negativePrompt": "on"},
+    {"profileName": "ultra", "title": "Ultra", "samplingSteps": 50,
+     "profileFlag": "membershipOnly", "negativePrompt": "on"},
+]}
+
+
+def _route(versions=_VERSIONS, profiles=_TSUBAKI2, calls=None):
+    """One fake for BOTH reads: /versions answers rows, /inference-profiles answers the
+    captured body. `profiles` may be an exception instance to fail that read only."""
+    def get(session, path, **k):
+        if calls is not None:
+            calls.append(path)
+        if path.endswith("/inference-profiles"):
+            if isinstance(profiles, Exception):
+                raise profiles
+            return profiles
+        return versions
+    return get
+
+
+def test_version_meta_carries_the_models_allowed_profiles(monkeypatch):
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    assert m["version_id"] == "V7"
+    # plain profileNames, in the order the site returned them -- membershipOnly Ultra
+    # INCLUDED (the site's own rejection path owns membership, not this display gate)
+    assert m["profiles"] == ["lite", "standard", "pro", "ultra"]
+    # the second read is version-keyed, not model-keyed (the model route 404s on a version)
+    assert "/generation-model/V7/inference-profiles" in calls
+
+    # Tsubaki.3's real shape: only two profiles, so the drawer dims lite + standard
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": [
+        {"profileName": "pro", "profileFlag": "default"},
+        {"profileName": "ultra", "profileFlag": "custom"}]}))
+    core._profile_cache.clear()
+    assert core.resolve_version_meta(
+        object(), "M1", with_profiles=True)["profiles"] == ["pro", "ultra"]
+
+
+def test_version_meta_profiles_survive_a_failed_read(monkeypatch):
+    """A failed/unparseable profile read must never break the resolve or lose the rest of
+    the meta -- it leaves profiles=None, which the drawer reads as "unknown, dim nothing"."""
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("nope")))
+    m = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    assert m["profiles"] is None and m["version_id"] == "V7"
+    assert m["model_type"] == "MMDIT26A_MODEL"          # the rest of the shape is intact
+
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=RuntimeError("socket")))
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
+
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}))   # wrong body key
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] is None
+
+    # An SDXL model answers a definitive `{"profiles": []}` -- a real answer, not a failure.
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"profiles": []}))
+    assert core.resolve_version_meta(object(), "M1", with_profiles=True)["profiles"] == []
+
+    # No version at all -> the empty shape still carries the key.
+    monkeypatch.setattr(core, "_rest_get", lambda *a, **k: [])
+    assert core.resolve_version_meta(object(), "x", with_profiles=True)["profiles"] is None
+
+
+def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
+    """The profiles read is OPT-IN (red team 2026-09-07). resolve_version_meta is the SHARED
+    low-level resolver -- /api/task-params' Remix loop calls it once per unique LoRA base and
+    reads only lora_base_model_type/model_type. Attaching profiles inside it doubled that
+    route's PixAI reads for a field it drops. Default: ONE GET, profiles present but None."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    m = core.resolve_version_meta(object(), "M1")
+    assert m["version_id"] == "V7"                       # the rest of the shape is untouched
+    assert m["profiles"] is None                         # the key is still always present
+    assert calls == ["/generation-model/M1/versions"]    # exactly one read, no /inference-profiles
+
+    # ...and the opt-in caller (the mode bar's own route) pays exactly one more.
+    calls.clear()
+    core._profile_cache.clear()
+    m2 = core.resolve_version_meta(object(), "M1", with_profiles=True)
+    assert m2["profiles"] == ["lite", "standard", "pro", "ultra"]
+    assert calls == ["/generation-model/M1/versions",
+                     "/generation-model/V7/inference-profiles"]
+
+
+def test_resolve_latest_version_stays_a_one_read_wrapper(monkeypatch):
+    """resolve_latest_version wants an id and nothing else -- it must never have been paying
+    for a profiles read either."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    assert core.resolve_latest_version(object(), "M1") == "V7"
+    assert calls == ["/generation-model/M1/versions"]
+
+
+def test_a_failed_profiles_read_is_not_repeated_within_the_short_ttl(monkeypatch):
+    """A failed read used to be cached NOT AT ALL, so a version PixAI will not answer for
+    re-fired the GET on every single call -- every /api/price keystroke, forever. It is now
+    remembered for _PROFILE_FAIL_TTL (60s) and returns the same fail-soft None meanwhile
+    (red team 2026-09-07)."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=core.PixAIError("502"), calls=calls))
+    for _ in range(4):
+        assert core._model_profiles(object(), "V7") is None
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+
+    # An unparseable 200 body is the same kind of miss and is bounded the same way.
+    calls.clear()
+    core._profile_cache.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles={"data": []}, calls=calls))
+    for _ in range(4):
+        assert core._model_profiles(object(), "V7") is None
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+
+    # ...but it is a SHORT memory: once the fail TTL is behind it, the next call retries and
+    # a recovered route is picked up. (Pinned by rewinding the entry's timestamp, so the test
+    # neither sleeps nor depends on the constant's exact value beyond it being finite.)
+    core._profile_cache["V7"] = (core._profile_cache["V7"][0] - core._PROFILE_FAIL_TTL - 1, None)
+    calls.clear()
+    monkeypatch.setattr(core, "_rest_get", _route(profiles=_TSUBAKI2, calls=calls))
+    assert core._model_profiles(object(), "V7") == _TSUBAKI2["profiles"]
+    assert calls.count("/generation-model/V7/inference-profiles") == 1
+    # and a SUCCESS keeps the long TTL, not the short one
+    assert core._PROFILE_FAIL_TTL < core._PROFILE_CACHE_TTL
+
+
+def test_list_model_versions_reads_profiles_once_for_the_applied_row(monkeypatch):
+    """The picker's ?all=1 list must not turn one pick into a read PER version (this
+    function's own no-N+1 contract). Only the row the drawer applies -- is_latest -- gets
+    the second read; the others carry profiles=None, which dims nothing."""
+    calls = []
+    monkeypatch.setattr(core, "_rest_get", _route(calls=calls))
+    out = core.list_model_versions(object(), "M1")
+    assert [v["version_id"] for v in out] == ["V7", "V6"]
+    assert out[0]["is_latest"] is True and out[0]["profiles"] == ["lite", "standard", "pro", "ultra"]
+    assert out[1]["profiles"] is None
+    assert [c for c in calls if c.endswith("/inference-profiles")] == \
+        ["/generation-model/V7/inference-profiles"]
+
+
 # ---- annotate_lora_compat (problem 3: architecture-aware LoRA sort/badge) -----------------
 # Mock rows use the CONFIRMED-live shape: `lora_base_model_type`, sourced from GraphQL's
 # latestVersion.loraBaseModelType (model_search_market_gql) -- e.g. real rows come back as
@@ -303,10 +465,13 @@ def test_model_search_market_gql(monkeypatch):
         ]}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
 
-    # base + category + newest -> category/orderBy interpolated, keyword bound as a variable
+    # base + category + newest -> category/feed interpolated, keyword bound as a variable.
+    # (Since 2026-09-07 a keyword re-points a ranking feed at the relevance one, so -createdAt is
+    # NOT expected here -- test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed
+    # pins both halves of that; the keywordless Latest orderBy is asserted just below.)
     r = core.model_search_market_gql(object(), keyword="anime", category="style",
                                      sort="newest", usage="MODEL", limit=24)
-    assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+    assert 'category:"style"' in captured["query"] and 'feed:"meilisearch"' in captured["query"]
     assert captured["vars"]["k"] == "anime"           # keyword stays a bound var (no injection)
     assert [m["model_id"] for m in r["results"]] == ["1"]   # LoRA dropped for MODEL usage
     m0 = r["results"][0]
@@ -315,10 +480,80 @@ def test_model_search_market_gql(monkeypatch):
     assert m0["description"] == "" and m0["ref_count"] == 0 and m0["official"] is False  # REST-only empty
     assert r["has_more"] is True
 
+    # the same category + Newest browse WITHOUT a keyword -- what this test has always been
+    # about -- still interpolates the Latest feed and its -createdAt, which REST silently ignores
+    core.model_search_market_gql(object(), category="style", sort="newest", usage="MODEL", limit=24)
+    assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+    assert 'feed:"latest"' in captured["query"]
+
     # LoRA usage keeps only LoRA rows; a bad category is ignored (no category arg emitted)
     r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
     assert 'category:' not in captured["query"]          # 'concept' not whitelisted
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
+
+
+def test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed(monkeypatch):
+    """Owner walk 2026-09-07: 'searching for a known LoRA fails' / 'it's always the SAME LoRA'.
+
+    `trending` and `latest` are RANKINGS. The connection accepts `keyword` alongside them and
+    returns the ranking anyway -- so every term produced the same head row, which is what
+    'always the same LoRA' is. Measured live that day under lora_base_type=MMDIT26A_MODEL:
+    trending gave 'Perfect Hands' -> 'Extremely detailed...', 'eyes' -> the same row again, and
+    'qwxzv nonsense' -> eight rows; meilisearch with an EMPTY orderBy gave 'JP Anime Perfect
+    Hands' / 'beautiful eyes' / nothing.
+
+    A wrong feed does not error -- it returns a plausible-looking list -- so this is pinned.
+    feed/orderBy are INTERPOLATED into the document (fixed table, never user text), so they are
+    asserted on the query, not on the bound variables.
+    """
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"], captured["vars"] = query, vars
+        return {"generationModels": {"pageInfo": {}, "edges": []}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    # trending + a keyword -> relevance search, and NO orderBy at all (that empty orderBy IS
+    # the relevance ranking; any orderBy would re-sort the matches and bury them again).
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="trending", usage="LORA",
+                                 lora_base_type="MMDIT26A_MODEL")
+    assert 'feed:"meilisearch"' in captured["query"]
+    assert "orderBy:" not in captured["query"]
+    assert captured["vars"]["k"] == "Perfect Hands"      # still a bound var, never interpolated
+    # ...and the base filter is orthogonal: it stays on (its rows measured correct and relevant).
+    assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
+
+    # the SAME call with no keyword is untouched -- plain browsing is what the ranking is for
+    core.model_search_market_gql(object(), sort="trending", usage="LORA",
+                                 lora_base_type="MMDIT26A_MODEL")
+    assert 'feed:"trending"' in captured["query"] and "meilisearch" not in captured["query"]
+    # a whitespace-only box is not a search
+    core.model_search_market_gql(object(), keyword="   ", sort="trending", usage="LORA")
+    assert 'feed:"trending"' in captured["query"]
+
+    # Latest is a ranking too, so a keyword re-points it the same way (and drops -createdAt).
+    core.model_search_market_gql(object(), keyword="eyes", sort="newest", usage="LORA")
+    assert 'feed:"meilisearch"' in captured["query"] and "orderBy:" not in captured["query"]
+    core.model_search_market_gql(object(), sort="newest", usage="LORA")
+    assert 'feed:"latest"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+
+    # liked/used are ALREADY meilisearch and KEEP their orderBy -- measured returning exact
+    # matches first ('Perfect Hands SDXL'), so there is nothing here to fix.
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="liked", usage="LORA")
+    assert 'feed:"meilisearch"' in captured["query"]
+    assert 'orderBy:"-markInfo.likedCount"' in captured["query"]
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="used", usage="LORA")
+    assert 'orderBy:"-markInfo.refCount"' in captured["query"]
+
+    # The pair lives in MARKET_SORTS as `relevance` rather than being written out here, so the
+    # feed table stays the one place a feed name is spelled.
+    assert core.MARKET_SORTS["relevance"] == ("meilisearch", "")
+    # It is a FALLBACK, not a fifth sort the picker offers -- the four it does offer are intact.
+    assert core.market_sort("trending") == ("trending", "")
+    assert core.market_sort("newest") == ("latest", "-createdAt")
+
+    # Base-model search gets it too: the feed is a property of the connection, not of the kind.
+    core.model_search_market_gql(object(), keyword="Tsubaki", sort="trending", usage="MODEL")
+    assert 'feed:"meilisearch"' in captured["query"]
 
 
 def test_market_asks_the_server_for_the_right_KIND_of_model(monkeypatch):
@@ -536,7 +771,11 @@ def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch
                                          lora_base_type=arch)
         q = captured["query"]
         assert "loraBaseModelTypes:[%s]" % arch in q
-        assert 'category:"style"' in q and 'orderBy:"-createdAt"' in q and "keyword:$k" in q
+        # This call carries a KEYWORD, so since 2026-09-07 its Latest ranking is replaced by the
+        # relevance feed and -createdAt goes with it (see
+        # test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed). What this test is
+        # about is unchanged: every OTHER argument still rides along with the arch filter.
+        assert 'category:"style"' in q and 'feed:"meilisearch"' in q and "keyword:$k" in q
         assert r["next_cursor"] == "C1"
 
         captured2 = _gql_capture(monkeypatch)
@@ -566,6 +805,67 @@ def test_lora_base_type_filter_does_not_replace_the_per_row_compat_badge(monkeyp
                                        lora_base_type="DIT7B_MODEL")["results"]
     tagged = core.annotate_lora_compat(res, "DIT7B_MODEL")
     assert {t["model_id"]: t["compat"] for t in tagged} == {"1": "yes", "2": "no"}
+
+
+def _lora_rows_two_architectures():
+    """One SDXL LoRA and one MMDIT26B one -- what PixAI answers when nothing narrows the
+    architecture. The SDXL row is the "known LoRA" of the report: it is the one the owner
+    typed the name of, and it is the one the server filter used to remove."""
+    return [
+        {"id": "1", "title": "Perfect Hands SDXL", "type": "MULTI_LORA", "isNsfw": False,
+         "likedCount": 5, "latestVersion": {"id": "v1", "modelType": "MULTI_LORA",
+                                            "loraBaseModelType": "SDXL_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+        {"id": "2", "title": "JP Anime Perfect Hands", "type": "MULTI_LORA", "isNsfw": False,
+         "likedCount": 2, "latestVersion": {"id": "v2", "modelType": "MULTI_LORA",
+                                            "loraBaseModelType": "MMDIT26B_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+    ]
+
+
+def test_a_keyword_search_shows_a_match_the_picked_base_cannot_run(tmp_path, monkeypatch, pixai):
+    """Owner's SECOND walk, 2026-09-07: "searching for a known LoRA still fails".
+
+    The first fix that day moved a keyword off a ranking feed onto the relevance index, and
+    that half worked. What still hid the answer was LAYER 1, the server-side
+    loraBaseModelTypes filter added 2026-07-24: search for an SDXL LoRA you know while
+    Tsubaki.3 (MMDIT26B) is the picked base and PixAI is only ever asked for MMDIT26B rows,
+    so the LoRA whose NAME was typed is not in the response at all. The grid fills with other
+    loosely relevant LoRAs, the empty state never fires, and the search reads as broken.
+
+    So a KEYWORD search sends no filter and lets layer 3 speak: every match comes back tagged
+    `compat`, the incompatible ones sorted last, for the picker to grey out and badge
+    "needs SDXL" (ModelPicker.jsx: compat === "no" -> .incompat, unclickable unless already
+    selected). This drives the REAL route through the REAL core function with only the
+    transport faked, because the defect was in what the query asked PixAI for -- a test that
+    stubbed model_search_market_gql could not have seen it.
+    """
+    from tests.conftest import login_client
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    cli = login_client(tmp_path)
+
+    d = cli.get("/api/model-search?kind=lora&q=Perfect+Hands"
+                "&base_type=MMDIT26B_MODEL").get_json()
+    assert "loraBaseModelTypes" not in captured["query"], (
+        "a keyword search still asked PixAI to hide every other architecture")
+    assert captured["vars"]["k"] == "Perfect Hands"        # still the keyword search itself
+    # BOTH matches are here, the incompatible one last and tagged so the picker can grey it.
+    assert [(m["model_id"], m["compat"]) for m in d["results"]] == [("2", "yes"), ("1", "no")]
+    assert d["results"][-1]["lora_base_model_type"] == "SDXL_MODEL", (
+        "the badge has nothing to say 'needs SDXL' from")
+
+    # A keywordless BROWSE is untouched: the 2026-07-24 wall (a DiT user's browse coming back
+    # 24-of-24 SD 1.5) is exactly what the server filter is for, and this refines that ruling
+    # rather than reversing it.
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    d2 = cli.get("/api/model-search?kind=lora&base_type=MMDIT26B_MODEL").get_json()
+    assert "loraBaseModelTypes:[MMDIT26B_MODEL]" in captured["query"]
+    assert [m["compat"] for m in d2["results"]] == ["yes", "no"]   # layer 3 still runs
+
+    # A whitespace-only box is not a search -- same rule the feed switch already follows.
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    cli.get("/api/model-search?kind=lora&q=+++&base_type=MMDIT26B_MODEL")
+    assert "loraBaseModelTypes:[MMDIT26B_MODEL]" in captured["query"]
 
 
 def test_task_image_media_prefers_batch_over_grid():
