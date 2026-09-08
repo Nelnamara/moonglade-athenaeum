@@ -75,10 +75,10 @@ the day it was written.
 
 The CI gap, and what covers it
 ------------------------------
-This module SKIPS without playwright + chromium, and `.github/workflows/tests.yml`
-installs neither -- so on CI these guards do not run at all. That is a deliberate
-trade (see the marker note in `pytest.ini`), but it means defect 3 above would have
-regressed on a `push` unseen. `tests/csshelp.py` covers exactly that one axis in pure
+This module SKIPS without playwright + a browser. `.github/workflows/tests.yml` installs
+playwright and chromium for the pytest job, so on CI these guards RUN on chromium (the
+WebKit profile is local-only: `MG_HARNESS_BROWSER=webkit`). Before 2026-09 CI installed
+neither and defect 3 above regressed on a `push` unseen. `tests/csshelp.py` covers that one axis in pure
 stdlib: it resolves which declaration WINS the cascade (!important, specificity,
 document order) with no browser, and
 `tests/test_web_pick.py::test_portrait_mobile_drawer_rules_actually_win` asserts on
@@ -102,8 +102,8 @@ from moonglade_gallery import (
     telem_flag, telemetry_metrics, load_telemetry,
 )
 
-# No playwright (or no browser) => this whole module skips. It is not installed by
-# .github/workflows/tests.yml, so these tests SKIP in CI today and run locally.
+# No playwright (or no browser) => this whole module skips. .github/workflows/tests.yml installs
+# playwright + chromium, so on CI this module runs; a checkout without them skips it cleanly.
 _pw = pytest.importorskip(
     "playwright.sync_api",
     reason="the rendering harness needs playwright + a chromium binary")
@@ -125,8 +125,10 @@ PHONE = {"width": 390, "height": 844}
 # viewport with Safari's address bar and bottom toolbar on screen -- the screen's full 932 is
 # what iOS hands `vh`, and the gap between the two is where a 78vh bottom sheet loses its
 # head. Touch, the iOS user agent and the 3x ratio come with it, so the phone shell's own
-# device gates run the way they run in his hand. Playwright's WebKit engine is used for it
-# when installed (`python -m playwright install webkit`); Chromium otherwise, recorded as such.
+# device gates run the way they run in his hand. The ENGINE is a separate choice: chromium by
+# default (CI's only engine); `MG_HARNESS_BROWSER=webkit` runs this module on the engine iPhone
+# Safari uses (`python -m playwright install webkit` once). Neither engine reproduces the two
+# iOS-only behaviours the sheet fix answers, which is why that test also pins them structurally.
 IPHONE_PRO_MAX = {
     "width": 430, "height": 740, "device_scale_factor": 3, "is_mobile": True, "has_touch": True,
     "user_agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
@@ -169,13 +171,18 @@ def render_browser():
         # MG_HARNESS_BROWSER=webkit runs this whole module on the engine iPhone Safari uses
         # (`python -m playwright install webkit`); chromium is the default and CI's only engine.
         engine = (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower()
+        if engine not in ("chromium", "firefox", "webkit"):
+            # A typo here must not turn the whole harness into a SKIP with a reason that
+            # blames a missing chromium binary (red team, 2026-09-08).
+            pw.stop()
+            pytest.fail("MG_HARNESS_BROWSER=%r is not one of chromium, firefox, webkit" % engine)
         browser = getattr(pw, engine).launch()
     except Exception as exc:                                  # pragma: no cover
         pw.stop()
         # First line only: playwright's own message trails a multi-line ASCII banner that
         # would swamp the -rs summary.
-        pytest.skip("no usable chromium binary (run `playwright install chromium`): "
-                    "{}".format(str(exc).splitlines()[0]))
+        pytest.skip("no usable %s binary (run `playwright install %s`): "
+                    "%s" % (engine, engine, str(exc).splitlines()[0]))
     try:
         yield browser
     finally:
@@ -4582,7 +4589,12 @@ def _sheet_geometry(page):
         const overlapTopmost = oy >= 0 ? chainOf(document.elementFromPoint(215, oy)).slice(0, 120) : null;
         const body = document.querySelector('.glm-body');
         const insideScroller = !!(fly && body && body.contains(fly));
-        return {viewport: {w: innerWidth, h: innerHeight}, insideScroller, overlapProbeY: oy, overlapTopmost, scrimZ: scrim ? getComputedStyle(scrim).zIndex : null,
+        const scrimInsideScroller = !!(scrim && body && body.contains(scrim));
+        // the hero's centre: the scrim must be the topmost thing there while the sheet is open
+        const hb = hero && hero.getBoundingClientRect();
+        const atHero = hb ? document.elementFromPoint(hb.x + hb.width / 2, hb.y + hb.height / 2) : null;
+        const scrimOverHero = !!(scrim && atHero === scrim);
+        return {viewport: {w: innerWidth, h: innerHeight}, insideScroller, scrimInsideScroller, scrimOverHero, overlapProbeY: oy, overlapTopmost, scrimZ: scrim ? getComputedStyle(scrim).zIndex : null,
             heroStack: hero ? getComputedStyle(hero).position + '/' + getComputedStyle(hero).zIndex : null, sheet: r(fly), sheetOffsetParent: fly && fly.offsetParent ? (fly.offsetParent.className || 'el').toString().split(' ')[0] : null,
             head: r(head), headHit: hit(head), done: r(done), doneHit: hit(done), search: r(q), searchHit: hit(q),
             hero: r(document.querySelector('.glm-hero')), nav: r(document.querySelector('.glm-nav')), chain};
@@ -4607,12 +4619,23 @@ def test_phone_lora_sheet_head_and_search_box_are_on_screen_and_tappable(logged_
     _settle(page)
     _open_phone_lora_sheet(page)
     g = _sheet_geometry(page)
-    print("\nSHEET GEOMETRY", profile, g)
+    engine = page.context.browser.browser_type.name
+    print("\nSHEET GEOMETRY", profile, "on", engine, g)
     assert g["head"] and g["headHit"] == "hit", "the sheet head is not on screen or something covers it: %r" % g
     assert g["search"] and g["searchHit"] == "hit", "the search box is not on screen or something covers it: %r" % g
     assert g["doneHit"] == "hit", "Confirm selection is not tappable: %r" % g
     assert g["sheet"]["y"] >= 0, "the sheet's top is above the screen: %r" % g["sheet"]
+    # The second half of his report: hero and tab bar UNDIMMED, i.e. the scrim was confined too.
+    assert g["scrimOverHero"], "the scrim is not the topmost thing over the hero while the sheet is open: %r" % g
+    assert str(g["overlapTopmost"]).startswith("mfly"), "where the sheet overlaps the hero, the hero paints on top: %r" % g
     # The rule no desktop engine can prove for us, so it is pinned structurally: iPhone Safari
     # confines a fixed element inside a touch scroller to the scroller's box (his screenshot).
-    # The sheet must therefore never be a DOM descendant of the scrolling body.
+    # Neither the sheet nor its scrim may be a DOM descendant of the scrolling body.
     assert g["insideScroller"] is False, "the sheet lives inside the scrolling .glm-body again -- iPhone Safari clips it there"
+    assert g["scrimInsideScroller"] is False, "the scrim lives inside the scrolling .glm-body again -- iPhone Safari confines it there"
+    # Negative control (the module's own contract: each test proves itself). On these engines
+    # every geometry number above is the same with the old code, so the structural probe is
+    # the discriminating one -- prove it discriminates: put the sheet back inside the scroller
+    # and the probe must say so.
+    page.evaluate("() => document.querySelector('.glm-body').appendChild(document.querySelector('.cm-modelwrap'))")
+    assert _sheet_geometry(page)["insideScroller"] is True, "the scroller probe cannot see a sheet that IS inside .glm-body -- it proves nothing"

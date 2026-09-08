@@ -219,11 +219,14 @@
    same component for the desktop dock (.mgx-dock-host .mfly). Scoped under
    this wrapper so the rule can't leak onto desktop. ---- */
 .cm-modelwrap .mfly { position: fixed; inset: auto 0 0 0; left: 0; right: 0; top: auto;
-  width: auto; max-width: none; height: 78vh; max-height: 78vh; z-index: 331;
-  /* dvh follows the VISIBLE viewport on a phone; vh is the screen with the browser's
-     toolbars hidden, so a 78vh sheet is taller than the space it has whenever the
-     toolbars are up (iPhone Safari, owner 2026-09-07). The vh line above stays as the
-     fallback for a browser without dvh. */
+  width: auto; max-width: none; z-index: 331;
+  /* Sized by the VISIBLE viewport (dvh, iOS 15.4+ / every current browser). vh is the
+     screen with the browser's toolbars hidden, so a 78vh sheet is taller than the space it
+     has whenever the toolbars are up (iPhone Safari, owner 2026-09-07). The two vh lines
+     are the fallback for a browser without dvh: a fixed element's 100% is the visible
+     viewport even there, and the safe-area term keeps the head out from under the notch
+     (the page ships viewport-fit=cover). Declaration order matters: fallback first. */
+  height: 78vh; max-height: calc(100% - env(safe-area-inset-top, 0px) - 64px);
   height: 78dvh; max-height: 78dvh;
   border-radius: 16px 16px 0 0; border: 1px solid var(--surface1);
   border-left: none; border-right: none; border-bottom: none;
