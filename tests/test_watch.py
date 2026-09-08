@@ -508,7 +508,11 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     app = _watch_app(tmp_path)
     catchup = app.extensions["mg_watch_catchup"]
 
-    edges = [{"node": {"id": "W5", "status": "completed"}}]
+    # A live TaskSummary names the media it holds; since the 2026-09-07 catch-up fix the
+    # "already collected?" test resolves THOSE ids (cataloged_media_ids), so the fake node
+    # carries one, and the by-task lookup a video would use answers nothing.
+    edges = [{"node": {"id": "W5", "status": "completed", "mediaId": "M5", "batchMediaIds": None}}]
+    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: None)
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
