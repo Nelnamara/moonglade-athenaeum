@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+
+- **The widest phones get the phone build again.** The phone build switched on at 430 CSS pixels of width; the Pro Max class has been 440 since the iPhone 16, and Safari's page zoom widens the number further, so a real phone could land on the desktop build, as the owner's did on a fresh install on 2026-09-07. The line is 520 now: every phone made is under it, and the narrowest tablet held upright, an iPad mini at 744, is still well above it. (2026-09-07)
 - On the phone, a feat's detail sheet shows the whole badge instead of cropping it. (2026-09-07)
 - The library's five-minute catch-up no longer re-collects pictures it already has; the log stops claiming they were never mirrored. (2026-09-07)
 

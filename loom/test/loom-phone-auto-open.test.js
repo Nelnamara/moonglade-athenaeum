@@ -4,7 +4,7 @@
    I don't want a Tablet design pass anytime soon :|"
 
    So the gate is the app's ONE existing phone rule (gallery/src/hooks/useIsMobile.js), not
-   a new threshold: a tablet's screen.width is above its 430px clause, so a tablet stays on
+   a new threshold: a tablet's screen.width is above its 520px clause, so a tablet stays on
    the desktop build BY CONSTRUCTION rather than by a second number somebody has to keep in
    step. That is what the "tablet" tests below actually pin -- the rule the Loom defers to,
    and the fact that it defers rather than re-deciding.
@@ -109,9 +109,9 @@ describe("the phone rule the Loom defers to still excludes tablets", () => {
       "no hand-rolled viewport query in the Loom; the rule lives in one file");
   });
 
-  test("that rule is still the 430px one, with its coarse-pointer fallback", () => {
-    assert.match(isMobileSrc, /const MOBILE_QUERY = "\(max-width: 430px\)";/);
-    assert.match(isMobileSrc, /coarse && portrait && screenW <= 430/,
+  test("that rule is still the one width line (520px since 2026-09-07), with its coarse-pointer fallback", () => {
+    assert.match(isMobileSrc, /const MOBILE_QUERY = "\(max-width: 520px\)";/);   // 430 -> 520 on 2026-09-07: the Pro Max class is 440 wide
+    assert.match(isMobileSrc, /coarse && portrait && screenW <= 520/,
       "the fallback's screen.width clause is what keeps a real tablet on the desktop build");
   });
 
@@ -120,8 +120,10 @@ describe("the phone rule the Loom defers to still excludes tablets", () => {
     // that decide, in the same order the hook evaluates them. An iPad in portrait is
     // coarse-pointer and portrait, and its screen.width (768+) is what refuses it.
     const rule = (layoutW, coarse, portrait, screenW) =>
-      layoutW <= 430 || (coarse && portrait && screenW <= 430);
+      layoutW <= 520 || (coarse && portrait && screenW <= 520);
     assert.equal(rule(390, true, true, 390), true, "iPhone portrait is a phone");
+    assert.equal(rule(440, true, true, 440), true, "an iPhone Pro Max (440 wide since the 16) is a phone -- the 2026-09-07 case");
+    assert.equal(rule(489, true, true, 440), true, "the same phone with Safari page zoom at 90% is still a phone");
     assert.equal(rule(1024, true, true, 390), true, "iOS Chrome's desktop-wide viewport, still a phone");
     assert.equal(rule(768, true, true, 768), false, "iPad portrait stays on desktop");
     assert.equal(rule(1024, true, false, 1024), false, "iPad landscape stays on desktop");
