@@ -190,6 +190,14 @@ why this section exists.
 
 ## Backlog — needs scoping
 
+- **First run, before the pack: the sign-in page is bare.** Until the setup wizard has downloaded
+  the art pack, every branding image 404s by design, so a fresh install's sign-in page shows no
+  banner and no mascot; the only art the code carries is the wizard's own downloader mascot
+  (`gallery/src/art/nelWizard.js`). Owner, 2026-09-07, walking a fresh install: look at embedding the
+  login banner (and the login mascot) the same way, since the pack's default login banner is small
+  enough to carry in the bundle. A scoping question, not a defect: which art, at what size, and
+  whether the sign-in page should say the pack is still to come.
+
 - **Docs: CLI + code-map refresh** *(owner-flagged 2026-08-31)* — the command reference and the
   internal code map have fallen well behind the 3.5→3.7 run (bundle v2, the emotions control, the
   contest verbs, the `/v2` REST growth, the React front door). Scope: audit `--help` + the wiki
