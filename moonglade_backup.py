@@ -13602,6 +13602,39 @@ def _check_time_capsule(created_at, out_dir):
         pass
 
 
+# THE WALK-END MARKER (owner report, 2026-09-07). "This should have picked up where it
+# left off and continued pulling 37k images." One fact, per library: has any pass over
+# this history ever reached the oldest page? Everything --update's early stop assumes
+# rests on it, and until 2026-09-07 nothing recorded it, so a first backup stopped
+# part-way left two known pages at the newest end and every later Sync read those two as
+# "the whole library is already here".
+#
+# It lives in the library's own telemetry.json -- the same store `first_sync_done` uses --
+# and NOT in config.json: it is a fact about this backup folder, not a setting of the app,
+# and two out_dirs must never share it. Fail-soft both ways, and the READ fails to False on
+# purpose: an unreadable marker means "keep walking", which costs pages, where the opposite
+# default means silently declaring an unfinished library finished.
+WALK_END_FLAG = "walk_reached_end"
+
+
+def walk_end_reached(out_dir):
+    """True once some pass over this library has seen pageInfo.hasPreviousPage == False."""
+    try:
+        import moonglade_gallery as _mg
+        return bool(_mg.load_telemetry(out_dir)["flags"].get(WALK_END_FLAG))
+    except Exception:
+        return False
+
+
+def mark_walk_end_reached(out_dir):
+    """Record that a pass walked all the way to the oldest page. Idempotent."""
+    try:
+        import moonglade_gallery as _mg
+        _mg.telem_flag(WALK_END_FLAG, out_dir=out_dir)
+    except Exception:
+        pass
+
+
 def run_download(args, progress=None):
     """Run the full paginated download + catalog loop.
 
@@ -13733,6 +13766,16 @@ def run_download(args, progress=None):
     update_mode = getattr(args, "update", False)
     update_grace = getattr(args, "update_grace", 2)
     consecutive_known_pages = 0
+    # THE RESUME GATE (owner report, 2026-09-07). This REFINES the incremental-stop ruling
+    # rather than reversing it: a run of already-on-disk pages still ends the walk, but only
+    # once this library has PROVEN where the end of history is (walk_end_reached above).
+    # Without that proof the walk pages to the true end exactly as a full re-walk does --
+    # still skipping every file already on disk, so it costs page listings, not downloads --
+    # which is what makes a first backup that was stopped part-way finish on the next Sync
+    # instead of stopping after the two pages it happened to have.
+    end_known = walk_end_reached(out)
+    reached_end = False      # this run saw pageInfo.hasPreviousPage == False
+    stopped_early = False    # this run took the consecutive-known-pages stop
 
     # Parallel downloads: only for the common flat-download case. collect_only does
     # no downloads, so it falls back to the serial path.
@@ -13893,16 +13936,19 @@ def run_download(args, progress=None):
                 if update_mode:
                     if page_new == 0:
                         consecutive_known_pages += 1
-                        if consecutive_known_pages >= update_grace:
+                        # `end_known`: the resume gate. See where it is set, above.
+                        if end_known and consecutive_known_pages >= update_grace:
                             print("\n--update: {} consecutive pages already on disk; "
                                   "stopping (older items are already downloaded)."
                                   .format(consecutive_known_pages))
+                            stopped_early = True
                             break
                     else:
                         consecutive_known_pages = 0
                 raw_f.flush()
                 pi = conn.get("pageInfo", {})
                 if not pi.get("hasPreviousPage"):
+                    reached_end = True
                     break
                 before = pi.get("startCursor")
                 time.sleep(args.delay)
@@ -14027,25 +14073,37 @@ def run_download(args, progress=None):
             # a run of pages where everything is already on disk, the rest of the
             # history is older and already downloaded -> stop early. The grace
             # window tolerates occasional gaps (a few missing/failed items).
+            # Gated on `end_known` since 2026-09-07 -- "already on disk" only implies
+            # "already downloaded" for a library whose tail was reached at least once.
             if update_mode:
                 if page_new == 0:
                     consecutive_known_pages += 1
-                    if consecutive_known_pages >= update_grace:
+                    if end_known and consecutive_known_pages >= update_grace:
                         print("\n--update: {} consecutive pages already on disk; "
                               "stopping (older items are already downloaded)."
                               .format(consecutive_known_pages))
+                        stopped_early = True
                         break
                 else:
                     consecutive_known_pages = 0
 
             pi = conn.get("pageInfo", {})
             if not pi.get("hasPreviousPage"):
+                reached_end = True
                 break
             before = pi.get("startCursor")
             time.sleep(args.delay)
 
     finally:
         raw_f.close()
+
+    if reached_end:
+        # ONLY a page that actually reported "no previous page" arms the marker. A --max
+        # cut-off, a --update early stop, an empty/absent connection and a run killed
+        # mid-page all leave it exactly as it was -- which is the whole point: the marker
+        # is proof the tail was seen, not a record that a walk happened.
+        mark_walk_end_reached(out)
+        end_known = True
 
     if not progress and sys.stdout.isatty() and processed:
         print()  # move past the \r progress bar line
@@ -14064,6 +14122,14 @@ def run_download(args, progress=None):
               "design. ***".format(dl["fail"]))
         if os.environ.get("MOONGLADE_PROGRESS") == "1":
             print("{}{}".format(PANEL_WARN_PREFIX, dl["fail"]), flush=True)
+    # How the walk ENDED, alongside what it moved -- the counters were already the return
+    # value (D-4), and --sync's closing line is the one caller that has to tell "walked to
+    # the end" from "caught up" apart (2026-09-07). Extra keys only; dl["ok"]/["skip"]/
+    # ["missing"]/["fail"] mean exactly what they meant.
+    dl["pages"] = page
+    dl["reached_end"] = reached_end
+    dl["stopped_early"] = stopped_early
+    dl["end_known"] = end_known
     return dl
 
 
@@ -14203,10 +14269,13 @@ def main():
     ap.add_argument("--update", action="store_true",
                     help="incremental follow-up run: stop paging once a run of pages is "
                          "already fully on disk (newest-first, so older items are already "
-                         "downloaded). Much faster than re-walking the whole history.")
+                         "downloaded). Much faster than re-walking the whole history. The "
+                         "early stop waits until one pass has reached the end of your "
+                         "history, so an interrupted first backup resumes to the end.")
     ap.add_argument("--update-grace", type=int, default=2,
                     help="with --update, number of consecutive all-on-disk pages before "
-                         "stopping (default 2; raise if your history has gaps)")
+                         "stopping (default 2; raise if your history has gaps). Ignored "
+                         "until this library's walk has reached the end of history once.")
     ap.add_argument("--accurate-count", action="store_true",
                     help="walk the whole API to count library size for the progress bar "
                          "(slow). Default uses the catalog size as a fast estimate.")
@@ -14812,14 +14881,29 @@ def main():
                     run_reconcile_deleted(args)
                 except Exception as e:                   # noqa: BLE001 -- advisory step, never fatal
                     print("  reconcile skipped: {}".format(e))
-                print("Sync complete.")
+                # WHICH ENDING (owner report, 2026-09-07). Both endings used to print the
+                # same "Sync complete." -- so a Sync that stopped two pages into an
+                # unfinished library announced itself exactly like one that had walked the
+                # whole 37k. Say which happened, in the owner's own terms.
+                if (dl or {}).get("reached_end"):
+                    print("Sync complete — walked to the end of your history ({} pages)."
+                          .format((dl or {}).get("pages") or 0))
+                else:
+                    print("Sync complete — caught up (nothing new in the last {} pages)."
+                          .format(getattr(args, "update_grace", 2)))
                 # Mark the first full sync done so the gallery stops withholding achievement
                 # unlock toasts (first-light etc. fire on completion, not seconds into the
                 # very first sync). Idempotent; covers the wizard too (its "Sync now" job
                 # runs this same --sync). Fail-soft: a telemetry hiccup must not fail the sync.
+                #
+                # Gated on the walk-end marker since 2026-09-07: it used to be set on EVERY
+                # --sync exit, so an interrupted first backup followed by a two-page Sync
+                # told first_sync_complete() the first sync was done when most of the library
+                # was still missing. Now the flag means what its name says.
                 try:
                     import moonglade_gallery as _mg
-                    _mg.telem_flag("first_sync_done", out_dir=out)
+                    if walk_end_reached(out):
+                        _mg.telem_flag("first_sync_done", out_dir=out)
                 except Exception:
                     pass
             except Exception as e:                       # noqa: BLE001 -- re-raised below unchanged

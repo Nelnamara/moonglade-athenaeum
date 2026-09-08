@@ -4265,7 +4265,11 @@ def first_sync_complete(out_dir, db_path, telem=None):
     the rungs earned during the first sync fire together AFTER it completes, not during.
 
     Set by `--sync`'s completion (telem flag 'first_sync_done') -- the CLI path AND the
-    wizard's sync job both run `--sync`, so one setter covers both.
+    wizard's sync job both run `--sync`, so one setter covers both. Refined 2026-09-07
+    (owner report): --sync used to set it on EVERY exit, so a first backup stopped
+    part-way plus a two-page Sync claimed a finished first sync over a mostly-empty
+    library. It is now set only once that library's walk has reached the end of history
+    (moonglade_backup.WALK_END_FLAG), so this gate says what its name says.
 
     Backfill for PRE-EXISTING installs so they neither suppress nor spam: keyed on
     prior achievement recognition (`seen`/`earned_at` present), NOT on images>0. An
@@ -9175,7 +9179,12 @@ def create_app(out_dir: Path):
         argv = [sys.executable, _cli_path, "--out", str(out_dir), "-v",
                 "--workers", str(workers)] + action_args
         # MOONGLADE_PROGRESS makes the CLI emit machine progress markers we parse above.
-        env = dict(os.environ, MOONGLADE_PROGRESS="1")
+        # PYTHONIOENCODING: the reader below decodes this pipe as UTF-8, but a child whose
+        # stdout is a pipe picks the locale encoding (cp1252 on this box), so any non-ASCII
+        # the CLI prints arrived as a replacement character in the transcript. Sync's
+        # closing line now carries an em dash (2026-09-07), so make the two agree at the
+        # source rather than mangling the one sentence that says whether the walk finished.
+        env = dict(os.environ, MOONGLADE_PROGRESS="1", PYTHONIOENCODING="utf-8")
         import uuid
         job_id = "panel-" + uuid.uuid4().hex[:12]
         # CLAIM the single job slot -- check and mark in ONE lock acquisition, BEFORE any

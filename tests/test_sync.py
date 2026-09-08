@@ -69,7 +69,8 @@ def test_sync_sets_update_and_full_meta(monkeypatch, tmp_path):
 def test_sync_survives_reconcile_failure(monkeypatch, tmp_path, capsys, exc):
     """A reconcile failure -- of ANY exception type -- must be downgraded to a warning:
     the backup already succeeded, so main() must return normally (not raise / sys.exit)
-    and still print 'Sync complete.'."""
+    and still print its 'Sync complete ...' line. (The line gained a tail saying WHICH
+    ending happened on 2026-09-07, so this asserts the stem, not the old full stop.)"""
     calls = []
     _patch_chain(monkeypatch, calls, reconcile_exc=exc)
     monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
@@ -77,7 +78,60 @@ def test_sync_survives_reconcile_failure(monkeypatch, tmp_path, capsys, exc):
     assert calls == ["download", "backfill", "fix_models", "thumbnails", "reconcile"]
     out = capsys.readouterr().out
     assert "reconcile skipped" in out
-    assert "Sync complete." in out
+    assert "Sync complete" in out
+
+
+# ---------------------------------------------------------------------------
+# Which ending did this Sync have? (owner report, 2026-09-07)
+# ---------------------------------------------------------------------------
+
+def _dl_result(**kw):
+    """What run_download hands back now: the counters, plus how the walk ended."""
+    base = {"ok": 0, "skip": 0, "missing": 0, "fail": 0,
+            "pages": 0, "reached_end": False, "stopped_early": False, "end_known": False}
+    base.update(kw)
+    return base
+
+
+def test_sync_that_reached_the_end_says_so_and_marks_the_first_sync(
+        monkeypatch, tmp_path, capsys):
+    """A walk that saw the oldest page reports the distance it covered, and only THEN is
+    first_sync_done set -- the flag the achievement-toast gate (first_sync_complete) reads."""
+    import moonglade_gallery as g
+    calls = []
+    _patch_chain(monkeypatch, calls)
+
+    def _dl(args, progress=None):
+        calls.append("download")
+        core.mark_walk_end_reached(tmp_path)      # what the real walk does at the tail
+        return _dl_result(pages=5, reached_end=True, end_known=True)
+    monkeypatch.setattr(core, "run_download", _dl)
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
+
+    core.main()
+
+    out = capsys.readouterr().out
+    assert "Sync complete — walked to the end of your history (5 pages)." in out
+    assert "caught up" not in out
+    assert g.load_telemetry(tmp_path)["flags"].get("first_sync_done")
+
+
+def test_sync_that_only_caught_up_says_so_and_withholds_the_first_sync_flag(
+        monkeypatch, tmp_path, capsys):
+    """The interrupted-first-backup shape: nothing has proven the end of history, so the
+    line says 'caught up' and first_sync_done stays unset. Before the fix it was set on
+    EVERY --sync exit, which told the gallery a mostly-empty library was fully backed up."""
+    import moonglade_gallery as g
+    calls = []
+    _patch_chain(monkeypatch, calls)              # the stub returns None: no end reached
+    monkeypatch.setattr(sys, "argv", ["prog", "--sync", "--out", str(tmp_path)])
+
+    core.main()
+
+    out = capsys.readouterr().out
+    assert "Sync complete — caught up (nothing new in the last 2 pages)." in out
+    assert "walked to the end" not in out
+    assert not g.load_telemetry(tmp_path)["flags"].get("first_sync_done")
 
 
 def test_update_builds_missing_thumbnails(monkeypatch, tmp_path):
