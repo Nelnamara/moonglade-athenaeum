@@ -667,6 +667,10 @@ button.mgcp-chip .mgico {
   max-height: 88px;
   overflow: hidden;
 }
+.model-picker .mg-sentinel {
+  height: 1px;
+  flex: none;
+}
 .model-picker .mg-loadmore {
   display: none;
   text-align: center;

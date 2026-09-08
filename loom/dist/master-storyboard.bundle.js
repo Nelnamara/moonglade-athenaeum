@@ -2148,6 +2148,7 @@ ${"=".repeat(48)}
     const hasMoreRef = useRef(false);
     const loadingMoreRef = useRef(false);
     const gridRef = useRef(null);
+    const sentinelRef = useRef(null);
     const lastKeyRef = useRef(null);
     const previewTimerRef = useRef(null);
     const scrollRafRef = useRef(null);
@@ -2209,6 +2210,16 @@ ${"=".repeat(48)}
         setLoadingMore(false);
       });
     }, [searchUrl]);
+    useEffect(() => {
+      if (!visible || typeof IntersectionObserver === "undefined") return;
+      const el = sentinelRef.current;
+      if (!el) return;
+      const io = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      }, { root: null, rootMargin: "160px 0px", threshold: 0 });
+      io.observe(el);
+      return () => io.disconnect();
+    }, [visible, loadMore, rows.length]);
     useEffect(() => {
       if (!visible) return;
       const key = searchUrl();
@@ -2275,6 +2286,7 @@ ${"=".repeat(48)}
       setPreview({ m, x, y });
     };
     const schedulePreview = (m, anchorEl) => {
+      if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(hover: none)").matches) return;
       clearTimeout(previewTimerRef.current);
       previewTimerRef.current = setTimeout(() => showPreview(m, anchorEl), 130);
     };
@@ -2414,7 +2426,7 @@ ${"=".repeat(48)}
           /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
         );
       })
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), /* @__PURE__ */ react_global_shim_default.createElement(
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: sentinelRef, className: "mg-sentinel", "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-loadmore" + (loadingMore ? " on" : ""), "aria-hidden": "true" }, "loading more\u2026"), /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         className: "mg-preview" + (p ? " open" : ""),
