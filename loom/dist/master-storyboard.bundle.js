@@ -2288,6 +2288,8 @@ ${"=".repeat(48)}
     }, []);
     const filtersHidden = market && src === "bookmark";
     const p = preview && preview.m;
+    const baseFilterLabel = kind === "lora" && baseType ? archLabel({ lora_base_model_type: baseType }, kind) : "";
+    const emptyLine = qDebounced && baseFilterLabel ? "No LoRAs for " + baseFilterLabel + " match \u201C" + qDebounced + "\u201D \u2014 clear the search or pick another base." : "No results \u2014 try another search.";
     return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
@@ -2374,7 +2376,7 @@ ${"=".repeat(48)}
       },
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any licence"),
       /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "COMMERCIAL" }, "Commercial use OK")
-    )))), err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "\u26A0 ", err) : !rows.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "No results \u2014 try another search.") : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty" }), /* @__PURE__ */ react_global_shim_default.createElement(
+    )))), err ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, "\u26A0 ", err) : !rows.length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty", style: { display: "block" } }, emptyLine) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-empty" }), /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         className: "mg-grid",
@@ -4124,6 +4126,10 @@ ${"=".repeat(48)}
         last[j.job_id] = st;
         return;
       }
+      if (j.scheduled) {
+        last[j.job_id] = st;
+        return;
+      }
       if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
         if (st === "done") {
           const mid = (j.media_ids || [])[0] || "";
@@ -5128,7 +5134,7 @@ ${"=".repeat(48)}
           onToggle(j.job_id);
         }
       },
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-line" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-ic" }, icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-kind" }, kindLabel(j.type)), queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-when" }, ago(j.ts)))), st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-line" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-ic" }, icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-lab" }, labelFor(j, fin)), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "at-sub" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-kind" }, kindLabel(j.type)), j.source === "pixai" ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-src", title: "Started on the PixAI website, not in this app." }, "website") : null, queued ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-phase", title: "PixAI has accepted this generation and no worker has picked it up yet \u2014 it has not started rendering." }, "queued") : null, queued && typeof j.eta_seconds === "number" && isFinite(j.eta_seconds) ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-eta", title: "The queue wait PixAI predicted for this model when the job was accepted. An estimate of the WAIT, not a countdown, and not progress \u2014 PixAI reports no progress on a running task." }, "est. ", fmtDuration(j.eta_seconds), " wait") : null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "at-when" }, ago(j.ts)))), st === "done" && mid ? /* @__PURE__ */ react_global_shim_default.createElement(
         "a",
         {
           className: "at-thumb",

@@ -2862,6 +2862,16 @@ button.mgcp-chip .mgico {
   letter-spacing: .07em;
   text-transform: uppercase;
 }
+.at-sub .at-src {
+  border: 1px solid var(--surface1);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 9.5px;
+  line-height: 15px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--subtext);
+}
 .at-errmsg {
   color: var(--red);
   font-size: 10.5px;
