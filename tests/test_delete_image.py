@@ -303,6 +303,118 @@ def test_every_image_pixai_already_deleted_is_kept_back_not_just_one(tmp_path, m
     assert left == ["a", "b", "z"]
 
 
+# ---------------------------------------------------------------------------
+# It shows in the Activity window, like a bulk delete does (owner's walk 2026-09-07)
+# ---------------------------------------------------------------------------
+
+def _delete_jobs(tmp_path):
+    """Every `delete` row in the job log, newest first."""
+    return [j for j in core.read_jobs(tmp_path) if j.get("type") == "delete"]
+
+
+def test_a_confirmed_delete_writes_one_activity_row(tmp_path, monkeypatch):
+    """Owner's walk 2026-09-07: "single delete did NOT show in the Activity tracker".
+
+    A bulk delete has written a job row since it existed (_start_bulk_delete's
+    "bulkdel-<hex>"); this one wrote nothing at all, so an image deleted from PixAI left no
+    trace anywhere in the app -- the one window that says what happened to this library was
+    blind to the most destructive thing in it, depending only on which button was used.
+
+    ONE row, and it says what actually happened in the plan's own words. It carries the media
+    id so the row can show the thumbnail, and it is NOT marked scheduled, because the owner
+    pressed a button -- which is what makes it toast like every other job he starts.
+    """
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
+    monkeypatch.setattr(core, "delete_batch_media_gql", lambda s, tid, mid: None)
+    for f in ("a.png", "b.png", "c.png"):
+        (tmp_path / f).write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    assert cli.post("/api/delete-image",
+                    json={"media_id": "b", "confirm": True}).get_json().get("ok") is True
+
+    rows = _delete_jobs(tmp_path)
+    assert len(rows) == 1, "the tracker got {} rows for one delete".format(len(rows))
+    j = rows[0]
+    assert j["job_id"].startswith("del-"), j["job_id"]
+    assert j["status"] == "done"
+    assert j["label"] == "Deleted 1 image from PixAI", j["label"]
+    assert j["media_ids"] == ["b"], "the row cannot show which image went"
+    assert not j.get("scheduled"), "a delete he pressed was logged as an automatic job"
+
+
+def test_a_whole_task_delete_says_so_on_its_row(tmp_path, monkeypatch):
+    """The other branch, and the row must not claim the smaller one. Deleting the last image
+    of a generation removes the whole generation record on PixAI -- the same fact the dialog
+    warns about before the click has to be the fact the tracker records after it."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _lone_task("b"))
+    monkeypatch.setattr(core, "delete_task_gql", lambda s, tid: None)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    assert cli.post("/api/delete-image",
+                    json={"media_id": "b", "confirm": True}).get_json().get("ok") is True
+    j = _delete_jobs(tmp_path)[0]
+    assert j["status"] == "done"
+    assert j["label"] == "Deleted the whole generation from PixAI (last image)", j["label"]
+
+
+def test_the_preview_writes_no_activity_row(tmp_path, monkeypatch):
+    """Opening the dialog is not an event. The preview deletes nothing, so a row for it would
+    be an entry in the tracker for something that did not happen -- and one per dialog-open,
+    since the dialog can be opened and closed all day."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": False}).get_json()
+    assert d["plan"] == "per-image"
+    assert _delete_jobs(tmp_path) == [], "the tracker logged a delete that never happened"
+
+
+def test_a_refused_delete_is_logged_as_a_failure_that_names_the_refusal(tmp_path, monkeypatch):
+    """A refusal is an outcome, not a non-event: he pressed the button, the image is still on
+    PixAI, and the window has to say why rather than showing nothing at all. `failed`, not
+    `done` -- a green row would read as "deleted"."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _live_task(("a", False), ("b", True), ("c", False)))
+    _nothing_deletes(monkeypatch)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": True}).get_json()
+    assert "already deleted" in (d.get("error") or "").lower(), d
+
+    j = _delete_jobs(tmp_path)[0]
+    assert j["status"] == "failed"
+    assert "already deleted on PixAI" in j["label"], j["label"]
+    assert "already deleted on PixAI" in (j.get("error") or ""), j
+
+
+def test_a_cloud_delete_that_errors_is_logged_as_a_failure(tmp_path, monkeypatch):
+    """The delete PixAI refused mid-flight -- a 500, an expired token, READ_ONLY. The image is
+    still there and the local copy was never touched, and the tracker says so with the error
+    line rather than staying silent about the click."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _all_live())
+
+    def boom(s, tid, mid):
+        raise core.PixAIError("HTTP 500 from PixAI")
+
+    monkeypatch.setattr(core, "delete_batch_media_gql", boom)
+    (tmp_path / "b.png").write_bytes(b"x")
+    cli = _cli(tmp_path, _batch(tmp_path))
+
+    cli.post("/api/delete-image", json={"media_id": "b", "confirm": True})
+    j = _delete_jobs(tmp_path)[0]
+    assert j["status"] == "failed" and "500" in (j.get("error") or ""), j
+    assert j["label"] == "Delete from PixAI failed", j["label"]
+
+
 def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
     """The bug this whole change exists for. A task that made ONE image has no batch for
     `deleteBatchMedia` to delete from, and PixAI answers 403 -- so the button had never once

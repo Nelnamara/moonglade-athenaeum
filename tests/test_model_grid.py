@@ -807,6 +807,67 @@ def test_lora_base_type_filter_does_not_replace_the_per_row_compat_badge(monkeyp
     assert {t["model_id"]: t["compat"] for t in tagged} == {"1": "yes", "2": "no"}
 
 
+def _lora_rows_two_architectures():
+    """One SDXL LoRA and one MMDIT26B one -- what PixAI answers when nothing narrows the
+    architecture. The SDXL row is the "known LoRA" of the report: it is the one the owner
+    typed the name of, and it is the one the server filter used to remove."""
+    return [
+        {"id": "1", "title": "Perfect Hands SDXL", "type": "MULTI_LORA", "isNsfw": False,
+         "likedCount": 5, "latestVersion": {"id": "v1", "modelType": "MULTI_LORA",
+                                            "loraBaseModelType": "SDXL_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+        {"id": "2", "title": "JP Anime Perfect Hands", "type": "MULTI_LORA", "isNsfw": False,
+         "likedCount": 2, "latestVersion": {"id": "v2", "modelType": "MULTI_LORA",
+                                            "loraBaseModelType": "MMDIT26B_MODEL"},
+         "media": {"urls": []}, "tags": [], "author": {}, "createdAt": ""},
+    ]
+
+
+def test_a_keyword_search_shows_a_match_the_picked_base_cannot_run(tmp_path, monkeypatch, pixai):
+    """Owner's SECOND walk, 2026-09-07: "searching for a known LoRA still fails".
+
+    The first fix that day moved a keyword off a ranking feed onto the relevance index, and
+    that half worked. What still hid the answer was LAYER 1, the server-side
+    loraBaseModelTypes filter added 2026-07-24: search for an SDXL LoRA you know while
+    Tsubaki.3 (MMDIT26B) is the picked base and PixAI is only ever asked for MMDIT26B rows,
+    so the LoRA whose NAME was typed is not in the response at all. The grid fills with other
+    loosely relevant LoRAs, the empty state never fires, and the search reads as broken.
+
+    So a KEYWORD search sends no filter and lets layer 3 speak: every match comes back tagged
+    `compat`, the incompatible ones sorted last, for the picker to grey out and badge
+    "needs SDXL" (ModelPicker.jsx: compat === "no" -> .incompat, unclickable unless already
+    selected). This drives the REAL route through the REAL core function with only the
+    transport faked, because the defect was in what the query asked PixAI for -- a test that
+    stubbed model_search_market_gql could not have seen it.
+    """
+    from tests.conftest import login_client
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    cli = login_client(tmp_path)
+
+    d = cli.get("/api/model-search?kind=lora&q=Perfect+Hands"
+                "&base_type=MMDIT26B_MODEL").get_json()
+    assert "loraBaseModelTypes" not in captured["query"], (
+        "a keyword search still asked PixAI to hide every other architecture")
+    assert captured["vars"]["k"] == "Perfect Hands"        # still the keyword search itself
+    # BOTH matches are here, the incompatible one last and tagged so the picker can grey it.
+    assert [(m["model_id"], m["compat"]) for m in d["results"]] == [("2", "yes"), ("1", "no")]
+    assert d["results"][-1]["lora_base_model_type"] == "SDXL_MODEL", (
+        "the badge has nothing to say 'needs SDXL' from")
+
+    # A keywordless BROWSE is untouched: the 2026-07-24 wall (a DiT user's browse coming back
+    # 24-of-24 SD 1.5) is exactly what the server filter is for, and this refines that ruling
+    # rather than reversing it.
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    d2 = cli.get("/api/model-search?kind=lora&base_type=MMDIT26B_MODEL").get_json()
+    assert "loraBaseModelTypes:[MMDIT26B_MODEL]" in captured["query"]
+    assert [m["compat"] for m in d2["results"]] == ["yes", "no"]   # layer 3 still runs
+
+    # A whitespace-only box is not a search -- same rule the feed switch already follows.
+    captured = _gql_capture(monkeypatch, rows=_lora_rows_two_architectures())
+    cli.get("/api/model-search?kind=lora&q=+++&base_type=MMDIT26B_MODEL")
+    assert "loraBaseModelTypes:[MMDIT26B_MODEL]" in captured["query"]
+
+
 def test_task_image_media_prefers_batch_over_grid():
     """A batchSize>1 task stores a composite GRID under outputs.mediaId and the individual
     images under outputs.batch[] -- we must save the individuals (with per-image seeds), never
