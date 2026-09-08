@@ -1993,6 +1993,12 @@ def _same_pixels(a, b):
 
 
 def media_ids_for(node):
+    """Every media id a task summary NAMES: `mediaId` plus `batchMediaIds`, deduped.
+
+    NOT the ids the catalog is keyed by -- on a batch task `mediaId` is the composite
+    preview grid and on a video task it is the poster still, and no row is keyed by
+    either. Anything asking "is this already collected?" wants `cataloged_media_ids`
+    below; asking it here answers "no" forever for both shapes (2026-09-07)."""
     ids = []
     if node.get("mediaId"):
         ids.append(str(node["mediaId"]))
@@ -2000,6 +2006,55 @@ def media_ids_for(node):
         if b:
             ids.append(str(b))
     return list(dict.fromkeys(ids))
+
+
+def cataloged_media_ids(node):
+    """The media ids this task's catalog rows are actually keyed by.
+
+    `media_ids_for` answers a DIFFERENT question -- every media id a task names -- and the
+    two sets are not the same. On a batch task `mediaId` is the composite preview grid,
+    which is never one of the batch members and is never cataloged (probe 2026-09-06); on a
+    video task `mediaId` is the poster STILL, while the catalog's row is keyed by the mp4's
+    own media id. Anything asking "has this task already been collected?" off
+    media_ids_for therefore answered "no" forever for both shapes -- which is what made the
+    live mirror's catch-up relist the same tasks every five minutes and claim in the log
+    they had never been mirrored (fixed 2026-09-07; the ruling that catch-up skips a task
+    only when the catalog is actually missing its media is unchanged, this is the id set
+    that ruling always meant).
+
+    Reads whichever shape it is handed:
+
+    * A full `getTaskById` result (it has `outputs`): videos via `video_outputs`, images via
+      `_task_image_media` -- the same two helpers `collect_generation` catalogs from, so the
+      answer is by construction the ids the rows carry.
+    * A `listUserTaskSummaries` node (a `TaskSummary`: no `outputs` at all, only
+      `mediaId` / `batchMediaIds` / `i2vProModel`): `batchMediaIds` when the task HAS a
+      batch, else `mediaId`. That is PixAI's own frontend rule for a summary, and it lands
+      on the same ids `_task_image_media` reaches from the detail. A member PixAI has
+      deleted comes through as a hole in `batchMediaIds` and is dropped here, matching
+      `_task_image_media` skipping a `deletedAt` member -- so a batch whose members are ALL
+      deleted yields nothing and deliberately does NOT fall back to `mediaId`, exactly as
+      that helper refuses to.
+
+    A VIDEO summary returns [] -- honestly nothing, because a summary names none of the ids
+    the catalog holds (only getTaskById carries the video's own media id). [] therefore
+    means "this node cannot tell you", not "there is nothing to collect", and a caller that
+    must decide about a video task from a summary has to ask by task id instead:
+    `_watch_catchup` checks `_is_video_task_node` first and uses `get_row_by_task`."""
+    node = node or {}
+    outputs = node.get("outputs")
+    if outputs is not None:                          # full task detail
+        vouts, _shared = video_outputs(node)
+        if vouts:
+            return list(dict.fromkeys(
+                str(o["video_media_id"]) for o in vouts if o.get("video_media_id")))
+        return [mid for mid, _seed in _task_image_media(outputs)]
+    if _is_video_task_node(node):                    # summary: only the poster still
+        return []
+    batch = node.get("batchMediaIds")
+    if isinstance(batch, (list, tuple)) and len(batch) > 0:
+        return list(dict.fromkeys(str(b) for b in batch if b))
+    return [str(node["mediaId"])] if node.get("mediaId") else []
 
 
 def _is_video_task_node(node):
