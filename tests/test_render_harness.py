@@ -90,6 +90,7 @@ import json
 import re
 import threading
 
+import os
 import pytest
 
 from tests.conftest import _SEALED_DONOR
@@ -119,6 +120,18 @@ DESKTOP = {"width": 1280, "height": 900}
 # 390x844 phone: the width Login Mobile.dc.html proves the design at, and comfortably
 # inside useIsMobile.js's own 520px breakpoint (430 until 2026-09-07), so main.jsx mounts AppMobile.jsx here.
 PHONE = {"width": 390, "height": 844}
+# The owner's phone, as a browser sees it (2026-09-07, from his 5059 screenshot: a Pro Max
+# class iPhone in Safari with its toolbars up). 430 CSS px wide; 740 tall is the VISIBLE
+# viewport with Safari's address bar and bottom toolbar on screen -- the screen's full 932 is
+# what iOS hands `vh`, and the gap between the two is where a 78vh bottom sheet loses its
+# head. Touch, the iOS user agent and the 3x ratio come with it, so the phone shell's own
+# device gates run the way they run in his hand. Playwright's WebKit engine is used for it
+# when installed (`python -m playwright install webkit`); Chromium otherwise, recorded as such.
+IPHONE_PRO_MAX = {
+    "width": 430, "height": 740, "device_scale_factor": 3, "is_mobile": True, "has_touch": True,
+    "user_agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+                   "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"),
+}
 
 # Kill every transition/animation so a geometry read can never catch an interpolated
 # mid-flight value. `*` + !important beats the app's id-selector rules; applied to the
@@ -153,7 +166,10 @@ def render_browser():
 
     pw = sync_playwright().start()
     try:
-        browser = pw.chromium.launch()
+        # MG_HARNESS_BROWSER=webkit runs this whole module on the engine iPhone Safari uses
+        # (`python -m playwright install webkit`); chromium is the default and CI's only engine.
+        engine = (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower()
+        browser = getattr(pw, engine).launch()
     except Exception as exc:                                  # pragma: no cover
         pw.stop()
         # First line only: playwright's own message trails a multi-line ASCII banner that
@@ -303,12 +319,15 @@ def logged_in_page(render_server, render_browser, monkeypatch):
     assert core._config_path() == render_server.config_path
     contexts = []
 
-    def _open(width=DESKTOP["width"], height=DESKTOP["height"]):
+    def _open(width=DESKTOP["width"], height=DESKTOP["height"], **device):
         # base_url makes page.goto("/loom") resolve against the ephemeral port, so no test
-        # has to carry the port around.
+        # has to carry the port around. `device` carries a real phone's identity when a test
+        # opens one (IPHONE_PRO_MAX below): user agent, touch, mobile viewport semantics and
+        # pixel ratio -- the owner's phone is not a 390-wide desktop window (2026-09-07).
+        opts = {"device_scale_factor": 1}
+        opts.update(device)
         ctx = render_browser.new_context(viewport={"width": width, "height": height},
-                                         device_scale_factor=1,
-                                         base_url=render_server.base_url)
+                                         base_url=render_server.base_url, **opts)
         # Playwright's 30s default turns "the fix is broken" into a 30s stall per test.
         # 10s is ~6x the slowest real wait here (the Loom bundle boot, ~1.7s) and keeps a
         # genuine regression failing in seconds.
@@ -4531,3 +4550,69 @@ def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_i
     assert done.is_visible()
     done.click()
     page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+
+
+# --- The phone's LoRA sheet, on the owner's actual phone profile (2026-09-07, his 5059
+# screenshot: the sheet with no head at all -- no Models/LoRAs tabs, no Confirm selection, no
+# search box -- the page's hero sitting above it and the tab bar below). The 390x844 desktop-
+# Chromium proof above passed while his phone showed this, so the proof was not the phone. ----
+def _sheet_geometry(page):
+    """Everything about where the open sheet and its head actually are, from the page's side."""
+    return page.evaluate("""() => {
+        const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+            return {x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height)}; };
+        const hit = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+            const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+            if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return "off-screen";
+            const at = document.elementFromPoint(cx, cy);
+            return at && (at === el || el.contains(at)) ? "hit" : (at ? (at.className || at.tagName).toString().slice(0, 40) : "nothing"); };
+        const fly = document.querySelector('.mfly.open');
+        const pane = fly && [...fly.querySelectorAll(':scope > div:not(.mfly-head)')].find(d => d.style.display !== 'none');
+        const head = fly && fly.querySelector('.mfly-head');
+        const done = fly && fly.querySelector('.mfly-done');
+        const q = pane && pane.querySelector('.mg-q');
+        const chain = []; let e = fly && fly.parentElement;
+        while (e && e !== document.documentElement) { const s = getComputedStyle(e);
+            if (s.transform !== 'none' || s.contain !== 'none' || s.filter !== 'none' || s.overflow !== 'visible' || s.position === 'fixed')
+                chain.push({cls: (e.className || e.tagName).toString().split(' ')[0], transform: s.transform !== 'none', contain: s.contain, overflow: s.overflow, position: s.position, z: s.zIndex, rect: r(e)});
+            e = e.parentElement; }
+        const scrim = document.querySelector('.glm-scrim'); const hero = document.querySelector('.glm-hero');
+        const chainOf = (el) => { const out = []; while (el && el !== document.body) { out.push((el.className || el.tagName).toString().split(' ')[0]); el = el.parentElement; } return out.join('<'); };
+        const oy = fly ? Math.round(fly.getBoundingClientRect().y + 4) : -1;
+        const overlapTopmost = oy >= 0 ? chainOf(document.elementFromPoint(215, oy)).slice(0, 120) : null;
+        const body = document.querySelector('.glm-body');
+        const insideScroller = !!(fly && body && body.contains(fly));
+        return {viewport: {w: innerWidth, h: innerHeight}, insideScroller, overlapProbeY: oy, overlapTopmost, scrimZ: scrim ? getComputedStyle(scrim).zIndex : null,
+            heroStack: hero ? getComputedStyle(hero).position + '/' + getComputedStyle(hero).zIndex : null, sheet: r(fly), sheetOffsetParent: fly && fly.offsetParent ? (fly.offsetParent.className || 'el').toString().split(' ')[0] : null,
+            head: r(head), headHit: hit(head), done: r(done), doneHit: hit(done), search: r(q), searchHit: hit(q),
+            hero: r(document.querySelector('.glm-hero')), nav: r(document.querySelector('.glm-nav')), chain};
+    }""")
+
+
+def _open_phone_lora_sheet(page):
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-addlora")
+    page.click(".cm-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+
+
+@pytest.mark.parametrize("profile", ["PHONE", "IPHONE_PRO_MAX"])
+def test_phone_lora_sheet_head_and_search_box_are_on_screen_and_tappable(logged_in_page, monkeypatch, profile):
+    """The sheet's head (Models / LoRAs / Confirm selection) and its search box must be on
+    screen and the topmost thing at their own centre, on the owner's phone profile as on the
+    390-wide one. His screenshot had neither: the hero sat where the head should be."""
+    _fake_market_pages(monkeypatch)
+    page = logged_in_page(**globals()[profile])
+    _visit(page, "/")
+    _settle(page)
+    _open_phone_lora_sheet(page)
+    g = _sheet_geometry(page)
+    print("\nSHEET GEOMETRY", profile, g)
+    assert g["head"] and g["headHit"] == "hit", "the sheet head is not on screen or something covers it: %r" % g
+    assert g["search"] and g["searchHit"] == "hit", "the search box is not on screen or something covers it: %r" % g
+    assert g["doneHit"] == "hit", "Confirm selection is not tappable: %r" % g
+    assert g["sheet"]["y"] >= 0, "the sheet's top is above the screen: %r" % g["sheet"]
+    # The rule no desktop engine can prove for us, so it is pinned structurally: iPhone Safari
+    # confines a fixed element inside a touch scroller to the scroller's box (his screenshot).
+    # The sheet must therefore never be a DOM descendant of the scrolling body.
+    assert g["insideScroller"] is False, "the sheet lives inside the scrolling .glm-body again -- iPhone Safari clips it there"
