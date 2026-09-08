@@ -13456,8 +13456,10 @@ def create_app(out_dir: Path):
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
         # The celebration toast asks for 384px so the enlarged medallion stays crisp
-        # on HiDPI; the Folio grid keeps the 256 default. Allowlisted to those two so
-        # the cache can't be spammed into unbounded sizes.
+        # on HiDPI, and since 2026-09-07 so does the phone Folio's detail sheet, which
+        # now shows the badge whole at the frame's full height; the Folio grid keeps the
+        # 256 default. Allowlisted to those two so the cache can't be spammed into
+        # unbounded sizes.
         size = 384 if request.args.get("size") == "384" else 256
         p = _badge_thumb(out_dir, aid, size)
         if isinstance(p, (bytes, bytearray)):
