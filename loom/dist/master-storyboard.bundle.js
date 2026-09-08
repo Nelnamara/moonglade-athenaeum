@@ -865,14 +865,14 @@ ${"=".repeat(48)}
   var PureComponent = React2.PureComponent;
 
   // ../gallery/src/hooks/useIsMobile.js
-  var MOBILE_QUERY = "(max-width: 430px)";
+  var MOBILE_QUERY = "(max-width: 520px)";
   function detectMobile() {
     if (typeof window === "undefined" || !window.matchMedia) return false;
     if (window.matchMedia(MOBILE_QUERY).matches) return true;
     const coarse = window.matchMedia("(pointer: coarse)").matches;
     const portrait = window.matchMedia("(orientation: portrait)").matches;
     const screenW = window.screen && window.screen.width || Infinity;
-    return coarse && portrait && screenW <= 430;
+    return coarse && portrait && screenW <= 520;
   }
   function useIsMobile() {
     const [isMobile, setIsMobile] = useState(detectMobile);
