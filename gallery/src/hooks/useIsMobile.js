@@ -12,11 +12,15 @@ import { useEffect, useState } from "react";
    a phone, or a desktop window dragged narrow, must flip the presentation
    live, not just on first paint).
 
-   Breakpoint: 430px. Login Mobile.dc.html proves the design out at 390px
-   (an iPhone frame's CSS width); 430px adds headroom so the widest current
-   phones (iPhone Pro Max class, ~428-430px CSS width) still get the mobile
-   build, without pulling in a small tablet held in portrait. */
-const MOBILE_QUERY = "(max-width: 430px)";
+   Breakpoint: 520px. Login Mobile.dc.html proves the design out at 390px
+   (an iPhone frame's CSS width). The line was 430px until 2026-09-07, when the
+   owner's own phone got the DESKTOP build on a fresh install: the Pro Max class
+   is 440 CSS px wide now (iPhone 16/17 Pro Max), and Safari's per-site page
+   zoom widens the reported width further still, so a real phone sat on either
+   side of 430 from one visit to the next. 520 covers every phone made (the
+   widest Android phones report ~480) and still stays under every tablet: the
+   narrowest tablet in portrait, an iPad mini, is 744 CSS px. */
+const MOBILE_QUERY = "(max-width: 520px)";
 
 /* One decision, evaluated live. The primary signal is the layout-viewport width
    (the max-width query). The FALLBACK exists because iOS Chrome (CriOS) and
@@ -28,7 +32,7 @@ const MOBILE_QUERY = "(max-width: 430px)";
    phone-width (screen.width, which is independent of the layout-viewport quirk)
    is a phone regardless of what innerWidth claims. Both extra clauses are
    necessary to stay off desktops: a mouse laptop is never coarse-pointer, and a
-   real tablet's screen.width is > 430 -- so neither can trip this. Landscape is
+   real tablet's screen.width is > 520 -- so neither can trip this. Landscape is
    deliberately left to the desktop build, exactly as the max-width query did. */
 function detectMobile() {
   if (typeof window === "undefined" || !window.matchMedia) return false;
@@ -36,7 +40,7 @@ function detectMobile() {
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const portrait = window.matchMedia("(orientation: portrait)").matches;
   const screenW = (window.screen && window.screen.width) || Infinity;
-  return coarse && portrait && screenW <= 430;
+  return coarse && portrait && screenW <= 520;   // same line as MOBILE_QUERY, see above
 }
 
 export default function useIsMobile() {

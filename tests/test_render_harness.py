@@ -117,7 +117,7 @@ _PASSWORD = "a-real-test-password-1"
 DESKTOP = {"width": 1280, "height": 900}
 
 # 390x844 phone: the width Login Mobile.dc.html proves the design at, and comfortably
-# inside useIsMobile.js's own 430px breakpoint, so main.jsx mounts AppMobile.jsx here.
+# inside useIsMobile.js's own 520px breakpoint (430 until 2026-09-07), so main.jsx mounts AppMobile.jsx here.
 PHONE = {"width": 390, "height": 844}
 
 # Kill every transition/animation so a geometry read can never catch an interpolated
@@ -1807,7 +1807,7 @@ def test_phone_picture_screen_speaks_the_same_similar_mark(logged_in_page):
 # 9. Contests on the phone (Contest Mobile Handoff.dc.html, Session D 2026-09-04)
 # ---------------------------------------------------------------------------
 # 390x844 is the frame the handoff is drawn at (an iPhone-class CSS viewport) and it is
-# under useIsMobile.js's 430px breakpoint, so the REAL mobile build mounts -- these drive
+# under useIsMobile.js's 520px breakpoint (430 until 2026-09-07), so the REAL mobile build mounts -- these drive
 # AppMobile.jsx, not App.jsx behind a narrow window.
 MOBILE = {"width": 390, "height": 844}
 
