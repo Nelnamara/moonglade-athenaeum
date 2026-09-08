@@ -15,6 +15,7 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- On the phone, a feat's detail sheet shows the whole badge instead of cropping it. (2026-09-07)
 - Removed leftover styles from retired screens (the classic grid, the old Edit-tab slots, the retired jobs tray and others); nothing you see changes.
 - The Blur toggle now also blurs the gallery picker's thumbnails and the generate drawer's reference images.
 - **The Konami Code, Read the Manual and Triggered can be earned from a phone or any logged-in device again; each event is one-time and rate-limited so it cannot be replayed.** A second tap inside a seventh of a second is read as one, a real second tap counts, and the thirty-a-minute limit holds even against a replayed sign-in cookie. (2026-09-07)

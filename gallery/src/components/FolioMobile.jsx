@@ -62,12 +62,19 @@ import "../styles/folio-mobile.css";
    3. DETAIL SHEET IMAGE: the REAL square badge -- badgeSrc(): the animated
       `/badge-thumb/<id>.webp` master when there is one, else the `.png` thumb
       (the same asset AchCard/the recent strip/every other badge image in this
-      app already uses) -- object-fit:cover into the design's 1.6:1 frame, not
+      app already uses) -- shown WHOLE inside the design's 1.6:1 frame, not
       the mock's own wide illustration path, which points at a per-item
       "hero art" file that doesn't exist anywhere on disk. Inventing pixels
       for an asset that isn't there is exactly what this codebase's own
       established rule (GalleryGridMobile.jsx's header comment) already
       rules out.
+      REFINED 2026-09-07, on the owner's phone screenshot: this note used to
+      read "object-fit:cover into the design's 1.6:1 frame". That frame was
+      drawn around the mock's WIDE cover art, so filling it with a 1:1
+      medallion could only work by cutting the disc's top and bottom off --
+      which is what a tapped feat's sheet was doing. The frame is unchanged;
+      the badge inside it is `contain`-ed and centred (folio-mobile.css), and
+      asks for the 384 bucket now that it stands at the frame's full height.
    4. RELIC SWATCHES: the real, already-shipped 4-hex-per-skin SKIN_SW table
       static/mg-notify.js's own classic Trophy Hall relic rows already use,
       copied byte-for-byte below -- not a new invented palette (desktop's
@@ -537,8 +544,13 @@ export default function FolioMobile({ onClose }) {
         {sheetAch && (
           <div className={"mgfo-t-" + (sheetAch.tier || "common")}>
             <div className={"fm-sheet-imgwrap" + (sheetAch.earned ? " earned" : "")}>
-              <img src={badgeSrc(sheetAch.id)} alt="" loading="lazy" draggable={false}
-                onError={(e) => { if (!badgeHop(e.currentTarget, sheetAch.id)) e.currentTarget.remove(); }} />
+              {/* 384 -- the toast's own enlarged-medallion bucket. The badge is shown WHOLE
+                  in this frame (folio-mobile.css), so it stands at the frame's full height
+                  rather than as a cropped strip of it, and the 256 grid thumb is soft at that
+                  size on a HiDPI phone. badgeHop takes the SAME size or it cannot find its
+                  own rung on the ladder. */}
+              <img src={badgeSrc(sheetAch.id, 384)} alt="" loading="lazy" draggable={false}
+                onError={(e) => { if (!badgeHop(e.currentTarget, sheetAch.id, 384)) e.currentTarget.remove(); }} />
             </div>
             <div className="fm-sheet-name">{sheetAch.name}</div>
             <div className="fm-sheet-metarow">
