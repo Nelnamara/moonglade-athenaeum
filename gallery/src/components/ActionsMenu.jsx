@@ -127,6 +127,17 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       ))}
     </div>
   );
+  /* WHAT THIS TASK IS (owner's walk, 2026-09-07: the strips said "whole batch" over a
+     single thumbnail). "whole batch" is not a title -- it is a claim about the OTHER files
+     coming along with the one you picked, which is exactly right for a task that made
+     several images and simply untrue for a task that made one. A one-file task names its
+     file instead, so the label and the strip beneath it say the same thing. Video, because
+     the strip already marks it with ▶ and calling it an image under its own ▶ is the same
+     mistake one size smaller. */
+  const taskLabel = (media) => {
+    if (media.length !== 1) return "whole batch";
+    return media[0] && media[0].is_video ? "single video" : "single image";
+  };
   return (
     <div className="lb" role="dialog" aria-modal="true" onClick={onCancel}>
       <div className="cd-inner" onClick={(e) => e.stopPropagation()}>
@@ -154,7 +165,7 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
         <div className="cd-tasks">
           {data.tasks.map((tk) => (
             <div className="cd-task" key={tk.task_id}>
-              <div className="cd-tlbl">whole batch
+              <div className="cd-tlbl">{taskLabel(tk.media)}
                 <span className="cd-tid">task {tk.task_id}</span>
                 <span>{plural(tk.media.length, "file", "files")}</span>
                 {tk.unverified && <span className="cd-unver">not checked on PixAI</span>}

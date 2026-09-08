@@ -154,3 +154,45 @@ describe("the preview fetch cannot hang the dialog open forever", () => {
       "the reason the preview could not be loaded must reach the owner");
   });
 });
+
+describe("a task strip says what the task actually is", () => {
+  /* OWNER'S WALK, 2026-09-07: the delete dialog's strips said "whole batch" over a single
+     thumbnail. "whole batch" is not a title -- it is a claim about the OTHER files coming
+     along with the one you picked, which is the whole reason this dialog exists. Over a
+     task that made one image it is simply false, and it is false in the one dialog whose
+     job is to tell you the truth about an irreversible action.
+
+     Driven, not pattern-matched: the label is a plain function of the task's own media, so
+     it is lifted out of the component and called for real (the same technique
+     med-mg-notify-detail-tick.test.js uses on ActivityRow's derivations). Pattern-matching
+     the strings would pass on a function that returned the right words for the wrong
+     input, which is exactly the bug. */
+  const m = /const taskLabel = (\(media\) => \{[\s\S]*?\n  \});/.exec(menu);
+  assert.ok(m, "ActionsMenu no longer defines taskLabel -- the strip's label moved, so this "
+    + "guard is blind. Re-point it rather than deleting it.");
+  const taskLabel = new Function("return " + m[1])();
+  const img = (id) => ({ media_id: id, is_video: false });
+  const vid = (id) => ({ media_id: id, is_video: true });
+
+  test("a task that made several files is a whole batch", () => {
+    assert.equal(taskLabel([img("a"), img("b")]), "whole batch");
+    assert.equal(taskLabel([img("a"), img("b"), img("c"), vid("d")]), "whole batch");
+  });
+
+  test("a task that made ONE file is not a batch and does not claim to be", () => {
+    assert.equal(taskLabel([img("a")]), "single image");
+    assert.notEqual(taskLabel([img("a")]), "whole batch");
+  });
+
+  test("a single video says video, under the ▶ the strip already draws on it", () => {
+    assert.equal(taskLabel([vid("a")]), "single video");
+  });
+
+  test("the label is what the strip renders, not a constant beside it", () => {
+    // The wiring half: taskLabel must actually reach the row, fed by that row's own media.
+    assert.match(menu, /<div className="cd-tlbl">\{taskLabel\(tk\.media\)\}/);
+    // ...and the old literal is gone from the task rows entirely, so it cannot come back
+    // as a fallback nobody notices.
+    assert.doesNotMatch(menu, /className="cd-tlbl">whole batch/);
+  });
+});
