@@ -230,6 +230,9 @@
 .at-sub{font-size:10.5px;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;color:var(--overlay0);}
 .at-sub .at-kind{color:var(--subtext);text-transform:capitalize;}
 .at-sub .at-phase{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;}
+/* The website source mark (2026-09-07). Same quiet pill as .at-phase on purpose -- it says
+   WHERE a run came from, not that anything is wrong with it, so nothing warning-coloured. */
+.at-sub .at-src{border:1px solid var(--surface1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;letter-spacing:.07em;text-transform:uppercase;color:var(--subtext);}
 .at-errmsg{color:var(--red);font-size:10.5px;margin-top:5px;white-space:normal;}
 .at-bar{height:4px;border-radius:3px;background:var(--surface1);margin-top:7px;overflow:hidden;}
 .at-bar i{display:block;height:100%;background:var(--lavender);border-radius:3px;transition:width .3s;}
