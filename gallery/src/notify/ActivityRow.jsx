@@ -102,6 +102,18 @@ export default function ActivityRow({ job: j, expanded, onToggle, onDismiss, com
           <div className="at-lab">{labelFor(j, fin)}</div>
           <div className="at-sub">
             <span className="at-kind">{kindLabel(j.type)}</span>
+            {/* WHERE the run was started, and the ONLY thing that distinguishes a website run
+                from an app run anywhere in this window (owner ruling 2026-09-07: a generation
+                started on pixai.art shows here "with the usual spinner", like any other). The
+                server writes source 'pixai' for those and 'web' for the app's own; every other
+                job type carries no source at all, so this mark appears on exactly the rows it
+                is about. Deliberately the queued pill's own quiet shape, on the sub-line it
+                already lives on -- a source is not a state, and inventing a second visual
+                language for it would make a website run look like a different KIND of job
+                rather than the same job from somewhere else. */}
+            {j.source === "pixai" ? (
+              <span className="at-src" title="Started on the PixAI website, not in this app.">website</span>
+            ) : null}
             {queued ? (
               <span className="at-phase" title="PixAI has accepted this generation and no worker has picked it up yet — it has not started rendering.">queued</span>
             ) : null}
