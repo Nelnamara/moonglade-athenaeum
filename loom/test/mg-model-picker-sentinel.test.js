@@ -20,9 +20,13 @@ describe("load-more watches a sentinel, not the grid's own scroll", () => {
     assert.match(src, /ref=\{sentinelRef\} className="mg-sentinel"/);
     assert.match(css, /\.model-picker \.mg-sentinel\{height:1px;flex:none;\}/);
   });
-  test("an IntersectionObserver on the sentinel calls loadMore, with root null so any ancestor's clip counts", () => {
+  test("an IntersectionObserver on the sentinel calls loadMore, rooted on the pane that scrolls with a page of head start", () => {
     assert.match(src, /new IntersectionObserver\(\(entries\) => \{\s*if \(entries\.some\(\(e\) => e\.isIntersecting\)\) loadMore\(\);/);
-    assert.match(src, /\{ root: null, rootMargin: "160px 0px", threshold: 0 \}/);
+    // root = the scrolling ancestor (picker/mergeRows.js scrollParentOf), NOT null: with the
+    // viewport as root the pane's clip wins and the margin buys nothing, so every page waited a
+    // full server round trip at the bottom of the list ("it does but its slow", owner 2026-09-07).
+    assert.match(src, /\{ root: scrollParentOf\(el\), rootMargin: "720px 0px", threshold: 0 \}/);
+    assert.match(src, /import \{ uniqueRows, appendRows, scrollParentOf, rowKey \} from "\.\.\/picker\/mergeRows\.js";/);
     assert.match(src, /io\.observe\(el\);\s*return \(\) => io\.disconnect\(\);/);
     // re-armed whenever the list grows, so the sentinel is re-observed below the new rows
     assert.match(src, /\}, \[visible, loadMore, rows\.length\]\);/);

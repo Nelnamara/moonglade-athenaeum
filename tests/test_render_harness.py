@@ -4394,17 +4394,34 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
 # selection of models and lora in all tabs and sorts", desktop and phone). Two fixes were
 # claimed from code reads before this test existed; this is the browser proof, on both shells,
 # with the market faked so PixAI is never called. -----------------------------------------
-def _fake_market_pages(monkeypatch, per_page=24, pages=3):
-    """Three pages of LoRA rows the way /api/model-search hands them to the picker."""
+def _fake_market_pages(monkeypatch, per_page=24, pages=3, overlap=0):
+    """Three pages of LoRA rows the way /api/model-search hands them to the picker.
+
+    `overlap` = how many of a page's first rows REPEAT the previous page's last rows (same
+    model_id, same title), the way PixAI's ranking feeds actually page (measured live 2026-09-07:
+    288 trending rows, 281 distinct). A keyword search answers with five "Hands LoRA" hits."""
+    def _row(n, i):
+        return {"model_id": "fake-%d-%d" % (n, i), "title": "Fake LoRA %d.%02d" % (n, i),
+                "preview_url": "", "liked_count": i, "lora_base_model_type": "",
+                "description": "", "official": False, "should_blur": False}
+
     def page(n):
-        rows = [{"model_id": "fake-%d-%d" % (n, i), "title": "Fake LoRA %d.%02d" % (n, i),
-                 "preview_url": "", "liked_count": i, "lora_base_model_type": "",
-                 "description": "", "official": False, "should_blur": False} for i in range(per_page)]
+        rows = [_row(n, i) for i in range(per_page)]
+        if overlap and n > 1:
+            rows[:overlap] = [_row(n - 1, i) for i in range(per_page - overlap, per_page)]
         return {"results": rows, "has_more": n < pages, "next_cursor": ("p%d" % (n + 1)) if n < pages else ""}
+
+    def hits(keyword):
+        rows = [{"model_id": "hit-%d" % i, "title": "Hands LoRA %d" % i, "preview_url": "",
+                 "liked_count": 0, "lora_base_model_type": "", "description": keyword,
+                 "official": False, "should_blur": False} for i in range(1, 6)]
+        return {"results": rows, "has_more": False, "next_cursor": ""}
     calls = []
 
     def fake_search(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
         calls.append(after)
+        if keyword:
+            return hits(keyword)
         n = int(after[1:]) if after else 1
         return page(n)
     monkeypatch.setattr(core, "model_search_market_gql", fake_search)
@@ -4442,13 +4459,50 @@ def test_desktop_lora_picker_pages_past_its_first_24(logged_in_page, monkeypatch
     page.wait_for_selector(".mgdock-addlora", state="visible")
     page.click(".mgdock-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
-    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length === 24")
+    # >= 24, not == 24: the next page is prefetched a page early, so the list may already be past
+    # its first page by the time this looks
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
     _scroll_pane_to_bottom(page)
     page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
     _scroll_pane_to_bottom(page)
     page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 72", timeout=8000)
     assert _cards(page) == 72, "three pages of 24 must all be in the list"
     assert calls[:3] == [None, "p2", "p3"], calls
+
+
+def test_desktop_lora_search_replaces_the_list_with_no_leftover_cards(logged_in_page, monkeypatch):
+    """The feed repeats a model across pages; a repeated model_id is a repeated React key, and the
+    card behind it can never be removed again -- it stayed at the top of every later list, above
+    the real results. Owner, 2026-09-07: "its always the SAME lora exactly", "Search is still
+    shit". Twenty-two such leftovers sat in his tab over the 24 "Perfect Hands" hits React held.
+    The list must carry each model once, and a search must leave nothing of the old list behind."""
+    _fake_market_pages(monkeypatch, overlap=2)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    if not page.locator(".mgdock-addlora").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-addlora", state="visible")
+    page.click(".mgdock-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
+    _scroll_pane_to_bottom(page)
+    # page 2 repeats page 1's last two rows: 48 rows handed over, 46 distinct models
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 46", timeout=8000)
+    mids = page.evaluate("() => [...document.querySelectorAll('.mfly.open .mg-card')].map(c => c.dataset.mid)")
+    assert len(mids) == len(set(mids)), "a model is in the list twice: %s" % [m for m in mids if mids.count(m) > 1]
+    # now a search: the whole list must be the five hits, the first card the first hit, nothing left over
+    page.locator(".mfly.open .mg-q").locator("visible=true").fill("hands")
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.mfly.open .mg-card')].some(c => c.textContent.includes('Hands LoRA 1'))",
+        timeout=8000)
+    page.wait_for_timeout(400)   # let any straggling continuation land before counting
+    cards = page.evaluate("() => [...document.querySelectorAll('.mfly.open .mg-card')].map(c => c.textContent.trim().slice(0, 12))")
+    assert len(cards) == 5, "leftover cards from the old list are still in the grid: %s" % cards
+    assert cards[0].startswith("Hands LoRA 1"), cards
+    assert not any(c.startswith("Fake LoRA") for c in cards), cards
 
 
 def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_in_page, monkeypatch):
@@ -4460,7 +4514,7 @@ def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_i
     page.wait_for_selector(".cm-addlora")
     page.click(".cm-addlora")
     page.wait_for_selector(".mfly.open .mg-card")
-    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length === 24")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 24")
     _scroll_pane_to_bottom(page)
     page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
     assert calls[:2] == [None, "p2"], calls

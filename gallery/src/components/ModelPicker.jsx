@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import { apiGet } from "../api.js";
+import { uniqueRows, appendRows, scrollParentOf, rowKey } from "../picker/mergeRows.js";
 import "../styles/model-picker.css";
 
 /* Faithful React port of static/mg-model-picker.js (2026-08-08, the vanilla static/ -> React
@@ -135,7 +136,7 @@ export default function ModelPicker({
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
       setErr(d && d.error ? d.error : "");
-      setRows((d && d.results) || []);
+      setRows(uniqueRows((d && d.results) || []));
       setDim(false);
     }).catch(() => {
       if (mine !== seqRef.current) return;
@@ -153,7 +154,10 @@ export default function ModelPicker({
       if (d && d.error) return;              // transient: leave hasMore/cursor, next scroll retries
       hasMoreRef.current = !!(d && d.has_more);
       cursorRef.current = (d && d.next_cursor) || "";
-      setRows((old) => old.concat((d && d.results) || []));
+      // One row per model (picker/mergeRows.js): the feeds repeat a model across pages, and a
+      // repeated key leaves React a card it can never remove again -- the "always the SAME
+      // LoRA" pile at the top of every later list (owner, 2026-09-07).
+      setRows((old) => appendRows(old, (d && d.results) || []));
     }).catch(() => { loadingMoreRef.current = false; setLoadingMore(false); });
   }, [searchUrl]);
 
@@ -164,14 +168,20 @@ export default function ModelPicker({
   // handler never ran, and every list stopped dead at its first page of 24 (owner, 2026-09-07,
   // desktop and phone, every tab and sort). An IntersectionObserver on a 1px sentinel after the
   // grid sees the sentinel come into view through ANY clipping ancestor, so it does not care
-  // which element scrolls. root: null = the viewport, intersected with every overflow ancestor.
+  // which element scrolls. The root is that scrolling ancestor when there is one (the viewport
+  // otherwise), because only then does the margin mean "this far before the END OF THE LIST":
+  // with root:null the margin widens the viewport, but the pane's clip is applied first, so the
+  // sentinel only ever intersected once it was physically on screen and every page cost a full
+  // server round trip (0.6-0.9 s, measured) spent looking at the bottom of the list ("it does but
+  // its slow" -- owner, 2026-09-07). 720px is about one page of cards: the next page is on its way
+  // while the current one is still being read, which is what the vanilla picker felt like.
   useEffect(() => {
     if (!visible || typeof IntersectionObserver === "undefined") return;
     const el = sentinelRef.current;
     if (!el) return;
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) loadMore();
-    }, { root: null, rootMargin: "160px 0px", threshold: 0 });
+    }, { root: scrollParentOf(el), rootMargin: "720px 0px", threshold: 0 });
     io.observe(el);
     return () => io.disconnect();
   }, [visible, loadMore, rows.length]);
@@ -341,7 +351,7 @@ export default function ModelPicker({
 
       <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
         style={{ opacity: dim ? 0.45 : 1 }}>
-        {rows.map((m) => {
+        {rows.map((m, i) => {
           const incompat = m.compat === "no";
           const arch = archLabel(m, kind);
           const sel = isSelected(m);
@@ -357,7 +367,7 @@ export default function ModelPicker({
               })();
           const clickable = !incompat || sel;   // an already-selected incompatible LoRA can still be removed
           return (
-            <div key={m.model_id} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
+            <div key={rowKey(m) || "row-" + i} className={"mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : "")}
               data-mid={m.model_id} title={tip || undefined}
               onClick={clickable ? () => pick(m) : undefined}
               onMouseEnter={(e) => schedulePreview(m, e.currentTarget)}

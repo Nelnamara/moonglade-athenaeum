@@ -2053,6 +2053,51 @@ ${"=".repeat(48)}
   }
   var ICON_NAMES = Object.keys(GLYPHS);
 
+  // ../gallery/src/picker/mergeRows.js
+  function rowKey(row) {
+    return row && row.model_id != null && row.model_id !== "" ? String(row.model_id) : "";
+  }
+  function uniqueRows(rows) {
+    const seen2 = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const r of rows || []) {
+      const k = rowKey(r);
+      if (k) {
+        if (seen2.has(k)) continue;
+        seen2.add(k);
+      }
+      out.push(r);
+    }
+    return out;
+  }
+  function appendRows(old, incoming) {
+    const base = old || [];
+    const seen2 = /* @__PURE__ */ new Set();
+    for (const r of base) {
+      const k = rowKey(r);
+      if (k) seen2.add(k);
+    }
+    const fresh = [];
+    for (const r of incoming || []) {
+      const k = rowKey(r);
+      if (k) {
+        if (seen2.has(k)) continue;
+        seen2.add(k);
+      }
+      fresh.push(r);
+    }
+    return fresh.length ? base.concat(fresh) : base;
+  }
+  function scrollParentOf(el) {
+    let e = el && el.parentElement;
+    while (e && e !== document.body) {
+      const oy = getComputedStyle(e).overflowY;
+      if (oy === "auto" || oy === "scroll") return e;
+      e = e.parentElement;
+    }
+    return null;
+  }
+
   // ../gallery/src/components/ModelPicker.jsx
   function fmt(n) {
     return (Number(n) || 0).toLocaleString();
@@ -2183,7 +2228,7 @@ ${"=".repeat(48)}
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
         setErr(d && d.error ? d.error : "");
-        setRows(d && d.results || []);
+        setRows(uniqueRows(d && d.results || []));
         setDim(false);
       }).catch(() => {
         if (mine !== seqRef.current) return;
@@ -2204,7 +2249,7 @@ ${"=".repeat(48)}
         if (d && d.error) return;
         hasMoreRef.current = !!(d && d.has_more);
         cursorRef.current = d && d.next_cursor || "";
-        setRows((old) => old.concat(d && d.results || []));
+        setRows((old) => appendRows(old, d && d.results || []));
       }).catch(() => {
         loadingMoreRef.current = false;
         setLoadingMore(false);
@@ -2216,7 +2261,7 @@ ${"=".repeat(48)}
       if (!el) return;
       const io = new IntersectionObserver((entries) => {
         if (entries.some((e) => e.isIntersecting)) loadMore();
-      }, { root: null, rootMargin: "160px 0px", threshold: 0 });
+      }, { root: scrollParentOf(el), rootMargin: "720px 0px", threshold: 0 });
       io.observe(el);
       return () => io.disconnect();
     }, [visible, loadMore, rows.length]);
@@ -2397,7 +2442,7 @@ ${"=".repeat(48)}
         onScroll,
         style: { opacity: dim ? 0.45 : 1 }
       },
-      rows.map((m) => {
+      rows.map((m, i) => {
         const incompat = m.compat === "no";
         const arch = archLabel(m, kind);
         const sel = isSelected(m);
@@ -2414,7 +2459,7 @@ ${"=".repeat(48)}
         return /* @__PURE__ */ react_global_shim_default.createElement(
           "div",
           {
-            key: m.model_id,
+            key: rowKey(m) || "row-" + i,
             className: "mg-card" + (sel ? " sel" : "") + (incompat ? " incompat" : ""),
             "data-mid": m.model_id,
             title: tip || void 0,
