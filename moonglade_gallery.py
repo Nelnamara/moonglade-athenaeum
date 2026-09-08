@@ -11781,12 +11781,37 @@ def create_app(out_dir: Path):
         and catalog never drift. Order matters: if the cloud call fails, nothing local is
         touched and the image is still there to try again. WHICH rows go is the plan's to
         say (`_delete_image_rows`), never this route's to re-derive from local counts.
+
+        A CONFIRMED delete writes one Activity row (`del-<hex>`, `type: "delete"`) -- owner's
+        walk 2026-09-07, "single delete did NOT show in the Activity tracker". A bulk delete
+        has written one since it existed (`_start_bulk_delete`'s `bulkdel-<hex>`), so the
+        finer-grained partner writes the same kind of row for the same event, and this
+        library's whole record of what left it stops depending on which button was used. The
+        PREVIEW writes nothing: nothing happened, and a row per dialog-open is noise.
         """
         import moonglade_backup as core          # lazy: avoid import cycle
+        import uuid
         body = request.get_json(silent=True) or {}
         if "confirm" not in body:
             return jsonify({"error": "not confirmed"}), 400
         preview = not body.get("confirm")
+
+        def _log_delete(status, label, error=None):
+            """The one Activity row this delete leaves behind.
+
+            Born terminal, unlike the bulk delete's two events: a single delete is one
+            mutation and there is no progress to report between them. Everything else follows
+            _start_bulk_delete exactly -- `type: "delete"` so the tray labels it Delete, and
+            NO `scheduled` field, because the owner pressed this button and a job you press
+            toasts its outcome (jobsStore.js's toastTransitions swallows only `scheduled`
+            rows). `media_ids` carries the one image so the row can show its thumbnail, and it
+            is written BEFORE the local purge, while that thumbnail is still on disk.
+
+            Never on the preview -- callers check that themselves rather than this swallowing
+            it, so the one caller that must not log reads as a decision at its own call site.
+            """
+            _log_job("del-" + uuid.uuid4().hex[:12], status=status, type="delete",
+                     label=label, error=error, media_ids=[mid] if mid else None)
         mid = str(body.get("media_id") or "").strip()
         row = get_row(db_path, mid) if mid else None
         if not row:
@@ -11810,7 +11835,12 @@ def create_app(out_dir: Path):
                 plan = core.delete_image_routed(_core_session, tid, mid,
                                                 confirmed_plan=body.get("plan") or None)
         except Exception as e:                        # noqa: BLE001
-            return jsonify({"error": _redact_host_paths(str(e))[:240]}), 200
+            line = _redact_host_paths(str(e))[:240]
+            if not preview:
+                # A delete he pressed that came back with an error is exactly the outcome the
+                # tracker must not be silent about -- READ_ONLY, a PixAI 500, a lost token.
+                _log_delete("failed", "Delete from PixAI failed", error=line)
+            return jsonify({"error": line}), 200
 
         # The read this plan was made from is the only place the app learns that PixAI has
         # dropped an image, so every row it names is marked here -- on the preview as much as
@@ -11827,6 +11857,9 @@ def create_app(out_dir: Path):
                       "local_rows": [], "message": plan.reason}
             if not preview:
                 answer["error"] = plan.reason
+                # A refusal is a real outcome of a button he pressed, not a non-event: the
+                # image is still on PixAI and the row says in the plan's own words why.
+                _log_delete("failed", "Refused: " + plan.reason, error=plan.reason)
             return jsonify(answer), 200
 
         rows = _delete_image_rows(plan, tid, mid)
@@ -11835,6 +11868,13 @@ def create_app(out_dir: Path):
                             "live_siblings": plan.live_siblings,
                             "local_rows": [r["media_id"] for r in rows],
                             "message": _delete_image_message(plan, rows)})
+
+        # The cloud delete has already fired and cannot be taken back, so the row goes in now
+        # -- what it records is what PixAI did, in the plan's own words. A local purge that
+        # fails afterwards is a different fact and comes back through this route's own error
+        # contract; it does not make the PixAI delete un-happen, so it does not rewrite this.
+        _log_delete("done", "Deleted 1 image from PixAI" if plan.plan == "per-image"
+                    else "Deleted the whole generation from PixAI (last image)")
 
         purged, failed = [], []
         for r in rows:
