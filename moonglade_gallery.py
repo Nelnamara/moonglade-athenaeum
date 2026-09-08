@@ -9864,7 +9864,8 @@ def create_app(out_dir: Path):
         in-memory-only, gone on restart and invisible to anyone reading moonglade.log
         after the fact. Found live: a task stuck failing every catch-up sweep for
         hours produced nothing but repeated "N finished task(s) were never mirrored"
-        warnings in the log -- true, but silent about WHY, because the actual
+        warnings in the log (that wording is historic -- the sweep says "are missing media
+        from the catalog" since 2026-09-07) -- true, but silent about WHY, because the actual
         exception only ever reached last_error. A restart cleared the symptom (fresh
         process, fresh attempt) without anyone learning the cause."""
         import logging as _logging
@@ -9993,11 +9994,30 @@ def create_app(out_dir: Path):
                 tid = str(node.get("id") or "")
                 if not tid or str(node.get("status") or "") not in core._GEN_DONE:
                     continue
-                mids = [str(m) for m in (core.media_ids_for(node) or [])]
-                if not mids:
-                    continue
                 # Absent from the catalog is the ONLY trigger. A task whose media is already
                 # here needs nothing, and re-collecting it would be pure waste.
+                #
+                # Asked of the ids the catalog is actually KEYED by (2026-09-07). This test
+                # used to run on media_ids_for, which is every id the summary
+                # NAMES -- and on the two commonest shapes those are ids no row ever holds:
+                # a batch task's `mediaId` is the composite preview grid (the members are
+                # the batch), and a video task's is the poster still (the row is keyed by
+                # the mp4). So the test was false forever for both, and every sweep relisted
+                # the same finished tasks and re-collected them for nothing -- the owner's
+                # "the app no longer picks up tracking of generations run from the website".
+                # The skip-only-when-really-present ruling is unchanged; this is the id set
+                # it always meant.
+                if core._is_video_task_node(node):
+                    # A summary names none of a video's cataloged ids, so ask by task: its
+                    # video row carries this task id.
+                    if get_row_by_task(db_path, tid):
+                        continue
+                    missed.append(tid)
+                    continue
+                mids = [str(m) for m in (core.cataloged_media_ids(node) or [])]
+                if not mids:
+                    continue
+                # EVERY one, so a half-collected batch is still finished off.
                 if all(get_row(db_path, m) for m in mids):
                     continue
                 missed.append(tid)
@@ -10005,8 +10025,9 @@ def create_app(out_dir: Path):
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
                 return
             _log.warning(
-                "live mirror: catch-up after %s -- %d finished task(s) were never mirrored, "
-                "collecting now: %s", reason, len(missed), ", ".join(missed[:10]))
+                "live mirror: catch-up after %s -- %d finished task(s) are missing media "
+                "from the catalog, collecting now: %s",
+                reason, len(missed), ", ".join(missed[:10]))
             for tid in missed:
                 _watch_mirror(tid)
                 _time.sleep(1.0)          # paced -- be polite to their servers
