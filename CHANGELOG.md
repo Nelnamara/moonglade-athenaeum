@@ -15,6 +15,8 @@ git tags. Full prose notes for tagged versions live on
 > commits reached master as part of **v2.0.0**, which does). There is **no v1.7.x** (1.6.0 → 1.8.0).
 
 ## [Unreleased]
+- **Generations you start on the PixAI website now show in the app's Activity window as they render, with the usual spinner, and land in it when mirrored.** The window shows a run started on the website exactly as it shows one started here — queued, then rendering with Nel's spinner, then done with its pictures once they have been mirrored — with a small **website** mark on the row as the only difference. A run the app missed because it was closed gets its row when the app catches up, already finished. One row per generation, never two. (2026-09-07)
+- The live mirror's own lines — connected, mirroring, disconnected — now reach `pixai_backup/logs/moonglade.log`, so the log can answer whether the socket was up when a generation finished. (2026-09-07)
 - Removed leftover styles from retired screens (the classic grid, the old Edit-tab slots, the retired jobs tray and others); nothing you see changes.
 - The Blur toggle now also blurs the gallery picker's thumbnails and the generate drawer's reference images.
 - **The Konami Code, Read the Manual and Triggered can be earned from a phone or any logged-in device again; each event is one-time and rate-limited so it cannot be replayed.** A second tap inside a seventh of a second is read as one, a real second tap counts, and the thirty-a-minute limit holds even against a replayed sign-in cookie. (2026-09-07)
