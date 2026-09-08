@@ -4388,3 +4388,92 @@ def test_the_bridges_mirror_tile_rests_off_and_refuses_to_arm_itself(logged_in_p
     assert any(m == "GET" and "/api/mirror/status" in u for (m, u) in seen), (
         "the tile never read /api/mirror/status -- it is rendering a placeholder, so every "
         "assertion above is about nothing")
+
+
+# --- The pickers page past 24 (owner, 2026-09-07, twice: "still do not scroll past a set
+# selection of models and lora in all tabs and sorts", desktop and phone). Two fixes were
+# claimed from code reads before this test existed; this is the browser proof, on both shells,
+# with the market faked so PixAI is never called. -----------------------------------------
+def _fake_market_pages(monkeypatch, per_page=24, pages=3):
+    """Three pages of LoRA rows the way /api/model-search hands them to the picker."""
+    def page(n):
+        rows = [{"model_id": "fake-%d-%d" % (n, i), "title": "Fake LoRA %d.%02d" % (n, i),
+                 "preview_url": "", "liked_count": i, "lora_base_model_type": "",
+                 "description": "", "official": False, "should_blur": False} for i in range(per_page)]
+        return {"results": rows, "has_more": n < pages, "next_cursor": ("p%d" % (n + 1)) if n < pages else ""}
+    calls = []
+
+    def fake_search(session, keyword="", category="", sort="", usage="MODEL", limit=24, after=None, **kw):
+        calls.append(after)
+        n = int(after[1:]) if after else 1
+        return page(n)
+    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    return calls
+
+
+def _scroll_pane_to_bottom(page):
+    """Scroll whichever element actually scrolls the open picker: the flyout's non-head pane."""
+    page.evaluate("""() => {
+        const fly = document.querySelector('.mfly.open');
+        const panes = [...fly.querySelectorAll(':scope > div:not(.mfly-head)')].filter(d => d.style.display !== 'none');
+        const pane = panes[0];
+        pane.scrollTop = pane.scrollHeight;
+        const grid = pane.querySelector('.mg-grid');
+        if (grid) grid.scrollTop = grid.scrollHeight;
+    }""")
+
+
+def _cards(page):
+    return page.locator(".mfly.open .mg-card").count()
+
+
+def test_desktop_lora_picker_pages_past_its_first_24(logged_in_page, monkeypatch):
+    calls = _fake_market_pages(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    # the LoRA row lives in the dock's settings; expand if the + LoRA control is not on screen
+    if not page.locator(".mgdock-addlora").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-addlora", state="visible")
+    page.click(".mgdock-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length === 24")
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 72", timeout=8000)
+    assert _cards(page) == 72, "three pages of 24 must all be in the list"
+    assert calls[:3] == [None, "p2", "p3"], calls
+
+
+def test_phone_lora_sheet_pages_past_its_first_24_and_confirm_closes_it(logged_in_page, monkeypatch):
+    calls = _fake_market_pages(monkeypatch)
+    page = logged_in_page(**PHONE)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-addlora")
+    page.click(".cm-addlora")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length === 24")
+    _scroll_pane_to_bottom(page)
+    page.wait_for_function("() => document.querySelectorAll('.mfly.open .mg-card').length >= 48", timeout=8000)
+    assert calls[:2] == [None, "p2"], calls
+    # the way out: the sheet head's Confirm selection, visible inside the viewport, closes the sheet
+    done = page.locator(".mfly.open .mfly-done")
+    assert done.count() == 1, "the phone sheet head carries the Confirm selection button"
+    box = done.bounding_box()
+    vw, vh = PHONE["width"], PHONE["height"]
+    assert box and 0 <= box["y"] and box["y"] + box["height"] <= vh and box["x"] + box["width"] <= vw, box
+    assert done.inner_text().strip() == "Confirm selection"
+    # a tap on a card keeps the sheet open (multi-select) and the button still reachable
+    page.locator(".mfly.open .mg-card").first.click()
+    assert page.locator(".mfly.open").count() == 1
+    assert done.is_visible()
+    done.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
