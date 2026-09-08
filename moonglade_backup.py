@@ -3167,11 +3167,17 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
 # (`last`/`before`) while meilisearch pages forward (`first`/`after`). This app pages forward
 # everywhere, which the connection accepts for all four, and switching direction per sort would
 # mean two cursor conventions in one picker for no user-visible gain.
+#
+# `relevance` is the fifth pair and NOT one of the four the picker offers: it is where a
+# KEYWORD search under Trending or Latest goes instead (owner walk 2026-09-07, "searching for a
+# known LoRA fails"). meilisearch with an EMPTY orderBy is PixAI's relevance ranking; see
+# model_search_market_gql's keyword handling for the measurements that establish it.
 MARKET_SORTS = {
     "trending":   ("trending", ""),
     "liked":      ("meilisearch", "-markInfo.likedCount"),
     "used":       ("meilisearch", "-markInfo.refCount"),
     "newest":     ("latest", "-createdAt"),
+    "relevance":  ("meilisearch", ""),
 }
 # What the old two-button UI sent, kept working so an older client or a bookmarked URL does not
 # silently lose its sort.
@@ -3399,8 +3405,10 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     empty and the card hides them), plus GraphQL-only extras: tags + created_at + author.
 
     category: one of MARKET_CATEGORIES (ignored if not). sort: 'newest' -> orderBy -createdAt;
-    anything else -> the connection's default order. usage MODEL/LORA splits base vs LoRA rows
-    (the connection conflates them). Read-only, no spend.
+    anything else -> the connection's default order. A non-empty `keyword` re-points a RANKING
+    feed (trending/latest) at the relevance one -- see the feed selection below for why and for
+    the 2026-09-07 measurements. usage MODEL/LORA splits base vs LoRA rows (the connection
+    conflates them). Read-only, no spend.
 
     `latestVersion` also requests modelType/loraBaseModelType (picker-parity-round2,
     2026-07-24) -- confirmed live: real rows come back e.g. modelType:"MULTI_LORA",
@@ -3461,6 +3469,22 @@ def model_search_market_gql(session, keyword="", category="", sort="", usage="MO
     # Sort is a FEED plus an orderBy, both from a fixed table -- safe to interpolate, and an
     # unrecognised name falls back to Trending rather than producing a broken query.
     feed, order_by = market_sort(sort)
+    # A KEYWORD goes to a search index, never to a ranking feed (owner walk 2026-09-07:
+    # "searching for a known LoRA fails" / "it's always the SAME LoRA"). `trending` and `latest`
+    # are RANKINGS: the connection accepts `keyword` alongside them and returns the ranking
+    # anyway, so every term produced the same head row -- which is exactly what "always the same
+    # LoRA" is. Measured live 2026-09-07 under lora_base_type=MMDIT26A_MODEL: on the trending
+    # feed "Perfect Hands" -> "Extremely detailed...", "Large Bust"; "eyes" -> "Extremely
+    # detailed..." again; and "qwxzv nonsense" -- a term nothing can match -- still returned
+    # eight rows. On the meilisearch feed with an EMPTY orderBy (relevance), the same three:
+    # "Perfect Hands" -> "JP Anime Perfect Hands", "perfect hand..."; "eyes" -> "beautiful eyes",
+    # "miyako eyes"; "qwxzv nonsense" -> nothing. So a keyword under Trending or Latest is served
+    # by MARKET_SORTS["relevance"] instead. `liked`/`used` are already meilisearch and keep their
+    # orderBy -- they were measured returning exact matches first ("Perfect Hands SDXL") -- and a
+    # search with no keyword is untouched, so plain browsing still gets the ranking feeds. The
+    # base-type filter is orthogonal and stays on either way; its rows measured correct.
+    if (keyword or "").strip() and feed in ("trending", "latest"):
+        feed, order_by = MARKET_SORTS["relevance"]
     args.append('feed:"%s"' % feed)
     if order_by:
         args.append('orderBy:"%s"' % order_by)

@@ -66,8 +66,11 @@ describe("Continuous scroll / load-more (owner report 2026-07-24)", () => {
       "a FRESH search (doSearch) replaces the row list outright -- the replace-vs-concat split " +
       "is what the vanilla `if (!append) g.innerHTML = ''` used to do; clearing on a continuation " +
       "would defeat the entire feature, wiping what's already loaded");
-    assert.match(src, /!rows\.length \? <div className="mg-empty"[^\n]*>No results/,
-      "the 'No results' empty-state is gated on !rows.length -- because loadMore concats onto " +
+    // The SENTENCE moved into the `emptyLine` const on 2026-09-07 (it now names the base filter
+    // when one is on -- mg-lora-search-empty-state.test.js owns its wording); the gate this test
+    // is about is unchanged.
+    assert.match(src, /!rows\.length \? <div className="mg-empty"[^\n]*>\{emptyLine\}</,
+      "the empty-state is gated on !rows.length -- because loadMore concats onto " +
       "the existing rows, an empty continuation page can never blank a grid that already holds " +
       "real results (the additive-continuation contract)");
   });
