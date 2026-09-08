@@ -2289,7 +2289,7 @@ ${"=".repeat(48)}
     const filtersHidden = market && src === "bookmark";
     const p = preview && preview.m;
     const baseFilterLabel = kind === "lora" && baseType ? archLabel({ lora_base_model_type: baseType }, kind) : "";
-    const emptyLine = qDebounced && baseFilterLabel ? "No LoRAs for " + baseFilterLabel + " match \u201C" + qDebounced + "\u201D \u2014 clear the search or pick another base." : "No results \u2014 try another search.";
+    const emptyLine = kind === "lora" && qDebounced ? "No LoRAs match \u201C" + qDebounced + "\u201D \u2014 try other words." : baseFilterLabel && !qDebounced ? "No LoRAs for " + baseFilterLabel + " here \u2014 pick another base or search by name." : "No results \u2014 try another search.";
     return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "model-picker", style }, /* @__PURE__ */ react_global_shim_default.createElement(
       "input",
       {
@@ -4133,10 +4133,11 @@ ${"=".repeat(48)}
       if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
         if (st === "done") {
           const mid = (j.media_ids || [])[0] || "";
+          const isDelete = j.type === "delete";
           show({
             kind: "ok",
-            title: (j.label || "Generation") + " \u2014 done",
-            msg: "Added to your gallery.",
+            title: (j.label || "Generation") + (isDelete ? "" : " \u2014 done"),
+            msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
             thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null
           });
         } else if (st === "done_with_errors") {
@@ -4155,9 +4156,10 @@ ${"=".repeat(48)}
           });
         } else {
           show({
+            // a refused delete's label already reads "Refused: <reason>"; "failed" on top of it is noise
             kind: "err",
             sticky: true,
-            title: (j.label || "Job") + " failed",
+            title: (j.label || "Job") + (j.type === "delete" ? "" : " failed"),
             msg: j.error || "See the activity card."
           });
         }
