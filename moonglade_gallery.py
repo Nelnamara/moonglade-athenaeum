@@ -13195,7 +13195,13 @@ def create_app(out_dir: Path):
         # untouched -- it still feeds the sort and the badge on every LoRA search.
         server_lora_type = base_type if (usage == "LORA" and not q) else ""
         try:
+            # The market is browsed AS THE WEBSITE (core.present_as_web): PixAI filters what it
+            # returns by the client it believes it is talking to, and the API-key session's own
+            # identity gets the stricter mobile-app policy -- a search that fills pages on the
+            # site came back empty here (owner, 2026-09-07). Same key, same query, website
+            # identity: the same rows the site shows.
             core, session = _gen_session()
+            session = core.present_as_web(session)
             if src == "bookmark":
                 # Its own operation -- the market connection has no bookmark argument, so this
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
@@ -13268,6 +13274,7 @@ def create_app(out_dir: Path):
         if version_id:
             try:
                 core, session = _gen_session()
+                session = core.present_as_web(session)   # same policy as the search that found it
                 return jsonify({"model_id": core.resolve_model_base_id(session, version_id)})
             except Exception as e:
                 return jsonify({"error": _redact_host_paths(str(e))[:200], "model_id": ""}), 200
@@ -13276,6 +13283,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "model_id required", "version_id": ""}), 400
         try:
             core, session = _gen_session()
+            session = core.present_as_web(session)   # same policy as the search that found it
             if (request.args.get("all") or "").strip() in ("1", "true"):
                 return jsonify({"versions": core.list_model_versions(session, mid)})
             # with_profiles: this is a BASE-model resolve whose answer feeds the composer's

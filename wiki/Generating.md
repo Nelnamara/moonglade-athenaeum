@@ -88,6 +88,11 @@ On Market you can also narrow by **category** (character, animal, style, realist
 clothing, background, detail, other), by **when it was posted**, by **source**
 (PixAI-trained or brought in from elsewhere), and to models that **allow commercial use**.
 
+Whatever the tab, the app browses the market the way your own browser does, so a search
+returns the same rows pixai.art returns for your account — including LoRAs the site only
+shows a signed-in adult account. If a search that fills pages on the site comes back empty
+here, that is a bug, not a setting.
+
 The filter row disappears on **Bookmarked**, and that is deliberate rather than an
 oversight: PixAI's bookmark list only supports a search term, so a category or date
 control there would look like it worked and quietly do nothing. Search still works, and if

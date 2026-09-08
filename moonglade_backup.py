@@ -6061,6 +6061,35 @@ def _mirror_session_from(jwt):
     return session
 
 
+# PixAI applies its CONTENT POLICY by the client it believes it is talking to, not by the
+# credential. Measured 2026-09-07, owner's walk (a LoRA search for "cum" that fills pages on
+# the site came back "No LoRAs match" in the app): the same API key and the same meilisearch
+# query returned 0 rows presenting as `pixai-personal-backup/1.0`, and 24 rows -- identical to
+# the browser-token session's -- presenting the website's identity. The strict tier is the
+# mobile-app one _mirror_session_from already describes. So a read that browses the market on
+# the owner's behalf presents as the website, which is exactly what his own browser does with
+# the same account. The credential is not in this set: Authorization is left as built.
+WEB_IDENTITY_HEADERS = {
+    "User-Agent": MIRROR_WEB_USER_AGENT,
+    "Origin": MIRROR_WEB_ORIGIN,
+    "Referer": MIRROR_WEB_ORIGIN + "/",
+}
+
+
+def present_as_web(session):
+    """`session`, now presenting the website's client identity (WEB_IDENTITY_HEADERS), so
+    PixAI applies the website content policy to what it returns. Mutates and returns the SAME
+    object -- a PixAIClient delegates `headers` to the Session it holds -- and leaves a stand-in
+    without headers (tests) untouched. Only the identity changes; the credential does not."""
+    headers = getattr(session, "headers", None)
+    if headers is not None:
+        try:
+            headers.update(WEB_IDENTITY_HEADERS)
+        except Exception:
+            pass
+    return session
+
+
 def make_mirror_session(bootstrap_from_browser=False):
     """The mirror submit/refresh session: a requests.Session authed with the browser JWT
     (Bearer) presenting the WEB client identity. Returns None -- NEVER raises -- when there is
