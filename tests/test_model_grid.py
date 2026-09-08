@@ -465,10 +465,13 @@ def test_model_search_market_gql(monkeypatch):
         ]}}
     monkeypatch.setattr(core, "gql_adhoc", fake_gql)
 
-    # base + category + newest -> category/orderBy interpolated, keyword bound as a variable
+    # base + category + newest -> category/feed interpolated, keyword bound as a variable.
+    # (Since 2026-09-07 a keyword re-points a ranking feed at the relevance one, so -createdAt is
+    # NOT expected here -- test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed
+    # pins both halves of that; the keywordless Latest orderBy is asserted just below.)
     r = core.model_search_market_gql(object(), keyword="anime", category="style",
                                      sort="newest", usage="MODEL", limit=24)
-    assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+    assert 'category:"style"' in captured["query"] and 'feed:"meilisearch"' in captured["query"]
     assert captured["vars"]["k"] == "anime"           # keyword stays a bound var (no injection)
     assert [m["model_id"] for m in r["results"]] == ["1"]   # LoRA dropped for MODEL usage
     m0 = r["results"][0]
@@ -477,10 +480,80 @@ def test_model_search_market_gql(monkeypatch):
     assert m0["description"] == "" and m0["ref_count"] == 0 and m0["official"] is False  # REST-only empty
     assert r["has_more"] is True
 
+    # the same category + Newest browse WITHOUT a keyword -- what this test has always been
+    # about -- still interpolates the Latest feed and its -createdAt, which REST silently ignores
+    core.model_search_market_gql(object(), category="style", sort="newest", usage="MODEL", limit=24)
+    assert 'category:"style"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+    assert 'feed:"latest"' in captured["query"]
+
     # LoRA usage keeps only LoRA rows; a bad category is ignored (no category arg emitted)
     r2 = core.model_search_market_gql(object(), category="concept", usage="LORA")
     assert 'category:' not in captured["query"]          # 'concept' not whitelisted
     assert [m["model_id"] for m in r2["results"]] == ["2"] and r2["results"][0]["should_blur"] is True
+
+
+def test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed(monkeypatch):
+    """Owner walk 2026-09-07: 'searching for a known LoRA fails' / 'it's always the SAME LoRA'.
+
+    `trending` and `latest` are RANKINGS. The connection accepts `keyword` alongside them and
+    returns the ranking anyway -- so every term produced the same head row, which is what
+    'always the same LoRA' is. Measured live that day under lora_base_type=MMDIT26A_MODEL:
+    trending gave 'Perfect Hands' -> 'Extremely detailed...', 'eyes' -> the same row again, and
+    'qwxzv nonsense' -> eight rows; meilisearch with an EMPTY orderBy gave 'JP Anime Perfect
+    Hands' / 'beautiful eyes' / nothing.
+
+    A wrong feed does not error -- it returns a plausible-looking list -- so this is pinned.
+    feed/orderBy are INTERPOLATED into the document (fixed table, never user text), so they are
+    asserted on the query, not on the bound variables.
+    """
+    captured = {}
+    def fake_gql(session, query, vars=None):
+        captured["query"], captured["vars"] = query, vars
+        return {"generationModels": {"pageInfo": {}, "edges": []}}
+    monkeypatch.setattr(core, "gql_adhoc", fake_gql)
+
+    # trending + a keyword -> relevance search, and NO orderBy at all (that empty orderBy IS
+    # the relevance ranking; any orderBy would re-sort the matches and bury them again).
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="trending", usage="LORA",
+                                 lora_base_type="MMDIT26A_MODEL")
+    assert 'feed:"meilisearch"' in captured["query"]
+    assert "orderBy:" not in captured["query"]
+    assert captured["vars"]["k"] == "Perfect Hands"      # still a bound var, never interpolated
+    # ...and the base filter is orthogonal: it stays on (its rows measured correct and relevant).
+    assert "loraBaseModelTypes:[MMDIT26A_MODEL]" in captured["query"]
+
+    # the SAME call with no keyword is untouched -- plain browsing is what the ranking is for
+    core.model_search_market_gql(object(), sort="trending", usage="LORA",
+                                 lora_base_type="MMDIT26A_MODEL")
+    assert 'feed:"trending"' in captured["query"] and "meilisearch" not in captured["query"]
+    # a whitespace-only box is not a search
+    core.model_search_market_gql(object(), keyword="   ", sort="trending", usage="LORA")
+    assert 'feed:"trending"' in captured["query"]
+
+    # Latest is a ranking too, so a keyword re-points it the same way (and drops -createdAt).
+    core.model_search_market_gql(object(), keyword="eyes", sort="newest", usage="LORA")
+    assert 'feed:"meilisearch"' in captured["query"] and "orderBy:" not in captured["query"]
+    core.model_search_market_gql(object(), sort="newest", usage="LORA")
+    assert 'feed:"latest"' in captured["query"] and 'orderBy:"-createdAt"' in captured["query"]
+
+    # liked/used are ALREADY meilisearch and KEEP their orderBy -- measured returning exact
+    # matches first ('Perfect Hands SDXL'), so there is nothing here to fix.
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="liked", usage="LORA")
+    assert 'feed:"meilisearch"' in captured["query"]
+    assert 'orderBy:"-markInfo.likedCount"' in captured["query"]
+    core.model_search_market_gql(object(), keyword="Perfect Hands", sort="used", usage="LORA")
+    assert 'orderBy:"-markInfo.refCount"' in captured["query"]
+
+    # The pair lives in MARKET_SORTS as `relevance` rather than being written out here, so the
+    # feed table stays the one place a feed name is spelled.
+    assert core.MARKET_SORTS["relevance"] == ("meilisearch", "")
+    # It is a FALLBACK, not a fifth sort the picker offers -- the four it does offer are intact.
+    assert core.market_sort("trending") == ("trending", "")
+    assert core.market_sort("newest") == ("latest", "-createdAt")
+
+    # Base-model search gets it too: the feed is a property of the connection, not of the kind.
+    core.model_search_market_gql(object(), keyword="Tsubaki", sort="trending", usage="MODEL")
+    assert 'feed:"meilisearch"' in captured["query"]
 
 
 def test_market_asks_the_server_for_the_right_KIND_of_model(monkeypatch):
@@ -698,7 +771,11 @@ def test_lora_base_type_filter_survives_category_sort_and_pagination(monkeypatch
                                          lora_base_type=arch)
         q = captured["query"]
         assert "loraBaseModelTypes:[%s]" % arch in q
-        assert 'category:"style"' in q and 'orderBy:"-createdAt"' in q and "keyword:$k" in q
+        # This call carries a KEYWORD, so since 2026-09-07 its Latest ranking is replaced by the
+        # relevance feed and -createdAt goes with it (see
+        # test_a_keyword_search_goes_to_the_search_index_not_a_ranking_feed). What this test is
+        # about is unchanged: every OTHER argument still rides along with the arch filter.
+        assert 'category:"style"' in q and 'feed:"meilisearch"' in q and "keyword:$k" in q
         assert r["next_cursor"] == "C1"
 
         captured2 = _gql_capture(monkeypatch)

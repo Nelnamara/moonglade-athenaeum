@@ -231,6 +231,18 @@ export default function ModelPicker({
   const filtersHidden = market && src === "bookmark";
   const p = preview && preview.m;
 
+  // A keyword search under a base filter has TWO ways to come back empty -- nothing is called
+  // that, or nothing called that is built for this base -- and "No results — try another
+  // search." answers only the first, so the second reads as the search being broken (owner walk,
+  // 2026-09-07). When a base filter is on, say so and offer both ways out. The label is
+  // archLabel's own, fed a row carrying just the base type, so the sentence names the base in
+  // exactly the words the cards' ⚠ badge and their "needs <arch>" line already use.
+  const baseFilterLabel = kind === "lora" && baseType
+    ? archLabel({ lora_base_model_type: baseType }, kind) : "";
+  const emptyLine = (qDebounced && baseFilterLabel)
+    ? "No LoRAs for " + baseFilterLabel + " match “" + qDebounced + "” — clear the search or pick another base."
+    : "No results — try another search.";
+
   return (
     <div className="model-picker" style={style}>
       <input className="mg-q" type="text" placeholder="Search" aria-label="Search models"
@@ -296,7 +308,7 @@ export default function ModelPicker({
       )}
 
       {err ? <div className="mg-empty" style={{ display: "block" }}>⚠ {err}</div>
-        : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>No results — try another search.</div>
+        : !rows.length ? <div className="mg-empty" style={{ display: "block" }}>{emptyLine}</div>
         : <div className="mg-empty" />}
 
       <div className="mg-grid" role="listbox" ref={gridRef} onScroll={onScroll}
