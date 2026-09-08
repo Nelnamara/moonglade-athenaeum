@@ -239,9 +239,14 @@ export default function ModelPicker({
   // exactly the words the cards' ⚠ badge and their "needs <arch>" line already use.
   const baseFilterLabel = kind === "lora" && baseType
     ? archLabel({ lora_base_model_type: baseType }, kind) : "";
-  const emptyLine = (qDebounced && baseFilterLabel)
-    ? "No LoRAs for " + baseFilterLabel + " match “" + qDebounced + "” — clear the search or pick another base."
-    : "No results — try another search.";
+  // Since 2026-09-07 a NAME search is not filtered by the base at all -- a match the picked base
+  // cannot run shows greyed with what it needs -- so an empty result means nothing matched the
+  // words. Browsing without a search term is still base-filtered, and its empty line says so.
+  const emptyLine = (kind === "lora" && qDebounced)
+    ? "No LoRAs match “" + qDebounced + "” — try other words."
+    : (baseFilterLabel && !qDebounced
+        ? "No LoRAs for " + baseFilterLabel + " here — pick another base or search by name."
+        : "No results — try another search.");
 
   return (
     <div className="model-picker" style={style}>

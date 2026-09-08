@@ -109,8 +109,12 @@ function toastTransitions(rows) {
     if (seeded && !TERMINAL[prev] && TERMINAL[st]) {
       if (st === "done") {
         const mid = (j.media_ids || [])[0] || "";
+        // A delete row (2026-09-07: single deletes write one, bulk deletes always did) says what
+        // it did; "Added to your gallery." is a generation's sentence and was wrong on both.
+        const isDelete = j.type === "delete";
         toastShow({
-          kind: "ok", title: (j.label || "Generation") + " — done", msg: "Added to your gallery.",
+          kind: "ok", title: (j.label || "Generation") + (isDelete ? "" : " — done"),
+          msg: isDelete ? "Gone from PixAI." : "Added to your gallery.",
           thumb: mid ? "/thumbs/" + encodeURIComponent(mid) + ".jpg" : null,
         });
       } else if (st === "done_with_errors") {
@@ -127,7 +131,8 @@ function toastTransitions(rows) {
         });
       } else {
         toastShow({
-          kind: "err", sticky: true, title: (j.label || "Job") + " failed",
+          // a refused delete's label already reads "Refused: <reason>"; "failed" on top of it is noise
+          kind: "err", sticky: true, title: (j.label || "Job") + (j.type === "delete" ? "" : " failed"),
           msg: j.error || "See the activity card.",
         });
       }

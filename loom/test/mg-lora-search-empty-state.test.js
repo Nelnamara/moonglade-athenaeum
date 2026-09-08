@@ -53,13 +53,14 @@ const build = new Function("kind", "baseType", "qDebounced", `
 const GENERIC = "No results — try another search.";
 
 describe("the LoRA picker's empty line names the base filter when one is on", () => {
-  test("a keyword search under a base filter says which base, and offers both ways out", () => {
-    const { emptyLine } = build("lora", "MMDIT26A_MODEL", "Perfect Hands");
-    assert.equal(emptyLine,
-      "No LoRAs for MMDiT match “Perfect Hands” — clear the search or pick another base.");
-    // both escape routes are named: the search is one of the two things narrowing the list
-    assert.match(emptyLine, /clear the search/);
-    assert.match(emptyLine, /pick another base/);
+  test("a name search that finds nothing says so, and never blames the base", () => {
+    // Since 2026-09-07 a name search is NOT base-filtered (a match the base cannot run shows
+    // greyed with what it needs), so an empty result means the words matched nothing.
+    for (const bt of ["MMDIT26A_MODEL", ""]) {
+      const { emptyLine } = build("lora", bt, "Perfect Hands");
+      assert.equal(emptyLine, "No LoRAs match “Perfect Hands” — try other words.");
+      assert.doesNotMatch(emptyLine, /pick another base|clear the search/, "that advice would be wrong now");
+    }
   });
 
   test("the base is named in archLabel's words, the same ones the cards use", () => {
@@ -80,11 +81,12 @@ describe("the LoRA picker's empty line names the base filter when one is on", ()
     assert.match(extractConst("baseFilterLabel"), /archLabel\(/);
   });
 
-  test("no base filter, or no search, keeps the generic line", () => {
-    // nothing found with the filter off really is "try another search"
-    assert.equal(build("lora", "", "Perfect Hands").emptyLine, GENERIC);
-    // an empty grid with an empty search box is a browse, not a failed search
-    assert.equal(build("lora", "MMDIT26A_MODEL", "").emptyLine, GENERIC);
+  test("a browse with no search term is still base-filtered, and its empty line says so", () => {
+    // an empty grid with an empty search box under a base filter is the filter's doing
+    const browse = build("lora", "MMDIT26A_MODEL", "").emptyLine;
+    assert.match(browse, /^No LoRAs for MMDiT here/);
+    assert.match(browse, /pick another base or search by name/);
+    // no base picked and nothing typed: the generic line
     assert.equal(build("lora", "", "").emptyLine, GENERIC);
   });
 
