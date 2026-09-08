@@ -534,6 +534,10 @@ class TestDownloadVerifiesContentLength:
 
 
 def test_update_mode_stops_early(tmp_path, mocker):
+    # The early stop is armed by the walk-end marker (2026-09-07): "already on disk" only
+    # means "already downloaded" for a library some pass has walked to the end of. A
+    # settled library has that marker; an interrupted first backup does not.
+    core.mark_walk_end_reached(tmp_path)
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     _patch_download_layer(mocker)
@@ -544,6 +548,121 @@ def test_update_mode_stops_early(tmp_path, mocker):
     core.run_download(_dl_args(tmp_path, update=True, update_grace=1))
 
     assert gql.call_count == 2  # page3 never requested
+
+
+# ---------------------------------------------------------------------------
+# The walk-end marker: an interrupted first backup must RESUME, not declare victory
+# (owner report, 2026-09-07 -- "This should have picked up where it left off and
+# continued pulling 37k images.")
+# ---------------------------------------------------------------------------
+
+def test_update_walks_to_the_end_while_the_marker_is_absent(tmp_path, mocker):
+    """A fresh library whose first backup was stopped part-way: the newest two pages are on
+    disk, nothing older is. The next Sync must page all the way to the true end and fill the
+    tail. FAILS before the fix -- the two known pages tripped `update_grace` and pages 3-5
+    were never even requested, so only the Advanced 'Full re-walk' could ever finish it."""
+    from moonglade_gallery import load_catalog
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
+    (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
+        _page("p4", True, "c4"), _page("p5", False)])
+
+    assert core.walk_end_reached(tmp_path) is False        # fresh: nothing has proven the end
+
+    result = core.run_download(_dl_args(tmp_path, update=True, update_grace=2))
+
+    assert gql.call_count == 5                             # all five pages requested
+    names = [str(c.args[2]) for c in dl.call_args_list]
+    assert not any("p1" in n or "p2" in n for n in names)  # on-disk items still skipped
+    for mid in ("p3", "p4", "p5"):
+        assert any(mid in n for n in names), "{} was never downloaded".format(mid)
+    mids = {r["media_id"] for r in load_catalog(tmp_path / "catalog.db")}
+    assert {"p1", "p2", "p3", "p4", "p5"} <= mids          # rows written for the tail
+    assert core.walk_end_reached(tmp_path) is True         # the end was seen -> marker set
+    assert result["reached_end"] is True
+    assert result["stopped_early"] is False
+    assert result["pages"] == 5
+
+
+def test_update_walks_to_the_end_while_the_marker_is_absent_parallel(tmp_path, mocker):
+    """The same gate on the parallel (--workers) path -- it carries its own copy of the
+    early stop, so it needs its own proof that the resume gate reached it."""
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
+    (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", False)])
+
+    core.run_download(_dl_args(tmp_path, update=True, update_grace=2, workers=4))
+
+    assert gql.call_count == 3
+    assert any("p3" in str(c.args[2]) for c in dl.call_args_list)
+    assert core.walk_end_reached(tmp_path) is True
+
+
+def test_update_stops_early_once_the_marker_is_set(tmp_path, mocker):
+    """The other side of the gate: a library whose walk HAS reached the end keeps the cheap
+    incremental stop -- two known pages and the Sync is over, exactly as before."""
+    core.mark_walk_end_reached(tmp_path)
+    (tmp_path / "images").mkdir(parents=True)
+    (tmp_path / "images" / "x_p1.webp").write_bytes(b"img")
+    (tmp_path / "images" / "x_p2.webp").write_bytes(b"img")
+    dl = _patch_download_layer(mocker)
+    gql = mocker.patch.object(core, "gql", side_effect=[
+        _page("p1", True, "c1"), _page("p2", True, "c2"), _page("p3", True, "c3"),
+        _page("p4", True, "c4"), _page("p5", False)])
+
+    result = core.run_download(_dl_args(tmp_path, update=True, update_grace=2))
+
+    assert gql.call_count == 2                             # stopped after the two known pages
+    assert not any("p3" in str(c.args[2]) for c in dl.call_args_list)
+    assert core.walk_end_reached(tmp_path) is True         # marker unchanged
+    assert result["stopped_early"] is True
+    assert result["reached_end"] is False
+
+
+def test_the_walk_end_marker_is_per_library(tmp_path, mocker):
+    """It belongs to the backup folder, not to the app -- so a finished library can never
+    arm a second, half-filled one's early stop. (This is why it is not in config.json.)"""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("only", False)])
+    core.run_download(_dl_args(a))
+
+    assert core.walk_end_reached(a) is True
+    assert core.walk_end_reached(b) is False
+    assert (a / "telemetry.json").exists()
+    assert not (b / "telemetry.json").exists()
+
+    # ...and library B, two known pages deep and never walked to its end, keeps going.
+    (b / "images").mkdir(parents=True)
+    (b / "images" / "x_q1.webp").write_bytes(b"img")
+    (b / "images" / "x_q2.webp").write_bytes(b"img")
+    gql_b = mocker.patch.object(core, "gql", side_effect=[
+        _page("q1", True, "c1"), _page("q2", True, "c2"), _page("q3", False)])
+
+    core.run_download(_dl_args(b, update=True, update_grace=2))
+
+    assert gql_b.call_count == 3, "library A's finished walk armed library B's early stop"
+
+
+def test_a_max_capped_run_does_not_claim_the_end_of_history(tmp_path, mocker):
+    """Test pull (--max N) stops on its own count, having seen nothing about the tail. If
+    that armed the marker, the very next Sync would stop two pages in on a library that was
+    never walked -- the reported bug, re-entered through a different door."""
+    _patch_download_layer(mocker)
+    mocker.patch.object(core, "gql", side_effect=[_page("p1", True, "c1")])
+
+    result = core.run_download(_dl_args(tmp_path, max=1))
+
+    assert core.walk_end_reached(tmp_path) is False
+    assert result["reached_end"] is False
 
 
 def test_is_video_task_node():
@@ -620,6 +739,7 @@ def test_parallel_workers_download_new_skip_known(tmp_path, mocker):
 def test_update_and_workers_compose(tmp_path, mocker):
     # --update (early-stop) + --workers (parallel) together: new items fetched
     # concurrently at the top, then stop once a page is fully on disk.
+    core.mark_walk_end_reached(tmp_path)   # a settled library: the stop is armed
     (tmp_path / "images").mkdir(parents=True)
     (tmp_path / "images" / "x_old.webp").write_bytes(b"img")
     dl = _patch_download_layer(mocker)
