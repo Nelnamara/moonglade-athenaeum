@@ -11839,7 +11839,7 @@ def create_app(out_dir: Path):
             if not preview:
                 # A delete he pressed that came back with an error is exactly the outcome the
                 # tracker must not be silent about -- READ_ONLY, a PixAI 500, a lost token.
-                _log_delete("failed", "Delete from PixAI failed", error=line)
+                _log_delete("failed", "PixAI delete failed", error=line)
             return jsonify({"error": line}), 200
 
         # The read this plan was made from is the only place the app learns that PixAI has

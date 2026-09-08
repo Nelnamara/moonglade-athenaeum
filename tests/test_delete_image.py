@@ -412,7 +412,7 @@ def test_a_cloud_delete_that_errors_is_logged_as_a_failure(tmp_path, monkeypatch
     cli.post("/api/delete-image", json={"media_id": "b", "confirm": True})
     j = _delete_jobs(tmp_path)[0]
     assert j["status"] == "failed" and "500" in (j.get("error") or ""), j
-    assert j["label"] == "Delete from PixAI failed", j["label"]
+    assert j["label"] == "PixAI delete failed", j["label"]
 
 
 def test_a_lone_image_uses_the_whole_task_mutation(tmp_path, monkeypatch):
