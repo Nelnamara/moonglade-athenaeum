@@ -1123,6 +1123,17 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
   transition: bottom .45s cubic-bezier(.2, .9, .24, 1); }
 .mgx-dock-host:has(.mgdock.expanded) .mfly { bottom: 470px; }
 
+/* ...and the palette's scroller has to be ALLOWED to shrink to that cap (owner walk,
+   2026-09-07: "LoRA picker in gen drawer does not scroll past first few"). The palette
+   above is the clipper (max-height:46vh; overflow:hidden); the element that actually
+   scrolls is ModelFlyout's non-head child -- styles.css's `.mfly > div:not(.mfly-head)`,
+   already flex:1 1 auto; overflow-y:auto. A flex ITEM defaults to min-height:auto, i.e.
+   never smaller than its content, so that child stayed full-list height and the palette
+   clipped it instead of it scrolling. min-height:0 lifts the automatic minimum.
+   The phone sheet got exactly this on 2026-08-24 (create-mobile.css, `.cm-modelwrap .mfly >
+   div:not(.mfly-head)`); this dock rule predates it and never picked it up. */
+.mgx-dock-host .mfly > div:not(.mfly-head) { min-height: 0; overflow-y: auto; }
+
 /* ============================ reduced motion ================================ */
 @media (prefers-reduced-motion: reduce) {
   .mgdock, .mgdock-run, .mgdock-slab, .mgdock-peek, .mgdock-tab.on,
