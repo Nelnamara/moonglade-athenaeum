@@ -40,7 +40,7 @@ git tags. Full prose notes for tagged versions live on
 - Jobs the library runs on its own schedule no longer pop a notice when they finish; the Activity window is where they are.
 - **The delete dialog stops calling a single picture a "whole batch".** Every task in the blast-radius list was labelled *whole batch*, including the ones that made exactly one image — and in the one dialog whose job is to tell you the truth about something you cannot undo, that reads as a warning about files coming along that do not exist. A task holding one file now says *single image*, or *single video* where the strip already marks it with a ▶; two or more still say *whole batch*, which is what that phrase was always for. (2026-09-07)
 - The generate panel's LoRA list scrolls again past the first rows.
-- Searching LoRAs by name now searches, instead of showing the trending list; the empty state says when the base model is what hides a match.
+- Searching LoRAs by name now searches, instead of showing the trending list; a match the base model you picked cannot run is shown greyed, with what it needs, instead of being left out of the results. The empty state is for when nothing matched at all.
 
 - **A first backup that was stopped part-way now resumes to the end on the next Sync, instead of stopping after two pages it already had. Sync says whether it walked to the end of your history or only caught up.** (2026-09-07)
 ## [3.9.0] - 2026-09-06 — Runs Itself

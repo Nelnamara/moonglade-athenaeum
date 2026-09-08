@@ -314,6 +314,48 @@ def test_model_search_threads_base_type_into_the_server_side_filter(tmp_path, mo
     assert gql[-1]["lora_base_type"] == ""
 
 
+def test_a_keyword_search_does_not_send_the_server_side_base_filter(tmp_path, monkeypatch, pixai):
+    """Owner's second walk, 2026-09-07: "searching for a known LoRA still fails". The route's
+    half of that fix -- what it hands each search path.
+
+    A keyword is a hunt for a LoRA the owner already knows, and the server filter answers it
+    by leaving the match out of the results. So with a keyword the route passes
+    lora_base_type="" and lets annotate_lora_compat grey the mismatch instead; `base_type`
+    itself is untouched and still feeds the compat sort and badge, which is the whole point --
+    the row has to arrive before it can be badged. Pinned on all THREE search paths
+    (market / bookmarked / mine), because a filter dropped in one place and left in another is
+    the same report again on a different tab.
+
+    Browsing with no keyword is unchanged (test_model_search_threads_base_type_into_the_
+    server_side_filter above still pins that), which is the 2026-07-24 ruling refined, not
+    reversed."""
+    gql, bmk = [], []
+    monkeypatch.setattr(core, "model_search_market_gql", lambda *a, **k: (
+        gql.append(k) or {"results": [{"model_id": "1", "lora_base_model_type": "SDXL_MODEL"}],
+                          "has_more": False, "next_cursor": ""}))
+    monkeypatch.setattr(core, "model_bookmarks_gql", lambda *a, **k: (
+        bmk.append(k) or {"results": [], "has_more": False, "next_cursor": ""}))
+    cli = _authed_client(tmp_path, [])
+
+    d = cli.get("/api/model-search?kind=lora&q=Perfect+Hands"
+                "&base_type=MMDIT26B_MODEL").get_json()
+    assert gql[-1]["lora_base_type"] == "", (
+        "the keyword search still asked PixAI to hide every other architecture")
+    assert gql[-1]["keyword"] == "Perfect Hands"
+    # ...and the badge layer still ran, off the SAME base_type the filter was denied.
+    assert d["results"][0]["compat"] == "no"
+
+    # Bookmarked and Mine are the same search with a different scope -- and the same report.
+    cli.get("/api/model-search?kind=lora&src=bookmark&q=Perfect+Hands&base_type=MMDIT26B_MODEL")
+    assert bmk[-1]["lora_base_type"] == ""
+    cli.get("/api/model-search?kind=lora&src=bookmark&base_type=MMDIT26B_MODEL")
+    assert bmk[-1]["lora_base_type"] == "MMDIT26B_MODEL"
+    cli.get("/api/model-search?kind=lora&src=mine&q=Perfect+Hands&base_type=MMDIT26B_MODEL")
+    assert gql[-1]["lora_base_type"] == ""
+    cli.get("/api/model-search?kind=lora&src=mine&base_type=MMDIT26B_MODEL")
+    assert gql[-1]["lora_base_type"] == "MMDIT26B_MODEL"
+
+
 def test_model_search_threads_cursor_to_whichever_path_is_in_use(tmp_path, monkeypatch, pixai):
     """Owner report 2026-07-24: the picker never loads more than its first page. The
     unused `offset=` param is replaced by a unified `cursor=` the client just echoes back

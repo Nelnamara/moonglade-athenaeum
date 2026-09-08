@@ -13074,6 +13074,8 @@ def create_app(out_dir: Path):
              was the actual complaint (the standing workaround was keyword-searching "sdxl"
              on PixAI's own site). Approximate, not strict, and only applied for architecture
              values on core's whitelist -- anything else falls through unfiltered.
+             BROWSE ONLY since the owner's second walk (2026-09-07), which REFINES the
+             2026-07-24 ruling rather than reversing it: see `server_lora_type` below.
           2. per-page soft SORT (compatible-or-unknown first, confirmed-mismatch last).
           3. per-row `compat` tag -- the PRECISE layer, see annotate_lora_compat(). Kept
              deliberately: layer 1 is a coarse browse hint, so only this one can be trusted
@@ -13105,6 +13107,19 @@ def create_app(out_dir: Path):
             size = max(1, min(int(request.args.get("size") or 24), 50))
         except ValueError:
             size = 24
+        # The base-type filter is a BROWSE hint, not a SEARCH one -- owner's second walk
+        # (2026-09-07: "searching for a known LoRA still fails"), REFINING the 2026-07-24
+        # ruling that added layer 1, not reversing it. Typing a name is a hunt for a LoRA he
+        # already knows, and the server filter answers that hunt by leaving the match OUT of
+        # the results entirely: an SDXL LoRA searched for while Tsubaki.3 (MMDIT26B) is the
+        # picked base simply is not there, the page fills up with other loosely-relevant
+        # LoRAs, and the empty state never fires -- so the search reads as broken. With a
+        # keyword we send NO filter and let layer 3 (annotate_lora_compat, the precise one)
+        # show the match greyed with its "needs <arch>" badge instead of hiding it. Browsing
+        # with no keyword keeps the filter exactly as 2026-07-24 set it: that wall
+        # (24-of-24 SD 1.5 rows) is the whole reason layer 1 exists. `base_type` itself is
+        # untouched -- it still feeds the sort and the badge on every LoRA search.
+        server_lora_type = base_type if (usage == "LORA" and not q) else ""
         try:
             core, session = _gen_session()
             if src == "bookmark":
@@ -13112,14 +13127,14 @@ def create_app(out_dir: Path):
                 # cannot be folded into the call below. Same row shape, so the grid does not care.
                 payload = core.model_bookmarks_gql(
                     session, keyword=q, usage=usage, limit=size, after=(cursor or None),
-                    lora_base_type=(base_type if usage == "LORA" else ""))
+                    lora_base_type=server_lora_type)
             elif src == "mine":
                 # "My LoRAs" is NOT a separate operation: it is the ordinary market connection
                 # filtered by the signed-in user's own id, exactly as their MY LORA tab does it.
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
-                    lora_base_type=(base_type if usage == "LORA" else ""),
+                    lora_base_type=server_lora_type,
                     author_id=core._client_of(session).user_id or "")
             # GraphQL whenever ANY market filter or sort is in play. The owner reported that
             # under Popular the Model Type and Posted-at filters did nothing: base+Popular used
@@ -13132,10 +13147,11 @@ def create_app(out_dir: Path):
                 payload = core.model_search_market_gql(
                     session, keyword=q, category=category, sort=sort, usage=usage,
                     limit=size, after=(cursor or None),
-                    # Same caller-supplied value that feeds the compat sort/badge below --
-                    # resolved once by the client, used at every layer. core ignores it for
-                    # a base-model search and for any architecture off its whitelist.
-                    lora_base_type=(base_type if usage == "LORA" else ""),
+                    # The same caller-supplied value that feeds the compat sort/badge
+                    # below, resolved once by the client -- but only on a keywordless BROWSE
+                    # (see server_lora_type). core ignores it for a base-model search and for
+                    # any architecture off its whitelist.
+                    lora_base_type=server_lora_type,
                     source=source, permitted_use=license_,
                     time_range=core.posted_at_range(posted),
                     model_types=model_types)
