@@ -9227,7 +9227,17 @@ def create_app(out_dir: Path):
         # key alongside the display label -- the Panel's run-history ledger needs it
         # for per-action last-run lookups and its "run again" control. Merge semantics
         # (_reconstruct_jobs' cur.update) keep it through every later event.
-        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action)
+        #
+        # `scheduled` rides it for the same reason and by the same merge: the client cannot
+        # tell an unattended run from a clicked one, and from the owner's walk (2026-09-07)
+        # it must -- an automatic job produces NO completion toast at all, only the Activity
+        # line (gallery/src/notify/jobsStore.js's toastTransitions). Written once, on the
+        # START event; cur.update carries it onto the terminal event the reader writes.
+        # `or None` rather than the bare False because append_job_event drops None fields,
+        # so a clicked run's row is byte-for-byte what it has always been -- absence means
+        # "somebody pressed this", which is what every row written before today means too.
+        _log_job(job_id, status="running", type="panel", label=spec["label"], action=action,
+                 scheduled=(scheduled or None))
         threading.Thread(target=_panel_reader, args=(proc,), kwargs={"then": then},
                          daemon=True).start()
         return True
@@ -9423,9 +9433,16 @@ def create_app(out_dir: Path):
             action = _panel_job.get("action") or ""
         return action if action in ARTWORKS_TOUCHING_ACTIONS else ""
 
-    def _artworks_kick(force=False):
+    def _artworks_kick(force=False, scheduled=False):
         """Fire one published-artwork sweep OFF-THREAD -- the one entry point all four
         triggers use (boot, the fifteen-minute tick, the publish kick, Run now).
+
+        `scheduled` means NOBODY CLICKED THIS, exactly as it does on _panel_run -- and it
+        is passed per trigger rather than derived from `force`, which looks like the same
+        question and is not: three of the four triggers force past the fifteen-minute
+        guard, and only ONE of those three (Run now) is a click. It rides the sweep's own
+        `log_event` onto the row it writes, so an unattended sweep lands in the Activity
+        window without a corner toast (owner's walk, 2026-09-07).
 
         Off-thread because none of the four can afford to wait on it: the publish kick
         happens inside a route that has already committed an irreversible publish, Run now
@@ -9463,7 +9480,14 @@ def create_app(out_dir: Path):
                     saved = float(_load_sched().get("artworks_deep_at") or 0.0)
                 if saved > _artworks_state["deep_at"]:
                     _artworks_state["deep_at"] = saved
-                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_log_job,
+                # The sweep bypasses _panel_run entirely (it is in-process work, not a
+                # subprocess in the job slot), so this wrapper is where its row learns
+                # whether anybody asked for it. Same `or None` as _panel_run's: a Run now
+                # writes the row it always wrote.
+                def _sweep_log(job_id, **fields):
+                    _log_job(job_id, scheduled=(scheduled or None), **fields)
+
+                artworks_sweep_kick(out_dir, db_path, force=force, log_event=_sweep_log,
                                     busy=_artworks_job_busy)
                 _sched_stamp(artworks_deep_at=_artworks_state["deep_at"])
             except Exception:                                # noqa: BLE001
@@ -9482,7 +9506,9 @@ def create_app(out_dir: Path):
             # this row is the one that governs here and it may be shorter than that guard --
             # the tick decides freshness itself, in artworks_sweep_fresh, before it gets
             # here (and that is what stops the first tick repeating the boot kick).
-            _artworks_kick(force=True)
+            # Scheduled: this IS the living library's tick, the same as the _panel_run
+            # branch below it.
+            _artworks_kick(force=True, scheduled=True)
             return True
         return _panel_run(action, then=LIVING_BY_ACTION.get(action, {}).get("then"),
                           scheduled=True)
@@ -10132,9 +10158,11 @@ def create_app(out_dir: Path):
         Sleeps past the contest sweep's own delay so the two never compete at boot, and
         goes through the same single-flight wrapper every other trigger uses. No `force`:
         at boot there is no specific publish to confirm, so the recent-guard is exactly the
-        right bound, and a restart loop cannot become a request storm."""
+        right bound, and a restart loop cannot become a request storm. Scheduled: starting
+        the app is not asking for a sweep, so it announces itself in the Activity window
+        and nowhere else (owner's walk, 2026-09-07)."""
         time.sleep(ARTWORKS_STARTUP_DELAY)
-        _artworks_kick(force=False)
+        _artworks_kick(force=False, scheduled=True)
 
     # MOONGLADE_DISABLE_WATCH=1 skips auto-start -- set by the test suite's conftest so
     # create_app() (called by ~every test) never opens a real WebSocket to PixAI using
@@ -11479,7 +11507,11 @@ def create_app(out_dir: Path):
         looking at.
 
         `deferred` names the catalog-writing Panel job that held the sweep off, when one
-        did (_artworks_job_busy) -- so an ok:false is never a silent nothing."""
+        did (_artworks_job_busy) -- so an ok:false is never a silent nothing.
+
+        NOT `scheduled`, and it is the only one of the four triggers that is not: this is a
+        button the owner pressed, so it still toasts when it finishes, exactly like every
+        other job he starts himself (owner's walk, 2026-09-07)."""
         deferred = _artworks_job_busy()
         return jsonify({"ok": bool(_artworks_kick(force=True)),
                         "deferred": deferred,
@@ -14994,8 +15026,14 @@ def create_app(out_dir: Path):
         # the same reasons the contest sweep's own publish kick is: nothing it does may
         # delay this response or turn an irreversible publish into a failure. Fires for
         # unpublish, re-tag and delete too -- each is a change to what listArtworks returns.
+        #
+        # Scheduled, even though a click reached this route: what the owner pressed was
+        # Publish, and he has the publish's own answer in front of him. The sweep is the
+        # library keeping itself honest afterwards, so it belongs in the Activity window
+        # rather than in a second corner notice about a job he never started (owner's
+        # walk, 2026-09-07).
         try:
-            _artworks_kick(force=True)
+            _artworks_kick(force=True, scheduled=True)
         except Exception:                                    # noqa: BLE001
             pass
         result["unmatched_tags"] = unmatched
