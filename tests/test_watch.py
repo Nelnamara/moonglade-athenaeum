@@ -360,55 +360,6 @@ def test_catchup_backfills_absent_media_skips_present_and_rate_limits(monkeypatc
     assert collected == ["T_absent"]     # no second collection
 
 
-def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path, caplog):
-    """The catch-up relisted the same finished tasks forever, and said in the log they had
-    never been mirrored while their rows sat complete in catalog.db (owner: "the app no
-    longer picks up tracking of generations run from the website", 2026-09-07).
-
-    Cause: "already collected?" was asked of `media_ids_for`, i.e. every media id the feed
-    summary NAMES -- and on the two commonest shapes those are ids no row is ever keyed by.
-    A batch task's `mediaId` is the composite preview grid (the pictures are the batch
-    members); a video task's is the poster still (the row is keyed by the mp4, an id only
-    getTaskById carries). Both tested absent every sweep, so every sweep relisted them and
-    re-collected them for nothing.
-
-    Drives the REAL resolution (no stub over `cataloged_media_ids`) across the four shapes
-    that matter, on nodes shaped like the live `TaskSummary`: id / status / mediaId /
-    batchMediaIds / i2vProModel, no `outputs` -- because the summary genuinely has none."""
-    import time
-    import moonglade_gallery as mg
-    from moonglade_gallery import create_app
-
-    app = create_app(tmp_path)
-    catchup = app.extensions["mg_watch_catchup"]
-
-    edges = [
-        # (a) a 4-up batch, every member already cataloged. Nothing holds GRID_1.
-        {"node": {"id": "T_batch_done", "status": "completed", "mediaId": "GRID_1",
-                  "batchMediaIds": ["B1", "B2", "B3", "B4"]}},
-        # (b) the same batch with one member missing -- EVERY id must have a row, so a
-        # half-collected batch is still finished off.
-        {"node": {"id": "T_batch_half", "status": "completed", "mediaId": "GRID_2",
-                  "batchMediaIds": ["H1", "H2", "H3", "H4"]}},
-        # (c) a video task whose real output is cataloged. POSTER_1 is the still, never a
-        # row; the mp4's row carries the task id, which is the only thing a summary shares
-        # with it.
-        {"node": {"id": "T_video_done", "status": "completed", "mediaId": "POSTER_1",
-                  "i2vProModel": "v4.0.1"}},
-        {"node": {"id": "T_video_new", "status": "completed", "mediaId": "POSTER_2",
-                  "i2vProModel": "v4.0.1"}},
-        # (d) every member deleted from PixAI: the ids come through as holes, so there is
-        # nothing left to collect -- and `mediaId` (the grid) is NOT a fallback here.
-        {"node": {"id": "T_batch_gone", "status": "completed", "mediaId": "GRID_3",
-                  "batchMediaIds": [None, None, None, None]}},
-        # the plain single-image gap-fill this sweep has always existed for
-        {"node": {"id": "T_single_new", "status": "completed", "mediaId": "S_new",
-                  "batchMediaIds": None}},
-    ]
-    present = {"B1", "B2", "B3", "B4", "H1", "H2", "H4", "V_real"}
-    by_task = {"T_video_done": {"media_id": "V_real", "task_id": "T_video_done",
-                                "is_video": "1"}}
-
 # ---------------------------------------------------------------------------------------
 # A run started on the WEBSITE gets an Activity row of its own (owner ruling, 2026-09-07)
 #
@@ -562,31 +513,6 @@ def test_the_catchup_writes_a_done_row_for_a_website_task_it_had_to_collect(tmp_
     monkeypatch.setattr(core, "gql", lambda *a, **k: {})
     monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
     monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
-    monkeypatch.setattr(mg, "get_row",
-                        lambda db_path, m: ({"media_id": m} if m in present else None))
-    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
-    monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
-
-    collected = []
-    monkeypatch.setattr(core, "collect_generation",
-                        lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
-
-    with caplog.at_level("INFO"):
-        catchup("startup")
-
-    # The cataloged batch and the cataloged video are NOT relisted; the half batch, the
-    # uncollected video and the new single image are.
-    assert collected == ["T_batch_half", "T_video_new", "T_single_new"]
-
-    # And the warning names only those, without claiming a half-collected batch was never
-    # mirrored.
-    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert len(warnings) == 1
-    assert "T_batch_done" not in warnings[0]
-    assert "T_video_done" not in warnings[0]
-    assert "T_batch_gone" not in warnings[0]
-    assert "3 finished task(s) are missing media from the catalog" in warnings[0]
-    assert "never mirrored" not in warnings[0]
     monkeypatch.setattr(core, "media_ids_for", lambda node: ["M5"])
     monkeypatch.setattr(mg, "get_row", lambda db_path, m: None)     # nothing catalogued yet
     monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
@@ -715,3 +641,85 @@ def test_the_row_writer_cannot_kill_the_socket(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_reconstruct_jobs", _boom)
 
     app.extensions["mg_watch_on_event"](_frame("W9", "waiting"))   # must not raise
+
+
+
+
+def test_catchup_tests_the_ids_the_catalog_actually_holds(monkeypatch, tmp_path, caplog):
+    """The catch-up relisted the same finished tasks forever, and said in the log they had
+    never been mirrored while their rows sat complete in catalog.db (owner: "the app no
+    longer picks up tracking of generations run from the website", 2026-09-07).
+
+    Cause: "already collected?" was asked of `media_ids_for`, i.e. every media id the feed
+    summary NAMES -- and on the two commonest shapes those are ids no row is ever keyed by.
+    A batch task's `mediaId` is the composite preview grid (the pictures are the batch
+    members); a video task's is the poster still (the row is keyed by the mp4, an id only
+    getTaskById carries). Both tested absent every sweep, so every sweep relisted them and
+    re-collected them for nothing.
+
+    Drives the REAL resolution (no stub over `cataloged_media_ids`) across the four shapes
+    that matter, on nodes shaped like the live `TaskSummary`: id / status / mediaId /
+    batchMediaIds / i2vProModel, no `outputs` -- because the summary genuinely has none."""
+    import time
+    import moonglade_gallery as mg
+    from moonglade_gallery import create_app
+
+    app = create_app(tmp_path)
+    catchup = app.extensions["mg_watch_catchup"]
+
+    edges = [
+        # (a) a 4-up batch, every member already cataloged. Nothing holds GRID_1.
+        {"node": {"id": "T_batch_done", "status": "completed", "mediaId": "GRID_1",
+                  "batchMediaIds": ["B1", "B2", "B3", "B4"]}},
+        # (b) the same batch with one member missing -- EVERY id must have a row, so a
+        # half-collected batch is still finished off.
+        {"node": {"id": "T_batch_half", "status": "completed", "mediaId": "GRID_2",
+                  "batchMediaIds": ["H1", "H2", "H3", "H4"]}},
+        # (c) a video task whose real output is cataloged. POSTER_1 is the still, never a
+        # row; the mp4's row carries the task id, which is the only thing a summary shares
+        # with it.
+        {"node": {"id": "T_video_done", "status": "completed", "mediaId": "POSTER_1",
+                  "i2vProModel": "v4.0.1"}},
+        {"node": {"id": "T_video_new", "status": "completed", "mediaId": "POSTER_2",
+                  "i2vProModel": "v4.0.1"}},
+        # (d) every member deleted from PixAI: the ids come through as holes, so there is
+        # nothing left to collect -- and `mediaId` (the grid) is NOT a fallback here.
+        {"node": {"id": "T_batch_gone", "status": "completed", "mediaId": "GRID_3",
+                  "batchMediaIds": [None, None, None, None]}},
+        # the plain single-image gap-fill this sweep has always existed for
+        {"node": {"id": "T_single_new", "status": "completed", "mediaId": "S_new",
+                  "batchMediaIds": None}},
+    ]
+    present = {"B1", "B2", "B3", "B4", "H1", "H2", "H4", "V_real"}
+    by_task = {"T_video_done": {"media_id": "V_real", "task_id": "T_video_done",
+                                "is_video": "1"}}
+
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: _Sess())
+    monkeypatch.setattr(core, "gql", lambda *a, **k: {})
+    monkeypatch.setattr(core, "page_variables", lambda *a, **k: {})
+    monkeypatch.setattr(core, "find_connection", lambda *a, **k: {"edges": edges})
+    monkeypatch.setattr(mg, "get_row",
+                        lambda db_path, m: ({"media_id": m} if m in present else None))
+    monkeypatch.setattr(mg, "get_row_by_task", lambda db_path, t: by_task.get(str(t)))
+    monkeypatch.setattr(time, "sleep", lambda *a, **k: None)
+
+    collected = []
+    monkeypatch.setattr(core, "collect_generation",
+                        lambda s, tid, out, **k: collected.append(str(tid)) or {"saved": 1})
+
+    with caplog.at_level("INFO"):
+        catchup("startup")
+
+    # The cataloged batch and the cataloged video are NOT relisted; the half batch, the
+    # uncollected video and the new single image are.
+    assert collected == ["T_batch_half", "T_video_new", "T_single_new"]
+
+    # And the warning names only those, without claiming a half-collected batch was never
+    # mirrored.
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "T_batch_done" not in warnings[0]
+    assert "T_video_done" not in warnings[0]
+    assert "T_batch_gone" not in warnings[0]
+    assert "3 finished task(s) are missing media from the catalog" in warnings[0]
+    assert "never mirrored" not in warnings[0]
