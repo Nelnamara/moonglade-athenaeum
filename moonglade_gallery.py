@@ -9869,7 +9869,13 @@ def create_app(out_dir: Path):
         """Resolve OUR Activity/job log for a task straight from a live event, so a
         generation whose Generate-card poller was closed (you navigated into the panel)
         still lands as done/failed instead of hanging at 'running' forever. Only touches a
-        job we already track -- never invents one for a task generated on the website."""
+        job we already track -- never invents one.
+
+        That last clause used to read "never invents one for a task generated on the
+        website", and the abstention was the whole point (2026-07-06). It still describes
+        THIS function exactly -- what changed on 2026-09-07 is that a website run now HAS a
+        row by the time this runs, written by _website_job_seen below off the same event.
+        So this closes a website row without knowing or caring that it is one."""
         import moonglade_backup as core
         try:
             term = "failed" if ws_status in core._GEN_FAIL else "done"
@@ -9879,6 +9885,123 @@ def create_app(out_dir: Path):
                 _log_job(str(tid), status=term,
                          error=(ws_status if term == "failed" else None))
         except Exception:                          # noqa: BLE001 -- reconciling must not kill the watcher
+            pass
+
+    # ---- A run started on pixai.art gets an Activity row of its own -------------------
+    # Owner ruling, 2026-09-07: "I often have things going from the app and website, so the
+    # generations I start on the website I would like to see on the app with the usual
+    # spinner." A website run is to look like an app run in the Activity window -- spinner
+    # while it renders, its pictures once the mirror lands them -- and differ only by a
+    # source mark.
+    #
+    # This REVERSES the 2026-07-06 contract the two writers above were built to keep
+    # (_reconcile_job's "never invents one for a task generated on the website",
+    # _log_mirrored_media's matching abstention "or every pixai.art generation would sprout a
+    # new Activity row"). That was the right call while nothing on this side had anything to
+    # build a row FROM; the socket's own taskUpdated frame supplies one now, so a website run
+    # can be a real row instead of an unexplained arrival in the library.
+    #
+    # The reversal is SCOPED to the two paths that hold a live frame -- the event stream and
+    # the catch-up sweep. Neither _reconcile_job nor _log_mirrored_media gained the power to
+    # invent: they still touch only what they find already logged, so _watch_mirror called on
+    # its own for an untracked task still writes nothing at all (pinned by
+    # tests/test_jobs.py::test_mirror_never_invents_a_job_for_a_task_we_do_not_track).
+    #
+    # THE JOB ID IS THE TASK ID, exactly as an app run's is (see _note_gen_phase's writer and
+    # _reconcile_job / _log_mirrored_media, which both look a job up by str(tid)). That is the
+    # whole derivation: it makes the event writer and the catch-up writer converge on ONE row
+    # instead of two, and it lets every existing terminal writer close a website row without
+    # needing to know such a thing exists.
+    _WEBSITE_JOB_SOURCE = "pixai"     # the app's own rows carry source "web"; this is the other one
+    _WEBSITE_JOB_LABEL = "From the website"
+    # PixAI's task lifecycle is waiting -> running -> completed (_WS_SUBSCRIPTION's own note in
+    # moonglade_backup.py). The pre-dispatch spellings are the same set core._never_dispatched()
+    # keys on, so "accepted, no worker yet" means the same thing here as it does there -- and
+    # that is precisely what the app's own rows record as started:false.
+    _WEBSITE_QUEUED_STATUSES = ("waiting", "pending", "queued")
+
+    def _website_job_label(frame):
+        """The row's label: the prompt's first words when the frame carries any, else a plain
+        "From the website".
+
+        NOTE (2026-09-07): the live subscription does NOT ask for `parameters` --
+        _WS_SUBSCRIPTION selects id/status/updatedAt/mediaId/media/priority/userId
+        (moonglade_backup.py) -- so today every live frame takes the fallback. Written as a
+        read of whatever the frame happens to carry rather than as a widening of that query,
+        deliberately: PixAI answers a subscription it dislikes with an `error` frame, which
+        _watch_events_async RAISES on, which would take the whole live mirror down. Widening
+        it is a probe-first change of its own, not a side effect of this one. The catch-up's
+        task nodes come through the same helper, so whichever path first carries a prompt
+        gets a real label for free.
+
+        Reads both spellings, and both nestings, for the same reason video_outputs() does: an
+        i2v / reference-video task keeps its prompt inside its own block, never at the top."""
+        params = (frame or {}).get("parameters")
+        if not isinstance(params, dict):
+            return _WEBSITE_JOB_LABEL
+        text = params.get("prompts") or params.get("prompt") or ""
+        if not text:
+            inner = params.get("referenceVideo") or params.get("i2vPro") or {}
+            if isinstance(inner, dict):
+                text = inner.get("prompt") or inner.get("prompts") or ""
+        words = str(text or "").split()
+        if not words:
+            return _WEBSITE_JOB_LABEL
+        return " ".join(words[:8])[:60].rstrip() or _WEBSITE_JOB_LABEL
+
+    def _website_job_seen(tid, ws_status, frame=None, terminal=False):
+        """Give a task with NO row of its own the row the ruling above asks for, and keep the
+        queued/rendering phase of one we already invented in step with the live frame.
+
+        Reads the RAW reconstructed log rather than read_jobs(), for the same reason
+        _log_mirrored_media does: a row the owner dismissed, or one already aged past
+        JOBS_MAX_AGE, is still a row. Inventing a second one for that task would resurrect
+        what he cleared and would be exactly the "two rows for one run" the shared job id
+        exists to prevent.
+
+        An APP run is left completely alone. It already has a row -- its Generate card
+        registers one through /api/jobs the moment the gen is submitted -- so the create
+        branch never fires for it, and the phase branch refuses anything whose source is not
+        ours. (The one window where that is not yet true is the sliver between PixAI accepting
+        an app submit and the browser's own POST landing. If a `waiting` frame wins that race
+        we write the row first and the browser's POST then merges source "web" over ours --
+        _reconstruct_jobs merges later events onto the current one -- so the row self-corrects
+        to an app row rather than staying mislabelled.)
+
+        `terminal` is the catch-up's case: the task finished while we were not listening, so
+        there is no spinner left to run and the row is born done.
+
+        Fails soft. This runs on the WebSocket's own event loop and in the catch-up's daemon
+        thread, and neither may die because logging did."""
+        import moonglade_backup as core
+        try:
+            tid = str(tid or "")
+            if not tid:
+                return
+            started = str(ws_status or "").lower() not in _WEBSITE_QUEUED_STATUSES
+            jobs_by_id, _order, _n = core._reconstruct_jobs(out_dir)
+            j = jobs_by_id.get(tid)
+            if j is None:
+                if terminal:
+                    # Born done -- and _log_mirrored_media then adds the media it collects to
+                    # this same row, which is precisely the "job already sitting at a bare
+                    # 'done'" case that helper was written for.
+                    _log_job(tid, status="done", type="generate",
+                             label=_website_job_label(frame), source=_WEBSITE_JOB_SOURCE)
+                else:
+                    _log_job(tid, status="running", type="generate",
+                             label=_website_job_label(frame), source=_WEBSITE_JOB_SOURCE,
+                             started=started)
+                return
+            # A row exists. Only ever nudge OUR OWN invention, only while it is still running,
+            # and only when the phase actually changed -- the terminal writers (_reconcile_job,
+            # _log_mirrored_media) own everything from done/failed onward.
+            if (j.get("source") != _WEBSITE_JOB_SOURCE or j.get("dismissed")
+                    or j.get("status") in core._JOBS_TERMINAL
+                    or bool(j.get("started")) == started):
+                return
+            _log_job(tid, status="running", started=started)
+        except Exception:                          # noqa: BLE001 -- logging must not kill the watcher
             pass
 
     def _reconcile_orphan_jobs(min_age=0):
@@ -9962,6 +10085,7 @@ def create_app(out_dir: Path):
                     WATCH_CATCHUP_TASKS, core._client_of(session).user_id)))
             edges = (conn or {}).get("edges") or []
             missed = []
+            nodes = {}
             for edge in edges:
                 node = edge.get("node", edge)
                 tid = str(node.get("id") or "")
@@ -9975,6 +10099,7 @@ def create_app(out_dir: Path):
                 if all(get_row(db_path, m) for m in mids):
                     continue
                 missed.append(tid)
+                nodes[tid] = node
             if not missed:
                 _log.info("live mirror: catch-up after %s -- nothing missed", reason)
                 return
@@ -9982,6 +10107,9 @@ def create_app(out_dir: Path):
                 "live mirror: catch-up after %s -- %d finished task(s) were never mirrored, "
                 "collecting now: %s", reason, len(missed), ", ".join(missed[:10]))
             for tid in missed:
+                # The Activity row this task never got, the socket having been down when it
+                # finished (see _website_job_seen). Before the mirror, and born done.
+                _website_job_seen(tid, "completed", nodes.get(tid), terminal=True)
                 _watch_mirror(tid)
                 _time.sleep(1.0)          # paced -- be polite to their servers
         except Exception as e:
@@ -10008,6 +10136,73 @@ def create_app(out_dir: Path):
             _time.sleep(WATCH_CATCHUP_MIN_GAP)
             _watch_catchup("periodic")
 
+    # Task ids already mirrored this process's lifetime (a 'completed' event can repeat, and
+    # a reconnect can replay one). Process-scoped, not per-connection: it lived inside
+    # _watch_loop before 2026-09-07 and meant exactly this then too.
+    _watch_backed = set()
+
+    def _watch_on_event(ev):
+        """Everything the live mirror does with ONE frame off the socket.
+
+        Lifted out of _watch_loop's inner `while True` on 2026-09-07 -- same body, same
+        order, now a closure a test can call directly. The reason it had to move is the
+        website-row ruling of that day: the row is written HERE, off the frame, and the rule
+        that a website run must be indistinguishable from an app run in the Activity window
+        is a claim about a SEQUENCE of frames (waiting -> running -> completed + the mirror
+        receipt), which nothing could exercise while this lived in a background thread's
+        inner loop. tests/test_watch.py's fake event stream drives it through the
+        mg_watch_on_event seam; the source-level pin on the collect/reconcile agreement moved
+        with it."""
+        import logging as _logging
+        import time as _time
+        import moonglade_backup as core
+        _log = _logging.getLogger(__name__)
+        if ev.get("__meta__") == "subscribed":
+            with _watch_lock:
+                _watch_status["connected"] = True
+                _watch_status["last_error"] = None
+            _log.info("live mirror: connected and subscribed")
+            # Every connect covers a window we were blind for -- the gap since the
+            # last one. Rate-limited inside, so a flapping socket cannot turn this
+            # into a request storm, and threaded so it never blocks this callback
+            # (which is running on the WebSocket's own event loop).
+            threading.Thread(target=_watch_catchup, args=("reconnect",),
+                             daemon=True).start()
+            return
+        tu = ev.get("taskUpdated")
+        if not tu:
+            return
+        with _watch_lock:
+            _watch_status["events_seen"] += 1
+            _watch_status["last_event_at"] = _time.time()
+        status = tu.get("status")
+        tid = str(tu.get("id") or "")
+        # The website run's own Activity row (owner ruling 2026-09-07) -- FIRST, and
+        # synchronously on this callback. The mirror thread started just below records what
+        # it collected through _log_mirrored_media, which writes only for a task that
+        # ALREADY has a row, so the row has to exist before that thread does. An app run
+        # already has one and is left untouched; see _website_job_seen.
+        if tid:
+            _website_job_seen(tid, status, tu)
+        # `in _GEN_DONE`, not `== _WS_DONE_STATUS`. This branch used to match ONE
+        # exact string while the reconcile branch below accepts five, off the same
+        # event -- so a done-status PixAI spells any other way would skip mirroring
+        # while still resolving the Activity row. Every task checked on 2026-07-26
+        # reports "completed", so this was not that day's cause, but the asymmetry
+        # produces exactly that symptom and is just as invisible.
+        if status in core._GEN_DONE and tid and tid not in _watch_backed:
+            _watch_backed.add(tid)
+            _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
+            threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
+        # Reconcile the Activity log from the SAME event stream, so a job resolves
+        # even if the Generate card that was polling /api/task-status is gone.
+        if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
+            _reconcile_job(tid, status)
+
+    # Test seam (same rationale as mg_watch_mirror / mg_watch_catchup above): the frame
+    # handler is only ever called from the WebSocket the suite never opens.
+    app.extensions["mg_watch_on_event"] = _watch_on_event
+
     def _watch_loop():
         import asyncio
         import logging as _logging
@@ -10020,8 +10215,6 @@ def create_app(out_dir: Path):
         # out_dir/logs/moonglade.log. Transitions and mirrored tasks only, never per-event:
         # this stream can carry a lot of traffic and a per-event line would bury the signal.
         _log = _logging.getLogger(__name__)
-        backed = set()   # task ids already mirrored this process's lifetime (a
-                         # 'completed' event can repeat)
         with _watch_lock:
             _watch_status["started_at"] = _time.time()
         _log.info("live mirror: starting")
@@ -10038,44 +10231,9 @@ def create_app(out_dir: Path):
                 # header, so there's nothing else to check here before subscribing.
                 session = core._make_session(None)
                 auth = session.headers.get("Authorization")
-
-                def on_event(ev):
-                    if ev.get("__meta__") == "subscribed":
-                        with _watch_lock:
-                            _watch_status["connected"] = True
-                            _watch_status["last_error"] = None
-                        _log.info("live mirror: connected and subscribed")
-                        # Every connect covers a window we were blind for -- the gap since the
-                        # last one. Rate-limited inside, so a flapping socket cannot turn this
-                        # into a request storm, and threaded so it never blocks this callback
-                        # (which is running on the WebSocket's own event loop).
-                        threading.Thread(target=_watch_catchup, args=("reconnect",),
-                                         daemon=True).start()
-                        return
-                    tu = ev.get("taskUpdated")
-                    if not tu:
-                        return
-                    with _watch_lock:
-                        _watch_status["events_seen"] += 1
-                        _watch_status["last_event_at"] = _time.time()
-                    status = tu.get("status")
-                    tid = str(tu.get("id") or "")
-                    # `in _GEN_DONE`, not `== _WS_DONE_STATUS`. This branch used to match ONE
-                    # exact string while the reconcile branch below accepts five, off the same
-                    # event -- so a done-status PixAI spells any other way would skip mirroring
-                    # while still resolving the Activity row. Every task checked on 2026-07-26
-                    # reports "completed", so this was not that day's cause, but the asymmetry
-                    # produces exactly that symptom and is just as invisible.
-                    if status in core._GEN_DONE and tid and tid not in backed:
-                        backed.add(tid)
-                        _log.info("live mirror: task %s reported %s -- mirroring", tid, status)
-                        threading.Thread(target=_watch_mirror, args=(tid,), daemon=True).start()
-                    # Reconcile the Activity log from the SAME event stream, so a job resolves
-                    # even if the Generate card that was polling /api/task-status is gone.
-                    if tid and (status in core._GEN_DONE or status in core._GEN_FAIL):
-                        _reconcile_job(tid, status)
-
-                asyncio.run(core._watch_events_async(auth, on_event, None))
+                # The frame handler itself is _watch_on_event, above -- see its docstring for
+                # why it is a create_app closure rather than a nested one.
+                asyncio.run(core._watch_events_async(auth, _watch_on_event, None))
                 _log.info("live mirror: disconnected cleanly; reconnecting in %ss", backoff)
                 backoff = 5   # a clean disconnect resets the backoff
             except core.WatchStaleError as e:
