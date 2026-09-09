@@ -27,9 +27,7 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **`release/3.10.2`** — the 3.10.2 point release: the art-pack manifest now points at the current
-  pack (so installs fetch it), plus the public-records spoiler scrub and the donor test-gate. Built,
-  tests green, awaiting the boop to cut.
+_Nothing in review right now._
 
 ## Next — scoped, not started
 
