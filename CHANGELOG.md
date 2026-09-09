@@ -16,6 +16,14 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-09-08 — The Last Mile
+
+- **Installs now fetch the current default art pack.** The manifest the released app carried still named the previous pack, so updating an install pulled nothing new even though a newer pack had already been published. It names the current pack now, so a fresh setup and an existing install both pick it up on their next check. (2026-09-08)
+
+### Under the hood
+- The tests that depend on the private donor are skipped when it is absent, so the public CI run is green with the donor not checked out. (2026-09-08)
+- Public records were swept and a guardrail test now pins them; nothing user-visible changed. (2026-09-08)
+
 ## [3.10.1] - 2026-09-08 — Under Lock
 
 - **A mark can be tied to an achievement, and stays locked until you earn it.** The header mark works the way skins already do: a mark bound to an achievement shows greyed with a lock and what unlocks it, and the app refuses to set it, serve its art, or make it the launcher icon until the achievement is earned. Marks with no achievement stay free picks, so nothing you have today changes. The bindings ride the next art pack; the mechanism is here now. (2026-09-08)

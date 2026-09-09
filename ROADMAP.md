@@ -19,9 +19,6 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
   sealed pack, public source holds only opaque ids) landed in 3.5.0; this session's toast polish and
   video-Remix fix are in `CHANGELOG.md` (the 3.6.0 release), per the rule at the top of this file.
 
-- **The restart card's mascot.** Settled 2026-09-07 on a live board: the halo pulses and glows
-  together, cyan, on a quicker beat, with a bigger Nel; text unchanged. Builds in 3.10.
-
 ---
 
 ## In review — built, not merged
@@ -30,8 +27,9 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **`staging/wave-3.10`** — the 3.10 wave, in build. Lanes A–C per the internal plan
-  (`../moonglade-internal/scopes/PLAN_2026-09-07_lanes.md`); sheet to follow.
+- **`release/3.10.2`** — the 3.10.2 point release: the art-pack manifest now points at the current
+  pack (so installs fetch it), plus the public-records spoiler scrub and the donor test-gate. Built,
+  tests green, awaiting the boop to cut.
 
 ## Next — scoped, not started
 
@@ -73,27 +71,6 @@ why this section exists.
   3.8.0 (see `CHANGELOG.md`). What remains is only the **optional local-VLM module** (Provider
   Deck era, rerolls only) that would name a series from the *image* rather than the prompt —
   banked for when the Provider Deck seam exists.
-
-- **Gallery census follow-ups** *(from the 2026-09-05 reset diagnosis; the page-1 fix itself
-  shipped — see `CHANGELOG.md` [3.8.1])* Two era-mismatches the census surfaced, both design-adjacent:
-  a **batch** card still takes over the whole library the way series cards did before the 3.8.0
-  series modal (asymmetric siblings), and the viewer's
-  page-stepping and its scroll-lock came from different months — stepping past a page boundary
-  swaps the grid behind the viewer while scroll is frozen, not remembered, so closing it can
-  strand the reader. The batch card **builds in 3.10: the series popup, marked BATCH.**
-  Diagnosis + full 23-trigger census in the 2026-09-05 session record.
-
-- **Surface-walk S4 polish batch (2026-08-29)** — small feel items from the owner's Phase A walk,
-  batched here per triage protocol (S4 = never issues):
-  - Mobile LoRA picker: multi-select by design so it stays open after a pick (the base-model picker
-    auto-closes) — reads as "stuck". **Builds in 3.10: a Done button.**
-
-- **Marks — the other-mark-sites sweep** *(what remains after the 3.7.0 marks pass)*
-  The roster, the 96/56 sizes, the speed+size sliders and animated-.webp mark support all shipped in
-  3.7.0. Left: sweep every surface that renders a mark for proportional scaling (marks-anims spec §1),
-  and get the owner's eight final animated .webp marks into the repo. (The pre-unlock mark
-  picker shipped in 3.8.0 as the Identity strip — #50 is closed; only the sweep and the marks
-  themselves remain here.)
 
 - **Gift icon on promo cards** *(the last slice of [#26](https://github.com/Nelnamara/moonglade-athenaeum/issues/26))*
   The icon on the claim chip shipped 2026-08-22 and the claimed-reward line in the activity tracker
