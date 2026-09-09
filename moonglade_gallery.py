@@ -2627,7 +2627,15 @@ def list_marks(out_dir, earned_ids=None):
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s%s" % (mid, ext),
                         "animated": ext == ".webp",
-                        "unlock": unlock,
+                        # BOTH the raw id and the display name are spoiler-masked on
+                        # the SAME `named` gate: the earlier fix masked only
+                        # unlock_name and left `unlock` carrying the raw hidden-feat
+                        # id (e.g. "under-the-hood") to any unearned LOGIN user on
+                        # GET /api/branding and /api/panel/summary (spoiler audit
+                        # 2026-09-08). `earned` is computed off the local `unlock`
+                        # above, and the seal rule reads the binding straight from
+                        # marks.json -- neither depends on this emitted field.
+                        "unlock": unlock if named else "",
                         "unlock_name": _ach_name(unlock) if named else "",
                         "earned": earned,
                         "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})

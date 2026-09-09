@@ -1026,12 +1026,14 @@ def test_list_marks_masks_an_unearned_hidden_feats_name(tmp_path, sealed_donor_p
     assert m["earned"] is False
     assert name not in (m["unlock_name"] or ""), "hidden feat named to an unearned user"
     assert m["unlock_name"] == ""                       # blank -> JSX shows "an achievement"
+    # the RAW id is masked on the same gate -- it used to leak (e.g. "under-the-hood")
+    assert m["unlock"] == "" and aid not in json.dumps(m), "hidden feat id leaked in the payload"
     # earned_ids=None ("earned unknown / not gating") is still silent for a hidden feat
     m = {x["id"]: x for x in g.list_marks(tmp_path)}["mark_h"]
-    assert m["unlock_name"] == ""
+    assert m["unlock_name"] == "" and m["unlock"] == ""
     # genuinely earned: naming it is no longer a spoiler
     m = {x["id"]: x for x in g.list_marks(tmp_path, earned_ids={aid})}["mark_h"]
-    assert m["earned"] is True and m["unlock_name"] == name
+    assert m["earned"] is True and m["unlock_name"] == name and m["unlock"] == aid
 
 
 def test_panel_summary_masks_an_unearned_hidden_feats_name(tmp_path, monkeypatch, sealed_donor_present):
@@ -1041,7 +1043,7 @@ def test_panel_summary_masks_an_unearned_hidden_feats_name(tmp_path, monkeypatch
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())   # nothing earned
     cli = _client(tmp_path)
     blob = json.dumps(cli.get("/api/panel/summary").get_json()["branding"]["marks"])
-    assert name not in blob, "the Control Panel's marks payload names an unearned hidden feat"
+    assert name not in blob and aid not in blob, "the Control Panel's marks payload leaks an unearned hidden feat (name or id)"
 
 
 def test_locked_hidden_feat_mark_403_does_not_leak_the_feat(tmp_path, sealed_donor_present):
