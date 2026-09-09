@@ -10820,7 +10820,14 @@ def create_app(out_dir: Path):
             "csrf": session["csrf"],
             "branding": dict(_branding_tuning(branding),
                              mark=branding["mark"], anim=branding["anim"],
-                             anims=MARK_ANIMS, marks=list_marks(out_dir),
+                             anims=MARK_ANIMS,
+                             # The Control Panel reads its marks from HERE, not from
+                             # GET /api/branding -- so the earned annotation the two
+                             # gated mark grids render off (locked/dimmed) has to be
+                             # computed here too, or the lock never shows and a bound
+                             # mark only fails on click with a raw 403 toast (red team
+                             # 2026-09-08). Same gate as the GET route below.
+                             marks=list_marks(out_dir, _earned_ach_ids(out_dir, db_path)),
                              slots=branding_slots_payload(out_dir)),
         })
 
@@ -16376,9 +16383,18 @@ def create_app(out_dir: Path):
         body = request.get_json(silent=True) or {}
         mark = str(body.get("mark") or load_branding(out_dir)["mark"])
         # Whitelist before anything touches the shell: only a known cut mark id
-        # may become an icon path (no traversal, no quoting surprises).
-        if mark not in {m["id"] for m in list_marks(out_dir)}:
+        # may become an icon path (no traversal, no quoting surprises). Gated on
+        # EARNED too (red team 2026-09-08): the Desktop .lnk icon IS the app's
+        # real icon, so a locked reward mark's art must not become it any more
+        # than it may become the active in-app mark -- the same 403 POST
+        # /api/branding gives. Free/logo marks and earned bound marks pass.
+        _marks = list_marks(out_dir, _earned_ach_ids(out_dir, db_path))
+        if mark not in {m["id"] for m in _marks}:
             return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
+        locked = next((m for m in _marks if m["id"] == mark and not m["earned"]), None)
+        if locked is not None:
+            return jsonify({"error": "mark locked",
+                            "unlock": locked.get("unlock_name") or locked.get("unlock")}), 403
         try:
             lnk = make_launcher_shortcut(out_dir, mark)
         except RuntimeError as e:

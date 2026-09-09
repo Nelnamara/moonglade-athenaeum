@@ -960,3 +960,34 @@ def test_free_mark_and_logo_never_gated(tmp_path, monkeypatch):
     cli = _client(tmp_path)
     assert cli.post("/api/branding", json={"mark": "mark_4"}).status_code == 200   # free
     assert cli.post("/api/branding", json={"mark": "logo"}).status_code == 200     # legacy
+
+
+# ---- red team 2026-09-08: the two gate leaks the review found ----
+def test_panel_summary_marks_carry_earned_so_the_lock_renders(tmp_path, monkeypatch):
+    # The Control Panel reads its marks from /api/panel/summary, NOT GET /api/branding.
+    # If that payload doesn't gate, the two grids never lock a bound-unearned mark.
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())
+    cli = _client(tmp_path)
+    marks = {m["id"]: m for m in cli.get("/api/panel/summary").get_json()["branding"]["marks"]}
+    assert marks["mark_4"]["earned"] is True
+    assert marks["mark_ms"]["earned"] is False and marks["mark_ms"]["unlock"] == "archivist"
+
+
+def test_shortcut_route_refuses_a_locked_mark(tmp_path, monkeypatch):
+    # The Desktop .lnk icon IS the app's real icon, so a locked reward mark's art
+    # must not become it -- the same 403 the active-mark POST gives.
+    _cut_bound_marks(tmp_path)
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # archivist NOT earned
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/shortcut", json={"mark": "mark_ms"})
+    assert r.status_code == 403 and r.get_json()["error"] == "mark locked"
+    # a free mark still works (subprocess is mocked so make_launcher_shortcut can run)
+    import subprocess
+    class _R:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
+    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: {"archivist"})
+    assert cli.post("/api/branding/shortcut", json={"mark": "mark_ms"}).status_code == 200
