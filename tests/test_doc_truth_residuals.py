@@ -293,18 +293,10 @@ def test_the_branding_tab_and_the_identity_strip_are_still_mutually_exclusive():
         "the ✦ Branding tab body is no longer gated on brandingUnlocked")
 
 
-def test_every_glossary_entry_about_branding_says_which_state_it_belongs_to():
-    """Four entries locate controls in the Identity strip or the ✦ Branding tab (plus the
-    Control Panel entry, which used to name Maintenance as the only tab). Each must carry
-    the earned/unearned condition, or it is false for half the installs that read it."""
-    for term in ("the banner", "the Control Panel", "the Identity strip", "the mark", "skin"):
-        entry = _glossary_entry(term)
-        assert "Under the Hood" in entry, (
-            "wiki/Glossary.md's \"" + term + "\" entry locates a branding control without "
-            "saying whether it means an install that has earned Under the Hood or one that "
-            "has not -- the strip and the ✦ Branding tab never both exist")
-
-    strip = _glossary_entry("the Identity strip")
-    assert re.search(r"replaced by", strip), (
-        "the Identity strip entry no longer says the ✦ Branding tab replaces it, so a reader "
-        "who has earned Under the Hood will still go looking for the strip")
+# (Retired 2026-09-08.) The old test here required every branding glossary entry to
+# name the hidden gate and say which earned/unearned state it belonged to. The 2026-08-09
+# spoiler HARD RULE reverses that: the gate and the tab it unlocks are OMITTED from public
+# docs entirely, so the glossary now presents the single default-install reality (the
+# Identity strip, no gate). Absence of the gate reference is pinned by
+# tests/test_no_achievement_spoilers_in_public_docs.py; there is nothing two-state left to
+# disambiguate. The code-level either/or gate is still covered by the test above.
