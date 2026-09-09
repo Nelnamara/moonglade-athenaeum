@@ -92,3 +92,31 @@ def test_search_catalog_new_filters(catalog):
     # the created-at range reaches query_catalog
     hits = m.search_catalog(date_from="2026-02-15", date_to="2026-03-15")["rows"]
     assert {r["media_id"] for r in hits} == {"m3"}
+
+
+# --- Tier 2 / session-bearing tools -----------------------------------------
+
+def test_find_duplicates_wraps_the_helper(monkeypatch):
+    fake = [{"media_id": "d1", "keeper": "a/d1.webp",
+             "copies": [{"rel": "b/d1.webp", "bucket": "month", "size": 10}]}]
+    monkeypatch.setattr(m.g, "duplicate_groups", lambda out, limit=100: fake)
+    assert m.find_duplicates() == {"count": 1, "groups": fake}
+
+
+def test_tag_suggest_wraps_suggest_prompt(monkeypatch):
+    import moonglade_backup as mb
+    monkeypatch.setattr(m, "_SESSION", "SESSION")   # skip building a real session
+    monkeypatch.setattr(mb, "suggest_prompt", lambda session, mid: ["1girl", "night elf, moonlight"])
+    assert m.tag_suggest("x9") == {"media_id": "x9", "suggestions": ["1girl", "night elf, moonlight"]}
+
+
+def test_tag_suggest_reports_error_not_raises(monkeypatch):
+    import moonglade_backup as mb
+    monkeypatch.setattr(m, "_SESSION", "SESSION")
+
+    def boom(session, mid):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(mb, "suggest_prompt", boom)
+    out = m.tag_suggest("x9")
+    assert out["suggestions"] == [] and "network down" in out["error"]

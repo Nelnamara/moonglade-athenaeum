@@ -2,7 +2,7 @@
 AI-assisted curation of the local PixAI backup. LOCAL stdio, owner-only.
 
 Reuses moonglade_gallery.py's catalog helpers + moonglade_similar.similar() -- no SQL is
-reimplemented here. Read-mostly; set_rating / add_to_collection are the only writes.
+reimplemented here. Catalog writes are set_rating / add_to_collection / remove_from_collection; tag_suggest is the first tool to reach the PixAI account (free, read-only).
 
 Config: env MOONGLADE_OUT = the backup dir that holds catalog.db (e.g.
 "D:\\path\\to\\pixai_backup"). Falls back to ./pixai_backup next to this file.
@@ -29,6 +29,25 @@ OUT = Path(os.environ.get("MOONGLADE_OUT") or (Path(__file__).resolve().parent /
 DB = str(OUT / "catalog.db")
 
 mcp = FastMCP("moonglade-athenaeum")
+
+# ---------------------------------------------------------------------------
+# PixAI session. The ACCOUNT-acting tools (tag_suggest today; generate / delete /
+# claim on the roadmap) need a live PixAI session, unlike the catalog-only tools.
+# Built exactly as the CLI/web do -- moonglade_backup._make_session(None) resolves
+# PIXAI_API_KEY from config.json -- lazily and once, so a session that only ever
+# touches the local catalog never imports the backup module or holds a credential.
+# READ_ONLY in config.json still overrides every mutating path (via _check_read_only
+# inside the backup helpers), exactly as for the CLI and the web app.
+# ---------------------------------------------------------------------------
+_SESSION = None
+
+
+def _session():
+    global _SESSION
+    if _SESSION is None:
+        import moonglade_backup as mb
+        _SESSION = mb._make_session(None)
+    return _SESSION
 
 def _slim(row):
     """Curation-relevant fields from a full catalog row, with friendly names
@@ -265,6 +284,30 @@ def catalog_stats() -> dict:
         "newest": (newest[0].get("created_at") if newest else None),
         "oldest": (oldest[0].get("created_at") if oldest else None),
     }
+
+
+@mcp.tool
+def find_duplicates(limit: int = 100) -> dict:
+    """Class-A duplicate groups in the LOCAL library -- a media_id whose file sits in
+    more than one folder bucket -- so you can thin or quarantine them. Cheap (no hashing),
+    read-only, local (no session). Returns {count, groups:[{media_id, keeper, copies}]}."""
+    groups = g.duplicate_groups(OUT, limit=max(1, min(limit, 500)))
+    return {"count": len(groups), "groups": groups}
+
+
+@mcp.tool
+def tag_suggest(media_id: str) -> dict:
+    """PixAI's own image->tags/description suggestion for ONE image (its "Image to
+    prompt"): a Danbooru-style tag list plus a natural-language variant, to auto-tag or
+    seed a search. FREE and read-only -- no credits, no mutation -- but it is the first
+    tool that reaches the PixAI ACCOUNT, so it needs the session (config.json's
+    PIXAI_API_KEY). Returns {media_id, suggestions:[...]} or {..., error} on failure."""
+    import moonglade_backup as mb
+    try:
+        out = mb.suggest_prompt(_session(), str(media_id))
+    except Exception as e:
+        return {"media_id": media_id, "suggestions": [], "error": str(e)}
+    return {"media_id": media_id, "suggestions": list(out or [])}
 
 
 if __name__ == "__main__":
