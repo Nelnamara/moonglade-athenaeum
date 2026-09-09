@@ -16,6 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-09-08 — Under Lock
+
+- **A mark can be tied to an achievement, and stays locked until you earn it.** The header mark works the way skins already do: a mark bound to an achievement shows greyed with a lock and what unlocks it, and the app refuses to set it, serve its art, or make it the launcher icon until the achievement is earned. Marks with no achievement stay free picks, so nothing you have today changes. The bindings ride the next art pack; the mechanism is here now. (2026-09-08)
+- **A hidden achievement is never named by the mark it unlocks.** A mark tied to a hidden feat used to hand its name, and then its raw id, to anyone who opened the panel before earning it — the same thing the Folio masks to `???`. The lock now says only "an achievement" for a hidden one, in the picker, the Control Panel, the error when you try to set it, and the launcher path. (2026-09-08)
+
 ## [3.10.0] - 2026-09-08 — In Plain Sight
 
 - **The model and LoRA pickers page past their first 24 again, on every tab and sort, computer and phone.** Scrolling to the bottom of a list stopped loading more because the picker listened for scrolling on its grid while the element that actually scrolls is the grid's wrapper. It now watches a marker at the end of the list, which works whichever ancestor scrolls. On a phone the hover preview no longer opens on a tap and stands over the sheet. (2026-09-07)

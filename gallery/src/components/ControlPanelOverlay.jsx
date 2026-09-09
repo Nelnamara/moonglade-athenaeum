@@ -1225,9 +1225,13 @@ function IdentityStrip({ summary, onSaved, skins, activeSkin, onPickSkin, achiev
           <div className="mgcp-idrow">
             <span className="mgcp-idlab">MARK</span>
             {marks.map((m) => (
-              <button type="button" key={m.id} disabled={busy}
-                className={"mgcp-idmark" + (m.id === curId ? " on" : "")}
-                onClick={() => pickMark(m.id)} title={m.label || m.id}>
+              <button type="button" key={m.id} disabled={busy || m.earned === false}
+                className={"mgcp-idmark" + (m.id === curId ? " on" : "")
+                  + (m.earned === false ? " gatedmark" : "")}
+                onClick={() => m.earned !== false && pickMark(m.id)}
+                title={m.earned === false
+                  ? (m.label || m.id) + " — unlocks with " + (m.unlock_name || "an achievement")
+                  : (m.label || m.id)}>
                 <MarkArt mark={m} />
               </button>
             ))}
@@ -1408,12 +1412,17 @@ function MarksSection({
           <div className="mgcp-marksbig">
             {marks.map((m) => {
               const on = m.id === summary.branding.mark;
+              const locked = m.earned === false;
               return (
                 <button type="button" key={m.id}
-                  className={"mgcp-markbig" + (on ? " on" : "")}
-                  onClick={() => pickMark(m.id)} disabled={busy} title={m.label || m.id}>
+                  className={"mgcp-markbig" + (on ? " on" : "") + (locked ? " gatedmark" : "")}
+                  onClick={() => !locked && pickMark(m.id)} disabled={busy || locked}
+                  title={locked
+                    ? (m.label || m.id) + " — unlocks with " + (m.unlock_name || "an achievement")
+                    : (m.label || m.id)}>
                   <MarkArt mark={m} />
                   {on && <span className="mgcp-markbig-check">✓</span>}
+                  {locked && <span className="mgcp-markbig-lock">🔒</span>}
                 </button>
               );
             })}
