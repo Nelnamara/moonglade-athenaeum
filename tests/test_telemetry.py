@@ -27,7 +27,7 @@ needs_donor = pytest.mark.skipif(not _SEALED_DONOR.is_file(),
 
 class _FixedNoon(_dt.datetime):
     """Freeze the wall clock at noon so /api/achievements never flags the 2-4am
-    Night Owl feat (session_hour) mid-test. That real-time side effect made the
+    a time-of-day feat (session_hour) mid-test. That real-time side effect made the
     hidden-feat masking assertions flaky whenever the suite ran overnight."""
     @classmethod
     def now(cls, tz=None):
@@ -142,7 +142,7 @@ def _client(tmp_path, rows):
 def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
     cli, out = _client(tmp_path, [_row(media_id="1", filename="a_1.png",
                                        created_at="2025-01-01T00:00:00")])
-    with mock.patch("datetime.datetime", _FixedNoon):   # never trip Night Owl mid-test
+    with mock.patch("datetime.datetime", _FixedNoon):   # never trip a time-of-day feat mid-test
         d = cli.get("/api/achievements").get_json()
     # every hidden feat is unearned here, and they COLLAPSE to one placeholder
     # (2026-08-13): the payload must not reveal how many remain undiscovered --

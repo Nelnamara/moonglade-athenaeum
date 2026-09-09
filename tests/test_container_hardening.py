@@ -18,7 +18,7 @@ import moonglade_container as mc
 def test_roundtrip_assets_payloads_and_read_contract(tmp_path):
     p = tmp_path / "t.dat"
     assets = {"banner.png": b"\x89PNG-fake-art-bytes", "marks/m.json": b'{"marks":[]}'}
-    secret = json.dumps([{"id": "night-owl", "roast": "SECRET", "threshold": 5}]).encode()
+    secret = json.dumps([{"id": "hidden-feat-a", "roast": "SECRET", "threshold": 5}]).encode()
     payloads = {"achievements": secret, "other": b"non-sensitive-payload"}
     assert mc.write_container(p, assets, payloads) == (2, 2)
 
@@ -42,10 +42,10 @@ def test_roundtrip_assets_payloads_and_read_contract(tmp_path):
 def test_no_plaintext_in_the_file(tmp_path):
     """A casual `strings moonglade.dat | grep roast` must find nothing."""
     p = tmp_path / "t.dat"
-    secret = b'[{"id":"night-owl","name":"Night Owl","roast":"UNMISTAKABLE_SPOILER_TEXT"}]'
+    secret = b'[{"id":"hidden-feat-a","name":"Hidden Feat A","roast":"UNMISTAKABLE_SPOILER_TEXT"}]'
     mc.write_container(p, {"a.png": b"x"}, {"achievements": secret})
     blob = p.read_bytes()
-    for needle in (b"UNMISTAKABLE_SPOILER_TEXT", b"night-owl", b"Night Owl", b"roast", b"id"):
+    for needle in (b"UNMISTAKABLE_SPOILER_TEXT", b"hidden-feat-a", b"Hidden Feat A", b"roast", b"id"):
         assert needle not in blob, "plaintext %r leaked into the .dat" % needle
 
 
