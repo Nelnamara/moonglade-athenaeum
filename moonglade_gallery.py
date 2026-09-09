@@ -2440,6 +2440,23 @@ def _seal_rule(rel):
         # /badge-thumb/ is the one sanctioned path so its own hidden-feat gate
         # can't be walked around -- keep denying it here.
         return ("deny", None)
+    marks = ROLE_CODE["marks"].lower()
+    if low.startswith(marks + "/"):
+        # Marks are a MIXED bucket: free/shipped tile marks serve open, but a
+        # mark bound to an achievement (its marks.json `unlock`) is reward art --
+        # served only once earned, exactly like a badge or mascot. Without this
+        # branch the lock was CSS-only and /branding/marks/<id>.<ext> handed the
+        # full-res locked art to anyone (red team 2026-09-08). marks.json itself
+        # is the manifest the picker reads, always open; no nesting under marks/.
+        name = low[len(marks) + 1:]
+        if "/" in name:
+            return ("deny", None)
+        if name == "marks.json":
+            return ("open", None)
+        unlock = _mark_unlock_for(name.rsplit(".", 1)[0])
+        if unlock:
+            return ("earned", unlock)     # bound: the serve route 404s it until earned
+        return ("open", None)             # free mark (or an unknown stem) serves normally
     badges = ROLE_CODE["badges"].lower()
     if low.startswith(badges + "/"):
         aid = low[len(badges) + 1:]
@@ -2563,7 +2580,7 @@ def list_marks(out_dir, earned_ids=None):
     `unlock` (2026-09-08): a mark entry may carry `unlock: "<achievement id>"`,
     the mark's reward binding -- empty/absent means a free pick, the marks-are-
     pure-data default the 2026-08 rewire plan set. `earned_ids` is the set of
-    currently-earned achievement ids (from _earned_ach_ids); pass it and each
+    currently-earned achievement ids (from _earned_achievement_ids); pass it and each
     mark reports `earned` (free, or its unlock is in the set) plus `unlock_name`
     for the "Unlocks with <name>" needle. Pass None -- the many callers that
     don't gate (the custom-mark upload response, the launcher-icon path) -- and
@@ -2591,12 +2608,27 @@ def list_marks(out_dir, earned_ids=None):
         if ext:
             unlock = str(m.get("unlock") or "")
             earned = (not unlock) or (earned_ids is None) or (unlock in earned_ids)
+            # A HIDDEN feat is discovered, never announced (leak class HIGH #2,
+            # owner 2026-08-21; /api/achievements masks the same feat to "???").
+            # So only name the unlock when it is non-hidden, or GENUINELY earned
+            # (a real earned set that carries it -- earned_ids=None means "not
+            # gating / earned unknown", which for a hidden feat must stay silent).
+            # Fail CLOSED on the roster, exactly as the badge-thumb route does
+            # (adversarial 2026-08-22): when the container is missing/invalid/stale
+            # _ach_hidden() goes EMPTY, so `unlock not in _ach_hidden()` passes for
+            # every mark -- and _ach_name falls back to returning the id itself, so
+            # a hidden feat's id would be published to an unearned user in exactly
+            # the state we cannot verify anything. Name it only when the roster
+            # actually carries it.
+            named = bool(unlock) and unlock in _ach_ids() and (
+                unlock not in _ach_hidden()
+                or (earned_ids is not None and unlock in earned_ids))
             out.append({"id": mid, "label": m.get("label") or mid,
                         "kind": m.get("kind") or "tile",
                         "png": "/branding/marks/%s%s" % (mid, ext),
                         "animated": ext == ".webp",
                         "unlock": unlock,
-                        "unlock_name": _ach_name(unlock) if unlock else "",
+                        "unlock_name": _ach_name(unlock) if named else "",
                         "earned": earned,
                         "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
     return out
@@ -2614,18 +2646,26 @@ def _ach_name(aid):
     return aid
 
 
-def _earned_ach_ids(out_dir, db_path):
-    """The set of currently-earned achievement ids, by the exact same recipe
-    /api/achievements, /api/skin and _mark_earned() use (metrics + telemetry +
-    earned_at, through compute_achievements). One computation the gated callers
-    share, so the marks a Branding request offers can never disagree with what
-    the Folio shows unlocked."""
-    metrics = achievement_metrics(db_path)
-    metrics.update(telemetry_metrics(out_dir))
-    result = compute_achievements(metrics, load_ach_state(out_dir).get("seen"),
-                                  sets=load_telemetry(out_dir).get("sets", {}),
-                                  earned_at=load_ach_state(out_dir).get("earned_at"))
-    return {a["id"] for a in result["achievements"] if a["earned"]}
+def _mark_unlock_for(mid):
+    """The achievement id a mark is bound to (its marks.json `unlock`), or "" for
+    a free mark, an unknown id, or a missing/corrupt manifest. Read fresh from
+    the manifest so the seal check on mark ART (_seal_rule's marks/ branch) can
+    never drift from the `unlock` list_marks() offers the picker off the same
+    file. Fails open ("" -> serve): a bound mark only exists when marks.json
+    parses AND carries its unlock, so a corrupt manifest has no bound mark to
+    leak (list_marks returns [] from it too)."""
+    if not mid:
+        return ""
+    raw = _branding_bytes(_role_rel("marks", "marks.json"))
+    if not raw:
+        return ""
+    try:
+        for m in (json.loads(raw.decode("utf-8")).get("marks") or []):
+            if isinstance(m, dict) and str(m.get("id") or "") == mid:
+                return str(m.get("unlock") or "")
+    except (ValueError, UnicodeDecodeError):
+        pass
+    return ""
 
 
 # The 4 Branding-tab slots Control Panel.dc.html specs beyond Icons & marks
@@ -10827,7 +10867,7 @@ def create_app(out_dir: Path):
                              # computed here too, or the lock never shows and a bound
                              # mark only fails on click with a raw 403 toast (red team
                              # 2026-09-08). Same gate as the GET route below.
-                             marks=list_marks(out_dir, _earned_ach_ids(out_dir, db_path)),
+                             marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
                              slots=branding_slots_payload(out_dir)),
         })
 
@@ -16149,11 +16189,11 @@ def create_app(out_dir: Path):
             return jsonify(dict(_branding_tuning(cfg),
                                 mark=cfg["mark"], anim=cfg["anim"],
                                 anims=MARK_ANIMS,
-                                marks=list_marks(out_dir, _earned_ach_ids(out_dir, db_path)),
+                                marks=list_marks(out_dir, _earned_achievement_ids(out_dir, db_path)),
                                 slots=branding_slots_payload(out_dir)))
         body = request.get_json(silent=True) or {}
         cfg = load_branding(out_dir)
-        _marks = list_marks(out_dir, _earned_ach_ids(out_dir, db_path))
+        _marks = list_marks(out_dir, _earned_achievement_ids(out_dir, db_path))
         have = {m["id"] for m in _marks}
         if "anim" in body:
             anim = str(body["anim"])
@@ -16388,7 +16428,7 @@ def create_app(out_dir: Path):
         # real icon, so a locked reward mark's art must not become it any more
         # than it may become the active in-app mark -- the same 403 POST
         # /api/branding gives. Free/logo marks and earned bound marks pass.
-        _marks = list_marks(out_dir, _earned_ach_ids(out_dir, db_path))
+        _marks = list_marks(out_dir, _earned_achievement_ids(out_dir, db_path))
         if mark not in {m["id"] for m in _marks}:
             return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
         locked = next((m for m in _marks if m["id"] == mark and not m["earned"]), None)

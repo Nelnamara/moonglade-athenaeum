@@ -932,7 +932,7 @@ def test_list_marks_annotates_unlock_and_earned(tmp_path):
 
 def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch):
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())
     cli = _client(tmp_path)
     marks = {m["id"]: m for m in cli.get("/api/branding").get_json()["marks"]}
     assert marks["mark_4"]["earned"] is True
@@ -941,7 +941,7 @@ def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch):
 
 def test_set_locked_mark_is_refused_403(tmp_path, monkeypatch):
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # archivist NOT earned
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())   # archivist NOT earned
     cli = _client(tmp_path)
     before = cli.get("/api/branding").get_json()["mark"]
     r = cli.post("/api/branding", json={"mark": "mark_ms"})
@@ -953,7 +953,7 @@ def test_set_locked_mark_is_refused_403(tmp_path, monkeypatch):
 
 def test_set_bound_mark_allowed_once_earned(tmp_path, monkeypatch):
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: {"archivist"})
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: {"archivist"})
     cli = _client(tmp_path)
     r = cli.post("/api/branding", json={"mark": "mark_ms"})
     assert r.status_code == 200
@@ -962,7 +962,7 @@ def test_set_bound_mark_allowed_once_earned(tmp_path, monkeypatch):
 
 def test_free_mark_and_logo_never_gated(tmp_path, monkeypatch):
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # nothing earned
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())   # nothing earned
     cli = _client(tmp_path)
     assert cli.post("/api/branding", json={"mark": "mark_4"}).status_code == 200   # free
     assert cli.post("/api/branding", json={"mark": "logo"}).status_code == 200     # legacy
@@ -973,7 +973,7 @@ def test_panel_summary_marks_carry_earned_so_the_lock_renders(tmp_path, monkeypa
     # The Control Panel reads its marks from /api/panel/summary, NOT GET /api/branding.
     # If that payload doesn't gate, the two grids never lock a bound-unearned mark.
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())
     cli = _client(tmp_path)
     marks = {m["id"]: m for m in cli.get("/api/panel/summary").get_json()["branding"]["marks"]}
     assert marks["mark_4"]["earned"] is True
@@ -984,7 +984,7 @@ def test_shortcut_route_refuses_a_locked_mark(tmp_path, monkeypatch):
     # The Desktop .lnk icon IS the app's real icon, so a locked reward mark's art
     # must not become it -- the same 403 the active-mark POST gives.
     _cut_bound_marks(tmp_path)
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # archivist NOT earned
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())   # archivist NOT earned
     cli = _client(tmp_path)
     r = cli.post("/api/branding/shortcut", json={"mark": "mark_ms"})
     assert r.status_code == 403 and r.get_json()["error"] == "mark locked"
@@ -995,5 +995,115 @@ def test_shortcut_route_refuses_a_locked_mark(tmp_path, monkeypatch):
         stderr = ""
         stdout = ""
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
-    monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: {"archivist"})
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: {"archivist"})
     assert cli.post("/api/branding/shortcut", json={"mark": "mark_ms"}).status_code == 200
+
+
+# ---- spoiler seal (feat/mark-gating review 2026-09-08): a mark bound to a HIDDEN feat must
+# not announce that feat's name to a user who hasn't earned it -- leak class HIGH #2 (owner
+# 2026-08-21), the same rule /api/achievements enforces by masking the feat to "???". ----
+def _a_hidden_achievement():
+    for a in g._roster():
+        if isinstance(a, dict) and a.get("hidden") and (a.get("name") or "").strip():
+            return a["id"], a["name"].strip()
+    return None, None
+
+
+def _cut_mark_bound_to(aid):
+    mdir = g._role_dir("marks"); mdir.mkdir(parents=True)
+    (mdir / "mark_h.png").write_bytes(b"\x89PNG fake")
+    (mdir / "marks.json").write_text(json.dumps({"marks": [
+        {"id": "mark_h", "label": "Bound Mark", "kind": "tile", "unlock": aid},
+    ]}), encoding="utf-8")
+
+
+def test_list_marks_masks_an_unearned_hidden_feats_name(tmp_path, sealed_donor_present):
+    aid, name = _a_hidden_achievement()
+    assert aid, "the sealed roster should carry at least one named hidden feat"
+    _cut_mark_bound_to(aid)
+    # locked (not earned): the needle must NOT carry the hidden feat's name
+    m = {x["id"]: x for x in g.list_marks(tmp_path, earned_ids=set())}["mark_h"]
+    assert m["earned"] is False
+    assert name not in (m["unlock_name"] or ""), "hidden feat named to an unearned user"
+    assert m["unlock_name"] == ""                       # blank -> JSX shows "an achievement"
+    # earned_ids=None ("earned unknown / not gating") is still silent for a hidden feat
+    m = {x["id"]: x for x in g.list_marks(tmp_path)}["mark_h"]
+    assert m["unlock_name"] == ""
+    # genuinely earned: naming it is no longer a spoiler
+    m = {x["id"]: x for x in g.list_marks(tmp_path, earned_ids={aid})}["mark_h"]
+    assert m["earned"] is True and m["unlock_name"] == name
+
+
+def test_panel_summary_masks_an_unearned_hidden_feats_name(tmp_path, monkeypatch, sealed_donor_present):
+    aid, name = _a_hidden_achievement()
+    assert aid
+    _cut_mark_bound_to(aid)
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())   # nothing earned
+    cli = _client(tmp_path)
+    blob = json.dumps(cli.get("/api/panel/summary").get_json()["branding"]["marks"])
+    assert name not in blob, "the Control Panel's marks payload names an unearned hidden feat"
+
+
+def test_list_marks_fails_closed_when_the_roster_is_unavailable(tmp_path, monkeypatch,
+                                                                sealed_donor_present):
+    """No/invalid/stale container -> _ach_hidden() is EMPTY, so a hidden-feat test alone
+    passes for every mark and _ach_name falls back to the id itself. Proven to publish
+    'the-konami-code' before the _ach_ids() guard (adversarial 2026-09-08; same fail-open
+    the badge-thumb route closed on 2026-08-22). The roster must gate it."""
+    aid, name = _a_hidden_achievement()
+    assert aid
+    _cut_mark_bound_to(aid)
+    monkeypatch.setattr(g, "_sealed_defs", lambda: g._derive_sealed({"roster": []}))
+    assert not g._ach_hidden() and not g._ach_ids()      # the state under test
+    for earned in (set(), None, {aid}):
+        m = {x["id"]: x for x in g.list_marks(tmp_path, earned_ids=earned)}["mark_h"]
+        assert m["unlock_name"] == "", (
+            "roster unavailable: published %r for a hidden feat" % m["unlock_name"])
+        assert aid not in (m["unlock_name"] or "")
+
+
+# ---- the gap the deeper review named: every gate test mocked the earned set.
+# These run the REAL _earned_achievement_ids against a real catalog, and prove the
+# ART is sealed server-side, not just hidden in CSS. ----
+def _cut_marks_bound_to(tmp_path, bindings):
+    """marks.json + art for {mark_id: unlock_ach_id-or-empty}."""
+    mdir = g._role_dir("marks"); mdir.mkdir(parents=True)
+    entries = []
+    for mid, unlock in bindings.items():
+        (mdir / (mid + ".png")).write_bytes(_png_bytes())
+        (mdir / (mid + ".ico")).write_bytes(b"\x00\x00icofake")
+        e = {"id": mid, "label": mid, "kind": "tile"}
+        if unlock:
+            e["unlock"] = unlock
+        entries.append(e)
+    (mdir / "marks.json").write_text(json.dumps({"marks": entries}), encoding="utf-8")
+
+
+def test_gate_agrees_with_the_real_earned_computation(tmp_path):
+    # first-light earns off the 1-row catalog _app() saves; archivist (1000 imgs)
+    # does NOT. No monkeypatch on the earned set -- the real recipe runs.
+    _cut_marks_bound_to(tmp_path, {"mk_free": "", "mk_first": "first-light", "mk_arch": "archivist"})
+    cli = _client(tmp_path)
+    earned = g._earned_achievement_ids(tmp_path, tmp_path / "catalog.db")
+    assert "first-light" in earned and "archivist" not in earned, "harness earned-set unexpected: %r" % (earned,)
+    marks = {m["id"]: m for m in cli.get("/api/branding").get_json()["marks"]}
+    assert marks["mk_free"]["earned"] is True
+    assert marks["mk_first"]["earned"] is True    # its achievement is really earned
+    assert marks["mk_arch"]["earned"] is False     # really not earned
+    # the write gate agrees with the real computation, no mock
+    assert cli.post("/api/branding", json={"mark": "mk_arch"}).status_code == 403
+    assert cli.post("/api/branding", json={"mark": "mk_first"}).status_code == 200
+
+
+def test_locked_mark_art_is_sealed_server_side(tmp_path, monkeypatch):
+    # /branding/marks/<id>.png must 404 for a bound-unearned mark, not hand over
+    # the full-res art -- the CSS lock is bypassable, the seal is the real gate.
+    _cut_marks_bound_to(tmp_path, {"mk_free": "", "mk_arch": "archivist"})
+    cli = _client(tmp_path)
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset())
+    assert cli.get("/branding/marks/mk_free.png").status_code == 200      # free art serves
+    assert cli.get("/branding/marks/mk_arch.png").status_code == 404      # locked art sealed
+    assert cli.get("/branding/marks/mk_arch.ico").status_code == 404      # and its icon
+    assert cli.get("/branding/marks/marks.json").status_code == 200       # the manifest stays open
+    monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset({"archivist"}))
+    assert cli.get("/branding/marks/mk_arch.png").status_code == 200      # earned -> art serves
