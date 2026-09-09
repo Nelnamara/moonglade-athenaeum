@@ -923,6 +923,11 @@ def test_list_marks_annotates_unlock_and_earned(tmp_path):
     assert by["mark_ms"]["unlock_name"]            # a needle string, name or id fallback
     by = {m["id"]: m for m in g.list_marks(tmp_path, earned_ids={"archivist"})}
     assert by["mark_ms"]["earned"] is True         # bound + earned -> unlocked
+    # _ach_name falls back to the id when the unlock id is not in the roster
+    # (a hermetic install has no sealed roster), so the needle is never empty.
+    assert by["mark_ms"]["unlock_name"] in (g._ach_name("archivist"), "archivist")
+    assert g._ach_name("no-such-achievement") == "no-such-achievement"
+    assert g._ach_name("") == ""
 
 
 def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch):
@@ -938,11 +943,12 @@ def test_set_locked_mark_is_refused_403(tmp_path, monkeypatch):
     _cut_bound_marks(tmp_path)
     monkeypatch.setattr(g, "_earned_ach_ids", lambda *a, **k: set())   # archivist NOT earned
     cli = _client(tmp_path)
+    before = cli.get("/api/branding").get_json()["mark"]
     r = cli.post("/api/branding", json={"mark": "mark_ms"})
     assert r.status_code == 403
     assert r.get_json()["error"] == "mark locked"
-    # the active mark did not change to the locked one
-    assert cli.get("/api/branding").get_json()["mark"] != "mark_ms"
+    # the active mark is EXACTLY what it was -- not merely "not the locked one"
+    assert cli.get("/api/branding").get_json()["mark"] == before
 
 
 def test_set_bound_mark_allowed_once_earned(tmp_path, monkeypatch):
