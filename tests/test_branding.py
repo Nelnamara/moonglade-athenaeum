@@ -1044,6 +1044,21 @@ def test_panel_summary_masks_an_unearned_hidden_feats_name(tmp_path, monkeypatch
     assert name not in blob, "the Control Panel's marks payload names an unearned hidden feat"
 
 
+def test_locked_hidden_feat_mark_403_does_not_leak_the_feat(tmp_path, sealed_donor_present):
+    """The mark-locked 403 must not name (or id) an unearned HIDDEN feat. The
+    fallback used to be `unlock_name or unlock`, and unlock_name is masked to ""
+    for a hidden feat -> it leaked the raw id (spoiler audit 2026-09-08)."""
+    aid, name = _a_hidden_achievement()
+    assert aid
+    _cut_mark_bound_to(aid)
+    cli = _client(tmp_path)                 # a fresh install earns no hidden feat
+    r = cli.post("/api/branding", json={"mark": "mark_h"})
+    assert r.status_code == 403
+    body = r.get_data(as_text=True)
+    assert aid not in body and name not in body, "the 403 leaks the hidden feat: %s" % body
+    assert r.get_json().get("unlock") == ""
+
+
 def test_list_marks_fails_closed_when_the_roster_is_unavailable(tmp_path, monkeypatch,
                                                                 sealed_donor_present):
     """No/invalid/stale container -> _ach_hidden() is EMPTY, so a hidden-feat test alone

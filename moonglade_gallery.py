@@ -16217,8 +16217,12 @@ def create_app(out_dir: Path):
             locked = next((m for m in _marks
                            if m["id"] == mark and not m["earned"]), None)
             if locked is not None:
+                # unlock_name is already spoiler-masked (empty for an unearned
+                # HIDDEN feat -- see list_marks). NEVER fall back to the raw
+                # unlock id: that would name the hidden feat the mask exists to
+                # hide (feat/mark-gating spoiler audit 2026-09-08).
                 return jsonify({"error": "mark locked",
-                                "unlock": locked.get("unlock_name") or locked.get("unlock"),
+                                "unlock": locked.get("unlock_name") or "",
                                 "mark": cfg["mark"]}), 403
             cfg["mark"] = mark
         # The tuning fields: clamped, never refused. A slider that sends 4.0 gets
@@ -16433,8 +16437,10 @@ def create_app(out_dir: Path):
             return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
         locked = next((m for m in _marks if m["id"] == mark and not m["earned"]), None)
         if locked is not None:
+            # Masked name only, never the raw unlock id -- a hidden feat's
+            # id must not leak through the shortcut 403 either (spoiler audit).
             return jsonify({"error": "mark locked",
-                            "unlock": locked.get("unlock_name") or locked.get("unlock")}), 403
+                            "unlock": locked.get("unlock_name") or ""}), 403
         try:
             lnk = make_launcher_shortcut(out_dir, mark)
         except RuntimeError as e:
