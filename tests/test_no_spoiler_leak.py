@@ -2,7 +2,7 @@
 public tree (see ACHIEVEMENT_SEALING_SPEC.md). This fails the suite if a sealed roast --
 the crown-jewel spoiler -- reappears in any committed public file (a future CHANGELOG line,
 a stray comment, a rebuilt bundle). Roasts are the reliable needle: long, distinctive
-strings, unlike feat NAMES ("under the hood", "eclipse", "marathon") which are common words
+strings, unlike feat NAMES, which are often short common words
 and would false-positive. Skips when the private donor isn't checked out (can't know the
 sealed strings without it)."""
 import json
