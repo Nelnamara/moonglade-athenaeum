@@ -58,13 +58,17 @@ def _slim(row):
 @mcp.tool
 def search_catalog(query: str = "", model: str = "", collection: str = "",
                    rating_min: int = 0, source: str = "", media_type: str = "",
-                   sort: str = "newest", limit: int = 30) -> dict:
+                   art_tag: str = "", lora: str = "", date_from: str = "", date_to: str = "",
+                   published_only: bool = False, sort: str = "newest", limit: int = 30) -> dict:
     """Search the image catalog. `query` matches prompt text; filter by model,
-    collection, minimum star rating (0-5), source (api/local), or media_type
-    (image/video). sort: newest|oldest|rating. Returns {total, count, rows}."""
+    collection, minimum star rating (0-5), source (api/local), media_type
+    (image/video), art_tag, lora, a created-at range (date_from/date_to as YYYY-MM-DD),
+    or published_only. sort: newest|oldest|rating. Returns {total, count, rows}."""
     rows, total = g.query_catalog(
         DB, q=query, model=model, collection=collection,
         rating_min=max(0, min(rating_min, 5)), source=source, media_type=media_type,
+        art_tag=art_tag, lora=lora, date_from=date_from, date_to=date_to,
+        published_only=published_only,
         sort=sort, page=1, page_size=max(1, min(limit, 100)))
     return {"total": total, "count": len(rows), "rows": [_slim(r) for r in rows]}
 
@@ -172,19 +176,95 @@ def add_to_collection(media_ids: list[str], collection: str) -> dict:
 
 
 @mcp.tool
-def pull_for_review(limit: int = 20, unrated_only: bool = True, source: str = "") -> dict:
-    """Fetch a set of images that likely need curation -- newest first, unrated by
-    default. Review, then set_rating / add_to_collection. Returns {count, rows}."""
+def pull_for_review(limit: int = 20, unrated_only: bool = True,
+                    uncollected_only: bool = False, source: str = "") -> dict:
+    """Fetch images that likely need curation -- newest first, unrated by default.
+    Set uncollected_only to surface images in NO collection instead (a common curation
+    target). Review, then set_rating / add_to_collection. Returns {count, rows}."""
     rows, _ = g.query_catalog(DB, source=source, sort="newest", page=1,
                               page_size=max(1, min(limit * 5, 300)))
     picked = []
     for r in rows:
         if unrated_only and int(r.get("rating") or 0) != 0:
             continue
+        if uncollected_only and (r.get("collections") or "").strip():
+            continue
         picked.append(_slim(r))
         if len(picked) >= limit:
             break
     return {"count": len(picked), "rows": picked}
+
+
+@mcp.tool
+def list_collections() -> dict:
+    """List every named collection and how many images each holds -- the view
+    add_to_collection / remove_from_collection are blind to on their own. Returns
+    {count, collections:[{name, count}]}."""
+    out = []
+    for name in g.unique_collections(DB):
+        _, total = g.query_catalog(DB, collection=name, page=1, page_size=1)
+        out.append({"name": name, "count": total})
+    return {"count": len(out), "collections": out}
+
+
+@mcp.tool
+def remove_from_collection(media_ids: list[str], collection: str) -> dict:
+    """WRITE: remove one or more images from a named collection. Returns how many rows
+    changed; a media_id that wasn't in that collection is skipped, not an error."""
+    name = (collection or "").strip()
+    if not name:
+        return {"ok": False, "error": "collection name required"}
+    n = g.remove_from_collection(DB, [str(m) for m in media_ids], name)
+    return {"ok": True, "collection": name, "removed": n}
+
+
+@mcp.tool
+def get_images(media_ids: list[str]) -> dict:
+    """Metadata for SEVERAL images at once -- the batch form of get_image, for
+    cross-referencing a set of ids (search hits, similar neighbours) without a call
+    each. Metadata only; for a visual, call get_image on the one you want. Unknown ids
+    come back under `missing`."""
+    rows, missing = [], []
+    for mid in [str(m) for m in media_ids][:100]:
+        row = g.get_row(DB, mid)
+        if row:
+            rows.append(_slim(row))
+        else:
+            missing.append(mid)
+    out = {"count": len(rows), "rows": rows}
+    if missing:
+        out["missing"] = missing
+    return out
+
+
+@mcp.tool
+def catalog_stats() -> dict:
+    """At-a-glance shape of the library, so an agent can decide what to curate without
+    paging search: totals, media-type / source / exact-rating breakdowns, the created-at
+    span, and every collection with its size. Read-only, built from query_catalog totals
+    (no reimplemented SQL)."""
+    def total(**kw):
+        _, t = g.query_catalog(DB, page=1, page_size=1, **kw)
+        return t
+    # exact-rating buckets from the cumulative rating_min filter: rating r is
+    # (>= r) minus (>= r+1); rating 0 is "unrated" (all minus rated-1-or-more).
+    by_rating = {}
+    for r in range(0, 6):
+        hi = total(rating_min=r + 1) if r < 5 else 0
+        by_rating[str(r)] = total(rating_min=r) - hi
+    newest, _ = g.query_catalog(DB, sort="newest", page=1, page_size=1)
+    oldest, _ = g.query_catalog(DB, sort="oldest", page=1, page_size=1)
+    return {
+        "total": total(),
+        "images": total(media_type="image"),
+        "videos": total(media_type="video"),
+        "by_source": {src: total(source=src) for src in ("api", "local")},
+        "by_rating": by_rating,
+        "collections": [{"name": n, "count": total(collection=n)}
+                        for n in g.unique_collections(DB)],
+        "newest": (newest[0].get("created_at") if newest else None),
+        "oldest": (oldest[0].get("created_at") if oldest else None),
+    }
 
 
 if __name__ == "__main__":
