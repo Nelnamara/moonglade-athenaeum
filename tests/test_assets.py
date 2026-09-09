@@ -119,6 +119,22 @@ def test_needs_download_present_no_marker_but_readable_is_false(tmp_path):
     assert ma.needs_download(c, manifest) is False
 
 
+def test_needs_download_present_no_marker_size_mismatch_is_true(tmp_path):
+    """A readable, markerless hand-copied pack whose SIZE disagrees with the
+    manifest is an OUTDATED pack (the version-bump case) -- re-fetch it rather
+    than trust it forever. Regression guard for 2026-09-08: a D: install carried
+    the v3 pack under a v4 manifest and never re-fetched, because a markerless
+    readable pack was trusted regardless of size."""
+    import moonglade_container as mc
+    c = tmp_path / "c.dat"
+    mc.write_container(str(c), {"_seed.txt": b"x"}, {})
+    real = _manifest_for(c.read_bytes())
+    manifest = dict(real, size=real["size"] + 4096)   # manifest wants a different-sized pack
+    assert ma._read_marker(c) is None
+    assert ma._container_readable(c) is True
+    assert ma.needs_download(c, manifest) is True
+
+
 def test_needs_download_present_no_marker_but_unreadable_is_true(tmp_path):
     """A present-but-UNREADABLE `.dat` with no marker -- a stale hand-copied
     pack from an older container format (a v1 pack under the v2 reader) or a

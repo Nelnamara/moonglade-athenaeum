@@ -107,10 +107,11 @@ def _container_readable(container_path):
 def needs_download(container_path, manifest=None):
     """True if `container_path` should be (re)fetched: missing entirely, its
     version marker disagrees with the current manifest, or it is present-but-
-    UNREADABLE by this build (a hand-copied `.dat` from an older container
-    format -- e.g. a v1 pack under the v2 reader). A container with NO marker
-    that DOES open counts as satisfied -- it dresses the app; only a confirmed
-    version mismatch or an unreadable file re-triggers a fetch, never a guess."""
+    UNREADABLE by this build, or a markerless pack whose SIZE disagrees with the
+    manifest (an outdated hand-copied `.dat`). A markerless pack that opens AND
+    matches the manifest size counts as satisfied -- the intentional hand-copy of
+    the CURRENT pack -- and is trusted without a re-hash; only a size or version
+    mismatch, or an unreadable file, re-triggers a fetch."""
     manifest = manifest if manifest is not None else read_manifest()
     if manifest is None:
         return False           # nothing to compare against -- nothing to fetch
@@ -118,9 +119,23 @@ def needs_download(container_path, manifest=None):
         return True
     marker = _read_marker(container_path)
     if marker is None:
-        # Present, unverified. Trust it ONLY if it actually opens under this
-        # build -- otherwise a stale hand-copied pack leaves the app silently
-        # undressed forever with no re-fetch (adversarial 2026-08-22).
+        # Present, unverified (hand-copied / pre-downloader install). We cannot
+        # sha-check an 800MB pack on every render, but the manifest's SIZE is a
+        # free, decisive signal: a markerless pack whose size differs from the
+        # manifest is a DIFFERENT (older) pack than the one this build should
+        # carry, so re-fetch it. Without this a readable-but-outdated hand-placed
+        # pack was trusted forever and a manifest version bump could never reach
+        # it (2026-09-08: a v3 pack sat under a v4 manifest and never updated).
+        want = manifest.get("size")
+        try:
+            same_size = want is None or container_path.stat().st_size == int(want)
+        except OSError:
+            return True
+        if not same_size:
+            return True
+        # Same size: trust it ONLY if it actually opens under this build --
+        # a stale hand-copied pack in an older/foreign format still re-fetches
+        # rather than leaving the app silently undressed (adversarial 2026-08-22).
         return not _container_readable(container_path)
     return marker.get("sha256") != manifest["sha256"]
 
