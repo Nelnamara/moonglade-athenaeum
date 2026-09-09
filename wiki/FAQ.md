@@ -50,7 +50,7 @@ screen — if that is what you remember seeing, update.)
 
 **How the phone's Back gesture behaves.** Anything the phone opens *over* your library —
 a picture full-screen, a picture's own record, anything from the **☰** menu, the Folio, the
-contact sheet, the contest entry screen, and the drill-ins inside Branding, the composer's
+contact sheet, the contest entry screen, and the composer's
 Advanced and Duplicates — closes on one Back, leaving whatever was underneath it standing.
 Two things stacked take two presses, one each. With nothing open, Back leaves the app, the
 same as any other page. Bottom sheets (Sort, Advanced Search, Actions, the menu) are the

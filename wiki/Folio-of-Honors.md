@@ -111,8 +111,7 @@ Skins are applied from the **Control Panel**, in its **Identity** strip, not fro
 Hall — all the cosmetics live together, and the strip pairs the skins with the mark that
 sits beside the title so you can judge the two together. Your choice is saved server-side,
 so it follows you to every device and every page of the suite. Picking a locked skin is
-refused by the server, so there's nothing to cheat. Once **Under the Hood** is found, the
-strip gives way to the full **✦ Branding** tab.
+refused by the server, so there's nothing to cheat.
 
 ## Where progress comes from
 

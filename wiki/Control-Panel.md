@@ -258,10 +258,6 @@ skin is saved to your account and follows you to every device. Anything still lo
 shown rather than hidden — a gold 🔒 tile that names what unlocks it when you hover over
 it.
 
-Find **Under the Hood** and this strip is replaced by the full **✦ Branding** tab, which
-adds the mark's animation and its speed/size/glow controls, the banner slots, a mark of
-your own to upload, and the **Type** picker below.
-
 ### Type
 
 Five curated pairs of faces — one for the italic display voice (titles, headings, the

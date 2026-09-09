@@ -16,10 +16,17 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-09-08 — The Last Mile
+
+- **Installs now fetch the current default art pack.** The manifest the released app carried still named the previous pack, so updating an install pulled nothing new even though a newer pack had already been published. It names the current pack now, so a fresh setup and an existing install both pick it up on their next check. (2026-09-08)
+
+### Under the hood
+- The tests that depend on the private donor are skipped when it is absent, so the public CI run is green with the donor not checked out. (2026-09-08)
+- Public records were swept and a guardrail test now pins them; nothing user-visible changed. (2026-09-08)
+
 ## [3.10.1] - 2026-09-08 — Under Lock
 
 - **A mark can be tied to an achievement, and stays locked until you earn it.** The header mark works the way skins already do: a mark bound to an achievement shows greyed with a lock and what unlocks it, and the app refuses to set it, serve its art, or make it the launcher icon until the achievement is earned. Marks with no achievement stay free picks, so nothing you have today changes. The bindings ride the next art pack; the mechanism is here now. (2026-09-08)
-- **A hidden achievement is never named by the mark it unlocks.** A mark tied to a hidden feat used to hand its name, and then its raw id, to anyone who opened the panel before earning it — the same thing the Folio masks to `???`. The lock now says only "an achievement" for a hidden one, in the picker, the Control Panel, the error when you try to set it, and the launcher path. (2026-09-08)
 
 ## [3.10.0] - 2026-09-08 — In Plain Sight
 
@@ -37,7 +44,6 @@ git tags. Full prose notes for tagged versions live on
 - The live mirror's own lines — connected, mirroring, disconnected — now reach `pixai_backup/logs/moonglade.log`, so the log can answer whether the socket was up when a generation finished. (2026-09-07)
 - Removed leftover styles from retired screens (the classic grid, the old Edit-tab slots, the retired jobs tray and others); nothing you see changes.
 - The Blur toggle now also blurs the gallery picker's thumbnails and the generate drawer's reference images.
-- **The Konami Code, Read the Manual and Triggered can be earned from a phone or any logged-in device again; each event is one-time and rate-limited so it cannot be replayed.** A second tap inside a seventh of a second is read as one, a real second tap counts, and the thirty-a-minute limit holds even against a replayed sign-in cookie. (2026-09-07)
 - **A custom mark you upload can now be the launcher's icon.** The Desktop shortcut is the only place the app has a real icon of its own, and it takes that icon from the mark you are wearing — but only the marks that shipped with a cut icon file ever had one. Upload your own mark and **Put a shortcut on the Desktop** simply refused it, saying no icon had been cut, with nothing you could do about it. The icon is cut for you now, the moment you upload, at all four of the sizes Windows asks for; the mark's own tile shows it as ready, and the shortcut takes it. A mark that isn't square is centred rather than squashed, and the space around it stays transparent. If the cut fails for any reason your mark is still saved and still wears normally — only the icon is missing. Replacing or removing a custom mark takes its icon away with it, so a shortcut can never end up pointing at one that is gone. (2026-09-07)
 - **The art pack now carries a build stamp the app checks before trusting it.** The pack the app downloads on first run — every mark, banner, mascot and badge, plus the achievement roster — announced only "this is a Moonglade pack" and nothing else. So a pack whose index had been edited, trimmed or re-ordered opened perfectly well and then went wrong slowly and quietly, one missing picture at a time, each looking exactly like a picture that had never been there. A pack built from now on carries its own index fingerprint, the time it was built and what built it. The app re-derives that fingerprint every time it opens the pack — it costs nothing, it reads no artwork to do it — and a pack that does not match is refused whole, the same way a corrupt file already was, rather than half-trusted. A pack built by a **newer** version of the builder than the app knows is refused too, instead of being read with rules that may since have changed. **Packs you already have keep working**: one built before this simply has no stamp, and is opened exactly as it always was. The builder checks its own stamp survived the pack before it will call a build good. (2026-09-07)
 - **Every place the mark appears now sizes from one hero size, so a size change reaches them all.** The marks board settled the sizes back in August — hero 96, slim 56, everything else scaling from the hero — and the stylesheets only half kept it. Five different places typed a mark size of their own: the banner's 96, the slim banner's 56, and three more that nothing tied to either of them — the sign-in card's mark, the sign-in card on a phone, and the brand mark on the phone's own header. Change the hero and four marks stayed exactly where they were, quietly out of proportion with it. The hero and slim sizes are written once now, and every other mark states itself as a share of the hero, so moving the hero moves all of them together. **Nothing on screen changes today**: each share was chosen to land on the very pixel that mark already occupied, and there is a test that says so for each one. No animation was added anywhere it wasn't already. (2026-09-07)
@@ -109,7 +115,7 @@ git tags. Full prose notes for tagged versions live on
 - **You can choose the type the app is set in.** The Branding tab has a **Type** picker under the marks: five curated pairs, each one face for the italic display voice — page titles, headings, the mark's own line — and one for everything else. Tap a pair and both change at once, across every screen. Both faces come off **your own machine**: nothing is downloaded, nothing is served, and a face a particular computer doesn't have falls back inside the same pair, which is why each one is a short list rather than a single name. The small uppercase monospaced labels never change — they are meant to read as machine type whatever else is on screen. Your pair is remembered *in this browser*, like the popup-blur switch and unlike the skin, so the same account can read Verdana on the phone and Palatino at the desk; it is applied before the page paints, so there is no flash of the old face on the way in. The five pairs themselves are a starting set and will be revisited. (2026-09-04)
 - **"Update now" shows the update happening, in the window you pressed it in.** The confirm no longer hands off to a spinner and a vague "updating…" — it turns into the update itself: **pull**, then **applying files**, then **restart**, each ticked off as it really finishes, with how long it actually took. The restart is the one step nobody can watch (the server is away by then), so it shows what your own machine's last restart took rather than a made-up number. The bar only moves when a step really ends. When the third tick lands the window holds the finished list for a moment and then closes itself as the page refreshes into the new version — the refresh is what makes the version at the foot of the sidebar the new one, because until the page reloads the app you are looking at is still the code the update just replaced. The old "Updated Moonglade — done / Added to your gallery" toast, which was wrong on both halves, is retired; the window is the receipt now. An update that *fails* while you are elsewhere still says so out loud, as it always did. A refusal lands in the same window in place of the bar, and says which kind it is: **grey**, the request never reached the server and nothing was attempted; **gold**, come back in a moment because something is still running; **red**, this install will keep refusing until something is changed — with the tool's own words, which are usually the whole fix. (2026-09-04)
 - **Moonglade notices a new release on its own now — and tells you.** It only ever looked when you opened the Control Panel, so a release could be out for days with the app never mentioning it. While it is running it now asks about **once an hour**, and when a new version turns up it says so wherever you happen to be: the version stamp at the foot of the Panel's sidebar turns gold as it always has, and a single notice appears in the corner — *"Moonglade v3.7.3 is ready — open the Control Panel to update."* Once per version, not once an hour, and not again after a reload. Opening the Panel still asks for a fresh answer rather than showing you one up to half an hour old, and opening and closing it repeatedly costs nothing. **It only tells you.** Nothing is fetched and nothing is installed until you press **Update now** in the Panel and confirm it: the app does not update itself, and is not going to. (2026-09-04)
-- **The mark and the skins are yours from the start.** The Control Panel used to offer a lone row of skins until an achievement unlocked the Branding tab — so the mark beside the title, the most visible piece of the app's identity and something the app has always let you change, simply wasn't on offer. There is now an **Identity** strip: the marks, the skins, and a small sample showing the pair together, because a mark and a palette are judged as one and were being chosen apart. Anything still locked is shown rather than hidden — a gold 🔒 tile that names what unlocks it when you hover over it, the same way the skins have always done it. Find **Under the Hood** and the strip gives way to the full Branding tab exactly as before. (#50) (2026-09-04)
+- **The mark and the skins are yours from the start.** The Control Panel used to offer a lone row of skins — so the mark beside the title, the most visible piece of the app's identity and something the app has always let you change, simply wasn't on offer. There is now an **Identity** strip: the marks, the skins, and a small sample showing the pair together, because a mark and a palette are judged as one and were being chosen apart. Anything still locked is shown rather than hidden — a gold 🔒 tile that names what unlocks it when you hover over it, the same way the skins have always done it. (#50) (2026-09-04)
 - **A ladder's badge now shows how far up it you are.** In the Folio's **All** tab, the row of ten tracks showed each ladder's *first* rung forever — the same ten pictures on your first day and after a year of collecting. Each badge now wears the art of the **highest rung you have earned** on that track, edged in that rung's rarity colour and marked with its number, and it upgrades itself the moment a higher rung lands. A track you haven't started shows its first rung — art and number both — dimmed, so every badge in the row names where you are on it. The badges sit still under the mouse and nothing is drawn around them but the edge itself. Fixed alongside it: every rung on that tab was being drawn **twice** — once in the selected ladder's own grid and again in *Every rung, every ladder* a few hundred pixels below. The duplicate grid is gone; the census lists each rung exactly once, and the ladder you have selected is detailed by the showcase at the top of the tab. (2026-09-04)
 - **An update that worked now says so when the app comes back.** Pressing **Update now** ends in the page reloading into the new version — and what came back was the gallery, looking exactly as it did before, with nothing anywhere saying the update had landed. You had to go back into the Control Panel and read the version at the foot of the sidebar to find out. A small note now appears in the corner on the way back in — *"Updated to v3.8.0"* — and waits there until you close it. It is checked, not assumed: the note appears only if the version the app is actually running is the one you were promised. An update that failed or was rolled back says nothing at all, and cannot say it later. It appears once, for the update that earned it; reloading the page again does not bring it back. (2026-09-05)
 - **The five skin swatches in the Identity strip show their own palettes.** Each little tile is meant to be the skin it stands for at a glance; two of them were painted by a rule rather than by their palette, so **Moonglade** ended on gold instead of its emerald and **Nightfallen** on a pale lavender instead of the deep plum the whole app's colour was drawn from. All five now read as themselves, and the sample beside them matches. Alongside it, the mark you have chosen is **filled** rather than gold-edged: gold in that strip means *locked*, so the mark you were using and the one you cannot have were wearing the same colour. (2026-09-05)
@@ -242,7 +248,7 @@ Moonglade now crosses into the half of PixAI that only a logged-in browser could
 
 ### Art & the Folio
 - **The default art ships as a sealed pack, and the branding folders go incognito.** The packed `moonglade.dat` now carries more of the app's built-in data than just the default art, in a hardened format; and the on-disk branding tree no longer wears its purposes as folder names — the app lays out, and packs its default art from, coded folder names it translates internally, documented nowhere public, this file included.
-- **Achievement art is genuinely earned.** Badge masters and per-achievement artwork serve only once their achievement is actually unlocked, instead of being fetchable early by anyone guessing addresses. The app's regular dress — narrator, tracker art, banners, marks — is unaffected, and the Folio's locked tiles still show their art as designed. The achievements data no longer reveals how many hidden feats remain: they appear as a single mystery entry, so the count can't be read out of devtools — and that mystery placeholder now shows at full strength rather than grayed out.
+- **Achievement art is genuinely earned.** Badge masters and per-achievement artwork serve only once their achievement is actually unlocked, instead of being fetchable early by anyone guessing addresses. The app's regular dress — narrator, tracker art, banners, marks — is unaffected, and the Folio's locked tiles still show their art as designed.
 - The Branding surface's customization slots are now exactly what the panel shows — the three banners plus Icons & marks; mascot and reward art are no longer accepted as upload targets. The Change Emotion picker's expression thumbnails ship as lightweight WebP.
 
 ### Fixed
@@ -5623,9 +5629,6 @@ large docs consolidation, and a real multi-account authentication stack.
 - **Bigger spinning-Nel mascot, head now spins** (header banner + activity tracker) — sizes bumped
   (22px→34px banner, 34px→48px tracker), and the chibi head itself rotates now (not just the loading
   ring around it), on a slower cycle than the ring for a layered look.
-- **Mystery-tile art for masked feats** — hidden feat achievements now show the owner's cloaked-Nel
-  artwork (`branding/mystery/secret_feat.png`) instead of a plain grayscale `❓`, in full color (not
-  grayscaled — it's meant as an intentional tease, not a disabled state). Name/description stay masked.
 
 ### Fixed
 - **The Loom no longer strands a shot when the tab closes mid-render.** `pollShot` held the task id
@@ -5866,7 +5869,7 @@ large docs consolidation, and a real multi-account authentication stack.
 
 ## [1.11.0] — 2026-07-13 — Achievement flair & the Trophy Hall
 
-_On `loom-v2`, past the `v1.10.0` tag. The 57-achievement system plus its flair layer (toast frames,
+_On `loom-v2`, past the `v1.10.0` tag. The achievement system plus its flair layer (toast frames,
 gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` remains unmerged to
 `master`; this tag sits on `loom-v2`. See git history for the full list._
 
@@ -5879,8 +5882,8 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   it, ESC out, animates from the 🏆 button; scoped so the contest/art modals are untouched; mobile
   stacks the rail under the grid.
 - **Earn-date persistence + badge thumb-cache** (Hall infra) — `achievements.json` records
-  `earned_at` per achievement (backfills existing earns; never leaks a hidden feat's date), and the
-  57 badge masters (~300 MB) are served as lazy ~256 px thumbs via `/badge-thumb/<id>.png` so a
+  `earned_at` per achievement (backfills existing earns; never leaks a masked entry's date), and the
+  badge masters are served as lazy ~256 px thumbs via `/badge-thumb/<id>.png` so a
   full Hall doesn't pull the masters.
 - **Tier flair frames on the unlock toast** — legendary + feat achievements now fire their unlock
   moment wrapped in an ornate **9-slice `border-image` frame** (LEG6 gold+emerald / FEAT13 ruby)
@@ -5888,17 +5891,12 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   is a one-line flip). The reward ribbon's placeholder emoji is replaced by the **gift-box icon**.
   Frame + gift assets are machine-local in `branding/frames/` + `branding/rewards/`.
 - **Achievement points** — every achievement carries a **rung-scaled score** (`tier base +
-  5×(rung−1)`; common 5 / rare 10 / epic 25 / legendary 50; **feats 0**, so the total never hints
-  at a hidden feat). Points show on the unlock toast, on each grid tile, and as a Warband-style
+  5×(rung−1)`; common 5 / rare 10 / epic 25 / legendary 50). Points show on the unlock toast, on each grid tile, and as a Warband-style
   running total in the panel header. Rung is *derived* from the roster (ladder families grouped by
   metric, ordered by threshold), reproducing each ladder's rung sequence exactly; a fixed points
   ceiling.
-- **The full 57-achievement roster is live** — the achievement system grew from 11 to all **57**
-  designed achievements (29 ladder rungs across 10 tracks · 9 milestones · 8 masteries · 11 hidden
-  **feats**), generated verbatim from the canonical `docs/achievements_roster_57.json` with every
-  achievement carrying its `roast` (and an unlockable uncensored variant). The panel groups them
-  into **Evolution Ladders / Milestones / Masteries / Feats of the Athenaeum** sections; earned
-  cards show their roast; one legendary achievement is flagged as a banner reward.
+- **The achievement system is live** — earn achievements as you back up, create, curate and weave;
+  each carries its own line, the panel groups them into sections, and earned cards show theirs.
 - **The telemetry layer** — the persisted counters behind every non-catalog metric
   (`out_dir/telemetry.json`: counters / maxima / sets / flags / distinct-days, lock-guarded and
   fail-soft everywhere). ~15 call sites now report in: edits, enhances (+ distinct workflows),
@@ -5907,10 +5905,7 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   applies, day-of-use tracking, and new catalog SQL for `local_gens` / `gens_in_a_day` /
   `distinct_keywords`. Feat events ride a new `/api/ach-event` beacon plus state sweeps and a
   new-download anniversary check.
-- **Hidden feats + the narrator** — feats serve masked (`???`) until earned and the whole feats
-  section stays cloaked until the first one lands; a hidden interaction earns a feat that reveals
-  the uncensored-roast toggle. (The specific triggers are sealed in the container, not here.)
-- **Per-achievement badge + mascot art** — the 57 voted badges/mascots are served from
+- **Per-achievement badge + mascot art** — the voted badges/mascots are served from
   `branding/badges/<id>.png` and `branding/mascots/ach/<id>.png`; the unlock moment now presents
   with **that achievement's own mascot** (falling back to the tier chibi), and the celebration
   queue/summary-toast handles the first-load burst.
@@ -5973,7 +5968,7 @@ gift box, rung-scaled points) and the maximized-overlay Trophy Hall. `loom-v2` r
   dropped) — content-moderation blocks read as a clear message instead of a bare "failed".
 - **Achievements art & moments** — 11 achievement-badge prompts + the Loom mark, a
   mascot-per-state activity tracker, a rarity-scaled "Nel presents" unlock pop with real badge art,
-  a spinning-Nel generation loader, and a hidden easter egg.
+  a spinning-Nel generation loader.
 - **Recover a task by ID** — a Control Panel action to import any generation/edit into the catalog
   by task id, with an "already in your gallery" check + jump link.
 - **Edit card** — multi-image references (Edit Pro 4 / Reference Pro 10) and
