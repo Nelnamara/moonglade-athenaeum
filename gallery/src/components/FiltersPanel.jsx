@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import Flyout from "./Flyout.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
+import LayoutStrip from "./LayoutStrip.jsx";
 import "../styles/librarybar.css";
 
 /* ============================================================================
@@ -175,6 +176,7 @@ export function LibraryBar({
   lib, boot, actions, collections,
   onSendVideo, onMutated,
   group, setGroup,
+  layout, setLayout,
   similar, onClearSimilar,
 }) {
   const {
@@ -346,6 +348,8 @@ export function LibraryBar({
           onSendVideo={onSendVideo}
           onMutated={onMutated}
         />
+
+        <LayoutStrip layout={layout} setLayout={setLayout} />
       </div>
     </div>
   );

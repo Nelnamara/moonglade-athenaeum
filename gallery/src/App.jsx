@@ -1468,6 +1468,7 @@ export default function App({ boot }) {
               actions={actions}
               collections={collections}
               group={group} setGroup={setGroup}
+              layout={layout} setLayout={setLayout}
               similar={similarToken} onClearSimilar={() => setSimilarFor(null)}
             />
           }
@@ -1477,7 +1478,6 @@ export default function App({ boot }) {
           slim={slim} onToggleSlim={() => setSlim(!slim)}
           blur={blur} onToggleBlur={() => setBlur(!blur)}
           thumb={thumb} thumbMax={thumbMax} onThumb={setThumb}
-          layout={layout} setLayout={setLayout}
           running={running}
           dockOpen={dockActive} onToggleDock={toggleDock}
           onOverlay={openOverlay}
