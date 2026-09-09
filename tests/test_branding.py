@@ -910,7 +910,7 @@ def _cut_bound_marks(tmp_path):
     ]}), encoding="utf-8")
 
 
-def test_list_marks_annotates_unlock_and_earned(tmp_path):
+def test_list_marks_annotates_unlock_and_earned(tmp_path, sealed_donor_present):
     _cut_bound_marks(tmp_path)
     # no earned set -> everything earned:True (the pre-gate callers: upload response, launcher)
     by = {m["id"]: m for m in g.list_marks(tmp_path)}
@@ -930,7 +930,7 @@ def test_list_marks_annotates_unlock_and_earned(tmp_path):
     assert g._ach_name("") == ""
 
 
-def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch):
+def test_branding_get_reports_locked_bound_mark(tmp_path, monkeypatch, sealed_donor_present):
     _cut_bound_marks(tmp_path)
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: set())
     cli = _client(tmp_path)
@@ -969,7 +969,7 @@ def test_free_mark_and_logo_never_gated(tmp_path, monkeypatch):
 
 
 # ---- red team 2026-09-08: the two gate leaks the review found ----
-def test_panel_summary_marks_carry_earned_so_the_lock_renders(tmp_path, monkeypatch):
+def test_panel_summary_marks_carry_earned_so_the_lock_renders(tmp_path, monkeypatch, sealed_donor_present):
     # The Control Panel reads its marks from /api/panel/summary, NOT GET /api/branding.
     # If that payload doesn't gate, the two grids never lock a bound-unearned mark.
     _cut_bound_marks(tmp_path)
@@ -1096,7 +1096,7 @@ def _cut_marks_bound_to(tmp_path, bindings):
     (mdir / "marks.json").write_text(json.dumps({"marks": entries}), encoding="utf-8")
 
 
-def test_gate_agrees_with_the_real_earned_computation(tmp_path):
+def test_gate_agrees_with_the_real_earned_computation(tmp_path, sealed_donor_present):
     # first-light earns off the 1-row catalog _app() saves; archivist (1000 imgs)
     # does NOT. No monkeypatch on the earned set -- the real recipe runs.
     _cut_marks_bound_to(tmp_path, {"mk_free": "", "mk_first": "first-light", "mk_arch": "archivist"})
