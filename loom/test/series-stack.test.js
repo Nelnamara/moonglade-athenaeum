@@ -185,9 +185,9 @@ describe("(c) opening a stack: BOTH kinds -> the one stack modal", () => {
     assert.ok(tray.includes('onClick={() => setGroup(group !== "series")}'));
     assert.ok(tray.includes('active={group === "series"}'));
     assert.ok(tray.includes('label="Stack sessions"'));
-    // B1 moved the layout picker OUT of this tray (it is the separator bar's glyph trio
-    // now), so the chip leads the tray rather than following the picker.
-    assert.ok(!tray.includes("<LayoutPicker"), "the layout picker left the tray in B1");
+    // The layout picker is its own LayoutStrip component now, rendered by the LibraryBar
+    // beside Actions (2026-09-09); the old inline <LayoutPicker> is gone.
+    assert.ok(!tray.includes("<LayoutPicker"), "the old inline layout picker is gone");
     assert.ok(!tray.includes("mgl-laybtn"));
   });
 });
@@ -246,17 +246,20 @@ describe("(c1) opening a picture from the stack leaves exactly ONE history entry
   });
 });
 
-describe("(c2) B1: the layout switcher is the separator bar's glyph strip", () => {
-  const sep = src("gallery/src/components/SeparatorBar.jsx");
+describe("(c2) B1: the layout switcher is the LibraryBar's glyph strip", () => {
+  const strip = src("gallery/src/components/LayoutStrip.jsx");
+  const bar = src("gallery/src/components/FiltersPanel.jsx");   // the LibraryBar renders the strip
   const shell = src("gallery/src/styles/shell.css");
-  test("four 28x28 cells, the handoff's own glyphs plus Hero's, no labels, beside SIZE", () => {
-    assert.ok(sep.includes('["masonry", "\u25a4", "Masonry \u2014 aspect-true, no crop"]'));
-    assert.ok(sep.includes('["grid", "\u25a6", "Grid \u2014 4:3, smart-cropped"]'));
-    assert.ok(sep.includes('["hero", "\u25a3", "Hero \u2014 a large feature, the rest in a grid"]'));
-    assert.ok(sep.includes('["timeline", "\u2261", "Timeline \u2014 date-banded, newest first"]'));
-    assert.ok(sep.includes('className="mgx-lay"'));
-    // it sits immediately before the SIZE pill
-    assert.ok(sep.indexOf('className="mgx-lay"') < sep.indexOf('className="mgx-size"'));
+  test("four 28x28 cells, the handoff's own glyphs plus Hero's, no labels, beside Actions", () => {
+    assert.ok(strip.includes('["masonry", "\u25a4", "Masonry \u2014 aspect-true, no crop"]'));
+    assert.ok(strip.includes('["grid", "\u25a6", "Grid \u2014 4:3, smart-cropped"]'));
+    assert.ok(strip.includes('["hero", "\u25a3", "Hero \u2014 a large feature, the rest in a grid"]'));
+    assert.ok(strip.includes('["timeline", "\u2261", "Timeline \u2014 date-banded, newest first"]'));
+    assert.ok(strip.includes('className="mgx-lay"'));
+    // the LibraryBar renders it immediately after the Actions pill (moved out of the
+    // separator bar 2026-09-09, into its own LayoutStrip component)
+    assert.ok(bar.includes("<LayoutStrip"));
+    assert.ok(bar.indexOf("<ActionsMenu") < bar.indexOf("<LayoutStrip"));
     // 122px all in: 4 x 28 cells + three 2px gaps + 2px padding a side
     assert.match(shell, /\.mgx-laycell \{[^}]*width: 28px; height: 28px;/);
     assert.match(shell, /\.mgx-lay \{[^}]*gap: 2px; padding: 2px;/);
@@ -264,11 +267,11 @@ describe("(c2) B1: the layout switcher is the separator bar's glyph strip", () =
   test("Hero is a CELL, not palette-only -- and the palette wears the cell's mark", () => {
     // 2026-09-05 (owner): the first B1 build shipped three cells and left Hero reachable
     // only from the command palette. Every layout the gallery renders is in the strip now.
-    const cells = sep.slice(sep.indexOf("const LAYOUT_CELLS = ["), sep.indexOf("];", sep.indexOf("const LAYOUT_CELLS = [")));
+    const cells = strip.slice(strip.indexOf("const LAYOUT_CELLS = ["), strip.indexOf("];", strip.indexOf("const LAYOUT_CELLS = [")));
     for (const key of ["masonry", "grid", "hero", "timeline"]) {
       assert.ok(cells.includes('"' + key + '"'), key + " has a cell in the strip");
     }
-    assert.ok(!sep.includes("LAYOUT_TRIO"), "the trio is a quartet now");
+    assert.ok(!strip.includes("LAYOUT_TRIO"), "the trio is a quartet now");
     // the palette's Hero row carries the SAME glyph the cell does (\u25a3, not the old \u25a7)
     assert.ok(app.includes('["hero", "Hero", "\u25a3"]'));
     assert.ok(!app.includes('["hero", "Hero", "\u25a7"]'));

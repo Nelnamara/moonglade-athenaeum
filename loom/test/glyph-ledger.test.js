@@ -327,7 +327,7 @@ test("12. the app prints under ONE mark, ⎙ -- 🖶 and 🖨 are retired", () =
 });
 
 test("G4/G13: the settled marks are untouched -- Hero ▣, Sync ⟳", () => {
-  assert.match(src("components/SeparatorBar.jsx"), /\["hero", "▣"/);
+  assert.match(src("components/LayoutStrip.jsx"), /\["hero", "▣"/);
   assert.match(app, /icon: "⟳", label: "Sync now"/);
 });
 
