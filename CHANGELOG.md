@@ -16,6 +16,13 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.10.3] - 2026-09-08 — Signed For
+
+- **An install carrying an older art pack now updates to the current one.** A pack placed by hand (rather than fetched by the setup wizard) was trusted for good, so even after a newer pack was published the app kept the old one and never offered the update. It now notices when the installed pack is not the one the current build expects and fetches the new one, the same as a fresh setup would. (2026-09-08)
+
+### Under the hood
+- Retired a stale documentation test left over from a prior wiki convention; the current guardrail already covers it. This is the follow-up that turns the master CI run green after 3.10.2. (2026-09-08)
+
 ## [3.10.2] - 2026-09-08 — The Last Mile
 
 - **Installs now fetch the current default art pack.** The manifest the released app carried still named the previous pack, so updating an install pulled nothing new even though a newer pack had already been published. It names the current pack now, so a fresh setup and an existing install both pick it up on their next check. (2026-09-08)
