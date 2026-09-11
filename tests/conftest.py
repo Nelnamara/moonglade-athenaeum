@@ -63,17 +63,27 @@ _REAL_CODED_ROOT = gallery.branding_root()
 
 
 def _snapshot_coded_tree():
-    """A read-only census of the real coded tree: {relpath: (size, mtime_ns)}.
+    """A read-only census of the real coded tree: {relpath: (size, mtime_ns) | "dir"}.
 
     Returns None for "the folder is not there", which is its own fact worth guarding: a
     test that CREATES it is as much of a violation as one that edits it (create_app()
     calls ensure_branding_discovery_tree(), so an un-pinned server fixture builds the
     tree in the checkout just by starting). Never creates and never writes -- a bare
-    exists() check, then walk and stat."""
+    exists() check, then walk and stat.
+
+    FOLDERS are recorded as well as files, and that is not tidiness. The side effect this
+    guard was written for is `ensure_branding_discovery_tree()`, which mkdirs the discovery
+    slots and writes the breadcrumb README only `if not readme.exists()`
+    (moonglade_gallery.py:3156-3161) -- on a checkout with no tree at all it creates six
+    FOLDERS and one file, and a file-only census would report the folders as nothing at
+    all."""
     if not _REAL_CODED_ROOT.exists():
         return None
     out = {}
-    for dirpath, _dirnames, filenames in os.walk(_REAL_CODED_ROOT):
+    for dirpath, dirnames, filenames in os.walk(_REAL_CODED_ROOT):
+        for name in dirnames:
+            path = Path(dirpath) / name
+            out[str(path.relative_to(_REAL_CODED_ROOT)) + os.sep] = "dir"
         for name in filenames:
             path = Path(dirpath) / name
             try:
@@ -85,15 +95,56 @@ def _snapshot_coded_tree():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _real_coded_tree_pinned_away(tmp_path_factory):
+    """PREVENTION: nothing in this session can resolve the checkout's own coded tree.
+
+    `_isolated_branding` below pins `branding_root()` per TEST, and that is too late for a
+    fixture of any wider scope: pytest sets a module- or session-scoped fixture up BEFORE
+    the function-scoped autouse ones, so until 2026-09-10 the render harness's module server
+    read whatever `moonglade.dat` happened to sit beside the checkout -- a full roster on the
+    owner's dev box, an empty one on CI, two different fixtures from one piece of code.
+    Every such fixture must still pin its own root (the harness does, and its own test
+    asserts it), but a rule that only holds while every future author remembers it is not a
+    rule. This is the floor under it: the resolver is pinned for the whole session, so a
+    fixture that forgets lands in a session tmp dir instead of the owner's real tree and the
+    real 802MB pack -- wrong, but wrong the same way on every machine.
+
+    A sealed container is seeded beside it from the private donor, so the session-wide
+    default matches the per-test default (`_sealed_roster_container`) rather than being a
+    third kind of roster; donor absent, nothing is written and the roster is empty exactly
+    as on public CI.
+
+    `_real_coded_tree_untouched` below stays as the backstop this cannot be: it watches the
+    tree itself, so code that builds a path some other way than through the resolver is
+    still caught."""
+    mp = pytest.MonkeyPatch()
+    root = tmp_path_factory.mktemp("session-branding")
+    mp.setattr(gallery, "branding_root", lambda: root / "branding")
+    seed_sealed_container(root / "moonglade.dat")
+    try:
+        yield root
+    finally:
+        mp.undo()
+        clear_sealed_caches()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _real_coded_tree_untouched():
-    """No test reads or writes the checkout's own coded tree -- and this proves it.
+    """No test reads or writes the checkout's own coded tree -- and this watches the tree.
 
     Every fixture that needs a branding tree or a sealed pack pins its own (the autouse
     `_isolated_branding` per test, `seed_sealed_container` above for the module-scoped
-    harness server). That is the rule; this is the enforcement. Snapshot at session start,
-    re-snapshot at session end, fail on any difference -- including the tree coming into
-    existence where there was none, which is how the machine-dependent harness announced
+    harness server), and `_real_coded_tree_pinned_away` above makes that the default even
+    when one forgets. This is the independent check on all of it: snapshot at session start,
+    re-snapshot at session end, fail on any difference -- files, folders, or the tree coming
+    into existence where there was none, which is how the machine-dependent harness announced
     itself on 2026-09-10.
+
+    What it cannot see, and why the pin above exists: a READ leaves no trace, and on a
+    checkout that already holds the discovery folders and the breadcrumb (the owner's own --
+    the machine CLAUDE.md names for the pre-merge run) an un-pinned `create_app()` writes
+    nothing new, so this guard would pass in silence on the one machine where the 2026-09-10
+    bug actually lived. A watcher cannot be the whole answer to a read; prevention is.
 
     Session scope and autouse so it brackets the whole run: it is set up before any
     module- or function-scoped fixture of the first test, and torn down after the last."""
@@ -104,10 +155,10 @@ def _real_coded_tree_untouched():
         return
     if before is None:
         pytest.fail("a test CREATED the real coded tree at {} -- every fixture that needs "
-                    "one must pin its own branding_root(). Files now there: {} (an empty "
-                    "list means folders only)".format(_REAL_CODED_ROOT, sorted(after)))
+                    "one must pin its own branding_root(). Now there (a trailing separator "
+                    "marks a folder): {}".format(_REAL_CODED_ROOT, sorted(after)))
     if after is None:
-        pytest.fail("a test REMOVED the real coded tree at {} -- it held {} file(s) at "
+        pytest.fail("a test REMOVED the real coded tree at {} -- it held {} entr(ies) at "
                     "session start.".format(_REAL_CODED_ROOT, len(before)))
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))

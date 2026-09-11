@@ -295,10 +295,19 @@ recently within hours of a "correction." All tests must pass before merging to m
 
 - **`python tools/ci_local.py` is THE pre-merge command.** It runs every job the GitHub
   "Tests" workflow runs, the way CI runs them — pytest with CI's exact ignore list, the
-  loom bundle rebuild plus the committed-`loom/dist`-is-stale check, and the Loom's
-  `node --test` suite — and exits non-zero if any of them fails. `pytest` alone is not the
-  pre-merge check: a front-end move goes red in the node job while pytest stays green, which
-  is how master went red twice in two days (2026-09-08/09). Green here means safe to push.
+  loom bundle rebuild plus the committed-`loom/dist`-is-stale check (via
+  `git status --porcelain`, the same comparison CI makes, so a new untracked or
+  already-staged file in `dist/` fails here too), and the Loom's `node --test` suite — and
+  exits non-zero if any of them fails. `pytest` alone is not the pre-merge check: a
+  front-end move goes red in the node job while pytest stays green, which is how master
+  went red twice in two days (2026-09-08/09).
+  It **refuses to start** until this machine has what CI's own install steps provide —
+  `gallery/node_modules`, `loom/node_modules`, a playwright chromium — because the three
+  checks that need them (both committed-bundle freshness tests and the whole render
+  harness) are written to skip themselves, so a run without them prints green while saying
+  nothing about the bundle it never rebuilt or the layout it never measured. It names the
+  command for each gap and installs nothing. Green here means safe to push; a green that
+  skipped the gate you needed is worse than a red.
 - **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
   "timing" or "this machine" without the trace that proves it, and never skipped, gated or
   `xfail`ed unless the commit message names the cause. The browser-driven render harness
@@ -316,8 +325,13 @@ recently within hours of a "correction." All tests must pass before merging to m
   including module-scoped fixtures, which are set up *before* the per-test autouse isolation
   and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
   roster on a dev box, an empty one on CI, different fixture state per machine (2026-09-10).
-  `tests/conftest.py`'s session-scoped guard snapshots that tree at session start and fails
-  the run if anything in it was added, removed or modified — a run that creates it counts.
+  Two things hold that: `tests/conftest.py` pins `branding_root()` for the whole SESSION, so
+  a fixture that forgets lands in a tmp dir rather than the owner's tree and the real pack;
+  and its session-scoped guard snapshots that tree (files *and* folders) at session start and
+  fails the run if anything in it was added, removed or modified — a run that creates it
+  counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
+  on a checkout that already holds the discovery folders, an un-pinned `create_app()` writes
+  nothing new and still reads the real pack.
 
 ---
 
