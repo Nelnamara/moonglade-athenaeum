@@ -2212,6 +2212,11 @@ def branding_root():
 # ---------------------------------------------------------------------------
 _GOODS_ROOT_NAME = "0x676F6F6473"      # hex "goods" -- the on-disk branding root folder name
 _GOODS_MID = "3f/00100100"             # 0x3F "?" / Bender's apartment -- shared middle
+# The pre-2026-08-21 badge-thumb cache folder, as a path SEGMENT at any depth --
+# the same shape tools/build_container.py's EXCLUDED_DIRS uses, and the reason
+# the container can never name one of these files. Read by the seal (deny) and
+# by _is_app_placed_branding_art (an app-written cache is not a find).
+_LEGACY_THUMB_DIR = "_thumbs"
 
 ROLE_CODE = {
     # role            -> coded folder rel-from-root (POSIX, no trailing slash)
@@ -2438,7 +2443,7 @@ def _seal_rule(rel):
         # reward-marker reconciliation is tracked work; gate per-achievement when
         # it lands).
         return ("deny", None)
-    if low.startswith("_thumbs/") or low == "_thumbs":
+    if low.startswith(_LEGACY_THUMB_DIR + "/") or low == _LEGACY_THUMB_DIR:
         # _thumbs/ was the badge-thumb cache before it moved out to
         # badge_cache_dir(); a stale one may linger in an older install's tree.
         # /badge-thumb/ is the one sanctioned path so its own hidden-feat gate
@@ -3255,9 +3260,18 @@ def _is_app_placed_branding_art(rel, out_dir, cache):
 
     "A default is not a find" is the oldest rule this mechanic has, and every
     time it has been broken it broke the same way: something that was always on
-    disk got counted as the owner's own drop. The three ways the app puts a file
+    disk got counted as the owner's own drop. The four ways the app puts a file
     into the tree, and how each is recognized:
 
+      - CACHED by an older build. The badge-thumb cache lived at
+        `<coded root>/_thumbs/<aid>.png` until it moved out to badge_cache_dir()
+        (bundle-v2), and nothing deletes the old one -- every install that
+        upgraded through that move still carries a folder of app-rendered PNGs
+        exactly where this walk looks. The container can never name them
+        (tools/build_container.py excludes `_thumbs` at any depth, which is why
+        box.has() is no help here and why this case is checked by segment, at
+        any depth, the same way). Matched first: it is the cheapest test and the
+        one that fires on a dressed install with no owner action at all.
       - SHIPPED, then unpacked loose. _migrate_legacy_branding_root() moves a
         pre-coded-tree install's whole role tree into the coded dirs -- marks,
         mascots, rewards, badges, the system chrome (logo.png, favicon, the
@@ -3283,6 +3297,9 @@ def _is_app_placed_branding_art(rel, out_dir, cache):
     being read as a POSITIVE find (which would make an untouched install look
     customized). This asks the container the opposite question -- "did you ship
     this exact file?" -- and only ever REMOVES a candidate."""
+    parts = rel.split("/")
+    if _LEGACY_THUMB_DIR in parts[:-1]:
+        return True              # a stale app-written badge cache, at any depth
     box = _get_container()
     try:
         if box is not None and box.has(rel):
@@ -3590,6 +3607,70 @@ def _write_banner_flat(out_dir, slot):
                                a.get("cropX", 50), a.get("cropY", 50))
 
 
+def _banner_flat_mtime_src(out_dir, slot):
+    """Newest mtime of everything one slot's flat is rendered FROM: which asset
+    is active (branding_slots.json), that asset's stored transform (the slot
+    manifest) and its bytes -- loose file or container, via _branding_mtime.
+    None when none of the three can be stat'ed, which reads as "no master to be
+    stale against"."""
+    stamps = []
+    try:
+        stamps.append(_slot_active_path(out_dir).stat().st_mtime)
+    except OSError:
+        pass
+    rels = [_role_rel(slot, "manifest.json")]
+    active_id = load_slot_active(out_dir).get(slot)
+    if active_id:
+        rels.append(_role_rel(slot, active_id + ".png"))
+    for rel in rels:
+        m = _branding_mtime(rel)
+        if m is not None:
+            stamps.append(m)
+    return max(stamps) if stamps else None
+
+
+def _ensure_banner_flat(out_dir, slot):
+    """This install's rendered flat for `slot` as a Path, rendered ON DEMAND
+    when the cache does not already hold a current one -- or None when there is
+    nothing to render from (a fresh install whose slot holds only the shipped
+    default's bytes and no manifest, say, which the route answers with its
+    rule-8 sealed fallback instead).
+
+    The lazy half of the badge-thumb precedent, and the half that makes
+    banner_cache_dir()'s out_dir-derived home safe. Renders are per-LIBRARY
+    (out_dir) while the pick that produces them is per-APP-FOLDER
+    (branding_slots.json, beside branding_root()), so pointing the app at a
+    second library would otherwise show the shipped default while the owner's
+    real pick sat recorded and unrendered -- the exact coupling branding_root()
+    left out_dir to kill in 2026-07-26. _badge_thumb() answers it the same way:
+    the master is the truth, the cache is derived, and an absent or stale cache
+    file regenerates rather than degrading what the page wears.
+
+    Stale = older than _banner_flat_mtime_src()'s newest master. A flat written
+    by the earned-banner apply route is younger than all three of those (it is
+    written last, from sealed bytes) so it reads as current and is never
+    re-rendered out from under the owner's pick.
+
+    Fails soft: a render that fails leaves whatever flat is already there, which
+    still displays -- strictly better than a broken header image."""
+    name = _BANNER_FLAT.get(slot)
+    if not name:
+        return None
+    dst = banner_cache_dir(out_dir) / name
+    try:
+        have = dst.is_file()
+        src = _banner_flat_mtime_src(out_dir, slot)
+        if have and (src is None or dst.stat().st_mtime >= src):
+            return dst
+    except OSError:
+        have = False
+    _write_banner_flat(out_dir, slot)
+    try:
+        return dst if dst.is_file() else None
+    except OSError:
+        return None
+
+
 def sweep_branding_drops(out_dir):
     """Two jobs with deliberately different scopes (owner ruling, 2026-09-10).
 
@@ -3756,7 +3837,9 @@ def brand_context(out_dir):
     # A banner shows when ANY of the three things /branding/banner.png serves
     # exists -- and this is the SAME three, in the same order, as the route's
     # flat branch, because this flag has to agree with what that route answers:
-    #   1. this install's RENDERED flat, in the app cache (not the coded root);
+    #   1. this install's RENDERED flat, in the app cache (not the coded root) --
+    #      or a pick the route would re-render one from, which is why the active
+    #      slot asset counts here even before anything has been rendered;
     #   2. a bare top-level flat inside the container, which a pack cut from a
     #      pre-2026-09-10 dressed tree carries (tools/build_container.py gathers
     #      the root recursively);
@@ -3765,7 +3848,8 @@ def brand_context(out_dir):
     # the route happily answers 200.
     flat = _BANNER_FLAT["banner_main"]
     try:
-        has_flat = (banner_cache_dir(out_dir) / flat).is_file()
+        has_flat = ((banner_cache_dir(out_dir) / flat).is_file()
+                    or load_slot_active(out_dir).get("banner_main") is not None)
     except OSError:
         has_flat = False
     box = _get_container()
@@ -9217,10 +9301,17 @@ def create_app(out_dir: Path):
     thumb_dir.mkdir(parents=True, exist_ok=True)
     ensure_branding_discovery_tree()   # "Under the Hood" needs empty folders to find
     # NOTE: the root-flat migration is deliberately NOT here -- it MOVES a real
-    # file out of the real coded tree, and create_app() is called by ~every test
-    # with the tree unpatched. It runs from main(), the one place that knows
-    # this is a real server start. Everything create_app() does to the tree is
-    # additive (the scaffold above), by the same rule.
+    # RENDER out of the real coded tree, and create_app() is called by ~every
+    # test with the tree unpatched. It runs from main(), the one place that
+    # knows this is a real server start.
+    #
+    # The scaffold call above is additive; its ONE known exception is the
+    # legacy-root migration it runs first (_migrate_legacy_branding_root), which
+    # folds a pre-coded-tree install's own role-named `branding/` tree into the
+    # coded dirs -- a move, never a delete, and the reason that migration is
+    # described as additive-or-move-only. It predates this rule and stays here
+    # because an install that still has that old tree is unusable until it runs.
+    # Nothing else create_app() does relocates a file in the coded tree.
 
     # Redacts THIS MACHINE's own filesystem paths out of an exception message before
     # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
@@ -14021,10 +14112,11 @@ def create_app(out_dir: Path):
         The three banner flats take their OWN branch, after the seal check and
         in place of the loose-root lookup (2026-09-10): they are per-install
         RENDERS, not tree assets, so the coded root is never read for them.
-        This install's render in banner_cache_dir() wins; failing that the
-        container's own copy, if an older pack carries one; failing that the
-        slot's SHIPPED sealed default, so a fresh install is dressed before its
-        first crop. And the coded ROOT's own top level is inert the same way:
+        This install's render in banner_cache_dir() wins -- re-rendered here
+        from the slot's active pick when the cache is absent or stale, the way
+        _badge_thumb() treats its own cache; failing that the container's own
+        copy, if an older pack carries one; failing that the slot's SHIPPED
+        sealed default, so a fresh install is dressed before its first crop. And the coded ROOT's own top level is inert the same way:
         a bare rel translation did not recognize reads the container only, so a
         file a tinkerer parks at the root is never served."""
         from flask import send_from_directory, abort
@@ -14050,9 +14142,14 @@ def create_app(out_dir: Path):
         if coded in _BANNER_FLAT.values():
             # The flat branch. bdir is deliberately NOT consulted: the render
             # lives in the cache, and a file parked at the coded root is not a
-            # render.
+            # render. An absent or stale cache render is RE-RENDERED from the
+            # slot's active pick first (_ensure_banner_flat) -- the cache is
+            # derived state keyed to this library, the pick is not, so a start
+            # against a second library rebuilds the banner rather than falling
+            # back to the shipped default.
+            slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
             cdir = banner_cache_dir(out_dir)
-            if (cdir / coded).is_file():
+            if _ensure_banner_flat(out_dir, slot) is not None:
                 resp = send_from_directory(str(cdir), coded)
                 resp.headers["Cache-Control"] = "no-cache, must-revalidate"
                 return resp
@@ -14061,10 +14158,9 @@ def create_app(out_dir: Path):
             box = _get_container()
             raw = box.get(coded) if box else None
             if raw is None:
-                # Rule-8 flat fallback: nothing rendered on this install yet ->
-                # the slot's shipped sealed default (translation itself never
-                # rewrites the flat names).
-                slot = next(s for s, n in _BANNER_FLAT.items() if n == coded)
+                # Rule-8 flat fallback: nothing rendered on this install yet and
+                # nothing to render FROM -> the slot's shipped sealed default
+                # (translation itself never rewrites the flat names).
                 raw = _branding_bytes(_flat_default_rel(slot))
         elif "/" not in coded:
             # A bare rel translation did not recognize (rule 7) addresses the

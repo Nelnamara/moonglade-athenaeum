@@ -220,6 +220,36 @@ def test_shipped_art_the_legacy_migration_left_loose_is_not_a_find(tmp_path):
     assert _flag(tmp_path) == 1
 
 
+def test_a_stale_legacy_badge_thumb_cache_is_not_a_find(tmp_path):
+    """The badge-thumb cache lived INSIDE the tree (`_thumbs/<aid>.png`) until
+    bundle-v2 moved it to badge_cache_dir(), and nothing deletes the old one --
+    so every install that upgraded through that move carries a folder of
+    app-rendered PNGs exactly where the wide walk looks. The container can never
+    name them (tools/build_container.py excludes `_thumbs` at ANY depth), so the
+    exclusion has to match by segment at any depth too, dressed or bare."""
+    top = _mkdir(g.branding_root() / g._LEGACY_THUMB_DIR)
+    (top / "first-light.png").write_bytes(_png_bytes())
+    nested = _mkdir(g._role_dir("marks") / g._LEGACY_THUMB_DIR)
+    (nested / "mark_4.png").write_bytes(_png_bytes((3, 3, 3)))
+
+    assert g._has_custom_branding_art(tmp_path) is False
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert not _flag(tmp_path), "the app's own regenerable badge cache earned the feat"
+    # ...still the app's, with no pack at all to ask.
+    try:
+        g._container_path().unlink()
+    except OSError:
+        pass
+    g._container_cache.update(path=None, mtime=None, box=None)
+    assert g._get_container() is None
+    assert g._has_custom_branding_art(tmp_path) is False
+    # ...and a drop in a folder the owner named `_thumbs`-ish but not exactly
+    # still counts, so the exclusion is a segment match and not a substring one.
+    d = _mkdir(g.branding_root() / "_thumbsketches")
+    (d / "mine.png").write_bytes(_png_bytes((250, 1, 1)))
+    assert g._has_custom_branding_art(tmp_path) is True
+
+
 def test_system_chrome_is_not_a_find_even_with_no_container(tmp_path):
     """A bare install has no moonglade.dat to ask, so the app's chrome is named
     directly: the bare-name system files the translation's rule 2 owns, and the
@@ -275,12 +305,19 @@ def test_the_render_lands_in_the_cache_and_the_root_stays_empty(tmp_path):
         "the coded root must hold nothing the app wrote"
 
 
-def test_building_the_app_never_moves_anything_in_the_tree(tmp_path):
+def test_building_the_app_never_moves_a_render_out_of_the_tree(tmp_path):
     """create_app() is what every test in this suite builds, several of them
     from module-scoped fixtures that conftest's per-test branding isolation
-    cannot reach. Its only write into the coded tree is the additive scaffold --
-    so a plain pytest run can never relocate a real install's dressed banner.
-    The destructive migration belongs to main()."""
+    cannot reach -- so a plain pytest run must never relocate a real install's
+    dressed banner into a pytest tmp dir. The destructive flat migration belongs
+    to main().
+
+    Narrowly about the RENDER, because create_app() is not move-free in general:
+    the scaffold it runs also runs _migrate_legacy_branding_root(), which folds a
+    pre-coded-tree install's own role-named `branding/` tree into the coded dirs
+    (a move, never a delete -- tests/test_goods_map.py owns that contract). That
+    is the one known exception, it predates this rule, and it stays because an
+    install carrying the old tree is unusable until it runs."""
     _seed_catalog(tmp_path)
     root = _mkdir(g.branding_root())
     raw = _png_bytes((7, 8, 9))
@@ -317,6 +354,52 @@ def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_pat
     g._migrate_root_banner_flats(tmp_path)
     assert dst.read_bytes() == raw
     assert (root / "banner.png").is_file()
+
+
+def test_a_real_start_runs_the_root_flat_migration(tmp_path):
+    """The migration's ONLY production call site is main(), and every other test
+    here asserts where it must NOT run (create_app) or what it does when called
+    directly. Without this, deleting the call would leave the feature dead and
+    the whole file green.
+
+    Read off main()'s own source rather than by running it -- main() parses
+    argv, binds a port and blocks -- so what is pinned is the call site itself:
+    present, and after the scaffold that gives a legacy install's flats a chance
+    to reach the coded root within the SAME start."""
+    import ast
+    import inspect
+
+    body = ast.parse(inspect.getsource(g.main))
+    calls = [n.func.id for n in ast.walk(body)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    assert "_migrate_root_banner_flats" in calls, \
+        "main() no longer moves a root render into the cache -- the feature is dead"
+    assert "ensure_branding_discovery_tree" in calls
+    assert calls.index("ensure_branding_discovery_tree") < \
+        calls.index("_migrate_root_banner_flats"), \
+        "the legacy tree must be folded in BEFORE the flats are looked for"
+
+
+def test_an_absent_cache_render_is_rebuilt_from_the_pick_not_defaulted(tmp_path):
+    """banner_cache_dir() hangs off out_dir (the LIBRARY) while the pick that
+    produces a render hangs off the app folder (branding_slots.json), so the
+    render has to be lazily regenerable or pointing the app at a second library
+    would wear the shipped default while the owner's real pick sat recorded --
+    the coupling branding_root() left out_dir to kill. _badge_thumb()'s deal:
+    the master is the truth, the cache is derived."""
+    cli = _client(tmp_path)
+    r = cli.post("/api/branding/slot",
+                 data={"slot": "banner_main", "file": (io.BytesIO(_png_bytes()), "b.png")},
+                 content_type="multipart/form-data")
+    assert r.status_code == 200
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    mine = flat.read_bytes()
+
+    _build_box(tmp_path, {g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
+    flat.unlink()                                   # a library this install never rendered into
+    assert cli.get("/branding/banner.png").data == mine, \
+        "an absent render fell back to the shipped default instead of rebuilding the pick"
+    assert flat.is_file(), "and the rebuild is cached, not re-rendered per request"
 
 
 def test_serving_prefers_the_cache_render_then_the_sealed_default(tmp_path):
