@@ -3075,11 +3075,13 @@ def _migrate_legacy_branding_root():
         three banner flats land top-level at the coded root, system files /
         ee_* land in their coded homes (leaving them at the coded top would
         strand a working override where the resolver no longer looks). The
-        flats do not STAY at the root: _migrate_root_banner_flats(), which
-        startup runs straight after this, moves them on into the banner cache
-        (2026-09-10 -- renders live outside the tree now). Two separate
-        migrations on purpose: this one is legacy-tree-shaped and has no
-        out_dir; that one is cache-shaped and needs one;
+        flats do not STAY at the root: _migrate_root_banner_flats(), which a
+        real server start (main()) runs immediately after this, moves them on
+        into the banner cache (2026-09-10 -- renders live outside the tree
+        now). Two separate migrations on purpose: this one is legacy-tree-
+        shaped, additive-or-move-only and safe to run from create_app(); that
+        one is cache-shaped, needs an out_dir, and is destructive to the tree,
+        so it stays out of app construction;
       - anything unrecognized STAYS PUT (flag-to-owner territory, per the
         standing stray-copy rule), and a destination that already exists is
         never overwritten -- the source stays put and is logged;
@@ -3181,11 +3183,19 @@ def ensure_branding_discovery_tree():
 def _migrate_root_banner_flats(out_dir):
     """One-time MOVE of any rendered banner flat still sitting at the coded
     root into banner_cache_dir() (2026-09-10 owner ruling: renders leave the
-    tree; afterwards the root holds nothing the app wrote). Called once at
-    startup, straight after ensure_branding_discovery_tree() -- which runs the
-    legacy role-tree migration first, so an ancient install's flats land at the
-    root and are picked up here in the same pass. Idempotent and a no-op once
-    the root holds no flats, so it is safe on every start.
+    tree; afterwards the root holds nothing the app wrote). Idempotent and a
+    no-op once the root holds no flats, so it is safe on every start.
+
+    Called from main() only -- NOT from create_app(). This is the one startup
+    step that writes destructively to the coded tree, and create_app() is built
+    by ~every test in the suite, several of them from module-scoped fixtures
+    that conftest's per-test branding isolation cannot reach; running it there
+    would relocate the owner's own dressed banner into a pytest tmp dir on a
+    plain test run. main() is the one caller that knows this is a real server
+    start with this install's real out_dir, and it runs the (additive,
+    idempotent) ensure_branding_discovery_tree() itself immediately before this
+    call, so an ancient install's legacy flats land at the coded root and are
+    moved on within the SAME start.
 
     MOVE, never delete: the flat IS the banner an existing install is currently
     wearing, and re-rendering it needs the active asset, which may only exist
@@ -3238,17 +3248,85 @@ def _is_readable_image(path):
 _BRANDING_WALK_MAX_DEPTH = 6
 
 
-def _has_custom_branding_art():
-    """True when ANY subfolder under the coded root holds a readable image, at
-    any depth down to _BRANDING_WALK_MAX_DEPTH -- the detection half of the
-    discovery mechanic (owner ruling, 2026-09-10: a drop ANYWHERE in the tree
-    counts, not just in the four folders the sweep adopts from).
+def _is_app_placed_branding_art(rel, out_dir, cache):
+    """True when the loose file at coded rel `rel` is art the APP itself put
+    there or ships -- a DEFAULT, not a find. The exclusion list the wide
+    detection walk below runs every candidate through.
+
+    "A default is not a find" is the oldest rule this mechanic has, and every
+    time it has been broken it broke the same way: something that was always on
+    disk got counted as the owner's own drop. The three ways the app puts a file
+    into the tree, and how each is recognized:
+
+      - SHIPPED, then unpacked loose. _migrate_legacy_branding_root() moves a
+        pre-coded-tree install's whole role tree into the coded dirs -- marks,
+        mascots, rewards, badges, the system chrome (logo.png, favicon, the
+        spinner, login_nel) and the starfall ee_* art. Every one of those is a
+        key in the container this build ships, so box.has(rel) names it. The
+        two system cases are ALSO matched by name, because a bare install with
+        no moonglade.dat has no container to ask.
+      - REGISTERED by the app. add_slot_asset() writes `<id>.png` into a slot
+        folder on every Branding-tab upload and _adopt_mark() writes `<id>.png|
+        .webp` into marks; both record the id in the manifest first. A
+        registered id is by definition not a hand-drop -- and when it WAS one,
+        the adopt path already fired the flag on the way in.
+      - TOMBSTONED. _MARK_TOMBSTONES ids (mark_12, mark_74) are shipped defaults
+        the app delisted; their files sit on every install that predates the
+        delisting, untouched. Adoption has treated a tombstone as known since
+        the 2026-08-13 live incident (the owner's own mark_12.png was eaten on
+        a page load); detection has to hold exactly the same line or a delisting
+        silently earns the feat for every install that upgrades.
+
+    Deliberately NOT symmetrical with _branding_bytes' loose-then-container
+    resolution, and not a contradiction of the "the sweep stays filesystem-only"
+    rule at the top of the container section: that rule stops the container
+    being read as a POSITIVE find (which would make an untouched install look
+    customized). This asks the container the opposite question -- "did you ship
+    this exact file?" -- and only ever REMOVES a candidate."""
+    box = _get_container()
+    try:
+        if box is not None and box.has(rel):
+            return True
+    except Exception:                       # noqa: BLE001 -- a broken container is not an answer
+        pass
+    head, _, name = rel.rpartition("/")
+    stem = Path(name).stem              # Path.stem exactly as the adopt path reads it
+    if head == ROLE_CODE["marks"]:
+        if "marks" not in cache:
+            cache["marks"] = ({m["id"] for m in list_marks(out_dir)}
+                              | set(_MARK_TOMBSTONES))
+        return stem in cache["marks"]
+    for slot in BRANDING_SLOTS:
+        if head == ROLE_CODE[slot]:
+            if slot not in cache:
+                cache[slot] = {a["id"] for a in list_slot_assets(out_dir, slot)}
+            return stem in cache[slot]
+    if head == ROLE_CODE["system"] and name in _SYSTEM_TOP_FILES:
+        return True
+    if head == ROLE_CODE["starfall"] and name.startswith("ee_"):
+        return True
+    return False
+
+
+def _has_custom_branding_art(out_dir):
+    """True when ANY subfolder under the coded root holds a readable image the
+    APP did not put there, at any depth down to _BRANDING_WALK_MAX_DEPTH -- the
+    detection half of the discovery mechanic (owner ruling, 2026-09-10: a drop
+    ANYWHERE in the tree counts, not just in the four folders the sweep adopts
+    from).
 
     STRICTLY READ-ONLY. It never unlinks, renames, re-encodes, moves or
     registers anything. Adoption stays exactly where it was -- _SWEEPABLE_SLOTS
     plus marks, in sweep_branding_drops -- which is what keeps the 2026-08-05
     near-miss dead: mascots/rewards hold role-bound files real code reads by
     exact filename, and being SEEN by this walk cannot consume them.
+
+    "The app did not put it there" is _is_app_placed_branding_art() above, and
+    it is the whole difference between a find and a default: a shipped file left
+    loose by the legacy migration, a tombstoned mark, an upload the Branding tab
+    itself registered -- none of those is the owner dropping a file into a
+    folder he was never told about. Checked BEFORE the Pillow open, so the
+    common (dressed, undiscovered) install pays dict lookups rather than decodes.
 
     The coded ROOT's own top-level files are excluded on purpose. Nothing the
     app writes lives there any more (the rendered banner flats moved to
@@ -3257,9 +3335,10 @@ def _has_custom_branding_art():
 
     First hit wins and the walk stops there: this runs on every /api/achievements
     fetch, so the common answer has to stay cheap."""
-    pending = [(branding_root(), 0)]
+    cache = {}
+    pending = [(branding_root(), "", 0)]
     while pending:
-        d, depth = pending.pop()
+        d, prefix, depth = pending.pop()
         try:
             with os.scandir(d) as it:
                 entries = sorted(it, key=lambda e: e.name)
@@ -3269,11 +3348,14 @@ def _has_custom_branding_art():
             try:
                 if e.is_dir():
                     if depth < _BRANDING_WALK_MAX_DEPTH:
-                        pending.append((Path(e.path), depth + 1))
+                        pending.append((Path(e.path), prefix + e.name + "/", depth + 1))
                     continue
                 if depth == 0 or not e.is_file():
                     continue                # the root's own files never count
             except OSError:
+                continue
+            rel = prefix + e.name
+            if _is_app_placed_branding_art(rel, out_dir, cache):
                 continue
             if _is_readable_image(Path(e.path)):
                 return True
@@ -3520,9 +3602,12 @@ def sweep_branding_drops(out_dir):
     DETECT -- strictly READ-ONLY -- covers everything else under the coded root:
     mascots, rewards, the bridge/system/starfall folders, a folder the user
     invented, at any depth to _BRANDING_WALK_MAX_DEPTH. One readable image
-    anywhere in there fires the 'Under the Hood' hidden feat with the file left
-    exactly as it was (_has_custom_branding_art). The coded ROOT's own top-level
-    files count for neither: they are not adopted, not detected, not served.
+    anywhere in there that the APP did not put there fires the 'Under the Hood'
+    hidden feat with the file left exactly as it was (_has_custom_branding_art;
+    _is_app_placed_branding_art is the "a default is not a find" half -- shipped
+    art the legacy migration left loose, a tombstoned mark, an upload the
+    Branding tab registered). The coded ROOT's own top-level files count for
+    neither: they are not adopted, not detected, not served.
 
     Runs on every /api/achievements fetch rather than sweep_telemetry()'s
     once-a-day cadence -- a real find deserves to pay off on the next reload,
@@ -3606,7 +3691,7 @@ def sweep_branding_drops(out_dir):
             already = (load_telemetry(out_dir)["flags"] or {}).get("branding_custom_file")
         except Exception:                  # noqa: BLE001 -- a broken read must not hide a real find
             already = False
-        if not already and _has_custom_branding_art():
+        if not already and _has_custom_branding_art(out_dir):
             telem_flag("branding_custom_file", out_dir=out_dir)
     return adopted
 
@@ -3668,16 +3753,25 @@ def brand_context(out_dir):
     processor, so old installs with only logo.png render exactly as before)."""
     cfg = load_branding(out_dir)
     marks = {m["id"]: m for m in list_marks(out_dir)}
-    # A banner shows when this install's RENDERED flat exists OR the shipped
-    # sealed default does (the serve route's rule-8 fallback renders the
-    # latter, so this flag has to agree with what /branding/banner.png serves).
-    # The render lives in the app cache, not the coded root -- the same place
-    # the route now looks, which is what keeps the two in step.
+    # A banner shows when ANY of the three things /branding/banner.png serves
+    # exists -- and this is the SAME three, in the same order, as the route's
+    # flat branch, because this flag has to agree with what that route answers:
+    #   1. this install's RENDERED flat, in the app cache (not the coded root);
+    #   2. a bare top-level flat inside the container, which a pack cut from a
+    #      pre-2026-09-10 dressed tree carries (tools/build_container.py gathers
+    #      the root recursively);
+    #   3. the slot's shipped sealed default -- the route's rule-8 fallback.
+    # Dropping any one of them here is how the header renders no banner while
+    # the route happily answers 200.
+    flat = _BANNER_FLAT["banner_main"]
     try:
-        has_flat = (banner_cache_dir(out_dir) / _BANNER_FLAT["banner_main"]).is_file()
+        has_flat = (banner_cache_dir(out_dir) / flat).is_file()
     except OSError:
         has_flat = False
-    has_banner = has_flat or _branding_exists(_flat_default_rel("banner_main"))
+    box = _get_container()
+    has_banner = (has_flat
+                  or bool(box and box.has(flat))
+                  or _branding_exists(_flat_default_rel("banner_main")))
     # The animation settings ride along on every page render, exactly as the mark
     # and its anim id always have -- the header reads them straight off MG_BOOT and
     # needs no extra fetch to dress itself correctly on first paint.
@@ -9122,7 +9216,11 @@ def create_app(out_dir: Path):
     thumb_dir = out_dir / "gallery" / "thumbs"
     thumb_dir.mkdir(parents=True, exist_ok=True)
     ensure_branding_discovery_tree()   # "Under the Hood" needs empty folders to find
-    _migrate_root_banner_flats(out_dir)   # renders live in the app cache, never in the tree
+    # NOTE: the root-flat migration is deliberately NOT here -- it MOVES a real
+    # file out of the real coded tree, and create_app() is called by ~every test
+    # with the tree unpatched. It runs from main(), the one place that knows
+    # this is a real server start. Everything create_app() does to the tree is
+    # additive (the scaffold above), by the same rule.
 
     # Redacts THIS MACHINE's own filesystem paths out of an exception message before
     # it's stored or served to any LOGIN-tier caller (any signed-in LAN account, not
@@ -19804,6 +19902,16 @@ def main():
                   file=sys.stderr)
             return 2
 
+    # One-time, and only on a REAL start: move any rendered banner flat still
+    # sitting at the coded root into this install's banner cache. Here rather
+    # than in create_app() because it is the only startup step that WRITES
+    # destructively to the coded tree, and create_app() is what every test
+    # builds -- see _migrate_root_banner_flats' own docstring. The scaffold call
+    # is additive and idempotent (create_app runs it again, to no effect); it is
+    # repeated here so a legacy install's role-tree migration happens BEFORE the
+    # flats are looked for, not after.
+    ensure_branding_discovery_tree()
+    _migrate_root_banner_flats(out_dir)
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)

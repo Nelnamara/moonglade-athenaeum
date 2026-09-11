@@ -2,10 +2,12 @@
 2026-09-10.
 
 1. DETECTION IS WIDE, ADOPTION IS NARROW. Any readable image in ANY subfolder
-   under the coded root, at any depth, earns the hidden discovery feat. Only the
-   four adopt folders (the three banner slots + marks) ever consume a file;
-   everywhere else the sweep is strictly read-only -- never unlink, rename,
-   re-encode, move or register.
+   under the coded root, at any depth, earns the hidden discovery feat -- as
+   long as the APP did not put it there (a default is not a find: shipped art
+   the legacy migration left loose, a tombstoned mark, an upload the Branding
+   tab registered). Only the four adopt folders (the three banner slots +
+   marks) ever consume a file; everywhere else the sweep is strictly read-only
+   -- never unlink, rename, re-encode, move or register.
 2. THE ROOT IS INERT. The rendered banner flats moved OUT of the tree into the
    app cache (g.banner_cache_dir(), the badge-thumb precedent), so the coded
    root holds nothing the app wrote. A file parked there is neither counted nor
@@ -165,6 +167,95 @@ def test_the_four_adopt_folders_still_adopt(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 1b. ...and a DEFAULT is not a find
+#
+# Every regression this mechanic has ever had is the same one: something that
+# was always on disk gets counted as the owner's own drop. Widening detection
+# to the whole tree widens that risk to every file the app itself ever put
+# there, so each of the three ways it does that gets a pin.
+# ---------------------------------------------------------------------------
+
+def test_a_tombstoned_shipped_mark_left_loose_is_not_a_find(tmp_path):
+    """mark_12 (Gem Tome, delisted 2026-07-23) and mark_74 (renamed by
+    bundle-v2) sit loose on every install that predates their delisting. The
+    adopt path has treated a tombstoned stem as KNOWN since the 2026-08-13 live
+    incident on the owner's own machine; detection has to hold the same line, or
+    delisting a default silently earns the feat for everyone who upgrades."""
+    mdir = _mkdir(g._role_dir("marks"))
+    for stem in sorted(g._MARK_TOMBSTONES):
+        (mdir / (stem + ".png")).write_bytes(_png_bytes())
+
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert not _flag(tmp_path), "a delisted shipped default earned the feat"
+    for stem in sorted(g._MARK_TOMBSTONES):
+        assert (mdir / (stem + ".png")).is_file()
+
+
+def test_shipped_art_the_legacy_migration_left_loose_is_not_a_find(tmp_path):
+    """_migrate_legacy_branding_root() moves a pre-coded-tree install's whole
+    role tree into the coded dirs -- marks, mascots, rewards, the system chrome.
+    Every one of those files is the APP's, and every one of them lands at
+    depth>0 where the walk looks. The container that ships them is what names
+    them."""
+    loose = {
+        g._role_rel("marks", "mark_4.png"): _png_bytes(),
+        g._role_rel("mascots", "nel_narrator.png"): _png_bytes((9, 9, 9)),
+        g._role_rel("rewards", "reward_1.png"): _png_bytes((8, 8, 8)),
+        g._role_rel("badges", "first-light.png"): _png_bytes((7, 7, 7)),
+    }
+    _build_box(tmp_path, dict(loose, **{
+        g._role_rel("marks", "marks.json"): json.dumps(
+            {"marks": [{"id": "mark_4", "label": "Crescent", "kind": "tile"}]}).encode()}))
+    for rel, raw in loose.items():
+        p = g.branding_root() / rel
+        _mkdir(p.parent)
+        p.write_bytes(raw)
+
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert not _flag(tmp_path), "the app's own shipped art earned the discovery feat"
+
+    # ...and the owner's actual drop, right beside it, still does.
+    (g._role_dir("mascots") / "my_own_nel.png").write_bytes(_png_bytes((1, 250, 1)))
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert _flag(tmp_path) == 1
+
+
+def test_system_chrome_is_not_a_find_even_with_no_container(tmp_path):
+    """A bare install has no moonglade.dat to ask, so the app's chrome is named
+    directly: the bare-name system files the translation's rule 2 owns, and the
+    ee_* starfall art rule 3 owns."""
+    try:                                 # conftest seeds one for the sealed roster
+        g._container_path().unlink()
+    except OSError:
+        pass
+    g._container_cache.update(path=None, mtime=None, box=None)
+
+    sysd = _mkdir(g._role_dir("system"))
+    for name in sorted(g._SYSTEM_TOP_FILES):
+        if name.endswith(".ico"):
+            continue                     # not an image Pillow reads; nothing to pin
+        (sysd / name).write_bytes(_png_bytes())
+    (_mkdir(g._role_dir("starfall")) / "ee_nelstarfall.png").write_bytes(_png_bytes())
+
+    assert g._get_container() is None, "this install genuinely has no pack"
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert not _flag(tmp_path)
+
+
+def test_an_upload_through_the_branding_tab_is_not_a_find(tmp_path):
+    """add_slot_asset() writes `<id>.png` straight into a slot folder the walk
+    reads. Using the Branding tab exactly as designed is the opposite of finding
+    an undocumented folder -- it must not earn the feat."""
+    _seed_catalog(tmp_path)
+    asset = g.add_slot_asset(tmp_path, "banner_main", _png_bytes())
+    assert asset and (g._role_dir("banner_main") / (asset["id"] + ".png")).is_file()
+
+    assert g.sweep_branding_drops(tmp_path) is False, "a registered id is not a fresh drop"
+    assert not _flag(tmp_path)
+    assert g._has_custom_branding_art(tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
 # 2. The renders live in the cache; the root is inert
 # ---------------------------------------------------------------------------
 
@@ -184,6 +275,24 @@ def test_the_render_lands_in_the_cache_and_the_root_stays_empty(tmp_path):
         "the coded root must hold nothing the app wrote"
 
 
+def test_building_the_app_never_moves_anything_in_the_tree(tmp_path):
+    """create_app() is what every test in this suite builds, several of them
+    from module-scoped fixtures that conftest's per-test branding isolation
+    cannot reach. Its only write into the coded tree is the additive scaffold --
+    so a plain pytest run can never relocate a real install's dressed banner.
+    The destructive migration belongs to main()."""
+    _seed_catalog(tmp_path)
+    root = _mkdir(g.branding_root())
+    raw = _png_bytes((7, 8, 9))
+    (root / "banner.png").write_bytes(raw)
+
+    create_app(tmp_path)
+
+    assert (root / "banner.png").read_bytes() == raw, \
+        "app construction moved a file out of the coded tree"
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+
+
 def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_path):
     """MOVE, never delete: that flat is the banner the install is currently
     WEARING, and re-rendering it needs an active asset that may only exist in
@@ -193,7 +302,7 @@ def test_startup_migration_moves_a_pre_existing_root_flat_into_the_cache(tmp_pat
     raw = _png_bytes((7, 8, 9))
     (root / "banner.png").write_bytes(raw)
 
-    create_app(tmp_path)                       # startup runs the migration
+    g._migrate_root_banner_flats(tmp_path)     # what a real start (main()) runs
 
     dst = g.banner_cache_dir(tmp_path) / "banner.png"
     assert not (root / "banner.png").exists()
