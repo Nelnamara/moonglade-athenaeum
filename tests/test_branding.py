@@ -34,6 +34,11 @@ def _client(tmp_path):
     return login_test_client(_app(tmp_path))
 
 
+def _brand_flag(tmp_path):
+    """The branding_custom_file telemetry flag, as the tree scan sets it."""
+    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+
+
 def _cut_fake_marks(tmp_path, ids=("mark_4", "mark_7"), ico=True):
     # Seeds land in the CODED marks dir (bundle-v2 rewire): on-disk paths come
     # from the ROLE_CODE map via g._role_dir, never a retyped hex literal --
@@ -456,7 +461,18 @@ def test_dropped_jpeg_is_re_encoded_to_real_png(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_sweep_never_touches_mascots_or_rewards(tmp_path):
+    """Route level on purpose: what a drop in mascots/rewards does has to be
+    true of the real request a page makes, not just of the sweep called by
+    hand -- /api/achievements is where the sweep actually runs."""
     cli = _client(tmp_path)
+    g._role_dir("mascots").mkdir(parents=True, exist_ok=True)
+    g._role_dir("rewards").mkdir(parents=True, exist_ok=True)
+    # Settle the install first: the scan records a baseline of what was already
+    # on disk the first time it runs, so an upgrade cannot self-earn off art an
+    # older build left behind. What lands AFTER that is the real drop.
+    cli.get("/api/achievements")
+    assert not _brand_flag(tmp_path)
+
     # The real role-bound files live in the CODED mascots/rewards dirs now --
     # the never-swept property has to hold exactly where the sweep would look.
     real_mascot = g._role_dir("mascots") / "gen_nel.png"
@@ -470,8 +486,11 @@ def test_sweep_never_touches_mascots_or_rewards(tmp_path):
         cli.get("/api/branding")
         cli.get("/api/panel/summary")
 
-    # untouched: still sitting under their OWN real names, same bytes --
-    # not adopted, not renamed, not re-encoded
+    # the drop REGISTERED through the route the page really calls...
+    assert _brand_flag(tmp_path) == 1, \
+        "a drop in mascots never reached the flag through /api/achievements"
+    # ...and it is untouched: still sitting under their OWN real names, same
+    # bytes -- not adopted, not renamed, not re-encoded
     assert real_mascot.exists() and real_reward.exists()
     assert (real_mascot.read_bytes(), real_reward.read_bytes()) == before
     # and since the 2026-08-13 unlock-split enforcement they aren't slots at
