@@ -54,6 +54,19 @@ assert.ok(rmStart > eeStart, "the .ee-* block has no reduced-motion rule after i
 const eeRules = css.slice(eeStart, rmStart);
 const rmBlock = css.slice(rmStart, css.indexOf("\n}", rmStart) + 2);
 
+/** indexOf, for ORDER assertions, that cannot answer -1.
+    `a.indexOf(x) < a.indexOf(y)` is true for free once x is gone: -1 is less than everything,
+    so the pin passes vacuously on exactly the edit it exists to catch. Deleting
+    `pendingRelease = release;` left all 33 tests in this file green for that reason. Every
+    order pin below goes through here, so the line has to BE there before its position is
+    asserted. */
+function at(hay, needle, why) {
+  const i = hay.indexOf(needle);
+  assert.ok(i >= 0, why || ("`" + needle + "` is gone. An order assertion on a line that no " +
+    "longer exists passes vacuously -- which is not a pin, it is a comment."));
+  return i;
+}
+
 /** The declaration body of `.<cls>{...}` -- the element's OWN rule, not a grouped selector. */
 function rule(cls) {
   const m = eeRules.match(new RegExp("\\." + cls + "\\s*\\{([^}]*)\\}"));
@@ -150,7 +163,7 @@ describe("the cast is built the way the handoff page builds it", () => {
     });
     // And the accident is actively ruled out: Nel is appended AFTER the stars, as the page
     // does it, so if append order were still deciding, the assertion above would be a lie.
-    assert.ok(konami.indexOf('className = "ee-nel"') > konami.indexOf('className = "ee-star"'),
+    assert.ok(at(konami, 'className = "ee-nel"') > at(konami, 'className = "ee-star"'),
       "Nel must be appended after the stars (as the page's cast() does) -- that is what makes " +
       "the z-index ladder load-bearing rather than decorative");
     assert.ok(zIndex("ee-layer") < 520,
@@ -251,10 +264,17 @@ describe("the bespoke-moment sequence rule, in source", () => {
       "inside _flair). The parade step, the queue and the Folio replay all fire the flair; " +
       "guarding them one by one is how a feat earned in a >3 flood still gets confetti over " +
       "a celebration that was supposed to replace it.");
-    assert.match(achSrc, /function _flair\(built, a, opts\) \{\s*\n\s*if \(_bespoke\) return;\s*[^\n]*\n\s*if \(BESPOKE_FEATS\.has\(a\.id\) && !\(opts && opts\.replay\)\) return;/,
-      "the two gates must be the first thing _flair does, in this order: nothing layers over a " +
-      "moment that is on screen, and an EARN of a bespoke feat is quiet because its own moment " +
-      "is the fanfare");
+    assert.match(achSrc, /function _flair\(built, a, opts\) \{\s*\n\s*if \(BESPOKE_FEATS\.has\(a\.id\) && !\(opts && opts\.replay\)\) return;/,
+      "the EARN gate must be the first thing _flair does: a bespoke feat's own moment IS its " +
+      "fanfare, and only the REPLAY entry is exempt");
+    // _flair used to carry a second gate above that one -- "a bespoke moment is on screen,
+    // never layer on it". It is deliberately gone: the dequeue now builds NOTHING while a
+    // moment owns the screen (no caller is exempt any more), so that gate could not fire,
+    // and an unreachable guard is one nobody can check. If a build path past the hold is
+    // ever reintroduced, the gate belongs back in the DEQUEUE, not here.
+    assert.doesNotMatch(achBody("_flair"), /_bespoke/,
+      "_flair must not re-check _bespoke: whether a moment may be built at all is the one " +
+      "gate's decision, and a copy of it here would go stale the first time the gate moves");
     // One build point means one flair call: the definition, and the single raise inside the
     // dequeue. Anything else is a second place that has to remember the rule.
     assert.equal((achSrc.match(/[^\w]_flair\(/g) || []).length, 2,
@@ -308,23 +328,70 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.match(drain, /if \(_cur\) return;/,
       "refusal 1: a moment is already being presented. Its teardown re-enters; a dequeue that " +
       "runs anyway is the second .ach-m2 the ruling forbids");
-    assert.match(drain, /if \(_bespoke && !\(head && head\.replay\)\) \{ _pendingDrain = true; return; \}/,
-      "refusal 2, THE hold: record that the queue wants to run and build nothing. Written " +
-      "once, here, and exempting only the replay entry");
-    const rel = achSrc.slice(achSrc.indexOf("export function endBespokeMoment()"));
-    assert.match(rel.slice(0, rel.indexOf("\n}")), /_drain\(\);/,
-      "the release must call the dequeue");
-    assert.equal((rel.slice(0, rel.indexOf("\n}")).match(/_drain\(/g) || []).length, 1,
-      "...exactly once. Draining a list of parked callers in a loop is what let two moments " +
-      "be built from one release");
+    assert.match(drain, /if \(_heldOff\(\)\) \{ _pendingDrain = true; return; \}/,
+      "THE hold: record that the queue wants to run and build nothing. One statement, no " +
+      "entry kind named in it -- the moment a caller is named here it is a caller that is " +
+      "exempt, and one door ajar is the whole invariant");
+    assert.doesNotMatch(drain, /replay\b(?=[^\n]*_pendingDrain)/,
+      "no exemption may be written into the gate. The Folio replay had one -- it is a click " +
+      "and its driver handle has to come back synchronously -- and it put a .ach-m2 (520) " +
+      "straight over a cast (449). The handle waits with the entry instead (_driver).");
+    // The gate is one predicate so that the two holds cannot drift apart: a bespoke moment
+    // owning the screen, and a cast WAITING to take it. Leaving the second one out lets the
+    // dequeue build one more moment in front of a cast that is about to arm.
+    const gate = achBody("_heldOff");
+    assert.match(gate, /_bespoke > 0/, "a bespoke moment owning the screen holds the dequeue");
+    assert.match(gate, /_whenClear\.length > 0/,
+      "...and so does a cast that is waiting for the screen: it is about to arm, and the " +
+      "moment built in the gap between the wait and the arm is painted over by definition");
+    const rel = achBody("_resume");
+    assert.match(rel, /if \(_heldOff\(\)\) return;/,
+      "the release re-reads the SAME gate rather than assuming its own hold was the last one");
+    assert.equal((rel.match(/_drain\(/g) || []).length, 1,
+      "the release calls the dequeue exactly once. Draining a list of parked callers in a " +
+      "loop is what let two moments be built from one release");
+    const end = achSrc.slice(achSrc.indexOf("export function endBespokeMoment()"));
+    assert.match(end.slice(0, end.indexOf("\n}")), /_resume\(\);/,
+      "and lifting a bespoke hold goes through that one release, not into the dequeue direct");
     assert.doesNotMatch(achSrc, /_playing/,
       "the round-2 'a moment is playing' flag is gone for good: it had to be lowered while a " +
       "caller was parked, which is what made a release able to start a moment over one that " +
       "was still on screen. _cur -- the element itself -- is the serialization now");
   });
 
+  test("the exit tells the queue the layer is free only once it really is", () => {
+    // The regression this round's review caught: _endParade used to call _settled() on the
+    // moment it had just started FADING, so a plain celebration queued behind the parade was
+    // built across that 500ms fade -- two full-screen .ach-m2 scrims (notify.css:27), the one
+    // thing this layer must never show. The behavioural proof is further down; this pins the
+    // shape, because the source is where the mistake is legible.
+    const end = achBody("_endParade");
+    const settles = end.split("\n").filter((l) => l.includes("_settled(")).map((l) => l.trim());
+    assert.deepEqual(settles, ["setTimeout(() => { _unmount(m); _settled(m); }, 500);"],
+      "the ONLY settle in _endParade must be the one inside the removal timer: removed " +
+      "first, settled second, on the same 500ms as the .out fade the ruling asks for. " +
+      "Settling the skipped moment where it stands tells the dequeue the layer is free " +
+      "while a full-screen .ach-m2 is still painted on it. Found: " + settles.join(" | "));
+    assert.match(end, /m\.classList\.add\("out"\);/,
+      "and it fades rather than vanishing mid-frame (owner ruling 2026-09-04)");
+  });
+
+  test("a parade with nothing on screen yet does not own Escape", () => {
+    // _parade is published at ENQUEUE time so the exit can reach a flood whose moments are
+    // all still queued. If "a parade is up" reads that alone, then a flood held behind a cast
+    // swallows Escape while the owner is looking at the starfall -- and the exit it runs
+    // discards the whole held flood on the way past.
+    const up = achBody("_paradeUp");
+    assert.match(up, /_parade\.m && _parade\.m === _cur/,
+      "'the parade is up' has to mean a moment of it is BEING PRESENTED (or its history is " +
+      "still on screen) -- not merely that a flood was enqueued");
+    assert.match(up, /_trail\.length \|\| _clearTimer/,
+      "its receded history and the linger before it bows out still count: Escape belongs to " +
+      "the parade for as long as any of it is painted");
+  });
+
   test("the Konami handler arms the moment before the beacon and releases it at the end", () => {
-    assert.ok(konami.indexOf("beginBespokeMoment()") < konami.indexOf('sendAchEvent("konami")'),
+    assert.ok(at(konami, "beginBespokeMoment()") < at(konami, 'sendAchEvent("konami")'),
       "the beacon is what EARNS the feat, so a check() -- the cast's own, or one a finishing " +
       "generation fires -- can land while this chain is still in the air; arming after the DOM " +
       "is built leaves that gap open");
@@ -339,13 +406,19 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.match(konami, /\.catch\(\(\) => \{ if \(teardown\) teardown\(\); else release\(\); \}\)/,
       "a throw anywhere in the chain -- and that includes the cast's own DOM building, which " +
       "runs inside this promise -- must still release");
-    assert.ok(konami.indexOf("pendingRelease = release;") < konami.indexOf('sendAchEvent("konami")'),
+    assert.ok(at(konami, "pendingRelease = release;",
+      "the cast never publishes its release to the effect's scope. Without that line an " +
+      "unmount inside the arm-to-beacon window has nothing to call: _bespoke never returns " +
+      "to 0 and every later achievement in the session is held forever with nothing left to " +
+      "release it. (This assertion used to be a bare indexOf comparison, which -1 satisfied " +
+      "for free -- deleting the line left every test in this file green.)")
+      < at(konami, 'sendAchEvent("konami")'),
       "the release must be published to the effect's scope BEFORE the beacon goes out -- that " +
       "is the whole window this assertion exists for");
     assert.match(app, /let pendingRelease = null;/,
       "and it must live beside teardown in the effect scope, not inside onKey's closure where " +
       "the cleanup cannot see it");
-    const cl = app.indexOf('document.removeEventListener("keydown", onKey);');
+    const cl = at(app, 'document.removeEventListener("keydown", onKey);');
     const cleanup = app.slice(cl, cl + 300);
     assert.match(cleanup, /if \(teardown\) teardown\(\);/,
       "unmounting with the layer up must take it down (teardown releases)");
@@ -372,13 +445,13 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.match(konami, /armT = setTimeout\(\(\) => \{ if \(!teardown\) release\(\); \}, ARM_CEILING_MS\);/,
       "the ceiling must RELEASE, and must stand down once the cast's own timeline exists " +
       "(teardown) -- a live cast owns the screen for as long as it holds it");
-    assert.ok(konami.indexOf("armT = setTimeout") < konami.indexOf('sendAchEvent("konami")'),
+    assert.ok(at(konami, "armT = setTimeout") < at(konami, 'sendAchEvent("konami")'),
       "armed before the beacon goes out: a ceiling started after the answer is a ceiling on " +
       "nothing");
     assert.match(konami, /clearTimeout\(armT\)/,
       "and release must cancel it, or a later cast's arm is released by the previous one's timer");
-    const built = konami.indexOf("document.body.appendChild(layer);");
-    const answered = konami.indexOf(".then((data) => {");
+    const built = at(konami, "document.body.appendChild(layer);");
+    const answered = at(konami, ".then((data) => {");
     assert.ok(answered > 0 && built > answered,
       "the cast's DOM must be built INSIDE the beacon's .then, after the answer. The ee_* art " +
       "is served under the unlock this beacon records, so a layer built before the answer " +
@@ -404,9 +477,9 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.doesNotMatch(konami, /\n\s*startCast\(\);/,
       "and it must not also call startCast() directly -- a second entry point would paint " +
       "the starfall under whatever is on screen, which is the case this hook exists for");
-    const armed = konami.indexOf("beginBespokeMoment()");
-    const castFn = konami.indexOf("const startCast = ");
-    const handoff = konami.indexOf("whenClear(startCast);");
+    const armed = at(konami, "beginBespokeMoment()");
+    const castFn = at(konami, "const startCast = ");
+    const handoff = at(konami, "whenClear(startCast);");
     assert.ok(castFn > 0 && handoff > castFn,
       "startCast must be defined before the handler hands it over");
     assert.ok(armed > castFn && armed < handoff,
@@ -423,11 +496,11 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.match(app, /import \{[^}]*check as achCheck[^}]*\} from "\.\/notify\/ach\.js"/,
       "App.jsx must import ach.js's check() -- window.Ach is a compat surface, not the contract");
     assert.match(konami, /\n\s*achCheck\(\);/, "and the cast must call it");
-    const marked = konami.indexOf("achCheck();");
-    assert.ok(marked > konami.indexOf("document.body.appendChild(layer);"),
+    const marked = at(konami, "achCheck();");
+    assert.ok(marked > at(konami, "document.body.appendChild(layer);"),
       "it fires once the layer is UP: the celebration it builds is parked by the moment, and " +
       "arriving before the moment is on screen is the overlap the ruling forbids");
-    assert.ok(marked < konami.indexOf("}, 6000);"),
+    assert.ok(marked < at(konami, "}, 6000);"),
       "and well inside the hold, so the held celebration is drained by this cast's release");
     assert.match(konami, /apiGet\("\/api\/achievements"\)/,
       "the desc read stays UNMARKED -- it only wants the now-unmasked flavor; marking is " +
@@ -481,11 +554,15 @@ const keyListeners = [];
    exactly like the hold failing, and would have this file lying about the thing it exists
    to prove. Escape ends a parade; a click dismisses a single moment. */
 function sendEscape() {
+  const seen = { prevented: false, stopped: false };
   const ev = {
     key: "Escape",
-    preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {},
+    preventDefault() { seen.prevented = true; },
+    stopPropagation() { seen.stopped = true; },
+    stopImmediatePropagation() { seen.stopped = true; },
   };
   keyListeners.forEach((fn) => fn(ev));
+  return seen;      // whether the engine CLAIMED the key -- see the held-flood test below
 }
 
 function payload(list) {
@@ -494,7 +571,20 @@ function payload(list) {
 const moments = () => body.children.filter((c) => c.classList.contains("ach-m2"));
 // A parade's spent moments stay in the DOM as the receded TRAIL; only the one front-and-centre
 // is a moment being presented, so a parade assertion has to say which it means.
-const front = () => moments().filter((c) => !c.classList.contains("trail"));
+const front = () => moments().filter((c) => c.classList.contains("trail") === false);
+const trail = () => moments().filter((c) => c.classList.contains("trail"));
+/* EVERYTHING this module paints, which is what the cast's layer has to be clear of. A trail
+   card is not a moment, but it still carries .ach-m2 (z-index 520) and the parade's two chips
+   sit at 519/521 -- all three above .ee-layer's 449, so all three are "on top of the cast". */
+const painted = () => body.children.filter((c) => c.classList.contains("ach-m2")
+  || c.classList.contains("ach-trailchip"));
+/* Which achievement a moment is showing: _mkMoment writes the name into .tw's innerHTML, and
+   the fake DOM keeps that as a plain string. Used to pin QUEUE ORDER -- a parade step and a
+   plain celebration coming out in FIFO is what "one queue" means in observable terms. */
+const nameOf = (m) => {
+  const stage = m.children[0], tw = stage && stage.children.filter((c) => c.classList.contains("tw"))[0];
+  return tw ? tw.innerHTML : "";
+};
 const starsIn = (m) => m.children.filter((c) => c.classList.contains("ee-star")).length;
 const confIn = (m) => m.children.filter((c) => c.classList.contains("m2-conf")).length;
 
@@ -571,6 +661,32 @@ describe("a bespoke moment owns the screen while it plays", () => {
     await tick();
     assert.equal(front().length, 1, "the parade starts once the screen is free");
     assert.equal(peak, 1, "and one moment at a time, not the whole flood at once");
+  });
+
+  test("a HELD flood owns nothing, so it neither eats Escape nor is thrown away by it", async () => {
+    // The parade is published the moment a flood is enqueued, so the exit can reach one whose
+    // moments are all still queued. If "a parade is up" reads that alone, then while the cast
+    // holds the screen a parade with NOTHING on it swallows Escape -- and the exit it runs
+    // splices the entire held flood out of the queue. The owner would have pressed Escape at
+    // something else entirely and silently lost every one of those celebrations.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "e" + i, name: "E" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.beginBespokeMoment();
+    ach.check();
+    await tick();
+    assert.equal(painted().length, 0, "none of the flood is on screen: it is all queued");
+
+    const claimed = sendEscape();
+    assert.equal(claimed.prevented, false,
+      "with nothing of the parade painted, Escape belongs to whatever IS on screen -- this " +
+      "module's listener is registered in CAPTURE on window, so claiming the key here stops " +
+      "every overlay in the app closing and nothing else fails for it");
+    assert.equal(claimed.stopped, false);
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1,
+      "and the held flood still plays: an exit nobody asked for must not have discarded it");
   });
 
   test("overlapping moments compose -- the release belongs to the last one out", async () => {
@@ -714,6 +830,96 @@ describe("a bespoke moment owns the screen while it plays", () => {
     assert.equal(peak, 1, "and never two, not even for the length of one turn");
     h.dismiss();
   });
+
+  test("a REPLAY clicked MID-PARADE takes the layer over too", async () => {
+    // The same claim, on the path that actually broke it. _takeover ends the parade first and
+    // then removes the moment on screen -- but the exit used to hand the moment off to the
+    // trail and null _cur on its way past, so by the time the takeover looked there was
+    // nothing left to remove and it opened a second .ach-m2 beside the one still fading.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "t" + i, name: "T" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    front()[0].click();                        // advance: one in the trail, one front-and-centre
+    await tick();
+    assert.equal(front().length, 1, "the parade is mid-step");
+    peakReset();
+
+    const h = ach.replay({ id: "t9", name: "Replayed", tier: "rare", desc: "x" }, {});
+    assert.equal(front().length, 1, "one moment, not two");
+    assert.equal(peak, 1, "and never two, not even for the length of one turn");
+    await wait(600);
+    assert.equal(trail().length, 0, "and the parade's trail left with it");
+    h.dismiss();
+    await wait(600);
+  });
+
+  test("skipping a parade does not build the celebration queued behind it ON TOP of it", async () => {
+    // The exit drops the parade's own entries and nothing else, so a plain celebration that
+    // arrived behind the flood still has to play. It must not be built while the skipped
+    // moment is still on screen: both are full-screen scrims (notify.css:27) and the skipped
+    // one fades for 500ms, so "the layer is free" said at skip time is said 500ms too early.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "k" + i, name: "K" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the parade is up");
+
+    nextPayload = payload([{ id: "behind", name: "Behind", tier: "common", desc: "x" }]);
+    ach.check();                               // a generation finishes mid-parade
+    await tick();
+    assert.equal(front().length, 1, "still just the parade's moment; the earn is queued");
+    peakReset();
+
+    sendEscape();
+    assert.equal(front().length, 1,
+      "the skipped moment is FADING, not gone -- and nothing may be built across that fade");
+
+    await wait(700);
+    assert.equal(front().length, 1, "the queued celebration plays once the layer is really empty");
+    assert.match(nameOf(front()[0]), /Behind/, "...and it is the one the skip did not touch");
+    // peak is sampled at every append, so it is the only way to see an overlap that opened
+    // and closed inside one turn -- which is what the skip path's did.
+    assert.equal(peak, 1, "at no instant two .ach-m2 moments (skip path)");
+  });
+
+  test("the parade's next step and a plain earn come out of ONE queue, in order", async () => {
+    // What "the parade is not a second door" means in observable terms. A parade that kept a
+    // pending list of its own would step from its own loop while celebrate() drained the
+    // queue, so the release would start two moments in the same turn -- and the order of a
+    // flood step against an earn queued behind it would be whichever timer won. The gate
+    // catching the step is not enough on its own to show that; sharing the queue is.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "f" + i, name: "F" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the parade is up and stepping");
+
+    ach.beginBespokeMoment();                  // the cast lands mid-parade
+    front()[0].click();                        // that moment recedes; the next step is held
+    await tick();
+    assert.equal(front().length, 0, "the step is held by the one gate");
+
+    nextPayload = payload([{ id: "tail", name: "Tail", tier: "common", desc: "x" }]);
+    ach.check();                               // ...and an earn arrives behind the flood
+    await tick();
+    assert.equal(front().length, 0,
+      "the plain earn is held by the SAME gate -- if it had a door of its own it would be on " +
+      "screen right now, over the cast");
+    peakReset();
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "the release builds exactly one");
+    assert.equal(peak, 1, "not the parade's step AND the queued earn in the same turn");
+    assert.match(nameOf(front()[0]), /F\d/, "and FIFO: the flood's remaining moments go first");
+
+    for (let i = 0; i < 4; i++) { front()[0].click(); await tick(); }   // walk the rest of the flood
+    assert.equal(front().length, 1);
+    assert.match(nameOf(front()[0]), /Tail/,
+      "the earn queued behind the flood comes out last, which is only true of one queue");
+    assert.equal(peak, 1, "one moment at a time the whole way down");
+  });
 });
 
 describe("whenClear: a cast never paints under a moment already on screen", () => {
@@ -764,6 +970,59 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
     await tick();
     assert.equal(front().length, 1, "and it plays once the cast has gone");
   });
+
+  test("it waits for the parade's TRAIL too, and the trail does not outlive the wait", async () => {
+    // A receded card is presented history, but it is still .ach-m2 at z-index 520 over the
+    // cast's 449: firing while four of them are stacked down-screen puts the starfall under
+    // them for its whole life. Waiting for the whole parade instead would cost the cast every
+    // earn still queued, so the wait takes the history DOWN rather than sitting behind it.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "u" + i, name: "U" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    front()[0].click();                        // one receded, one front-and-centre, chips up
+    await tick();
+    assert.equal(trail().length, 1, "there is presented history on screen");
+    assert.ok(painted().length > 1, "and the parade's chips with it");
+
+    let atArm = null;
+    ach.whenClear(() => { atArm = painted().length; ach.beginBespokeMoment(); });  // what App.jsx does
+    assert.equal(atArm, null, "a moment is presenting: the cast waits");
+
+    front()[0].click();                        // it ends naturally and recedes
+    await wait(700);
+    assert.equal(atArm, 0,
+      "the cast must arm on a screen this module has left EMPTY -- 'no moment presenting' is " +
+      "not the same as clear, and the difference is four dimmed cards on top of the starfall");
+    assert.equal(painted().length, 0,
+      "and nothing may drift back onto it: the linger timer that bows a parade out sits ahead " +
+      "of the gate precisely so it can still run while a cast holds the screen");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "the parade resumes where it stopped once the cast is gone");
+  });
+
+  test("a SKIPPED parade is empty before the cast starts, not merely settled", async () => {
+    // The exit reaches the same hook every other teardown does. It used to reach it with the
+    // skipped moment still painted, so a cast waiting behind the skip started underneath it.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "v" + i, name: "V" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    front()[0].click();
+    await tick();
+    assert.equal(front().length, 1);
+
+    let atFire = null;
+    ach.whenClear(() => { atFire = painted().length; });
+    sendEscape();
+    assert.equal(atFire, null,
+      "the skipped moment is fading through the same 500ms .out the ruling asks for; the " +
+      "layer is not free yet and the cast must not be told that it is");
+    await wait(700);
+    assert.equal(atFire, 0, "and the cast starts on an empty screen");
+  });
 });
 
 describe("a bespoke feat's EARN never gets the generic fanfare", () => {
@@ -799,15 +1058,38 @@ describe("a bespoke feat's EARN never gets the generic fanfare", () => {
     h.dismiss();
   });
 
-  test("...but not while a bespoke moment is actually on screen", () => {
+  /* CHANGED 2026-09-11, and this is what it used to say: "a replay is a click and still takes
+     over the layer, moment or no moment" -- it asserted that a replay BUILDS while a bespoke
+     moment owns the screen, and only its fanfare was suppressed. That pinned the exemption
+     the dequeue's gate carried for replay entries, and the exemption is the overlap: .ach-m2
+     is z-index 520 and the cast's layer is 449, .ee-layer takes no pointer events, so an open
+     Folio stays clickable for the whole 6000ms hold and one click put a toast over the
+     starfall. Owner ruling 2026-09-10 says impossible by construction in BOTH directions, and
+     a gate with one caller written out of it is not a construction. The click is not refused
+     either -- it is HELD, like everything else, and its driver handle waits with it. */
+  test("a replay during a bespoke moment is HELD, and plays when the screen is free", async () => {
     ach.beginBespokeMoment();
+    peakReset();
     const h = ach.replay({ id: "some-other-feat", name: "Other", tier: "feat", desc: "x" }, {});
+    assert.equal(moments().length, 0,
+      "nothing may be built while a bespoke moment owns the screen -- not even a click's " +
+      "moment. This is the reverse direction of the ruling and the one the gate used to leave " +
+      "open for exactly one caller.");
+    assert.equal(typeof h.setText, "function",
+      "...and the click still gets a REAL driver handle back, synchronously: useFolio spreads " +
+      "it and calls setText/setGlitching unguarded through its 26-tick scramble, so handing " +
+      "back a bare {} would throw on the first tick");
+    h.setText("a line the scramble settled on while it waited");
+
+    ach.endBespokeMoment();
+    await tick();
     const m = moments()[0];
-    assert.ok(m, "a replay is a click and still takes over the layer, moment or no moment");
-    assert.equal(starsIn(m), 0,
-      "but nothing layers flair over a cast that is still fading underneath -- that is rule 2 " +
-      "read as what it means");
-    assert.equal(confIn(m), 0);
+    assert.ok(m, "and the celebration plays once the screen is free, rather than being dropped");
+    assert.equal(peak, 1, "one moment, never two");
+    assert.ok(starsIn(m) > 0,
+      "with its ordinary feat fanfare: a replay is not an earn (rule 2), and by the time it " +
+      "is built there is nothing on screen left to layer over");
+    assert.ok(confIn(m) > 0);
     h.dismiss();
   });
 });
