@@ -247,13 +247,26 @@ describe("there is exactly one teardown path", () => {
   });
 
   test("the exit and the replay takeover call the same teardown", () => {
-    assert.match(src, /function _endParade\(\)[\s\S]*?_clearParade\(\);\r?\n\}/,
+    const endBody = src.match(/function _endParade\(\) \{[\s\S]*?\n\}/)[0];
+    assert.match(endBody, /_clearParade\(\);/,
       "_endParade must finish through _clearParade, not its own removal loop");
-    const replayBody = src.match(/export function replay\(a, opts\) \{[\s\S]*$/)[0];
-    assert.match(replayBody, /_endParade\(\);/,
-      "replay's takeover must route through the exit, so a parade still IN FLIGHT is stopped " +
+    assert.doesNotMatch(endBody, /_trail\.splice\(/,
+      "...and it must not empty the trail itself -- a second removal loop here is exactly the " +
+      "shape the test above forbids, written one function further along");
+    // The takeover is its own function since 2026-09-11: taking the celebration layer over
+    // means more than ending a parade, because a QUEUED moment on screen has to go too or the
+    // replay opens a second .ach-m2 beside it. The indirection is deliberate; what must not
+    // change is that the parade half of it is still THE EXIT and nothing else.
+    const takeover = src.match(/function _takeover\(\) \{[\s\S]*?\n\}/)[0];
+    assert.match(takeover, /_endParade\(\);/,
+      "the takeover must route through the exit, so a parade still IN FLIGHT is stopped " +
       "and not merely cleared of its trail");
-    assert.doesNotMatch(replayBody, /_clearParade\(\);/,
+    assert.doesNotMatch(takeover, /_clearParade\(\);/,
       "and it must not also call the teardown directly -- one call, one path");
+    const replayBody = src.match(/export function replay\(a, opts\) \{[\s\S]*$/)[0];
+    assert.match(replayBody, /_takeover\(\);/,
+      "replay takes the layer over through that one function");
+    assert.doesNotMatch(replayBody, /_clearParade\(\);|_endParade\(\);/,
+      "never reaching around it into the teardown itself");
   });
 });

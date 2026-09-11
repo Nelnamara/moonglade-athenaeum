@@ -81,6 +81,17 @@ function zIndex(cls) {
   assert.ok(m, "." + cls + " declares no z-index -- the ladder must be explicit");
   return Number(m[1]);
 }
+/** The body of a top-level `function <name>(` in ach.js, up to the next top-level function. */
+function achFn(name) {
+  const from = achSrc.indexOf("function " + name + "(");
+  assert.ok(from > 0, "ach.js no longer has a " + name);
+  const tail = achSrc.slice(from + 1).search(/\n(?:export )?function /);
+  return { from, to: tail < 0 ? achSrc.length : from + 1 + tail };
+}
+function achBody(name) {
+  const r = achFn(name);
+  return achSrc.slice(r.from, r.to);
+}
 
 describe("the cast is built the way the handoff page builds it", () => {
   test("an orb glow is created, and it is the element the page pulses", () => {
@@ -92,10 +103,24 @@ describe("the cast is built the way the handoff page builds it", () => {
     assert.match(orb, /height\s*:\s*340px/);
     assert.match(orb, /margin\s*:\s*-170px/, "centred on its point the way the page centres it");
     assert.match(orb, /filter\s*:\s*blur\(8px\)/, "the page's blur, not a sharp disc");
-    assert.match(orb, /--lavender/, "lavender core");
-    assert.match(orb, /--emerald/, "emerald at the 45% stop");
+    assert.match(orb, /--mauve[^;]*?75%/,
+      "the page's core stop is rgba(196,166,240,.75) -- #c4a6f0, which is --mauve, not " +
+      "--lavender. The block's header lists the rgba->token swap as the one adaptation here; " +
+      "swapping the HUE as well is the kind of quiet drift that list exists to stop");
+    assert.match(orb, /--emerald[^;]*?20%/, "emerald at the page's .2 alpha");
     assert.match(orb, /45%/);
     assert.match(orb, /transparent 68%/);
+    // The orb tracks NEL, not the viewport. The page centres Nel at the stage's horizontal
+    // middle and puts the orb's centre at 60% of the stage width -- +10% of the width to her
+    // right -- and 40% down. Written against Nel's own left:50% so the offset stays +10% of
+    // the viewport on any monitor; a bare 60vw is the same thing on a laptop and slides the
+    // glow off her on an ultrawide.
+    assert.match(orb, /left\s*:\s*calc\(50% \+ 10vw\)/,
+      "the orb must be offset from Nel's own left:50%, not measured from the viewport edge");
+    assert.match(orb, /top\s*:\s*40vh/, "and 40% down, as on the page");
+    assert.match(rule("ee-nel"), /left\s*:\s*50%/,
+      "...which only tracks her while Nel herself is centred -- if she moves, the calc above " +
+      "is measuring from nothing");
     assert.match(orb, /animation\s*:\s*ee-orb 2\.6s ease-in-out \.3s infinite/,
       "the page's orbP cadence: 2.6s, eased, .3s in, forever");
     assert.match(css, /@keyframes ee-orb\{0%,100%\{opacity:\.35;transform:scale\(\.92\);\}50%\{opacity:\.9;transform:scale\(1\.1\);\}\}/,
@@ -230,20 +255,72 @@ describe("the bespoke-moment sequence rule, in source", () => {
       "the two gates must be the first thing _flair does, in this order: nothing layers over a " +
       "moment that is on screen, and an EARN of a bespoke feat is quiet because its own moment " +
       "is the fanfare");
-    ["_floodParade", "_next", "replay"].forEach((fn) => {
-      const from = achSrc.indexOf("function " + fn + "(");
-      assert.ok(from > 0, "ach.js no longer has a " + fn);
-      const tail = achSrc.slice(from + 1);
-      const end = tail.search(/\n(?:export )?function /);
-      const body = achSrc.slice(from, end < 0 ? achSrc.length : from + 1 + end);
-      assert.match(body, /_flair\(built, a[,)]/, fn + " must raise its flair through _flair");
-    });
-    // ...and exactly ONE of them declares itself a replay. If an earn path ever passed that
-    // flag it would hand a bespoke feat back the confetti its own moment replaces.
-    assert.equal((achSrc.match(/_flair\(built, a, \{ replay: true \}\)/g) || []).length, 1,
-      "only replay() may call _flair as a replay");
-    assert.match(achSrc.slice(achSrc.indexOf("export function replay(")), /_flair\(built, a, \{ replay: true \}\);/,
-      "and it must be replay() that does");
+    // One build point means one flair call: the definition, and the single raise inside the
+    // dequeue. Anything else is a second place that has to remember the rule.
+    assert.equal((achSrc.match(/[^\w]_flair\(/g) || []).length, 2,
+      "expected exactly two mentions of _flair -- its definition and ONE call, inside _drain. " +
+      "The parade step, the queue and the Folio replay all celebrate; guarding them one by " +
+      "one is how a feat earned in a >3 flood still gets confetti over a celebration that " +
+      "was supposed to replace it.");
+    assert.match(achBody("_drain"), /_flair\(built, a, e\.replay \? \{ replay: true \} : undefined\)/,
+      "and only the REPLAY entry may declare itself a replay. If an earn path ever passed " +
+      "that flag it would hand a bespoke feat back the confetti its own moment replaces.");
+  });
+
+  test("one queue, one dequeue: _drain is the only place a moment is built", () => {
+    // The invariant behind every hold assertion below. A second build point is a second door
+    // onto the screen, and one gate cannot cover two doors -- which is exactly how the
+    // round-2 mechanism ended up parking three separate continuations.
+    const def = achSrc.indexOf("function _mkMoment(") + "function ".length;
+    const d = achFn("_drain");
+    const stray = [];
+    const re = /_mkMoment\(/g;
+    let m;
+    while ((m = re.exec(achSrc))) {
+      if (m.index === def) continue;                       // the definition itself
+      if (m.index >= d.from && m.index < d.to) continue;   // the one dequeue
+      stray.push(achSrc.slice(Math.max(0, m.index - 60), m.index + 12).split("\n").pop());
+    }
+    assert.deepEqual(stray, [],
+      "a moment is built outside _drain: " + stray.join(" | ") + ". Every moment -- a queued " +
+      "earn, a parade step, a Folio replay -- must come out of the one dequeue, because the " +
+      "bespoke hold is a gate on that dequeue and nothing else.");
+  });
+
+  test("the parade ENQUEUES; it does not run a loop of its own", () => {
+    // The shape that made the old parade a second door: it kept its own pending list in a
+    // closure and stepped itself, so the hold had to be written twice (and the second copy
+    // was the one nothing tested). It now pushes flood-tagged entries into the same _q.
+    const body = achBody("_floodParade");
+    assert.match(body, /_q\.push\(\{ a, flood: true \}\)/,
+      "a flood's moments must be entries in the ONE queue");
+    assert.match(body, /_drain\(\);/, "and it starts them by asking the one dequeue to run");
+    assert.doesNotMatch(body, /_playFlood\(/,
+      "_floodParade must not present a moment itself -- that is the dequeue's job, and it is " +
+      "where the hold lives");
+    assert.doesNotMatch(body, /const step = /,
+      "no step loop of its own: start and step have to be the same code path, or the gate " +
+      "that covers the start does not cover the step");
+  });
+
+  test("the hold is ONE gate on the dequeue, and the release just calls it", () => {
+    const drain = achBody("_drain");
+    assert.match(drain, /if \(_cur\) return;/,
+      "refusal 1: a moment is already being presented. Its teardown re-enters; a dequeue that " +
+      "runs anyway is the second .ach-m2 the ruling forbids");
+    assert.match(drain, /if \(_bespoke && !\(head && head\.replay\)\) \{ _pendingDrain = true; return; \}/,
+      "refusal 2, THE hold: record that the queue wants to run and build nothing. Written " +
+      "once, here, and exempting only the replay entry");
+    const rel = achSrc.slice(achSrc.indexOf("export function endBespokeMoment()"));
+    assert.match(rel.slice(0, rel.indexOf("\n}")), /_drain\(\);/,
+      "the release must call the dequeue");
+    assert.equal((rel.slice(0, rel.indexOf("\n}")).match(/_drain\(/g) || []).length, 1,
+      "...exactly once. Draining a list of parked callers in a loop is what let two moments " +
+      "be built from one release");
+    assert.doesNotMatch(achSrc, /_playing/,
+      "the round-2 'a moment is playing' flag is gone for good: it had to be lowered while a " +
+      "caller was parked, which is what made a release able to start a moment over one that " +
+      "was still on screen. _cur -- the element itself -- is the serialization now");
   });
 
   test("the Konami handler arms the moment before the beacon and releases it at the end", () => {
@@ -284,8 +361,14 @@ describe("the bespoke-moment sequence rule, in source", () => {
     // never reaches .then, never reaches .catch, and leaves _bespoke above zero for the rest of
     // the session with every later achievement silently swallowed. Only wall-clock time can end
     // that, so the arm carries a ceiling from the moment it is armed.
-    assert.match(konami, /const ARM_CEILING_MS = \d+;/,
-      "the arm needs a wall-clock ceiling, named once");
+    const cap = konami.match(/const ARM_CEILING_MS = (\d+);/);
+    assert.ok(cap, "the arm needs a wall-clock ceiling, named once");
+    assert.ok(Number(cap[1]) > 0,
+      "ARM_CEILING_MS is " + cap[1] + "ms. A zero ceiling fires in the same turn it is armed " +
+      "and releases the arm before the beacon can answer, so every cast would build over an " +
+      "engine that had already been let go -- the exact overlap the arm exists to prevent. " +
+      "The value is a failsafe for a fetch that never settles, so it belongs far past any " +
+      "answer a local server plausibly takes.");
     assert.match(konami, /armT = setTimeout\(\(\) => \{ if \(!teardown\) release\(\); \}, ARM_CEILING_MS\);/,
       "the ceiling must RELEASE, and must stand down once the cast's own timeline exists " +
       "(teardown) -- a live cast owns the screen for as long as it holds it");
@@ -296,11 +379,40 @@ describe("the bespoke-moment sequence rule, in source", () => {
       "and release must cancel it, or a later cast's arm is released by the previous one's timer");
     const built = konami.indexOf("document.body.appendChild(layer);");
     const answered = konami.indexOf(".then((data) => {");
-    assert.ok(answered > 0 && built > answered, "the cast no longer builds inside .then");
+    assert.ok(answered > 0 && built > answered,
+      "the cast's DOM must be built INSIDE the beacon's .then, after the answer. The ee_* art " +
+      "is served under the unlock this beacon records, so a layer built before the answer " +
+      "lands 404s its own images on the very first cast -- and the `if (released) return` " +
+      "below, which is the whole point of the assertion that follows, only guards code that " +
+      "runs in there.");
     assert.match(konami.slice(answered, built), /if \(released\) return;/,
       "a chain that answers AFTER the ceiling expired must build nothing -- otherwise a hung " +
       "beacon that finally lands pops a starfall over whatever the page is doing minutes later, " +
       "and overwrites a newer cast's teardown on its way past");
+  });
+
+  test("the cast waits for a moment already on screen, and arms inside that wait", () => {
+    // The reverse direction. Arming stops a celebration being BUILT over the cast, but it can
+    // do nothing about one that is already painted -- .ach-m2 is z-index 520 and the cast's
+    // layer is 449, so a cast entered mid-celebration would play underneath it. So the key
+    // sequence does not cast: it hands the cast to ach.js's whenClear hook, which runs it now
+    // if the layer is empty and otherwise the instant that moment tears down.
+    assert.match(app, /import \{[^}]*whenClear[^}]*\} from "\.\/notify\/ach\.js"/,
+      "App.jsx must import ach.js's whenClear -- the hold alone closes only one direction");
+    assert.match(konami, /whenClear\(startCast\);/,
+      "the keydown handler must hand the cast to whenClear rather than running it");
+    assert.doesNotMatch(konami, /\n\s*startCast\(\);/,
+      "and it must not also call startCast() directly -- a second entry point would paint " +
+      "the starfall under whatever is on screen, which is the case this hook exists for");
+    const armed = konami.indexOf("beginBespokeMoment()");
+    const castFn = konami.indexOf("const startCast = ");
+    const handoff = konami.indexOf("whenClear(startCast);");
+    assert.ok(castFn > 0 && handoff > castFn,
+      "startCast must be defined before the handler hands it over");
+    assert.ok(armed > castFn && armed < handoff,
+      "the arm has to happen INSIDE the callback. Arming on the keypress instead would hold " +
+      "the celebration the cast is waiting for, and the cast would wait for a moment that " +
+      "was itself waiting on the cast");
   });
 
   test("the cast fires the marking check() itself, from inside the moment", () => {
@@ -386,8 +498,25 @@ const front = () => moments().filter((c) => !c.classList.contains("trail"));
 const starsIn = (m) => m.children.filter((c) => c.classList.contains("ee-star")).length;
 const confIn = (m) => m.children.filter((c) => c.classList.contains("m2-conf")).length;
 
+/* THE INVARIANT, watched rather than sampled. "At no instant two moments" cannot be checked by
+   looking after the fact -- the overlap the round-2 mechanism allowed opened and closed inside
+   one turn of the event loop. A moment can only appear by being appended to the body, so the
+   count is taken at every append and the high-water mark is what the tests assert on. */
+let peak = 0;
+const peakReset = () => { peak = 0; };
+function watchAppends(b) {
+  const raw = b.appendChild;
+  b.appendChild = (c) => {
+    const r = raw(c);
+    const n = front().length;
+    if (n > peak) peak = n;
+    return r;
+  };
+}
+
 before(async () => {
   body = el("body");
+  watchAppends(body);
   globalThis.document = { body, documentElement: el("html"), createElement: (t) => el(t) };
   globalThis.window = {
     addEventListener(t, fn) { if (t === "keydown") keyListeners.push(fn); },
@@ -402,9 +531,16 @@ afterEach(async () => {
   await tick();
   sendEscape();                                        // ends a parade, if one is running
   await wait(600);
-  moments().forEach((m) => m.click());                 // dismisses a single moment
-  await wait(700);                                     // .out fade + the queue draining
+  // Dismiss until the layer is genuinely empty: dismissing one moment lets the NEXT queued
+  // one build, and leaving that one behind would strand the engine's _cur on an element this
+  // teardown is about to drop -- which looks exactly like the hold failing in the next test.
+  for (let i = 0; i < 10 && moments().length; i++) {
+    moments().forEach((m) => m.click());
+    await wait(700);                                   // .out fade + the queue draining
+  }
+  assert.equal(moments().length, 0, "the fake DOM was not emptied between tests");
   body.children.length = 0;
+  peakReset();
 });
 
 describe("a bespoke moment owns the screen while it plays", () => {
@@ -430,10 +566,11 @@ describe("a bespoke moment owns the screen while it plays", () => {
     ach.check();
     await tick();
     assert.equal(moments().length, 0, ">3 earns route to _floodParade instead of celebrate(); " +
-      "holding only one of the two leaves the other wide open");
+      "a parade that started its own loop would walk straight onto the screen");
     ach.endBespokeMoment();
     await tick();
-    assert.equal(moments().length, 1, "the parade starts once the screen is free");
+    assert.equal(front().length, 1, "the parade starts once the screen is free");
+    assert.equal(peak, 1, "and one moment at a time, not the whole flood at once");
   });
 
   test("overlapping moments compose -- the release belongs to the last one out", async () => {
@@ -485,15 +622,17 @@ describe("a bespoke moment owns the screen while it plays", () => {
     assert.equal(front().length, 1, "the parade is up and stepping");
 
     ach.beginBespokeMoment();
+    peakReset();
     front()[0].click();                        // advance: this one recedes into the trail
     await tick();
     assert.equal(front().length, 0,
-      "the parade's step is the same re-entry problem as the queue's: it must park, not build " +
-      "the next moment over the cast");
+      "the parade's next moment comes out of the same dequeue as a queued celebration, so " +
+      "the one gate must stop it: a parade that stepped itself would build over the cast");
 
     ach.endBespokeMoment();
     await tick();
     assert.equal(front().length, 1, "and the parade resumes where it stopped");
+    assert.equal(peak, 1, "at no instant two moments being presented");
   });
 
   test("with no moment up nothing is held", async () => {
@@ -501,6 +640,129 @@ describe("a bespoke moment owns the screen while it plays", () => {
     ach.check();
     await tick();
     assert.equal(moments().length, 1, "the ordinary path must be untouched by all of this");
+  });
+
+  test("held, then EXACTLY ONE, then the next after its hold", async () => {
+    // The release drains a queue, not a list of parked callers. Round 2 parked a continuation
+    // per entry point and replayed them all on release, so two celebrations could be built in
+    // the same turn -- and the "playing" flag had been lowered while they waited, so nothing
+    // stopped them. Deleting the gate in _drain fails the first assertion; deleting the
+    // _drain() call in endBespokeMoment fails the second.
+    nextPayload = payload([
+      { id: "h1", name: "One", tier: "common", desc: "x" },
+      { id: "h2", name: "Two", tier: "common", desc: "x" },
+    ]);
+    ach.beginBespokeMoment();
+    ach.check();
+    await tick();
+    assert.equal(front().length, 0,
+      "a celebration queued while the hold is armed must not be BUILT -- that is the whole " +
+      "construction the ruling asks for");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1,
+      "the release builds exactly one: the second is still an entry in the queue, not a " +
+      "second parked caller waiting to be replayed alongside the first");
+    assert.equal(peak, 1, "and at no instant were there two .ach-m2 moments on screen");
+
+    front()[0].click();                        // the first ends normally
+    await wait(600);
+    assert.equal(front().length, 1, "the next arrives only once the first has left the DOM");
+    assert.equal(peak, 1, "still one at a time across the handover");
+  });
+
+  test("a moment on screen when the hold arms: its natural end dequeues nothing", async () => {
+    // The hole round 2's front-door hold could not see, and the one that bites: by the time
+    // the cast lands the first celebration is already playing and the second is queued behind
+    // it. The queue re-enters itself when the first ends, so the gate has to be there and not
+    // at the point a celebration first arrives.
+    nextPayload = payload([
+      { id: "s1", name: "One", tier: "common", desc: "x" },
+      { id: "s2", name: "Two", tier: "common", desc: "x" },
+    ]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the first plays; the second is queued behind it");
+
+    ach.beginBespokeMoment();                  // the cast lands mid-celebration
+    peakReset();
+    front()[0].click();                        // ...and the first ends naturally
+    await wait(600);
+    assert.equal(front().length, 0,
+      "the natural end must dequeue NOTHING while the gate is closed -- .ach-m2 is z-index " +
+      "520 and would paint straight over the cast's 449");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "and the release builds it");
+    assert.equal(peak, 1, "at no instant two .ach-m2 moments");
+  });
+
+  test("a REPLAY takes the layer over instead of opening a second one", async () => {
+    // Not a hold case: a replay is a click and is deliberately exempt. But it must still be
+    // the only moment on screen. Before this it cleared the parade only, so a replay clicked
+    // while a QUEUED celebration was playing opened a second .ach-m2 beside it and whichever
+    // ended first tore down the other's DOM.
+    nextPayload = payload([{ id: "r1", name: "One", tier: "common", desc: "x" }]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1);
+    peakReset();
+    const h = ach.replay({ id: "r2", name: "Replayed", tier: "rare", desc: "x" }, {});
+    assert.equal(front().length, 1, "one moment, not two");
+    assert.equal(peak, 1, "and never two, not even for the length of one turn");
+    h.dismiss();
+  });
+});
+
+describe("whenClear: a cast never paints under a moment already on screen", () => {
+  test("with the layer empty it fires at once, synchronously", () => {
+    let fired = 0;
+    ach.whenClear(() => { fired++; });
+    assert.equal(fired, 1,
+      "an empty celebration layer must not delay the cast by even a tick -- the ordinary " +
+      "case is 'the owner enters the code while nothing is celebrating'");
+  });
+
+  test("mid-moment it waits for that moment's teardown", async () => {
+    nextPayload = payload([{ id: "w1", name: "One", tier: "common", desc: "x" }]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1);
+
+    let fired = 0;
+    ach.whenClear(() => { fired++; });
+    assert.equal(fired, 0,
+      "the moment is on screen and the cast's layer is BELOW it (449 vs 520); firing now " +
+      "would put the starfall underneath a toast, which is the ruling read backwards");
+
+    front()[0].click();
+    await wait(600);
+    assert.equal(fired, 1, "and it fires the instant that moment has been torn down");
+  });
+
+  test("the callback runs BEFORE the dequeue, so its hold catches the next moment", async () => {
+    // The ordering that makes the two directions one mechanism. If the dequeue ran first, the
+    // next queued celebration would already be on screen by the time the cast armed, and the
+    // cast would paint under it -- the same overlap, one link further along the chain.
+    nextPayload = payload([
+      { id: "c1", name: "One", tier: "common", desc: "x" },
+      { id: "c2", name: "Two", tier: "common", desc: "x" },
+    ]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1);
+
+    ach.whenClear(() => ach.beginBespokeMoment());   // exactly what the Konami handler does
+    front()[0].click();
+    await wait(600);
+    assert.equal(front().length, 0,
+      "the cast armed inside the callback, so the second celebration must still be held");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "and it plays once the cast has gone");
   });
 });
 

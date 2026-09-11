@@ -34,7 +34,7 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import { sendAchEvent } from "./notify/achNonce.js";
-import { beginBespokeMoment, check as achCheck, endBespokeMoment } from "./notify/ach.js";
+import { beginBespokeMoment, check as achCheck, endBespokeMoment, whenClear } from "./notify/ach.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
@@ -692,6 +692,16 @@ export default function App({ boot }) {
      than over it: on a first earn the celebration is not merely delayed, it has not been built
      yet, so the two layers cannot share the screen.
 
+     And the other direction, which arming alone cannot cover: a moment ALREADY on screen when
+     the code is entered is a layer the cast would paint UNDER (.ach-m2 is z-index 520, the
+     cast's layer 449). So the cast does not start on the keypress -- it starts from ach.js's
+     whenClear() hook, which runs it at once when nothing is presenting and otherwise the
+     instant that moment has been torn down. The arm happens inside that callback, so the cast
+     is never the thing waiting and the moment is never the thing painted over. The cost is
+     that entering the code during a celebration delays the starfall by at most that
+     celebration's own hold (HOLD in ach.js, 4.2-6.4s), which is exactly as long as the thing
+     it would otherwise have hidden behind.
+
      The cast FIRES that toast itself (achCheck() below, once the layer is up). Nothing in the
      app polls achievements -- check() runs once per boot and after a generation -- so without
      that call the standard toast for a freshly cast egg would not arrive until the next page
@@ -719,14 +729,11 @@ export default function App({ boot }) {
     const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
     const ARM_CEILING_MS = 20000;            // see the note above: the failsafe for a fetch that never settles
     let pos = 0, busy = false;
+    let gone = false;                        // the effect has been torn down
     let teardown = null;                     // the in-flight cast's teardown, once its DOM exists
     let pendingRelease = null;               // ...and its release, from the instant it is ARMED
-    const onKey = (e) => {
-      pos = e.keyCode === seq[pos] ? pos + 1 : (e.keyCode === seq[0] ? 1 : 0);
-      if (pos !== seq.length) return;
-      pos = 0;
-      if (busy) return;
-      busy = true;
+    const startCast = () => {
+      if (gone) return;                      // unmounted while the cast waited for a clear layer
       // ARMED BEFORE THE BEACON, not after the DOM is built: the beacon is what earns the
       // feat, and a check() -- this cast's own, below, or one a finishing generation fires --
       // can land while this promise chain is still in the air.
@@ -749,18 +756,17 @@ export default function App({ boot }) {
       // egg's visuals for that press (the feat itself was earned server-side by the beacon,
       // or was not sent at all).
       armT = setTimeout(() => { if (!teardown) release(); }, ARM_CEILING_MS);
-      // The ee_* assets are SEALED to The Konami Code (the unlock-split
-      // enforcement, 2026-08-13) and this beacon is what earns it -- so the
-      // visuals wait for the beacon to land, or the very first trigger races
-      // its own unlock and the art 404s. Fail-soft on a beacon error: the
-      // stars/toast still play (the img/audio just may not resolve).
-      // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
-      // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
-      // public source, so a clone can't read the egg's payoff before finding it -- a
-      // failed read answers {error}, and the sub-line falls back to its generic string.
+      // The ee_* assets are served under the-konami-code's own unlock (the unlock-split
+      // enforcement, 2026-08-13) and this beacon is what records it -- so the visuals wait
+      // for the beacon to land, or the very first trigger races its own unlock and the art
+      // 404s. Fail-soft on a beacon error: the stars/toast still play (the img/audio just
+      // may not resolve). The /api/achievements read that follows is for the same reason:
+      // the roster answers for this id once the beacon has landed, and the sub-line takes
+      // its text from that answer -- a failed read answers {error} and the sub-line falls
+      // back to its generic string.
       // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
       // adopts the next one (notify/achNonce.js), which is what let the route go back to
-      // LOGIN so a phone can find this egg too.
+      // LOGIN so a phone can reach this too.
       sendAchEvent("konami")
         .then(() => apiGet("/api/achievements"))
         .then((data) => {
@@ -797,8 +803,8 @@ export default function App({ boot }) {
         nel.onerror = () => nel.remove();
         layer.appendChild(nel);
         // Built with DOM methods, not innerHTML. The greeting is a fixed literal; the
-        // punchline is the SEALED roster's desc for the-konami-code, set via textContent
-        // (so fetched data can never inject markup) -- it is not in this public source to spoil.
+        // sub-line takes the roster's own desc for the-konami-code, set via textContent so
+        // fetched text can never reach an HTML parser.
         const toast = document.createElement("div");
         toast.className = "ee-toast";
         toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
@@ -810,7 +816,7 @@ export default function App({ boot }) {
         layer.appendChild(toast);
         document.body.appendChild(layer);
         // MARK-AND-TOAST for the earn that just happened, fired from INSIDE the moment. The
-        // read above is deliberately unmarked (it only wants the now-unmasked desc); this is
+        // read above is deliberately unmarked (it only wants the sub-line's text); this is
         // the marking call, the only one that turns `newly` into a celebration (notify/ach.js
         // load(mark) -> toastNew). It is held by the moment and plays after the fade.
         achCheck();
@@ -833,8 +839,20 @@ export default function App({ boot }) {
       })
         .catch(() => { if (teardown) teardown(); else release(); });
     };
+    const onKey = (e) => {
+      pos = e.keyCode === seq[pos] ? pos + 1 : (e.keyCode === seq[0] ? 1 : 0);
+      if (pos !== seq.length) return;
+      pos = 0;
+      if (busy) return;
+      busy = true;
+      // NOT startCast() directly: see the note above. whenClear runs it now if the
+      // celebration layer is empty, and otherwise as soon as the moment on screen has torn
+      // down -- `busy` is already true, so re-entering the code while one waits does nothing.
+      whenClear(startCast);
+    };
     document.addEventListener("keydown", onKey);
     return () => {
+      gone = true;
       document.removeEventListener("keydown", onKey);
       if (teardown) teardown();              // unmounted mid-cast: take it down, release
       else if (pendingRelease) pendingRelease();   // armed, beacon still in the air: release

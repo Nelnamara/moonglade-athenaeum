@@ -4372,12 +4372,8 @@ ${"=".repeat(48)}
   var data = null;
   var BESPOKE_FEATS = /* @__PURE__ */ new Set(["the-konami-code", "under-the-hood"]);
   var _bespoke = 0;
-  var _held = [];
-  function _hold(fn) {
-    if (!_bespoke) return false;
-    _held.push(fn);
-    return true;
-  }
+  var _pendingDrain = false;
+  var _whenClear = [];
   function unleashed() {
     try {
       return localStorage.getItem("unleash") === "1";
@@ -4423,7 +4419,8 @@ ${"=".repeat(48)}
     newly.forEach((a) => celebrate(a));
   }
   var _q = [];
-  var _playing = false;
+  var _cur = null;
+  var _curBuilt = null;
   var _actx = null;
   var _sfx = {};
   function _chime(tier) {
@@ -4657,7 +4654,19 @@ ${"=".repeat(48)}
     const tier = a.tier || "common";
     if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
   }
-  function _play(built, hold, after) {
+  function _settled(m) {
+    if (_cur !== m) return;
+    _cur = null;
+    _curBuilt = null;
+    _whenClear.splice(0).forEach((fn) => {
+      try {
+        fn();
+      } catch {
+      }
+    });
+    _drain();
+  }
+  function _play(built, hold) {
     const m = built.m, tw = built.tw;
     document.body.appendChild(m);
     void m.offsetWidth;
@@ -4669,7 +4678,7 @@ ${"=".repeat(48)}
       m.classList.add("out");
       setTimeout(() => {
         if (m.parentNode) m.remove();
-        if (after) after();
+        _settled(m);
       }, 500);
     };
     m._t = setTimeout(done, hold);
@@ -4700,6 +4709,7 @@ ${"=".repeat(48)}
   }
   var _clearTimer = null;
   var _parade = null;
+  var _paradeShown = 0;
   function _clearParade() {
     _clearTimer = null;
     _parade = null;
@@ -4724,14 +4734,16 @@ ${"=".repeat(48)}
   }
   function _endParade() {
     const p = _parade;
+    let front = null;
     if (p) {
       p.ended = true;
-      p.q.length = 0;
+      for (let i = _q.length - 1; i >= 0; i--) if (_q[i].flood) _q.splice(i, 1);
       const m = p.m;
       if (m && !m._adv) {
         clearTimeout(m._t);
         m._adv = true;
         _trail.unshift(m);
+        front = m;
       }
     }
     if (_clearTimer) {
@@ -4739,6 +4751,8 @@ ${"=".repeat(48)}
       _clearTimer = null;
     }
     _clearParade();
+    if (front) _settled(front);
+    else _drain();
   }
   function _mkSkipChip() {
     const b = document.createElement("button");
@@ -4762,7 +4776,7 @@ ${"=".repeat(48)}
   if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener("keydown", _onKey, true);
   }
-  function _playFlood(built, after) {
+  function _playFlood(built) {
     const m = built.m, tw = built.tw;
     document.body.appendChild(m);
     void m.offsetWidth;
@@ -4772,7 +4786,7 @@ ${"=".repeat(48)}
       if (m._adv) return;
       m._adv = true;
       _recede(m);
-      if (after) after();
+      _settled(m);
     };
     m._t = setTimeout(advance, FLOOD_DWELL_MS);
     m.addEventListener("click", () => {
@@ -4781,75 +4795,78 @@ ${"=".repeat(48)}
     });
   }
   function _floodParade(list) {
-    if (_hold(() => _floodParade(list))) return;
-    const q = list.slice();
-    const p = { q, m: null, ended: false };
-    _parade = p;
-    let shown = 0;
-    const step = () => {
-      if (p.ended) return;
-      if (_hold(step)) return;
-      if (!q.length) {
-        _clearTimer = setTimeout(_clearParade, 3200);
-        return;
-      }
-      const a = q.shift();
-      shown++;
-      const tier = a.tier || "common";
-      _chime(tier);
-      const built = _mkMoment(a, {});
-      _flair(built, a);
-      p.m = built.m;
-      _playFlood(built, step);
-      if (shown > 1) {
+    _parade = { m: null, ended: false };
+    _paradeShown = 0;
+    list.forEach((a) => _q.push({ a, flood: true }));
+    _drain();
+  }
+  function celebrate(a) {
+    if (!a) return;
+    _q.push({ a });
+    _drain();
+  }
+  function _drain() {
+    if (_cur) return;
+    const head = _q[0];
+    if (_bespoke && !(head && head.replay)) {
+      _pendingDrain = true;
+      return;
+    }
+    while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
+    if (!_q.length) {
+      if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
+      return;
+    }
+    const e = _q.shift();
+    const a = e.a, tier = a.tier || "common";
+    _chime(tier);
+    const built = e.replay ? _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: (e.opts || {}).line }) : _mkMoment(a, {});
+    _flair(built, a, e.replay ? { replay: true } : void 0);
+    _cur = built.m;
+    _curBuilt = built;
+    if (e.flood) {
+      _parade.m = built.m;
+      _paradeShown++;
+      _playFlood(built);
+      if (_paradeShown > 1) {
         if (!_chip) {
           _chip = document.createElement("div");
           _chip.className = "ach-trailchip";
           document.body.appendChild(_chip);
         }
-        _chip.textContent = "\xD7" + shown + " earned";
+        _chip.textContent = "\xD7" + _paradeShown + " earned";
         if (!_skip) _skip = _mkSkipChip();
-        _skip.textContent = q.length ? "skip \xD7" + q.length + " \xB7 Esc" : "skip \xB7 Esc";
+        const left = _q.reduce((n, x) => n + (x.flood ? 1 : 0), 0);
+        _skip.textContent = left ? "skip \xD7" + left + " \xB7 Esc" : "skip \xB7 Esc";
       }
-    };
-    step();
-  }
-  function celebrate(a) {
-    if (!a) return;
-    if (_hold(() => celebrate(a))) return;
-    _q.push(a);
-    if (!_playing) _next();
-  }
-  function _next() {
-    if (!_q.length) {
-      _playing = false;
-      return;
+    } else {
+      _play(built, HOLD[tier] || 4600);
     }
-    if (_hold(_next)) {
-      _playing = false;
-      return;
-    }
-    _playing = true;
-    const a = _q.shift(), tier = a.tier || "common";
-    _chime(tier);
-    const built = _mkMoment(a, {});
-    _flair(built, a);
-    _play(built, HOLD[tier] || 4600, _next);
   }
   function check() {
     load(true);
   }
+  function _takeover() {
+    _q.length = 0;
+    _endParade();
+    const m = _cur;
+    if (m) {
+      clearTimeout(m._t);
+      m._d = true;
+      m._adv = true;
+      if (m.parentNode) m.remove();
+      _cur = null;
+      _curBuilt = null;
+    }
+  }
   function replay(a, opts) {
     if (!a || !a.id) return {};
     opts = opts || {};
-    _q.length = 0;
-    _playing = false;
-    _endParade();
-    const tier = a.tier || "common";
-    _chime(tier);
-    const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });
-    _flair(built, a, { replay: true });
-    _play(built, HOLD[tier] || 4600, null);
+    _takeover();
+    _q.push({ a, opts, replay: true });
+    _drain();
+    const built = _curBuilt;
+    if (!built) return {};
     const rEl = built.tw.querySelector(".toast .tbody .r");
     return {
       setText(text) {
