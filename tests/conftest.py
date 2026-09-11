@@ -17,6 +17,106 @@ _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
 
 
+def clear_sealed_caches():
+    """Reset the three module-level caches that would otherwise answer one install's
+    question with another install's roster.
+
+    `_sealed_cache` (the parsed definitions), `_container_cache` (the opened box) and
+    `_earned_ids_cache` (a 5s-TTL memo keyed on NOTHING -- out_dir is not part of the key)
+    are process globals, so they outlive whichever tmp_path wrote them. Every place that
+    re-points `_container_path()` at a different file has to clear all three on both sides
+    of the swap, and this is that one place."""
+    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
+    gallery._container_cache.update(path=None, mtime=None, box=None)
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+
+
+def seed_sealed_container(container_path):
+    """Write the sealed achievement roster to `container_path`, from the private donor.
+
+    The ONE implementation of "give this install the real roster", shared by the autouse
+    per-test fixture below and by tests/test_render_harness.py's module-scoped server
+    fixture. The harness needs it because a module-scoped fixture is set up BEFORE the
+    function-scoped autouse ones: without seeding its own container first, its achievement
+    state at setup came from whatever pack happened to be sitting beside the checkout --
+    a full roster on a dev box, an empty one on CI, and therefore a different pre-seeded
+    `seen`/`earned_at` per machine (2026-09-10).
+
+    Donor absent (public CI, no companion repo): nothing is written, `_sealed_defs()` falls
+    through to its free-skins fallback, the roster is empty and donor-gated tests skip.
+    That is the behaviour every caller wants there, and pinning it HERE -- rather than
+    letting the filesystem beside the checkout decide -- is what makes a dev box and CI
+    agree on which tests run."""
+    container_path = Path(container_path)
+    if _SEALED_DONOR.is_file():
+        defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+        _mc.write_container(container_path, {"_seed.txt": b"x"},
+                            {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
+    clear_sealed_caches()
+
+
+# The REAL coded goods tree, resolved at conftest IMPORT time -- earlier than any fixture
+# can run, so no monkeypatch of branding_root() has had a chance to redirect it yet. The
+# guard below compares against this Path object instead of re-calling the resolver, so a
+# test that leaves the resolver patched cannot point the guard at a decoy.
+_REAL_CODED_ROOT = gallery.branding_root()
+
+
+def _snapshot_coded_tree():
+    """A read-only census of the real coded tree: {relpath: (size, mtime_ns)}.
+
+    Returns None for "the folder is not there", which is its own fact worth guarding: a
+    test that CREATES it is as much of a violation as one that edits it (create_app()
+    calls ensure_branding_discovery_tree(), so an un-pinned server fixture builds the
+    tree in the checkout just by starting). Never creates and never writes -- a bare
+    exists() check, then walk and stat."""
+    if not _REAL_CODED_ROOT.exists():
+        return None
+    out = {}
+    for dirpath, _dirnames, filenames in os.walk(_REAL_CODED_ROOT):
+        for name in filenames:
+            path = Path(dirpath) / name
+            try:
+                st = path.stat()
+            except OSError:                    # vanished mid-walk; the diff will say so
+                continue
+            out[str(path.relative_to(_REAL_CODED_ROOT))] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_coded_tree_untouched():
+    """No test reads or writes the checkout's own coded tree -- and this proves it.
+
+    Every fixture that needs a branding tree or a sealed pack pins its own (the autouse
+    `_isolated_branding` per test, `seed_sealed_container` above for the module-scoped
+    harness server). That is the rule; this is the enforcement. Snapshot at session start,
+    re-snapshot at session end, fail on any difference -- including the tree coming into
+    existence where there was none, which is how the machine-dependent harness announced
+    itself on 2026-09-10.
+
+    Session scope and autouse so it brackets the whole run: it is set up before any
+    module- or function-scoped fixture of the first test, and torn down after the last."""
+    before = _snapshot_coded_tree()
+    yield
+    after = _snapshot_coded_tree()
+    if before == after:
+        return
+    if before is None:
+        pytest.fail("a test CREATED the real coded tree at {} -- every fixture that needs "
+                    "one must pin its own branding_root(). Files now there: {} (an empty "
+                    "list means folders only)".format(_REAL_CODED_ROOT, sorted(after)))
+    if after is None:
+        pytest.fail("a test REMOVED the real coded tree at {} -- it held {} file(s) at "
+                    "session start.".format(_REAL_CODED_ROOT, len(before)))
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    modified = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    pytest.fail("the real coded tree at {} changed during this run -- no test may read or "
+                "write it; pin your own branding_root(). added={} removed={} modified={}"
+                .format(_REAL_CODED_ROOT, added, removed, modified))
+
+
 def pytest_sessionstart(session):
     """One loud line when the sealed donor is absent, naming the file and how many tests
     it gates.
@@ -145,20 +245,9 @@ def _sealed_roster_container(request, tmp_path):
     if "test_assets" in request.node.nodeid:
         yield
         return
-    if _SEALED_DONOR.is_file():
-        defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
-        _mc.write_container(tmp_path / "moonglade.dat", {"_seed.txt": b"x"},
-                            {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
-    gallery._container_cache.update(path=None, mtime=None, box=None)
-    # The earned-ids cache is a 5s-TTL module global keyed on nothing (out_dir is
-    # not part of the key), so without a reset one test's earned set can answer
-    # another test's seal check inside the window. Clear it around each test too.
-    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    seed_sealed_container(tmp_path / "moonglade.dat")
     yield
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
-    gallery._container_cache.update(path=None, mtime=None, box=None)
-    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    clear_sealed_caches()
 
 
 @pytest.fixture()

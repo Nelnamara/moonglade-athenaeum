@@ -199,16 +199,31 @@ def render_server(tmp_path_factory):
     quieted werkzeug logger are all gone before any later test file runs.
 
     Its own `pytest.MonkeyPatch` (the function-scoped `monkeypatch` fixture cannot reach
-    module scope) pins the same three things conftest's autouse fixtures pin per test, so
-    the server never sees this machine's real config or credentials:
+    module scope) pins the same things conftest's autouse fixtures pin per test, so the
+    server never sees this machine's real config, credentials, coded tree or pack:
     `MOONGLADE_DISABLE_WATCH=1` (no live-mirror WebSocket), `core._config_path` (so
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
-    checkout) and an empty `core._cfg`.
+    checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the discovery
+    tree `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
+    `moonglade.dat`, land under this fixture's own root).
+
+    That last pin is load-bearing and was missing until 2026-09-10. A module-scoped fixture
+    is set up BEFORE the function-scoped autouse ones, so at the moment the achievement
+    block below ran, `branding_root()` was still the real resolver: `_container_path()`
+    named the checkout's own `moonglade.dat`. A dev box has a full pack there and pre-seeded
+    every earned id into `seen`/`earned_at`; CI has none and pre-seeded nothing. Same code,
+    two different fixtures, decided by a file nobody in this module wrote. The pin plus
+    `seed_sealed_container()` (conftest's, the same helper the per-test fixture uses) makes
+    the container this fixture reads one it wrote itself -- from the private donor when it
+    is checked out, and absent exactly as on CI when it is not.
     """
     import logging
     from types import SimpleNamespace
 
     from werkzeug.serving import make_server
+
+    import moonglade_gallery as _gallery
+    from tests.conftest import clear_sealed_caches, seed_sealed_container
 
     # A browser pulls ~40 sub-resources per page; werkzeug's per-request access log buries
     # a real failure's traceback in captured output. Restored on teardown.
@@ -222,6 +237,10 @@ def render_server(tmp_path_factory):
     mp.setenv("MOONGLADE_DISABLE_WATCH", "1")
     mp.setattr(core, "_config_path", lambda: config_path)
     mp.setattr(core, "_cfg", {})
+    # BEFORE anything below reads achievement state (and before create_app() builds a
+    # discovery tree): this fixture's own coded tree, and its own sealed pack beside it.
+    mp.setattr(_gallery, "branding_root", lambda: root / "branding")
+    seed_sealed_container(root / "moonglade.dat")
 
     save_catalog(root / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {
@@ -306,6 +325,10 @@ def render_server(tmp_path_factory):
         server.shutdown()
         thread.join(timeout=5)
         mp.undo()
+        # The container caches are process globals: clear them on the way out too, or this
+        # module's pack answers the next module's seal check (same two-sided contract
+        # conftest's per-test fixture keeps).
+        clear_sealed_caches()
         wz_log.setLevel(wz_level)
 
 
@@ -4079,21 +4102,24 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
          it and marks it seen BEFORE the drop is even written, and the post-drop reload the
          test captures reports `newly: []`. Caught 2026-09-10 by tracing every
          /api/achievements response across login and reload: two ?mark=1 fetches, the
-         FIRST carrying the feat. Whether the fixture pins it at all depends on the machine
-         -- see 4 -- which is why this went unnoticed: CI has no donor, so the assertion is
-         skipped there, and it only ever ran on a box that also had a real pack beside the
-         checkout.
+         FIRST carrying the feat. It went unnoticed because whether the fixture pinned it
+         used to depend on the machine -- see 4 -- and CI, which has no donor, skips the
+         assertion. Still required now that the fixture is hermetic: donor present, the
+         roster is full and every earned id (this feat included, since the fixture arms its
+         flag itself) IS pinned, so the un-pin below is what makes the earn a first earn.
       4. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
          library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
-         which the fixture computes at module setup from whatever roster the machine's
-         container yields at that moment -- module-scoped fixtures set up before conftest's
-         per-test container is pinned, so `_container_path()` still resolves to the
-         checkout's own moonglade.dat: no file there (CI) and the roster is empty, nothing
-         is seen or pinned and the gate reads "still syncing"; a real pack there (a dev
-         box) and the roster is full, everything earned is pinned. The flag is set here
-         explicitly so the gate never depends on which. An install with a fully swept
-         catalog, which is exactly what this harness serves, has that flag set; it is set
-         here for the same reason the API key above it is.
+         which the fixture computes at module setup from the roster its container yields.
+         That container used to be the checkout's own moonglade.dat -- module-scoped
+         fixtures are set up before conftest's per-test container is pinned -- so the
+         backfill depended on a file nobody in this module wrote: none there (CI) and the
+         roster is empty, nothing seen or pinned and the gate reads "still syncing"; a real
+         pack there (a dev box) and the roster is full, everything earned is pinned. The
+         fixture now seeds its own container from the donor (2026-09-10), so the only
+         remaining fork is donor-vs-no-donor, which is the fork this file gates on
+         deliberately. The flag is still set here explicitly so the gate depends on neither.
+         An install with a fully swept catalog, which is exactly what this harness serves,
+         has that flag set; it is set here for the same reason the API key above it is.
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in

@@ -293,6 +293,32 @@ test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.p
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
 
+- **`python tools/ci_local.py` is THE pre-merge command.** It runs every job the GitHub
+  "Tests" workflow runs, the way CI runs them — pytest with CI's exact ignore list, the
+  loom bundle rebuild plus the committed-`loom/dist`-is-stale check, and the Loom's
+  `node --test` suite — and exits non-zero if any of them fails. `pytest` alone is not the
+  pre-merge check: a front-end move goes red in the node job while pytest stays green, which
+  is how master went red twice in two days (2026-09-08/09). Green here means safe to push.
+- **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
+  "timing" or "this machine" without the trace that proves it, and never skipped, gated or
+  `xfail`ed unless the commit message names the cause. The browser-driven render harness
+  stays in the local run for the same reason — without it every guard in that file is
+  decoration, and the one local failure it ever had was a real precondition bug in a test.
+- **Achievement and celebration work runs from an unearned baseline.** Before building or
+  verifying a celebration, put the feat under test back to genuinely unearned on the dev
+  library — flag cleared, `earned_at` un-pinned, `seen` cleared — because a re-earn never
+  fires and a "nothing happened" from an already-earned feat looks exactly like a broken
+  build. `earned_at` is the one that catches people: since pin-once it is authoritative, so
+  clearing the flag alone un-earns nothing.
+- **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
+  that needs branding art or a sealed roster pins its own `branding_root()` and seeds its
+  own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
+  including module-scoped fixtures, which are set up *before* the per-test autouse isolation
+  and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
+  roster on a dev box, an empty one on CI, different fixture state per machine (2026-09-10).
+  `tests/conftest.py`'s session-scoped guard snapshots that tree at session start and fails
+  the run if anything in it was added, removed or modified — a run that creates it counts.
+
 ---
 
 ## Current state
