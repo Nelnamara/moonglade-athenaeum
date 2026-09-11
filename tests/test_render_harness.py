@@ -4064,20 +4064,36 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
         telemetry flags and the achievement state -- and restores them in a `finally`,
         whether it passes or not.
 
-    THREE preconditions have to be undone for the celebration to be a real earn rather
+    FOUR preconditions have to be undone for the celebration to be a real earn rather
     than a re-run of an already-recognized one, and each is a fixture decision made for an
     unrelated reason:
       1. render_server pre-seeds the `branding_custom_file` flag, to unlock the Branding
          tab for the Control Panel test -- cleared here, so the sweep is what sets it;
       2. it pre-marks every earned achievement `seen`, to stop boot toasts -- this feat is
          un-seen here, so its own toast is allowed to fire;
-      3. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
+      3. it also stamps every earned achievement into `earned_at`, and since #37 (pin-once,
+         2026-08-29) anything in `earned_at` STAYS earned whatever its live metric says.
+         Clearing the flag alone therefore un-earns nothing, so the feat is un-PINNED here
+         too. Without that, the login landing page's own boot fetch (logged_in_page ->
+         _login -> "/" -> installNotify -> ach.check) finds it earned-and-unseen, celebrates
+         it and marks it seen BEFORE the drop is even written, and the post-drop reload the
+         test captures reports `newly: []`. Caught 2026-09-10 by tracing every
+         /api/achievements response across login and reload: two ?mark=1 fetches, the
+         FIRST carrying the feat. Whether the fixture pins it at all depends on the machine
+         -- see 4 -- which is why this went unnoticed: CI has no donor, so the assertion is
+         skipped there, and it only ever ran on a box that also had a real pack beside the
+         checkout.
+      4. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
          library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
-         and the fixture computes those BEFORE conftest's per-test sealed container exists
-         -- module-scoped fixtures set up ahead of function-scoped autouse ones -- so they
-         land empty and the gate reads "still syncing" for the life of the module. An
-         install with a fully swept catalog, which is exactly what this harness serves, has
-         that flag set; it is set here for the same reason the API key above it is.
+         which the fixture computes at module setup from whatever roster the machine's
+         container yields at that moment -- module-scoped fixtures set up before conftest's
+         per-test container is pinned, so `_container_path()` still resolves to the
+         checkout's own moonglade.dat: no file there (CI) and the roster is empty, nothing
+         is seen or pinned and the gate reads "still syncing"; a real pack there (a dev
+         box) and the roster is full, everything earned is pinned. The flag is set here
+         explicitly so the gate never depends on which. An install with a fully swept
+         catalog, which is exactly what this harness serves, has that flag set; it is set
+         here for the same reason the API key above it is.
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
@@ -4104,11 +4120,25 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
         # --- put the feat back to genuinely-unearned, and open the celebration gate ---
         _g._telem_mutate(root, lambda d: d["flags"].pop("branding_custom_file", None))
         telem_flag("first_sync_done", out_dir=root)
-        save_ach_state(root, dict(ach_before, seen=[
-            i for i in (ach_before.get("seen") or []) if i != _UNDER_THE_HOOD]))
+        save_ach_state(root, dict(
+            ach_before,
+            seen=[i for i in (ach_before.get("seen") or []) if i != _UNDER_THE_HOOD],
+            # precondition 3: `earned_at` is authoritative (pin-once), so an id left in it
+            # is earned no matter what the flag above says
+            earned_at={k: v for k, v in (ach_before.get("earned_at") or {}).items()
+                       if k != _UNDER_THE_HOOD}))
         assert not load_telemetry(root)["flags"].get("branding_custom_file")
+        assert _UNDER_THE_HOOD not in (load_ach_state(root).get("earned_at") or {}), (
+            "the feat is still pinned in earned_at -- the login page would earn it first")
 
         page = logged_in_page(**DESKTOP)
+        if _SEALED_DONOR.is_file():
+            # The landing page must NOT have celebrated it already: that is the exact
+            # failure precondition 3 exists to prevent, and this names it at the point it
+            # happens rather than three assertions later as an empty `newly`.
+            assert page.locator(".ach-m2").count() == 0, (
+                "a celebration fired on the login landing page, before the drop -- the feat "
+                "was already earned (pinned or flagged) when the page first booted")
 
         # --- the drop itself: a picture, by hand, into the slot folder ---
         drop = sdir / "my_own_banner.png"
