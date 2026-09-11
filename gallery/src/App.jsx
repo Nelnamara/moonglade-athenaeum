@@ -692,15 +692,16 @@ export default function App({ boot }) {
      than over it: on a first earn the celebration is not merely delayed, it has not been built
      yet, so the two layers cannot share the screen.
 
-     And the other direction, which arming alone cannot cover: a moment ALREADY on screen when
-     the code is entered is a layer the cast would paint UNDER (.ach-m2 is z-index 520, the
-     cast's layer 449). So the cast does not start on the keypress -- it starts from ach.js's
-     whenClear() hook, which runs it at once when nothing is presenting and otherwise the
-     instant that moment has been torn down. The arm happens inside that callback, so the cast
-     is never the thing waiting and the moment is never the thing painted over. The cost is
-     that entering the code during a celebration delays the starfall by at most that
-     celebration's own hold (HOLD in ach.js, 4.2-6.4s), which is exactly as long as the thing
-     it would otherwise have hidden behind.
+     And the other direction, which arming alone cannot cover: anything ALREADY on screen when
+     the code is entered is a layer the cast would paint UNDER (.ach-m2 is z-index 520 and the
+     parade's chips 519/521, against the cast's 449). So the cast does not start on the
+     keypress -- it starts from ach.js's whenClear() hook, which runs it at once when that
+     layer is EMPTY and otherwise the instant the last thing on it has left the DOM. The arm
+     happens inside that callback, so the cast is never the thing waiting and nothing is ever
+     the thing painted over. The cost is that entering the code mid-celebration delays the
+     starfall by at most that celebration's own hold (HOLD in ach.js, 4.2-6.4s) plus the 500ms
+     a parade's already-receded cards take to fade -- and a waiting cast is what sends those
+     cards away, so the wait is never the length of a whole parade.
 
      The cast FIRES that toast itself (achCheck() below, once the layer is up). Nothing in the
      app polls achievements -- check() runs once per boot and after a generation -- so without
