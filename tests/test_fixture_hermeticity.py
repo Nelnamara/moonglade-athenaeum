@@ -16,27 +16,31 @@ silently absent, and deleting the session pin would have produced a green run. T
 needs no browser and no server: it resolves two paths. It belongs where every run sees it.
 
 `_real_coded_tree_untouched` (conftest) remains the backstop for WRITES. It cannot see a
-read -- on a checkout that already holds the discovery folders an un-pinned `create_app()`
-writes nothing new -- which is why the prevention below is the thing that has to hold.
+read -- on a checkout where that tree already exists, an un-pinned `create_app()` writes
+nothing new -- which is why the prevention below is the thing that has to hold.
 
-Three invariants live here, and they are different claims. One: no module-scoped fixture can
+Four invariants live here, and they are different claims. One: no module-scoped fixture can
 reach the real tree or the real pack (the session pin holds). Two: each harness server
 fixture that needs to pin and seed for ITSELF still does -- which the session pin now masks,
 since a harness that lost its pin would land in the session's tmp root and look fine. Three:
-no harness server takes an achievement mark from the wall clock; every one of them settles
-that mark in its own ledger first. The first is measured live; the other two are read off
-the harness's source, because measuring them is exactly what the floors beneath them made
-impossible.
+every harness server pins its clock before it starts serving. Four: that pin actually keeps
+the hour out of an install's ledger -- measured against the real route at 03:00, because a
+source-level check can only see the spelling of a call.
+
+One and four are measured live; two and three are read off the harness's source, because
+measuring them is exactly what the floors beneath them made impossible.
 """
 import ast
+import datetime as _dt
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
 
-# Every fixture in the harness that starts a server. Each must settle the clock-driven
-# achievement mark; the two that are NOT covered by conftest's function-scoped autouse
+# Every fixture in the harness that starts a server. Each must pin its clock before that
+# server can answer; the two that are NOT covered by conftest's function-scoped autouse
 # isolation must also pin their own coded tree and seed their own pack.
 _SERVER_FIXTURES = ("render_server", "fresh_install_server", "paged_library_server")
 _PINS_ITS_OWN_TREE = ("render_server", "fresh_install_server")
@@ -63,11 +67,25 @@ def _calls_in(fixture_name):
             if isinstance(n, ast.Call)]
 
 
+def _call_name(call):
+    """`f(...)` -> "f"; `x.f(...)` -> "f"; anything else -> None."""
+    return (call.func.id if isinstance(call.func, ast.Name)
+            else getattr(call.func, "attr", None))
+
+
 def _calls_by_name(calls, name):
     """True when any of `calls` calls a plain `name(...)` or an `x.name(...)`."""
-    return any((c.func.id if isinstance(c.func, ast.Name)
-                else getattr(c.func, "attr", None)) == name
-               for c in calls)
+    return any(_call_name(c) == name for c in calls)
+
+
+def _first_call_lineno(calls, name):
+    """The line of the FIRST `name(...)` in `calls`, or None when there is none.
+
+    Position, not just presence: the clock guard below is about ordering inside the fixture
+    body, and a presence-only check cannot see an edit that moves a call after the thing it
+    was supposed to precede."""
+    hits = [c.lineno for c in calls if _call_name(c) == name]
+    return min(hits) if hits else None
 
 
 @pytest.mark.parametrize("fixture_name", _PINS_ITS_OWN_TREE)
@@ -112,29 +130,143 @@ def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
 
 
 @pytest.mark.parametrize("fixture_name", _SERVER_FIXTURES)
-def test_every_harness_server_settles_the_clock_driven_mark(fixture_name):
+def test_every_harness_server_pins_its_clock_before_it_starts_serving(fixture_name):
     """A harness result must never be a property of the hour the run started in.
 
-    `/api/achievements` reads the hour off the wall clock and, for part of the day, writes
-    the `session_hour` telemetry flag into the install's own ledger. An achievement reads
-    that flag, so it can arrive as newly earned mid-test and put the full-screen celebration
-    overlay over whatever was being measured. A downstream lane lost a run to exactly that,
-    purely because it started in the small hours.
+    `/api/achievements` reads the hour off the wall clock and, for part of the night, writes
+    a telemetry flag into the install's own ledger. An achievement reads that flag, so it can
+    arrive as newly earned mid-test and put the full-screen celebration overlay over whatever
+    was being measured. A downstream lane lost a run to exactly that, purely because it
+    started in the small hours.
 
-    Every fixture that starts a server therefore writes that mark itself, before it works
-    out what is already `seen`. Same mask as the root/pack pin above, and worse: for most of
-    the day a fixture that leaves it to the clock looks perfect, so this cannot be measured
-    by watching a passing run. It is asserted at the source level, as a call to
-    `settle_the_time_of_day` in the fixture's own body.
+    Every fixture that starts a server therefore pins its install to a fixed daytime weekday
+    instant (`tests/conftest.py::pin_daytime_clock`, with the fixture's own MonkeyPatch),
+    and pins it BEFORE `make_server` -- a pin installed after the server is serving is a pin
+    with a hole the width of whatever arrived first. Both halves are asserted here, and both
+    are source-level for the same reason the root/pack pin above is: for most of the day a
+    fixture that leaves this to the clock looks perfect, so a passing run proves nothing.
 
-    (The other lever -- replacing `datetime.datetime` for the fixture's lifetime -- was
-    built and measured and cannot be used; `settle_the_time_of_day`'s own docstring carries
-    what it did and how that was isolated.)"""
-    assert _calls_by_name(_calls_in(fixture_name), "settle_the_time_of_day"), (
-        "tests/test_render_harness.py::{} starts a server without settling the clock-driven "
-        "achievement mark -- whether its install carries that flag, and so whether an "
-        "achievement lands mid-test, would be decided by the hour the suite happened to "
-        "start".format(fixture_name))
+    What this cannot see is whether the pin still WORKS -- a call by the right name can have
+    had its body gutted. That is the next test's job, and it is measured against the real
+    route, not read."""
+    calls = _calls_in(fixture_name)
+    pinned = _first_call_lineno(calls, "pin_daytime_clock")
+    assert pinned is not None, (
+        "tests/test_render_harness.py::{} starts a server without pinning its clock -- "
+        "whether its install carries the hour-driven flag, and so whether an achievement "
+        "lands mid-test, would be decided by the hour the suite happened to start"
+        .format(fixture_name))
+    served = _first_call_lineno(calls, "make_server")
+    assert served is not None, (
+        "tests/test_render_harness.py::{} no longer starts its server with make_server(), "
+        "so this guard can no longer tell whether the clock pin precedes it -- re-point it "
+        "at whatever starts the server now".format(fixture_name))
+    assert pinned < served, (
+        "tests/test_render_harness.py::{} pins its clock at line {}, AFTER the server it "
+        "starts at line {} -- every request that arrives in between reads the wall clock"
+        .format(fixture_name, pinned, served))
+
+
+class _ThreeAM(_dt.datetime):
+    """The wall clock inside the window the route writes the hour-driven flag in. The
+    suite's existing idiom (tests/test_achievements.py, tests/test_telemetry.py) with the
+    hands moved to the hour that is actually dangerous instead of away from it."""
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2025, 6, 11, 3, 0, 0)
+
+
+def test_the_clock_pin_keeps_the_hour_out_of_an_installs_ledger(tmp_path):
+    """The pin's EFFECT, measured through the real route -- the half no source read covers.
+
+    Both halves run `/api/achievements` on a real app at 03:00, and the control is what makes
+    the result mean anything: un-pinned, the flag must land, which proves this probe can see
+    the write at all. Pinned, the same request at the same hour must leave the ledger clear.
+    Gut `pin_daytime_clock`'s body and the second half goes red here while every source-level
+    check above stays green.
+
+    No donor needed: this asserts the telemetry ledger, not the roster, so it holds on public
+    CI as well as on a machine with the sealed definitions."""
+    import moonglade_gallery as g
+    from moonglade_gallery import save_catalog
+
+    from tests.conftest import HOUR_DRIVEN_FLAG, login_client, pin_daytime_clock
+
+    unpinned = tmp_path / "unpinned"
+    unpinned.mkdir()
+    save_catalog(unpinned / "catalog.db", [])
+    with mock.patch("datetime.datetime", _ThreeAM):
+        assert login_client(unpinned).get("/api/achievements").status_code == 200
+    assert g.load_telemetry(unpinned)["flags"].get(HOUR_DRIVEN_FLAG) == 1, (
+        "the control half never wrote the hour-driven flag, so this test cannot say anything "
+        "about the pin: either the route stopped reading the clock (then delete the pin and "
+        "this test) or the clock substitution no longer reaches it (then fix the probe)")
+
+    pinned = tmp_path / "pinned"
+    pinned.mkdir()
+    save_catalog(pinned / "catalog.db", [])
+    mp = pytest.MonkeyPatch()
+    pin_daytime_clock(mp)
+    try:
+        with mock.patch("datetime.datetime", _ThreeAM):
+            assert login_client(pinned).get("/api/achievements").status_code == 200
+    finally:
+        mp.undo()
+    assert HOUR_DRIVEN_FLAG not in g.load_telemetry(pinned)["flags"], (
+        "conftest's pin_daytime_clock() no longer keeps the hour-driven flag out of an "
+        "install's ledger -- every harness server's achievement state is a property of when "
+        "the suite ran again")
+
+
+class _DayOne(_dt.date):
+    @classmethod
+    def today(cls):
+        return cls(2025, 6, 11)
+
+
+class _DayTwo(_dt.date):
+    @classmethod
+    def today(cls):
+        return cls(2025, 6, 12)
+
+
+def test_the_clock_pin_records_one_day_even_across_midnight(tmp_path):
+    """The pin's other half: an install at a single instant records ONE day in the ledger.
+
+    `days_used` and the streak metrics are counted off that ledger, so a run long enough to
+    cross local midnight steps them up mid-run -- rare, and exactly the kind of rare that
+    reads as a flaky harness at 00:00 and is unreproducible at 10:00. The control half here
+    is the crossing itself: un-pinned, two marks under two dates record two days.
+
+    The date STRING is deliberately not pinned. No metric reads it; they read the count and
+    the streaks over the list, and both are pinned by there being one entry."""
+    import moonglade_gallery as g
+
+    from tests.conftest import pin_daytime_clock
+
+    unpinned = tmp_path / "unpinned-days"
+    unpinned.mkdir()
+    for day in (_DayOne, _DayTwo):
+        with mock.patch("datetime.date", day):
+            g.telem_mark_day(out_dir=unpinned)
+    assert len(g.load_telemetry(unpinned)["days"]) == 2, (
+        "the control half never recorded two days, so this test cannot say anything about "
+        "the pin -- the day ledger no longer works the way the pin is written against")
+
+    pinned = tmp_path / "pinned-days"
+    pinned.mkdir()
+    mp = pytest.MonkeyPatch()
+    pin_daytime_clock(mp)
+    try:
+        for day in (_DayOne, _DayTwo):
+            with mock.patch("datetime.date", day):
+                g.telem_mark_day(out_dir=pinned)
+    finally:
+        mp.undo()
+    assert len(g.load_telemetry(pinned)["days"]) == 1, (
+        "conftest's pin_daytime_clock() no longer holds the day ledger at one entry -- a "
+        "harness run that crosses local midnight moves days_used and the streak metrics "
+        "under whatever is being measured")
 
 
 @pytest.fixture(scope="module")
@@ -156,8 +288,8 @@ def test_a_module_scoped_fixture_can_never_reach_the_real_coded_tree(unpinned_mo
     """The machine-dependence itself, asserted -- not the symptom it produced.
 
     conftest's `_real_coded_tree_untouched` watches the real tree for WRITES, and a read
-    leaves nothing for it to see: on a checkout that already holds the discovery folders
-    (the owner's does) an un-pinned `create_app()` writes nothing new, yet `_container_path()`
+    leaves nothing for it to see: on a checkout where that tree already exists (the owner's
+    does) an un-pinned `create_app()` writes nothing new, yet `_container_path()`
     quietly names the real pack and the fixture's achievement state becomes a property of the
     machine. So the rule is enforced by prevention -- conftest's session-scoped
     `_real_coded_tree_pinned_away` -- and this is the test that the prevention holds at the

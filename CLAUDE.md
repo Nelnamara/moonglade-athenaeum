@@ -347,7 +347,7 @@ recently within hours of a "correction." All tests must pass before merging to m
   and its session-scoped guard snapshots that tree (files *and* folders) at session start and
   fails the run if anything in it was added, removed or modified — a run that creates it
   counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
-  on a checkout that already holds the discovery folders, an un-pinned `create_app()` writes
+  on a checkout where that tree already exists, an un-pinned `create_app()` writes
   nothing new and still reads the real pack. That the pin holds is itself asserted, in
   `tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
   self-skips without playwright and is excludable with `-m "not render"`: a suite-wide

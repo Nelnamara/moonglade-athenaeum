@@ -55,6 +55,80 @@ def seed_sealed_container(container_path):
     clear_sealed_caches()
 
 
+# The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any
+# daytime weekday reading would do -- what matters is that it never moves, and that it is
+# outside the narrow window moonglade_gallery.py's /api/achievements writes `session_hour`
+# in (2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
+# the value a pinned clock produces is what the pin below reproduces, not the clock object.
+PINNED_INSTANT = "13:00, Wednesday 2025-06-11, local"
+
+# The one telemetry flag whose write is decided by the hour of the run. Public because
+# tests/test_fixture_hermeticity.py measures the pin against it rather than re-spelling it.
+HOUR_DRIVEN_FLAG = "session_hour"
+
+
+def pin_daytime_clock(mp):
+    """Make an install answer as it would at `PINNED_INSTANT`, for every wall-clock read an
+    achievement metric can reach, for the lifetime of `mp` (the caller's own MonkeyPatch).
+
+    THE SURVEY, re-run 2026-09-11 over both modules (`datetime.now()` / `date.today()` /
+    `.hour` / weekday arithmetic). Three reads can reach an achievement metric, all in
+    `/api/achievements`: `date.today()` into the distinct-days ledger (`days_used` and the
+    streak metrics), `datetime.now().hour` into the `session_hour` flag, and `date.today()`
+    again for the `earned_at` stamps, which no metric reads. Everything else is not a
+    metric input -- a printed date string in the collection-print payload, the timezone
+    offset the activity chart is bucketed by, a search filter's date window -- and
+    `moonglade_backup.py`'s one age comparison (`old_piece_backed_up`, 730 days) lives in
+    the download loop, which no server runs. No metric reads a weekday at all.
+
+    WHAT THE PIN DOES, read against those three:
+      * The hour. At 13:00 the route's window is closed, so the flag is never written. The
+        wrapper below drops exactly that key and passes every other flag through untouched,
+        which is the same answer the route itself gives at the pinned hour.
+      * The day. At a single instant the ledger records one day, once. Left alone, a run
+        that crosses local midnight records a second, and `days_used` steps up mid-run. The
+        wrapper marks each ledger once per install and drops the repeat. The date string it
+        records is still today's -- no metric reads the string, only the count and the
+        streaks over it, and both are pinned by there being exactly one entry.
+      * The stamps. `earned_at` values are dates in the install's own state file; no
+        threshold is computed from them.
+
+    WHY NOT THE CLOCK ITSELF. The route reads the clock through a function-local
+    `import datetime`, so the only lever that reaches it is substituting `datetime.datetime`
+    process-wide (the `mock.patch("datetime.datetime", _FixedNoon)` idiom this suite already
+    uses around single test-client calls). That idiom cannot be held open for a server
+    fixture's lifetime here: the render harness answers on werkzeug request threads whose
+    routes import heavy libraries lazily (the similar route pulls pandas, which pulls
+    dateutil.tz), and with `datetime.datetime` substituted that import chain ends in a
+    Windows stack overflow that takes the interpreter down mid-module -- reproduced three
+    times end to end against a baseline that runs the file green, then isolated (a subclass
+    whose `now()` returns the REAL time crashes identically, so it is the substitution and
+    not the frozen value). So the pin is applied at the two seams the clock feeds instead of
+    at the clock, and lands on the same install state a frozen daytime clock would.
+
+    Effects are asserted, not assumed: tests/test_fixture_hermeticity.py drives the real
+    route at 03:00 with and without this pin.
+    """
+    real_flag = gallery.telem_flag
+    real_mark_day = gallery.telem_mark_day
+    marked = set()
+
+    def _flag_at_the_pinned_instant(key, out_dir=None):
+        if key == HOUR_DRIVEN_FLAG:
+            return
+        return real_flag(key, out_dir=out_dir)
+
+    def _mark_day_at_the_pinned_instant(out_dir=None, keys=None):
+        token = (str(out_dir), tuple(keys) if keys is not None else None)
+        if token in marked:
+            return
+        marked.add(token)
+        return real_mark_day(out_dir=out_dir, keys=keys)
+
+    mp.setattr(gallery, "telem_flag", _flag_at_the_pinned_instant)
+    mp.setattr(gallery, "telem_mark_day", _mark_day_at_the_pinned_instant)
+
+
 # The REAL coded goods tree, resolved at conftest IMPORT time -- earlier than any fixture
 # can run, so no monkeypatch of branding_root() has had a chance to redirect it yet. The
 # guard below compares against this Path object instead of re-calling the resolver, so a
@@ -73,7 +147,7 @@ def _snapshot_coded_tree():
 
     FOLDERS are recorded as well as files, and that is not tidiness. The side effect this
     guard was written for is `ensure_branding_discovery_tree()`, which mkdirs every
-    discovery slot in `_BRANDING_DISCOVERY_SLOTS` and writes the breadcrumb README only
+    slot in `_BRANDING_DISCOVERY_SLOTS` and writes its placeholder README only
     `if not readme.exists()` (moonglade_gallery.py:3156-3161). On a checkout with no tree
     at all that is a set of FOLDERS and a single file -- and the folders are the bulk of
     it, because each slot's coded rel is itself nested (`ROLE_CODE`), so `parents=True`
@@ -143,8 +217,8 @@ def _real_coded_tree_untouched():
     itself on 2026-09-10.
 
     What it cannot see, and why the pin above exists: a READ leaves no trace, and on a
-    checkout that already holds the discovery folders and the breadcrumb (the owner's own --
-    the machine CLAUDE.md names for the pre-merge run) an un-pinned `create_app()` writes
+    checkout where that tree already exists (the owner's own -- the machine CLAUDE.md names
+    for the pre-merge run) an un-pinned `create_app()` writes
     nothing new, so this guard would pass in silence on the one machine where the 2026-09-10
     bug actually lived. A watcher cannot be the whole answer to a read; prevention is.
 
