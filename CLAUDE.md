@@ -302,12 +302,16 @@ recently within hours of a "correction." All tests must pass before merging to m
   front-end move goes red in the node job while pytest stays green, which is how master
   went red twice in two days (2026-09-08/09).
   It **refuses to start** until this machine has what CI's own install steps provide —
-  `gallery/node_modules`, `loom/node_modules`, a playwright chromium — because the three
-  checks that need them (both committed-bundle freshness tests and the whole render
+  `gallery/node_modules`, `loom/node_modules`, a chromium that actually *launches* — because
+  the three checks that need them (both committed-bundle freshness tests and the whole render
   harness) are written to skip themselves, so a run without them prints green while saying
   nothing about the bundle it never rebuilt or the layout it never measured. It names the
-  command for each gap and installs nothing. Green here means safe to push; a green that
-  skipped the gate you needed is worse than a red.
+  command for each gap and installs nothing. **And it checks afterwards that those three
+  really ran**, off the run's own junit report, because a preflight can only answer "could
+  this check run": the harness skips on a failed browser *launch*, not on a missing path, and
+  the gallery-bundle test also skips on `MOONGLADE_SKIP_GALLERY_BUILD` or a half-missing
+  `gallery/dist`. A gate that skipped fails the run and is named. Green here means safe to
+  push; a green that skipped the gate you needed is worse than a red.
 - **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
   "timing" or "this machine" without the trace that proves it, and never skipped, gated or
   `xfail`ed unless the commit message names the cause. The browser-driven render harness
@@ -331,7 +335,10 @@ recently within hours of a "correction." All tests must pass before merging to m
   fails the run if anything in it was added, removed or modified — a run that creates it
   counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
   on a checkout that already holds the discovery folders, an un-pinned `create_app()` writes
-  nothing new and still reads the real pack.
+  nothing new and still reads the real pack. That the pin holds is itself asserted, in
+  `tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
+  self-skips without playwright and is excludable with `-m "not render"`: a suite-wide
+  invariant whose only assertion can be gated away is not an invariant.
 
 ---
 
