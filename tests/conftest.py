@@ -17,6 +17,233 @@ _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
                  / "moonglade-internal" / "achievements_folio_donor.json")
 
 
+def clear_sealed_caches():
+    """Reset the three module-level caches that would otherwise answer one install's
+    question with another install's roster.
+
+    `_sealed_cache` (the parsed definitions), `_container_cache` (the opened box) and
+    `_earned_ids_cache` (a 5s-TTL memo keyed on NOTHING -- out_dir is not part of the key)
+    are process globals, so they outlive whichever tmp_path wrote them. Every place that
+    re-points `_container_path()` at a different file has to clear all three on both sides
+    of the swap, and this is that one place."""
+    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
+    gallery._container_cache.update(path=None, mtime=None, box=None)
+    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+
+
+def seed_sealed_container(container_path):
+    """Write the sealed achievement roster to `container_path`, from the private donor.
+
+    The ONE implementation of "give this install the real roster", shared by the autouse
+    per-test fixture below and by tests/test_render_harness.py's module-scoped server
+    fixture. The harness needs it because a module-scoped fixture is set up BEFORE the
+    function-scoped autouse ones: without seeding its own container first, its achievement
+    state at setup came from whatever pack happened to be sitting beside the checkout --
+    a full roster on a dev box, an empty one on CI, and therefore a different pre-seeded
+    `seen`/`earned_at` per machine (2026-09-10).
+
+    Donor absent (public CI, no companion repo): nothing is written, `_sealed_defs()` falls
+    through to its free-skins fallback, the roster is empty and donor-gated tests skip.
+    That is the behaviour every caller wants there, and pinning it HERE -- rather than
+    letting the filesystem beside the checkout decide -- is what makes a dev box and CI
+    agree on which tests run."""
+    container_path = Path(container_path)
+    if _SEALED_DONOR.is_file():
+        defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
+        _mc.write_container(container_path, {"_seed.txt": b"x"},
+                            {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
+    clear_sealed_caches()
+
+
+# The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any
+# daytime weekday reading would do -- what matters is that it never moves, and that it is
+# outside the narrow window moonglade_gallery.py's /api/achievements writes `session_hour`
+# in (2 <= hour < 4). Documentation only: nothing constructs a datetime from it, because
+# the value a pinned clock produces is what the pin below reproduces, not the clock object.
+PINNED_INSTANT = "13:00, Wednesday 2025-06-11, local"
+
+# The one telemetry flag whose write is decided by the hour of the run. Public because
+# tests/test_fixture_hermeticity.py measures the pin against it rather than re-spelling it.
+HOUR_DRIVEN_FLAG = "session_hour"
+
+
+def pin_daytime_clock(mp):
+    """Make an install answer as it would at `PINNED_INSTANT`, for every wall-clock read an
+    achievement metric can reach, for the lifetime of `mp` (the caller's own MonkeyPatch).
+
+    THE SURVEY, re-run 2026-09-11 over both modules (`datetime.now()` / `date.today()` /
+    `.hour` / weekday arithmetic). Three reads can reach an achievement metric, all in
+    `/api/achievements`: `date.today()` into the distinct-days ledger (`days_used` and the
+    streak metrics), `datetime.now().hour` into the `session_hour` flag, and `date.today()`
+    again for the `earned_at` stamps, which no metric reads. Everything else is not a
+    metric input -- a printed date string in the collection-print payload, the timezone
+    offset the activity chart is bucketed by, a search filter's date window -- and
+    `moonglade_backup.py`'s one age comparison (`old_piece_backed_up`, 730 days) lives in
+    the download loop, which no server runs. No metric reads a weekday at all.
+
+    WHAT THE PIN DOES, read against those three:
+      * The hour. At 13:00 the route's window is closed, so the flag is never written. The
+        wrapper below drops exactly that key and passes every other flag through untouched,
+        which is the same answer the route itself gives at the pinned hour.
+      * The day. At a single instant the ledger records one day, once. Left alone, a run
+        that crosses local midnight records a second, and `days_used` steps up mid-run. The
+        wrapper marks each ledger once per install and drops the repeat. The date string it
+        records is still today's -- no metric reads the string, only the count and the
+        streaks over it, and both are pinned by there being exactly one entry.
+      * The stamps. `earned_at` values are dates in the install's own state file; no
+        threshold is computed from them.
+
+    WHY NOT THE CLOCK ITSELF. The route reads the clock through a function-local
+    `import datetime`, so the only lever that reaches it is substituting `datetime.datetime`
+    process-wide (the `mock.patch("datetime.datetime", _FixedNoon)` idiom this suite already
+    uses around single test-client calls). That idiom cannot be held open for a server
+    fixture's lifetime here: the render harness answers on werkzeug request threads whose
+    routes import heavy libraries lazily (the similar route pulls pandas, which pulls
+    dateutil.tz), and with `datetime.datetime` substituted that import chain ends in a
+    Windows stack overflow that takes the interpreter down mid-module -- reproduced three
+    times end to end against a baseline that runs the file green, then isolated (a subclass
+    whose `now()` returns the REAL time crashes identically, so it is the substitution and
+    not the frozen value). So the pin is applied at the two seams the clock feeds instead of
+    at the clock, and lands on the same install state a frozen daytime clock would.
+
+    Effects are asserted, not assumed: tests/test_fixture_hermeticity.py drives the real
+    route at 03:00 with and without this pin.
+    """
+    real_flag = gallery.telem_flag
+    real_mark_day = gallery.telem_mark_day
+    marked = set()
+
+    def _flag_at_the_pinned_instant(key, out_dir=None):
+        if key == HOUR_DRIVEN_FLAG:
+            return
+        return real_flag(key, out_dir=out_dir)
+
+    def _mark_day_at_the_pinned_instant(out_dir=None, keys=None):
+        token = (str(out_dir), tuple(keys) if keys is not None else None)
+        if token in marked:
+            return
+        marked.add(token)
+        return real_mark_day(out_dir=out_dir, keys=keys)
+
+    mp.setattr(gallery, "telem_flag", _flag_at_the_pinned_instant)
+    mp.setattr(gallery, "telem_mark_day", _mark_day_at_the_pinned_instant)
+
+
+# The REAL coded goods tree, resolved at conftest IMPORT time -- earlier than any fixture
+# can run, so no monkeypatch of branding_root() has had a chance to redirect it yet. The
+# guard below compares against this Path object instead of re-calling the resolver, so a
+# test that leaves the resolver patched cannot point the guard at a decoy.
+_REAL_CODED_ROOT = gallery.branding_root()
+
+
+def _snapshot_coded_tree():
+    """A read-only census of the real coded tree: {relpath: (size, mtime_ns) | "dir"}.
+
+    Returns None for "the folder is not there", which is its own fact worth guarding: a
+    test that CREATES it is as much of a violation as one that edits it (create_app()
+    calls ensure_branding_discovery_tree(), so an un-pinned server fixture builds the
+    tree in the checkout just by starting). Never creates and never writes -- a bare
+    exists() check, then walk and stat.
+
+    FOLDERS are recorded as well as files, and that is not tidiness. The side effect this
+    guard was written for is `ensure_branding_discovery_tree()`, which mkdirs every
+    slot in `_BRANDING_DISCOVERY_SLOTS` and writes its placeholder README only
+    `if not readme.exists()` (moonglade_gallery.py:3156-3161). On a checkout with no tree
+    at all that is a set of FOLDERS and a single file -- and the folders are the bulk of
+    it, because each slot's coded rel is itself nested (`ROLE_CODE`), so `parents=True`
+    materializes the intermediate levels too. A file-only census would report all of that
+    as nothing at all."""
+    if not _REAL_CODED_ROOT.exists():
+        return None
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(_REAL_CODED_ROOT):
+        for name in dirnames:
+            path = Path(dirpath) / name
+            out[str(path.relative_to(_REAL_CODED_ROOT)) + os.sep] = "dir"
+        for name in filenames:
+            path = Path(dirpath) / name
+            try:
+                st = path.stat()
+            except OSError:                    # vanished mid-walk; the diff will say so
+                continue
+            out[str(path.relative_to(_REAL_CODED_ROOT))] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_coded_tree_pinned_away(tmp_path_factory):
+    """PREVENTION: nothing in this session can resolve the checkout's own coded tree.
+
+    `_isolated_branding` below pins `branding_root()` per TEST, and that is too late for a
+    fixture of any wider scope: pytest sets a module- or session-scoped fixture up BEFORE
+    the function-scoped autouse ones, so until 2026-09-10 the render harness's module server
+    read whatever `moonglade.dat` happened to sit beside the checkout -- a full roster on the
+    owner's dev box, an empty one on CI, two different fixtures from one piece of code.
+    Every such fixture must still pin its own root (the harness does, and its own test
+    asserts it), but a rule that only holds while every future author remembers it is not a
+    rule. This is the floor under it: the resolver is pinned for the whole session, so a
+    fixture that forgets lands in a session tmp dir instead of the owner's real tree and the
+    real 802MB pack -- wrong, but wrong the same way on every machine.
+
+    A sealed container is seeded beside it from the private donor, so the session-wide
+    default matches the per-test default (`_sealed_roster_container`) rather than being a
+    third kind of roster; donor absent, nothing is written and the roster is empty exactly
+    as on public CI.
+
+    `_real_coded_tree_untouched` below stays as the backstop this cannot be: it watches the
+    tree itself, so code that builds a path some other way than through the resolver is
+    still caught."""
+    mp = pytest.MonkeyPatch()
+    root = tmp_path_factory.mktemp("session-branding")
+    mp.setattr(gallery, "branding_root", lambda: root / "branding")
+    seed_sealed_container(root / "moonglade.dat")
+    try:
+        yield root
+    finally:
+        mp.undo()
+        clear_sealed_caches()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_coded_tree_untouched():
+    """No test reads or writes the checkout's own coded tree -- and this watches the tree.
+
+    Every fixture that needs a branding tree or a sealed pack pins its own (the autouse
+    `_isolated_branding` per test, `seed_sealed_container` above for the module-scoped
+    harness server), and `_real_coded_tree_pinned_away` above makes that the default even
+    when one forgets. This is the independent check on all of it: snapshot at session start,
+    re-snapshot at session end, fail on any difference -- files, folders, or the tree coming
+    into existence where there was none, which is how the machine-dependent harness announced
+    itself on 2026-09-10.
+
+    What it cannot see, and why the pin above exists: a READ leaves no trace, and on a
+    checkout where that tree already exists (the owner's own -- the machine CLAUDE.md names
+    for the pre-merge run) an un-pinned `create_app()` writes
+    nothing new, so this guard would pass in silence on the one machine where the 2026-09-10
+    bug actually lived. A watcher cannot be the whole answer to a read; prevention is.
+
+    Session scope and autouse so it brackets the whole run: it is set up before any
+    module- or function-scoped fixture of the first test, and torn down after the last."""
+    before = _snapshot_coded_tree()
+    yield
+    after = _snapshot_coded_tree()
+    if before == after:
+        return
+    if before is None:
+        pytest.fail("a test CREATED the real coded tree at {} -- every fixture that needs "
+                    "one must pin its own branding_root(). Now there (a trailing separator "
+                    "marks a folder): {}".format(_REAL_CODED_ROOT, sorted(after)))
+    if after is None:
+        pytest.fail("a test REMOVED the real coded tree at {} -- it held {} entr(ies) at "
+                    "session start.".format(_REAL_CODED_ROOT, len(before)))
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    modified = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    pytest.fail("the real coded tree at {} changed during this run -- no test may read or "
+                "write it; pin your own branding_root(). added={} removed={} modified={}"
+                .format(_REAL_CODED_ROOT, added, removed, modified))
+
+
 def pytest_sessionstart(session):
     """One loud line when the sealed donor is absent, naming the file and how many tests
     it gates.
@@ -145,20 +372,9 @@ def _sealed_roster_container(request, tmp_path):
     if "test_assets" in request.node.nodeid:
         yield
         return
-    if _SEALED_DONOR.is_file():
-        defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
-        _mc.write_container(tmp_path / "moonglade.dat", {"_seed.txt": b"x"},
-                            {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
-    gallery._container_cache.update(path=None, mtime=None, box=None)
-    # The earned-ids cache is a 5s-TTL module global keyed on nothing (out_dir is
-    # not part of the key), so without a reset one test's earned set can answer
-    # another test's seal check inside the window. Clear it around each test too.
-    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    seed_sealed_container(tmp_path / "moonglade.dat")
     yield
-    gallery._sealed_cache.update(path=None, mtime=None, defs=None)
-    gallery._container_cache.update(path=None, mtime=None, box=None)
-    gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    clear_sealed_caches()
 
 
 @pytest.fixture()

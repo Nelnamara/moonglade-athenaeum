@@ -144,6 +144,23 @@ _FREEZE_MOTION_CSS = (
     " animation: none !important; animation-duration: 0s !important; }"
 )
 
+
+# ---------------------------------------------------------------------------
+# The wall clock, and why no server fixture here reads it
+# ---------------------------------------------------------------------------
+# Every server fixture below pins its install to a fixed daytime weekday instant --
+# `tests/conftest.py`'s `pin_daytime_clock(mp)`, with the fixture's OWN MonkeyPatch, in
+# place before the server can answer anything. That helper carries the survey of which
+# wall-clock reads an achievement metric can reach, what the pin does at each of them, and
+# why the clock object itself cannot be replaced for a fixture lifetime on these threads.
+#
+# What it buys this module: an install whose achievement state is the same at 03:00 as at
+# 13:00. Un-pinned, `/api/achievements` writes a telemetry flag for part of the night, an
+# achievement reads that flag, the answer arrives as newly earned, and the celebration
+# overlay (.ach-m2) is a full-screen click-or-timeout layer over the surface being
+# measured. A downstream lane lost a run to exactly that, in the small hours -- the same
+# test, the same code, a different answer for no other reason.
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -199,16 +216,34 @@ def render_server(tmp_path_factory):
     quieted werkzeug logger are all gone before any later test file runs.
 
     Its own `pytest.MonkeyPatch` (the function-scoped `monkeypatch` fixture cannot reach
-    module scope) pins the same three things conftest's autouse fixtures pin per test, so
-    the server never sees this machine's real config or credentials:
+    module scope) pins the same things conftest's autouse fixtures pin per test, so the
+    server never sees this machine's real config, credentials, coded tree or pack:
     `MOONGLADE_DISABLE_WATCH=1` (no live-mirror WebSocket), `core._config_path` (so
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
-    checkout) and an empty `core._cfg`.
+    checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the coded tree
+    `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
+    `moonglade.dat`, land under this fixture's own root). The same MonkeyPatch carries the
+    clock pin -- `pin_daytime_clock`, below -- so the state this install reports is the
+    state it would report at any hour.
+
+    That last pin is load-bearing and was missing until 2026-09-10. A module-scoped fixture
+    is set up BEFORE the function-scoped autouse ones, so at the moment the achievement
+    block below ran, `branding_root()` was still the real resolver: `_container_path()`
+    named the checkout's own `moonglade.dat`. A dev box has a full pack there and pre-seeded
+    every earned id into `seen`/`earned_at`; CI has none and pre-seeded nothing. Same code,
+    two different fixtures, decided by a file nobody in this module wrote. The pin plus
+    `seed_sealed_container()` (conftest's, the same helper the per-test fixture uses) makes
+    the container this fixture reads one it wrote itself -- from the private donor when it
+    is checked out, and absent exactly as on CI when it is not.
     """
     import logging
     from types import SimpleNamespace
 
     from werkzeug.serving import make_server
+
+    import moonglade_gallery as _gallery
+    from tests.conftest import (clear_sealed_caches, pin_daytime_clock,
+                                seed_sealed_container)
 
     # A browser pulls ~40 sub-resources per page; werkzeug's per-request access log buries
     # a real failure's traceback in captured output. Restored on teardown.
@@ -222,6 +257,13 @@ def render_server(tmp_path_factory):
     mp.setenv("MOONGLADE_DISABLE_WATCH", "1")
     mp.setattr(core, "_config_path", lambda: config_path)
     mp.setattr(core, "_cfg", {})
+    # BEFORE anything below reads achievement state (and before create_app() builds a
+    # coded tree): this fixture's own coded tree, and its own sealed pack beside it.
+    mp.setattr(_gallery, "branding_root", lambda: root / "branding")
+    # ...and before the server can answer a single request: the clock this install reads,
+    # pinned to a fixed daytime weekday instant (tests/conftest.py::pin_daytime_clock).
+    pin_daytime_clock(mp)
+    seed_sealed_container(root / "moonglade.dat")
 
     save_catalog(root / "catalog.db", [
         {f: "" for f in CATALOG_FIELDS} | {
@@ -278,6 +320,10 @@ def render_server(tmp_path_factory):
     #    per-test-tmp-independent, no real branding folder involved.
     telem_flag("branding_custom_file", out_dir=root)
     #
+    # (The clock-driven flag is NOT written here: the pin above puts this install at a
+    #  daytime instant, where the route never writes it, so it is absent at every hour and
+    #  the `seen` computation below covers the same set on every run.)
+    #
     # 2. Everything earned is pre-marked SEEN, so no toast fires on page load. A truly
     #    fresh state file makes every already-earned achievement "newly earned" on first
     #    fetch, and the celebration overlay (.ach-m2 -- a deliberate full-screen,
@@ -306,6 +352,10 @@ def render_server(tmp_path_factory):
         server.shutdown()
         thread.join(timeout=5)
         mp.undo()
+        # The container caches are process globals: clear them on the way out too, or this
+        # module's pack answers the next module's seal check (same two-sided contract
+        # conftest's per-test fixture keeps).
+        clear_sealed_caches()
         wz_log.setLevel(wz_level)
 
 
@@ -435,6 +485,18 @@ def no_confirmed_contest_entry(render_browser):
     assert not confirmed, (
         "a CONFIRMED /api/contest/enter left this test: {!r} -- entering a contest is an "
         "irreversible, public account write with no un-enter route".format(confirmed))
+
+
+# ---------------------------------------------------------------------------
+# 0. The hermeticity of this file's own fixtures
+# ---------------------------------------------------------------------------
+# It is asserted in tests/test_fixture_hermeticity.py, NOT here, and deliberately so: this
+# module self-skips without playwright and carries `pytestmark = pytest.mark.render`, which
+# pytest.ini advertises as excludable with `-m "not render"`. A suite-wide invariant that
+# only speaks when a browser is installed is not an invariant -- under either of those
+# conditions, unpinning conftest's session-scoped `_real_coded_tree_pinned_away` would have
+# produced a fully green run. That test needs neither browser nor server; it resolves two
+# paths, so it belongs in a module every invocation collects.
 
 
 # ---------------------------------------------------------------------------
@@ -1414,11 +1476,26 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     SetupWizard exists for. Its OWN server, separate from the module's shared
     `render_server` -- that fixture is deliberately configured OUT of this state (see its
     own comment) so the rest of the module can keep assuming an already-onboarded install;
-    this is the one test that needs the state it was configured out of."""
+    this is the one test that needs the state it was configured out of.
+
+    It pins its own coded tree and seeds its own sealed pack, exactly as `render_server`
+    above does and through the same conftest helper. It is function-scoped, so conftest's
+    autouse `_isolated_branding`/`_sealed_roster_container` have already pinned a per-test
+    tmp dir by the time this runs -- but that is an ordering rule (autouse first, within a
+    scope), not a property of this fixture, and the 2026-09-10 bug was precisely a fixture
+    whose isolation came from somewhere else. Pinning here means this server's tree and
+    pack are ones this fixture wrote, whatever scope it is later given. It pins its own
+    clock for the same reason -- and because "fresh" has to mean fresh at every hour: at
+    the pinned daytime instant the route writes no clock-driven flag, so this install
+    carries none, which is the state a real first-run install is in."""
     import logging
     from types import SimpleNamespace
 
     from werkzeug.serving import make_server
+
+    import moonglade_gallery as _gallery
+    from tests.conftest import (clear_sealed_caches, pin_daytime_clock,
+                                seed_sealed_container)
 
     wz_log = logging.getLogger("werkzeug")
     wz_level = wz_log.level
@@ -1429,6 +1506,14 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
     monkeypatch.setattr(core, "_config_path", lambda: config_path)
     monkeypatch.setattr(core, "_cfg", {})
+    # BEFORE create_app() builds a coded tree, and before anything reads achievement
+    # state: this fixture's own coded tree, and its own sealed pack beside it.
+    monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
+    seed_sealed_container(root / "moonglade.dat")
+    # ...and the clock, before the server can answer anything. "Fresh" here means no key and
+    # no catalog, which is what the Setup Wizard is measured against; it also has to mean an
+    # install that reads none of its state off the wall clock (conftest::pin_daytime_clock).
+    pin_daytime_clock(monkeypatch)
     # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
     # own docstring) -- it derives its path from core.__file__'s directory instead, the
     # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
@@ -1449,6 +1534,9 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+        # The container caches are process globals -- clear them on the way out, the same
+        # two-sided contract `render_server` and conftest's per-test fixture both keep.
+        clear_sealed_caches()
         wz_log.setLevel(wz_level)
 
 
@@ -2674,12 +2762,27 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     this seeds 120 rows against a server of its own rather than reshaping the fixture the
     other eighteen tests measure against -- the same call
     `test_setup_wizard_onboards_a_genuinely_fresh_install` makes for the opposite state.
+
+    It pins no coded tree and seeds no pack of its own, and that is deliberate rather than
+    an omission. This fixture is FUNCTION-scoped, so pytest has already set up conftest's
+    autouse, function-scoped `_isolated_branding` (which points `branding_root()` at this
+    test's own `tmp_path/branding`) and `_sealed_roster_container` (which writes a sealed
+    `moonglade.dat` at the path `_container_path()` then resolves to, and clears the sealed
+    caches afterwards) by the time it runs. `render_server` pins both itself because it is
+    MODULE-scoped and is therefore set up BEFORE those -- the distinction that produced the
+    2026-09-10 bug. If this fixture is ever given a wider scope it acquires that problem and
+    must pin for itself, the way `render_server` and `fresh_install_server` do.
+
+    The clock it does pin itself, because conftest pins no clock at any scope -- see
+    `pin_daytime_clock`.
     """
     import datetime as _dt
     import logging
     from types import SimpleNamespace
 
     from werkzeug.serving import make_server
+
+    from tests.conftest import pin_daytime_clock
 
     wz_log = logging.getLogger("werkzeug")
     wz_level = wz_log.level
@@ -2690,6 +2793,9 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
     monkeypatch.setattr(core, "_config_path", lambda: config_path)
     monkeypatch.setattr(core, "_cfg", {})
+    # Before the server exists, let alone answers: the clock this install reads, pinned to a
+    # fixed daytime weekday instant (tests/conftest.py::pin_daytime_clock).
+    pin_daytime_clock(monkeypatch)
     # 120 rows at the default 100 per page = exactly two pages, so page 2 is a real place
     # with real cards on it (20 of them) rather than an empty edge case.
     save_catalog(root / "catalog.db", [
@@ -2714,7 +2820,8 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     config_path.write_text(json.dumps(cfg))
     # ...and every earned achievement pre-marked seen, so no .ach-m2 celebration is up while
     # the grid is being measured. window.Ach.check() runs on mg-gen-done (App.jsx, and now
-    # AppMobile.jsx too), which is precisely the event this test fires.
+    # AppMobile.jsx too), which is precisely the event this test fires. With the clock pinned
+    # above, "every earned achievement" is the same set whatever hour this run started in.
     _telem = load_telemetry(root)
     _metrics = achievement_metrics(root / "catalog.db")
     _metrics.update(telemetry_metrics(root))
@@ -4079,21 +4186,24 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
          it and marks it seen BEFORE the drop is even written, and the post-drop reload the
          test captures reports `newly: []`. Caught 2026-09-10 by tracing every
          /api/achievements response across login and reload: two ?mark=1 fetches, the
-         FIRST carrying the feat. Whether the fixture pins it at all depends on the machine
-         -- see 4 -- which is why this went unnoticed: CI has no donor, so the assertion is
-         skipped there, and it only ever ran on a box that also had a real pack beside the
-         checkout.
+         FIRST carrying the feat. It went unnoticed because whether the fixture pinned it
+         used to depend on the machine -- see 4 -- and CI, which has no donor, skips the
+         assertion. Still required now that the fixture is hermetic: donor present, the
+         roster is full and every earned id (this feat included, since the fixture arms its
+         flag itself) IS pinned, so the un-pin below is what makes the earn a first earn.
       4. `first_sync_complete()` withholds `newly` (and leaves `seen` alone) until a first
          library sync has finished. Its backfill keys on a non-empty `seen`/`earned_at`,
-         which the fixture computes at module setup from whatever roster the machine's
-         container yields at that moment -- module-scoped fixtures set up before conftest's
-         per-test container is pinned, so `_container_path()` still resolves to the
-         checkout's own moonglade.dat: no file there (CI) and the roster is empty, nothing
-         is seen or pinned and the gate reads "still syncing"; a real pack there (a dev
-         box) and the roster is full, everything earned is pinned. The flag is set here
-         explicitly so the gate never depends on which. An install with a fully swept
-         catalog, which is exactly what this harness serves, has that flag set; it is set
-         here for the same reason the API key above it is.
+         which the fixture computes at module setup from the roster its container yields.
+         That container used to be the checkout's own moonglade.dat -- module-scoped
+         fixtures are set up before conftest's per-test container is pinned -- so the
+         backfill depended on a file nobody in this module wrote: none there (CI) and the
+         roster is empty, nothing seen or pinned and the gate reads "still syncing"; a real
+         pack there (a dev box) and the roster is full, everything earned is pinned. The
+         fixture now seeds its own container from the donor (2026-09-10), so the only
+         remaining fork is donor-vs-no-donor, which is the fork this file gates on
+         deliberately. The flag is still set here explicitly so the gate depends on neither.
+         An install with a fully swept catalog, which is exactly what this harness serves,
+         has that flag set; it is set here for the same reason the API key above it is.
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
