@@ -157,12 +157,18 @@ def test_system_chrome_stays_open(tmp_path):
         ("mascots/nel_narrator.png", g._role_rel("mascots", "nel_narrator.png")),
         ("mascots/trk_done.png",     g._role_rel("mascots", "trk_done.png")),
         ("mascots/present_1.png",    g._role_rel("mascots", "present_1.png")),
-        ("banner.png",               "banner.png"),   # flat: loose-only at the coded root
         ("marks/mark_4.png",         g._role_rel("marks", "mark_4.png")),
     ]
     for public, coded in pairs:
         _seed(tmp_path, coded)
         assert cli.get("/branding/" + public).status_code == 200, public
+    # The banner flat is ungated too, but it is not a tree asset: since
+    # 2026-09-10 the route reads a flat from this install's render cache only,
+    # never from the coded root. Seed it where it actually lives.
+    cdir = g.banner_cache_dir(tmp_path)
+    cdir.mkdir(parents=True, exist_ok=True)
+    (cdir / "banner.png").write_bytes(b"\x89PNG fake")
+    assert cli.get("/branding/banner.png").status_code == 200
 
 
 def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):

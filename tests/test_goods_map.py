@@ -271,12 +271,19 @@ def test_flats_fall_back_to_the_shipped_slot_defaults(tmp_path):
         assert r.status_code == 200 and r.data == want, url
 
 
-def test_loose_flat_wins_over_the_shipped_default(tmp_path):
+def test_this_installs_render_wins_over_the_shipped_default(tmp_path):
+    """Rule 8 is a FALLBACK, not a preference: once this install has a render of
+    its own, that is what serves. The render lives in the app cache (2026-09-10
+    -- it is derived per-install state, not a tree asset), so this seeds it
+    there; a file parked at the coded root is not a render and is covered by
+    tests/test_branding_tree_rules.py."""
     cli = _client(tmp_path)
     _build_box({g._role_rel("banner_main", "banner_main.png"): b"SHIPPED MAIN"})
-    _seed("banner.png", b"LOOSE FLAT")
+    cdir = g.banner_cache_dir(tmp_path)
+    cdir.mkdir(parents=True, exist_ok=True)
+    (cdir / "banner.png").write_bytes(b"MY RENDER")
     r = cli.get("/branding/banner.png")
-    assert r.status_code == 200 and r.data == b"LOOSE FLAT"
+    assert r.status_code == 200 and r.data == b"MY RENDER"
 
 
 def test_flat_404s_when_neither_loose_nor_default_exists(tmp_path):
@@ -376,10 +383,10 @@ def test_earned_banner_pick_is_server_gated(tmp_path, monkeypatch):
                               "label": "The Great Library",
                               "earned": False,
                               "png": "/branding/earned_banners/great_library.png"}]}
-    # locked -> 403, and no flat gets written
+    # locked -> 403, and no render gets written
     r = cli.post("/api/branding/banner/earned", json={"id": "great_library"})
     assert r.status_code == 403
-    assert not (g.branding_root() / "banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
     # unknown ids (void_banner included -- it is NOT wired) -> 400
     assert cli.post("/api/branding/banner/earned",
                     json={"id": "void_banner"}).status_code == 400
@@ -390,10 +397,14 @@ def test_earned_banner_pick_is_server_gated(tmp_path, monkeypatch):
     assert d["banners"][0]["earned"] is True
     r = cli.post("/api/branding/banner/earned", json={"id": "great_library"})
     assert r.status_code == 200 and r.get_json() == {"ok": True}
-    flat = g.branding_root() / "banner.png"
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
     assert flat.is_file()
     from PIL import Image
     assert Image.open(flat).size == (1920, 480)    # banner_main's canonical cut
+    # ...and the render says where it came from, which is what stops any later
+    # pass re-rendering banner_main's slot pick over the applied banner.
+    assert g._read_banner_record(tmp_path, "banner.png") == {
+        "kind": "earned", "banner_id": "great_library"}
 
 
 def test_earned_banner_public_url_is_seal_gated(tmp_path, monkeypatch):
