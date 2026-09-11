@@ -673,13 +673,14 @@ export default function App({ boot }) {
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
-  /* The Konami Code easter egg. REBUILT 2026-09-10 to the committed Design Handoff page
-     (moonglade-internal/design/handoff-2026-09-04/briefs/nel-starfall-easter-egg.html --
-     that page's cast() script is this function's spec, its <style> block is styles.css's):
-     scrim, orb glow, 40 stars, Nel, bottom glass toast; the stars' own size/duration/delay
-     ranges; hold 6000ms, then ONE .6s opacity fade of the whole .ee-layer, then removal.
-     The first port (from the classic BASE_HTML, which /next never inherited -- owner QA:
-     "the Konami code is broken"; it wasn't, it was simply absent) gave every element its
+  /* The key-sequence cast. REBUILT 2026-09-10 to its committed Design Handoff brief (the
+     handoff-2026-09-04 set in the private moonglade-internal repo, which this public file
+     deliberately does not name any more precisely than that): that brief's cast() script is
+     this function's spec, its <style> block is styles.css's -- scrim, orb glow, 40 stars,
+     Nel, bottom glass toast; the stars' own size/duration/delay ranges; hold 6000ms, then
+     ONE .6s opacity fade of the whole .ee-layer, then removal.
+     The first port (from the classic BASE_HTML, which /next never inherited -- owner QA
+     reported it broken; it wasn't, it was simply absent) gave every element its
      own 6s hold-and-fade keyframe and let append order decide the stacking. Both are gone:
      each element now runs a short ENTRANCE animation only, the timeline below owns the hold
      and the exit, and z-index VALUES own the stacking (styles.css). Sequence, beacon and
@@ -705,7 +706,7 @@ export default function App({ boot }) {
 
      The cast FIRES that toast itself (achCheck() below, once the layer is up). Nothing in the
      app polls achievements -- check() runs once per boot and after a generation -- so without
-     that call the standard toast for a freshly cast egg would not arrive until the next page
+     that call the standard toast for a fresh cast would not arrive until the next page
      load, the hold would have nothing to hold, and the ruled sequence would exist only in a
      test. The call is inside the moment on purpose: its celebration is built while the moment
      is armed, so ach.js parks it, and release() is what lets it play.
@@ -754,7 +755,7 @@ export default function App({ boot }) {
       // The only path that can end a hung fetch. Generous on purpose -- it is a failsafe, not
       // a timeout policy: a slow-but-alive beacon must still get its cast, so the ceiling sits
       // far past any answer a local server plausibly takes, and expiring costs nothing but the
-      // egg's visuals for that press (the feat itself was earned server-side by the beacon,
+      // cast's visuals for that press (the feat itself was earned server-side by the beacon,
       // or was not sent at all).
       armT = setTimeout(() => { if (!teardown) release(); }, ARM_CEILING_MS);
       // The ee_* assets are served under the-konami-code's own unlock (the unlock-split

@@ -4732,6 +4732,20 @@ ${"=".repeat(48)}
     }
   }
   var _clearTimer = null;
+  function _cancelLinger() {
+    if (_clearTimer) {
+      clearTimeout(_clearTimer);
+      _clearTimer = null;
+    }
+  }
+  function _armLinger(p) {
+    if (_clearTimer) return;
+    _clearTimer = setTimeout(() => {
+      _clearTimer = null;
+      if (p !== _parade) return;
+      _clearParade();
+    }, 3200);
+  }
   var _parade = null;
   var _paradeShown = 0;
   function _hush() {
@@ -4773,10 +4787,7 @@ ${"=".repeat(48)}
         }, 500);
       }
     }
-    if (_clearTimer) {
-      clearTimeout(_clearTimer);
-      _clearTimer = null;
-    }
+    _cancelLinger();
     _clearParade();
     _drain();
   }
@@ -4821,6 +4832,7 @@ ${"=".repeat(48)}
     });
   }
   function _floodParade(list) {
+    _cancelLinger();
     _parade = { m: null, ended: false };
     _paradeShown = 0;
     list.forEach((a) => _q.push({ a, flood: true }));
@@ -4835,7 +4847,7 @@ ${"=".repeat(48)}
     if (_cur) return;
     while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
     if (!_q.length) {
-      if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
+      if (_parade && !_parade.ended) _armLinger(_parade);
       return;
     }
     if (_heldOff()) {
@@ -4874,10 +4886,7 @@ ${"=".repeat(48)}
   function _takeover() {
     _hush();
     if (!_q.some((x) => x.flood)) {
-      if (_clearTimer) {
-        clearTimeout(_clearTimer);
-        _clearTimer = null;
-      }
+      _cancelLinger();
       _parade = null;
     }
     const m = _cur;

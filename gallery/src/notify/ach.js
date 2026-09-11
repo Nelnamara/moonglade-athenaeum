@@ -455,10 +455,28 @@ function _recede(m) {
   }
 }
 
-// The pending "the trail bows out" timer, held so it can be CANCELLED. Without this a
-// replay that starts while a parade is winding down inherits the parade's 3.2s timer,
-// which then rips the replay's own trail and chip out of the DOM mid-moment.
+/* The pending "the trail bows out" timer -- held so it can be CANCELLED, and ARMED FOR ONE
+   NAMED PARADE. Without the handle, a replay that starts while a parade is winding down
+   inherits the parade's 3.2s timer, which then rips the replay's own trail and chip out of
+   the DOM mid-moment. Without the identity, a SECOND flood arriving inside the first's
+   linger inherits it instead, and that one is worse than a visual: the stale timer would
+   reach _clearParade with a DIFFERENT parade live, null it, and _drain's stale-flood guard
+   (`!_parade || _parade.ended`) would then shift every one of the new parade's pending
+   entries off the queue and drop them -- first earns whose marks the server has already
+   consumed, gone with no toast and no error. So the timer can only ever end the parade that
+   armed it, and a new parade cancels its predecessor's before publishing itself. */
 let _clearTimer = null;
+function _cancelLinger() {
+  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+}
+function _armLinger(p) {
+  if (_clearTimer) return;             // this parade's linger is already counting down
+  _clearTimer = setTimeout(() => {
+    _clearTimer = null;                // spent, so a successor parade can arm its own
+    if (p !== _parade) return;         // armed for a parade that has since been replaced
+    _clearParade();
+  }, 3200);
+}
 
 /* The LIVE parade, or null when none is on screen: {m, ended}. `m` is the moment currently
    front-and-centre. Its PENDING moments are not here any more -- they are flood-tagged
@@ -490,8 +508,10 @@ function _hush() {
   _chip = null; _skip = null;
 }
 
-// THE ONE TEARDOWN. Natural end, replay()'s takeover and the exit all land here; nothing
-// else ends a parade, so there is no second path to race this one.
+// THE ONE TEARDOWN. The natural end (through the linger armed above) and the exit both land
+// here; nothing else ends a parade with history still on screen, so there is no second path
+// to race this one. It always ends the LIVE parade -- _armLinger is what makes sure a stale
+// timer never reaches it in the first place.
 function _clearParade() {
   _clearTimer = null;
   _parade = null;
@@ -545,7 +565,7 @@ function _endParade() {
       setTimeout(() => { _unmount(m); _settled(m); }, 500);
     }
   }
-  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  _cancelLinger();
   _clearParade();
   // Re-enter the one dequeue for anything the skip did NOT touch -- a plain celebration
   // queued behind the parade. It refuses while a moment is still on screen (refusal 1), so
@@ -610,6 +630,11 @@ function _floodParade(list) {
   // Published before anything is built so the exit can reach a parade whose moments are all
   // still queued. `m` stays null until the dequeue actually presents one, and _paradeUp()
   // reads it: a parade that is only an intention does not own Escape.
+  // A new flood SUPERSEDES whatever parade came before it, so that one's linger timer goes
+  // first: left running it would fire inside THIS parade, and a timer that ends a parade it
+  // was not armed for takes the queue's pending first earns down with it (see _armLinger).
+  // Cancelling is also what lets this parade arm a linger of its own when its queue runs dry.
+  _cancelLinger();
   _parade = { m: null, ended: false };
   _paradeShown = 0;
   list.forEach((a) => _q.push({ a, flood: true }));
@@ -640,7 +665,7 @@ function _drain() {
   // A skipped parade splices its own entries out, so this only ever catches a stale one.
   while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
   if (!_q.length) {
-    if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
+    if (_parade && !_parade.ended) _armLinger(_parade);
     return;
   }
   if (_heldOff()) { _pendingDrain = true; return; }
@@ -707,7 +732,7 @@ function _takeover() {
   // replay is up Escape belongs to the Folio. A parade with steps still pending keeps both
   // its entries and its identity, and resumes behind the replay.
   if (!_q.some((x) => x.flood)) {
-    if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+    _cancelLinger();
     _parade = null;
   }
   const m = _cur;

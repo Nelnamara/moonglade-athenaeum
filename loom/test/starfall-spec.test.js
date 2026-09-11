@@ -1,8 +1,10 @@
 // The Konami starfall, pinned to its committed Design Handoff page, plus the sequence rule
 // that keeps a bespoke celebration and the standard achievement toast off each other.
 //
-// The spec is moonglade-internal/design/handoff-2026-09-04/briefs/nel-starfall-easter-egg.html
-// -- a PRIVATE page, so this file cannot read it and cannot quote its copy. What it can do is
+// The spec is this cast's brief in the handoff-2026-09-04 set of the private
+// moonglade-internal repo -- which this public file deliberately does not name any more
+// precisely than that, and could not read in any case, so it cannot quote its copy. What it
+// can do is
 // pin the facts the rebuild was measured against, in the two public files that implement them
 // (gallery/src/App.jsx's Konami handler, gallery/src/styles.css's .ee-* block), so a later
 // edit that quietly drifts back toward the pre-2026-09-10 port fails here instead of being
@@ -491,7 +493,7 @@ describe("the bespoke-moment sequence rule, in source", () => {
   test("the cast fires the marking check() itself, from inside the moment", () => {
     // Without this the hold is inert for the very feat it was built for. Nothing in the app
     // polls achievements: check() runs once per boot (notify/index.jsx) and after a generation,
-    // so the standard toast for a freshly cast egg would otherwise wait for the next page load
+    // so the standard toast for a fresh cast would otherwise wait for the next page load
     // and the ruled "starfall, then the toast" sequence would exist only in the test below.
     assert.match(app, /import \{[^}]*check as achCheck[^}]*\} from "\.\/notify\/ach\.js"/,
       "App.jsx must import ach.js's check() -- window.Ach is a compat surface, not the contract");
@@ -1177,6 +1179,101 @@ describe("a replay takes the SCREEN over, never somebody else's first earn", () 
     assert.equal(front().length, 1,
       "and the earn that was waiting still plays -- the replay took the screen, not the queue");
     assert.match(nameOf(front()[0]), /Second/);
+  });
+
+  test("a takeover from a DRAINED parade ends it, so Escape belongs to the Folio", async () => {
+    // The takeover's parade-ending branch, pinned by its observable consequence rather than
+    // by its text. A parade whose queue has run dry has nothing left but the history the
+    // takeover just removed -- but the LINGER it armed is still counting down, and the linger
+    // is half of what _paradeUp() answers on. Leave the branch out and _paradeUp() keeps
+    // saying "a parade is up" for 3.2s while a Folio replay is the only thing on screen, so
+    // this module swallows the Escape that is supposed to close the Folio. Nothing else in
+    // the suite reaches this state: every other replay test replays with no parade at all,
+    // where _paradeUp() is false whether the branch is there or not.
+    const list = Array.from({ length: 4 }, (_, i) => ({ id: "tk" + i, name: "TK" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    for (let i = 0; i < 4; i++) { front()[0].click(); await tick(); }
+    assert.equal(front().length, 0, "every moment has receded: the parade is lingering");
+    assert.ok(painted().length > 0, "...with its trail and its chips still painted");
+
+    const h = ach.replay({ id: "tkr", name: "Replayed", tier: "rare", desc: "x" }, {});
+    assert.equal(typeof h.setText, "function", "replay must hand back its driver handle");
+    assert.equal(front().length, 1, "the replay took the layer over");
+    assert.match(nameOf(front()[0]), /Replayed/);
+
+    const claimed = sendEscape();
+    assert.equal(claimed.prevented, false,
+      "a replay is not a parade: the takeover must END a parade that had nothing left but " +
+      "its linger, or this module eats the Escape that closes the Folio -- for the rest of " +
+      "the linger, on a screen showing one replayed card and nothing else");
+    assert.equal(claimed.stopped, false,
+      "...and it must not stop the key propagating to the app's own Escape ladder either");
+    assert.equal(front().length, 1,
+      "and the replay is still on screen: the key never reached the exit");
+
+    h.dismiss();
+    await wait(700);
+  });
+});
+
+describe("a parade's linger belongs to the parade that armed it", () => {
+  test("the timer is armed FOR one parade and cannot end any other", () => {
+    // Two halves, and the behavioural test below only reaches the first of them. The second
+    // is what keeps this closed when a LATER edit adds a second place that publishes a
+    // parade: the timer carries the parade it was armed for, so ending the wrong one is not
+    // something a new caller can forget to prevent.
+    const arm = achBody("_armLinger");
+    assert.match(arm, /_clearTimer = null;/,
+      "the fired timer must give the handle up, or the parade that replaces this one can " +
+      "never arm a linger of its own and never bows out at all");
+    assert.match(arm, /if \(p !== _parade\) return;/,
+      "the linger must check that the parade it was armed for is still the live one before " +
+      "it tears anything down. Without it a timer from a superseded parade reaches " +
+      "_clearParade, nulls the LIVE parade, and the dequeue's stale-flood guard drops every " +
+      "pending entry -- first earns the server has already marked");
+    assert.match(achBody("_floodParade"), /_cancelLinger\(\);/,
+      "and a new flood must cancel its predecessor's linger as it publishes itself -- " +
+      "leaving it armed would hold the handle that stops THIS parade arming its own");
+  });
+
+  test("a second flood arriving inside the first's linger loses none of its earns", async () => {
+    // A parade whose queue runs dry arms a 3.2s linger before it bows out. That timer used to
+    // be anonymous: a flood arriving inside the window published a NEW parade over the old
+    // one and the old one's timer went on running, so _clearParade nulled the LIVE parade --
+    // and the dequeue's stale-flood guard then shifted every one of its pending entries off
+    // the queue. Those are first earns whose marks the server has already consumed: no toast,
+    // no error, nothing to replay from. The wall-clock waits are the test: click straight
+    // through and the timer never gets to fire in the window it breaks.
+    const a = Array.from({ length: 4 }, (_, i) => ({ id: "fa" + i, name: "FA" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(a);
+    ach.check();
+    await tick();
+    for (let i = 0; i < 4; i++) { front()[0].click(); await tick(); }
+    assert.equal(front().length, 0, "the first parade has run dry and is lingering");
+
+    await wait(2900);                          // still inside its 3.2s linger, only just
+    const b = Array.from({ length: 4 }, (_, i) => ({ id: "fb" + i, name: "FB" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(b);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the second parade's first moment is presenting");
+    await wait(500);                           // ...and now the first parade's timer has fired
+
+    const shown = [nameOf(front()[0])];
+    for (let i = 0; i < 3; i++) {
+      front()[0].click();
+      await tick();
+      assert.equal(front().length, 1,
+        "the second parade stopped after " + shown.length + " of its 4 earns. A timer armed " +
+        "by the parade BEFORE it fired inside this one, ended it, and the dequeue dropped " +
+        "every entry still waiting -- marks the server has already consumed, so those toasts " +
+        "are gone for good");
+      shown.push(nameOf(front()[0]));
+    }
+    assert.deepEqual(shown.map((n) => (n.match(/FB\d/) || [""])[0]), ["FB0", "FB1", "FB2", "FB3"],
+      "every earn of the second flood must present, in order");
   });
 });
 
