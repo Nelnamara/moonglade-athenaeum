@@ -2872,8 +2872,8 @@ def add_slot_asset(out_dir, slot, png_bytes, zoom=100, cropx=50, cropy=50):
     new_id = secrets.token_hex(4)
     (sdir / (new_id + ".png")).write_bytes(png_bytes)
     # The app just put a file in the tree: record it as a default in the same
-    # breath, so the read-only scan cannot later read the app's own write as
-    # somebody's find (_baseline_note_app_write).
+    # breath, so the read-only scan cannot later read the app's own write as a
+    # file the install did not put there (_baseline_note_app_write).
     _baseline_note_app_write(out_dir, _role_rel(slot, new_id + ".png"))
     t = _asset_transform({"zoom": zoom, "cropX": cropx, "cropY": cropy})
     items.append({"id": new_id, **t})
@@ -3046,8 +3046,8 @@ def add_custom_mark(out_dir, png_bytes, label="Custom mark", ext=".png"):
     ico = _cut_mark_ico(mdir, new_id, png_bytes)
     # Both files the app just wrote into the tree go into the baseline as
     # defaults (_baseline_note_app_write). The .ico matters as much as the art:
-    # Pillow reads an .ico perfectly well, so an unrecorded one would read back
-    # as a find on the very next scan.
+    # Pillow reads an .ico perfectly well, so an unrecorded one would raise the
+    # flag on the very next scan.
     _baseline_note_app_write(out_dir, _role_rel("marks", new_id + ext))
     if ico:
         _baseline_note_app_write(out_dir, _role_rel("marks", new_id + ".ico"))
@@ -3460,8 +3460,8 @@ def _record_branding_baseline(out_dir):
     be read when the snapshot was taken (locked by another process, a
     permissions corner). Such a file is stored with its size and a NULL hash
     rather than dropped, because dropping it is wrong in both directions: an
-    absent rel counts as new forever -- a permanent false find on a file that was
-    always there -- while pretending it is fine forever would be a permanent
+    absent rel counts as new forever -- a permanent false positive on a file that
+    was always there -- while pretending it is fine forever would be a permanent
     blind spot. Size alone is what the snapshot honestly knows, so that is what
     it stores, and the comparison honours it exactly: a later file at that rel
     with the same size is the file that was already there (readable or not), and
@@ -3492,7 +3492,7 @@ def _baseline_note_app_write(out_dir, rel):
     tree: add_slot_asset() (`<id>.png` into a banner slot, every Branding-tab
     upload), _adopt_mark() (`<id>.png|.webp` into marks) and add_custom_mark()
     (the custom mark plus the launcher .ico cut beside it -- Pillow reads an
-    .ico, so an unrecorded one reads back as a find). Everything else the app
+    .ico, so an unrecorded one would raise the flag). Everything else the app
     writes now lands outside the tree (banner_cache_dir(), badge_cache_dir()),
     and grep for this function's name is the live list.
 
@@ -3649,7 +3649,7 @@ def _adopt_mark(out_dir, raw_stem, art_bytes, ext=".png"):
     (mdir / "marks.json").write_text(json.dumps({"marks": marks}, indent=2), encoding="utf-8")
     (mdir / (mid + ext)).write_bytes(art_bytes)
     # Same reason as add_slot_asset's own note: the art this just registered is
-    # the app's own write from here on, not a standing find.
+    # the app's own write from here on, not a standing flag.
     _baseline_note_app_write(out_dir, _role_rel("marks", mid + ext))
     cfg = load_branding(out_dir)
     cfg["mark"] = mid
@@ -4006,20 +4006,32 @@ def _record_slot_resolution(out_dir):
     was never written down. Recording it makes the render's `asset_id` a claim
     about a stored pick rather than about a derivation.
 
+    Called from main() only -- NOT from create_app(), and for the same reason
+    _migrate_root_banner_flats() is not: branding_slots.json is addressed off
+    branding_root(), the REAL coded tree on any test that does not patch it,
+    and ~every test in the suite builds create_app(), several from module-scoped
+    fixtures that conftest's per-test branding isolation cannot reach. Run there,
+    a plain pytest run on a dressed install would rewrite the owner's own pick
+    file. main() is the one caller that knows this is a real start, and it runs
+    immediately before create_app(), so the ensure pass inside it still stamps
+    its renders with picks that are by then written down.
+
     Writes only when a slot actually resolved to an asset the file does not
     already name: a library with no assets at all leaves no file behind, and the
-    owner's own recorded picks are never rewritten. Fail-soft -- this runs
-    inside create_app, and a pick that cannot be persisted still renders."""
-    recorded = _recorded_slot_active(out_dir)
-    resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
-                for slot in BRANDING_SLOTS}
-    if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
-               for slot in BRANDING_SLOTS):
-        return
+    owner's own recorded picks are never rewritten. Fail-soft -- a pick that
+    cannot be persisted still resolves the same way and still renders."""
     try:
+        recorded = _recorded_slot_active(out_dir)
+        resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
+                    for slot in BRANDING_SLOTS}
+        if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
+                   for slot in BRANDING_SLOTS):
+            return
         save_slot_active(out_dir, resolved)
-    except OSError:
-        pass
+    except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "banner render: the slot resolution could not be recorded", exc_info=True)
 
 
 def _ensure_banner_renders(out_dir):
@@ -4035,14 +4047,11 @@ def _ensure_banner_renders(out_dir):
     A banner that cannot be rendered costs a banner -- the route still falls
     through to the container copy and then the shipped sealed default.
 
-    The resolution is RECORDED first (_record_slot_resolution), so the picks the
-    renders below are stamped with are picks this install has written down."""
-    try:
-        _record_slot_resolution(out_dir)
-    except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "banner render: the slot resolution could not be recorded", exc_info=True)
+    Reads the slot picks, never writes them: on a real start main() has already
+    persisted the resolution (_record_slot_resolution) a moment earlier, so the
+    picks stamped into the renders below are picks this install has written
+    down, and on a test build there is nothing here that can touch the coded
+    tree's own pick file."""
     for slot in BRANDING_SLOTS:
         try:
             _ensure_banner_flat(out_dir, slot)
@@ -4079,8 +4088,10 @@ def sweep_branding_drops(out_dir, telem=None):
     signal.
 
     Runs on every /api/achievements fetch rather than sweep_telemetry()'s
-    once-a-day cadence -- a real drop deserves to pay off on the next reload,
-    not up to a day later. The cost of that cadence is the scan's, and it is
+    once-a-day cadence, so a file that arrived since the last fetch is adopted,
+    or raises the flag, on the next reload rather than up to a day later --
+    the same cadence the four adopt folders have always had for a hand-placed
+    file. The cost of that cadence is the scan's, and it is
     priced in _branding_tree_has_new_art: the first scan of a process reads and
     hashes a head of each baseline file, every scan after it is the walk's stats
     and a memo lookup. The adopt half is a handful of small directory listings,
@@ -4089,9 +4100,9 @@ def sweep_branding_drops(out_dir, telem=None):
     `telem` is this request's already-loaded telemetry store, when the caller has
     one (/api/achievements does, and used to make the short-circuit below parse
     the file a second time). Handed in, it is READ for the flag short-circuit and
-    UPDATED in place with a flag this call raises, so the caller's copy stays
-    true without a re-read -- which matters because that route flattens flags
-    into the achievement metrics further down the same request.
+    UPDATED in place with any flag this call raises, so the caller's copy still
+    matches the file it was parsed from -- which matters because that caller goes
+    on reading its copy further down the same request.
 
     Returns True if anything was ADOPTED this call -- the flag can fire off the
     scan without that being true."""
@@ -9710,10 +9721,14 @@ def create_app(out_dir: Path):
     # Regenerates only a MISSING render or one whose record says its slot's pick
     # moved -- see _ensure_banner_flat.
     _ensure_banner_renders(out_dir)
-    # NOTE: the root-flat migration is deliberately NOT here -- it MOVES a real
-    # RENDER out of the real coded tree, and create_app() is called by ~every
-    # test with the tree unpatched. It runs from main(), the one place that
-    # knows this is a real server start.
+    # NOTE: two startup steps are deliberately NOT here, both because they write
+    # somewhere branding_root() addresses rather than somewhere out_dir does, and
+    # create_app() is called by ~every test with the tree unpatched: the root-flat
+    # migration (_migrate_root_banner_flats), which MOVES a real render out of the
+    # real coded tree, and the slot-pick record (_record_slot_resolution), which
+    # rewrites branding_slots.json beside it. Both run from main(), the one place
+    # that knows this is a real server start. The ensure pass above only READS
+    # those picks; everything it writes is under out_dir.
     #
     # The scaffold call above is additive; its ONE known exception is the
     # legacy-root migration it runs first (_migrate_legacy_branding_root), which
@@ -16652,10 +16667,10 @@ def create_app(out_dir: Path):
         #
         # Loaded BEFORE the branding sweep, and handed to it, because the sweep's own
         # flag short-circuit wants exactly this store and used to parse it a second
-        # time on every fetch. The sweep mirrors a flag it raises back into this dict,
-        # so a drop still pays off on the very request that found it -- flags flatten
-        # into the metric namespace below (telemetry_metrics), and reading the file
-        # first would otherwise hold a copy taken one moment too early.
+        # time on every fetch. The sweep writes through to the file and mirrors the
+        # same change back into this dict, so the copy the rest of the request reads
+        # from still matches what is on disk -- without that, a store loaded before
+        # the sweep is one write stale for the remainder of the request.
         telem = load_telemetry(out_dir)
         # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
         # a file dropped into the tree since the last fetch is picked up on the next
@@ -20436,6 +20451,12 @@ def main():
     # flats are looked for, not after.
     ensure_branding_discovery_tree()
     _migrate_root_banner_flats(out_dir)
+    # Same rule, same reason: this WRITES branding_slots.json, which lives beside
+    # the coded tree and is not out_dir-scoped, so it stays out of create_app().
+    # Ordered last of the three -- after the scaffold, so a legacy install's
+    # assets are already in the coded dirs to resolve against, and before
+    # create_app(), so its ensure pass stamps renders with a recorded pick.
+    _record_slot_resolution(out_dir)
     app = create_app(out_dir)
     url = "{}://{}:{}/".format(
         scheme, "localhost" if args.host == "0.0.0.0" else args.host, args.port)

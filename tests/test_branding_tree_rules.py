@@ -917,7 +917,8 @@ def test_a_render_with_no_record_is_left_alone(tmp_path):
 # different assets. The ensure pass would then compare the render's record
 # against one answer and re-render it to the other, on alternate boots. One
 # function (resolve_slot_active) now answers that for the payload, the self-heal
-# and the ensure pass alike, and the start RECORDS what it resolved.
+# and the ensure pass alike, and a REAL start (main(), not create_app) records
+# what it resolved.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("order", [("aaaa1111", "zzzz9999"), ("zzzz9999", "aaaa1111")])
@@ -942,8 +943,10 @@ def test_an_unrecorded_pick_resolves_to_the_last_manifest_item(tmp_path, order):
 
 def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
     """End to end: two assets, no recorded pick, two server starts, one render.
-    The first start also RECORDS the resolution, so the answer stops being
-    re-derived from the manifest at every boot."""
+    A real start also RECORDS the resolution, so the answer stops being
+    re-derived from the manifest at every boot -- run here in main()'s order
+    (record, then build the app), because branding_slots.json hangs off the
+    coded tree and create_app() must not write it."""
     _seed_catalog(tmp_path)
     first = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
     second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
@@ -953,16 +956,83 @@ def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
     flat.unlink()
     g._banner_record_path(tmp_path, "banner.png").unlink()
 
+    g._record_slot_resolution(tmp_path)             # what main() runs, before create_app
+    assert g._recorded_slot_active(tmp_path)["banner_main"] == second["id"], \
+        "the start did not record the resolution it was about to render from"
+
     create_app(tmp_path)
     once = flat.read_bytes()
     assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"], \
         "an unrecorded pick did not resolve to the most recent upload"
-    assert g._recorded_slot_active(tmp_path)["banner_main"] == second["id"], \
-        "the start did not record the resolution it rendered from"
 
     create_app(tmp_path)                            # the next start
     assert flat.read_bytes() == once, "two starts of one install rendered different assets"
     assert first["id"] != second["id"]
+
+
+def test_the_render_is_the_same_asset_even_with_nobody_recording_it(tmp_path):
+    """The determinism is the resolver's, not the record's: with NO recorded
+    pick written at any point -- which is exactly what a bare create_app() build
+    is -- two starts still render the same asset. Without this, deleting
+    resolve_slot_active()'s manifest-order rule could hide behind the record the
+    test above writes."""
+    _seed_catalog(tmp_path)
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    pick = g._slot_active_path(tmp_path)
+    pick.unlink()                                   # never recorded, ever
+
+    for _ in range(2):
+        flat.unlink()
+        g._banner_record_path(tmp_path, "banner.png").unlink()
+        create_app(tmp_path)
+        assert not pick.exists(), \
+            "app construction wrote the pick file that lives beside the coded tree"
+        assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"]
+
+
+def test_building_the_app_never_writes_the_slot_pick_file(tmp_path):
+    """Same rule as the flat migration above, same reason: branding_slots.json
+    is addressed off branding_root(), NOT out_dir, so on the module-scoped
+    fixtures that conftest's per-test isolation cannot reach it resolves to this
+    checkout's real app folder. A plain pytest run must not rewrite the owner's
+    own picks. Recording belongs to main().
+
+    The state under test is the one that makes the record step want to write:
+    assets present, no pick recorded."""
+    _seed_catalog(tmp_path)
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    pick = g._slot_active_path(tmp_path)
+    pick.unlink()
+
+    create_app(tmp_path)
+
+    assert not pick.exists(), \
+        "app construction wrote branding_slots.json beside the coded tree"
+
+
+def test_a_real_start_records_the_slot_resolution(tmp_path):
+    """The record step's ONLY production call site is main() -- pinned off
+    main()'s own source, the way the flat migration is, because main() parses
+    argv, binds a port and blocks. Without this the step could be deleted, or
+    slide after create_app(), and the file would stay green."""
+    import ast
+    import inspect
+
+    body = ast.parse(inspect.getsource(g.main))
+    calls = [n.func.id for n in ast.walk(body)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    assert "_record_slot_resolution" in calls, \
+        "main() no longer records the slot resolution -- the step is dead"
+    assert calls.index("ensure_branding_discovery_tree") < \
+        calls.index("_record_slot_resolution"), \
+        "the scaffold must run first: a legacy install's assets resolve from the coded dirs"
+    assert calls.index("_record_slot_resolution") < calls.index("create_app"), \
+        ("the resolution must be recorded BEFORE the app is built, so the ensure "
+         "pass inside create_app stamps its renders with a pick this install has "
+         "written down rather than one derived again")
 
 
 # ---------------------------------------------------------------------------
