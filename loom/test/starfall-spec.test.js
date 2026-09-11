@@ -239,8 +239,8 @@ describe("the cast is built the way the handoff page builds it", () => {
     assert.match(konami, /ee_starfall_loop\.ogg/);
     assert.match(konami, /"✺ Elune-adore, Nelnamara ✺"/, "the fixed greeting is a literal");
     assert.match(konami, /sub\.textContent = \(feat && feat\.desc\)/,
-      "the punchline still comes from the SEALED roster via textContent -- it is not in this " +
-      "public tree, and this wave does not change it");
+      "the sub-line still takes the roster's own text through textContent, with a literal " +
+      "fallback -- this wave does not change where it comes from");
     assert.doesNotMatch(konami, /\.innerHTML\s*=/,
       "DOM methods only: fetched roster text must never reach an HTML parser");
     assert.match(konami, /nel\.onerror = \(\) => nel\.remove\(\)/, "the missing-art fail-soft");
@@ -525,7 +525,17 @@ function el(tag) {
       if (p) { const i = p.children.indexOf(e); if (i >= 0) p.children.splice(i, 1); }
       e.parentNode = null;
     },
-    querySelector() { return el("div"); },
+    // STABLE per selector, unlike ach-parade-exit.test.js's throwaway stand-in: a real
+    // querySelector answers with the same node every time, and the replay driver depends on
+    // exactly that -- _bind writes the settled line onto `.toast .tbody .r` and the handle
+    // reads it back through the same call. Handing out a fresh element each time would make
+    // the driver untestable and let a gutted _bind pass.
+    querySelector(sel) {
+      const k = String(sel);
+      e._qs = e._qs || {};
+      if (!e._qs[k]) e._qs[k] = el("div");
+      return e._qs[k];
+    },
     setAttribute() {}, removeAttribute() {},
     addEventListener(t, fn) { (e._ls[t] = e._ls[t] || []).push(fn); },
     fire(t, ev) { (e._ls[t] || []).slice().forEach((fn) => fn(ev || { stopPropagation() {} })); },
@@ -582,8 +592,18 @@ const painted = () => body.children.filter((c) => c.classList.contains("ach-m2")
    the fake DOM keeps that as a plain string. Used to pin QUEUE ORDER -- a parade step and a
    plain celebration coming out in FIFO is what "one queue" means in observable terms. */
 const nameOf = (m) => {
-  const stage = m.children[0], tw = stage && stage.children.filter((c) => c.classList.contains("tw"))[0];
+  const tw = twOf(m);
   return tw ? tw.innerHTML : "";
+};
+const twOf = (m) => {
+  const stage = m.children[0];
+  return stage && stage.children.filter((c) => c.classList.contains("tw"))[0];
+};
+/* The roast line of a built moment -- the node the Folio's scramble driver writes through.
+   The same selector the engine uses, answered by the same cached element (see el() above). */
+const lineOf = (m) => {
+  const tw = twOf(m);
+  return tw && tw.querySelector(".toast .tbody .r");
 };
 const starsIn = (m) => m.children.filter((c) => c.classList.contains("ee-star")).length;
 const confIn = (m) => m.children.filter((c) => c.classList.contains("m2-conf")).length;
@@ -851,7 +871,12 @@ describe("a bespoke moment owns the screen while it plays", () => {
     await wait(600);
     assert.equal(trail().length, 0, "and the parade's trail left with it");
     h.dismiss();
-    await wait(600);
+    await wait(700);
+    // ...its presented HISTORY, that is. The steps it had not shown yet are first earns with
+    // their marks already consumed, so the click does not get to throw them away: the parade
+    // picks up where it stopped once the replay is done with the screen.
+    assert.equal(front().length, 1, "the parade resumes behind the replay");
+    assert.match(nameOf(front()[0]), /T\d/);
   });
 
   test("skipping a parade does not build the celebration queued behind it ON TOP of it", async () => {
@@ -952,6 +977,20 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
     // The ordering that makes the two directions one mechanism. If the dequeue ran first, the
     // next queued celebration would already be on screen by the time the cast armed, and the
     // cast would paint under it -- the same overlap, one link further along the chain.
+    //
+    // PINNED WHERE IT IS WRITTEN, because the behaviour below cannot see it: _heldOff() also
+    // counts a cast that is merely WAITING, so a swapped _settled refuses the dequeue on that
+    // gate instead and reaches the same end state. The order is the second line of that
+    // defence -- what keeps _settled correct if the gate's second clause ever moves -- and a
+    // second line of defence can only be pinned at the line. `at()` refuses -1, so deleting
+    // either call fails here rather than passing vacuously.
+    const settle = achBody("_settled");
+    assert.ok(at(settle, "_flushClear();", "_settled no longer flushes the waiting casts at all")
+      < at(settle, "_drain();", "_settled no longer re-enters the dequeue"),
+      "_settled must flush the waiting casts BEFORE it re-enters the dequeue. Reversed, " +
+      "whether the next queued moment is built over a cast that is about to arm depends on " +
+      "the gate alone, and the two halves of the mechanism drift apart the day it changes.");
+
     nextPayload = payload([
       { id: "c1", name: "One", tier: "common", desc: "x" },
       { id: "c2", name: "Two", tier: "common", desc: "x" },
@@ -1026,6 +1065,36 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
     assert.equal(atFire, 0, "the wait takes the history down and fires on an empty screen");
   });
 
+  test("the wait's own release is what restarts a queue held behind it", async () => {
+    // _flushClear fires the waiting casts and then calls _resume(). That call is reached from
+    // _unmount -- the last thing painted leaving the DOM -- where NOTHING follows it: _settled
+    // is not involved, no timer is pending, no caller is left to ask again. Delete it and the
+    // queue that was held only because a cast was waiting stays held for the rest of the
+    // session, which looks exactly like the engine having died.
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "z" + i, name: "Z" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    front()[0].click();                        // one receded, one front-and-centre, chips up
+    await tick();
+    assert.equal(trail().length, 1, "there is presented history on screen");
+
+    let fired = 0;
+    ach.whenClear(() => { fired++; });          // a waiter that does NOT arm: the release under
+    front()[0].click();                         // test is the flush's own, not a bespoke one
+    await tick();
+    assert.equal(fired, 0, "the history is still painted, so the wait has not fired");
+    assert.equal(front().length, 0,
+      "and the parade's next step is held -- a cast waiting for the screen closes the gate");
+
+    await wait(700);
+    assert.equal(fired, 1, "the wait took the history down and fired on an empty screen");
+    assert.equal(front().length, 1,
+      "and the held queue ran again. The ONLY thing that can restart it here is the _resume() " +
+      "_flushClear makes after firing its waiters: this release arrives from _unmount, and " +
+      "nothing follows _unmount to ask the dequeue a second time.");
+  });
+
   test("a SKIPPED parade is empty before the cast starts, not merely settled", async () => {
     // The exit reaches the same hook every other teardown does. It used to reach it with the
     // skipped moment still painted, so a cast waiting behind the skip started underneath it.
@@ -1045,6 +1114,129 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
       "layer is not free yet and the cast must not be told that it is");
     await wait(700);
     assert.equal(atFire, 0, "and the cast starts on an empty screen");
+  });
+});
+
+describe("a replay takes the SCREEN over, never somebody else's first earn", () => {
+  test("a replay clicked while a cast is WAITING does not strand the cast", async () => {
+    // The hole the takeover had: it emptied the queue, ended the parade and removed the
+    // moment on screen, but it nulled _cur by hand AFTER unmounting, so the flush _unmount
+    // fires saw a moment still presenting and returned -- and nothing ever flushed again.
+    // _heldOff() then answered true for the rest of the session: no starfall, no replay, no
+    // celebration, and not one error. The fix is that the takeover finishes through _settled,
+    // the same settle path every other teardown uses.
+    nextPayload = payload([{ id: "sw1", name: "Onscreen", tier: "common", desc: "x" }]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "a moment is presenting");
+
+    let fired = 0;
+    ach.whenClear(() => { fired++; ach.beginBespokeMoment(); });   // what App.jsx does
+    assert.equal(fired, 0, "the cast waits while that moment is up");
+
+    const h = ach.replay({ id: "sw2", name: "Replayed", tier: "rare", desc: "x" }, {});
+    await tick();
+    assert.equal(fired, 1,
+      "the takeover emptied the layer, so the waiting cast must have been flushed. Left " +
+      "unflushed it waits forever -- _heldOff() stays true, the dequeue builds nothing ever " +
+      "again, and the session is silently over.");
+    assert.equal(moments().length, 0,
+      "and the replay is held behind the cast it just let through, like any other entry -- " +
+      "a click is not an exemption from the gate (owner ruling 2026-09-10, both directions)");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "and it plays the moment the cast releases");
+    assert.match(nameOf(front()[0]), /Replayed/);
+    h.dismiss();
+    await wait(600);
+  });
+
+  test("the earns already queued keep their turn behind it", async () => {
+    // A pending entry is a FIRST EARN whose mark the server already consumed, so dropping
+    // one is a celebration the owner can never get back. The takeover used to empty the
+    // whole queue: clicking a Folio card while two unlocks were waiting silently destroyed
+    // the second one's only toast.
+    nextPayload = payload([
+      { id: "d1", name: "First", tier: "common", desc: "x" },
+      { id: "d2", name: "Second", tier: "common", desc: "x" },
+    ]);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the first earn plays; the second is queued behind it");
+
+    const h = ach.replay({ id: "dr", name: "Replayed", tier: "rare", desc: "x" }, {});
+    assert.equal(front().length, 1, "one moment, not two");
+    assert.equal(peak, 1);
+    assert.match(nameOf(front()[0]), /Replayed/,
+      "the click is immediate in the only way it still can be: the entry goes to the FRONT " +
+      "of the queue and is the next thing built");
+
+    h.dismiss();
+    await wait(700);
+    assert.equal(front().length, 1,
+      "and the earn that was waiting still plays -- the replay took the screen, not the queue");
+    assert.match(nameOf(front()[0]), /Second/);
+  });
+});
+
+describe("the replay driver drives an entry that is not on screen yet", () => {
+  test("what the scramble settled on while it waited is on the moment when it builds", async () => {
+    // useFolio starts driving the instant replay() returns and does not wait for a moment to
+    // exist: it spreads the handle and calls setText/setGlitching/setSettledNsfw through a
+    // 26-tick scramble. A held entry therefore has to RECORD what it is told, and _bind is
+    // what replays that onto the element the dequeue finally builds -- without it the
+    // celebration arrives on the clean line, or on a half-scrambled one, whichever the
+    // scramble happened to leave behind.
+    ach.beginBespokeMoment();
+    const h = ach.replay({ id: "some-other-feat", name: "Other", tier: "feat", desc: "x" }, {});
+    assert.equal(moments().length, 0, "held: nothing is built while the moment owns the screen");
+    h.setText("the line the scramble settled on");
+    h.setGlitching(true);
+    h.setSettledNsfw(true);
+    h.setGlitching(false);                     // ...and the scramble finishing before it builds
+
+    ach.endBespokeMoment();
+    await tick();
+    const m = front()[0];
+    assert.ok(m, "the celebration plays once the screen is free");
+    const r = lineOf(m);
+    assert.equal(r.textContent, "the line the scramble settled on",
+      "the moment must be built carrying the driver's recorded text. Empty here means the " +
+      "entry's state was never replayed onto the element -- _bind gone or gutted -- and the " +
+      "owner's card celebrates on a line the reveal had already moved past.");
+    assert.equal(r.classList.contains("settled-nsfw"), true,
+      "the settled-nsfw flag is recorded state too, not a live call against a live element");
+    assert.equal(r.classList.contains("glitch"), false,
+      "and the LAST value wins: replaying the first call instead of the settled one would " +
+      "leave the moment glitching forever");
+
+    h.setText("and it keeps driving after it is built");
+    assert.equal(r.textContent, "and it keeps driving after it is built",
+      "once bound, the handle drives the real element -- the recording is a bridge, not a " +
+      "replacement for the live path useFolio's toggleUnleash still uses");
+    h.dismiss();
+    await wait(600);
+  });
+
+  test("a replay dismissed before it was ever built leaves the queue and never plays", async () => {
+    // The Folio dismisses the previous handle on every card click (useFolio's replayToast),
+    // and Escape closes the Folio through the same call. A held entry has no element to
+    // click, so dismiss() has to reach into the queue and take it out -- a no-op there is a
+    // celebration that pops up later for a card the owner already clicked away, and the
+    // suite stays green because nothing else ever looks at that branch.
+    ach.beginBespokeMoment();
+    const h = ach.replay({ id: "some-other-feat", name: "Ghost", tier: "feat", desc: "x" }, {});
+    assert.equal(moments().length, 0, "held, and never built");
+    h.dismiss();
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(moments().length, 0,
+      "a dismissed-before-built replay must have LEFT the queue. Still there, it is built by " +
+      "the release and the dismissed card celebrates anyway.");
+    await wait(700);
+    assert.equal(moments().length, 0, "and it does not arrive late either");
   });
 });
 

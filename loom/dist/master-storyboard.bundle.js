@@ -4872,16 +4872,22 @@ ${"=".repeat(48)}
     load(true);
   }
   function _takeover() {
-    _q.length = 0;
-    _endParade();
+    _hush();
+    if (!_q.some((x) => x.flood)) {
+      if (_clearTimer) {
+        clearTimeout(_clearTimer);
+        _clearTimer = null;
+      }
+      _parade = null;
+    }
     const m = _cur;
     if (m) {
       clearTimeout(m._t);
       m._d = true;
       m._adv = true;
       _unmount(m);
-      _cur = null;
     }
+    _settled(m);
   }
   function _driver(e) {
     const r = () => e.built ? e.built.tw.querySelector(".toast .tbody .r") : null;
@@ -4922,9 +4928,8 @@ ${"=".repeat(48)}
   function replay(a, opts) {
     if (!a || !a.id) return {};
     const e = { a, opts: opts || {}, replay: true, drive: {} };
+    _q.unshift(e);
     _takeover();
-    _q.push(e);
-    _drain();
     return _driver(e);
   }
 

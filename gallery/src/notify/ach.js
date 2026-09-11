@@ -24,10 +24,9 @@ import { badgeSrc, badgeHop } from "./badgeArt.js";
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
 /* ---- BESPOKE MOMENTS (owner ruling 2026-09-10) -----------------------------------------
-   A couple of feats have a celebration of their own -- the Konami starfall App.jsx casts,
-   and the Control Panel reveal that follows its sibling -- and a bespoke moment REPLACES
-   the generic flair rather than layering on it. Two rules, both enforced here rather than
-   at the call sites so that a new caller cannot forget one:
+   A couple of feats have a celebration of their own, and a bespoke moment REPLACES the
+   generic flair rather than layering on it. Two rules, both enforced here rather than at
+   the call sites so that a new caller cannot forget one:
 
      1. While a bespoke moment owns the screen, this module builds NOTHING, so the standard
         achievement toast plays AFTER the bespoke moment. On a FIRST earn the two cannot
@@ -61,18 +60,8 @@ let data = null;                 // last /api/achievements payload (skinName for
         there is no celebration here for flair to ride on.
 
    Deliberately pure module state: BOTH hosts load this file and the Loom has none of the
-   gallery's easter-egg DOM or CSS, so nothing here may read an element, a class or a
-   stylesheet -- the owner of a moment tells us it started and tells us it ended.
-
-   WAVE BOUNDARY, disclosed rather than discovered later: only the first id has its moment in
-   this wave. The second id's celebration and the reveal flow it opens are the NEXT wave's
-   build (owner ruling 2026-09-10, item 5), so between the two waves that feat's EARN presents
-   with its standard moment and NO fanfare -- a thinner celebration than it had before this
-   change. That is the ruled set, not an oversight; the fix is the next wave, not a re-gating
-   here. Its Folio card is NOT thinned: a replay is not an earn (rule 2).
-
-   Both ids are already public in this source tree (App.jsx's Konami handler,
-   useControlPanel.js); the NAMES behind them are not, and must not be written here. */
+   gallery's bespoke-moment DOM or CSS, so nothing here may read an element, a class or a
+   stylesheet -- the owner of a moment tells us it started and tells us it ended. */
 export const BESPOKE_FEATS = new Set(["the-konami-code", "under-the-hood"]);
 
 let _bespoke = 0;                // depth, not a bool: two moments may overlap and compose
@@ -692,26 +681,45 @@ function _drain() {
    and after a real action completes (App.jsx onGenDone, submitTask). Exactly load(true). */
 export function check() { load(true); }
 
-/* A Folio replay TAKES OVER the celebration layer rather than joining the queue behind it: the
-   click is immediate and its driver handle is returned synchronously, so there is nothing to
-   wait behind. Taking over means the layer really is emptied first -- pending entries dropped,
-   any parade ended and its trail cleared, and the moment on screen removed OUTRIGHT rather
-   than faded, because a .out fade is 500ms this function does not have.
-   Before this, the takeover cleared the PARADE only, so a replay clicked while a queued
-   celebration was on screen opened a second .ach-m2 beside it and whichever ended first tore
-   down the other's DOM -- the exact overlap the parade takeover was written to prevent, left
-   open on the other path. The exit is THE EXIT (2026-09-04): _endParade cancels the linger
-   timer, clears the trail, and stops a parade still in flight. */
+/* A Folio replay TAKES THE SCREEN OVER on its way into the queue. What that means is exactly
+   two things and no more: the moment being PRESENTED is removed OUTRIGHT rather than faded
+   (a .out fade is 500ms a click does not have), and the parade's PRESENTED history -- the
+   receded trail and its two chips -- goes with it, through _hush, the one removal loop.
+
+   What a takeover must NEVER touch is anything still PENDING. Every entry in _q is a first
+   earn whose mark the server has already consumed (the /api/achievements?mark=1 load that
+   produced the list), so a toast dropped here is a celebration the owner can never get back
+   -- and that includes a parade's remaining steps, which is why this does NOT run THE EXIT.
+   _endParade splices the flood's own entries out of the queue, and that is the owner asking
+   for it (Escape, the skip chip), not a side effect of clicking a card. The replay goes to
+   the FRONT of the queue instead (see replay()) and the rest of the queue plays after it.
+
+   And it finishes through _settled -- the same settle path _play, _playFlood and the exit all
+   land on: the element leaves the DOM FIRST, then _cur is nulled, then the casts waiting on
+   whenClear are flushed, then the dequeue is re-entered. Nulling _cur after an _unmount that
+   ran while it was still set is what stranded a waiting cast: the flush _unmount fired saw a
+   moment presenting and returned, nothing ever flushed again, and _heldOff() stayed true for
+   the rest of the session -- no starfall, no replay, no celebration, in silence. */
 function _takeover() {
-  _q.length = 0;
-  _endParade();
-  const m = _cur;                 // still set: the exit fades its front moment, it does not
-  if (m) {                        // pretend the layer is free while that fade is running
-    clearTimeout(m._t);
-    m._d = true; m._adv = true;   // its own timer and click can no longer reach _settled
-    _unmount(m);
-    _cur = null;
+  _hush();                        // the presented trail and the parade's chips, one loop
+  // A parade whose queue has run dry has nothing left but the history just taken down, so it
+  // ends here rather than lingering: the linger still owns Escape (_paradeUp), and while a
+  // replay is up Escape belongs to the Folio. A parade with steps still pending keeps both
+  // its entries and its identity, and resumes behind the replay.
+  if (!_q.some((x) => x.flood)) {
+    if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+    _parade = null;
   }
+  const m = _cur;
+  if (m) {
+    clearTimeout(m._t);
+    m._d = true; m._adv = true;   // its own dwell and its click can no longer reach _settled
+    _unmount(m);                  // out of the DOM BEFORE _cur is nulled, so that...
+  }
+  // ...the flush inside the one settle path sees a layer this function has already emptied.
+  // With nothing presenting (m and _cur both null) it is still that same path: null _cur,
+  // flush the casts waiting on whenClear, then re-enter the dequeue.
+  _settled(m);
 }
 
 /* THE REPLAY DRIVER, bound to the QUEUE ENTRY rather than to an element. useFolio starts
@@ -747,21 +755,22 @@ function _bind(e, built) {
 
 /* replay(a, opts): re-plays the REAL celebration moment for an ALREADY-EARNED achievement, on
    demand. It goes through the ONE queue like every other moment -- serialized by the same
-   _cur, held by the same one gate -- and TAKES THE LAYER OVER on its way in rather than
-   joining the back of the queue: the click is immediate, so pending entries are dropped, any
-   parade is ended and its trail cleared, and a moment on screen is removed outright.
-   Held is not the same as refused. While a bespoke moment owns the screen the entry waits and
-   plays when the moment releases, driven the whole time by the handle above -- where the
-   exemption this used to carry put a .ach-m2 at z-index 520 over a cast at 449, which is the
-   overlap owner ruling 2026-09-10 rules out in BOTH directions.
+   _cur, held by the same one gate -- and takes the SCREEN over on its way in (see _takeover).
+   It goes to the FRONT of that queue rather than the back, which is what "the click is
+   immediate" can honestly mean once dropping the queue is off the table: the replay is the
+   next thing built, and the earns already waiting keep their turn behind it.
+   Held is not the same as immediate. While a bespoke moment owns the screen -- or while a
+   cast waits for the screen -- the entry waits with everything else and plays when the gate
+   lifts, driven the whole time by the handle above; the exemption this used to carry put a
+   .ach-m2 at z-index 520 over a cast at 449, which is the overlap owner ruling 2026-09-10
+   rules out in BOTH directions.
    opts.line forces the initial roast text (the Folio's ruby-scramble reveal starts from the
    CLEAN line on its own timing). Returns the driver handle useFolio.js consumes; {} only when
    there is nothing to celebrate at all. */
 export function replay(a, opts) {
   if (!a || !a.id) return {};
   const e = { a, opts: opts || {}, replay: true, drive: {} };
-  _takeover();
-  _q.push(e);
-  _drain();                      // builds now if the screen is free, later if it is not
-  return _driver(e);
+  _q.unshift(e);                 // the front of the queue, ahead of the earns already waiting
+  _takeover();                   // and it finishes through _settled, which re-enters the one
+  return _driver(e);             // dequeue -- so there is no second _drain() here to race it
 }
