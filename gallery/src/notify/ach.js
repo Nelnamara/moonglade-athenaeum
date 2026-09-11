@@ -23,6 +23,119 @@ import { badgeSrc, badgeHop } from "./badgeArt.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
+/* ---- BESPOKE MOMENTS (owner ruling 2026-09-10) -----------------------------------------
+   A couple of feats have a celebration of their own, and a bespoke moment REPLACES the
+   generic flair rather than layering on it. Two rules, both enforced here rather than at
+   the call sites so that a new caller cannot forget one:
+
+     1. While a bespoke moment owns the screen, this module builds NOTHING, so the standard
+        achievement toast plays AFTER the bespoke moment. On a FIRST earn the two cannot
+        share the screen at all -- the moment's DOM has not been built yet, which is overlap
+        made impossible by construction rather than by two timers happening to miss each
+        other.
+        The hold is ONE GATE ON ONE DEQUEUE. Every moment this module can put on screen --
+        a queued earn, a parade step, a Folio replay -- is an entry in _q, and _drain() is
+        the only function that builds one; hold _drain and nothing reaches the screen.
+        NO CALLER IS EXEMPT. A Folio replay used to be, on the grounds that a click has to
+        hand its driver handle back synchronously and a parked entry could only return a
+        dead one -- so a replay clicked during a cast opened .ach-m2 (z-index 520) straight
+        over it. An exemption is a door left ajar, and one door ajar is the whole invariant;
+        the handle waits WITH the entry instead and drives the moment the dequeue eventually
+        builds (see replay() and _driver below).
+        An earlier mechanism parked CONTINUATIONS instead (one from the celebration's front
+        door, one from the queue's own re-entry, one from the parade's step) and replayed
+        them on release. Three parked closures draining in a row is three callers racing to
+        build, and the "a moment is playing" flag had to be lowered while they were parked,
+        so a release could start a second moment over one still on screen. Replaced, not
+        patched: there is no flag to lower now, only _cur -- the element being presented --
+        and a dequeue that refuses while it is set.
+        The REVERSE direction is closed by whenClear() below: a cast that would otherwise
+        paint UNDER something already on screen waits for the screen to be empty first.
+     2. An achievement in BESPOKE_FEATS never gets _fanfare ON AN EARN: its own moment IS
+        the fanfare. A Folio REPLAY is not that moment (replay builds the standard moment
+        and casts nothing), so suppressing there would leave a celebration thinner than the
+        one that shipped before this rule, with nothing replacing it -- the replay keeps its
+        ordinary feat fanfare. "Never layer flair over a moment that is on screen" is not a
+        second gate any more: rule 1 means nothing is BUILT while one owns the screen, so
+        there is no celebration here for flair to ride on.
+
+   Deliberately pure module state: BOTH hosts load this file and the Loom has none of the
+   gallery's bespoke-moment DOM or CSS, so nothing here may read an element, a class or a
+   stylesheet -- the owner of a moment tells us it started and tells us it ended. */
+export const BESPOKE_FEATS = new Set(["the-konami-code", "under-the-hood"]);
+
+let _bespoke = 0;                // depth, not a bool: two moments may overlap and compose
+let _pendingDrain = false;       // the dequeue was asked to run while the gate was closed
+const _whenClear = [];           // callers waiting for the celebration layer to be EMPTY
+
+/* THE LAYER LEDGER. Everything this module paints is body-level and sits ABOVE the cast's
+   own layer -- a moment .ach-m2 at z-index 520, the parade's two chips at 519/521, against
+   .ee-layer's 449 -- so "the celebration layer is clear" has to mean the DOM is empty of
+   all of it. A receded trail card is not a moment, but it is still four dimmed cards
+   painted over a starfall. Every append goes through _mount and every removal through
+   _unmount, so the ledger cannot drift from the DOM; the module still reads no element,
+   class or stylesheet, it only counts what it put there itself. */
+const _live = new Set();
+function _mount(el) { _live.add(el); document.body.appendChild(el); }
+function _unmount(el) {
+  _live.delete(el);
+  if (el.parentNode) el.remove();
+  _flushClear();
+}
+
+/* THE GATE, as one predicate. The dequeue is held while a bespoke moment owns the screen,
+   and while a cast is WAITING to take it -- that cast is about to arm, and building one
+   more moment in front of it is the same overlap one link earlier in the chain. */
+function _heldOff() { return _bespoke > 0 || _whenClear.length > 0; }
+
+/* THE ONE RELEASE. Both holds lift through here, and it calls the dequeue exactly once.
+   _drain carries its own "is a moment on screen" check, so a release that lands while
+   something is still presenting cannot start a second one -- the release does not need to
+   know, and cannot get it wrong. */
+function _resume() {
+  if (_heldOff()) return;
+  if (!_pendingDrain) return;    // the queue never asked; there is nothing parked
+  _pendingDrain = false;
+  _drain();
+}
+
+export function beginBespokeMoment() { _bespoke++; }
+export function endBespokeMoment() {
+  if (_bespoke > 0) _bespoke--;
+  _resume();
+}
+
+/* whenClear(fn): the reverse direction of the hold. The hold keeps a moment off a cast that
+   is already up; this keeps a cast off anything that is already up. fn runs immediately when
+   the layer is empty, otherwise the instant the last thing on it has left the DOM -- and it
+   runs BEFORE the dequeue does (see _settled), so a caller that arms its hold inside fn
+   catches the next queued moment rather than racing it.
+
+   "Empty" is the DOM, not the queue. Treating a parade's receded trail as clear was the
+   reverse direction left half-open: those cards keep .ach-m2's z-index 520 over the cast's
+   449, and while a hold was armed they could not even time out. Waiting for the whole parade
+   instead would delay a cast by every earn still in it, so a waiting cast does not wait for
+   presented history -- _flushClear takes it down (_hush). What a cast waits for is the
+   moment actually being presented, plus the 500ms that history takes to fade. */
+export function whenClear(fn) {
+  if (typeof fn !== "function") return;
+  if (!_cur && !_live.size) { fn(); return; }
+  _whenClear.push(fn);
+  _flushClear();                 // nothing presenting, only history? then start taking it down
+}
+
+/* The one place waiting casts are fired, reached from every removal (_unmount) and from the
+   teardown that clears _cur (_settled). Three states, in order: a moment is presenting, so
+   wait; only presented history is left, so take it down and wait for its fade; the screen is
+   empty, so fire -- and only then let the dequeue run again. */
+function _flushClear() {
+  if (!_whenClear.length) return;
+  if (_cur) return;
+  if (_live.size) { _hush(); return; }
+  _whenClear.splice(0).forEach((fn) => { try { fn(); } catch { /* a cast's own problem */ } });
+  _resume();
+}
+
 function unleashed() {
   try { return localStorage.getItem("unleash") === "1"; } catch { return false; }
 }
@@ -59,8 +172,15 @@ function toastNew(d) {
 }
 
 // ---- the mid-screen achievement MOMENT: Nel presents the badge, flair scales with rarity ----
-const _q = [];
-let _playing = false;
+/* THE ONE QUEUE. Every moment that can reach the screen is an entry here and _drain() is the
+   only function that builds one, which is what makes a single hold enough.
+   `_cur` -- the element being presented -- is the serialization: _drain refuses while it is
+   set, and the teardown that clears it is what re-enters _drain. "At most one moment on
+   screen" is therefore the presence of a DOM node, not a boolean somebody has to remember to
+   lower; the "a moment is playing" flag this replaced was lowered in four places, and the
+   one that lowered it while the moment was still on screen is the bug that got us here. */
+const _q = [];                   // pending entries: {a, flood?, replay?, opts?, drive?, built?}
+let _cur = null;                 // the .ach-m2 element being presented right now, or null
 let _actx = null;
 const _sfx = {};
 
@@ -255,16 +375,55 @@ function _fanfare(m, tier) {
   }
 }
 
-function _play(built, hold, after) {
+/* THE ONE PLACE THAT DECIDES WHETHER THE FANFARE FIRES. All three moments that can carry
+   it -- the parade step, the queue, the Folio replay -- call this and never _fanfare
+   directly, because "suppress it for the bespoke feats" written out three times is
+   "suppress it for the bespoke feats" forgotten once: a feat earned in a >3 flood would
+   still blow confetti over a celebration that is supposed to replace it.
+
+   ONE suppression, where there used to be two. An EARN of a bespoke feat is quiet because
+   its own moment is its fanfare, so the standard toast that follows the cast arrives
+   without confetti. `opts.replay` is what separates that from the Folio, where the owner
+   clicks an already-earned card: replay() builds the standard moment and casts NOTHING, so
+   gating it there would make that card's celebration thinner than it was before this rule
+   with nothing put in its place.
+   The gate that used to stand first here -- "a bespoke moment is on screen, never layer on
+   it" -- is gone because it can no longer fire: the dequeue builds nothing at all while one
+   owns the screen, so there is no celebration in this function to decorate. It was load-
+   bearing only while the Folio replay had an exemption from that gate, and the exemption is
+   what went. A guard that cannot run is a guard nobody can check. */
+function _flair(built, a, opts) {
+  if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;   // the earn: its own moment is the fanfare
+  const tier = a.tier || "common";
+  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+}
+
+/* THE ONE TEARDOWN HOOK. A moment stops being presented in exactly three ways -- _play
+   removes it, _playFlood recedes it into the trail, the exit fades it out -- and all three
+   land here, each of them only once the element is no longer a moment on screen. Nothing
+   else clears _cur, so nothing else can let a second moment be built. */
+function _settled(m) {
+  if (_cur !== m) return;        // a replay already took the layer over; that one owns it
+  _cur = null;
+  // The waiting cast goes FIRST and the dequeue second: the cast arms its hold inside its
+  // callback, so running it first is exactly what stops the next queued moment from being
+  // built over it. Reversed, the two would race and the order would be luck.
+  _flushClear();
+  _drain();
+}
+
+function _play(built, hold) {
   const m = built.m, tw = built.tw;
-  document.body.appendChild(m);
+  _mount(m);
   void m.offsetWidth;
   m.classList.add("go"); tw.classList.add("go");
   const done = () => {
     if (m._d) return;
     m._d = true;
     m.classList.add("out");
-    setTimeout(() => { if (m.parentNode) m.remove(); if (after) after(); }, 500);
+    // REMOVED from the DOM before the queue is told the layer is free, so the next moment is
+    // built into an empty layer instead of across the .out fade of the one before it.
+    setTimeout(() => { _unmount(m); _settled(m); }, 500);
   };
   m._t = setTimeout(done, hold);
   m.addEventListener("click", () => { clearTimeout(m._t); done(); });
@@ -292,38 +451,71 @@ function _recede(m) {
   while (_trail.length > 4) {
     const old = _trail.pop();
     old.classList.add("out");
-    setTimeout(() => { if (old.parentNode) old.remove(); }, 500);
+    setTimeout(() => _unmount(old), 500);
   }
 }
 
-// The pending "the trail bows out" timer, held so it can be CANCELLED. Without this a
-// replay that starts while a parade is winding down inherits the parade's 3.2s timer,
-// which then rips the replay's own trail and chip out of the DOM mid-moment.
+/* The pending "the trail bows out" timer, held so it can be CANCELLED. Without the handle a
+   replay that starts while a parade is winding down inherits the parade's 3.2s timer, which
+   then rips the replay's own trail and chip out of the DOM mid-moment.
+
+   THE TIMER BELONGS TO WHICHEVER PARADE IS LIVE, and what keeps that true is that every
+   place which publishes or drops a parade takes the handle with it -- _floodParade,
+   _endParade and the takeover, all through this one function. Left behind, a superseded
+   parade's timer reaches _clearParade with a DIFFERENT parade live and nulls it, and
+   _drain's stale-flood guard (`!_parade || _parade.ended`) then shifts every one of THAT
+   parade's pending entries off the queue and drops them -- first earns whose marks the
+   server has already consumed, gone with no toast and no error -- while the same teardown's
+   _hush rips the live parade's trail and chips off screen mid-parade. (It is also the handle
+   the arm in _drain waits on, so a timer left behind stops the new parade ever arming one of
+   its own, and that parade then never bows out at all.)
+   Keyed to the parade instead -- a timer that checks it is still the live one before firing
+   -- the same hole stays shut, and this module has one rule about the difference: a guard
+   that cannot run is a guard nobody can check. Cancelling AT the three places is reachable
+   from every one of them, and loom/test/starfall-spec.test.js pins all three. */
 let _clearTimer = null;
+function _cancelLinger() {
+  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+}
 
-/* The LIVE parade, or null when none is on screen: {q, m, ended}. `q` is the flood's own
-   pending list (the moments not yet shown) and `m` the one currently front-and-center.
-   Holding that at module scope is what lets THE EXIT below reach a parade already in
-   flight -- the queue used to live only inside _floodParade's closure, where nothing
-   outside could stop it (not even replay()'s takeover, which cleared _q and the trail but
-   left the flood happily stepping on behind the replay's own moment). */
+/* The LIVE parade, or null when none is on screen: {m, ended}. `m` is the moment currently
+   front-and-centre. Its PENDING moments are not here any more -- they are flood-tagged
+   entries in the one _q, which is what makes "the parade is a second door onto the screen"
+   untrue by construction rather than by a guard in its step loop.
+   Holding this at module scope is what lets THE EXIT below reach a parade already in flight;
+   the flood's list used to live only inside _floodParade's closure, where nothing outside
+   could stop it (not even replay()'s takeover, which cleared _q and the trail but left the
+   flood happily stepping on behind the replay's own moment). */
 let _parade = null;
+let _paradeShown = 0;          // how many of this parade's moments have presented
 
-// THE ONE TEARDOWN. Natural end, replay()'s takeover and the exit all land here; nothing
-// else removes a trail layer or a chip, so there is no second path to race this one.
-function _clearParade() {
-  _clearTimer = null;
-  _parade = null;
+/* Take the parade's presented HISTORY off the screen -- the receded trail and the two chips
+   -- WITHOUT ending the parade: its pending moments are entries in _q and are still its own.
+   THE ONE REMOVAL LOOP: natural end, replay()'s takeover, the exit and a waiting cast all
+   reach the trail through this function and nothing else, so there is no second path to
+   race it. (A second loop removing the same DOM, whichever finished first winning, is
+   exactly how the replay/parade overlap bug worked.) */
+function _hush() {
   _trail.splice(0).forEach((el) => {
     el.classList.add("out");
-    setTimeout(() => { if (el.parentNode) el.remove(); }, 500);
+    setTimeout(() => _unmount(el), 500);
   });
   [_chip, _skip].forEach((c) => {
     if (!c) return;
     c.classList.add("out");
-    setTimeout(() => { if (c.parentNode) c.remove(); }, 500);
+    setTimeout(() => _unmount(c), 500);
   });
   _chip = null; _skip = null;
+}
+
+// THE ONE TEARDOWN. The natural end (through the linger armed above) and the exit both land
+// here; nothing else ends a parade with history still on screen, so there is no second path
+// to race this one. It always ends whichever parade is LIVE, which is only safe because a
+// superseded parade's linger is cancelled the moment it is superseded (see _cancelLinger).
+function _clearParade() {
+  _clearTimer = null;
+  _parade = null;
+  _hush();
 }
 
 /* ---- THE EXIT (owner ruling 2026-09-04, DECISIONS.md "The achievement parade gets an
@@ -336,24 +528,49 @@ function _clearParade() {
    the earn and applied from the same payload by syncSkin(), not by the moment. So an
    achievement whose moment never played is earned exactly like one that was watched.
 
-   The moment on screen JOINS THE TRAIL rather than being ripped out of the DOM, which is
-   what makes it fade instead of vanishing mid-frame -- and it fades through the same .out
-   class, on the same 500ms, as the click-dismiss that has always shipped. Then _clearParade
-   takes the layer down. No second teardown, nothing new for the existing ones to race. */
-function _paradeUp() { return !!(_parade || _clearTimer || _trail.length); }
+   The moment on screen fades instead of vanishing mid-frame -- through the same .out class,
+   on the same 500ms, as the click-dismiss that has always shipped -- and the queue is told
+   the layer is free only once that element has actually LEFT THE DOM, exactly as _play does
+   it. Telling it earlier is what put a celebration queued behind the parade on screen
+   across the skipped moment's fade: two full-screen .ach-m2 scrims at once, which is the
+   one thing this layer must never do. Then _clearParade takes the rest down. No second
+   teardown, nothing new for the existing ones to race. */
+
+/* A parade is UP when part of it is ON THE SCREEN: its front moment presenting, its history
+   still there, or the linger before it bows out. _parade is published at ENQUEUE time so the
+   exit can reach a parade whose moments are still queued -- but a parade with nothing on
+   screen yet must not swallow Escape. Held behind a bespoke moment it would otherwise eat
+   the key while the owner was looking at a different layer entirely, and the exit would
+   discard the whole held flood on the way past. */
+function _paradeUp() {
+  if (_trail.length || _clearTimer) return true;
+  return !!(_parade && _parade.m && _parade.m === _cur);
+}
 
 function _endParade() {
   const p = _parade;
   if (p) {
-    p.ended = true;                 // the step loop is over, whatever timer fires next
-    p.q.length = 0;                 // the moments still queued: skipped, and already earned
+    p.ended = true;                 // this parade is over, whatever timer fires next
+    // Its pending moments live in the ONE queue now, so skipping the parade means dropping
+    // its entries from there -- and ONLY its entries. A plain celebration waiting behind
+    // them is not part of what the owner asked to skip.
+    for (let i = _q.length - 1; i >= 0; i--) if (_q[i].flood) _q.splice(i, 1);
     const m = p.m;
-    // A false _adv is the tell that the front moment has NOT receded, so it is not in
-    // _trail yet and _clearParade would leave it stranded on screen.
-    if (m && !m._adv) { clearTimeout(m._t); m._adv = true; _trail.unshift(m); }
+    // A false _adv is the tell that the front moment has NOT receded: it is still the moment
+    // being presented, so it fades from where it stands and stays _cur until it is gone.
+    if (m && !m._adv) {
+      clearTimeout(m._t);
+      m._adv = true; m._d = true;   // its own dwell and its click can no longer advance it
+      m.classList.add("out");
+      setTimeout(() => { _unmount(m); _settled(m); }, 500);
+    }
   }
-  if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+  _cancelLinger();
   _clearParade();
+  // Re-enter the one dequeue for anything the skip did NOT touch -- a plain celebration
+  // queued behind the parade. It refuses while a moment is still on screen (refusal 1), so
+  // the skipped moment's own _settled is what actually lets that one build.
+  _drain();
 }
 
 /* The skip control: the counter chip's twin, one line above it. A SEPARATE element because
@@ -366,7 +583,7 @@ function _mkSkipChip() {
   b.className = "ach-trailchip ach-skipchip";
   b.setAttribute("aria-label", "Skip the rest of the achievement parade");
   b.addEventListener("click", (e) => { e.stopPropagation(); _endParade(); });
-  document.body.appendChild(b);
+  _mount(b);
   return b;
 }
 
@@ -391,57 +608,95 @@ if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("keydown", _onKey, true);
 }
 
-function _playFlood(built, after) {
+function _playFlood(built) {
   const m = built.m, tw = built.tw;
-  document.body.appendChild(m);
+  _mount(m);
   void m.offsetWidth;
   m.classList.add("go"); tw.classList.add("go");
   const advance = () => {
     if (m._adv) return;
     m._adv = true;
-    _recede(m);
-    if (after) after();
+    _recede(m);                    // presented history from here on, not a moment presenting
+    _settled(m);
   };
   m._t = setTimeout(advance, FLOOD_DWELL_MS);
   m.addEventListener("click", () => { clearTimeout(m._t); advance(); });  // click = next, same gesture as dismiss
 }
 
+/* A flood ENQUEUES; it does not run a loop of its own. Every moment it will ever show is an
+   entry in the one queue, so the hold that covers a celebration covers the parade -- at its
+   start and at every step, because start and step are the same code path. */
 function _floodParade(list) {
-  const q = list.slice();
-  const p = { q, m: null, ended: false };
-  _parade = p;                                     // published so the exit can reach it
-  let shown = 0;
-  const step = () => {
-    if (p.ended) return;                           // skipped: this parade is finished
-    if (!q.length) { _clearTimer = setTimeout(_clearParade, 3200); return; }  // lingers, then bows out
-    const a = q.shift(); shown++;
-    const tier = a.tier || "common";
-    _chime(tier);
-    const built = _mkMoment(a, {});
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-    p.m = built.m;
-    _playFlood(built, step);
-    if (shown > 1) {
-      if (!_chip) { _chip = document.createElement("div"); _chip.className = "ach-trailchip"; document.body.appendChild(_chip); }
-      _chip.textContent = "×" + shown + " earned";
-      // The skip chip arrives with the counter, i.e. once it is demonstrably a parade and
-      // not a single moment, and counts what SKIPPING would cost -- the pending queue.
-      if (!_skip) _skip = _mkSkipChip();
-      _skip.textContent = q.length ? ("skip ×" + q.length + " · Esc") : "skip · Esc";
-    }
-  };
-  step();
+  // Published before anything is built so the exit can reach a parade whose moments are all
+  // still queued. `m` stays null until the dequeue actually presents one, and _paradeUp()
+  // reads it: a parade that is only an intention does not own Escape.
+  // A new flood SUPERSEDES whatever parade came before it, so that parade's linger goes with
+  // it. Left running, the timer fires INSIDE this parade, ends a parade it was never armed
+  // for, and takes this one's pending first earns off the queue with it (see _cancelLinger).
+  // Cancelling is also what lets this parade arm a linger of its own when its queue runs dry.
+  _cancelLinger();
+  _parade = { m: null, ended: false };
+  _paradeShown = 0;
+  list.forEach((a) => _q.push({ a, flood: true }));
+  _drain();
 }
 
-function celebrate(a) { if (a) { _q.push(a); if (!_playing) _next(); } }
-function _next() {
-  if (!_q.length) { _playing = false; return; }
-  _playing = true;
-  const a = _q.shift(), tier = a.tier || "common";
+function celebrate(a) {
+  if (!a) return;
+  _q.push({ a });
+  _drain();
+}
+
+/* THE ONE DEQUEUE, and the only place in this module that builds a moment.
+   Three refusals, in this order:
+     1. a moment is already being presented -> return. Its teardown re-enters through
+        _settled; a second entry point is the whole class of bug this replaced.
+     2. nothing pending -> if a parade is draining, it lingers and then bows out. This sits
+        AHEAD of the gate on purpose: it builds nothing, and a parade whose queue has run dry
+        has to be able to bow out while a bespoke moment holds the screen. Behind the gate,
+        its trail sat over the cast for the cast's whole life and 3.2s past its release,
+        because the only line that arms the linger timer was never reached.
+     3. the gate is closed -> record that the queue wants to run and build NOTHING. This is
+        THE hold, written once, for every entry and every caller. _resume() calls back into
+        this same function, so a release that arrives while something is still presenting is
+        caught by refusal 1 rather than by the release having to know about it. */
+function _drain() {
+  if (_cur) return;
+  // A skipped parade splices its own entries out, so this only ever catches a stale one.
+  while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
+  if (!_q.length) {
+    if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
+    return;
+  }
+  if (_heldOff()) { _pendingDrain = true; return; }
+  const e = _q.shift();
+  const a = e.a, tier = a.tier || "common";
   _chime(tier);
-  const built = _mkMoment(a, {});
-  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-  _play(built, HOLD[tier] || 4600, _next);
+  const built = e.replay
+    ? _mkMoment(a, { eyebrow: "Achievement · Replay", line: (e.opts || {}).line })
+    : _mkMoment(a, {});
+  // `replay: true` -- see _flair. A replay casts no bespoke moment, so a bespoke feat's Folio
+  // card keeps the ordinary feat fanfare.
+  _flair(built, a, e.replay ? { replay: true } : undefined);
+  if (e.replay) _bind(e, built);   // the handle handed back at click time finds its element
+  _cur = built.m;
+  if (e.flood) {
+    _parade.m = built.m;
+    _paradeShown++;
+    _playFlood(built);
+    if (_paradeShown > 1) {
+      if (!_chip) { _chip = document.createElement("div"); _chip.className = "ach-trailchip"; _mount(_chip); }
+      _chip.textContent = "×" + _paradeShown + " earned";
+      // The skip chip arrives with the counter, i.e. once it is demonstrably a parade and
+      // not a single moment, and counts what SKIPPING would cost -- this parade's share of
+      // the queue, never a celebration queued behind it that the skip does not touch.
+      if (!_skip) _skip = _mkSkipChip();
+      const left = _q.reduce((n, x) => n + (x.flood ? 1 : 0), 0);
+      _skip.textContent = left ? ("skip ×" + left + " · Esc") : "skip · Esc";
+    }
+  } else {
+    _play(built, HOLD[tier] || 4600);
+  }
 }
 
 /* The old >3-unlock SUMMARY toast (showToast) is gone -- the trail parade replaced it
@@ -451,38 +706,96 @@ function _next() {
    and after a real action completes (App.jsx onGenDone, submitTask). Exactly load(true). */
 export function check() { load(true); }
 
+/* A Folio replay TAKES THE SCREEN OVER on its way into the queue. What that means is exactly
+   two things and no more: the moment being PRESENTED is removed OUTRIGHT rather than faded
+   (a .out fade is 500ms a click does not have), and the parade's PRESENTED history -- the
+   receded trail and its two chips -- goes with it, through _hush, the one removal loop.
+
+   What a takeover must NEVER touch is anything still PENDING. Every entry in _q is a first
+   earn whose mark the server has already consumed (the /api/achievements?mark=1 load that
+   produced the list), so a toast dropped here is a celebration the owner can never get back
+   -- and that includes a parade's remaining steps, which is why this does NOT run THE EXIT.
+   _endParade splices the flood's own entries out of the queue, and that is the owner asking
+   for it (Escape, the skip chip), not a side effect of clicking a card. The replay goes to
+   the FRONT of the queue instead (see replay()) and the rest of the queue plays after it.
+
+   And it finishes through _settled -- the same settle path _play, _playFlood and the exit all
+   land on: the element leaves the DOM FIRST, then _cur is nulled, then the casts waiting on
+   whenClear are flushed, then the dequeue is re-entered. Nulling _cur after an _unmount that
+   ran while it was still set is what stranded a waiting cast: the flush _unmount fired saw a
+   moment presenting and returned, nothing ever flushed again, and _heldOff() stayed true for
+   the rest of the session -- no starfall, no replay, no celebration, in silence. */
+function _takeover() {
+  _hush();                        // the presented trail and the parade's chips, one loop
+  // A parade whose queue has run dry has nothing left but the history just taken down, so it
+  // ends here rather than lingering: the linger still owns Escape (_paradeUp), and while a
+  // replay is up Escape belongs to the Folio. A parade with steps still pending keeps both
+  // its entries and its identity, and resumes behind the replay.
+  if (!_q.some((x) => x.flood)) {
+    _cancelLinger();
+    _parade = null;
+  }
+  const m = _cur;
+  if (m) {
+    clearTimeout(m._t);
+    m._d = true; m._adv = true;   // its own dwell and its click can no longer reach _settled
+    _unmount(m);                  // out of the DOM BEFORE _cur is nulled, so that...
+  }
+  // ...the flush inside the one settle path sees a layer this function has already emptied.
+  // With nothing presenting (m and _cur both null) it is still that same path: null _cur,
+  // flush the casts waiting on whenClear, then re-enter the dequeue.
+  _settled(m);
+}
+
+/* THE REPLAY DRIVER, bound to the QUEUE ENTRY rather than to an element. useFolio starts
+   driving the scramble reveal the instant replay() returns, and the entry it is driving may
+   not be on screen yet -- a replay clicked while a bespoke moment owns the screen waits its
+   turn like everything else, because an exemption there is a door left ajar (rule 1).
+   So the handle records what it was told and _bind replays that onto the moment the dequeue
+   eventually builds: the celebration arrives on the line the scramble settled at, instead of
+   on a half-scrambled one or on nothing at all. The handle is always a REAL object with all
+   four methods -- useFolio spreads it and calls them unguarded -- which is why a queued
+   entry may never hand back a bare {}. */
+function _driver(e) {
+  const r = () => (e.built ? e.built.tw.querySelector(".toast .tbody .r") : null);
+  return {
+    setText(text) { e.drive.text = text; const x = r(); if (x) x.textContent = text; },
+    setGlitching(on) { e.drive.glitch = !!on; const x = r(); if (x) x.classList.toggle("glitch", !!on); },
+    setSettledNsfw(on) { e.drive.nsfw = !!on; const x = r(); if (x) x.classList.toggle("settled-nsfw", !!on); },
+    dismiss() {
+      if (e.built) { if (e.built.m && e.built.m.parentNode) e.built.m.click(); return; }
+      const i = _q.indexOf(e);   // never reached the screen: it leaves the queue instead
+      if (i >= 0) _q.splice(i, 1);
+    },
+  };
+}
+function _bind(e, built) {
+  e.built = built;
+  const x = built.tw.querySelector(".toast .tbody .r");
+  if (!x) return;
+  if (e.drive.text != null) x.textContent = e.drive.text;
+  x.classList.toggle("glitch", !!e.drive.glitch);
+  x.classList.toggle("settled-nsfw", !!e.drive.nsfw);
+}
+
 /* replay(a, opts): re-plays the REAL celebration moment for an ALREADY-EARNED achievement, on
-   demand. NOT routed through the _q/_next queue -- that queue is for real earn-events arriving
-   together; a manual replay click is a single, immediate, user-driven action. opts.line forces
-   the initial roast text (the Folio's ruby-scramble reveal starts from the CLEAN line on its own
-   timing). Returns the driver handle useFolio.js consumes; {} if there is nothing to celebrate. */
+   demand. It goes through the ONE queue like every other moment -- serialized by the same
+   _cur, held by the same one gate -- and takes the SCREEN over on its way in (see _takeover).
+   It goes to the FRONT of that queue rather than the back, which is what "the click is
+   immediate" can honestly mean once dropping the queue is off the table: the replay is the
+   next thing built, and the earns already waiting keep their turn behind it.
+   Held is not the same as immediate. While a bespoke moment owns the screen -- or while a
+   cast waits for the screen -- the entry waits with everything else and plays when the gate
+   lifts, driven the whole time by the handle above; the exemption this used to carry put a
+   .ach-m2 at z-index 520 over a cast at 449, which is the overlap owner ruling 2026-09-10
+   rules out in BOTH directions.
+   opts.line forces the initial roast text (the Folio's ruby-scramble reveal starts from the
+   CLEAN line on its own timing). Returns the driver handle useFolio.js consumes; {} only when
+   there is nothing to celebrate at all. */
 export function replay(a, opts) {
   if (!a || !a.id) return {};
-  opts = opts || {};
-  // SERIALIZED against the parade. This path deliberately does not queue (a replay click
-  // is immediate and hands its driver handle back synchronously), which meant a click
-  // during a running parade opened a SECOND full-screen layer sharing the module-level
-  // _trail/_chip -- two moments on screen at once, and whichever finished first tore down
-  // the other's DOM. So the replay takes over instead of joining: any queued moments are
-  // dropped, the parade's own teardown is cancelled, and its trail clears before this one
-  // builds. Overlap is now impossible in either direction.
-  // The takeover is THE EXIT, run for a different reason (2026-09-04): _endParade cancels
-  // the linger timer and clears the trail exactly as the inline sequence here used to, and
-  // additionally stops a parade still in FLIGHT -- whose pending moments and front layer
-  // were out of this function's reach while they lived in _floodParade's closure.
-  _q.length = 0;
-  _playing = false;
-  _endParade();
-  const tier = a.tier || "common";
-  _chime(tier);
-  const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });
-  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-  _play(built, HOLD[tier] || 4600, null);
-  const rEl = built.tw.querySelector(".toast .tbody .r");
-  return {
-    setText(text) { if (rEl) rEl.textContent = text; },
-    setGlitching(on) { if (rEl) rEl.classList.toggle("glitch", !!on); },
-    setSettledNsfw(on) { if (rEl) rEl.classList.toggle("settled-nsfw", !!on); },
-    dismiss() { if (built.m && built.m.parentNode) built.m.click(); },
-  };
+  const e = { a, opts: opts || {}, replay: true, drive: {} };
+  _q.unshift(e);                 // the front of the queue, ahead of the earns already waiting
+  _takeover();                   // and it finishes through _settled, which re-enters the one
+  return _driver(e);             // dequeue -- so there is no second _drain() here to race it
 }

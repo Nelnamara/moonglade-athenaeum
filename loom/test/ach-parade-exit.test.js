@@ -246,14 +246,59 @@ describe("there is exactly one teardown path", () => {
       "The exit reuses _clearParade for exactly that reason.");
   });
 
-  test("the exit and the replay takeover call the same teardown", () => {
-    assert.match(src, /function _endParade\(\)[\s\S]*?_clearParade\(\);\r?\n\}/,
-      "_endParade must finish through _clearParade, not its own removal loop");
+  test("the exit FINISHES through that teardown, and the takeover never runs the exit", () => {
+    const endBody = src.match(/function _endParade\(\) \{[\s\S]*?\n\}/)[0];
+    // POSITIONAL, restored 2026-09-11. "must finish through _clearParade" was checked with a
+    // bare match, which a _clearParade() moved to the TOP of the function satisfies just as
+    // well -- and there it tears the parade down before the moment on screen has been faded
+    // and before the flood's entries have been spliced, which is the bug the sentence
+    // describes. A claim about where a call sits has to be pinned by where it sits.
+    const lines = endBody.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+    const iClear = lines.indexOf("_clearParade();");
+    assert.ok(iClear >= 0,
+      "_endParade no longer calls _clearParade at all -- an order assertion on a line that is " +
+      "gone would pass for free, so this is the check that has to come first");
+    assert.deepEqual(lines.slice(iClear).filter((l) => !l.startsWith("//")),
+      ["_clearParade();", "_drain();", "}"],
+      "_endParade must FINISH through _clearParade -- the one teardown, after the moment on " +
+      "screen has been set fading and the flood's own entries spliced out, with nothing left " +
+      "after it but the re-entry into the dequeue. Found instead: " +
+      lines.slice(iClear).filter((l) => !l.startsWith("//")).join(" | "));
+    assert.doesNotMatch(endBody, /_trail\.splice\(/,
+      "...and it must not empty the trail itself -- a second removal loop here is exactly the " +
+      "shape the test above forbids, written one function further along");
+
+    // CHANGED 2026-09-11, and this is what it used to require: that the takeover ROUTE
+    // THROUGH _endParade. It must now do the opposite, and the reason is what a takeover is
+    // allowed to take. THE EXIT is the owner asking for the rest of a parade to be dropped,
+    // so it splices the flood's pending entries out of the queue. Those entries are first
+    // earns whose marks the server has already consumed -- clicking a Folio card must not
+    // destroy them. So the takeover takes the PRESENTED trail (through _hush, the one removal
+    // loop) and the PRESENTED moment, and leaves every pending entry where it is.
+    const takeover = src.match(/function _takeover\(\) \{[\s\S]*?\n\}/)[0];
+    assert.doesNotMatch(takeover, /_endParade\(\)/,
+      "the takeover must NOT run the exit: _endParade drops the parade's pending moments, and " +
+      "a replay click is not the owner asking to skip them");
+    assert.doesNotMatch(takeover, /_clearParade\(\)/,
+      "nor reach past it into the teardown -- a parade with steps still queued keeps its " +
+      "identity and resumes behind the replay");
+    assert.doesNotMatch(takeover, /_trail\.splice\(|_q\.length = 0|_q\.splice\(/,
+      "and it empties neither the trail by hand (that is _hush, the one removal loop) nor the " +
+      "queue (that is a first-earn toast the owner can never get back)");
+    assert.match(takeover, /_hush\(\);/,
+      "the presented trail and the parade's chips still go, through the one removal loop");
+    assert.match(takeover, /_settled\(m\);/,
+      "and it finishes through the ONE settle path, which nulls _cur, flushes the casts " +
+      "waiting on whenClear and re-enters the dequeue. Nulling _cur by hand after the unmount " +
+      "is what left a waiting cast stranded with the engine held shut for the session.");
+
     const replayBody = src.match(/export function replay\(a, opts\) \{[\s\S]*$/)[0];
-    assert.match(replayBody, /_endParade\(\);/,
-      "replay's takeover must route through the exit, so a parade still IN FLIGHT is stopped " +
-      "and not merely cleared of its trail");
-    assert.doesNotMatch(replayBody, /_clearParade\(\);/,
-      "and it must not also call the teardown directly -- one call, one path");
+    assert.match(replayBody, /_takeover\(\);/,
+      "replay takes the screen over through that one function");
+    assert.doesNotMatch(replayBody, /_clearParade\(\);|_endParade\(\);/,
+      "never reaching around it into the teardown itself");
+    assert.match(replayBody, /_q\.unshift\(e\);/,
+      "and its entry goes to the FRONT of the one queue -- which is what 'the click is " +
+      "immediate' can mean now that emptying the queue behind it is off the table");
   });
 });

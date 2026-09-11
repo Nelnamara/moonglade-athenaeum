@@ -416,9 +416,15 @@ export default function useFolio() {
   // invented toast). Locked/masked achievements are wired to the same
   // handler by every consumer (matching the DC's own cardBase) but no-op
   // here.
-  // Ach.replay() is immediate and NOT queued (unlike a real earn-event) --
-  // dismiss whatever moment might already be showing before starting the
-  // next one, so two clicks in a row don't stack.
+  // Ach.replay() goes through the engine's ONE queue, at the FRONT of it: it
+  // takes the screen over (the moment being presented is removed, a parade's
+  // receded trail goes with it) but it is HELD like everything else while a
+  // bespoke moment owns the screen or a cast is waiting for it, and it plays
+  // when that lifts. So the handle can come back before the moment exists --
+  // it records what it is told and the engine replays that onto the moment it
+  // eventually builds. Dismiss whatever moment might already be showing before
+  // starting the next one, so two clicks in a row don't stack: dismissing an
+  // entry that never reached the screen simply takes it out of the queue.
   function replayToast(a) {
     if (!a.earned) return;
     const { sfw, nsfw } = roastPair(a);

@@ -34,6 +34,7 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import { sendAchEvent } from "./notify/achNonce.js";
+import { beginBespokeMoment, check as achCheck, endBespokeMoment, whenClear } from "./notify/ach.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
@@ -672,80 +673,192 @@ export default function App({ boot }) {
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
-  /* The Konami Code easter egg, ported from the classic BASE_HTML (its CSS/JS
-     never shipped to /next -- owner QA: "the Konami code is broken"; it wasn't,
-     it was simply absent). Same sequence, same beacon, same visuals; styles
-     live in styles.css. Mounted once, globally. */
+  /* The key-sequence cast. REBUILT 2026-09-10 to its committed Design Handoff brief (the
+     handoff-2026-09-04 set in the private moonglade-internal repo, which this public file
+     deliberately does not name any more precisely than that): that brief's cast() script is
+     this function's spec, its <style> block is styles.css's -- scrim, orb glow, 40 stars,
+     Nel, bottom glass toast; the stars' own size/duration/delay ranges; hold 6000ms, then
+     ONE .6s opacity fade of the whole .ee-layer, then removal.
+     The first port (from the classic BASE_HTML, which /next never inherited -- owner QA
+     reported it broken; it wasn't, it was simply absent) gave every element its
+     own 6s hold-and-fade keyframe and let append order decide the stacking. Both are gone:
+     each element now runs a short ENTRANCE animation only, the timeline below owns the hold
+     and the exit, and z-index VALUES own the stacking (styles.css). Sequence, beacon and
+     audio are unchanged. Mounted once, globally.
+
+     It is also a BESPOKE MOMENT. For its whole life -- from before the earning beacon goes
+     out, through the hold and the fade, to teardown -- it owns the screen, and notify/ach.js
+     HOLDS any newly-earned celebration until it releases (beginBespokeMoment/endBespokeMoment).
+     That is what makes THIS earn's standard achievement toast play AFTER the starfall rather
+     than over it: on a first earn the celebration is not merely delayed, it has not been built
+     yet, so the two layers cannot share the screen.
+
+     And the other direction, which arming alone cannot cover: anything ALREADY on screen when
+     the code is entered is a layer the cast would paint UNDER (.ach-m2 is z-index 520 and the
+     parade's chips 519/521, against the cast's 449). So the cast does not start on the
+     keypress -- it starts from ach.js's whenClear() hook, which runs it at once when that
+     layer is EMPTY and otherwise the instant the last thing on it has left the DOM. The arm
+     happens inside that callback, so the cast is never the thing waiting and nothing is ever
+     the thing painted over. The cost is that entering the code mid-celebration delays the
+     starfall by at most that celebration's own hold (HOLD in ach.js, 4.2-6.4s) plus the 500ms
+     a parade's already-receded cards take to fade -- and a waiting cast is what sends those
+     cards away, so the wait is never the length of a whole parade.
+
+     The cast FIRES that toast itself (achCheck() below, once the layer is up). Nothing in the
+     app polls achievements -- check() runs once per boot and after a generation -- so without
+     that call the standard toast for a fresh cast would not arrive until the next page
+     load, the hold would have nothing to hold, and the ruled sequence would exist only in a
+     test. The call is inside the moment on purpose: its celebration is built while the moment
+     is armed, so ach.js parks it, and release() is what lets it play.
+
+     Every exit below -- the normal timeline, a failed beacon, an unmount BEFORE the beacon
+     lands as well as after, and a beacon that never answers at all -- runs release() exactly
+     once; a missed release would wedge the engine and silently swallow every later
+     achievement. That is why release lives beside teardown in the effect's scope rather than
+     inside onKey: teardown only exists once the DOM has been built, and the arm-to-beacon
+     window is real time during which an unmount would otherwise have nothing to call.
+
+     And why the WALL CLOCK is the last of those paths rather than the cleanup: apiGet/apiPost
+     make a bare fetch (gallery/src/api.js -- no AbortController unless a caller asks for
+     timeoutMs, and a network failure RESOLVES with {error} rather than rejecting), so a
+     request that simply never settles never rejects and never resolves. The .catch below
+     cannot see it, and the effect cleanup is unmount -- which the root App does not do. That
+     leaves a silent /api/ach-event holding the engine above zero for the rest of the session.
+     ARM_CEILING_MS closes it in the only way a hung promise can be closed, by giving the arm
+     a ceiling in real time; a chain that answers after it has expired finds `released` and
+     builds nothing, so a cast cannot appear minutes later over a page that moved on. */
   useEffect(() => {
     const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
+    const ARM_CEILING_MS = 20000;            // see the note above: the failsafe for a fetch that never settles
     let pos = 0, busy = false;
+    let gone = false;                        // the effect has been torn down
+    let teardown = null;                     // the in-flight cast's teardown, once its DOM exists
+    let pendingRelease = null;               // ...and its release, from the instant it is ARMED
+    const startCast = () => {
+      if (gone) return;                      // unmounted while the cast waited for a clear layer
+      // ARMED BEFORE THE BEACON, not after the DOM is built: the beacon is what earns the
+      // feat, and a check() -- this cast's own, below, or one a finishing generation fires --
+      // can land while this promise chain is still in the air.
+      beginBespokeMoment();
+      let released = false;
+      let armT = 0;                          // the wall-clock ceiling on the arm-to-beacon window
+      const release = () => {
+        if (released) return;
+        released = true;
+        clearTimeout(armT);
+        if (pendingRelease === release) pendingRelease = null;
+        teardown = null;
+        busy = false;
+        endBespokeMoment();                  // the held celebration plays now
+      };
+      pendingRelease = release;              // reachable from the effect cleanup, DOM or no DOM
+      // The only path that can end a hung fetch. Generous on purpose -- it is a failsafe, not
+      // a timeout policy: a slow-but-alive beacon must still get its cast, so the ceiling sits
+      // far past any answer a local server plausibly takes, and expiring costs nothing but the
+      // cast's visuals for that press (the feat itself was earned server-side by the beacon,
+      // or was not sent at all).
+      armT = setTimeout(() => { if (!teardown) release(); }, ARM_CEILING_MS);
+      // The ee_* assets are served under the-konami-code's own unlock (the unlock-split
+      // enforcement, 2026-08-13) and this beacon is what records it -- so the visuals wait
+      // for the beacon to land, or the very first trigger races its own unlock and the art
+      // 404s. Fail-soft on a beacon error: the stars/toast still play (the img/audio just
+      // may not resolve). The /api/achievements read that follows is for the same reason:
+      // the roster answers for this id once the beacon has landed, and the sub-line takes
+      // its text from that answer -- a failed read answers {error} and the sub-line falls
+      // back to its generic string.
+      // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
+      // adopts the next one (notify/achNonce.js), which is what let the route go back to
+      // LOGIN so a phone can reach this too.
+      sendAchEvent("konami")
+        .then(() => apiGet("/api/achievements"))
+        .then((data) => {
+        // Answered after the ceiling expired: the arm is long gone, the engine has been
+        // released and another cast may even have played. Build nothing.
+        if (released) return;
+        // The stage, ported: one fixed layer holding the whole cast, so the ending is the
+        // page's ending -- a single element fading, not five elements racing.
+        const layer = document.createElement("div");
+        layer.className = "ee-layer";
+        const scrim = document.createElement("div");
+        scrim.className = "ee-scrim";
+        layer.appendChild(scrim);
+        const orb = document.createElement("div");
+        orb.className = "ee-orb";
+        layer.appendChild(orb);
+        const glyphs = ["✦", "✧", "★", "✪", "✺"];
+        for (let i = 0; i < 40; i++) {
+          const s = document.createElement("div");
+          s.className = "ee-star";
+          s.textContent = glyphs[i % glyphs.length];
+          s.style.left = Math.random() * 100 + "vw";
+          s.style.fontSize = 13 + Math.random() * 24 + "px";
+          s.style.animationDuration = 2.2 + Math.random() * 2.4 + "s";
+          s.style.animationDelay = Math.random() * 1.6 + "s";
+          layer.appendChild(s);
+        }
+        // Appended AFTER the stars, exactly as the handoff's cast() does -- and painted
+        // BEHIND them all the same, because the stars carry the higher z-index. Append
+        // order is not the ladder here; styles.css is.
+        const nel = document.createElement("img");
+        nel.className = "ee-nel";
+        nel.src = "/branding/ee_nelstarfall.png";
+        nel.onerror = () => nel.remove();
+        layer.appendChild(nel);
+        // Built with DOM methods, not innerHTML. The greeting is a fixed literal; the
+        // sub-line takes the roster's own desc for the-konami-code, set via textContent so
+        // fetched text can never reach an HTML parser.
+        const toast = document.createElement("div");
+        toast.className = "ee-toast";
+        toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
+        const sub = document.createElement("div");
+        sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:6px;";
+        const feat = data && (data.achievements || []).find((a) => a.id === "the-konami-code");
+        sub.textContent = (feat && feat.desc) || "A hidden power stirs in the Athenaeum.";
+        toast.appendChild(sub);
+        layer.appendChild(toast);
+        document.body.appendChild(layer);
+        // MARK-AND-TOAST for the earn that just happened, fired from INSIDE the moment. The
+        // read above is deliberately unmarked (it only wants the sub-line's text); this is
+        // the marking call, the only one that turns `newly` into a celebration (notify/ach.js
+        // load(mark) -> toastNew). It is held by the moment and plays after the fade.
+        achCheck();
+        let cast, loop;
+        try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
+        try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
+        let fadeT = null;
+        teardown = () => {
+          clearTimeout(holdT);
+          clearTimeout(fadeT);
+          if (layer.parentNode) layer.remove();
+          try { loop && loop.pause(); } catch {}
+          try { cast && cast.pause(); } catch {}
+          release();
+        };
+        const holdT = setTimeout(() => {
+          layer.classList.add("ee-out");     // the whole layer, one .6s opacity fade
+          fadeT = setTimeout(teardown, 600);
+        }, 6000);
+      })
+        .catch(() => { if (teardown) teardown(); else release(); });
+    };
     const onKey = (e) => {
       pos = e.keyCode === seq[pos] ? pos + 1 : (e.keyCode === seq[0] ? 1 : 0);
       if (pos !== seq.length) return;
       pos = 0;
       if (busy) return;
       busy = true;
-      // The ee_* assets are SEALED to The Konami Code (the unlock-split
-      // enforcement, 2026-08-13) and this beacon is what earns it -- so the
-      // visuals wait for the beacon to land, or the very first trigger races
-      // its own unlock and the art 404s. Fail-soft on a beacon error: the
-      // stars/toast still play (the img/audio just may not resolve).
-      // Earn the feat, THEN read its now-unmasked flavor from /api/achievements. The
-      // Konami punchline lives in the SEALED roster (the-konami-code's desc), not in this
-      // public source, so a clone can't read the egg's payoff before finding it -- a
-      // failed read answers {error}, and the sub-line falls back to its generic string.
-      // Through sendAchEvent since 2026-09-07: the beacon carries this page's nonce and
-      // adopts the next one (notify/achNonce.js), which is what let the route go back to
-      // LOGIN so a phone can find this egg too.
-      sendAchEvent("konami")
-        .then(() => apiGet("/api/achievements"))
-        .then((data) => {
-        const glyphs = ["✦", "✧", "★", "✪", "✺"];
-        const stars = [];
-        for (let i = 0; i < 46; i++) {
-          const s = document.createElement("div");
-          s.className = "ee-star";
-          s.textContent = glyphs[i % glyphs.length];
-          s.style.left = Math.random() * 100 + "vw";
-          s.style.fontSize = 13 + Math.random() * 24 + "px";
-          s.style.animationDuration = 2.2 + Math.random() * 2.6 + "s";
-          s.style.animationDelay = Math.random() * 1.8 + "s";
-          document.body.appendChild(s);
-          stars.push(s);
-        }
-        const scrim = document.createElement("div");
-        scrim.className = "ee-scrim";
-        document.body.appendChild(scrim);
-        const nel = document.createElement("img");
-        nel.className = "ee-nel";
-        nel.src = "/branding/ee_nelstarfall.png";
-        nel.onerror = () => nel.remove();
-        document.body.appendChild(nel);
-        // Built with DOM methods, not innerHTML. The greeting is a fixed literal; the
-        // punchline is the SEALED roster's desc for the-konami-code, set via textContent
-        // (so fetched data can never inject markup) -- it is not in this public source to spoil.
-        const toast = document.createElement("div");
-        toast.className = "ee-toast";
-        toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
-        const sub = document.createElement("div");
-        sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:7px;";
-        const feat = data && (data.achievements || []).find((a) => a.id === "the-konami-code");
-        sub.textContent = (feat && feat.desc) || "A hidden power stirs in the Athenaeum.";
-        toast.appendChild(sub);
-        document.body.appendChild(toast);
-        let cast, loop;
-        try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
-        try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
-        setTimeout(() => {
-          document.querySelectorAll(".ee-star,.ee-toast,.ee-nel,.ee-scrim").forEach((n) => n.remove());
-          try { loop && loop.pause(); } catch {}
-          try { cast && cast.pause(); } catch {}
-          busy = false;
-        }, 7000);
-      });
+      // NOT startCast() directly: see the note above. whenClear runs it now if the
+      // celebration layer is empty, and otherwise as soon as the moment on screen has torn
+      // down -- `busy` is already true, so re-entering the code while one waits does nothing.
+      whenClear(startCast);
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      gone = true;
+      document.removeEventListener("keydown", onKey);
+      if (teardown) teardown();              // unmounted mid-cast: take it down, release
+      else if (pendingRelease) pendingRelease();   // armed, beacon still in the air: release
+    };
   }, []);
 
   /* ---- bulk Actions: the classic flows, confirm texts verbatim ---- */

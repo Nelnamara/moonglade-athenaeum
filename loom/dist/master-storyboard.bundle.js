@@ -4370,6 +4370,44 @@ ${"=".repeat(48)}
 
   // ../gallery/src/notify/ach.js
   var data = null;
+  var BESPOKE_FEATS = /* @__PURE__ */ new Set(["the-konami-code", "under-the-hood"]);
+  var _bespoke = 0;
+  var _pendingDrain = false;
+  var _whenClear = [];
+  var _live = /* @__PURE__ */ new Set();
+  function _mount(el) {
+    _live.add(el);
+    document.body.appendChild(el);
+  }
+  function _unmount(el) {
+    _live.delete(el);
+    if (el.parentNode) el.remove();
+    _flushClear();
+  }
+  function _heldOff() {
+    return _bespoke > 0 || _whenClear.length > 0;
+  }
+  function _resume() {
+    if (_heldOff()) return;
+    if (!_pendingDrain) return;
+    _pendingDrain = false;
+    _drain();
+  }
+  function _flushClear() {
+    if (!_whenClear.length) return;
+    if (_cur) return;
+    if (_live.size) {
+      _hush();
+      return;
+    }
+    _whenClear.splice(0).forEach((fn) => {
+      try {
+        fn();
+      } catch {
+      }
+    });
+    _resume();
+  }
   function unleashed() {
     try {
       return localStorage.getItem("unleash") === "1";
@@ -4415,7 +4453,7 @@ ${"=".repeat(48)}
     newly.forEach((a) => celebrate(a));
   }
   var _q = [];
-  var _playing = false;
+  var _cur = null;
   var _actx = null;
   var _sfx = {};
   function _chime(tier) {
@@ -4643,9 +4681,20 @@ ${"=".repeat(48)}
       m.appendChild(cn);
     }
   }
-  function _play(built, hold, after) {
+  function _flair(built, a, opts) {
+    if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;
+    const tier = a.tier || "common";
+    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+  }
+  function _settled(m) {
+    if (_cur !== m) return;
+    _cur = null;
+    _flushClear();
+    _drain();
+  }
+  function _play(built, hold) {
     const m = built.m, tw = built.tw;
-    document.body.appendChild(m);
+    _mount(m);
     void m.offsetWidth;
     m.classList.add("go");
     tw.classList.add("go");
@@ -4654,8 +4703,8 @@ ${"=".repeat(48)}
       m._d = true;
       m.classList.add("out");
       setTimeout(() => {
-        if (m.parentNode) m.remove();
-        if (after) after();
+        _unmount(m);
+        _settled(m);
       }, 500);
     };
     m._t = setTimeout(done, hold);
@@ -4679,52 +4728,60 @@ ${"=".repeat(48)}
     while (_trail.length > 4) {
       const old = _trail.pop();
       old.classList.add("out");
-      setTimeout(() => {
-        if (old.parentNode) old.remove();
-      }, 500);
+      setTimeout(() => _unmount(old), 500);
     }
   }
   var _clearTimer = null;
+  function _cancelLinger() {
+    if (_clearTimer) {
+      clearTimeout(_clearTimer);
+      _clearTimer = null;
+    }
+  }
   var _parade = null;
-  function _clearParade() {
-    _clearTimer = null;
-    _parade = null;
+  var _paradeShown = 0;
+  function _hush() {
     _trail.splice(0).forEach((el) => {
       el.classList.add("out");
-      setTimeout(() => {
-        if (el.parentNode) el.remove();
-      }, 500);
+      setTimeout(() => _unmount(el), 500);
     });
     [_chip, _skip].forEach((c) => {
       if (!c) return;
       c.classList.add("out");
-      setTimeout(() => {
-        if (c.parentNode) c.remove();
-      }, 500);
+      setTimeout(() => _unmount(c), 500);
     });
     _chip = null;
     _skip = null;
   }
+  function _clearParade() {
+    _clearTimer = null;
+    _parade = null;
+    _hush();
+  }
   function _paradeUp() {
-    return !!(_parade || _clearTimer || _trail.length);
+    if (_trail.length || _clearTimer) return true;
+    return !!(_parade && _parade.m && _parade.m === _cur);
   }
   function _endParade() {
     const p = _parade;
     if (p) {
       p.ended = true;
-      p.q.length = 0;
+      for (let i = _q.length - 1; i >= 0; i--) if (_q[i].flood) _q.splice(i, 1);
       const m = p.m;
       if (m && !m._adv) {
         clearTimeout(m._t);
         m._adv = true;
-        _trail.unshift(m);
+        m._d = true;
+        m.classList.add("out");
+        setTimeout(() => {
+          _unmount(m);
+          _settled(m);
+        }, 500);
       }
     }
-    if (_clearTimer) {
-      clearTimeout(_clearTimer);
-      _clearTimer = null;
-    }
+    _cancelLinger();
     _clearParade();
+    _drain();
   }
   function _mkSkipChip() {
     const b = document.createElement("button");
@@ -4735,7 +4792,7 @@ ${"=".repeat(48)}
       e.stopPropagation();
       _endParade();
     });
-    document.body.appendChild(b);
+    _mount(b);
     return b;
   }
   function _onKey(e) {
@@ -4748,9 +4805,9 @@ ${"=".repeat(48)}
   if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener("keydown", _onKey, true);
   }
-  function _playFlood(built, after) {
+  function _playFlood(built) {
     const m = built.m, tw = built.tw;
-    document.body.appendChild(m);
+    _mount(m);
     void m.offsetWidth;
     m.classList.add("go");
     tw.classList.add("go");
@@ -4758,7 +4815,7 @@ ${"=".repeat(48)}
       if (m._adv) return;
       m._adv = true;
       _recede(m);
-      if (after) after();
+      _settled(m);
     };
     m._t = setTimeout(advance, FLOOD_DWELL_MS);
     m.addEventListener("click", () => {
@@ -4767,84 +4824,114 @@ ${"=".repeat(48)}
     });
   }
   function _floodParade(list) {
-    const q = list.slice();
-    const p = { q, m: null, ended: false };
-    _parade = p;
-    let shown = 0;
-    const step = () => {
-      if (p.ended) return;
-      if (!q.length) {
-        _clearTimer = setTimeout(_clearParade, 3200);
-        return;
-      }
-      const a = q.shift();
-      shown++;
-      const tier = a.tier || "common";
-      _chime(tier);
-      const built = _mkMoment(a, {});
-      if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-      p.m = built.m;
-      _playFlood(built, step);
-      if (shown > 1) {
+    _cancelLinger();
+    _parade = { m: null, ended: false };
+    _paradeShown = 0;
+    list.forEach((a) => _q.push({ a, flood: true }));
+    _drain();
+  }
+  function celebrate(a) {
+    if (!a) return;
+    _q.push({ a });
+    _drain();
+  }
+  function _drain() {
+    if (_cur) return;
+    while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
+    if (!_q.length) {
+      if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
+      return;
+    }
+    if (_heldOff()) {
+      _pendingDrain = true;
+      return;
+    }
+    const e = _q.shift();
+    const a = e.a, tier = a.tier || "common";
+    _chime(tier);
+    const built = e.replay ? _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: (e.opts || {}).line }) : _mkMoment(a, {});
+    _flair(built, a, e.replay ? { replay: true } : void 0);
+    if (e.replay) _bind(e, built);
+    _cur = built.m;
+    if (e.flood) {
+      _parade.m = built.m;
+      _paradeShown++;
+      _playFlood(built);
+      if (_paradeShown > 1) {
         if (!_chip) {
           _chip = document.createElement("div");
           _chip.className = "ach-trailchip";
-          document.body.appendChild(_chip);
+          _mount(_chip);
         }
-        _chip.textContent = "\xD7" + shown + " earned";
+        _chip.textContent = "\xD7" + _paradeShown + " earned";
         if (!_skip) _skip = _mkSkipChip();
-        _skip.textContent = q.length ? "skip \xD7" + q.length + " \xB7 Esc" : "skip \xB7 Esc";
+        const left = _q.reduce((n, x) => n + (x.flood ? 1 : 0), 0);
+        _skip.textContent = left ? "skip \xD7" + left + " \xB7 Esc" : "skip \xB7 Esc";
       }
-    };
-    step();
-  }
-  function celebrate(a) {
-    if (a) {
-      _q.push(a);
-      if (!_playing) _next();
+    } else {
+      _play(built, HOLD[tier] || 4600);
     }
-  }
-  function _next() {
-    if (!_q.length) {
-      _playing = false;
-      return;
-    }
-    _playing = true;
-    const a = _q.shift(), tier = a.tier || "common";
-    _chime(tier);
-    const built = _mkMoment(a, {});
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-    _play(built, HOLD[tier] || 4600, _next);
   }
   function check() {
     load(true);
   }
-  function replay(a, opts) {
-    if (!a || !a.id) return {};
-    opts = opts || {};
-    _q.length = 0;
-    _playing = false;
-    _endParade();
-    const tier = a.tier || "common";
-    _chime(tier);
-    const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
-    _play(built, HOLD[tier] || 4600, null);
-    const rEl = built.tw.querySelector(".toast .tbody .r");
+  function _takeover() {
+    _hush();
+    if (!_q.some((x) => x.flood)) {
+      _cancelLinger();
+      _parade = null;
+    }
+    const m = _cur;
+    if (m) {
+      clearTimeout(m._t);
+      m._d = true;
+      m._adv = true;
+      _unmount(m);
+    }
+    _settled(m);
+  }
+  function _driver(e) {
+    const r = () => e.built ? e.built.tw.querySelector(".toast .tbody .r") : null;
     return {
       setText(text) {
-        if (rEl) rEl.textContent = text;
+        e.drive.text = text;
+        const x = r();
+        if (x) x.textContent = text;
       },
       setGlitching(on) {
-        if (rEl) rEl.classList.toggle("glitch", !!on);
+        e.drive.glitch = !!on;
+        const x = r();
+        if (x) x.classList.toggle("glitch", !!on);
       },
       setSettledNsfw(on) {
-        if (rEl) rEl.classList.toggle("settled-nsfw", !!on);
+        e.drive.nsfw = !!on;
+        const x = r();
+        if (x) x.classList.toggle("settled-nsfw", !!on);
       },
       dismiss() {
-        if (built.m && built.m.parentNode) built.m.click();
+        if (e.built) {
+          if (e.built.m && e.built.m.parentNode) e.built.m.click();
+          return;
+        }
+        const i = _q.indexOf(e);
+        if (i >= 0) _q.splice(i, 1);
       }
     };
+  }
+  function _bind(e, built) {
+    e.built = built;
+    const x = built.tw.querySelector(".toast .tbody .r");
+    if (!x) return;
+    if (e.drive.text != null) x.textContent = e.drive.text;
+    x.classList.toggle("glitch", !!e.drive.glitch);
+    x.classList.toggle("settled-nsfw", !!e.drive.nsfw);
+  }
+  function replay(a, opts) {
+    if (!a || !a.id) return {};
+    const e = { a, opts: opts || {}, replay: true, drive: {} };
+    _q.unshift(e);
+    _takeover();
+    return _driver(e);
   }
 
   // ../gallery/src/notify/spikeStore.js
