@@ -2180,10 +2180,9 @@ def branding_root():
     still on disk in the old folder, the app just no longer looking there. Nobody hit it because
     only one library has ever existed.
 
-    And the "Under the Hood" easter egg depends on a curious user FINDING the empty slot folders.
-    They scan the top level of the app directory; they do not go rummaging inside a picture
-    library full of month folders and thumbnail caches. Discovery through the filesystem is the
-    mechanic, so the folders have to be where a tinkerer's eye lands. Deliberately NOT inside the
+    And the slot folders are meant to be VISIBLE: they sit beside the launcher, in the same
+    folder the user already opens to start the app, rather than inside a picture library full of
+    month folders and thumbnail caches nobody browses by hand. Deliberately NOT inside the
     /moonglade package that the naming pass will create either -- that is for code, and user art
     in a package boundary gets treated as code by something eventually.
 
@@ -2191,7 +2190,7 @@ def branding_root():
     exactly how the out_dir coupling above went unnoticed.
 
     Renamed to the coded goods root 2026-08-21 (the bundle-v2 rewire,
-    SCOPE_bundle-v2-contract.md): the on-disk tree a tinkerer finds is coded end
+    SCOPE_bundle-v2-contract.md): the on-disk tree is coded end
     to end -- role names never appear as folder names -- while the browser keeps
     requesting the friendly /branding/<role>/... URLs and the serve route
     translates once at the boundary (_public_rel_to_coded below)."""
@@ -2495,7 +2494,7 @@ def _seal_rule(rel):
             return ("earned", aid)
         return ("deny", None)
     if low.startswith(ROLE_CODE["starfall"].lower() + "/"):
-        # The whole Starfall bucket -- art, audio, AND the GONK breadcrumb
+        # The whole Starfall bucket -- art, audio, AND the GONK folder
         # inside it (ROLE_CODE['breadcrumb'] nests under starfall, so this
         # prefix covers it without its own branch).
         return ("earned", "the-konami-code")
@@ -2631,16 +2630,17 @@ def list_marks(out_dir, earned_ids=None):
         if ext:
             unlock = str(m.get("unlock") or "")
             earned = (not unlock) or (earned_ids is None) or (unlock in earned_ids)
-            # A HIDDEN feat is discovered, never announced (leak class HIGH #2,
-            # owner 2026-08-21; /api/achievements masks the same feat to "???").
-            # So only name the unlock when it is non-hidden, or GENUINELY earned
-            # (a real earned set that carries it -- earned_ids=None means "not
-            # gating / earned unknown", which for a hidden feat must stay silent).
+            # A feat the roster marks hidden stays masked until it is earned
+            # (leak class HIGH #2, owner 2026-08-21; /api/achievements masks the
+            # same feat to "???"). So only name the unlock when it is non-hidden,
+            # or GENUINELY earned (a real earned set that carries it --
+            # earned_ids=None means "not gating / earned unknown", which for a
+            # masked feat must stay silent).
             # Fail CLOSED on the roster, exactly as the badge-thumb route does
             # (adversarial 2026-08-22): when the container is missing/invalid/stale
             # _ach_hidden() goes EMPTY, so `unlock not in _ach_hidden()` passes for
             # every mark -- and _ach_name falls back to returning the id itself, so
-            # a hidden feat's id would be published to an unearned user in exactly
+            # a masked feat's id would be published to an unearned user in exactly
             # the state we cannot verify anything. Name it only when the roster
             # actually carries it.
             named = bool(unlock) and unlock in _ach_ids() and (
@@ -2721,8 +2721,8 @@ def _mark_unlock_for(mid):
 # and mascots' customization ships later as a named-role checklist over an
 # owner-curated SELECTION of system roles -- not a pick-one-active gallery, and not
 # the full role list. Until then neither is a slot: the payload doesn't list them,
-# the upload/crop/set-active routes refuse them. Their on-disk breadcrumb folders
-# stay (see _BRANDING_DISCOVERY_SLOTS).
+# the upload/crop/set-active routes refuse them. Their on-disk folders stay
+# (see _BRANDING_DISCOVERY_SLOTS).
 BRANDING_SLOTS = ("banner_main", "banner_login", "banner_loom")
 
 
@@ -2791,24 +2791,58 @@ def _slot_active_path(out_dir):
     return branding_root().parent / "branding_slots.json"
 
 
+def _recorded_slot_active(out_dir):
+    """The RECORDED pick per slot, exactly as branding_slots.json holds it -- no
+    self-heal, no existence check, no defaulting. Split out so the resolver below
+    can be handed ONE parse of that file instead of re-reading it per slot."""
+    try:
+        raw = json.loads(_slot_active_path(out_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
+
+
+def resolve_slot_active(out_dir, slot, recorded=None, assets=None):
+    """Which asset a slot actually wears, by ONE rule for every caller:
+
+      1. the RECORDED pick, when an asset with that id still exists on disk;
+      2. otherwise the manifest's LAST item -- the most recent upload, which is
+         the one add_slot_asset() makes active on the way in, so a pick that
+         went missing heals to the asset the last upload had already chosen;
+      3. otherwise None (the slot is empty).
+
+    One function because the answer has to be the SAME answer in three places:
+    the payload the Branding tab is served, load_slot_active()'s self-heal, and
+    the startup ensure pass that decides whether a render is still current. The
+    self-heal used to be `next(iter({ids}), None)` over a SET, and a set of
+    strings iterates in hash order -- which is randomised per process. With two
+    assets and no recorded pick, two starts of one install could resolve to
+    different assets, so the ensure pass compared the render against one answer
+    and re-rendered it to the other, on every other boot.
+
+    `recorded` / `assets` let a caller that already has them skip the re-read."""
+    if slot not in BRANDING_SLOTS:
+        return None
+    ids = [a["id"] for a in (list_slot_assets(out_dir, slot) if assets is None else assets)]
+    if recorded is None:
+        recorded = _recorded_slot_active(out_dir).get(slot)
+    if recorded in ids:
+        return recorded
+    return ids[-1] if ids else None
+
+
 def load_slot_active(out_dir):
     """Which uploaded asset (by id) is the ACTIVE one per slot -- the same
     relationship branding.json's own "mark" field already has to list_marks():
     many stored, one worn. Self-heals exactly like load_branding() does for
     "mark": a recorded active id that no longer exists on disk (deleted file,
-    corrupt manifest) falls back to the first real asset, or None."""
-    active = {}
-    try:
-        raw = json.loads(_slot_active_path(out_dir).read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            active = {k: str(v) for k, v in raw.items() if k in BRANDING_SLOTS and v}
-    except (OSError, ValueError):
-        pass
-    for slot in BRANDING_SLOTS:
-        have = {a["id"] for a in list_slot_assets(out_dir, slot)}
-        if active.get(slot) not in have:
-            active[slot] = next(iter(have), None)
-    return active
+    corrupt manifest) falls back through resolve_slot_active() above, which is
+    where the healing rule -- and its determinism -- lives."""
+    recorded = _recorded_slot_active(out_dir)
+    return {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
+            for slot in BRANDING_SLOTS}
 
 
 def save_slot_active(out_dir, active):
@@ -3063,32 +3097,40 @@ def branding_slots_payload(out_dir):
     """The Branding tab's full slot state -- assets + which one is active, per
     slot -- in the one shape both /api/branding and /api/panel/summary hand to
     the React BrandingTab. A single function so both routes can never disagree
-    about what a slot looks like."""
-    active = load_slot_active(out_dir)
-    return {slot: {"assets": list_slot_assets(out_dir, slot), "active": active.get(slot)}
-            for slot in BRANDING_SLOTS}
+    about what a slot looks like.
+
+    The active id comes from resolve_slot_active() -- the same function the
+    self-heal and the startup render pass ask -- so what the tab shows as active
+    is what the header is actually wearing. Each slot's manifest is parsed once
+    and handed to both halves."""
+    recorded = _recorded_slot_active(out_dir)
+    out = {}
+    for slot in BRANDING_SLOTS:
+        assets = list_slot_assets(out_dir, slot)
+        out[slot] = {"assets": assets,
+                     "active": resolve_slot_active(out_dir, slot, recorded.get(slot), assets)}
+    return out
 
 
-# "Under the Hood" intended flow (docs/DECISIONS.md, 2026-07-26, owner-confirmed
-# 2026-08-05): a fresh install ships the branding slot folders EMPTY, with a
-# single README breadcrumb the only hint. A curious user drops a raw PNG/JPEG
-# directly into one of them; the app ADOPTS it into that slot on its own --
-# no marks.json to hand-author, no upload UI. That adoption is what fires the
-# hidden feat and unlocks the Control Panel Branding tab. The earn path can
-# never be "use the Branding tab's own upload API" -- that tab sits BEHIND
-# this exact unlock -- so this has to work by scanning raw filesystem drops,
-# not by extending the authenticated upload routes above.
-# Fallback breadcrumb text ONLY (container absent): the real README content
-# (cryptic Nel ASCII + this line) is a SEALED asset materialized by
-# ensure_branding_discovery_tree -- spoiler hygiene keeps it out of this
-# public source.
+# The raw-drop path (docs/DECISIONS.md, 2026-07-26, owner-confirmed 2026-08-05):
+# a fresh install ships the branding slot folders EMPTY, and a raw PNG/JPEG
+# placed by hand into one of the four adopt folders is ADOPTED into that slot by
+# the app itself -- no marks.json to hand-author, no upload UI, no authenticated
+# request. That is the point: the Branding tab's own upload API is gated, so a
+# drop has to be picked up by scanning the filesystem rather than by extending
+# the authenticated upload routes above.
+# Fallback README text ONLY (container absent): the real README content is a
+# SEALED asset materialized by ensure_branding_discovery_tree and deliberately
+# kept out of this public source.
 _BRANDING_README = "Maybe something goes in here.\n"
-# mascots/rewards are listed here EXPLICITLY even though they are no longer
-# BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): their empty folders
-# are part of the tinkerer-discovery landscape and existing installs have them,
-# so the on-disk breadcrumb tree keeps the same six roles (now coded). A drop
-# there still does nothing (the sweep only ever adopts from _SWEEPABLE_SLOTS +
-# marks).
+# The folders the app creates at startup, so an install has somewhere to put
+# art. mascots/rewards are listed EXPLICITLY even though they are no longer
+# BRANDING_SLOTS (the 2026-08-13 unlock-split enforcement): existing installs
+# already have them, so the on-disk tree keeps the same six roles (now coded). A
+# drop in either is DETECTED and nothing else -- the wide read-only scan raises
+# the branding_custom_file flag (2026-09-10), while adoption stays narrow
+# (_SWEEPABLE_SLOTS + marks), so the role-bound files those two folders hold are
+# read but never consumed.
 _BRANDING_DISCOVERY_SLOTS = BRANDING_SLOTS + ("mascots", "rewards", "marks")
 
 
@@ -3182,17 +3224,21 @@ def _migrate_legacy_branding_root():
 
 
 def ensure_branding_discovery_tree():
-    """Create the empty, coded slot folders + the one GONK breadcrumb, so there
-    is actually something for a tinkerer to find. Idempotent and additive only
-    -- never touches a folder or file that already exists, so it is safe to
-    call on every server start regardless of what's already on disk (the
-    owner's own real tree, a returning install with real uploads, ...). Runs
-    the one-time legacy migration first so an old install's real files land in
-    the coded dirs before the empties go down. The README's content is
-    materialized from the SEALED asset (spoiler hygiene: the cryptic Nel ASCII
-    never appears in this public source); a container-less install gets the
-    plain one-liner. The old root-level README is no longer written. Called
-    once at app startup (create_app), not per-request."""
+    """Create the empty, coded slot folders + the one GONK folder's README, so a
+    fresh install has the tree on disk. Idempotent and additive only -- never
+    touches a folder or file that already exists, so it is safe to call on every
+    server start regardless of what's already on disk (the owner's own real
+    tree, a returning install with real uploads, ...). Runs the one-time legacy
+    migration first so an old install's real files land in the coded dirs before
+    the empties go down. The README's content is materialized from the SEALED
+    asset (it never appears in this public source); a container-less install
+    gets the plain one-liner. The old root-level README is no longer written.
+
+    Called at STARTUP, never per-request, and from TWO places: create_app()
+    runs it, and main() runs it again itself immediately before
+    _migrate_root_banner_flats() -- which is what lets an ancient install's
+    legacy flats land at the coded root and be moved on within the same
+    start."""
     _migrate_legacy_branding_root()
     for slot in _BRANDING_DISCOVERY_SLOTS:
         _role_dir(slot).mkdir(parents=True, exist_ok=True)
@@ -3281,8 +3327,8 @@ def _is_readable_image(path):
 
 # How deep the read-only detection walk below descends. The deepest SHIPPED
 # coded folder is four segments from the root (ROLE_CODE's enhance/emotion under
-# bridge, and the breadcrumb under starfall), so six leaves a tinkerer two levels
-# of their own nesting and still bounds the cost on a per-request path.
+# bridge, and the GONK folder under starfall), so six leaves two levels of
+# user-made nesting inside the cap and still bounds the cost on a per-request path.
 _BRANDING_WALK_MAX_DEPTH = 6
 
 
@@ -3408,12 +3454,29 @@ def _record_branding_baseline(out_dir):
     """Take the snapshot: every file the walk can reach, fingerprinted, stored in
     the library's telemetry beside flags and sets, under this library-and-app-
     folder pairing's own key. Once per pairing, on that pairing's first scan --
-    which is why that scan reports nothing."""
+    which is why that scan reports nothing.
+
+    EVERY file the walk reaches is recorded, including one whose bytes could not
+    be read when the snapshot was taken (locked by another process, a
+    permissions corner). Such a file is stored with its size and a NULL hash
+    rather than dropped, because dropping it is wrong in both directions: an
+    absent rel counts as new forever -- a permanent false find on a file that was
+    always there -- while pretending it is fine forever would be a permanent
+    blind spot. Size alone is what the snapshot honestly knows, so that is what
+    it stores, and the comparison honours it exactly: a later file at that rel
+    with the same size is the file that was already there (readable or not), and
+    a different size is a real change and counts. A stat that fails too leaves
+    the rel recorded with nothing known, which the comparison reads as changed --
+    and the scan cannot stat such a file either, so it never reaches judgement."""
     snap = {}
     for rel, e in _branding_tree_files():
         fp = _file_fingerprint(e.path)
-        if fp is not None:
-            snap[rel] = fp
+        if fp is None:
+            try:
+                fp = [int(e.stat().st_size), None]
+            except (OSError, TypeError, ValueError):
+                fp = [None, None]
+        snap[rel] = fp
 
     def _store(d):
         d.setdefault("baselines", {})[_baseline_key()] = snap
@@ -3482,7 +3545,10 @@ def _branding_tree_has_new_art(out_dir):
     memoised per process: a file compared and found to be a default is
     remembered as (rel, size, mtime_ns), and a later scan that finds the same
     triple skips straight past it. The first scan of a process pays the reads;
-    every scan after it pays the walk's own stats and nothing else.
+    every scan after it pays the walk's own stats, plus -- every single call,
+    memo or no memo -- the one read-and-JSON-parse of the telemetry store that
+    fetching the baseline costs (_branding_baseline -> load_telemetry). That
+    parse is why the callers guard this on the flag not already being set.
 
     The memo trusts an mtime, so it deliberately does NOT trust a fresh one: a
     file written within _BASELINE_SETTLE_NS of the scan is left out of the memo
@@ -3520,7 +3586,11 @@ def _branding_tree_has_new_art(out_dir):
             except (TypeError, ValueError):
                 same_size = False
             if same_size:
-                fp = _file_fingerprint(e.path)
+                # A NULL hash is the snapshot saying it could not read this file
+                # when it looked: size is the whole of what it knows, so a
+                # same-size file at that rel is the file it recorded, and there
+                # is nothing to compare bytes against.
+                fp = None if known[1] is None else _file_fingerprint(e.path)
                 if fp is None or fp[1] == known[1]:
                     if now - stamp[2] > _BASELINE_SETTLE_NS:
                         clean.append(stamp)
@@ -3647,10 +3717,10 @@ def banner_cache_dir(out_dir):
 
     Moved OUT of the coded goods root on 2026-09-10 (owner ruling). The tree
     now holds slot folders and nothing else: the root is empty and inert, the
-    app writes nothing there and serves nothing from there, and a file a
-    tinkerer drops at the root is neither served nor overwritten by the next
-    re-render. Derived from `out_dir` directly -- NOT from branding_root() --
-    which is the same rule badge_cache_dir() follows."""
+    app writes nothing there and serves nothing from there, and a file dropped
+    at the root is neither served nor overwritten by the next re-render. Derived
+    from `out_dir` directly -- NOT from branding_root() -- which is the same rule
+    badge_cache_dir() follows."""
     return Path(out_dir) / "gallery" / "cache" / "_banners"
 
 
@@ -3780,9 +3850,15 @@ def _slot_render_record(out_dir, slot):
     {"kind": "slot", "asset_id", "transform"} -- or None when the slot has no
     active asset to render from. The one place the comparison shape is built,
     so what _ensure_banner_renders compares against and what _write_banner_flat
-    stamps can never disagree."""
-    active_id = load_slot_active(out_dir).get(slot)
-    a = next((x for x in list_slot_assets(out_dir, slot) if x["id"] == active_id), None)
+    stamps can never disagree.
+
+    "Current active pick" is resolve_slot_active()'s answer, not this function's
+    own: a slot with assets and no recorded pick has to resolve the same way
+    here as it does for the payload and the self-heal, or the ensure pass
+    compares a render against an answer nothing else would give."""
+    assets = list_slot_assets(out_dir, slot)
+    active_id = resolve_slot_active(out_dir, slot, assets=assets)
+    a = next((x for x in assets if x["id"] == active_id), None)
     if not a:
         return None
     return {"kind": "slot", "asset_id": a["id"],
@@ -3917,6 +3993,35 @@ def _ensure_banner_flat(out_dir, slot):
         return None
 
 
+def _record_slot_resolution(out_dir):
+    """Write the resolution the startup pass is about to render from back into
+    branding_slots.json, so a slot that HAD no recorded pick has one from here
+    on and the answer stops being re-derived at every start.
+
+    Resolution is already deterministic (resolve_slot_active), so this changes
+    no bytes; what it changes is where the answer lives. A slot whose pick was
+    only ever implied -- assets adopted from a hand-drop by an older build, a
+    pick file lost with a copied library -- is one manifest edit away from
+    implying a different asset, and a render then disagrees with a record that
+    was never written down. Recording it makes the render's `asset_id` a claim
+    about a stored pick rather than about a derivation.
+
+    Writes only when a slot actually resolved to an asset the file does not
+    already name: a library with no assets at all leaves no file behind, and the
+    owner's own recorded picks are never rewritten. Fail-soft -- this runs
+    inside create_app, and a pick that cannot be persisted still renders."""
+    recorded = _recorded_slot_active(out_dir)
+    resolved = {slot: resolve_slot_active(out_dir, slot, recorded.get(slot))
+                for slot in BRANDING_SLOTS}
+    if not any(resolved[slot] and recorded.get(slot) != resolved[slot]
+               for slot in BRANDING_SLOTS):
+        return
+    try:
+        save_slot_active(out_dir, resolved)
+    except OSError:
+        pass
+
+
 def _ensure_banner_renders(out_dir):
     """The startup pass: every banner slot's flat brought up to date once, at
     app construction, instead of lazily on a request. The public unauthenticated
@@ -3928,7 +4033,16 @@ def _ensure_banner_renders(out_dir):
     Fails soft per slot, and deliberately BROADLY: this runs inside create_app,
     so anything that escapes here takes the whole server down at construction.
     A banner that cannot be rendered costs a banner -- the route still falls
-    through to the container copy and then the shipped sealed default."""
+    through to the container copy and then the shipped sealed default.
+
+    The resolution is RECORDED first (_record_slot_resolution), so the picks the
+    renders below are stamped with are picks this install has written down."""
+    try:
+        _record_slot_resolution(out_dir)
+    except Exception:                      # noqa: BLE001 -- a pick must never fail a boot
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "banner render: the slot resolution could not be recorded", exc_info=True)
     for slot in BRANDING_SLOTS:
         try:
             _ensure_banner_flat(out_dir, slot)
@@ -3938,7 +4052,7 @@ def _ensure_banner_renders(out_dir):
                 "banner render: %s could not be brought up to date", slot, exc_info=True)
 
 
-def sweep_branding_drops(out_dir):
+def sweep_branding_drops(out_dir, telem=None):
     """Two jobs with deliberately different scopes (owner ruling, 2026-09-10).
 
     ADOPT -- the only part that WRITES -- covers exactly four folders: the three
@@ -3971,8 +4085,21 @@ def sweep_branding_drops(out_dir):
     hashes a head of each baseline file, every scan after it is the walk's stats
     and a memo lookup. The adopt half is a handful of small directory listings,
     matching list_marks()/list_quarantined()'s own "stays cheap" precedent.
+
+    `telem` is this request's already-loaded telemetry store, when the caller has
+    one (/api/achievements does, and used to make the short-circuit below parse
+    the file a second time). Handed in, it is READ for the flag short-circuit and
+    UPDATED in place with a flag this call raises, so the caller's copy stays
+    true without a re-read -- which matters because that route flattens flags
+    into the achievement metrics further down the same request.
+
     Returns True if anything was ADOPTED this call -- the flag can fire off the
     scan without that being true."""
+    def _raise_flag():
+        telem_flag("branding_custom_file", out_dir=out_dir)
+        if isinstance(telem, dict) and isinstance(telem.get("flags"), dict):
+            telem["flags"]["branding_custom_file"] = 1
+
     adopted = False
     for slot in _SWEEPABLE_SLOTS:
         sdir = _slot_dir(slot)
@@ -4041,16 +4168,19 @@ def sweep_branding_drops(out_dir):
     # one-shot by contract ("once set they stay set"). Without the guard, every
     # request on a dressed install would both walk the tree and take
     # _telem_mutate's process lock + atomic rewrite to store a 1 that is already
-    # there. One cheap read replaces both.
+    # there. One cheap read replaces both -- and on the request path it is not
+    # even a read: `telem` is the store that request already parsed, so the
+    # guard costs a dict lookup.
     if adopted:
-        telem_flag("branding_custom_file", out_dir=out_dir)
+        _raise_flag()
     else:
         try:
-            already = (load_telemetry(out_dir)["flags"] or {}).get("branding_custom_file")
+            d = load_telemetry(out_dir) if telem is None else telem
+            already = (d["flags"] or {}).get("branding_custom_file")
         except Exception:                  # noqa: BLE001 -- a broken read must not hide a real drop
             already = False
         if not already and _branding_tree_has_new_art(out_dir):
-            telem_flag("branding_custom_file", out_dir=out_dir)
+            _raise_flag()
     return adopted
 
 
@@ -4379,7 +4509,7 @@ def _build_ach_rung(roster):
 def achievement_points(a):
     """Rung-scaled score for one achievement: tier base + 5*(rung-1). Feats score
     0 by design (pure bragging-rights flair), so the points total never reveals a
-    hidden feat."""
+    masked feat."""
     if a.get("tier") == "feat":
         return 0
     return _TIER_POINTS.get(a.get("tier"), 0) + 5 * (_ach_rung().get(a["id"], 1) - 1)
@@ -4582,8 +4712,9 @@ def save_ach_state(out_dir, state):
 def badge_cache_dir(out_dir):
     """Where the regenerable badge-thumb cache lives: `out_dir/gallery/cache/_badges/`.
     OUTSIDE the coded branding tree on purpose (SCOPE_bundle-v2-branding constraint 3:
-    the tree must keep reading as the empty scaffold + breadcrumb -- a folder of PNGs
-    named by achievement id beside the coded folders gave the tree's purpose away), and
+    the tree must keep reading as the empty slot scaffold -- a folder of PNGs named by
+    achievement id beside the coded folders published the sealed roster's own contents
+    to anyone who opened it), and
     under `gallery/`, which every filesystem walker already skips wholesale (organize,
     import, audit, dedup -- Invariant 6), so the cache can never be catalogued as art.
     `gallery/cache/` is the general home for regenerable caches (owner, 2026-08-21: a
@@ -14396,7 +14527,7 @@ def create_app(out_dir: Path):
         slot's SHIPPED sealed default, so a fresh install is dressed before its
         first crop. And the coded ROOT's own top level is inert the same way: a
         bare rel translation did not recognize reads the container only, so a
-        file a tinkerer parks at the root is never served.
+        file parked at the root is never served.
 
         This route SERVES and never renders. It is PUBLIC tier -- an anonymous
         GET from anywhere on the LAN reaches it -- so it must not be able to
@@ -14499,20 +14630,20 @@ def create_app(out_dir: Path):
         # an id that IS in the roster; an unknown id -- OR ANY id when the roster
         # is unavailable (no/invalid container -> _ach_ids() empty) -- is denied.
         # Without this, _ach_hidden() also goes empty in that state, the hidden
-        # gate below silently passes, and an unearned hidden feat's master serves
+        # gate below silently passes, and an unearned masked feat's master serves
         # by id (the fail-open _seal_rule was written to avoid; the parallel gate
         # here missed it -- adversarial, 2026-08-22). Visible feats' thumbs still
         # serve unearned (the Folio's locked tiles show art by design).
         if aid not in _ach_ids():
             abort(404)
-        # Hidden feats are masked in /api/achievements, but their ids sit in
-        # this public source -- so an unearned hidden feat's badge must not be
-        # fishable by id here either.
+        # Feats the roster marks hidden are masked in /api/achievements, but
+        # their ids sit in this public source -- so an unearned masked feat's
+        # badge must not be fishable by id here either.
         if aid in _ach_hidden() and aid not in _earned_achievement_ids(
                 out_dir, db_path, need=aid):
             abort(404)
         if ext == "webp":
-            # Past the same gate the stills pass, so an unearned hidden feat's
+            # Past the same gate the stills pass, so an unearned masked feat's
             # animation is no more fishable than its still. Served whole -- see
             # _badge_anim on why an animated master is never re-encoded here.
             raw = _badge_anim(aid)
@@ -16499,10 +16630,11 @@ def create_app(out_dir: Path):
         achievements as 'seen' so the unlock toast fires exactly once.
 
         Side effects (cheap, fail-soft): marks today in the Vigil day ledger, checks
-        the Night Owl window, and sweeps the state-derived feat flags. Hidden feats
-        that aren't earned go out MASKED -- collapsed to a single ??? placeholder
-        so devtools can't spoil them or even count how many remain; the whole
-        feat tab stays cloaked until the first feat lands."""
+        the Night Owl window, and sweeps the state-derived feat flags. A feat the
+        roster marks hidden goes out MASKED until it is earned -- collapsed with
+        every other still-masked one into a single ??? placeholder, so devtools
+        can't spoil them or even count how many remain; the whole feat tab stays
+        cloaked until the first feat lands."""
         import datetime as _dt
         try:
             today = _dt.date.today().isoformat()
@@ -16514,18 +16646,24 @@ def create_app(out_dir: Path):
                 telem_flag("session_hour", out_dir=out_dir)
         except Exception:
             pass
-        # "Under the Hood"'s real trigger -- unlike sweep_telemetry above, this runs
-        # EVERY call, not once a day: a curious user who just dropped a file into
-        # branding/<slot>/ deserves the achievement on their next reload, not up to
-        # a day later. See sweep_branding_drops()'s own docstring.
-        try:
-            sweep_branding_drops(out_dir)
-        except Exception:
-            pass
         # ONE telemetry read for the whole request. This route wanted the store three
         # times -- the metric flatten, the first-sync gate, and compute's `sets` -- and
         # was reading and parsing the file for each. Same values, a third of the I/O.
+        #
+        # Loaded BEFORE the branding sweep, and handed to it, because the sweep's own
+        # flag short-circuit wants exactly this store and used to parse it a second
+        # time on every fetch. The sweep mirrors a flag it raises back into this dict,
+        # so a drop still pays off on the very request that found it -- flags flatten
+        # into the metric namespace below (telemetry_metrics), and reading the file
+        # first would otherwise hold a copy taken one moment too early.
         telem = load_telemetry(out_dir)
+        # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
+        # a file dropped into the tree since the last fetch is picked up on the next
+        # reload, not up to a day later. See sweep_branding_drops()'s own docstring.
+        try:
+            sweep_branding_drops(out_dir, telem=telem)
+        except Exception:
+            pass
         metrics = achievement_metrics(db_path)
         metrics.update(telemetry_metrics(out_dir, telem=telem))
         # Gate the unlock toasts until the first full sync completes (see first_sync_complete):
@@ -16569,9 +16707,8 @@ def create_app(out_dir: Path):
         # Masked feats COLLAPSE to a single placeholder (2026-08-13): the old
         # scheme kept one "hidden-feat-N" entry per undiscovered feat, so the
         # array length -- and any earned/total arithmetic a client renders --
-        # counted exactly how many secrets were left. One placeholder says
-        # "there are hidden feats" (which the placeholder itself publicizes)
-        # and nothing more.
+        # counted exactly how many secrets were left. One placeholder says only
+        # what the placeholder itself already publicizes, and nothing more.
         masked_metrics, n_masked, visible = set(), 0, []
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
@@ -16905,9 +17042,9 @@ def create_app(out_dir: Path):
             locked = next((m for m in _marks
                            if m["id"] == mark and not m["earned"]), None)
             if locked is not None:
-                # unlock_name is already spoiler-masked (empty for an unearned
-                # HIDDEN feat -- see list_marks). NEVER fall back to the raw
-                # unlock id: that would name the hidden feat the mask exists to
+                # unlock_name is already spoiler-masked (empty while the feat is
+                # masked -- see list_marks). NEVER fall back to the raw
+                # unlock id: that would name the very feat the mask exists to
                 # hide (feat/mark-gating spoiler audit 2026-09-08).
                 return jsonify({"error": "mark locked",
                                 "unlock": locked.get("unlock_name") or "",
@@ -17130,7 +17267,7 @@ def create_app(out_dir: Path):
             return jsonify({"error": "unknown mark (no .ico cut for it)"}), 400
         locked = next((m for m in _marks if m["id"] == mark and not m["earned"]), None)
         if locked is not None:
-            # Masked name only, never the raw unlock id -- a hidden feat's
+            # Masked name only, never the raw unlock id -- a masked feat's
             # id must not leak through the shortcut 403 either (spoiler audit).
             return jsonify({"error": "mark locked",
                             "unlock": locked.get("unlock_name") or ""}), 403

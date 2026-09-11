@@ -187,28 +187,45 @@ def test_the_walk_cap_bounds_the_scan_in_both_directions(tmp_path):
     never recorded would count as new forever.
 
     Depth is counted in folder segments below the coded root: a file at the cap
-    is inside, one folder deeper is outside and is invisible to both halves."""
+    is inside, one folder deeper is outside and is invisible to both halves.
+
+    BOTH files arrive AFTER the baseline, which is what makes this a test of the
+    cap at all. Seeded before it, the deep file is simply part of the snapshot
+    and "does not count" for a reason that has nothing to do with depth -- the
+    assertion then holds with the cap removed entirely, which is how this passed
+    against a walk that had none."""
     cap = g._BRANDING_WALK_MAX_DEPTH
     at_cap = _mkdir(g.branding_root().joinpath(*["d%d" % i for i in range(cap)]))
     beyond = _mkdir(at_cap / "toodeep")
-    (beyond / "hidden.png").write_bytes(_png_bytes((5, 5, 5)))
 
-    _settle(tmp_path)
-    assert g._branding_tree_has_new_art(tmp_path) is False, \
-        "a file past the cap is outside the tree's vocabulary, not a find"
+    _settle(tmp_path)                        # baseline: both folders empty
 
     (at_cap / "found.png").write_bytes(_png_bytes((250, 5, 5)))
     assert g._branding_tree_has_new_art(tmp_path) is True, \
         "a file AT the cap is inside it"
+    (at_cap / "found.png").unlink()
+    assert g._branding_tree_has_new_art(tmp_path) is False, "back to the baseline"
+
+    (beyond / "deeper.png").write_bytes(_png_bytes((5, 5, 5)))
+    assert g._branding_tree_has_new_art(tmp_path) is False, \
+        "a file one level PAST the cap is outside the tree's vocabulary, not a find"
 
 
 def test_a_text_file_anywhere_does_not_raise_the_flag(tmp_path):
     """_is_readable_image is the gate. A note-to-self written into the tree
     AFTER the baseline is a real difference and still must not count -- the rule
-    is "a readable image", not "anything new"."""
-    _settle(tmp_path)
+    is "a readable image", not "anything new".
+
+    Both halves of that rule are exercised, and in the order that makes each one
+    real: notes.txt is on disk BEFORE the baseline (so the change to it later is
+    genuinely a change at a RECORDED rel -- the override case), while the other
+    two arrive after it (new rels)."""
     _mkdir(g._role_dir("rewards"))
     (g._role_dir("rewards") / "notes.txt").write_text("todo: draw something", encoding="utf-8")
+    _settle(tmp_path)                        # the baseline records notes.txt
+    assert g._branding_baseline(tmp_path).get(g._role_rel("rewards", "notes.txt")), \
+        "the baseline did not record the .txt this test is about"
+
     _mkdir(g.branding_root() / "scratch")
     (g.branding_root() / "scratch" / "plan.txt").write_text("later", encoding="utf-8")
     _mkdir(g._role_dir("breadcrumb"))
@@ -216,9 +233,8 @@ def test_a_text_file_anywhere_does_not_raise_the_flag(tmp_path):
 
     assert g.sweep_branding_drops(tmp_path) is False
     assert not _flag(tmp_path)
-    # ...and a .txt whose bytes later change at a path the baseline DOES hold is
-    # still not an image, so the override rule cannot smuggle one in either.
-    _settle(tmp_path)
+    # ...and a .txt whose bytes change at a path the baseline DOES hold is still
+    # not an image, so the override rule cannot smuggle one in either.
     (g._role_dir("rewards") / "notes.txt").write_text("todo: draw two things",
                                                      encoding="utf-8")
     assert g._branding_tree_has_new_art(tmp_path) is False
@@ -890,6 +906,63 @@ def test_a_render_with_no_record_is_left_alone(tmp_path):
 
     create_app(tmp_path)
     assert flat.read_bytes() == b"SOMETHING OLDER"
+
+
+# ---------------------------------------------------------------------------
+# 2c. ...and the pick behind a 'slot' render resolves the same way every time
+#
+# The self-heal for "a slot with assets but no recorded pick" was
+# `next(iter({ids}), None)` over a SET of id strings, and string hashing is
+# randomised per process -- so two starts of ONE install could resolve to
+# different assets. The ensure pass would then compare the render's record
+# against one answer and re-render it to the other, on alternate boots. One
+# function (resolve_slot_active) now answers that for the payload, the self-heal
+# and the ensure pass alike, and the start RECORDS what it resolved.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("order", [("aaaa1111", "zzzz9999"), ("zzzz9999", "aaaa1111")])
+def test_an_unrecorded_pick_resolves_to_the_last_manifest_item(tmp_path, order):
+    """The rule is the manifest's LAST item -- the most recent upload, which is
+    the one add_slot_asset() makes active on the way in, so the heal lands where
+    the last upload already pointed. Both orders run deliberately: an answer
+    taken from a set or a sort passes one of them and fails the other; only
+    manifest order passes both."""
+    sdir = _mkdir(g._role_dir("banner_main"))
+    for iid in order:
+        (sdir / (iid + ".png")).write_bytes(_png_bytes())
+    (sdir / "manifest.json").write_text(
+        json.dumps({"items": [{"id": i} for i in order]}), encoding="utf-8")
+    assert not g._slot_active_path(tmp_path).exists(), "no recorded pick is the state under test"
+
+    assert g.resolve_slot_active(tmp_path, "banner_main") == order[-1]
+    assert g.load_slot_active(tmp_path)["banner_main"] == order[-1]
+    assert g.branding_slots_payload(tmp_path)["banner_main"]["active"] == order[-1]
+    assert g._slot_render_record(tmp_path, "banner_main")["asset_id"] == order[-1]
+
+
+def test_two_starts_over_an_unrecorded_pick_render_the_same_asset(tmp_path):
+    """End to end: two assets, no recorded pick, two server starts, one render.
+    The first start also RECORDS the resolution, so the answer stops being
+    re-derived from the manifest at every boot."""
+    _seed_catalog(tmp_path)
+    first = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    second = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((200, 10, 10)))
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    # the pick file goes missing -- a library copied mid-write, a cleaned app folder
+    g._slot_active_path(tmp_path).unlink()
+    flat.unlink()
+    g._banner_record_path(tmp_path, "banner.png").unlink()
+
+    create_app(tmp_path)
+    once = flat.read_bytes()
+    assert g._read_banner_record(tmp_path, "banner.png")["asset_id"] == second["id"], \
+        "an unrecorded pick did not resolve to the most recent upload"
+    assert g._recorded_slot_active(tmp_path)["banner_main"] == second["id"], \
+        "the start did not record the resolution it rendered from"
+
+    create_app(tmp_path)                            # the next start
+    assert flat.read_bytes() == once, "two starts of one install rendered different assets"
+    assert first["id"] != second["id"]
 
 
 # ---------------------------------------------------------------------------

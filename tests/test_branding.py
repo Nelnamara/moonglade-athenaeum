@@ -746,6 +746,77 @@ def test_non_banner_slots_never_write_a_flat(tmp_path):
     assert not (g.banner_cache_dir(tmp_path) / "login-banner.png").exists()
 
 
+# ---- the header's banner flag (brand_context) --------------------------------
+# has_banner rides every page render and decides whether the header emits the
+# banner <img> at all, so it has to agree with what /branding/banner.png actually
+# answers -- a 200 the flag does not know about is a banner nobody sees, and a
+# true flag over a 404 is a broken image. The route serves from three places in
+# order (this install's render in the app cache, a top-level flat inside an older
+# pack, the slot's shipped sealed default), so each gets its own state below and
+# the route is asked in every one of them.
+#
+# The rewrite that moved the render out of the coded tree (2026-09-10) rewrote
+# this flag too; the fresh-install case below is the semantics it had BEFORE that
+# move (staging/wave-3.11: `_branding_exists("banner.png") or the sealed
+# default`), pinned so the move cannot quietly undress a new install.
+
+def _build_box(assets):
+    """(Re)build this install's moonglade.dat around `assets` and drop the read
+    cache, so the new content is seen immediately (the cache keys on mtime, which
+    can collide with conftest's own seed inside the filesystem's resolution)."""
+    import moonglade_container as mc
+    mc.write_container(g._container_path(), assets, {})
+    g._container_cache.update(path=None, mtime=None, box=None)
+
+
+def test_has_banner_is_true_for_this_installs_render_and_the_route_serves_it(tmp_path):
+    cli = _client(tmp_path)
+    assert g.brand_context(tmp_path)["has_banner"] is False     # nothing yet
+    cli.post("/api/branding/slot", data={"slot": "banner_main",
+             "file": (io_bytes(_wide_png_bytes()), "b.png")},
+             content_type="multipart/form-data")
+
+    assert (g.banner_cache_dir(tmp_path) / "banner.png").is_file()
+    assert g.brand_context(tmp_path)["has_banner"] is True
+    assert cli.get("/branding/banner.png").status_code == 200
+
+
+def test_has_banner_is_true_for_a_top_level_flat_in_an_older_pack(tmp_path):
+    """The middle source: a pack cut from a pre-2026-09-10 dressed tree carries
+    banner.png at its own top level, and the route serves it when this install
+    has rendered nothing. The flag has to count it too."""
+    _build_box({"banner.png": b"OLD PACK FLAT"})
+    cli = _app(tmp_path).test_client()
+
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert g.brand_context(tmp_path)["has_banner"] is True
+    r = cli.get("/branding/banner.png")
+    assert r.status_code == 200 and r.data == b"OLD PACK FLAT"
+
+
+def test_has_banner_is_true_when_only_the_shipped_default_exists(tmp_path):
+    """A fresh install is DRESSED: nothing uploaded, nothing rendered, and the
+    header still shows the banner the container ships -- the route's rule-8
+    fallback. This is the pre-wave semantics kept through the render move."""
+    _build_box({g._role_rel("banner_main", "banner_main.png"): _png_bytes((9, 9, 9))})
+    cli = _app(tmp_path).test_client()
+
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert g.branding_slots_payload(tmp_path)["banner_main"]["active"] is None
+    assert g.brand_context(tmp_path)["has_banner"] is True
+    assert cli.get("/branding/banner.png").status_code == 200
+
+
+def test_has_banner_is_false_when_there_is_no_banner_anywhere(tmp_path):
+    """...and false exactly where the route 404s: a pack with no banner in it,
+    no render, no upload."""
+    _build_box({"_seed.txt": b"x"})
+    cli = _app(tmp_path).test_client()
+
+    assert g.brand_context(tmp_path)["has_banner"] is False
+    assert cli.get("/branding/banner.png").status_code == 404
+
+
 # ---- Custom Mark (handoff-2026-08-09-branding-integration.md's 6th marks tile,
 # gated to the-great-library) -----------------------------------------------
 
