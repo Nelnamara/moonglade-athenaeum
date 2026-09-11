@@ -4,8 +4,8 @@
 // The spec is this cast's brief in the handoff-2026-09-04 set of the private
 // moonglade-internal repo -- which this public file deliberately does not name any more
 // precisely than that, and could not read in any case, so it cannot quote its copy. What it
-// can do is
-// pin the facts the rebuild was measured against, in the two public files that implement them
+// can do is pin the facts the rebuild was measured against, in the two public files that
+// implement them
 // (gallery/src/App.jsx's Konami handler, gallery/src/styles.css's .ee-* block), so a later
 // edit that quietly drifts back toward the pre-2026-09-10 port fails here instead of being
 // noticed months later on a live cast.
@@ -714,7 +714,7 @@ describe("a bespoke moment owns the screen while it plays", () => {
   test("overlapping moments compose -- the release belongs to the last one out", async () => {
     nextPayload = payload([{ id: "solo", name: "Solo", tier: "rare", desc: "x" }]);
     ach.beginBespokeMoment();
-    ach.beginBespokeMoment();          // e.g. the starfall, then the reveal it hands off to
+    ach.beginBespokeMoment();          // two bespoke moments back to back
     ach.check();
     await tick();
     assert.equal(moments().length, 0);

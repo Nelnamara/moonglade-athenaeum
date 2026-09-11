@@ -4130,7 +4130,7 @@ def test_each_tab_keeps_its_own_scroll(
 # of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
 # -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
 # friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
-_UNDER_THE_HOOD = "under-the-hood"     # the hidden feat sweep_branding_drops() fires
+_UNDER_THE_HOOD = "under-the-hood"     # the feat the custom-file flag arms
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
 _DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the

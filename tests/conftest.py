@@ -119,11 +119,16 @@ def pin_daytime_clock(mp):
         return real_flag(key, out_dir=out_dir)
 
     def _mark_day_at_the_pinned_instant(out_dir=None, keys=None):
-        token = (str(out_dir), tuple(keys) if keys is not None else None)
-        if token in marked:
+        # Dedupe per LEDGER, not per call shape: the legacy flat list (keys=None) and
+        # every named per-key list each record one day for the run, whichever call
+        # shape reaches them first, so a run crossing local midnight cannot move
+        # days_used, active_days or a streak metric through a second call shape.
+        ledgers = ("days",) if keys is None else tuple(keys)
+        fresh = [k for k in ledgers if (str(out_dir), k) not in marked]
+        if not fresh:
             return
-        marked.add(token)
-        return real_mark_day(out_dir=out_dir, keys=keys)
+        marked.update((str(out_dir), k) for k in fresh)
+        return real_mark_day(out_dir=out_dir, keys=None if keys is None else fresh)
 
     mp.setattr(gallery, "telem_flag", _flag_at_the_pinned_instant)
     mp.setattr(gallery, "telem_mark_day", _mark_day_at_the_pinned_instant)
@@ -183,7 +188,7 @@ def _real_coded_tree_pinned_away(tmp_path_factory):
     asserts it), but a rule that only holds while every future author remembers it is not a
     rule. This is the floor under it: the resolver is pinned for the whole session, so a
     fixture that forgets lands in a session tmp dir instead of the owner's real tree and the
-    real 802MB pack -- wrong, but wrong the same way on every machine.
+    real pack -- wrong, but wrong the same way on every machine.
 
     A sealed container is seeded beside it from the private donor, so the session-wide
     default matches the per-test default (`_sealed_roster_container`) rather than being a

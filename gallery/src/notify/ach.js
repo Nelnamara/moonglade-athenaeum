@@ -131,7 +131,16 @@ export function whenClear(fn) {
 function _flushClear() {
   if (!_whenClear.length) return;
   if (_cur) return;
-  if (_live.size) { _hush(); return; }
+  if (_live.size) {
+    // Taking a drained parade's history down for a waiting cast also cancels its linger:
+    // with the trail gone, a still-armed timer would keep _paradeUp() claiming Escape for
+    // the rest of the 3.2s while only the cast is on screen. The parade record itself stays
+    // (its pending moments are flood entries the dequeue would drop as stale otherwise);
+    // the linger re-arms after its next moment plays, as it always does.
+    _cancelLinger();
+    _hush();
+    return;
+  }
   _whenClear.splice(0).forEach((fn) => { try { fn(); } catch { /* a cast's own problem */ } });
   _resume();
 }

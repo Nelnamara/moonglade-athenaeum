@@ -4397,6 +4397,7 @@ ${"=".repeat(48)}
     if (!_whenClear.length) return;
     if (_cur) return;
     if (_live.size) {
+      _cancelLinger();
       _hush();
       return;
     }

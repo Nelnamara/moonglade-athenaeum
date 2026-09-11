@@ -12,7 +12,8 @@ those commands passed here and the skip-prone gates really ran; only CI's own ru
 
 THE JOBS. `.github/workflows/tests.yml` has two, and this runs both:
 
-  1. pytest -- CI's exact command, `pytest -q --ignore=tests/test_similar.py`
+  1. pytest -- CI's command, `pytest -q --ignore=tests/test_similar.py` (plus `--junitxml`,
+     which only feeds job [1b])
      (test_similar needs the optional Pixeltable/CLIP index; CI skips it too). The
      browser-driven render harness is INCLUDED: a harness test that fails here is a bug
      to trace, not a reason to skip the file.
@@ -62,7 +63,7 @@ GALLERY = os.path.join(ROOT, "gallery")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "tests.yml")
 
 JOBS = [
-    "[1] pytest  (CI's exact command; render harness included)",
+    "[1] pytest  (CI's command plus --junitxml for [1b]; render harness included)",
     "[1b] the skip-prone checks actually ran  (read off the junit report)",
     "[2a] loom: rebuild the esbuild bundle",
     "[2b] loom/dist is a fresh build  (git status --porcelain, as CI checks it)",

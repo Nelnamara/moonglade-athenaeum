@@ -247,9 +247,9 @@ button:disabled { cursor: default; }
 .mfly > div:not(.mfly-head) { flex: 1 1 auto; overflow-y: auto; }
 .mfly-head { display: flex; gap: 7px; align-items: center; }
 
-/* ===== The Konami Code easter egg — REBUILT 2026-09-10 to its committed Design Handoff
-   page (moonglade-internal/design/handoff-2026-09-04/briefs/nel-starfall-easter-egg.html:
-   that page's <style> block and its cast() script ARE the spec). The first port carried
+/* ===== The Konami starfall layer — REBUILT 2026-09-10 to its committed Design Handoff
+   page (the starfall brief in the handoff-2026-09-04 set of the private moonglade-internal
+   repo: that page's <style> block and its cast() script ARE the spec). The first port carried
    the classic BASE_HTML's rules across verbatim; this one carries the design across
    instead, and the two differ in structure, not just numbers.
 

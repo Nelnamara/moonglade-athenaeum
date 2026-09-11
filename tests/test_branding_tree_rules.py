@@ -169,8 +169,8 @@ def test_a_drop_in_the_rewards_folder_raises_the_flag_and_is_untouched(tmp_path)
 
 
 def test_a_drop_in_a_user_made_nested_folder_raises_the_flag_and_is_untouched(tmp_path):
-    """The walk is general, not a list of known folders: a tinkerer who invents
-    their own nesting is exactly the person this is for."""
+    """The walk is general, not a list of known folders: a user who invents their
+    own nesting is covered the same as one who uses the folders the app made."""
     _settle(tmp_path)
     d = _mkdir(g.branding_root() / "my stuff" / "deeper")
     raw = _png_bytes((10, 200, 10))

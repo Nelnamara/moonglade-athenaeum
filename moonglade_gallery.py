@@ -3909,7 +3909,8 @@ def _write_banner_flat(out_dir, slot):
     transform was stored metadata nothing rendered before.
 
     One of the EXPLICIT writers: an upload, a pick, a re-crop, and the startup
-    ensure pass. Nothing on the request path calls this. Fails soft (False),
+    ensure pass -- each an authenticated action or a server start. Nothing on the
+    GET/serve path calls this: the /branding/ route only serves. Fails soft (False),
     never a 500: a banner that fails to render leaves the previous flat and its
     record in place, which still displays -- strictly better than a broken
     header image."""
@@ -16668,9 +16669,10 @@ def create_app(out_dir: Path):
         # Loaded BEFORE the branding sweep, and handed to it, because the sweep's own
         # flag short-circuit wants exactly this store and used to parse it a second
         # time on every fetch. The sweep writes through to the file and mirrors the
-        # same change back into this dict, so the copy the rest of the request reads
-        # from still matches what is on disk -- without that, a store loaded before
-        # the sweep is one write stale for the remainder of the request.
+        # FLAG it may set back into this dict, so the copy the rest of the request
+        # reads from carries that write -- without that, a store loaded before the
+        # sweep is one write stale for the remainder of the request. (A baseline the
+        # sweep records is read only by the next scan, so it is not mirrored.)
         telem = load_telemetry(out_dir)
         # Unlike sweep_telemetry above, this runs EVERY call rather than once a day:
         # a file dropped into the tree since the last fetch is picked up on the next

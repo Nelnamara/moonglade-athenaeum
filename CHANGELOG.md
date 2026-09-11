@@ -16,6 +16,16 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **An achievement celebration rebuilt to its committed Design Handoff.** The build had drifted from its design page — a missing glow layer behind the mascot, an inverted stacking order, the toast in the wrong place and the wrong material, a different arrival and teardown, no reduced-motion rule. It goes back to the page point for point; its audio is unchanged. (2026-09-11)
+- **A celebration of its own plays alone.** When a feat has its own celebration, the standard achievement toast waits for it to finish instead of playing over it, and the generic star-rain and confetti it replaces never fire under it — whichever of the two arrives first. A Folio replay clicked during one waits for it too, instead of stacking a second toast. (2026-09-11)
+- **The achievement parade keeps every earn.** A second wave of earns arriving while the previous parade was bowing out could silently drop the earns still queued behind it; they play now. Escape keeps closing the Folio while a parade bows out. (2026-09-11)
+- **Asset-folder rules.** Outside the few folders the app has always managed, it no longer changes anything on disk — nothing deleted, renamed, re-encoded, moved or registered. The banner images it renders for itself moved out of that tree into the app cache, beside the badge thumbnails, so each has exactly one home; an existing render is moved there at startup, never deleted, and a render is refreshed only when its own slot's pick changes. (2026-09-11)
+
+### Under the hood
+- The render harness is hermetic: every module-scoped server fixture pins its own asset root, seeds its own sealed container from the private donor, and pins the clock the achievement metrics read, so the suite behaves identically with or without a real pack beside the checkout and whatever the hour it runs in. A session-wide guard fails the run if any test changed the real asset tree, and `tests/test_fixture_hermeticity.py` asserts the pins outside the browser-gated module. (2026-09-11)
+- `tools/ci_local.py` is the committed pre-merge command: it runs CI's commands on this machine, refuses to start on a machine that would skip the bundle or harness gates, and reads the run's junit report to fail if a skip-prone gate did not actually run. (2026-09-11)
+- The two public-doc guards now cover `ROADMAP.md`. (2026-09-11)
+
 ## [3.10.3] - 2026-09-08 — Signed For
 
 - **An install carrying an older art pack now updates to the current one.** A pack placed by hand (rather than fetched by the setup wizard) was trusted for good, so even after a newer pack was published the app kept the old one and never offered the update. It now notices when the installed pack is not the one the current build expects and fetches the new one, the same as a fresh setup would. (2026-09-08)
