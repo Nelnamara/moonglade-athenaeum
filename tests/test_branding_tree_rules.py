@@ -32,6 +32,8 @@ branding_root() into tmp_path, and the banner cache derives from out_dir
 (tmp_path) exactly as badge_cache_dir() does."""
 import io
 import json
+import os
+import time
 
 import pytest
 
@@ -101,6 +103,21 @@ def _no_container(tmp_path):
         pass
     g._container_cache.update(path=None, mtime=None, box=None)
     assert g._get_container() is None
+
+
+def _age(root, seconds=60):
+    """Push every file under `root` far enough into the past to clear the scan's
+    settle window (g._BASELINE_SETTLE_NS).
+
+    A file written moments ago is deliberately NEVER memoised as clean: Windows'
+    file-time clock ticks about every 15 ms, so a file overwritten within the
+    same tick as the one that was hashed can carry an identical size and mtime.
+    Anything asserting on the memo therefore has to age its fixtures first --
+    which is the rule itself, stated in a test's own terms."""
+    old = time.time() - seconds
+    for p in root.rglob("*"):
+        if p.is_file():
+            os.utime(p, (old, old))
 
 
 def _settle(tmp_path):
@@ -379,6 +396,103 @@ def test_a_same_size_override_still_counts(tmp_path):
     assert g._branding_tree_has_new_art(tmp_path) is True
 
 
+def test_a_second_app_folder_against_the_same_library_is_not_a_find(tmp_path, monkeypatch):
+    """The snapshot lives in the LIBRARY; the tree it describes does not.
+
+    branding_root() is the app folder beside the launcher, out_dir is whatever
+    library the app was pointed at, and the two move independently -- that split
+    is the whole reason branding_root() left out_dir in 2026-07-26. So a
+    snapshot stored under one shared key would describe whichever app folder
+    happened to look first: launch a second checkout (the D: run-copy, a
+    worktree, a branch being tried live) against the same library and every file
+    in ITS tree is absent from that record, every file reads as new, and the
+    flag fires on the first fetch with nobody having touched anything. The key
+    carries the pairing, so a tree is only ever compared against a snapshot of
+    itself."""
+    _seed_catalog(tmp_path)
+    shipped = _png_bytes((9, 9, 9))
+    first = _mkdir(g._role_dir("mascots"))
+    (first / "nel_narrator.png").write_bytes(shipped)
+    _settle(tmp_path)                               # app folder A takes its snapshot
+
+    second = tmp_path / "second_checkout"
+    monkeypatch.setattr(g, "branding_root", lambda: second / "branding")
+    other = _mkdir(g._role_dir("mascots"))
+    (other / "nel_narrator.png").write_bytes(shipped)
+    (other / "nel_dressed.png").write_bytes(_png_bytes((8, 8, 8)))
+
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert not _flag(tmp_path), \
+        "a second app folder's own shipped art self-earned the feat off the first's snapshot"
+
+    # ...and the second folder has a real baseline of its OWN, so a real drop
+    # into it still counts.
+    (other / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert _flag(tmp_path) == 1, "the second app folder's baseline swallowed a genuine drop"
+
+
+def test_a_settled_tree_is_not_rehashed_on_every_fetch(tmp_path, monkeypatch):
+    """What the scan COSTS, pinned, because it runs on every /api/achievements
+    fetch until the flag is set.
+
+    Deciding "same path, same bytes" needs the bytes, and an untouched baseline
+    file is same-size by definition -- so a full comparison reads and hashes a
+    head of every file in the tree, and an install that upgraded through the
+    bundle-v2 move carries a whole legacy _thumbs cache of them. Once a file has
+    been compared and found to be a default, a later scan that finds the same
+    (rel, size, mtime) skips it: the first scan of a process pays the reads, the
+    rest pay the walk's own stats."""
+    _seed_catalog(tmp_path)
+    mdir = _mkdir(g._role_dir("mascots"))
+    for n in range(3):
+        (mdir / ("shipped_%d.png" % n)).write_bytes(_png_bytes((10, 200, 10), w=80 + n))
+    _age(g.branding_root())
+    _settle(tmp_path)                               # the snapshot pass
+    assert g.sweep_branding_drops(tmp_path) is False  # the first real comparison: reads
+
+    reads = []
+    real = g._file_fingerprint
+    monkeypatch.setattr(g, "_file_fingerprint",
+                        lambda p: (reads.append(str(p)), real(p))[1])
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert reads == [], "a settled tree was read and hashed again on a later fetch"
+
+    # ...and the memo is not a blindfold: a drop still counts on the next fetch.
+    (mdir / "mine.png").write_bytes(_png_bytes((1, 250, 1)))
+    assert g.sweep_branding_drops(tmp_path) is False
+    assert _flag(tmp_path) == 1, "the memo hid a genuine drop"
+
+
+def test_a_freshly_written_file_is_compared_again_rather_than_memoised(tmp_path, monkeypatch):
+    """The memo trusts an mtime, so it refuses a fresh one.
+
+    Windows' file-time clock ticks about every 15 ms; two writes inside one tick
+    can share an mtime to the nanosecond, so a same-size overwrite of a file
+    hashed moments earlier would otherwise be waved through as "already
+    compared". Anything written within the settle window is left out of the memo
+    and compared again -- which is what keeps the override case (same name, same
+    length, different bytes) counting no matter how fast it follows the scan."""
+    a, b = _same_size_pngs()
+    assert len(a) == len(b) and a != b, "fixture no longer exercises the same-size case"
+    p = g.branding_root() / g._role_rel("rewards", "reward_1.png")
+    _mkdir(p.parent)
+    p.write_bytes(a)
+
+    _settle(tmp_path)
+    assert g._branding_tree_has_new_art(tmp_path) is False   # the first real comparison
+
+    reads = []
+    real = g._file_fingerprint
+    monkeypatch.setattr(g, "_file_fingerprint",
+                        lambda q: (reads.append(str(q)), real(q))[1])
+    assert g._branding_tree_has_new_art(tmp_path) is False
+    assert reads, "a file written moments ago was memoised on its mtime"
+
+    p.write_bytes(b)                                # same name, same length, his bytes
+    assert g._branding_tree_has_new_art(tmp_path) is True
+
+
 def test_a_stale_legacy_badge_thumb_cache_is_not_a_find(tmp_path):
     """The badge-thumb cache lived INSIDE the tree (`_thumbs/<aid>.png`) until
     bundle-v2 moved it to badge_cache_dir(), and nothing deletes the old one --
@@ -579,6 +693,13 @@ def test_a_real_start_runs_the_root_flat_migration(tmp_path):
     assert calls.index("ensure_branding_discovery_tree") < \
         calls.index("_migrate_root_banner_flats"), \
         "the legacy tree must be folded in BEFORE the flats are looked for"
+    assert "create_app" in calls
+    assert calls.index("_migrate_root_banner_flats") < calls.index("create_app"), \
+        ("the migration must run BEFORE the app is built: create_app's ensure pass "
+         "finds an empty cache, renders the slot pick and stamps 'slot' over it, "
+         "and the migration then refuses to overwrite what is already there -- "
+         "stranding the banner the upgrading install is actually wearing at the "
+         "now-inert coded root")
 
 
 def test_an_absent_cache_render_is_rebuilt_at_startup_not_defaulted(tmp_path):
@@ -694,6 +815,43 @@ def test_an_applied_earned_banner_is_never_reverted_by_the_ensure_pass(tmp_path)
     g._ensure_banner_renders(tmp_path)              # and again, directly
     assert flat.read_bytes() == applied, "the ensure pass reverted an applied earned banner"
     assert g._read_banner_record(tmp_path, "banner.png")["kind"] == "earned"
+
+
+@pytest.mark.parametrize("record", [
+    {"kind": "earned", "banner_id": "great_library"},
+    {"kind": "migrated"},
+])
+def test_a_render_that_goes_missing_never_costs_its_provenance(tmp_path, record):
+    """A render and its record can part company -- a selective cache cleanup, a
+    png quarantined by a virus scanner, a library copied while it was being
+    written. Reading the record only when the png is PRESENT makes that a silent
+    revert: the ensure pass sees "no render", calls the slot renderer, and the
+    renderer stamps its own {"kind": "slot"} over the record on the way past. An
+    applied earned banner would come back as the slot pick on the next restart,
+    and a migrated flat -- which may have nothing left to re-render from -- would
+    lose the only thing saying so.
+
+    So the record is read first, and 'earned'/'migrated' is left alone whether
+    its bytes are there or not. A missing render is reported missing and the
+    route falls through to the container copy and the sealed default, which the
+    owner can undo; an overwritten record he cannot."""
+    _seed_catalog(tmp_path)
+    pick = g.add_slot_asset(tmp_path, "banner_main", _png_bytes((10, 200, 10)))
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    assert g._render_banner_flat(tmp_path, "banner_main", _png_bytes((1, 1, 250)),
+                                 record=dict(record)) is True
+
+    flat.unlink()                                   # the png alone goes missing
+    assert g._banner_record_path(tmp_path, "banner.png").is_file()
+
+    assert g._ensure_banner_flat(tmp_path, "banner_main") is None
+    create_app(tmp_path)                            # and a whole start over it
+
+    assert g._read_banner_record(tmp_path, "banner.png") == record, \
+        "the slot renderer overwrote a record it does not own"
+    assert not flat.exists(), \
+        "the ensure pass rendered the slot pick into a flat that was not its own"
+    assert pick["id"]                               # there WAS a pick to render, and it did not
 
 
 def test_a_slot_render_regenerates_when_its_own_pick_moves(tmp_path):

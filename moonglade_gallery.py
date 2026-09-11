@@ -2338,9 +2338,11 @@ def _branding_path(out_dir):
 # dismiss a candidate, fails OPEN on an install that has no pack at all (a
 # legacy tree's art left loose then counts for everyone who upgrades) and fails
 # CLOSED on the owner's own loose-wins override (his bytes under a shipped
-# asset's filename are still "shipped"). The scan compares against a per-install
-# BASELINE of what was already on disk instead -- a question that is answerable
-# identically with a pack and without one. See _branding_tree_has_new_art.
+# asset's filename are still "shipped"). The scan compares against a BASELINE of
+# what was already on disk instead -- one snapshot per library-and-app-folder
+# pairing, since the snapshot is stored in the library and the tree is not
+# (_baseline_key) -- a question that is answerable identically with a pack and
+# without one. See _branding_tree_has_new_art.
 # ---------------------------------------------------------------------------
 def _container_path():
     # Sibling of branding/ and branding.json -- the same app-root, machine-local tree.
@@ -3291,6 +3293,18 @@ _BRANDING_WALK_MAX_DEPTH = 6
 # scaled with file size would put a multi-megabyte mascot on a per-request path.
 _BASELINE_GOODS = "goods_tree"
 _BASELINE_HEAD = 64 * 1024
+# How recently a file may have been written and still be trusted to the
+# in-process clean memo below. Windows' file-time clock ticks about every
+# 15.6 ms, so two writes inside one tick can share an mtime to the nanosecond;
+# two seconds is three orders of magnitude clear of that.
+_BASELINE_SETTLE_NS = 2_000_000_000
+# Per-process memo of "this exact file was compared against the baseline and was
+# a default": {(out_dir, baseline key) -> frozenset of (rel, size, mtime_ns)}.
+# Small on purpose -- one entry per library/app-folder pairing a single process
+# ever scans -- and cleared wholesale rather than evicted, because a rebuilt memo
+# costs one scan and a clever eviction costs a bug.
+_BASELINE_CLEAN_MEMO = {}
+_BASELINE_CLEAN_MEMO_MAX = 8
 
 
 def _branding_tree_files():
@@ -3348,23 +3362,53 @@ def _file_fingerprint(path):
     return [int(size), hashlib.sha256(head).hexdigest()]
 
 
+def _baseline_key():
+    """The baselines[] key a coded-tree snapshot is stored under: the goods-tree
+    name PLUS the identity of the tree it describes.
+
+    The two halves of this mechanism hang off DIFFERENT folders. The snapshot
+    lives in the LIBRARY's telemetry (out_dir); the tree it describes is the APP
+    folder's (branding_root(), beside the launcher). branding_root() was moved
+    out of out_dir in 2026-07-26 precisely because the two are independent, and
+    _ensure_banner_flat() already handles the same split for renders -- but a
+    single shared snapshot key would ignore it here. Point a second checkout at
+    the same library (the D: run-copy, a worktree, a branch tried out live) and
+    that library's one snapshot would describe a tree this install has never
+    seen: every file in it missing from the record, every file therefore "new",
+    and the flag raised on the first fetch with no user action at all.
+
+    So the pairing is part of the key: a library remembers one snapshot per app
+    folder it has been pointed at, and a tree is only ever compared against a
+    snapshot of ITSELF. A never-seen pairing takes its own first snapshot and
+    reports nothing, exactly like a fresh install.
+
+    Hashed rather than spelled out: the path is normalised for case first so
+    Windows' several spellings of one folder agree, and a telemetry dump has no
+    need to carry a filesystem path in the clear."""
+    import hashlib
+    p = os.path.normcase(str(branding_root()))
+    return "%s@%s" % (_BASELINE_GOODS,
+                      hashlib.sha256(p.encode("utf-8", "replace")).hexdigest()[:16])
+
+
 def _branding_baseline(out_dir, telem=None):
-    """This install's recorded snapshot of the coded tree, or None when it has
-    never taken one.
+    """This library's recorded snapshot of THIS app folder's coded tree (see
+    _baseline_key), or None when that pairing has never taken one.
 
     None and {} are deliberately DIFFERENT answers. An empty dict is the correct
     record for a tree that held nothing when the snapshot was taken (a fresh
     install), and it is exactly what makes the first later drop count; None means
     nobody has looked yet, and the next look records rather than judges."""
     d = load_telemetry(out_dir) if telem is None else telem
-    base = (d.get("baselines") or {}).get(_BASELINE_GOODS)
+    base = (d.get("baselines") or {}).get(_baseline_key())
     return base if isinstance(base, dict) else None
 
 
 def _record_branding_baseline(out_dir):
     """Take the snapshot: every file the walk can reach, fingerprinted, stored in
-    the library's telemetry beside flags and sets. Once per install, on the first
-    scan -- which is why that scan reports nothing."""
+    the library's telemetry beside flags and sets, under this library-and-app-
+    folder pairing's own key. Once per pairing, on that pairing's first scan --
+    which is why that scan reports nothing."""
     snap = {}
     for rel, e in _branding_tree_files():
         fp = _file_fingerprint(e.path)
@@ -3372,7 +3416,7 @@ def _record_branding_baseline(out_dir):
             snap[rel] = fp
 
     def _store(d):
-        d.setdefault("baselines", {})[_BASELINE_GOODS] = snap
+        d.setdefault("baselines", {})[_baseline_key()] = snap
     _telem_mutate(out_dir, _store)
     return snap
 
@@ -3398,7 +3442,7 @@ def _baseline_note_app_write(out_dir, rel):
         return
 
     def _note(d):
-        cur = d.setdefault("baselines", {}).get(_BASELINE_GOODS)
+        cur = d.setdefault("baselines", {}).get(_baseline_key())
         if isinstance(cur, dict):
             cur[rel] = fp
     _telem_mutate(out_dir, _note)
@@ -3425,32 +3469,70 @@ def _branding_tree_has_new_art(out_dir):
     "shipped"). A snapshot asks a question with no such gap: what was here
     before anyone looked? Everything else is new.
 
-    So the first call on an install RECORDS and reports nothing, and from then
-    on a file counts when its coded rel is absent from the snapshot, or when the
+    So the first call on a pairing RECORDS and reports nothing, and from then on
+    a file counts when its coded rel is absent from the snapshot, or when the
     bytes at a recorded rel have changed -- the override case, and the reason a
     candidate can never be dismissed on its path alone.
 
-    Cheapest test first: a dict lookup, then a size compare off the walk's own
-    stat, so only a same-size candidate pays a read; the Pillow decode is last,
-    so the common answer on a dressed, undiscovered install is dict lookups.
-    First hit wins and the walk stops there."""
+    WHAT IT COSTS, precisely, because this runs on every /api/achievements fetch
+    until the flag is set. Deciding "same path, same bytes" needs the bytes: an
+    UNCHANGED baseline file is same-size by definition, so a full comparison
+    reads and hashes 64 KiB of every file in the tree -- and an upgraded install
+    can carry a hundred of them in a legacy _thumbs cache. So the answer is
+    memoised per process: a file compared and found to be a default is
+    remembered as (rel, size, mtime_ns), and a later scan that finds the same
+    triple skips straight past it. The first scan of a process pays the reads;
+    every scan after it pays the walk's own stats and nothing else.
+
+    The memo trusts an mtime, so it deliberately does NOT trust a fresh one: a
+    file written within _BASELINE_SETTLE_NS of the scan is left out of the memo
+    and re-read next time, which closes the one window where a coarse filesystem
+    clock could hand a changed file its predecessor's timestamp. Nothing here
+    touches the persisted baseline, so a change the memo could ever miss inside
+    one process is still caught by the full comparison the next start runs.
+
+    Cheapest test first within a file, too: the memo lookup, then a dict lookup,
+    then a size compare off the walk's own stat, so only a same-size unmemoised
+    candidate pays a read; the Pillow decode is last. First hit wins and the walk
+    stops there."""
+    import time
     base = _branding_baseline(out_dir)
     if base is None:
         _record_branding_baseline(out_dir)
         return False
+    memo_key = (str(out_dir), _baseline_key())
+    was_clean = _BASELINE_CLEAN_MEMO.get(memo_key) or frozenset()
+    now = time.time_ns()
+    clean = []
     for rel, e in _branding_tree_files():
+        try:
+            st = e.stat()
+            stamp = (rel, int(st.st_size), int(st.st_mtime_ns))
+        except (OSError, TypeError, ValueError):
+            continue                        # unreadable now -> nothing to judge
+        if stamp in was_clean:
+            clean.append(stamp)
+            continue                        # already compared, byte for byte, this process
         known = base.get(rel)
         if isinstance(known, list) and len(known) == 2:
             try:
-                same_size = int(e.stat().st_size) == int(known[0])
-            except (OSError, TypeError, ValueError):
-                continue                    # unreadable now -> nothing to judge
+                same_size = stamp[1] == int(known[0])
+            except (TypeError, ValueError):
+                same_size = False
             if same_size:
                 fp = _file_fingerprint(e.path)
                 if fp is None or fp[1] == known[1]:
+                    if now - stamp[2] > _BASELINE_SETTLE_NS:
+                        clean.append(stamp)
                     continue                # same path, same bytes -> a default
         if _is_readable_image(Path(e.path)):
+            _BASELINE_CLEAN_MEMO.pop(memo_key, None)
             return True
+        if now - stamp[2] > _BASELINE_SETTLE_NS:
+            clean.append(stamp)             # not art, and not art again next time
+    if memo_key not in _BASELINE_CLEAN_MEMO and len(_BASELINE_CLEAN_MEMO) >= _BASELINE_CLEAN_MEMO_MAX:
+        _BASELINE_CLEAN_MEMO.clear()
+    _BASELINE_CLEAN_MEMO[memo_key] = frozenset(clean)
     return False
 
 
@@ -3774,21 +3856,33 @@ def _ensure_banner_flat(out_dir, slot):
     afterwards, else None.
 
     Regenerates in exactly two cases:
-      - the render is MISSING. Renders are per-LIBRARY (out_dir) while the pick
-        that produces them is per-APP-FOLDER (branding_slots.json, beside
-        branding_root()), so pointing the app at a second library must rebuild
-        the owner's real pick rather than falling back to the shipped default --
-        the exact coupling branding_root() left out_dir to kill in 2026-07-26.
-      - the record says kind 'slot' and that slot's active pick or transform no
-        longer matches it.
+      - the render is MISSING and nothing claims it -- no record at all, or a
+        record that says kind 'slot'. Renders are per-LIBRARY (out_dir) while
+        the pick that produces them is per-APP-FOLDER (branding_slots.json,
+        beside branding_root()), so pointing the app at a second library must
+        rebuild the owner's real pick rather than falling back to the shipped
+        default -- the exact coupling branding_root() left out_dir to kill in
+        2026-07-26.
+      - the render is present, its record says kind 'slot', and that slot's
+        active pick or transform no longer matches it.
 
     Everything else is left alone, and that is the point. An 'earned' render (a
-    banner applied from sealed bytes, no slot pick behind it) and a 'migrated'
-    one (moved in from an old install's coded root, possibly with nothing left
-    to re-render from) are never touched by this path; neither is a render whose
-    record is missing or unreadable. Only an explicit user action -- upload,
-    pick, crop, apply-earned -- replaces those, and it writes its own new record
-    when it does.
+    banner applied from sealed bytes, no slot pick behind it), a 'migrated' one
+    (moved in from an old install's coded root, possibly with nothing left to
+    re-render from) and a record this build does not recognise are never touched
+    by this path. Only an explicit user action -- upload, pick, crop,
+    apply-earned -- replaces those, and it writes its own new record when it does.
+
+    The record is read BEFORE the file is looked for, and that ordering is the
+    whole guarantee. Gate the check on the render's presence instead and a
+    render that goes missing under a surviving record -- a selective cache
+    cleanup, a quarantined png, a half-copied library -- falls through to the
+    slot renderer, which stamps its own {"kind": "slot"} over the record and
+    takes the provenance with it. An earned banner would silently revert; a
+    migrated one, with nothing left to re-render from, would be gone for good.
+    A missing 'earned' or 'migrated' render is reported as missing (None) and
+    the route falls through to the container copy and the sealed default, which
+    is recoverable; an overwritten record is not.
 
     Called at STARTUP (create_app, via _ensure_banner_renders) and from nowhere
     on the request path: the /branding/ flat route serves what is here and never
@@ -3801,10 +3895,15 @@ def _ensure_banner_flat(out_dir, slot):
         have = dst.is_file()
     except OSError:
         have = False
+    rec = _read_banner_record(out_dir, name)
+    kind = rec.get("kind") if isinstance(rec, dict) else None
+    if kind is not None and kind != "slot":
+        # earned / migrated / a kind this build does not know -- not ours to
+        # redo, and not ours to overwrite the record of when the png is gone.
+        return dst if have else None
     if have:
-        rec = _read_banner_record(out_dir, name)
-        if not isinstance(rec, dict) or rec.get("kind") != "slot":
-            return dst                     # earned / migrated / opaque -- not ours to redo
+        if kind is None:
+            return dst                     # a render nothing claims: what the install wears
         want = _slot_render_record(out_dir, slot)
         if want is None:
             return dst                     # nothing to render from; keep what displays
@@ -3858,18 +3957,22 @@ def sweep_branding_drops(out_dir):
     are outside both jobs: not adopted, not scanned, not served.
 
     The baseline is the whole of "the app did not put it there", and it is
-    recorded on the FIRST scan an install ever runs, which therefore reports
-    nothing (_branding_tree_has_new_art). That is what stops an upgrade from
-    counting art an older build left behind. Adoption is unaffected: a drop in
-    one of the four folders is consumed and flagged on the very first sweep,
-    baseline or no baseline, because ADOPTING is itself the signal.
+    recorded on the FIRST scan this library-and-app-folder pairing ever runs,
+    which therefore reports nothing (_branding_tree_has_new_art). That is what
+    stops an upgrade from counting art an older build left behind. Adoption is
+    unaffected: a drop in one of the four folders is consumed and flagged on the
+    very first sweep, baseline or no baseline, because ADOPTING is itself the
+    signal.
 
     Runs on every /api/achievements fetch rather than sweep_telemetry()'s
     once-a-day cadence -- a real drop deserves to pay off on the next reload,
-    not up to a day later. Cheap: a handful of small directory listings plus a
-    first-hit-wins walk, matching list_marks()/list_quarantined()'s own "stays
-    cheap" precedent. Returns True if anything was ADOPTED this call -- the flag
-    can fire off the scan without that being true."""
+    not up to a day later. The cost of that cadence is the scan's, and it is
+    priced in _branding_tree_has_new_art: the first scan of a process reads and
+    hashes a head of each baseline file, every scan after it is the walk's stats
+    and a memo lookup. The adopt half is a handful of small directory listings,
+    matching list_marks()/list_quarantined()'s own "stays cheap" precedent.
+    Returns True if anything was ADOPTED this call -- the flag can fire off the
+    scan without that being true."""
     adopted = False
     for slot in _SWEEPABLE_SLOTS:
         sdir = _slot_dir(slot)
@@ -4594,12 +4697,14 @@ def set_telemetry_out(out_dir):
 _TELEM_EMPTY = {"counters": {}, "maxima": {}, "sets": {}, "flags": {}, "days": [],
                 "day_lists": {}, "baselines": {}}
 # `baselines` is the ONE section telemetry_metrics() deliberately ignores: it is
-# not a metric, it is remembered STATE -- a per-install snapshot of what was
-# already on disk the first time a detector looked, so a later comparison can
-# tell "this was always here" from "this is new". Today it holds exactly one
-# entry (_BASELINE_GOODS, the coded branding tree); it is a dict of named
-# snapshots rather than a bare map so a second detector can never have to
-# rename the first one's key.
+# not a metric, it is remembered STATE -- a snapshot of what was already on disk
+# the first time a detector looked, so a later comparison can tell "this was
+# always here" from "this is new". Today the only detector using it is the coded
+# branding tree's, and its keys are _BASELINE_GOODS plus the identity of the app
+# folder whose tree was snapshotted (_baseline_key): this file lives in the
+# LIBRARY, the tree does not, so one library can legitimately hold one snapshot
+# per app folder it has been pointed at. A dict of named snapshots rather than a
+# bare map, so a second detector can never have to rename the first one's key.
 
 
 def load_telemetry(out_dir):
