@@ -209,20 +209,54 @@ describe("the bespoke-moment sequence rule, in source", () => {
 
   test("the Konami handler arms the moment before the beacon and releases it at the end", () => {
     assert.ok(konami.indexOf("beginBespokeMoment()") < konami.indexOf('sendAchEvent("konami")'),
-      "the beacon is what EARNS the feat, so the check() carrying its standard toast can land " +
-      "while this chain is still in the air -- arming after the DOM is built leaves that gap open");
+      "the beacon is what EARNS the feat, so a check() -- the cast's own, or one a finishing " +
+      "generation fires -- can land while this chain is still in the air; arming after the DOM " +
+      "is built leaves that gap open");
     assert.match(konami, /endBespokeMoment\(\)/, "and it must release");
     assert.match(konami, /const release = \(\) => \{\s*\n\s*if \(released\) return;/,
-      "release must be idempotent: three paths reach it and a double release would unbalance " +
+      "release must be idempotent: four paths reach it and a double release would unbalance " +
       "the depth count, un-holding a moment that is still on screen");
-    // Teardown is reachable from the timer, from a failed beacon and from unmount. A path that
-    // forgets it wedges the engine: _bespoke never returns to 0 and every later achievement is
-    // held forever with nothing left to release it.
+    // Teardown is reachable from the timer and from a failed beacon, but it does not EXIST
+    // until the beacon has landed and the DOM is built. Unmounting inside the arm-to-beacon
+    // window therefore has to reach the release directly, or _bespoke never returns to 0 and
+    // every later achievement is held forever with nothing left to release it. apiGet makes a
+    // bare fetch with no timeout and no AbortController (gallery/src/api.js), so a request that
+    // never settles never rejects either: the .catch below cannot stand in for this path.
     assert.match(konami, /\.catch\(\(\) => \{ if \(teardown\) teardown\(\); else release\(\); \}\)/,
       "a beacon or roster read that rejects must still release");
-    const cleanup = app.slice(app.indexOf('document.removeEventListener("keydown", onKey);'));
-    assert.match(cleanup.slice(0, 300), /if \(teardown\) teardown\(\);/,
-      "unmounting mid-cast must take the layer down and release, not leave it lit");
+    assert.ok(konami.indexOf("pendingRelease = release;") < konami.indexOf('sendAchEvent("konami")'),
+      "the release must be published to the effect's scope BEFORE the beacon goes out -- that " +
+      "is the whole window this assertion exists for");
+    assert.match(app, /let pendingRelease = null;/,
+      "and it must live beside teardown in the effect scope, not inside onKey's closure where " +
+      "the cleanup cannot see it");
+    const cl = app.indexOf('document.removeEventListener("keydown", onKey);');
+    const cleanup = app.slice(cl, cl + 300);
+    assert.match(cleanup, /if \(teardown\) teardown\(\);/,
+      "unmounting with the layer up must take it down (teardown releases)");
+    assert.match(cleanup, /else if \(pendingRelease\) pendingRelease\(\);/,
+      "and unmounting BEFORE the layer exists must still release: without this branch an " +
+      "unmount (or a fetch that never settles) in the arm-to-beacon window wedges the engine " +
+      "above zero forever and silently swallows every later achievement");
+  });
+
+  test("the cast fires the marking check() itself, from inside the moment", () => {
+    // Without this the hold is inert for the very feat it was built for. Nothing in the app
+    // polls achievements: check() runs once per boot (notify/index.jsx) and after a generation,
+    // so the standard toast for a freshly cast egg would otherwise wait for the next page load
+    // and the ruled "starfall, then the toast" sequence would exist only in the test below.
+    assert.match(app, /import \{[^}]*check as achCheck[^}]*\} from "\.\/notify\/ach\.js"/,
+      "App.jsx must import ach.js's check() -- window.Ach is a compat surface, not the contract");
+    assert.match(konami, /\n\s*achCheck\(\);/, "and the cast must call it");
+    const marked = konami.indexOf("achCheck();");
+    assert.ok(marked > konami.indexOf("document.body.appendChild(layer);"),
+      "it fires once the layer is UP: the celebration it builds is parked by the moment, and " +
+      "arriving before the moment is on screen is the overlap the ruling forbids");
+    assert.ok(marked < konami.indexOf("}, 6000);"),
+      "and well inside the hold, so the held celebration is drained by this cast's release");
+    assert.match(konami, /apiGet\("\/api\/achievements"\)/,
+      "the desc read stays UNMARKED -- it only wants the now-unmasked flavor; marking is " +
+      "check()'s job and doing it twice would consume `newly` before the toast is built");
   });
 });
 

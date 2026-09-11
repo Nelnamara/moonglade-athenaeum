@@ -34,7 +34,7 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import { sendAchEvent } from "./notify/achNonce.js";
-import { beginBespokeMoment, endBespokeMoment } from "./notify/ach.js";
+import { beginBespokeMoment, check as achCheck, endBespokeMoment } from "./notify/ach.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
@@ -688,15 +688,28 @@ export default function App({ boot }) {
      It is also a BESPOKE MOMENT. For its whole life -- from before the earning beacon goes
      out, through the hold and the fade, to teardown -- it owns the screen, and notify/ach.js
      HOLDS any newly-earned celebration until it releases (beginBespokeMoment/endBespokeMoment).
-     That is what makes the first earn's standard achievement toast play AFTER the starfall
-     rather than over it: on a first earn the celebration is not merely delayed, it has not
-     been built yet, so the two layers cannot share the screen. Every exit below -- normal
-     teardown, a failed beacon, an unmount mid-cast -- runs release() exactly once; a missed
-     release would wedge the engine and silently swallow every later achievement. */
+     That is what makes THIS earn's standard achievement toast play AFTER the starfall rather
+     than over it: on a first earn the celebration is not merely delayed, it has not been built
+     yet, so the two layers cannot share the screen.
+
+     The cast FIRES that toast itself (achCheck() below, once the layer is up). Nothing in the
+     app polls achievements -- check() runs once per boot and after a generation -- so without
+     that call the standard toast for a freshly cast egg would not arrive until the next page
+     load, the hold would have nothing to hold, and the ruled sequence would exist only in a
+     test. The call is inside the moment on purpose: its celebration is built while the moment
+     is armed, so ach.js parks it, and release() is what lets it play.
+
+     Every exit below -- the normal timeline, a failed beacon, an unmount BEFORE the beacon
+     lands as well as after -- runs release() exactly once; a missed release would wedge the
+     engine and silently swallow every later achievement. That is why release lives beside
+     teardown in the effect's scope rather than inside onKey: teardown only exists once the DOM
+     has been built, and the arm-to-beacon window is real time during which an unmount would
+     otherwise have nothing to call. */
   useEffect(() => {
     const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
     let pos = 0, busy = false;
-    let teardown = null;                     // the in-flight cast's teardown, for unmount
+    let teardown = null;                     // the in-flight cast's teardown, once its DOM exists
+    let pendingRelease = null;               // ...and its release, from the instant it is ARMED
     const onKey = (e) => {
       pos = e.keyCode === seq[pos] ? pos + 1 : (e.keyCode === seq[0] ? 1 : 0);
       if (pos !== seq.length) return;
@@ -704,17 +717,19 @@ export default function App({ boot }) {
       if (busy) return;
       busy = true;
       // ARMED BEFORE THE BEACON, not after the DOM is built: the beacon is what earns the
-      // feat, and the check() carrying its standard toast can land while this promise chain
-      // is still in the air.
+      // feat, and a check() -- this cast's own, below, or one a finishing generation fires --
+      // can land while this promise chain is still in the air.
       beginBespokeMoment();
       let released = false;
       const release = () => {
         if (released) return;
         released = true;
+        if (pendingRelease === release) pendingRelease = null;
         teardown = null;
         busy = false;
         endBespokeMoment();                  // the held celebration plays now
       };
+      pendingRelease = release;              // reachable from the effect cleanup, DOM or no DOM
       // The ee_* assets are SEALED to The Konami Code (the unlock-split
       // enforcement, 2026-08-13) and this beacon is what earns it -- so the
       // visuals wait for the beacon to land, or the very first trigger races
@@ -772,6 +787,11 @@ export default function App({ boot }) {
         toast.appendChild(sub);
         layer.appendChild(toast);
         document.body.appendChild(layer);
+        // MARK-AND-TOAST for the earn that just happened, fired from INSIDE the moment. The
+        // read above is deliberately unmarked (it only wants the now-unmasked desc); this is
+        // the marking call, the only one that turns `newly` into a celebration (notify/ach.js
+        // load(mark) -> toastNew). It is held by the moment and plays after the fade.
+        achCheck();
         let cast, loop;
         try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
         try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
@@ -795,6 +815,7 @@ export default function App({ boot }) {
     return () => {
       document.removeEventListener("keydown", onKey);
       if (teardown) teardown();              // unmounted mid-cast: take it down, release
+      else if (pendingRelease) pendingRelease();   // armed, beacon still in the air: release
     };
   }, []);
 

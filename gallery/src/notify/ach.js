@@ -40,6 +40,12 @@ let data = null;                 // last /api/achievements payload (skinName for
    gallery's easter-egg DOM or CSS, so nothing here may read an element, a class or a
    stylesheet -- the owner of a moment tells us it started and tells us it ended.
 
+   WAVE BOUNDARY, disclosed rather than discovered later: only the first id has its moment in
+   this wave. The second id's celebration and the reveal flow it opens are the NEXT wave's
+   build (owner ruling 2026-09-10, item 5), so between the two waves that feat presents with
+   its standard moment and NO fanfare -- a thinner celebration than it had before this change.
+   That is the ruled set, not an oversight; the fix is the next wave, not a re-gating here.
+
    Both ids are already public in this source tree (App.jsx's Konami handler,
    useControlPanel.js); the NAMES behind them are not, and must not be written here. */
 export const BESPOKE_FEATS = new Set(["the-konami-code", "under-the-hood"]);
