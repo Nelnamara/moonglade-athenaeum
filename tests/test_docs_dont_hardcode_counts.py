@@ -43,8 +43,12 @@ _FIX = (
 
 
 def _live_docs():
-    """Every doc that claims to describe the project as it is NOW."""
-    paths = [_REPO / "README.md", _REPO / "CLAUDE.md"]
+    """Every doc that claims to describe the project as it is NOW.
+
+    ROADMAP.md joined the set on 2026-09-10: it describes work in flight and work to come,
+    it is edited every wave, and it was the one live prose doc at the repo root this check
+    never opened -- so a green run said nothing about it."""
+    paths = [_REPO / "README.md", _REPO / "CLAUDE.md", _REPO / "ROADMAP.md"]
     paths += sorted((_REPO / "docs").glob("*.md"))      # top level only -- archive/ excluded
     paths += sorted((_REPO / "wiki").glob("*.md"))
     return [p for p in paths if p.is_file()]
