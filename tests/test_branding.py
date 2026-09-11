@@ -448,6 +448,11 @@ def test_dropped_jpeg_is_re_encoded_to_real_png(tmp_path):
 # have adopted-then-DELETED every one of them on any install that actually
 # has them. Caught before it ever ran against real assets -- this pins it so
 # it can't come back quietly.
+#
+# 2026-09-10 (owner ruling): the never-TOUCHED half is what this guards, and it
+# is unchanged. What flipped is the flag -- mascots/rewards are now READ for
+# detection, so a drop there earns the feat while the file stays exactly as it
+# was. See tests/test_branding_tree_rules.py for the detection half in full.
 # ---------------------------------------------------------------------------
 
 def test_sweep_never_touches_mascots_or_rewards(tmp_path):
@@ -458,24 +463,25 @@ def test_sweep_never_touches_mascots_or_rewards(tmp_path):
     real_reward = g._role_dir("rewards") / "claim.png"
     real_mascot.write_bytes(_png_bytes())
     real_reward.write_bytes(_png_bytes())
+    before = (real_mascot.read_bytes(), real_reward.read_bytes())
 
     for _ in range(3):
         cli.get("/api/achievements")
         cli.get("/api/branding")
         cli.get("/api/panel/summary")
 
-    # untouched: still sitting under their OWN real names, not adopted/renamed
-    assert real_mascot.exists()
-    assert real_reward.exists()
+    # untouched: still sitting under their OWN real names, same bytes --
+    # not adopted, not renamed, not re-encoded
+    assert real_mascot.exists() and real_reward.exists()
+    assert (real_mascot.read_bytes(), real_reward.read_bytes()) == before
     # and since the 2026-08-13 unlock-split enforcement they aren't slots at
     # all -- the payload doesn't even list them
     slots = cli.get("/api/branding").get_json()["slots"]
     assert "mascots" not in slots and "rewards" not in slots
-    # and the achievement must NOT fire off a file that was never adopted --
-    # unearned hidden feats are masked to a fake id, so "no real id present"
-    # IS the not-earned assertion (see /api/achievements' own docstring).
-    d = cli.get("/api/achievements").get_json()
-    assert not any(a["id"] == "under-the-hood" for a in d["achievements"])
+    # ...and nothing was adopted INTO them either: the folders hold exactly the
+    # two files the test put there, with no manifest.json alongside.
+    assert sorted(p.name for p in g._role_dir("mascots").iterdir()) == ["gen_nel.png"]
+    assert sorted(p.name for p in g._role_dir("rewards").iterdir()) == ["claim.png"]
 
 
 def test_dropped_file_in_marks_registers_a_real_mark_and_activates_it(tmp_path):
@@ -555,10 +561,14 @@ def test_login_mascot_takes_webp_or_png_like_the_achievement_mascots(tmp_path):
 
 
 # ---- Banner write-through (2026-08-06, owner: "Yes, seems obvious") -------------------
-# The slot system stores many assets; branding/banner.png and login-banner.png are the
-# ONE file the header/login templates actually read. Every path that changes which asset
-# displays must re-render its slot's flat -- before this, picking a banner saved a choice
-# that displayed nowhere.
+# The slot system stores many assets; banner.png and login-banner.png are the ONE file
+# the header/login templates actually read. Every path that changes which asset displays
+# must re-render its slot's flat -- before this, picking a banner saved a choice that
+# displayed nowhere.
+#
+# 2026-09-10 (owner ruling): the render moved OUT of the coded tree into the app cache
+# (g.banner_cache_dir(out_dir), the badge-thumb precedent), so these assertions moved with
+# it. The path is asked for, never retyped -- same rule the coded dirs follow via _role_dir.
 
 def _wide_png_bytes(w=80, h=10):
     """Wider than 4:1, with a red left half and blue right half -- so the left/right
@@ -575,12 +585,12 @@ def _wide_png_bytes(w=80, h=10):
 def test_banner_upload_writes_the_flat_file_the_header_reads(tmp_path):
     from PIL import Image
     cli = _client(tmp_path)
-    flat = tmp_path / "branding" / "banner.png"
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
     assert not flat.exists()
     cli.post("/api/branding/slot", data={"slot": "banner_main",
              "file": (io_bytes(_wide_png_bytes()), "b.png")},
              content_type="multipart/form-data")
-    assert flat.exists(), "an active banner must land in branding/banner.png"
+    assert flat.exists(), "an active banner must land in the banner cache"
     with Image.open(flat) as im:
         w, h = im.size
         assert w == h * 4, "the flat is cropped to the 4:1 banner canvas"
@@ -591,8 +601,8 @@ def test_banner_login_slot_writes_its_own_flat(tmp_path):
     cli.post("/api/branding/slot", data={"slot": "banner_login",
              "file": (io_bytes(_wide_png_bytes()), "b.png")},
              content_type="multipart/form-data")
-    assert (tmp_path / "branding" / "login-banner.png").exists()
-    assert not (tmp_path / "branding" / "banner.png").exists(), \
+    assert (g.banner_cache_dir(tmp_path) / "login-banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists(), \
         "the two banner slots must never write each other's flat"
 
 
@@ -607,7 +617,7 @@ def test_banner_crop_change_rerenders_the_flat(tmp_path):
                  "file": (io_bytes(_wide_png_bytes()), "b.png")},
                  content_type="multipart/form-data").get_json()
     item = d["item"]                       # neutral default: centered window
-    flat = tmp_path / "branding" / "banner.png"
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
     with Image.open(flat) as im:
         w = im.size[0]
         assert im.size == (1920, 480), "flat is normalized to the DC's 1920x480 canvas"
@@ -646,12 +656,12 @@ def test_loom_banner_slot_writes_its_own_12to1_flat(tmp_path):
                  "file": (io_bytes(_wide_png_bytes()), "strip.png")},
                  content_type="multipart/form-data")
     assert r.status_code == 200
-    flat = tmp_path / "branding" / "banner-loom.png"
+    flat = g.banner_cache_dir(tmp_path) / "banner-loom.png"
     assert flat.exists()
     with Image.open(flat) as im:
         assert im.size == (1920, 160)
-    assert not (tmp_path / "branding" / "banner.png").exists()
-    assert not (tmp_path / "branding" / "login-banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "login-banner.png").exists()
 
 
 def test_branding_slot_from_gallery_sources_by_media_id(tmp_path):
@@ -667,8 +677,8 @@ def test_branding_slot_from_gallery_sources_by_media_id(tmp_path):
     assert r.status_code == 200
     item = r.get_json()["item"]
     assert (g._role_dir("banner_main") / (item["id"] + ".png")).exists()
-    # the write-through flat stays a top-level loose file at the coded root
-    assert (tmp_path / "branding" / "banner.png").exists()
+    # the write-through flat is a real render in the app cache, outside the tree
+    assert (g.banner_cache_dir(tmp_path) / "banner.png").exists()
     r = cli.post("/api/branding/slot", data={"slot": "banner_main", "media_id": "nope404"},
                  content_type="multipart/form-data")
     assert r.status_code == 400
@@ -701,7 +711,7 @@ def test_banner_pick_active_rerenders_the_flat(tmp_path):
                   content_type="multipart/form-data").get_json()
     first_id = [a for a in d2["assets"] if a["id"] != d2["item"]["id"]][0]["id"]
     cli.post("/api/branding/slot/active", json={"slot": "banner_main", "id": first_id})
-    flat = tmp_path / "branding" / "banner.png"
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
     from PIL import Image
     with Image.open(flat) as im:
         px = im.convert("RGB").getpixel((0, 0))
@@ -713,8 +723,8 @@ def test_non_banner_slots_never_write_a_flat(tmp_path):
     cli.post("/api/branding/slot", data={"slot": "mascots",
              "file": (io_bytes(_png_bytes()), "m.png")},
              content_type="multipart/form-data")
-    assert not (tmp_path / "branding" / "banner.png").exists()
-    assert not (tmp_path / "branding" / "login-banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "banner.png").exists()
+    assert not (g.banner_cache_dir(tmp_path) / "login-banner.png").exists()
 
 
 # ---- Custom Mark (handoff-2026-08-09-branding-integration.md's 6th marks tile,
