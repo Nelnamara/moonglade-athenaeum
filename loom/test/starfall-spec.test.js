@@ -1003,6 +1003,29 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
     assert.equal(front().length, 1, "the parade resumes where it stopped once the cast is gone");
   });
 
+  test("a parade LINGERING with nothing presenting is not 'clear' either", async () => {
+    // The window the assertion above cannot reach: every moment has receded, so nothing is
+    // being presented and whenClear's own front door would fire on the spot -- with four
+    // dimmed trail cards and the parade's two chips still painted over the cast. "Nothing is
+    // presenting" and "the screen is empty" differ for the whole 3.2s a parade lingers.
+    const list = Array.from({ length: 4 }, (_, i) => ({ id: "l" + i, name: "L" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    for (let i = 0; i < 4; i++) { front()[0].click(); await tick(); }   // walk the whole flood
+    assert.equal(front().length, 0, "every moment has receded: the parade is lingering");
+    assert.ok(painted().length > 0, "...with its trail and its chips still on screen");
+
+    let atFire = null;
+    ach.whenClear(() => { atFire = painted().length; });
+    assert.equal(atFire, null,
+      "the cast must not start here. .ach-m2.trail drops the scrim (notify.css:35) but keeps " +
+      "z-index 520, so those cards sit on top of the starfall's 449 for as long as they last");
+
+    await wait(700);
+    assert.equal(atFire, 0, "the wait takes the history down and fires on an empty screen");
+  });
+
   test("a SKIPPED parade is empty before the cast starts, not merely settled", async () => {
     // The exit reaches the same hook every other teardown does. It used to reach it with the
     // skipped moment still painted, so a cast waiting behind the skip started underneath it.
