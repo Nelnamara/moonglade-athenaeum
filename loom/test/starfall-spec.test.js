@@ -60,6 +60,22 @@ function rule(cls) {
   assert.ok(m, "styles.css has no ." + cls + " rule");
   return m[1];
 }
+/** Every `selector { body }` pair inside a slab of CSS, as {selector, body}. Flat rules only,
+    which is all the .ee-* block and its media query contain. */
+function rules(slab) {
+  const out = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m;
+  while ((m = re.exec(slab))) {
+    const sel = m[1].replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    if (sel && !sel.startsWith("@")) out.push({ selector: sel, body: m[2] });
+  }
+  return out;
+}
+/** A comma-separated selector list, split and trimmed: ".a, .b.go" -> [".a", ".b.go"]. */
+function selectors(sel) {
+  return sel.split(",").map((s) => s.trim()).filter(Boolean);
+}
 function zIndex(cls) {
   const m = rule(cls).match(/z-index\s*:\s*(-?\d+)/);
   assert.ok(m, "." + cls + " declares no z-index -- the ladder must be explicit");
@@ -156,13 +172,28 @@ describe("the cast is built the way the handoff page builds it", () => {
   });
 
   test("reduced motion stills the whole layer", () => {
+    // Pinned by SELECTOR, not by "the name appears somewhere in the media query". A rule that
+    // merely mentions .ee-star -- resetting its transform, say -- while the animation:none
+    // declaration lists only three classes ships full motion to a user who asked for none, and
+    // a substring check cannot tell the two apart. So: find the rule that actually stills, read
+    // ITS selector list, and require every animated part of the cast to be in it.
+    const stilling = rules(rmBlock).filter((r) => /animation\s*:\s*none\s*!important/.test(r.body));
+    assert.ok(stilling.length, "no rule in the reduced-motion block stills an animation");
+    const stilled = new Set(stilling.flatMap((r) => selectors(r.selector)));
     ["ee-scrim", "ee-orb", "ee-nel", "ee-star", "ee-toast"].forEach((cls) => {
-      assert.ok(rmBlock.includes("." + cls),
-        "." + cls + " is not covered by the reduced-motion rule -- the page's own rule covers " +
-        "every animated part of the cast, the orb included");
+      assert.ok(stilled.has("." + cls),
+        "." + cls + " does not appear in the SELECTOR of a rule that sets animation:none " +
+        "!important (stilled: " + [...stilled].join(", ") + "). The page's own rule covers " +
+        "every animated part of the cast -- the orb and the stars included, and those two are " +
+        "the whole motion of the effect.");
     });
-    assert.match(rmBlock, /animation\s*:\s*none\s*!important/);
-    assert.match(rmBlock, /opacity\s*:\s*1\s*!important/, "everything sits at its rest opacity");
+    const rest = rules(rmBlock).filter((r) => /opacity\s*:\s*1\s*!important/.test(r.body));
+    const lit = new Set(rest.flatMap((r) => selectors(r.selector)));
+    ["ee-scrim", "ee-orb", "ee-nel", "ee-star", "ee-toast"].forEach((cls) => {
+      assert.ok(lit.has("." + cls),
+        "." + cls + " is not forced to its rest opacity -- its entrance animation starts at " +
+        "opacity 0 and stilling it there would leave the element invisible rather than at rest");
+    });
   });
 
   test("the things that were NOT up for redesign are untouched", () => {
@@ -195,16 +226,24 @@ describe("the bespoke-moment sequence rule, in source", () => {
       "inside _flair). The parade step, the queue and the Folio replay all fire the flair; " +
       "guarding them one by one is how a feat earned in a >3 flood still gets confetti over " +
       "a celebration that was supposed to replace it.");
-    assert.match(achSrc, /function _flair\(built, a\) \{\s*\n\s*if \(BESPOKE_FEATS\.has\(a\.id\)\) return;/,
-      "and the gate must be the first thing _flair does");
+    assert.match(achSrc, /function _flair\(built, a, opts\) \{\s*\n\s*if \(_bespoke\) return;\s*[^\n]*\n\s*if \(BESPOKE_FEATS\.has\(a\.id\) && !\(opts && opts\.replay\)\) return;/,
+      "the two gates must be the first thing _flair does, in this order: nothing layers over a " +
+      "moment that is on screen, and an EARN of a bespoke feat is quiet because its own moment " +
+      "is the fanfare");
     ["_floodParade", "_next", "replay"].forEach((fn) => {
       const from = achSrc.indexOf("function " + fn + "(");
       assert.ok(from > 0, "ach.js no longer has a " + fn);
       const tail = achSrc.slice(from + 1);
       const end = tail.search(/\n(?:export )?function /);
       const body = achSrc.slice(from, end < 0 ? achSrc.length : from + 1 + end);
-      assert.match(body, /_flair\(built, a\);/, fn + " must raise its flair through _flair");
+      assert.match(body, /_flair\(built, a[,)]/, fn + " must raise its flair through _flair");
     });
+    // ...and exactly ONE of them declares itself a replay. If an earn path ever passed that
+    // flag it would hand a bespoke feat back the confetti its own moment replaces.
+    assert.equal((achSrc.match(/_flair\(built, a, \{ replay: true \}\)/g) || []).length, 1,
+      "only replay() may call _flair as a replay");
+    assert.match(achSrc.slice(achSrc.indexOf("export function replay(")), /_flair\(built, a, \{ replay: true \}\);/,
+      "and it must be replay() that does");
   });
 
   test("the Konami handler arms the moment before the beacon and releases it at the end", () => {
@@ -217,13 +256,12 @@ describe("the bespoke-moment sequence rule, in source", () => {
       "release must be idempotent: four paths reach it and a double release would unbalance " +
       "the depth count, un-holding a moment that is still on screen");
     // Teardown is reachable from the timer and from a failed beacon, but it does not EXIST
-    // until the beacon has landed and the DOM is built. Unmounting inside the arm-to-beacon
-    // window therefore has to reach the release directly, or _bespoke never returns to 0 and
-    // every later achievement is held forever with nothing left to release it. apiGet makes a
-    // bare fetch with no timeout and no AbortController (gallery/src/api.js), so a request that
-    // never settles never rejects either: the .catch below cannot stand in for this path.
+    // until the beacon has landed and the DOM is built. Every other way out of the
+    // arm-to-beacon window therefore has to reach the release directly, or _bespoke never
+    // returns to 0 and every later achievement is held forever with nothing left to release it.
     assert.match(konami, /\.catch\(\(\) => \{ if \(teardown\) teardown\(\); else release\(\); \}\)/,
-      "a beacon or roster read that rejects must still release");
+      "a throw anywhere in the chain -- and that includes the cast's own DOM building, which " +
+      "runs inside this promise -- must still release");
     assert.ok(konami.indexOf("pendingRelease = release;") < konami.indexOf('sendAchEvent("konami")'),
       "the release must be published to the effect's scope BEFORE the beacon goes out -- that " +
       "is the whole window this assertion exists for");
@@ -235,9 +273,34 @@ describe("the bespoke-moment sequence rule, in source", () => {
     assert.match(cleanup, /if \(teardown\) teardown\(\);/,
       "unmounting with the layer up must take it down (teardown releases)");
     assert.match(cleanup, /else if \(pendingRelease\) pendingRelease\(\);/,
-      "and unmounting BEFORE the layer exists must still release: without this branch an " +
-      "unmount (or a fetch that never settles) in the arm-to-beacon window wedges the engine " +
-      "above zero forever and silently swallows every later achievement");
+      "and unmounting BEFORE the layer exists must still release");
+  });
+
+  test("a beacon that never answers cannot wedge the engine", () => {
+    // The hole the cleanup branch above does NOT cover, and the one that actually bites: the
+    // root App never unmounts, so its cleanup never runs. apiGet/apiPost make a bare fetch with
+    // no AbortController unless a caller passes timeoutMs (gallery/src/api.js), and a network
+    // failure RESOLVES with {error} rather than rejecting -- so a request that never settles
+    // never reaches .then, never reaches .catch, and leaves _bespoke above zero for the rest of
+    // the session with every later achievement silently swallowed. Only wall-clock time can end
+    // that, so the arm carries a ceiling from the moment it is armed.
+    assert.match(konami, /const ARM_CEILING_MS = \d+;/,
+      "the arm needs a wall-clock ceiling, named once");
+    assert.match(konami, /armT = setTimeout\(\(\) => \{ if \(!teardown\) release\(\); \}, ARM_CEILING_MS\);/,
+      "the ceiling must RELEASE, and must stand down once the cast's own timeline exists " +
+      "(teardown) -- a live cast owns the screen for as long as it holds it");
+    assert.ok(konami.indexOf("armT = setTimeout") < konami.indexOf('sendAchEvent("konami")'),
+      "armed before the beacon goes out: a ceiling started after the answer is a ceiling on " +
+      "nothing");
+    assert.match(konami, /clearTimeout\(armT\)/,
+      "and release must cancel it, or a later cast's arm is released by the previous one's timer");
+    const built = konami.indexOf("document.body.appendChild(layer);");
+    const answered = konami.indexOf(".then((data) => {");
+    assert.ok(answered > 0 && built > answered, "the cast no longer builds inside .then");
+    assert.match(konami.slice(answered, built), /if \(released\) return;/,
+      "a chain that answers AFTER the ceiling expired must build nothing -- otherwise a hung " +
+      "beacon that finally lands pops a starfall over whatever the page is doing minutes later, " +
+      "and overwrites a newer cast's teardown on its way past");
   });
 
   test("the cast fires the marking check() itself, from inside the moment", () => {
@@ -317,6 +380,9 @@ function payload(list) {
   return { achievements: list, newly: list.map((a) => a.id), skins: [], skin: "moonglade" };
 }
 const moments = () => body.children.filter((c) => c.classList.contains("ach-m2"));
+// A parade's spent moments stay in the DOM as the receded TRAIL; only the one front-and-centre
+// is a moment being presented, so a parade assertion has to say which it means.
+const front = () => moments().filter((c) => !c.classList.contains("trail"));
 const starsIn = (m) => m.children.filter((c) => c.classList.contains("ee-star")).length;
 const confIn = (m) => m.children.filter((c) => c.classList.contains("m2-conf")).length;
 
@@ -386,6 +452,50 @@ describe("a bespoke moment owns the screen while it plays", () => {
     assert.equal(moments().length, 1);
   });
 
+  test("a celebration already QUEUED when the moment arms is held too", async () => {
+    // The shape the front-door hold alone does not catch, and the likely one: a generation
+    // finishes, check() queues two earns, the first is on screen, and the owner casts the code
+    // while it plays. The queue re-enters itself through _play's `after` -- never through
+    // celebrate() -- so without a hold at that re-entry the SECOND moment builds .ach-m2
+    // (z-index 520) straight over the starfall layer (449) the instant the first ends.
+    nextPayload = payload([
+      { id: "q1", name: "One", tier: "common", desc: "x" },
+      { id: "q2", name: "Two", tier: "common", desc: "x" },
+    ]);
+    ach.check();
+    await tick();
+    assert.equal(moments().length, 1, "the first plays; the second is queued behind it");
+
+    ach.beginBespokeMoment();                  // the cast lands mid-celebration
+    moments()[0].click();                      // ...and the first moment ends normally
+    await wait(600);
+    assert.equal(moments().length, 0,
+      "the queued celebration must NOT take the screen while the cast owns it");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(moments().length, 1, "and it plays once the cast has gone");
+  });
+
+  test("a parade already RUNNING is held at its next step", async () => {
+    const list = Array.from({ length: 5 }, (_, i) => ({ id: "p" + i, name: "P" + i, tier: "common", desc: "x" }));
+    nextPayload = payload(list);
+    ach.check();
+    await tick();
+    assert.equal(front().length, 1, "the parade is up and stepping");
+
+    ach.beginBespokeMoment();
+    front()[0].click();                        // advance: this one recedes into the trail
+    await tick();
+    assert.equal(front().length, 0,
+      "the parade's step is the same re-entry problem as the queue's: it must park, not build " +
+      "the next moment over the cast");
+
+    ach.endBespokeMoment();
+    await tick();
+    assert.equal(front().length, 1, "and the parade resumes where it stopped");
+  });
+
   test("with no moment up nothing is held", async () => {
     nextPayload = payload([{ id: "plain", name: "Plain", tier: "common", desc: "x" }]);
     ach.check();
@@ -394,21 +504,48 @@ describe("a bespoke moment owns the screen while it plays", () => {
   });
 });
 
-describe("a bespoke feat never gets the generic fanfare", () => {
-  test("its own moment is the celebration", () => {
-    const h = ach.replay({ id: "the-konami-code", name: "A Feat", tier: "feat", desc: "x" }, {});
+describe("a bespoke feat's EARN never gets the generic fanfare", () => {
+  test("its own moment is the celebration", async () => {
+    nextPayload = payload([{ id: "the-konami-code", name: "A Feat", tier: "feat", desc: "x" }]);
+    ach.check();
+    await tick();
     const m = moments()[0];
     assert.ok(m, "the moment itself still plays -- suppressed FANFARE, not a suppressed toast");
     assert.equal(starsIn(m), 0, "no star rain over a celebration that already had one");
     assert.equal(confIn(m), 0, "and no confetti");
-    h.dismiss();
   });
 
-  test("every other feat keeps it", () => {
-    const h = ach.replay({ id: "some-other-feat", name: "Other", tier: "feat", desc: "x" }, {});
+  test("every other feat keeps it", async () => {
+    nextPayload = payload([{ id: "some-other-feat", name: "Other", tier: "feat", desc: "x" }]);
+    ach.check();
+    await tick();
     const m = moments()[0];
     assert.ok(starsIn(m) > 0, "the ordinary feat fanfare must survive this change");
     assert.ok(confIn(m) > 0);
+  });
+
+  test("a FOLIO REPLAY of one keeps it -- a replay is not an earn", () => {
+    // replay() builds the standard moment and casts no starfall, so gating it here would not
+    // "replace" the fanfare with anything: it would just make that card's celebration thinner
+    // than the one that shipped before the bespoke rule existed, permanently and for no reason
+    // the rule states. The suppression is about the EARN, where a cast really does play.
+    const h = ach.replay({ id: "the-konami-code", name: "A Feat", tier: "feat", desc: "x" }, {});
+    const m = moments()[0];
+    assert.ok(starsIn(m) > 0,
+      "the Konami card in the Folio of Honors must still celebrate like the feat it is");
+    assert.ok(confIn(m) > 0);
+    h.dismiss();
+  });
+
+  test("...but not while a bespoke moment is actually on screen", () => {
+    ach.beginBespokeMoment();
+    const h = ach.replay({ id: "some-other-feat", name: "Other", tier: "feat", desc: "x" }, {});
+    const m = moments()[0];
+    assert.ok(m, "a replay is a click and still takes over the layer, moment or no moment");
+    assert.equal(starsIn(m), 0,
+      "but nothing layers flair over a cast that is still fading underneath -- that is rule 2 " +
+      "read as what it means");
+    assert.equal(confIn(m), 0);
     h.dismiss();
   });
 });

@@ -34,7 +34,19 @@ let data = null;                 // last /api/achievements payload (skinName for
         bespoke moment. On a FIRST earn the two cannot share the screen at all -- the
         moment's DOM has not been built yet, which is overlap made impossible by
         construction rather than by two timers happening to miss each other.
-     2. An achievement in BESPOKE_FEATS never gets _fanfare: its own moment IS the fanfare.
+        The hold is checked at every point a moment is BUILT, not only where a celebration
+        enters: the queue and the parade re-enter themselves through `after` callbacks
+        (_next, the parade's step), so guarding only the front door let a celebration that
+        was already queued when the moment armed walk straight onto the screen over it.
+        The one thing a hold cannot undo is a moment ALREADY painted when the moment arms --
+        that layer is on screen before there is anything to hold, and the cast paints under
+        it. Nothing here builds over the bespoke layer; that is the guarantee.
+     2. An achievement in BESPOKE_FEATS never gets _fanfare ON AN EARN: its own moment IS
+        the fanfare. A Folio REPLAY is not that moment (replay builds the standard moment
+        and casts nothing), so suppressing there would leave a celebration thinner than the
+        one that shipped before this rule, with nothing replacing it -- the replay keeps its
+        ordinary feat fanfare. When a bespoke moment is genuinely on screen, no flair fires
+        at all, replay included: that is rule 2 read as what it means, never layer on it.
 
    Deliberately pure module state: BOTH hosts load this file and the Loom has none of the
    gallery's easter-egg DOM or CSS, so nothing here may read an element, a class or a
@@ -42,9 +54,10 @@ let data = null;                 // last /api/achievements payload (skinName for
 
    WAVE BOUNDARY, disclosed rather than discovered later: only the first id has its moment in
    this wave. The second id's celebration and the reveal flow it opens are the NEXT wave's
-   build (owner ruling 2026-09-10, item 5), so between the two waves that feat presents with
-   its standard moment and NO fanfare -- a thinner celebration than it had before this change.
-   That is the ruled set, not an oversight; the fix is the next wave, not a re-gating here.
+   build (owner ruling 2026-09-10, item 5), so between the two waves that feat's EARN presents
+   with its standard moment and NO fanfare -- a thinner celebration than it had before this
+   change. That is the ruled set, not an oversight; the fix is the next wave, not a re-gating
+   here. Its Folio card is NOT thinned: a replay is not an earn (rule 2).
 
    Both ids are already public in this source tree (App.jsx's Konami handler,
    useControlPanel.js); the NAMES behind them are not, and must not be written here. */
@@ -302,11 +315,22 @@ function _fanfare(m, tier) {
 /* THE ONE PLACE THAT DECIDES WHETHER THE FANFARE FIRES. All three moments that can carry
    it -- the parade step, the queue, the Folio replay -- call this and never _fanfare
    directly, because "suppress it for the bespoke feats" written out three times is
-   "suppress it for the bespoke feats" forgotten once: a feat earned in a >3 flood, or
-   replayed from the Folio, would still blow confetti over a celebration that is supposed
-   to replace it. */
-function _flair(built, a) {
-  if (BESPOKE_FEATS.has(a.id)) return;          // its own moment is its fanfare
+   "suppress it for the bespoke feats" forgotten once: a feat earned in a >3 flood would
+   still blow confetti over a celebration that is supposed to replace it.
+
+   Two different suppressions, deliberately not one:
+     - a bespoke moment is ON SCREEN: nothing layers over it, whatever is celebrating.
+       Only a replay can reach this line while _bespoke is up (earns are held), and a
+       replay takes over the celebration layer -- taking it over is not licence to blow
+       confetti across a cast that is still fading underneath.
+     - an EARN of a bespoke feat: its own moment is its fanfare, so the standard toast that
+       follows the cast arrives quiet. `opts.replay` is what separates that from the Folio,
+       where the owner clicks an already-earned card: replay() builds the standard moment
+       and casts NOTHING, so gating it there would make that card's celebration thinner
+       than it was before this rule with nothing put in its place. */
+function _flair(built, a, opts) {
+  if (_bespoke) return;                         // a moment owns the screen -- never layer on it
+  if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;   // the earn: its own moment is the fanfare
   const tier = a.tier || "common";
   if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
 }
@@ -470,6 +494,10 @@ function _floodParade(list) {
   let shown = 0;
   const step = () => {
     if (p.ended) return;                           // skipped: this parade is finished
+    // The parade re-enters HERE, from _playFlood's `after` -- not through _floodParade -- so
+    // this is the gate that matters once it is running: a bespoke moment that arms mid-parade
+    // must stop the NEXT moment being built over it, not merely the next flood being started.
+    if (_hold(step)) return;
     if (!q.length) { _clearTimer = setTimeout(_clearParade, 3200); return; }  // lingers, then bows out
     const a = q.shift(); shown++;
     const tier = a.tier || "common";
@@ -497,6 +525,13 @@ function celebrate(a) {
 }
 function _next() {
   if (!_q.length) { _playing = false; return; }
+  // The QUEUE's own re-entry, handed to _play as its `after`. celebrate()'s hold covers the
+  // celebration that ARRIVES during a moment; this covers the one that was already waiting
+  // its turn when the moment armed -- the common shape, since a finished generation queues
+  // two or three earns at once and the cast can land during the first. _playing goes back to
+  // false while parked so a later celebrate() is not left thinking the queue is draining; the
+  // release drains this continuation first, in arrival order, and it sets _playing itself.
+  if (_hold(_next)) { _playing = false; return; }
   _playing = true;
   const a = _q.shift(), tier = a.tier || "common";
   _chime(tier);
@@ -536,14 +571,18 @@ export function replay(a, opts) {
   // its driver handle back synchronously, so parking it would return a dead handle to
   // useFolio and the Folio's scramble reveal would drive nothing. The two states are separate
   // axes and compose: a replay during a bespoke moment takes over the celebration layer as it
-  // always has, and the moment still releases whatever it was holding when it ends.
+  // always has, and the moment still releases whatever it was holding when it ends. What the
+  // takeover does NOT buy is flair over the cast still fading underneath -- _flair refuses
+  // while a moment is up, for every caller including this one.
   _q.length = 0;
   _playing = false;
   _endParade();
   const tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });
-  _flair(built, a);
+  // `replay: true` -- see _flair. This path casts no bespoke moment, so a bespoke feat's card
+  // keeps the ordinary feat fanfare here; _flair still refuses if a real moment is on screen.
+  _flair(built, a, { replay: true });
   _play(built, HOLD[tier] || 4600, null);
   const rEl = built.tw.querySelector(".toast .tbody .r");
   return {

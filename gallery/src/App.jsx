@@ -700,13 +700,24 @@ export default function App({ boot }) {
      is armed, so ach.js parks it, and release() is what lets it play.
 
      Every exit below -- the normal timeline, a failed beacon, an unmount BEFORE the beacon
-     lands as well as after -- runs release() exactly once; a missed release would wedge the
-     engine and silently swallow every later achievement. That is why release lives beside
-     teardown in the effect's scope rather than inside onKey: teardown only exists once the DOM
-     has been built, and the arm-to-beacon window is real time during which an unmount would
-     otherwise have nothing to call. */
+     lands as well as after, and a beacon that never answers at all -- runs release() exactly
+     once; a missed release would wedge the engine and silently swallow every later
+     achievement. That is why release lives beside teardown in the effect's scope rather than
+     inside onKey: teardown only exists once the DOM has been built, and the arm-to-beacon
+     window is real time during which an unmount would otherwise have nothing to call.
+
+     And why the WALL CLOCK is the last of those paths rather than the cleanup: apiGet/apiPost
+     make a bare fetch (gallery/src/api.js -- no AbortController unless a caller asks for
+     timeoutMs, and a network failure RESOLVES with {error} rather than rejecting), so a
+     request that simply never settles never rejects and never resolves. The .catch below
+     cannot see it, and the effect cleanup is unmount -- which the root App does not do. That
+     leaves a silent /api/ach-event holding the engine above zero for the rest of the session.
+     ARM_CEILING_MS closes it in the only way a hung promise can be closed, by giving the arm
+     a ceiling in real time; a chain that answers after it has expired finds `released` and
+     builds nothing, so a cast cannot appear minutes later over a page that moved on. */
   useEffect(() => {
     const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
+    const ARM_CEILING_MS = 20000;            // see the note above: the failsafe for a fetch that never settles
     let pos = 0, busy = false;
     let teardown = null;                     // the in-flight cast's teardown, once its DOM exists
     let pendingRelease = null;               // ...and its release, from the instant it is ARMED
@@ -721,15 +732,23 @@ export default function App({ boot }) {
       // can land while this promise chain is still in the air.
       beginBespokeMoment();
       let released = false;
+      let armT = 0;                          // the wall-clock ceiling on the arm-to-beacon window
       const release = () => {
         if (released) return;
         released = true;
+        clearTimeout(armT);
         if (pendingRelease === release) pendingRelease = null;
         teardown = null;
         busy = false;
         endBespokeMoment();                  // the held celebration plays now
       };
       pendingRelease = release;              // reachable from the effect cleanup, DOM or no DOM
+      // The only path that can end a hung fetch. Generous on purpose -- it is a failsafe, not
+      // a timeout policy: a slow-but-alive beacon must still get its cast, so the ceiling sits
+      // far past any answer a local server plausibly takes, and expiring costs nothing but the
+      // egg's visuals for that press (the feat itself was earned server-side by the beacon,
+      // or was not sent at all).
+      armT = setTimeout(() => { if (!teardown) release(); }, ARM_CEILING_MS);
       // The ee_* assets are SEALED to The Konami Code (the unlock-split
       // enforcement, 2026-08-13) and this beacon is what earns it -- so the
       // visuals wait for the beacon to land, or the very first trigger races
@@ -745,6 +764,9 @@ export default function App({ boot }) {
       sendAchEvent("konami")
         .then(() => apiGet("/api/achievements"))
         .then((data) => {
+        // Answered after the ceiling expired: the arm is long gone, the engine has been
+        // released and another cast may even have played. Build nothing.
+        if (released) return;
         // The stage, ported: one fixed layer holding the whole cast, so the ending is the
         // page's ending -- a single element fading, not five elements racing.
         const layer = document.createElement("div");

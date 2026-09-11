@@ -4370,6 +4370,14 @@ ${"=".repeat(48)}
 
   // ../gallery/src/notify/ach.js
   var data = null;
+  var BESPOKE_FEATS = /* @__PURE__ */ new Set(["the-konami-code", "under-the-hood"]);
+  var _bespoke = 0;
+  var _held = [];
+  function _hold(fn) {
+    if (!_bespoke) return false;
+    _held.push(fn);
+    return true;
+  }
   function unleashed() {
     try {
       return localStorage.getItem("unleash") === "1";
@@ -4643,6 +4651,12 @@ ${"=".repeat(48)}
       m.appendChild(cn);
     }
   }
+  function _flair(built, a, opts) {
+    if (_bespoke) return;
+    if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;
+    const tier = a.tier || "common";
+    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+  }
   function _play(built, hold, after) {
     const m = built.m, tw = built.tw;
     document.body.appendChild(m);
@@ -4767,12 +4781,14 @@ ${"=".repeat(48)}
     });
   }
   function _floodParade(list) {
+    if (_hold(() => _floodParade(list))) return;
     const q = list.slice();
     const p = { q, m: null, ended: false };
     _parade = p;
     let shown = 0;
     const step = () => {
       if (p.ended) return;
+      if (_hold(step)) return;
       if (!q.length) {
         _clearTimer = setTimeout(_clearParade, 3200);
         return;
@@ -4782,7 +4798,7 @@ ${"=".repeat(48)}
       const tier = a.tier || "common";
       _chime(tier);
       const built = _mkMoment(a, {});
-      if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+      _flair(built, a);
       p.m = built.m;
       _playFlood(built, step);
       if (shown > 1) {
@@ -4799,13 +4815,17 @@ ${"=".repeat(48)}
     step();
   }
   function celebrate(a) {
-    if (a) {
-      _q.push(a);
-      if (!_playing) _next();
-    }
+    if (!a) return;
+    if (_hold(() => celebrate(a))) return;
+    _q.push(a);
+    if (!_playing) _next();
   }
   function _next() {
     if (!_q.length) {
+      _playing = false;
+      return;
+    }
+    if (_hold(_next)) {
       _playing = false;
       return;
     }
@@ -4813,7 +4833,7 @@ ${"=".repeat(48)}
     const a = _q.shift(), tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, {});
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _flair(built, a);
     _play(built, HOLD[tier] || 4600, _next);
   }
   function check() {
@@ -4828,7 +4848,7 @@ ${"=".repeat(48)}
     const tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: opts.line });
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _flair(built, a, { replay: true });
     _play(built, HOLD[tier] || 4600, null);
     const rEl = built.tw.querySelector(".toast .tbody .r");
     return {
