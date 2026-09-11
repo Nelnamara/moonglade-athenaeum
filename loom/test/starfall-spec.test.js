@@ -1219,23 +1219,17 @@ describe("a replay takes the SCREEN over, never somebody else's first earn", () 
 });
 
 describe("a parade's linger belongs to the parade that armed it", () => {
-  test("the timer is armed FOR one parade and cannot end any other", () => {
-    // Two halves, and the behavioural test below only reaches the first of them. The second
-    // is what keeps this closed when a LATER edit adds a second place that publishes a
-    // parade: the timer carries the parade it was armed for, so ending the wrong one is not
-    // something a new caller can forget to prevent.
-    const arm = achBody("_armLinger");
-    assert.match(arm, /_clearTimer = null;/,
-      "the fired timer must give the handle up, or the parade that replaces this one can " +
-      "never arm a linger of its own and never bows out at all");
-    assert.match(arm, /if \(p !== _parade\) return;/,
-      "the linger must check that the parade it was armed for is still the live one before " +
-      "it tears anything down. Without it a timer from a superseded parade reaches " +
-      "_clearParade, nulls the LIVE parade, and the dequeue's stale-flood guard drops every " +
-      "pending entry -- first earns the server has already marked");
-    assert.match(achBody("_floodParade"), /_cancelLinger\(\);/,
-      "and a new flood must cancel its predecessor's linger as it publishes itself -- " +
-      "leaving it armed would hold the handle that stops THIS parade arming its own");
+  test("every place that publishes or drops a parade takes the linger with it", () => {
+    // _clearParade ends whichever parade is LIVE, which is only safe while no timer outlives
+    // the parade that armed it. The behavioural test below pins the one path that reaches
+    // that state today; this is what keeps the rule findable from the other two sites, and
+    // from a fourth somebody adds later.
+    ["_floodParade", "_endParade", "_takeover"].forEach((fn) => {
+      assert.match(achBody(fn), /_cancelLinger\(\);/,
+        fn + " publishes or drops a parade without cancelling the linger. A timer left " +
+        "behind fires against whatever parade is live THEN -- nulling it, and taking every " +
+        "pending first earn off the queue with it through _drain's stale-flood guard");
+    });
   });
 
   test("a second flood arriving inside the first's linger loses none of its earns", async () => {

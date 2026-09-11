@@ -455,27 +455,27 @@ function _recede(m) {
   }
 }
 
-/* The pending "the trail bows out" timer -- held so it can be CANCELLED, and ARMED FOR ONE
-   NAMED PARADE. Without the handle, a replay that starts while a parade is winding down
-   inherits the parade's 3.2s timer, which then rips the replay's own trail and chip out of
-   the DOM mid-moment. Without the identity, a SECOND flood arriving inside the first's
-   linger inherits it instead, and that one is worse than a visual: the stale timer would
-   reach _clearParade with a DIFFERENT parade live, null it, and _drain's stale-flood guard
-   (`!_parade || _parade.ended`) would then shift every one of the new parade's pending
-   entries off the queue and drop them -- first earns whose marks the server has already
-   consumed, gone with no toast and no error. So the timer can only ever end the parade that
-   armed it, and a new parade cancels its predecessor's before publishing itself. */
+/* The pending "the trail bows out" timer, held so it can be CANCELLED. Without the handle a
+   replay that starts while a parade is winding down inherits the parade's 3.2s timer, which
+   then rips the replay's own trail and chip out of the DOM mid-moment.
+
+   THE TIMER BELONGS TO WHICHEVER PARADE IS LIVE, and what keeps that true is that every
+   place which publishes or drops a parade takes the handle with it -- _floodParade,
+   _endParade and the takeover, all through this one function. Left behind, a superseded
+   parade's timer reaches _clearParade with a DIFFERENT parade live and nulls it, and
+   _drain's stale-flood guard (`!_parade || _parade.ended`) then shifts every one of THAT
+   parade's pending entries off the queue and drops them -- first earns whose marks the
+   server has already consumed, gone with no toast and no error -- while the same teardown's
+   _hush rips the live parade's trail and chips off screen mid-parade. (It is also the handle
+   the arm in _drain waits on, so a timer left behind stops the new parade ever arming one of
+   its own, and that parade then never bows out at all.)
+   Keyed to the parade instead -- a timer that checks it is still the live one before firing
+   -- the same hole stays shut, and this module has one rule about the difference: a guard
+   that cannot run is a guard nobody can check. Cancelling AT the three places is reachable
+   from every one of them, and loom/test/starfall-spec.test.js pins all three. */
 let _clearTimer = null;
 function _cancelLinger() {
   if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
-}
-function _armLinger(p) {
-  if (_clearTimer) return;             // this parade's linger is already counting down
-  _clearTimer = setTimeout(() => {
-    _clearTimer = null;                // spent, so a successor parade can arm its own
-    if (p !== _parade) return;         // armed for a parade that has since been replaced
-    _clearParade();
-  }, 3200);
 }
 
 /* The LIVE parade, or null when none is on screen: {m, ended}. `m` is the moment currently
@@ -510,8 +510,8 @@ function _hush() {
 
 // THE ONE TEARDOWN. The natural end (through the linger armed above) and the exit both land
 // here; nothing else ends a parade with history still on screen, so there is no second path
-// to race this one. It always ends the LIVE parade -- _armLinger is what makes sure a stale
-// timer never reaches it in the first place.
+// to race this one. It always ends whichever parade is LIVE, which is only safe because a
+// superseded parade's linger is cancelled the moment it is superseded (see _cancelLinger).
 function _clearParade() {
   _clearTimer = null;
   _parade = null;
@@ -630,9 +630,9 @@ function _floodParade(list) {
   // Published before anything is built so the exit can reach a parade whose moments are all
   // still queued. `m` stays null until the dequeue actually presents one, and _paradeUp()
   // reads it: a parade that is only an intention does not own Escape.
-  // A new flood SUPERSEDES whatever parade came before it, so that one's linger timer goes
-  // first: left running it would fire inside THIS parade, and a timer that ends a parade it
-  // was not armed for takes the queue's pending first earns down with it (see _armLinger).
+  // A new flood SUPERSEDES whatever parade came before it, so that parade's linger goes with
+  // it. Left running, the timer fires INSIDE this parade, ends a parade it was never armed
+  // for, and takes this one's pending first earns off the queue with it (see _cancelLinger).
   // Cancelling is also what lets this parade arm a linger of its own when its queue runs dry.
   _cancelLinger();
   _parade = { m: null, ended: false };
@@ -665,7 +665,7 @@ function _drain() {
   // A skipped parade splices its own entries out, so this only ever catches a stale one.
   while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
   if (!_q.length) {
-    if (_parade && !_parade.ended) _armLinger(_parade);
+    if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
     return;
   }
   if (_heldOff()) { _pendingDrain = true; return; }

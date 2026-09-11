@@ -4738,14 +4738,6 @@ ${"=".repeat(48)}
       _clearTimer = null;
     }
   }
-  function _armLinger(p) {
-    if (_clearTimer) return;
-    _clearTimer = setTimeout(() => {
-      _clearTimer = null;
-      if (p !== _parade) return;
-      _clearParade();
-    }, 3200);
-  }
   var _parade = null;
   var _paradeShown = 0;
   function _hush() {
@@ -4847,7 +4839,7 @@ ${"=".repeat(48)}
     if (_cur) return;
     while (_q.length && _q[0].flood && (!_parade || _parade.ended)) _q.shift();
     if (!_q.length) {
-      if (_parade && !_parade.ended) _armLinger(_parade);
+      if (_parade && !_parade.ended && !_clearTimer) _clearTimer = setTimeout(_clearParade, 3200);
       return;
     }
     if (_heldOff()) {
