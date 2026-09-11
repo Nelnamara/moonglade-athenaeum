@@ -144,6 +144,46 @@ _FREEZE_MOTION_CSS = (
     " animation: none !important; animation-duration: 0s !important; }"
 )
 
+
+# ---------------------------------------------------------------------------
+# The one mark this app takes from the wall clock
+# ---------------------------------------------------------------------------
+def settle_the_time_of_day(out_dir):
+    """Write the clock-driven telemetry mark into `out_dir`'s ledger, so the run cannot.
+
+    `/api/achievements` reads `_dt.datetime.now().hour` and, for part of the day, writes
+    the `session_hour` flag into the install's own telemetry ledger (moonglade_gallery.py).
+    It is the only wall-clock input any achievement metric has that a harness server can
+    reach: the rest of the route's clock reads are `_dt.date.today()` stamps -- the day
+    ledger and `earned_at` -- which no threshold here is measured against, and the one age
+    comparison in moonglade_backup.py lives in the download loop, which no server runs.
+
+    Left to the clock, that flag makes a fixture's achievement state a property of WHEN the
+    suite started: the flag lands, an achievement reads it, the answer arrives as newly
+    earned, and the celebration overlay (.ach-m2) is a full-screen, click-or-timeout layer
+    over the surface being measured. A downstream lane lost a run to exactly that, in the
+    small hours -- the same test, the same code, a different answer for no other reason.
+
+    So the fixture writes the mark itself, BEFORE it works out what is already `seen`. That
+    is the move this module already makes for `branding_custom_file` a few lines down, and
+    the same principle as the pinned branding root and the seeded pack: the state a fixture
+    reads is state that fixture wrote, never state the machine handed it. `telem_flag` is
+    idempotent, so the route writing it again mid-run changes nothing.
+
+    THE ALTERNATIVE, BUILT AND MEASURED. Freezing the clock itself -- `datetime.datetime`
+    (and `datetime.date`) replaced by fixed subclasses for a fixture's lifetime, which is
+    the only lever that reaches a route reading the clock through a function-local
+    `import datetime` -- cannot be used here. This module's servers answer on werkzeug
+    request threads, and routes on those threads import heavy libraries lazily (the similar
+    route pulls pandas, which pulls dateutil.tz). With `datetime.datetime` substituted, that
+    import chain ends in a Windows stack overflow and takes the interpreter down mid-module:
+    reproduced three times end to end, always at the same test, against a baseline that runs
+    the file green. Then isolated -- a substituted subclass whose `now()` returns the REAL
+    time crashes identically, so it is the substitution and not the frozen value, and the
+    `datetime.date` half alone survives. A pin that kills the run is not a pin."""
+    telem_flag("session_hour", out_dir=out_dir)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -205,7 +245,9 @@ def render_server(tmp_path_factory):
     `get_or_create_secret_key()` and the account write land in tmp, not next to the
     checkout), an empty `core._cfg`, and `gallery.branding_root` (so both the discovery
     tree `create_app()` builds and `_container_path()`, which is this folder's PARENT plus
-    `moonglade.dat`, land under this fixture's own root).
+    `moonglade.dat`, land under this fixture's own root). The achievement block below adds
+    the one piece of state the app otherwise takes from the wall clock -- see
+    `settle_the_time_of_day`.
 
     That last pin is load-bearing and was missing until 2026-09-10. A module-scoped fixture
     is set up BEFORE the function-scoped autouse ones, so at the moment the achievement
@@ -296,6 +338,11 @@ def render_server(tmp_path_factory):
     #    exact flag on a real adoption), scoped to this module's own out_dir --
     #    per-test-tmp-independent, no real branding folder involved.
     telem_flag("branding_custom_file", out_dir=root)
+    #
+    # 1b. The clock-driven mark, decided here rather than by the hour this run started in
+    #    -- see settle_the_time_of_day(). It goes in BEFORE the `seen` computation below,
+    #    so the achievement that reads it is earned and pre-seen like every other.
+    settle_the_time_of_day(root)
     #
     # 2. Everything earned is pre-marked SEEN, so no toast fires on page load. A truly
     #    fresh state file makes every already-earned achievement "newly earned" on first
@@ -1457,7 +1504,8 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     tmp dir by the time this runs -- but that is an ordering rule (autouse first, within a
     scope), not a property of this fixture, and the 2026-09-10 bug was precisely a fixture
     whose isolation came from somewhere else. Pinning here means this server's tree and
-    pack are ones this fixture wrote, whatever scope it is later given."""
+    pack are ones this fixture wrote, whatever scope it is later given. It settles the
+    clock-driven achievement mark for itself for the same reason."""
     import logging
     from types import SimpleNamespace
 
@@ -1479,6 +1527,11 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     # state: this fixture's own coded tree, and its own sealed pack beside it.
     monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
     seed_sealed_container(root / "moonglade.dat")
+    # The clock-driven mark, decided here rather than by the hour this run started in --
+    # see settle_the_time_of_day(). "Fresh" here means no key and no catalog, which is what
+    # the Setup Wizard is measured against; it does not mean a fixture that reads the wall
+    # clock for part of its state.
+    settle_the_time_of_day(root)
     # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
     # own docstring) -- it derives its path from core.__file__'s directory instead, the
     # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
@@ -2727,6 +2780,19 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     this seeds 120 rows against a server of its own rather than reshaping the fixture the
     other eighteen tests measure against -- the same call
     `test_setup_wizard_onboards_a_genuinely_fresh_install` makes for the opposite state.
+
+    It pins no coded tree and seeds no pack of its own, and that is deliberate rather than
+    an omission. This fixture is FUNCTION-scoped, so pytest has already set up conftest's
+    autouse, function-scoped `_isolated_branding` (which points `branding_root()` at this
+    test's own `tmp_path/branding`) and `_sealed_roster_container` (which writes a sealed
+    `moonglade.dat` at the path `_container_path()` then resolves to, and clears the sealed
+    caches afterwards) by the time it runs. `render_server` pins both itself because it is
+    MODULE-scoped and is therefore set up BEFORE those -- the distinction that produced the
+    2026-09-10 bug. If this fixture is ever given a wider scope it acquires that problem and
+    must pin for itself, the way `render_server` and `fresh_install_server` do.
+
+    The clock-driven achievement mark it does settle itself, because conftest settles no
+    such thing at any scope -- see `settle_the_time_of_day`.
     """
     import datetime as _dt
     import logging
@@ -2767,7 +2833,10 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     config_path.write_text(json.dumps(cfg))
     # ...and every earned achievement pre-marked seen, so no .ach-m2 celebration is up while
     # the grid is being measured. window.Ach.check() runs on mg-gen-done (App.jsx, and now
-    # AppMobile.jsx too), which is precisely the event this test fires.
+    # AppMobile.jsx too), which is precisely the event this test fires. The clock-driven
+    # mark goes in first, so "every earned achievement" means the same set whatever hour
+    # this run started in -- see settle_the_time_of_day().
+    settle_the_time_of_day(root)
     _telem = load_telemetry(root)
     _metrics = achievement_metrics(root / "catalog.db")
     _metrics.update(telemetry_metrics(root))

@@ -19,12 +19,14 @@ needs no browser and no server: it resolves two paths. It belongs where every ru
 read -- on a checkout that already holds the discovery folders an un-pinned `create_app()`
 writes nothing new -- which is why the prevention below is the thing that has to hold.
 
-Two invariants live here, and they are different claims. One: no module-scoped fixture can
-reach the real tree or the real pack (the session pin holds). Two: the render harness's own
-server fixture still pins and seeds for ITSELF -- which the session pin now masks, since a
-harness that lost its pin would land in the session's tmp root and look fine. The first is
-measured live; the second is read off the harness's source, because measuring it is exactly
-what the floor beneath it made impossible.
+Three invariants live here, and they are different claims. One: no module-scoped fixture can
+reach the real tree or the real pack (the session pin holds). Two: each harness server
+fixture that needs to pin and seed for ITSELF still does -- which the session pin now masks,
+since a harness that lost its pin would land in the session's tmp root and look fine. Three:
+no harness server takes an achievement mark from the wall clock; every one of them settles
+that mark in its own ledger first. The first is measured live; the other two are read off
+the harness's source, because measuring them is exactly what the floors beneath them made
+impossible.
 """
 import ast
 from pathlib import Path
@@ -32,6 +34,12 @@ from pathlib import Path
 import pytest
 
 _HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
+
+# Every fixture in the harness that starts a server. Each must settle the clock-driven
+# achievement mark; the two that are NOT covered by conftest's function-scoped autouse
+# isolation must also pin their own coded tree and seed their own pack.
+_SERVER_FIXTURES = ("render_server", "fresh_install_server", "paged_library_server")
+_PINS_ITS_OWN_TREE = ("render_server", "fresh_install_server")
 
 
 def _fixture_body(path, name):
@@ -49,39 +57,84 @@ def _fixture_body(path, name):
     raise AssertionError("{} no longer defines a module-level `def {}`".format(path, name))
 
 
-def test_the_render_harness_server_pins_its_own_root_and_pack():
-    """`render_server` must pin branding_root() and seed its own container ITSELF.
+def _calls_in(fixture_name):
+    """Every `ast.Call` inside the harness's module-level `def fixture_name(...)`."""
+    return [n for n in ast.walk(_fixture_body(_HARNESS, fixture_name))
+            if isinstance(n, ast.Call)]
+
+
+def _calls_by_name(calls, name):
+    """True when any of `calls` calls a plain `name(...)` or an `x.name(...)`."""
+    return any((c.func.id if isinstance(c.func, ast.Name)
+                else getattr(c.func, "attr", None)) == name
+               for c in calls)
+
+
+@pytest.mark.parametrize("fixture_name", _PINS_ITS_OWN_TREE)
+def test_a_harness_server_fixture_pins_its_own_root_and_pack(fixture_name):
+    """`render_server` and `fresh_install_server` must pin branding_root() and seed their
+    own container THEMSELVES.
 
     Since conftest gained the session-scoped `_real_coded_tree_pinned_away`, the
-    experiment that used to discriminate this no longer can: with or without the
-    harness's own pin, a pack-present run and a pack-absent run now look identical,
-    because the session pin already put every unpinned resolution in a session tmp dir.
-    That is the floor working as designed -- and it is also a mask. Delete the module
-    pin inside `render_server` today and nothing goes red: the harness would quietly
-    fall back to the session root and the session's seeded container, sharing one tree
-    and one pack with whatever else forgot, instead of writing and reading its own.
+    experiment that used to discriminate this no longer can: with or without a fixture's
+    own pin, a pack-present run and a pack-absent run now look identical, because the
+    session pin already put every unpinned resolution in a session tmp dir. That is the
+    floor working as designed -- and it is also a mask. Delete the pin inside either
+    fixture today and nothing goes red: it would quietly fall back to the session root and
+    the session's seeded container, sharing one tree and one pack with whatever else
+    forgot, instead of writing and reading its own.
 
-    So the module pin is asserted directly, at the only level that survives the mask:
-    the fixture's own source must (a) setattr `branding_root` and (b) call conftest's
+    So the pin is asserted directly, at the only level that survives the mask: the
+    fixture's own source must (a) setattr `branding_root` and (b) call conftest's
     `seed_sealed_container`. Both, because either alone is a half-pin -- a pinned root
     with no seeded pack points `_container_path()` at a `moonglade.dat` nobody wrote,
-    and a seeded pack with no pinned root writes it beside the checkout."""
-    body = _fixture_body(_HARNESS, "render_server")
-    calls = [n for n in ast.walk(body) if isinstance(n, ast.Call)]
+    and a seeded pack with no pinned root writes it beside the checkout.
+
+    `paged_library_server` is deliberately NOT in this list: it is function-scoped, so
+    conftest's autouse `_isolated_branding` and `_sealed_roster_container` have already
+    pinned and seeded a per-test tmp dir before it runs. The two named here cannot rely on
+    that -- `render_server` is module-scoped and is set up BEFORE the autouse fixtures of
+    the narrower scope (the 2026-09-10 bug), and `fresh_install_server` pins so that its
+    guarantee survives a later change of scope."""
+    calls = _calls_in(fixture_name)
     pins_root = any(
         isinstance(c.func, ast.Attribute) and c.func.attr == "setattr"
         and any(isinstance(a, ast.Constant) and a.value == "branding_root" for a in c.args)
         for c in calls)
-    seeds_pack = any(
-        (c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", None))
-        == "seed_sealed_container" for c in calls)
     assert pins_root, (
-        "tests/test_render_harness.py::render_server no longer pins branding_root() -- it "
-        "would resolve to conftest's session-wide fallback root, shared with every other "
-        "fixture that forgot, instead of its own")
-    assert seeds_pack, (
-        "tests/test_render_harness.py::render_server no longer calls seed_sealed_container() "
-        "-- its achievement state would come from a container this fixture never wrote")
+        "tests/test_render_harness.py::{} no longer pins branding_root() -- it would "
+        "resolve to conftest's session-wide fallback root, shared with every other fixture "
+        "that forgot, instead of its own".format(fixture_name))
+    assert _calls_by_name(calls, "seed_sealed_container"), (
+        "tests/test_render_harness.py::{} no longer calls seed_sealed_container() -- its "
+        "achievement state would come from a container this fixture never wrote"
+        .format(fixture_name))
+
+
+@pytest.mark.parametrize("fixture_name", _SERVER_FIXTURES)
+def test_every_harness_server_settles_the_clock_driven_mark(fixture_name):
+    """A harness result must never be a property of the hour the run started in.
+
+    `/api/achievements` reads the hour off the wall clock and, for part of the day, writes
+    the `session_hour` telemetry flag into the install's own ledger. An achievement reads
+    that flag, so it can arrive as newly earned mid-test and put the full-screen celebration
+    overlay over whatever was being measured. A downstream lane lost a run to exactly that,
+    purely because it started in the small hours.
+
+    Every fixture that starts a server therefore writes that mark itself, before it works
+    out what is already `seen`. Same mask as the root/pack pin above, and worse: for most of
+    the day a fixture that leaves it to the clock looks perfect, so this cannot be measured
+    by watching a passing run. It is asserted at the source level, as a call to
+    `settle_the_time_of_day` in the fixture's own body.
+
+    (The other lever -- replacing `datetime.datetime` for the fixture's lifetime -- was
+    built and measured and cannot be used; `settle_the_time_of_day`'s own docstring carries
+    what it did and how that was isolated.)"""
+    assert _calls_by_name(_calls_in(fixture_name), "settle_the_time_of_day"), (
+        "tests/test_render_harness.py::{} starts a server without settling the clock-driven "
+        "achievement mark -- whether its install carries that flag, and so whether an "
+        "achievement lands mid-test, would be decided by the hour the suite happened to "
+        "start".format(fixture_name))
 
 
 @pytest.fixture(scope="module")

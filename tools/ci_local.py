@@ -1,79 +1,56 @@
 #!/usr/bin/env python3
-"""Local mirror of the GitHub "Tests" workflow (.github/workflows/tests.yml).
+"""Runs CI's commands on THIS machine, before you push.
 
-Run this from anywhere BEFORE pushing to master, so master never goes red on
-something a local run could have caught:
+    python tools/ci_local.py            # run them
+    python tools/ci_local.py --dry-run  # list the jobs and run the file/package presence
+                                        # checks; launches no browser and executes no job
 
-    python tools/ci_local.py            # the real thing
-    python tools/ci_local.py --dry-run  # print the preflight + the jobs, run nothing
+WHAT THIS IS, in one statement. It runs CI's commands -- pytest exactly as CI invokes it,
+then the loom build, the stale-bundle check and `node --test` -- on THIS machine's Python,
+Node, OS and installed packages. It does not reproduce CI's environment. Green here means
+those commands passed here and the skip-prone gates really ran; only CI's own run proves CI.
 
-The real workflow has two jobs and this runs both, the way CI runs them:
+THE JOBS. `.github/workflows/tests.yml` has two, and this runs both:
 
   1. pytest -- CI's exact command, `pytest -q --ignore=tests/test_similar.py`
      (test_similar needs the optional Pixeltable/CLIP index; CI skips it too). The
-     browser-driven render harness is INCLUDED. It runs clean on a dev box; the one
-     local failure it ever had was a real precondition bug in a test, since fixed, not
-     an environment quirk. A harness test that fails here is a bug to trace, not a
-     reason to skip the file.
-  2. loom-node-tests -- rebuild loom/dist, FAIL if the committed bundle is stale,
-     then run the Loom's `node --test` source-structure + logic suite. This is the
-     job a Python-only local run misses: a front-end MOVE/rename goes red here while
-     pytest stays green (learned twice, 2026-09-08/09).
-
-THE PIP STEP, mirrored in ONE direction, which is the only honest half. CI's pytest job
-installs a CURATED list (deliberately not requirements.txt: pixeltable is heavy, optional and
-GPU-oriented, and test_similar.py skips without it). That list is READ OFF the workflow here
-rather than copied into this file (`ci_pip_packages`), so it follows CI when the line changes.
-Preflight checks PRESENCE: every distribution CI installs must import on this interpreter,
-because a box missing one runs a different suite than CI does -- `truststore` is the live
-example, absent here and installed there, and `moonglade_backup._TRUSTSTORE_ACTIVE` is a
-different value on each. Which of the list a given test actually imports is not triaged; the
-same argument as the bundle gates, a list nobody has to judge is a list that cannot rot.
-
-The direction preflight CANNOT check is the one that reds master: a dependency present HERE
-and absent THERE. requirements.txt asks for more than CI's line installs, and a dev
-interpreter carries more again -- a module-scope import of any of it passes locally and fails
-on CI, which is exactly the class this tool exists to prevent. Nothing in a local run closes
-that, because this interpreter is not CI's clean one; so preflight NAMES the repo-declared
-part out loud (requirements.txt minus CI's line, filtered to what really imports here) and
-this paragraph names the rest. CI's own pytest job is the only thing that proves an import is
-CI-safe.
+     browser-driven render harness is INCLUDED: a harness test that fails here is a bug
+     to trace, not a reason to skip the file.
+  2. loom-node-tests -- rebuild loom/dist, FAIL if the committed bundle is stale, then run
+     the Loom's `node --test` source-structure + logic suite. This is the job a Python-only
+     local run misses: a front-end MOVE/rename goes red here while pytest stays green
+     (learned twice, 2026-09-08/09).
 
 PREFLIGHT, and why it refuses rather than warns. Three checks in the pytest job are written
 to SKIP themselves when their toolchain is absent -- the committed-gallery-bundle and
 committed-loom-bundle freshness tests (they need node_modules) and the whole render harness
-(it needs a playwright browser). Two of the three really run in CI: its pytest job installs
-node, `npm ci`s gallery/ and installs chromium `--with-deps`. The loom bundle test is the
-exception and is worth being exact about -- CI's pytest job never touches loom/node_modules,
-so that test SKIPS there every time; CI covers the same staleness in its OTHER job, the
-`git status --porcelain -- dist` step this script mirrors as [2b]. A local run missing any
-of them prints the same "green" while saying nothing about the bundle it would have rebuilt
-or the layout it would have measured: precisely how a stale gallery/dist earns a green
-pre-merge command and a red CI. So this refuses to start until the environment carries what
-CI's install steps provide -- the curated `pip install` above, `npm ci`, `playwright install`
-(plus loom's `npm ci`, which only this run needs) -- and names the command that fixes each
-gap. Nothing is installed for you -- an install is the kind of thing you should watch.
+(it needs a browser that launches). A run missing any of them prints the same "green" while
+saying nothing about the bundle it would have rebuilt or the layout it would have measured.
+So the run refuses to start until three things hold: gallery/node_modules and
+loom/node_modules are present, the harness engine actually launches, and every package on
+CI's `pip install` line imports on this interpreter. It names the command that fixes each
+gap and installs nothing -- an install is the kind of thing you should watch.
+
+CI's pip line is READ OFF the workflow (`ci_pip_packages`), never copied into this file, so
+it follows CI when the line changes; a token on it that is not a plain distribution name
+refuses the run rather than being half-read.
 
 AND THEN IT CHECKS THAT THEY REALLY RAN, which is the half a preflight cannot do. A
-preflight answers "could this check run", and those are not the same sentence: chromium's
-binary can be on disk and still refuse to launch (a fresh Linux box after
-`playwright install chromium` without the system libraries -- CI installs them with
-`--with-deps`), and the harness skips on the LAUNCH, not on the path. `gallery/dist/app.css`
-can be missing, or `MOONGLADE_SKIP_GALLERY_BUILD` set, and the bundle test skips itself with
-every preflight box ticked. So the pytest job is run with a junit report and the report is
-read afterwards: both bundle-freshness tests must have actually executed, and the render
-harness must have contributed at least one non-skipped test. A gate that skipped fails this
-run. A green that skipped the gate you needed is worse than a red.
+preflight answers "could this check run", and those are not the same sentence: a browser
+binary can be on disk and still refuse to launch, and the harness skips on the LAUNCH, not
+on the path; `gallery/dist/app.css` can be missing, or `MOONGLADE_SKIP_GALLERY_BUILD` set,
+and the bundle test skips itself with every preflight box ticked. So the pytest job is run
+with a junit report and the report is read afterwards: both bundle-freshness tests must
+have actually executed, and the render harness must have contributed at least one
+non-skipped test. A gate that skipped fails this run. A green that skipped the gate you
+needed is worse than a red.
 
-Exit 0 only if every job passes. Green here means every job CI runs was run here the way CI
-runs it, on an interpreter carrying at least what CI installs -- not that it carries ONLY
-that, which is the one gap above and the one a local run cannot close. It is a long run --
-start it when you are done editing, not between edits.
+Exit 0 only if every job passes. It is a long run -- start it when you are done editing,
+not between edits.
 """
 import importlib.util
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -83,7 +60,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOOM = os.path.join(ROOT, "loom")
 GALLERY = os.path.join(ROOT, "gallery")
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "tests.yml")
-REQUIREMENTS = os.path.join(ROOT, "requirements.txt")
 
 JOBS = [
     "[1] pytest  (CI's exact command; render harness included)",
@@ -103,31 +79,36 @@ def _run(desc, cmd, cwd=None, shell=False):
 # Distribution name -> the module that proves it is importable, where the two differ.
 # Everything else is its own name with `-` as `_` (pytest-mock -> pytest_mock).
 _IMPORT_NAME = {"pillow": "PIL"}
-# A requirement line's name ends at the first specifier/marker/extra character.
-_REQ_NAME = re.compile(r"^[A-Za-z0-9._-]+")
+# A plain distribution name and nothing else: no specifier, no marker, no extra, no quote.
+_DIST_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _dist_names(tokens):
-    """Bare distribution names from requirement-ish tokens: `zeroconf>=0.130` -> `zeroconf`."""
+    """Distribution names off CI's install line. Returns (names, offending token).
+
+    Every token must be a plain distribution name. Anything else -- a flag (`-r`,
+    `--upgrade`), a quoted or version-pinned requirement (`"flask>=3"`, `zeroconf>=0.130`),
+    a trailing `\\` continuation -- returns `(None, that token)` so the caller can refuse
+    the run and print it verbatim. Dropping it silently is the failure worth designing
+    against: preflight would then tick its box against a shorter list than CI installs and
+    call that a mirror.
+    """
     out = []
     for tok in tokens:
-        m = _REQ_NAME.match(tok.strip())
-        if m:
-            out.append(m.group(0).lower())
-    return out
+        if not _DIST_NAME.match(tok):
+            return None, tok
+        out.append(tok.lower())
+    return out, ""
 
 
 def ci_pip_packages():
-    """CI's curated install list, READ OFF the workflow. Returns (packages, problem).
+    """CI's install list, READ OFF the workflow. Returns (packages, problem).
 
     Read, never copied: a list transcribed into this file is a list that silently stops
-    being CI's the first time .github/workflows/tests.yml is edited, and this script's whole
-    claim is that it mirrors that file. Exactly one `pip install` line must be findable --
-    zero means the step moved or was renamed, more than one means this mirror cannot tell
-    which belongs to the pytest job, and both are gaps rather than guesses. A flag token
-    (`-r`, `--upgrade`) is refused for the same reason: `-r requirements.txt` would change
-    what CI installs completely, so an uninterpretable line stops the run instead of being
-    quietly half-read."""
+    being CI's the first time .github/workflows/tests.yml is edited. Exactly one
+    `pip install` line must be findable -- zero means the step moved or was renamed, more
+    than one means this script cannot tell which belongs to the pytest job, and both are
+    gaps rather than guesses."""
     rel = os.path.relpath(WORKFLOW, ROOT).replace(os.sep, "/")
     try:
         with open(WORKFLOW, encoding="utf-8") as fh:
@@ -137,45 +118,30 @@ def ci_pip_packages():
     lines = [ln for ln in text.splitlines()
              if "pip install" in ln and not ln.lstrip().startswith("#")]
     if len(lines) != 1:
-        return None, ("%s has %d `pip install` line(s) -- this mirror can only read CI's "
+        return None, ("%s has %d `pip install` line(s) -- this script can only read CI's "
                       "install step when there is exactly one" % (rel, len(lines)))
     tokens = lines[0].split("pip install", 1)[1].split()
-    flags = [t for t in tokens if t.startswith("-")]
-    if flags:
-        return None, ("CI's `pip install` line carries %s, which this mirror does not "
-                      "interpret" % ", ".join(flags))
-    pkgs = _dist_names(tokens)
+    pkgs, offender = _dist_names(tokens)
+    if pkgs is None:
+        return None, ("CI's `pip install` line carries the token %r, which is not a plain "
+                      "distribution name -- this script does not interpret it, and will "
+                      "not read the rest of the line as though it were not there" % offender)
     if not pkgs:
         return None, "CI's `pip install` line names no packages"
     return pkgs, ""
 
 
+def _import_name(dist):
+    """The module `dist` is proved importable by."""
+    return _IMPORT_NAME.get(dist, dist.replace("-", "_"))
+
+
 def _importable(dist):
     """True when the distribution `dist` can be imported on THIS interpreter."""
-    mod = _IMPORT_NAME.get(dist, dist.replace("-", "_"))
     try:
-        return importlib.util.find_spec(mod) is not None
+        return importlib.util.find_spec(_import_name(dist)) is not None
     except Exception:                            # noqa: BLE001 -- a half-installed dist is absent
         return False
-
-
-def deps_ci_will_not_have(ci_pkgs):
-    """Requirements this repo declares, CI does not install, and this box can import.
-
-    The asymmetry preflight cannot fix, made as concrete as it can be made locally. These
-    are exactly the imports that pass here and fail on CI: requirements.txt asks for them,
-    CI's curated line does not install them, and `find_spec` says this interpreter answers
-    them. (The interpreter carries more than requirements.txt too -- that part cannot be
-    enumerated against CI, and the module docstring says so.) Not a gap: nothing a runner
-    can install or uninstall makes it go away, and one of them being present is correct --
-    numpy backs `moonglade_similar.py`, whose test file is the one CI ignores."""
-    try:
-        with open(REQUIREMENTS, encoding="utf-8") as fh:
-            lines = [ln.split("#", 1)[0].strip() for ln in fh]
-    except OSError:
-        return []
-    declared = _dist_names([ln for ln in lines if ln])
-    return sorted(d for d in set(declared) - set(ci_pkgs) if _importable(d))
 
 
 _ENGINES = ("chromium", "firefox", "webkit")
@@ -199,11 +165,9 @@ def _engine_unusable(engine):
     It launches one and closes it, rather than resolving the path and stating it, because
     the path is not what the harness skips on: `render_browser` calls `browser.launch()`
     and skips on the exception it raises (tests/test_render_harness.py). A binary that is
-    present but cannot start -- what `playwright install chromium` leaves on a fresh Linux
-    box without the system libraries CI's `--with-deps` adds -- passes a stat and fails a
-    launch, so a stat-based preflight would tick its box and let every harness test skip.
-    Costs about a second. Downloads nothing and installs nothing: an install is the kind of
-    thing you should watch."""
+    present but cannot start passes a stat and fails a launch, so a stat-based preflight
+    would tick its box and let every harness test skip. Costs about a second. Downloads
+    nothing and installs nothing: an install is the kind of thing you should watch."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:                     # noqa: BLE001 -- any import failure is "absent"
@@ -226,21 +190,11 @@ def _engine_unusable(engine):
     return ""
 
 
-def preflight():
-    """The environment CI's install steps provide. Returns a list of (gap, fix) pairs.
+def preflight(launch_engine=True):
+    """The three things a meaningful run needs. Returns a list of (gap, fix) pairs.
 
-    Every skip path of BOTH bundle-freshness tests is covered here, not just the gallery
-    one: `test_committed_loom_bundle_matches_a_fresh_build` skips on
-    MOONGLADE_SKIP_LOOM_BUILD, a missing node, missing loom/scripts/build.mjs or
-    loom/dist/master-storyboard.bundle.js, and a missing loom/node_modules/esbuild
-    (tests/test_js_syntax.py). [1b] catches a skip after the fact, but a gap named before
-    the run costs minutes instead of the whole pytest job, and the loom test has no reason
-    to be told about later than its gallery twin.
-
-    CI's FIRST install step -- its curated `pip install` -- is checked here too, in the only
-    direction a local run can check it: everything CI installs must import here. The reverse
-    (something importable here that CI has never heard of) is unfixable from inside this
-    process and is reported as a note instead, by `deps_ci_will_not_have`."""
+    `launch_engine=False` leaves the browser alone and checks only what is on disk and on
+    the import path -- what `--dry-run` asks for."""
     gaps = []
     ci_pkgs, problem = ci_pip_packages()
     if ci_pkgs is None:
@@ -253,53 +207,25 @@ def preflight():
         if missing:
             gaps.append(("CI's pytest job installs %s, which this interpreter cannot import "
                          "-- a test that touches one runs differently here than on CI"
-                         % ", ".join(missing),
+                         % ", ".join("%s (tried `import %s`)" % (p, _import_name(p))
+                                     for p in missing),
                          "pip install %s" % " ".join(missing)))
-    if shutil.which("node") is None:
-        gaps.append(("node is not on PATH -- both bundle-freshness tests and the whole "
-                     "loom-node-tests job need it", "install Node 22 (CI's version)"))
-    if not os.path.isfile(os.path.join(GALLERY, "node_modules", "vite", "bin", "vite.js")):
+    if not os.path.isdir(os.path.join(GALLERY, "node_modules")):
         gaps.append(("gallery/node_modules is missing, so "
                      "test_committed_gallery_bundle_matches_a_fresh_build SKIPS and a stale "
                      "committed gallery/dist would sail through this run",
                      "cd gallery && npm ci"))
-    for name in ("app.js", "app.css"):
-        if not os.path.isfile(os.path.join(GALLERY, "dist", name)):
-            # The same test skips on `len(committed) != 2`, so a missing half of the
-            # committed bundle silently turns the freshness gate off.
-            gaps.append(("gallery/dist/%s is missing, so "
-                         "test_committed_gallery_bundle_matches_a_fresh_build SKIPS itself "
-                         "and nothing compares the served bundle to its source" % name,
-                         "cd gallery && npm run build   then commit gallery/dist/"))
-    if not os.path.isdir(os.path.join(LOOM, "node_modules", "esbuild")):
+    if not os.path.isdir(os.path.join(LOOM, "node_modules")):
         gaps.append(("loom/node_modules is missing, so the loom bundle cannot be rebuilt "
                      "with the esbuild version pinned in loom/package-lock.json -- and "
                      "test_committed_loom_bundle_matches_a_fresh_build SKIPS on it too",
                      "cd loom && npm ci"))
-    for rel in (os.path.join("scripts", "build.mjs"),
-                os.path.join("dist", "master-storyboard.bundle.js")):
-        if not os.path.isfile(os.path.join(LOOM, rel)):
-            # The same "build tooling or dist bundle not present" skip the gallery test has,
-            # on the loom side: without either half there is nothing to rebuild or compare.
-            gaps.append(("loom/%s is missing, so "
-                         "test_committed_loom_bundle_matches_a_fresh_build SKIPS itself and "
-                         "nothing compares the served bundle to its source"
-                         % rel.replace(os.sep, "/"),
-                         "restore it from git -- /loom?bundle=1 serves that committed file"))
-    if os.environ.get("MOONGLADE_SKIP_GALLERY_BUILD"):
-        gaps.append(("MOONGLADE_SKIP_GALLERY_BUILD is set in this environment -- it turns "
-                     "test_committed_gallery_bundle_matches_a_fresh_build off outright",
-                     "unset MOONGLADE_SKIP_GALLERY_BUILD"))
-    if os.environ.get("MOONGLADE_SKIP_LOOM_BUILD"):
-        gaps.append(("MOONGLADE_SKIP_LOOM_BUILD is set in this environment -- it turns "
-                     "test_committed_loom_bundle_matches_a_fresh_build off outright",
-                     "unset MOONGLADE_SKIP_LOOM_BUILD"))
     engine = harness_engine()
     if engine not in _ENGINES:
         gaps.append(("MG_HARNESS_BROWSER=%r is not one of %s -- the render harness "
                      "pytest.fail()s on it rather than running" % (engine, ", ".join(_ENGINES)),
                      "unset MG_HARNESS_BROWSER (chromium, CI's engine) or set a real one"))
-    else:
+    elif launch_engine:
         unusable = _engine_unusable(engine)
         if unusable:
             gaps.append(("the render harness would skip itself -- %s" % unusable,
@@ -346,7 +272,7 @@ def gates_that_did_not_run(xml_path):
             ran = [c for c in cases if c[0] == module and not c[2]]
             if not ran:
                 gaps.append("%s contributed no test that actually ran -- the whole module "
-                            "skipped (no playwright, or a chromium that will not launch), "
+                            "skipped (no playwright, or a browser that will not launch), "
                             "so every guard in it was decoration on this run" % module)
             continue
         matches = [c for c in cases if c[0] == module and c[1] == name]
@@ -370,29 +296,20 @@ def main(argv=None):
             print("unknown argument %r (try --help)" % arg)
             return 2
 
-    gaps = preflight()
+    gaps = preflight(launch_engine=not dry)
     if gaps:
-        print("\n== preflight: this environment is not what CI gives its jobs ==")
+        print("\n== preflight: this machine is missing something the run needs ==")
         for gap, fix in gaps:
             print("  MISSING: %s" % gap)
             print("     fix:  %s" % fix)
+    elif dry:
+        print("\n== preflight (--dry-run): CI's pip list imports here, gallery/node_modules "
+              "and\n   loom/node_modules are present. %s was NOT launched -- a dry run "
+              "starts no\n   browser, so it cannot say whether the harness would run =="
+              % harness_engine())
     else:
-        print("\n== preflight: CI's pip list, node, gallery/ and loom/ build tooling, a %s "
-              "that launches -- all present ==" % harness_engine())
-
-    # The half no preflight can close, said out loud every run -- green or not. A gap is
-    # something you can go and fix; this is something you have to KNOW, because the fix for
-    # it is CI itself.
-    ci_pkgs = ci_pip_packages()[0] or []
-    extra = deps_ci_will_not_have(ci_pkgs)
-    if extra:
-        print("\n== note: importable here, NOT installed by CI ==")
-        print("  %s" % ", ".join(extra))
-        print("  CI's pytest job installs a curated list, not requirements.txt. A "
-              "module-scope\n  import of one of the above passes in this run and reds "
-              "master -- and this\n  interpreter may answer more imports than "
-              "requirements.txt even names. Nothing\n  local can prove an import CI-safe; "
-              "CI's own pytest job is what does that.")
+        print("\n== preflight: CI's pip list imports here, gallery/node_modules and "
+              "loom/node_modules\n   are present, and %s launches ==" % harness_engine())
 
     if dry:
         print("\n-- dry run: nothing below is executed --")
@@ -470,9 +387,9 @@ def main(argv=None):
     if fails:
         print("FAIL: " + ", ".join(fails) + "  -- do NOT push.")
         return 1
-    print("PASS: every CI job ran here, the way CI runs it, and is green -- safe to push.\n"
-          "      The one thing this run cannot vouch for is an import CI does not install;\n"
-          "      that is the note above, and only CI's own pytest job settles it.")
+    print("PASS: CI's commands ran here, the way CI invokes them, on this machine's Python,\n"
+          "      Node, OS and installed packages, and the skip-prone gates really ran. This\n"
+          "      run does not reproduce CI's environment -- only CI's own run proves CI.")
     return 0
 
 

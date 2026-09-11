@@ -293,26 +293,29 @@ test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.p
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
 
-- **`python tools/ci_local.py` is THE pre-merge command.** It runs every job the GitHub
-  "Tests" workflow runs, the way CI runs them — pytest with CI's exact ignore list, the
-  loom bundle rebuild plus the committed-`loom/dist`-is-stale check (via
+- **`python tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
+  exactly as CI invokes it, then the loom build, the stale-`loom/dist` check (via
   `git status --porcelain`, the same comparison CI makes, so a new untracked or
-  already-staged file in `dist/` fails here too), and the Loom's `node --test` suite — and
-  exits non-zero if any of them fails — all of it on *this* interpreter, which is the one
-  thing it cannot make CI's (the pip asymmetry at the end of this entry). `pytest` alone is
-  not the pre-merge check: a
+  already-staged file in `dist/` fails here too) and the Loom's `node --test` suite — on
+  *this* machine's Python, Node, OS and installed packages, and exits non-zero if any of
+  them fails. **It does not reproduce CI's environment.** Green here means those commands
+  passed here and the skip-prone gates really ran; only CI's own run proves CI. `pytest`
+  alone is not the pre-merge check: a
   front-end move goes red in the node job while pytest stays green, which is how master
   went red twice in two days (2026-09-08/09).
-  It **refuses to start** until this machine carries what those jobs' install steps provide —
-  every distribution CI's curated `pip install` line installs (read off the workflow file, not
-  copied into the script, so it follows CI), `gallery/node_modules`, `loom/node_modules` and
-  loom's committed build inputs, and the harness's browser engine actually *launching*
+  It **refuses to start** until three things hold — `gallery/node_modules` and
+  `loom/node_modules` are present, the harness's browser engine actually *launches*
   (chromium by default, or whatever `MG_HARNESS_BROWSER` names, which is the engine the
-  harness itself will launch) — because
+  harness itself will launch), and every package on CI's `pip install` line imports here
+  (read off the workflow file, not copied into the script, so it follows CI; a token on that
+  line that is not a plain distribution name refuses the run and is printed verbatim rather
+  than quietly dropped) — because
   the three checks that need them (both committed-bundle freshness tests and the whole render
   harness) are written to skip themselves, so a run without them prints green while saying
   nothing about the bundle it never rebuilt or the layout it never measured. It names the
-  command for each gap and installs nothing. **And it checks afterwards that those three
+  command for each gap and installs nothing. `--dry-run` lists the jobs and runs those file
+  and package presence checks only: it launches no browser and executes no job.
+  **And it checks afterwards that those three
   really ran**, off the run's own junit report, because a preflight can only answer "could
   this check run": the harness skips on a failed browser *launch*, not on a missing path, and
   each bundle test also skips on its own `MOONGLADE_SKIP_*_BUILD` env var or a half-missing
@@ -321,17 +324,7 @@ recently within hours of a "correction." All tests must pass before merging to m
   so the gallery-bundle test and the render harness really run there; it never installs
   `loom/node_modules`, so the **loom-bundle test skips in CI every time** and CI catches a
   stale `loom/dist` in its other job instead — the `git status --porcelain` step this script
-  mirrors. Green here means safe to push; a green that skipped the gate you needed is worse
-  than a red.
-  **The pip step is mirrored one way only, and that is the tool's one honest limit.** CI
-  installs a curated list, deliberately not `requirements.txt`; the script checks that
-  everything on that list imports here, because a box missing one runs a different suite than
-  CI (`truststore` was exactly that on the home box). It cannot check the reverse — a
-  dependency present *here* and absent *there*, which is the import that passes locally and
-  reds master — because this interpreter is not CI's clean one. So it prints, every run, the
-  requirements this repo declares that CI does not install and this box can import, and says
-  plainly that the interpreter may answer more imports than `requirements.txt` even names.
-  Only CI's own pytest job proves an import is CI-safe.
+  mirrors. A green that skipped the gate you needed is worse than a red.
 - **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
   "timing" or "this machine" without the trace that proves it, and never skipped, gated or
   `xfail`ed unless the commit message names the cause. The browser-driven render harness
