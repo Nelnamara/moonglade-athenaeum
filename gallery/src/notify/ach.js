@@ -23,6 +23,44 @@ import { badgeSrc, badgeHop } from "./badgeArt.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
+/* ---- BESPOKE MOMENTS (owner ruling 2026-09-10) -----------------------------------------
+   A couple of feats have a celebration of their own -- the Konami starfall App.jsx casts,
+   and the Control Panel reveal that follows its sibling -- and a bespoke moment REPLACES
+   the generic flair rather than layering on it. Two rules, both enforced here rather than
+   at the call sites so that a new caller cannot forget one:
+
+     1. While a bespoke moment owns the screen, a newly-earned celebration is HELD, and
+        released when the moment ends. So the standard achievement toast plays AFTER the
+        bespoke moment. On a FIRST earn the two cannot share the screen at all -- the
+        moment's DOM has not been built yet, which is overlap made impossible by
+        construction rather than by two timers happening to miss each other.
+     2. An achievement in BESPOKE_FEATS never gets _fanfare: its own moment IS the fanfare.
+
+   Deliberately pure module state: BOTH hosts load this file and the Loom has none of the
+   gallery's easter-egg DOM or CSS, so nothing here may read an element, a class or a
+   stylesheet -- the owner of a moment tells us it started and tells us it ended.
+
+   Both ids are already public in this source tree (App.jsx's Konami handler,
+   useControlPanel.js); the NAMES behind them are not, and must not be written here. */
+export const BESPOKE_FEATS = new Set(["the-konami-code", "under-the-hood"]);
+
+let _bespoke = 0;                // depth, not a bool: two moments may overlap and compose
+const _held = [];                // celebrations that arrived while the screen was owned
+
+export function beginBespokeMoment() { _bespoke++; }
+export function endBespokeMoment() {
+  if (_bespoke > 0) _bespoke--;
+  if (_bespoke) return;          // an outer moment still owns the screen
+  _held.splice(0).forEach((fn) => fn());   // drained in arrival order, then replayed as if new
+}
+/* Returns true when the caller has been parked. Every entry into the celebration queue
+   passes through here; that is the whole guarantee. */
+function _hold(fn) {
+  if (!_bespoke) return false;
+  _held.push(fn);
+  return true;
+}
+
 function unleashed() {
   try { return localStorage.getItem("unleash") === "1"; } catch { return false; }
 }
@@ -255,6 +293,18 @@ function _fanfare(m, tier) {
   }
 }
 
+/* THE ONE PLACE THAT DECIDES WHETHER THE FANFARE FIRES. All three moments that can carry
+   it -- the parade step, the queue, the Folio replay -- call this and never _fanfare
+   directly, because "suppress it for the bespoke feats" written out three times is
+   "suppress it for the bespoke feats" forgotten once: a feat earned in a >3 flood, or
+   replayed from the Folio, would still blow confetti over a celebration that is supposed
+   to replace it. */
+function _flair(built, a) {
+  if (BESPOKE_FEATS.has(a.id)) return;          // its own moment is its fanfare
+  const tier = a.tier || "common";
+  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+}
+
 function _play(built, hold, after) {
   const m = built.m, tw = built.tw;
   document.body.appendChild(m);
@@ -407,6 +457,7 @@ function _playFlood(built, after) {
 }
 
 function _floodParade(list) {
+  if (_hold(() => _floodParade(list))) return;   // a bespoke moment owns the screen
   const q = list.slice();
   const p = { q, m: null, ended: false };
   _parade = p;                                     // published so the exit can reach it
@@ -418,7 +469,7 @@ function _floodParade(list) {
     const tier = a.tier || "common";
     _chime(tier);
     const built = _mkMoment(a, {});
-    if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+    _flair(built, a);
     p.m = built.m;
     _playFlood(built, step);
     if (shown > 1) {
@@ -433,14 +484,18 @@ function _floodParade(list) {
   step();
 }
 
-function celebrate(a) { if (a) { _q.push(a); if (!_playing) _next(); } }
+function celebrate(a) {
+  if (!a) return;
+  if (_hold(() => celebrate(a))) return;        // a bespoke moment owns the screen
+  _q.push(a); if (!_playing) _next();
+}
 function _next() {
   if (!_q.length) { _playing = false; return; }
   _playing = true;
   const a = _q.shift(), tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, {});
-  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+  _flair(built, a);
   _play(built, HOLD[tier] || 4600, _next);
 }
 
@@ -470,13 +525,19 @@ export function replay(a, opts) {
   // the linger timer and clears the trail exactly as the inline sequence here used to, and
   // additionally stops a parade still in FLIGHT -- whose pending moments and front layer
   // were out of this function's reach while they lived in _floodParade's closure.
+  // NOT held behind a bespoke moment, unlike celebrate()/_floodParade(). The hold exists for
+  // EARNS, which arrive on their own and can simply wait; a replay is a click that must hand
+  // its driver handle back synchronously, so parking it would return a dead handle to
+  // useFolio and the Folio's scramble reveal would drive nothing. The two states are separate
+  // axes and compose: a replay during a bespoke moment takes over the celebration layer as it
+  // always has, and the moment still releases whatever it was holding when it ends.
   _q.length = 0;
   _playing = false;
   _endParade();
   const tier = a.tier || "common";
   _chime(tier);
   const built = _mkMoment(a, { eyebrow: "Achievement · Replay", line: opts.line });
-  if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
+  _flair(built, a);
   _play(built, HOLD[tier] || 4600, null);
   const rEl = built.tw.querySelector(".toast .tbody .r");
   return {

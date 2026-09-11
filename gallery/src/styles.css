@@ -247,32 +247,72 @@ button:disabled { cursor: default; }
 .mfly > div:not(.mfly-head) { flex: 1 1 auto; overflow-y: auto; }
 .mfly-head { display: flex; gap: 7px; align-items: center; }
 
-/* ===== The Konami Code easter egg — ported verbatim from the classic BASE_HTML,
-   which /next never inherited (that CSS lives only in the classic's inline
-   <style> block). Owner QA 2026-07-30: "the Konami code is broken" -- it wasn't
-   broken, it simply had no styling on this page, so the elements the JS creates
-   rendered invisibly. The JS lives in App.jsx (one keydown listener, mounted
-   once). ===== */
-.ee-star{position:fixed;top:-40px;z-index:450;pointer-events:none;color:var(--lavender,var(--accent));
+/* ===== The Konami Code easter egg — REBUILT 2026-09-10 to its committed Design Handoff
+   page (moonglade-internal/design/handoff-2026-09-04/briefs/nel-starfall-easter-egg.html:
+   that page's <style> block and its cast() script ARE the spec). The first port carried
+   the classic BASE_HTML's rules across verbatim; this one carries the design across
+   instead, and the two differ in structure, not just numbers.
+
+   Three things to know before editing:
+
+   1. THE LAYER EXISTS TO FADE. The page draws inside a 520px .stage and ends the cast by
+      fading THAT ONE ELEMENT (`stage.style.opacity="0"` over .6s). Every child here runs a
+      short ENTRANCE animation with `forwards`, and a filling CSS animation outranks an
+      inline style, so fading the children individually cannot put the stars or Nel out --
+      only a wrapper can. .ee-layer is the stage, ported to viewport-fixed.
+   2. STACKING IS BY VALUE. The page's ladder verbatim -- scrim 1 < orb 2 < Nel 3 < stars 4
+      < toast 5 -- resolved inside the layer's own stacking context, so the stars fall in
+      FRONT of Nel no matter what order App.jsx appends them in. Do not re-derive the order
+      from appendChild calls; that accident is what used to paint Nel over the starfall.
+   3. THE PAGE'S ABSOLUTE-IN-STAGE VALUES ARE PORTED, NOT COPIED. There is no 520px box
+      here, so the orb's `left:60%;top:40%` of the stage becomes 60vw/40vh of the viewport
+      (same -170px margin trick to centre a 340px circle on that point), and the star fall
+      is vh-based rather than the page's 560px. Same porting decision the first port made.
+
+   The JS lives in App.jsx (one keydown listener, mounted once). It owns the 6000ms hold and
+   the .6s fade; nothing here holds. ===== */
+.ee-layer{position:fixed;inset:0;z-index:449;pointer-events:none;}
+.ee-layer.ee-out{opacity:0;transition:opacity .6s ease;}
+.ee-scrim{position:absolute;inset:0;z-index:1;
+  background:radial-gradient(circle at 50% 60%,rgba(6,5,14,.32),rgba(6,5,14,.84));
+  pointer-events:none;opacity:0;animation:ee-scrim .5s ease forwards;}
+@keyframes ee-scrim{to{opacity:1;}}
+/* the cast's orb glow (handoff .orbglow/orbP): lavender core -> emerald at 45% -> clear at
+   68%, at the page's alpha stops, breathing forever until the layer goes. */
+.ee-orb{position:absolute;left:60vw;top:40vh;width:340px;height:340px;margin:-170px 0 0 -170px;
+  border-radius:50%;z-index:2;opacity:0;pointer-events:none;
+  background:radial-gradient(circle,
+    color-mix(in srgb, var(--lavender, var(--accent)) 75%, transparent),
+    color-mix(in srgb, var(--emerald, var(--accent)) 20%, transparent) 45%, transparent 68%);
+  filter:blur(8px);animation:ee-orb 2.6s ease-in-out .3s infinite;}
+@keyframes ee-orb{0%,100%{opacity:.35;transform:scale(.92);}50%{opacity:.9;transform:scale(1.1);}}
+.ee-nel{position:absolute;left:50%;bottom:0;transform:translateX(-50%);transform-origin:bottom center;
+  z-index:3;max-height:80vh;max-width:94vw;pointer-events:none;opacity:0;
+  filter:drop-shadow(0 10px 34px rgba(0,0,0,.55)) drop-shadow(0 0 30px rgba(182,146,230,.4));
+  animation:ee-nel .65s cubic-bezier(.18,.9,.2,1.08) forwards;}
+/* handoff nelpop: a .65s POP IN and then rest. It does not fade itself back out -- the
+   whole layer leaves together at the end. */
+@keyframes ee-nel{0%{opacity:0;transform:translateX(-50%) translateY(26px) scale(.86);}
+  60%{opacity:1;transform:translateX(-50%) translateY(0) scale(1.02);}
+  100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}}
+.ee-star{position:absolute;top:-40px;z-index:4;pointer-events:none;color:var(--lavender,var(--accent));
   text-shadow:0 0 14px rgba(182,146,230,.9),0 0 30px rgba(182,146,230,.5);animation:ee-fall linear forwards;}
 @keyframes ee-fall{to{transform:translateY(112vh) rotate(540deg);opacity:.05;}}
-.ee-toast{position:fixed;left:50%;top:15%;transform:translate(-50%,-50%);z-index:452;
-  background:var(--mantle);border:1px solid var(--lavender,var(--accent));border-radius:14px;
-  padding:16px 30px;font-size:19px;color:var(--text);text-align:center;
-  box-shadow:0 0 70px rgba(182,146,230,.55);pointer-events:none;animation:ee-toast 6s ease forwards;}
-@keyframes ee-toast{0%{opacity:0;transform:translate(-50%,-50%) scale(.85);}
-  10%{opacity:1;transform:translate(-50%,-50%) scale(1);}82%{opacity:1;}100%{opacity:0;}}
-.ee-scrim{position:fixed;inset:0;z-index:449;
-  background:radial-gradient(circle at 50% 60%,rgba(6,5,14,.32),rgba(6,5,14,.84));
-  pointer-events:none;animation:ee-scrim 6s ease forwards;}
-@keyframes ee-scrim{0%{opacity:0;}10%{opacity:1;}82%{opacity:1;}100%{opacity:0;}}
-.ee-nel{position:fixed;left:50%;bottom:0;transform:translateX(-50%);transform-origin:bottom center;
-  z-index:450;max-height:80vh;max-width:94vw;pointer-events:none;
-  filter:drop-shadow(0 10px 34px rgba(0,0,0,.55)) drop-shadow(0 0 30px rgba(182,146,230,.4));
-  animation:ee-nel 6s cubic-bezier(.18,.9,.2,1.05) forwards;}
-@keyframes ee-nel{0%{opacity:0;transform:translateX(-50%) translateY(30px) scale(.86);}
-  12%{opacity:1;transform:translateX(-50%) translateY(0) scale(1.02);}
-  18%{transform:translateX(-50%) translateY(0) scale(1);}84%{opacity:1;}100%{opacity:0;}}
+/* handoff .eetoast: bottom-anchored glass, not a centred slab. */
+.ee-toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%) scale(.9);z-index:5;opacity:0;
+  background:rgba(10,8,24,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border:1px solid var(--lavender,var(--accent));border-radius:14px;
+  padding:14px 26px;font-size:19px;color:var(--text);text-align:center;max-width:86vw;
+  box-shadow:0 0 60px rgba(182,146,230,.5);pointer-events:none;
+  animation:ee-toastin .5s ease .35s forwards;}
+@keyframes ee-toastin{to{opacity:1;transform:translateX(-50%) scale(1);}}
+/* handoff's own reduced-motion rule, over the whole layer: nothing animates, everything
+   sits at its rest opacity, and the layer's exit is a cut rather than a fade. */
+@media (prefers-reduced-motion: reduce) {
+  .ee-scrim, .ee-orb, .ee-nel, .ee-star, .ee-toast { animation: none !important; opacity: 1 !important; }
+  .ee-nel, .ee-toast { transform: translateX(-50%) !important; }
+  .ee-layer.ee-out { transition: none; }
+}
 
 /* clickable stars -- shared by the grid card, the lightbox and the details view,
    not scoped to .grid: three surfaces render the same <Stars> component now. */

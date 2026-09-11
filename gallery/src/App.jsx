@@ -34,6 +34,7 @@ import {
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
 import { sendAchEvent } from "./notify/achNonce.js";
+import { beginBespokeMoment, endBespokeMoment } from "./notify/ach.js";
 import useLibrary, { filterQueryString, pruneSelected } from "./hooks/useLibrary.js";
 import useSimilar from "./hooks/useSimilar.js";
 import { invalidate } from "./hooks/swrCache.js";
@@ -672,19 +673,48 @@ export default function App({ boot }) {
 
   useEffect(() => { fetchAccount().then(setAccount); }, []);
 
-  /* The Konami Code easter egg, ported from the classic BASE_HTML (its CSS/JS
-     never shipped to /next -- owner QA: "the Konami code is broken"; it wasn't,
-     it was simply absent). Same sequence, same beacon, same visuals; styles
-     live in styles.css. Mounted once, globally. */
+  /* The Konami Code easter egg. REBUILT 2026-09-10 to the committed Design Handoff page
+     (moonglade-internal/design/handoff-2026-09-04/briefs/nel-starfall-easter-egg.html --
+     that page's cast() script is this function's spec, its <style> block is styles.css's):
+     scrim, orb glow, 40 stars, Nel, bottom glass toast; the stars' own size/duration/delay
+     ranges; hold 6000ms, then ONE .6s opacity fade of the whole .ee-layer, then removal.
+     The first port (from the classic BASE_HTML, which /next never inherited -- owner QA:
+     "the Konami code is broken"; it wasn't, it was simply absent) gave every element its
+     own 6s hold-and-fade keyframe and let append order decide the stacking. Both are gone:
+     each element now runs a short ENTRANCE animation only, the timeline below owns the hold
+     and the exit, and z-index VALUES own the stacking (styles.css). Sequence, beacon and
+     audio are unchanged. Mounted once, globally.
+
+     It is also a BESPOKE MOMENT. For its whole life -- from before the earning beacon goes
+     out, through the hold and the fade, to teardown -- it owns the screen, and notify/ach.js
+     HOLDS any newly-earned celebration until it releases (beginBespokeMoment/endBespokeMoment).
+     That is what makes the first earn's standard achievement toast play AFTER the starfall
+     rather than over it: on a first earn the celebration is not merely delayed, it has not
+     been built yet, so the two layers cannot share the screen. Every exit below -- normal
+     teardown, a failed beacon, an unmount mid-cast -- runs release() exactly once; a missed
+     release would wedge the engine and silently swallow every later achievement. */
   useEffect(() => {
     const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
     let pos = 0, busy = false;
+    let teardown = null;                     // the in-flight cast's teardown, for unmount
     const onKey = (e) => {
       pos = e.keyCode === seq[pos] ? pos + 1 : (e.keyCode === seq[0] ? 1 : 0);
       if (pos !== seq.length) return;
       pos = 0;
       if (busy) return;
       busy = true;
+      // ARMED BEFORE THE BEACON, not after the DOM is built: the beacon is what earns the
+      // feat, and the check() carrying its standard toast can land while this promise chain
+      // is still in the air.
+      beginBespokeMoment();
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        teardown = null;
+        busy = false;
+        endBespokeMoment();                  // the held celebration plays now
+      };
       // The ee_* assets are SEALED to The Konami Code (the unlock-split
       // enforcement, 2026-08-13) and this beacon is what earns it -- so the
       // visuals wait for the beacon to land, or the very first trigger races
@@ -700,27 +730,35 @@ export default function App({ boot }) {
       sendAchEvent("konami")
         .then(() => apiGet("/api/achievements"))
         .then((data) => {
+        // The stage, ported: one fixed layer holding the whole cast, so the ending is the
+        // page's ending -- a single element fading, not five elements racing.
+        const layer = document.createElement("div");
+        layer.className = "ee-layer";
+        const scrim = document.createElement("div");
+        scrim.className = "ee-scrim";
+        layer.appendChild(scrim);
+        const orb = document.createElement("div");
+        orb.className = "ee-orb";
+        layer.appendChild(orb);
         const glyphs = ["✦", "✧", "★", "✪", "✺"];
-        const stars = [];
-        for (let i = 0; i < 46; i++) {
+        for (let i = 0; i < 40; i++) {
           const s = document.createElement("div");
           s.className = "ee-star";
           s.textContent = glyphs[i % glyphs.length];
           s.style.left = Math.random() * 100 + "vw";
           s.style.fontSize = 13 + Math.random() * 24 + "px";
-          s.style.animationDuration = 2.2 + Math.random() * 2.6 + "s";
-          s.style.animationDelay = Math.random() * 1.8 + "s";
-          document.body.appendChild(s);
-          stars.push(s);
+          s.style.animationDuration = 2.2 + Math.random() * 2.4 + "s";
+          s.style.animationDelay = Math.random() * 1.6 + "s";
+          layer.appendChild(s);
         }
-        const scrim = document.createElement("div");
-        scrim.className = "ee-scrim";
-        document.body.appendChild(scrim);
+        // Appended AFTER the stars, exactly as the handoff's cast() does -- and painted
+        // BEHIND them all the same, because the stars carry the higher z-index. Append
+        // order is not the ladder here; styles.css is.
         const nel = document.createElement("img");
         nel.className = "ee-nel";
         nel.src = "/branding/ee_nelstarfall.png";
         nel.onerror = () => nel.remove();
-        document.body.appendChild(nel);
+        layer.appendChild(nel);
         // Built with DOM methods, not innerHTML. The greeting is a fixed literal; the
         // punchline is the SEALED roster's desc for the-konami-code, set via textContent
         // (so fetched data can never inject markup) -- it is not in this public source to spoil.
@@ -728,24 +766,36 @@ export default function App({ boot }) {
         toast.className = "ee-toast";
         toast.appendChild(document.createTextNode("✺ Elune-adore, Nelnamara ✺"));
         const sub = document.createElement("div");
-        sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:7px;";
+        sub.style.cssText = "font-size:12.5px;color:var(--subtext);margin-top:6px;";
         const feat = data && (data.achievements || []).find((a) => a.id === "the-konami-code");
         sub.textContent = (feat && feat.desc) || "A hidden power stirs in the Athenaeum.";
         toast.appendChild(sub);
-        document.body.appendChild(toast);
+        layer.appendChild(toast);
+        document.body.appendChild(layer);
         let cast, loop;
         try { cast = new Audio("/branding/ee_starfall_cast.ogg"); cast.volume = 0.7; cast.play().catch(() => {}); } catch {}
         try { loop = new Audio("/branding/ee_starfall_loop.ogg"); loop.loop = true; loop.volume = 0.35; loop.play().catch(() => {}); } catch {}
-        setTimeout(() => {
-          document.querySelectorAll(".ee-star,.ee-toast,.ee-nel,.ee-scrim").forEach((n) => n.remove());
+        let fadeT = null;
+        teardown = () => {
+          clearTimeout(holdT);
+          clearTimeout(fadeT);
+          if (layer.parentNode) layer.remove();
           try { loop && loop.pause(); } catch {}
           try { cast && cast.pause(); } catch {}
-          busy = false;
-        }, 7000);
-      });
+          release();
+        };
+        const holdT = setTimeout(() => {
+          layer.classList.add("ee-out");     // the whole layer, one .6s opacity fade
+          fadeT = setTimeout(teardown, 600);
+        }, 6000);
+      })
+        .catch(() => { if (teardown) teardown(); else release(); });
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (teardown) teardown();              // unmounted mid-cast: take it down, release
+    };
   }, []);
 
   /* ---- bulk Actions: the classic flows, confirm texts verbatim ---- */
