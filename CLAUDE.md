@@ -301,17 +301,24 @@ recently within hours of a "correction." All tests must pass before merging to m
   exits non-zero if any of them fails. `pytest` alone is not the pre-merge check: a
   front-end move goes red in the node job while pytest stays green, which is how master
   went red twice in two days (2026-09-08/09).
-  It **refuses to start** until this machine has what CI's own install steps provide —
-  `gallery/node_modules`, `loom/node_modules`, a chromium that actually *launches* — because
+  It **refuses to start** until this machine carries what those jobs' install steps provide —
+  `gallery/node_modules`, `loom/node_modules` and loom's committed build inputs, and the
+  harness's browser engine actually *launching* (chromium by default, or whatever
+  `MG_HARNESS_BROWSER` names, which is the engine the harness itself will launch) — because
   the three checks that need them (both committed-bundle freshness tests and the whole render
   harness) are written to skip themselves, so a run without them prints green while saying
   nothing about the bundle it never rebuilt or the layout it never measured. It names the
   command for each gap and installs nothing. **And it checks afterwards that those three
   really ran**, off the run's own junit report, because a preflight can only answer "could
   this check run": the harness skips on a failed browser *launch*, not on a missing path, and
-  the gallery-bundle test also skips on `MOONGLADE_SKIP_GALLERY_BUILD` or a half-missing
-  `gallery/dist`. A gate that skipped fails the run and is named. Green here means safe to
-  push; a green that skipped the gate you needed is worse than a red.
+  each bundle test also skips on its own `MOONGLADE_SKIP_*_BUILD` env var or a half-missing
+  `dist/`. A gate that skipped fails the run and is named. Be exact about which of the three
+  CI itself runs: its pytest job installs node, `npm ci`s `gallery/` and installs chromium,
+  so the gallery-bundle test and the render harness really run there; it never installs
+  `loom/node_modules`, so the **loom-bundle test skips in CI every time** and CI catches a
+  stale `loom/dist` in its other job instead — the `git status --porcelain` step this script
+  mirrors. Green here means safe to push; a green that skipped the gate you needed is worse
+  than a red.
 - **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
   "timing" or "this machine" without the trace that proves it, and never skipped, gated or
   `xfail`ed unless the commit message names the cause. The browser-driven render harness

@@ -18,8 +18,70 @@ needs no browser and no server: it resolves two paths. It belongs where every ru
 `_real_coded_tree_untouched` (conftest) remains the backstop for WRITES. It cannot see a
 read -- on a checkout that already holds the discovery folders an un-pinned `create_app()`
 writes nothing new -- which is why the prevention below is the thing that has to hold.
+
+Two invariants live here, and they are different claims. One: no module-scoped fixture can
+reach the real tree or the real pack (the session pin holds). Two: the render harness's own
+server fixture still pins and seeds for ITSELF -- which the session pin now masks, since a
+harness that lost its pin would land in the session's tmp root and look fine. The first is
+measured live; the second is read off the harness's source, because measuring it is exactly
+what the floor beneath it made impossible.
 """
+import ast
+from pathlib import Path
+
 import pytest
+
+_HARNESS = Path(__file__).resolve().parent / "test_render_harness.py"
+
+
+def _fixture_body(path, name):
+    """The AST body of the module-level `def name(...)` in `path`.
+
+    Source-level on purpose: tests/test_render_harness.py sits under a module-level
+    `pytest.importorskip("playwright.sync_api")`, so importing it to introspect the
+    fixture object would make this test skip on exactly the checkouts where the harness
+    is not running -- i.e. it would inherit the gateability this file exists to escape.
+    Reading the file needs neither playwright nor a browser."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError("{} no longer defines a module-level `def {}`".format(path, name))
+
+
+def test_the_render_harness_server_pins_its_own_root_and_pack():
+    """`render_server` must pin branding_root() and seed its own container ITSELF.
+
+    Since conftest gained the session-scoped `_real_coded_tree_pinned_away`, the
+    experiment that used to discriminate this no longer can: with or without the
+    harness's own pin, a pack-present run and a pack-absent run now look identical,
+    because the session pin already put every unpinned resolution in a session tmp dir.
+    That is the floor working as designed -- and it is also a mask. Delete the module
+    pin inside `render_server` today and nothing goes red: the harness would quietly
+    fall back to the session root and the session's seeded container, sharing one tree
+    and one pack with whatever else forgot, instead of writing and reading its own.
+
+    So the module pin is asserted directly, at the only level that survives the mask:
+    the fixture's own source must (a) setattr `branding_root` and (b) call conftest's
+    `seed_sealed_container`. Both, because either alone is a half-pin -- a pinned root
+    with no seeded pack points `_container_path()` at a `moonglade.dat` nobody wrote,
+    and a seeded pack with no pinned root writes it beside the checkout."""
+    body = _fixture_body(_HARNESS, "render_server")
+    calls = [n for n in ast.walk(body) if isinstance(n, ast.Call)]
+    pins_root = any(
+        isinstance(c.func, ast.Attribute) and c.func.attr == "setattr"
+        and any(isinstance(a, ast.Constant) and a.value == "branding_root" for a in c.args)
+        for c in calls)
+    seeds_pack = any(
+        (c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", None))
+        == "seed_sealed_container" for c in calls)
+    assert pins_root, (
+        "tests/test_render_harness.py::render_server no longer pins branding_root() -- it "
+        "would resolve to conftest's session-wide fallback root, shared with every other "
+        "fixture that forgot, instead of its own")
+    assert seeds_pack, (
+        "tests/test_render_harness.py::render_server no longer calls seed_sealed_container() "
+        "-- its achievement state would come from a container this fixture never wrote")
 
 
 @pytest.fixture(scope="module")

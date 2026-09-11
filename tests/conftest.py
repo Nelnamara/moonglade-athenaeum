@@ -72,11 +72,13 @@ def _snapshot_coded_tree():
     exists() check, then walk and stat.
 
     FOLDERS are recorded as well as files, and that is not tidiness. The side effect this
-    guard was written for is `ensure_branding_discovery_tree()`, which mkdirs the discovery
-    slots and writes the breadcrumb README only `if not readme.exists()`
-    (moonglade_gallery.py:3156-3161) -- on a checkout with no tree at all it creates six
-    FOLDERS and one file, and a file-only census would report the folders as nothing at
-    all."""
+    guard was written for is `ensure_branding_discovery_tree()`, which mkdirs every
+    discovery slot in `_BRANDING_DISCOVERY_SLOTS` and writes the breadcrumb README only
+    `if not readme.exists()` (moonglade_gallery.py:3156-3161). On a checkout with no tree
+    at all that is a set of FOLDERS and a single file -- and the folders are the bulk of
+    it, because each slot's coded rel is itself nested (`ROLE_CODE`), so `parents=True`
+    materializes the intermediate levels too. A file-only census would report all of that
+    as nothing at all."""
     if not _REAL_CODED_ROOT.exists():
         return None
     out = {}

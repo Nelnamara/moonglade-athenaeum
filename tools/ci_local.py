@@ -20,16 +20,20 @@ The real workflow has two jobs and this runs both, the way CI runs them:
      job a Python-only local run misses: a front-end MOVE/rename goes red here while
      pytest stays green (learned twice, 2026-09-08/09).
 
-PREFLIGHT, and why it refuses rather than warns. Three checks in CI's pytest job are
-written to SKIP themselves when their toolchain is absent -- the committed-gallery-bundle
-and committed-loom-bundle freshness tests (they need node_modules) and the whole render
-harness (it needs a playwright browser). CI installs all of it, so those checks really run
-there. A local run without them prints the same "green" while saying nothing about the
-bundle it would have rebuilt or the layout it would have measured: precisely how a stale
-gallery/dist earns a green pre-merge command and a red CI. So this refuses to start until
-the environment carries what CI's `npm ci` / `playwright install` steps provide, and names
-the command that fixes each gap. Nothing is installed for you -- an install is the kind of
-thing you should watch.
+PREFLIGHT, and why it refuses rather than warns. Three checks in the pytest job are written
+to SKIP themselves when their toolchain is absent -- the committed-gallery-bundle and
+committed-loom-bundle freshness tests (they need node_modules) and the whole render harness
+(it needs a playwright browser). Two of the three really run in CI: its pytest job installs
+node, `npm ci`s gallery/ and installs chromium `--with-deps`. The loom bundle test is the
+exception and is worth being exact about -- CI's pytest job never touches loom/node_modules,
+so that test SKIPS there every time; CI covers the same staleness in its OTHER job, the
+`git status --porcelain -- dist` step this script mirrors as [2b]. A local run missing any
+of them prints the same "green" while saying nothing about the bundle it would have rebuilt
+or the layout it would have measured: precisely how a stale gallery/dist earns a green
+pre-merge command and a red CI. So this refuses to start until the environment carries what
+CI's `npm ci` / `playwright install` steps provide (plus loom's, which only this run needs),
+and names the command that fixes each gap. Nothing is installed for you -- an install is the
+kind of thing you should watch.
 
 AND THEN IT CHECKS THAT THEY REALLY RAN, which is the half a preflight cannot do. A
 preflight answers "could this check run", and those are not the same sentence: chromium's
@@ -58,7 +62,7 @@ GALLERY = os.path.join(ROOT, "gallery")
 
 JOBS = [
     "[1] pytest  (CI's exact command; render harness included)",
-    "[1b] the skip-prone CI checks actually ran  (read off the junit report)",
+    "[1b] the skip-prone checks actually ran  (read off the junit report)",
     "[2a] loom: rebuild the esbuild bundle",
     "[2b] loom/dist is a fresh build  (git status --porcelain, as CI checks it)",
     "[3] loom node suite  (node --test)",
@@ -71,8 +75,23 @@ def _run(desc, cmd, cwd=None, shell=False):
     return subprocess.run(cmd, cwd=cwd or ROOT, shell=shell).returncode == 0
 
 
-def _chromium_unusable():
-    """'' when chromium LAUNCHES here, else the reason it does not.
+_ENGINES = ("chromium", "firefox", "webkit")
+
+
+def harness_engine():
+    """The engine the harness will actually launch, read the way it reads it.
+
+    `render_browser` takes `MG_HARNESS_BROWSER` (default chromium, CI's only engine) and
+    launches THAT (tests/test_render_harness.py). A preflight that hard-codes chromium
+    answers a question nobody asked under `MG_HARNESS_BROWSER=webkit`: it ticks its box off
+    a chromium the run will never touch, and every harness test then skips on the webkit
+    binary that was never installed. Returns the raw value when it is not a known engine --
+    the caller reports that as its own gap, because the harness pytest.fail()s on it."""
+    return (os.environ.get("MG_HARNESS_BROWSER") or "chromium").strip().lower()
+
+
+def _engine_unusable(engine):
+    """'' when `engine` LAUNCHES here, else the reason it does not.
 
     It launches one and closes it, rather than resolving the path and stating it, because
     the path is not what the harness skips on: `render_browser` calls `browser.launch()`
@@ -91,21 +110,29 @@ def _chromium_unusable():
     except Exception as exc:                     # noqa: BLE001
         return "playwright will not start (%s)" % exc
     try:
-        exe = pw.chromium.executable_path
+        exe = getattr(pw, engine).executable_path
         if not os.path.exists(exe):
-            return "no chromium binary at %s" % exe
-        browser = pw.chromium.launch()
+            return "no %s binary at %s" % (engine, exe)
+        browser = getattr(pw, engine).launch()
         browser.close()
     except Exception as exc:                     # noqa: BLE001
         # First line only: playwright's own message trails a multi-line ASCII banner.
-        return "chromium will not launch (%s)" % str(exc).splitlines()[0]
+        return "%s will not launch (%s)" % (engine, str(exc).splitlines()[0])
     finally:
         pw.stop()
     return ""
 
 
 def preflight():
-    """The environment CI's install steps provide. Returns a list of (gap, fix) pairs."""
+    """The environment CI's install steps provide. Returns a list of (gap, fix) pairs.
+
+    Every skip path of BOTH bundle-freshness tests is covered here, not just the gallery
+    one: `test_committed_loom_bundle_matches_a_fresh_build` skips on
+    MOONGLADE_SKIP_LOOM_BUILD, a missing node, missing loom/scripts/build.mjs or
+    loom/dist/master-storyboard.bundle.js, and a missing loom/node_modules/esbuild
+    (tests/test_js_syntax.py). [1b] catches a skip after the fact, but a gap named before
+    the run costs minutes instead of the whole pytest job, and the loom test has no reason
+    to be told about later than its gallery twin."""
     gaps = []
     if shutil.which("node") is None:
         gaps.append(("node is not on PATH -- both bundle-freshness tests and the whole "
@@ -125,23 +152,51 @@ def preflight():
                          "cd gallery && npm run build   then commit gallery/dist/"))
     if not os.path.isdir(os.path.join(LOOM, "node_modules", "esbuild")):
         gaps.append(("loom/node_modules is missing, so the loom bundle cannot be rebuilt "
-                     "with the esbuild version pinned in loom/package-lock.json",
+                     "with the esbuild version pinned in loom/package-lock.json -- and "
+                     "test_committed_loom_bundle_matches_a_fresh_build SKIPS on it too",
                      "cd loom && npm ci"))
+    for rel in (os.path.join("scripts", "build.mjs"),
+                os.path.join("dist", "master-storyboard.bundle.js")):
+        if not os.path.isfile(os.path.join(LOOM, rel)):
+            # The same "build tooling or dist bundle not present" skip the gallery test has,
+            # on the loom side: without either half there is nothing to rebuild or compare.
+            gaps.append(("loom/%s is missing, so "
+                         "test_committed_loom_bundle_matches_a_fresh_build SKIPS itself and "
+                         "nothing compares the served bundle to its source"
+                         % rel.replace(os.sep, "/"),
+                         "restore it from git -- /loom?bundle=1 serves that committed file"))
     if os.environ.get("MOONGLADE_SKIP_GALLERY_BUILD"):
         gaps.append(("MOONGLADE_SKIP_GALLERY_BUILD is set in this environment -- it turns "
                      "test_committed_gallery_bundle_matches_a_fresh_build off outright",
                      "unset MOONGLADE_SKIP_GALLERY_BUILD"))
-    chromium = _chromium_unusable()
-    if chromium:
-        gaps.append(("the render harness would skip itself -- %s" % chromium,
-                     "python -m playwright install --with-deps chromium   (CI's own step; "
-                     "--with-deps is what supplies chromium's system libraries on Linux)"))
+    if os.environ.get("MOONGLADE_SKIP_LOOM_BUILD"):
+        gaps.append(("MOONGLADE_SKIP_LOOM_BUILD is set in this environment -- it turns "
+                     "test_committed_loom_bundle_matches_a_fresh_build off outright",
+                     "unset MOONGLADE_SKIP_LOOM_BUILD"))
+    engine = harness_engine()
+    if engine not in _ENGINES:
+        gaps.append(("MG_HARNESS_BROWSER=%r is not one of %s -- the render harness "
+                     "pytest.fail()s on it rather than running" % (engine, ", ".join(_ENGINES)),
+                     "unset MG_HARNESS_BROWSER (chromium, CI's engine) or set a real one"))
+    else:
+        unusable = _engine_unusable(engine)
+        if unusable:
+            gaps.append(("the render harness would skip itself -- %s" % unusable,
+                         "python -m playwright install --with-deps %s   (CI's own step for "
+                         "chromium; --with-deps is what supplies the browser's system "
+                         "libraries on Linux)" % engine))
     return gaps
 
 
-# The checks inside CI's pytest job that are written to skip themselves. Preflight argues
+# The checks inside the pytest job that are written to skip themselves. Preflight argues
 # they CAN run; this is how the run proves they DID. (module, test) for a named test;
 # (module, None) for "this whole module must have contributed something".
+#
+# Two of the three are also gates in CI's own pytest job. The loom bundle test is not --
+# CI's pytest job never installs loom/node_modules, so it skips there and CI catches a
+# stale loom/dist in the loom-node-tests job instead ([2b] below). It is required here
+# anyway: it is the one check that compares the committed bundle to a rebuild inside the
+# pytest run, and a local gate going quiet is still a local gate going quiet.
 REQUIRED_TO_RUN = [
     ("tests.test_js_syntax", "test_committed_gallery_bundle_matches_a_fresh_build"),
     ("tests.test_js_syntax", "test_committed_loom_bundle_matches_a_fresh_build"),
@@ -152,7 +207,7 @@ REQUIRED_TO_RUN = [
 def gates_that_did_not_run(xml_path):
     """Read the junit report; return a list of gates that skipped or never appeared.
 
-    Empty list == every skip-prone check in CI's pytest job actually executed here. This is
+    Empty list == every skip-prone check in the pytest job actually executed here. This is
     the difference between "the environment looks right" and "the gate ran": the harness
     skips on a failed browser LAUNCH, and the bundle test skips on an env var or a missing
     dist file, neither of which a preflight can see from outside the run."""
@@ -201,7 +256,8 @@ def main(argv=None):
             print("  MISSING: %s" % gap)
             print("     fix:  %s" % fix)
     else:
-        print("\n== preflight: node, gallery/ and loom/ build tooling, chromium -- all present ==")
+        print("\n== preflight: node, gallery/ and loom/ build tooling, a %s that launches "
+              "-- all present ==" % harness_engine())
 
     if dry:
         print("\n-- dry run: nothing below is executed --")
@@ -232,7 +288,14 @@ def main(argv=None):
         for gap in skipped_gates:
             print("  DID NOT RUN: %s" % gap)
         print("  A green pytest that skipped one of these says nothing about the bundle it\n"
-              "  never rebuilt or the layout it never measured. CI runs all of them.")
+              "  never rebuilt or the layout it never measured.\n"
+              "  Which of these CI itself runs, exactly: its pytest job installs node,\n"
+              "  `npm ci`s gallery/ and installs chromium --with-deps, so the GALLERY bundle\n"
+              "  test and the RENDER HARNESS really run there. It never installs\n"
+              "  loom/node_modules, so the LOOM bundle test skips in CI every time -- CI\n"
+              "  catches a stale loom/dist in its other job instead, the check mirrored\n"
+              "  below as [2b]. So a loom-bundle skip here is a local-only gate going\n"
+              "  quiet, and the other two are gates CI will run whether you did or not.")
         fails.append("a CI check skipped locally")
     else:
         print("  both bundle-freshness tests ran, and the render harness really rendered.")

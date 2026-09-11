@@ -1449,11 +1449,22 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     SetupWizard exists for. Its OWN server, separate from the module's shared
     `render_server` -- that fixture is deliberately configured OUT of this state (see its
     own comment) so the rest of the module can keep assuming an already-onboarded install;
-    this is the one test that needs the state it was configured out of."""
+    this is the one test that needs the state it was configured out of.
+
+    It pins its own coded tree and seeds its own sealed pack, exactly as `render_server`
+    above does and through the same conftest helper. It is function-scoped, so conftest's
+    autouse `_isolated_branding`/`_sealed_roster_container` have already pinned a per-test
+    tmp dir by the time this runs -- but that is an ordering rule (autouse first, within a
+    scope), not a property of this fixture, and the 2026-09-10 bug was precisely a fixture
+    whose isolation came from somewhere else. Pinning here means this server's tree and
+    pack are ones this fixture wrote, whatever scope it is later given."""
     import logging
     from types import SimpleNamespace
 
     from werkzeug.serving import make_server
+
+    import moonglade_gallery as _gallery
+    from tests.conftest import clear_sealed_caches, seed_sealed_container
 
     wz_log = logging.getLogger("werkzeug")
     wz_level = wz_log.level
@@ -1464,6 +1475,10 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
     monkeypatch.setattr(core, "_config_path", lambda: config_path)
     monkeypatch.setattr(core, "_cfg", {})
+    # BEFORE create_app() builds a discovery tree, and before anything reads achievement
+    # state: this fixture's own coded tree, and its own sealed pack beside it.
+    monkeypatch.setattr(_gallery, "branding_root", lambda: root / "branding")
+    seed_sealed_container(root / "moonglade.dat")
     # /api/setup/save-key deliberately does NOT go through core._config_path() (see its
     # own docstring) -- it derives its path from core.__file__'s directory instead, the
     # exact mechanism tests/test_setup_wizard.py's own _redirect_config_to() patches.
@@ -1484,6 +1499,9 @@ def fresh_install_server(tmp_path_factory, monkeypatch):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+        # The container caches are process globals -- clear them on the way out, the same
+        # two-sided contract `render_server` and conftest's per-test fixture both keep.
+        clear_sealed_caches()
         wz_log.setLevel(wz_level)
 
 
