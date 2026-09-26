@@ -16601,16 +16601,29 @@ def create_app(out_dir: Path):
         per character. A quote needs the SHAPE, not an upload-kind id."""
         return core.RequestResolver(
             model_version=core.model_version_resolver(gsession),
-            preset=lambda u, name: _load_presets(u).get(name))
+            preset=lambda u, name: _load_presets(u).get(name),
+            gate=core.gate_resolver(gsession),
+            video_duration=_video_duration_lookup)
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
         a generation OUTPUT, and PixAI refuses one as an input on the Edit and Fix paths
-        (the Loom's video routes resolve their own frames -- see loom_generate)."""
+        (the Loom's video routes resolve their own frames -- see loom_generate). The gate
+        and the video-length lookup are the SAME ones the quote uses."""
         return core.RequestResolver(
             model_version=core.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
-            media_id=lambda v: _input_media_id(core, gsession, v))
+            media_id=lambda v: _input_media_id(core, gsession, v),
+            gate=core.gate_resolver(gsession),
+            video_duration=_video_duration_lookup)
+
+    def _video_duration_lookup(media_id):
+        """A reference video's real length in seconds, or None, for
+        referenceVideo.inputVideoDurations (RequestResolver.video_duration). Scaffold
+        (2026-09-26): returns None, so nothing changes yet. The video lane fills it (the
+        local file's measured length first, then the catalog), and it must stay a pure
+        local read -- /api/price runs it on every keystroke."""
+        return None
 
     _presets_lock = threading.Lock()
 
@@ -18450,9 +18463,14 @@ __DESIGN_TOKENS__
                 # the READ_ONLY + free-card choke. Frames are resolved HERE (data-URL
                 # upload / catalog passthrough -- see resolve_img) and handed in already
                 # resolved, so the request carries exactly the ids that go out.
+                # The video-length lookup is the same one /api/price's resolver carries, so
+                # the Loom's submit cannot send a shorter inputVideoDurations than its badge
+                # quoted (2026-09-26).
                 return core.build_request({**p, "images": imgs,
                                            "video_refs": video_ids,
-                                           "audio_refs": audio_ids}, mode="video")
+                                           "audio_refs": audio_ids}, mode="video",
+                                          resolve=core.RequestResolver(
+                                              video_duration=_video_duration_lookup))
 
             req = _request_for(image_ids)
             params = req.parameters      # bound for _log_gen_failure's locals().get()

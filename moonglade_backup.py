@@ -9692,14 +9692,24 @@ class RequestResolver:
     model_version(model_id, client_version_id) -> version id   -- needs a session
     preset(user, name) -> banked Toolbox preset dict or None   -- per-account store
     media_id(value)    -> an id PixAI accepts as an INPUT      -- uploads; SUBMIT only
+    gate(params)       -> (params, adjusted)                   -- the per-model gate,
+                          applied ONCE at build so the quoted, card-matched and
+                          submitted dict is one object; `adjusted` is receipt entries
+                          [{field, asked, used, why}] (see gate_resolver)
+    video_duration(media_id) -> seconds or None                -- a reference video's
+                          real length, for referenceVideo.inputVideoDurations
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
-    per character; a quote needs the SHAPE, not an upload-kind id.
+    per character; a quote needs the SHAPE, not an upload-kind id. `gate` and
+    `video_duration` are supplied IDENTICALLY to a quote and a spend -- they change
+    the shape, so a quote without them would price something the submit never sends.
     """
     model_version: object = None
     preset: object = None
     media_id: object = None
+    gate: object = None
+    video_duration: object = None
 
 
 def model_version_resolver(session):
@@ -9734,6 +9744,21 @@ def model_version_resolver(session):
             return versions[0]["version_id"]
         return vid
     return _resolve
+
+
+def gate_resolver(session):
+    """The build-time gate for RequestResolver.gate: params -> (params, adjusted).
+
+    Scaffold (2026-09-26, SCOPE_2026-09-26_tsubaki3-parity-fixes): an identity gate, so
+    wiring it through the quote and spend resolvers changes nothing yet. The image lane
+    replaces this body with the per-model gate (size grid, feature strips, context images,
+    the MMDIT26B prompt helper), returning the gated dict and one receipt entry per change.
+    """
+    def _gate(params):
+        return params, []
+    return _gate
+
+
 def _gen_args_from_web_payload(p):
     """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
     feeds to _gen_parameters -- so web + CLI build identical params (one source
