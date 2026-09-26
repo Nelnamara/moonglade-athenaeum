@@ -24,6 +24,11 @@
 .cost-badge[data-state="free"] { border-color: var(--emerald, #4fc99a); color: var(--emerald, #4fc99a); }
 .cost-badge[data-state="paid"][data-warn] { border-color: var(--peach, #fab387); color: var(--peach, #fab387); }
 .cost-badge[data-state="error"] { border-color: var(--red, #f38ba8); color: var(--red, #f38ba8); }
+/* Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C5): "Free ∞" as PixAI's own
+   prompt box draws it -- the word in the badge's ink, the mark in the lane's emerald. The
+   bar keeps the free state's emerald border; nothing here is a card, so no card line. */
+.cost-badge[data-lane="unlimited"] { color: var(--text); }
+.cost-badge .mgc-inf { margin-left: .3em; font-weight: 700; color: var(--emerald); }
 
 /* compact: the credits chip (gallery-era spec) — metallic violet pill face. z 1 at rest,
    z 7 while its billing tip shows (top of the 0-7 component band; the tip itself is z 5 as

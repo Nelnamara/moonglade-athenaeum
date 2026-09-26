@@ -64,7 +64,8 @@ import "../styles/cost-badge.css";
      cardLabel  — fallback name for the covering card when the server didn't send one.
      onCost     — called on every state push with the old mg-cost detail
                   {state, settled, cost, free, cards, card_name, card_expires, text, raw}
-                  plus card_short (true only on the paid-because-short case above).
+                  plus card_short (true only on the paid-because-short case above) and
+                  unlimited (true only on a free Unlimited Mode answer, below).
      id / className / style — passed to the root (className is appended after "cost-badge").
    Imperative handle (a host sets data; the badge never goes and gets it):
      setPrice(resp) — feed the PARSED /api/price response. Pass null/undefined when the fetch
@@ -147,11 +148,21 @@ function build(view, props) {
   const warn = (props.warn || "").trim();
   const compact = !!props.compact;
   let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
+  // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C5, §8.7): the server answers a
+  // lane request {cost: 0, free: true, unlimited: true} with no card involved, and every form
+  // reads "Free ∞" in place of the price and the card line -- the ∞ its own span, in emerald.
+  const lane = state === "free" && d.unlimited === true;
   // Ticket accounting from the response: `cards`/`cards_held` = tickets HELD, `cards_needed` =
   // tickets this job COSTS (absent = 1, the one-job-one-ticket case every image is).
   const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
   const needN = cardCount(d.cards_needed);
-  if (state === "free") {
+  if (lane) {
+    main = "Free";
+    title = "Unlimited Mode — this generation spends nothing and uses no card.";
+    val = "Free";
+    lab = "Unlimited Mode";
+    tip = title;
+  } else if (state === "free") {
     const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
     const leftN = (heldN != null) ? fmt(heldN) + " left" : "";
     // Multi-ticket job (a >5s video): say how many of the held tickets it consumes. A 1-ticket
@@ -221,7 +232,7 @@ function build(view, props) {
     ? (sub ? { text: sub.text + " · " + adj, title: sub.title + " · " + adj, days: sub.days }
       : { text: adj, title: adj, days: null })
     : sub;
-  const text = main + (noteLine ? " · " + noteLine.text : "");
+  const text = main + (lane ? " ∞" : "") + (noteLine ? " · " + noteLine.text : "");
   // The stack's second line (DC costSubLine): settled facts first ('<card> card', 'N images',
   // the free card's expiry), the balance last. Read off the same `d` as the main line -- the
   // card name is the server's, the count and balance are the host's own real data. Idle,
@@ -231,7 +242,9 @@ function build(view, props) {
   if (stack) {
     const parts = [];
     const countN = cardCount(props.count);
-    if (state === "free") {
+    if (lane) {
+      // no card to name and no expiry to count down: the lane line is the balance alone
+    } else if (state === "free") {
       const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
       parts.push(/\bcard\b/i.test(card) ? card : card + " card");
       if (countN != null && countN > 1) parts.push(fmt(countN) + " images");
@@ -245,7 +258,7 @@ function build(view, props) {
     if (balanceN != null) parts.push(fmt(balanceN) + " credits");
     line = parts.join(" · ");
   }
-  return { state, warn, compact, stack, short, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
+  return { state, warn, compact, stack, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
 }
 
 function detailOf(m) {
@@ -256,6 +269,7 @@ function detailOf(m) {
     cost: (d.cost != null && isFinite(Number(d.cost))) ? Number(d.cost) : null,
     free: m.state === "free",
     card_short: !!m.short,
+    unlimited: !!m.lane,
     cards: d.cards != null ? d.cards : null,
     card_name: d.card_name != null ? d.card_name : null,
     card_expires: d.card_expires != null ? d.card_expires : null,
@@ -323,6 +337,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
       data-state={m.state}
       data-warn={dataWarn}
       data-short={dataShort}
+      data-lane={m.lane ? "unlimited" : undefined}
       role="status"
       aria-live="polite"
       title={nativeTitle}
@@ -330,7 +345,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
     >
       {showChip ? (
         <>
-          <span className="mgc-val">{m.val}</span>
+          <span className="mgc-val">{m.val}{m.lane ? <span className="mgc-inf">∞</span> : null}</span>
           <span className="mgc-div" />
           <span className="mgc-lab">{m.lab}</span>
           {m.sub ? <span className="mgc-sub">{m.sub.text}</span> : null}
@@ -343,6 +358,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
         <>
           <span className="mgc-main">
             {m.state === "checking" ? <><span className="mgc-pip" />Checking cost…</> : m.main}
+            {m.lane ? <span className="mgc-inf">∞</span> : null}
           </span>
           {m.line ? <span className="mgc-line">{m.line}</span> : null}
           {m.sub && m.short ? <span className="mgc-sub" title={m.sub.title}>{m.sub.text}</span> : null}
@@ -352,6 +368,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
       ) : (
         <>
           {m.main}
+          {m.lane ? <span className="mgc-inf">∞</span> : null}
           {m.noteLine ? <span className="mgc-sub" title={m.noteLine.title}>{m.noteLine.text}</span> : null}
         </>
       )}

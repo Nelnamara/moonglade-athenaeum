@@ -4814,3 +4814,144 @@ def test_the_train_dataset_pool_pages_past_its_first_60(
                 len(srcs), len(set(srcs))))
     finally:
         ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# Tsubaki.3 Unlimited Mode on the desktop dock (SCOPE_2026-09-26_unlimited-mode §5)
+# ---------------------------------------------------------------------------
+# The whole road is real -- the picker's pick, /api/model-version's meta, /api/price's lane
+# check and the badge -- with PixAI faked at core._rest_get, so the entitlement is a stub and
+# nothing leaves the machine. Only the market search is faked above that (its own reader).
+_UNL_T3 = "2024383379556065549"
+
+
+def _fake_unlimited_pixai(monkeypatch, days=9.5):
+    """A Tsubaki.3 the market lists, its version reads, a held entitlement `days` from now, and
+    a list price -- the reads the dock's pick and quote make. Every card-check params it is
+    handed is recorded, so the test can prove the lane never reached one."""
+    import datetime as _dt
+    expires = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=days)).isoformat()
+    features = {"modelType": "MMDIT26B_MODEL", "features": [
+        {"featureName": k, "status": v} for k, v in (
+            ("negativePrompt", "on"), ("contextImages", "on"), ("upscale", "off"),
+            ("enableADetailer", "off"), ("inferenceProfile", "on"))]}
+    size_config = {"ranges": [
+        {"minWidth": 512, "maxWidth": w, "minHeight": 512, "maxHeight": w}
+        for w in (2496, 2200, 1800)]}
+    bodies = {
+        "/generation-model/unl-t3/versions": [
+            {"id": _UNL_T3, "modelType": "MMDIT26B_MODEL", "extra": {}}],
+        "/generation-model/%s/features" % _UNL_T3: features,
+        "/generation-model/%s/size-config" % _UNL_T3: size_config,
+        "/generation-model/%s/inference-profiles" % _UNL_T3: {"profiles": [
+            {"profileName": "pro", "profileFlag": "default"},
+            {"profileName": "ultra", "profileFlag": "membershipOnly"}]},
+        "/generation-model-version/%s/infinite-mode" % _UNL_T3: {
+            "owned": True, "expiresAt": expires, "claimable": False,
+            "claimability": "alreadyClaimed", "visibility": "visible"},
+        "/task-price": {"actualPrice": 5100},
+    }
+
+    def fake_rest_get(session, path, params=None, **k):
+        if path in bodies:
+            return bodies[path]
+        raise core.PixAIError("unexpected GET " + path)
+
+    def fake_search(session, keyword="", category="", sort="", usage="MODEL", limit=24,
+                    after=None, **kw):
+        return {"results": [{"model_id": "unl-t3", "title": "Tsubaki.3", "preview_url": "",
+                             "liked_count": 0, "lora_base_model_type": "",
+                             "description": "", "official": True, "should_blur": False}],
+                "has_more": False, "next_cursor": ""}
+    matched = []
+    monkeypatch.setattr(core, "_rest_get", fake_rest_get)
+    monkeypatch.setattr(core, "model_search_market_gql", fake_search)
+    monkeypatch.setattr(core, "model_search_rest", fake_search)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "match_kaisuuken",
+                        lambda s, params, **k: matched.append(dict(params)) or None)
+    return matched
+
+
+_UNL_CONTROLS_JS = """() => {
+    const slabs = [...document.querySelectorAll('.mgdock-slabs:not(.mgdock-editslabs) .mgdock-slab')];
+    const stops = [...slabs[1].querySelectorAll('.mgdock-stops')];
+    const hp = [...document.querySelectorAll('.mgdock-sw')]
+        .find(l => l.textContent.includes('High priority'));
+    return {
+        modes: [...document.querySelectorAll('.mgdock-modebar')].map(b => b.disabled),
+        sizes: [...stops[0].querySelectorAll('button')].map(b => b.disabled),
+        counts: [...stops[1].querySelectorAll('button')].map(b => b.disabled),
+        highPriority: hp.querySelector('input').disabled,
+    };
+}"""
+
+
+def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
+        logged_in_page, monkeypatch):
+    """Review sheet §6, before the owner's walk: a held Tsubaki.3 Unlimited Mode shows its
+    toggle row under the model card with the days left; switching it on puts the band over the
+    prompt, "Free ∞" on the cost badge (no card checked), Mode fixed on Pro, the count on 1,
+    High priority off and the XL size (2048 × 2048 is over the lane's 1792 × 1792) locked.
+    Turn off, on the band itself, puts every one of those back -- which is also the proof that
+    each assertion above can fail."""
+    matched = _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    if not page.locator(".mgdock-modelrow").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-modelrow", state="visible")
+    page.click(".mgdock-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+
+    row = page.locator(".mgunl-row")
+    row.wait_for(state="visible")
+    assert "Tsubaki.3 Unlimited Mode" in row.inner_text()
+    assert "10 days left" in row.inner_text()
+    assert not page.locator(".mgunl-strip").count(), "the band is up before the lane is on"
+    badge = page.locator(".mgdock-gocol > .cost-badge")
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
+    assert "5,100" in badge.inner_text()
+    off = page.evaluate(_UNL_CONTROLS_JS)
+    assert off == {"modes": [False, True, True, False, False],
+                   "sizes": [False, False, False, False],
+                   "counts": [False, False, False, False], "highPriority": False}, off
+
+    page.click(".mgunl-sw")
+    page.wait_for_selector(".mgunl-strip", state="visible")
+    strip = page.locator(".mgunl-strip").inner_text()
+    assert "Unlimited Mode is on" in strip and "Turn off" in strip
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.lane === 'unlimited'")
+    assert badge.get_attribute("data-state") == "free"
+    assert badge.locator(".mgc-main").inner_text().replace("\n", "").strip() == "Free∞"
+    inf = page.evaluate("""() => {
+        const el = document.querySelector('.mgdock-gocol > .cost-badge .mgc-inf');
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--emerald)';
+        document.body.appendChild(probe);
+        const want = getComputedStyle(probe).color;
+        probe.remove();
+        return {got: getComputedStyle(el).color, want};
+    }""")
+    assert inf["got"] == inf["want"], "the ∞ must be the emerald token: %r" % inf
+    assert not [p for p in matched if p.get("lane")], "a lane request reached the card check"
+    on = page.evaluate(_UNL_CONTROLS_JS)
+    assert on == {"modes": [True, True, True, False, True],
+                  "sizes": [False, False, False, True],
+                  "counts": [False, True, True, True], "highPriority": True}, on
+
+    page.click(".mgunl-off")
+    page.wait_for_selector(".mgunl-strip", state="detached")
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
+    assert badge.get_attribute("data-lane") is None
+    assert page.evaluate(_UNL_CONTROLS_JS) == {
+        "modes": [False, True, True, False, False], "sizes": [False, False, False, False],
+        "counts": [False, False, False, False], "highPriority": False}

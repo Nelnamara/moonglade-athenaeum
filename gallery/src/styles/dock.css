@@ -334,6 +334,9 @@ html.mg-noblur .mgdock-scrim {
   transition: border-color .2s, background .2s, color .2s; }
 .mgdock-stop.on { border-color: var(--accent); background: rgba(182, 146, 230, .16);
   color: var(--text); }
+/* A frame or count Unlimited Mode would refuse while the lane is on: dimmed in place, the
+   mode bars' own .35 (SCOPE_2026-09-26_unlimited-mode C3). */
+.mgdock-stop:disabled, .mgdock-ratio:disabled { opacity: .35; cursor: not-allowed; }
 
 .mgdock-customrow { display: flex; align-items: center; gap: 6px;
   font-size: 10.5px; color: var(--subtext); }
@@ -389,6 +392,8 @@ html.mg-noblur .mgdock-scrim {
   background: #180f2c; }
 .mgdock-swlab { font-size: 10.5px; color: var(--subtext); }
 .mgdock-sw input:checked ~ .mgdock-swlab { color: var(--text); }
+/* High priority while Unlimited Mode is on: off and locked (C3) */
+.mgdock-sw.off { opacity: .4; cursor: not-allowed; }
 
 /* amber note bar (DC 1545-1547) -- for adjustment notes only; the no-model gate
    is NOT one of them any more (handoff 2026-08-16 §2: it moved inline beside the
