@@ -293,6 +293,66 @@ test count in this or any live doc** — `tests/test_docs_dont_hardcode_counts.p
 suite if you do; it was wrong in every one of six-plus files it was ever stated in, most
 recently within hours of a "correction." All tests must pass before merging to master.
 
+- **`python tools/ci_local.py` is THE pre-merge command.** It runs CI's commands — pytest
+  exactly as CI invokes it, then the loom build, the stale-`loom/dist` check (via
+  `git status --porcelain`, the same comparison CI makes, so a new untracked or
+  already-staged file in `dist/` fails here too) and the Loom's `node --test` suite — on
+  *this* machine's Python, Node, OS and installed packages, and exits non-zero if any of
+  them fails. **It does not reproduce CI's environment.** Green here means those commands
+  passed here and the skip-prone gates really ran; only CI's own run proves CI. `pytest`
+  alone is not the pre-merge check: a
+  front-end move goes red in the node job while pytest stays green, which is how master
+  went red twice in two days (2026-09-08/09).
+  It **refuses to start** until three things hold — `gallery/node_modules` and
+  `loom/node_modules` are present, the harness's browser engine actually *launches*
+  (chromium by default, or whatever `MG_HARNESS_BROWSER` names, which is the engine the
+  harness itself will launch), and every package on CI's `pip install` line imports here
+  (read off the workflow file, not copied into the script, so it follows CI; a token on that
+  line that is not a plain distribution name refuses the run and is printed verbatim rather
+  than quietly dropped) — because
+  the three checks that need them (both committed-bundle freshness tests and the whole render
+  harness) are written to skip themselves, so a run without them prints green while saying
+  nothing about the bundle it never rebuilt or the layout it never measured. It names the
+  command for each gap and installs nothing. `--dry-run` lists the jobs and runs those file
+  and package presence checks only: it launches no browser and executes no job.
+  **And it checks afterwards that those three
+  really ran**, off the run's own junit report, because a preflight can only answer "could
+  this check run": the harness skips on a failed browser *launch*, not on a missing path, and
+  each bundle test also skips on its own `MOONGLADE_SKIP_*_BUILD` env var or a half-missing
+  `dist/`. A gate that skipped fails the run and is named. Be exact about which of the three
+  CI itself runs: its pytest job installs node, `npm ci`s `gallery/` and installs chromium,
+  so the gallery-bundle test and the render harness really run there; it never installs
+  `loom/node_modules`, so the **loom-bundle test skips in CI every time** and CI catches a
+  stale `loom/dist` in its other job instead — the `git status --porcelain` step this script
+  mirrors. A green that skipped the gate you needed is worse than a red.
+- **A test that fails locally is traced to its cause.** Never labelled flaky, never blamed on
+  "timing" or "this machine" without the trace that proves it, and never skipped, gated or
+  `xfail`ed unless the commit message names the cause. The browser-driven render harness
+  stays in the local run for the same reason — without it every guard in that file is
+  decoration, and the one local failure it ever had was a real precondition bug in a test.
+- **Achievement and celebration work runs from an unearned baseline.** Before building or
+  verifying a celebration, put the feat under test back to genuinely unearned on the dev
+  library — flag cleared, `earned_at` un-pinned, `seen` cleared — because a re-earn never
+  fires and a "nothing happened" from an already-earned feat looks exactly like a broken
+  build. `earned_at` is the one that catches people: since pin-once it is authoritative, so
+  clearing the flag alone un-earns nothing.
+- **No test reads or writes the checkout's real coded tree or the pack beside it.** A fixture
+  that needs branding art or a sealed roster pins its own `branding_root()` and seeds its
+  own container from the private donor (`tests/conftest.py`'s `seed_sealed_container`) —
+  including module-scoped fixtures, which are set up *before* the per-test autouse isolation
+  and so used to read whatever `moonglade.dat` happened to sit beside the checkout: a full
+  roster on a dev box, an empty one on CI, different fixture state per machine (2026-09-10).
+  Two things hold that: `tests/conftest.py` pins `branding_root()` for the whole SESSION, so
+  a fixture that forgets lands in a tmp dir rather than the owner's tree and the real pack;
+  and its session-scoped guard snapshots that tree (files *and* folders) at session start and
+  fails the run if anything in it was added, removed or modified — a run that creates it
+  counts. The pin is the one that matters, because a read leaves nothing for a guard to see:
+  on a checkout where that tree already exists, an un-pinned `create_app()` writes
+  nothing new and still reads the real pack. That the pin holds is itself asserted, in
+  `tests/test_fixture_hermeticity.py` — deliberately NOT inside the render harness, which
+  self-skips without playwright and is excludable with `-m "not render"`: a suite-wide
+  invariant whose only assertion can be gated away is not an invariant.
+
 ---
 
 ## Current state

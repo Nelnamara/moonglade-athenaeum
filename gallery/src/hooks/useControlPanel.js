@@ -714,14 +714,11 @@ export default function useControlPanel() {
   const activeSkin = achievements?.skin || "moonglade";
   const pickSkin = (id) => applySkin(id, achievements, setAchievements);
 
-  // Control Panel.dc.html's own `underTheHood` editor prop (Branding tab
-  // visibility) maps to a REAL, already-shipped hidden feat -- 'under-the-hood'
-  // (moonglade_gallery.py's ACHIEVEMENTS, metric branding_custom_file) -- not a
-  // UI-only toggle. Owner call, 2026-08-05: gate for real, since the DC itself
-  // never had this code/achievement in context when it defaulted the prop to
-  // always-visible. Achievements masks an unearned hidden feat's id to
-  // "hidden-feat-N" (/api/achievements' own docstring), so this correctly reads
-  // false until it's real -- no separate "is it hidden" check needed.
+  // The Branding tab is gated on an EARNED achievement, not a UI-only toggle
+  // (owner call, 2026-08-05: gate for real -- the Design Handoff's editor prop
+  // defaulted the tab to always-visible because it never had the gate in
+  // context). /api/achievements masks the id of anything not yet earned, so
+  // this reads false until it is real -- no separate visibility check needed.
   const brandingUnlocked = (achievements?.achievements || []).some(
     (a) => a.id === "under-the-hood" && a.earned
   );

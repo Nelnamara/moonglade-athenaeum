@@ -16,6 +16,19 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-09-26 — House Rules
+
+- **An achievement celebration rebuilt to its committed Design Handoff.** The build had drifted from its design page — a missing glow layer behind the mascot, an inverted stacking order, the toast in the wrong place and the wrong material, a different arrival and teardown, no reduced-motion rule. It goes back to the page point for point; its audio is unchanged. (2026-09-11)
+- **A celebration of its own plays alone.** When a feat has its own celebration, the standard achievement toast waits for it to finish instead of playing over it, and the generic star-rain and confetti it replaces never fire under it — whichever of the two arrives first. A Folio replay clicked during one waits for it too, instead of stacking a second toast. (2026-09-11)
+- **The achievement parade keeps every earn.** A second wave of earns arriving while the previous parade was bowing out could silently drop the earns still queued behind it; they play now. Escape keeps closing the Folio while a parade bows out. (2026-09-11)
+- **Asset-folder rules.** Outside the few folders the app has always managed, it no longer changes anything on disk — nothing deleted, renamed, re-encoded, moved or registered. The banner images it renders for itself moved out of that tree into the app cache, beside the badge thumbnails, so each has exactly one home; an existing render is moved there at startup, never deleted, and a render is refreshed only when its own slot's pick changes. (2026-09-11)
+
+### Under the hood
+- The render harness is hermetic: every module-scoped server fixture pins its own asset root, seeds its own sealed container from the private donor, and pins the clock the achievement metrics read, so the suite behaves identically with or without a real pack beside the checkout and whatever the hour it runs in. A session-wide guard fails the run if any test changed the real asset tree, and `tests/test_fixture_hermeticity.py` asserts the pins outside the browser-gated module. (2026-09-11)
+- `tools/ci_local.py` is the committed pre-merge command: it runs CI's commands on this machine, refuses to start on a machine that would skip the bundle or harness gates, and reads the run's junit report to fail if a skip-prone gate did not actually run. (2026-09-11)
+- The two public-doc guards now cover `ROADMAP.md`. (2026-09-11)
+- The Moonglade MCP server gets a PixAI session of its own, its first account tool (tag suggestions) and a duplicate finder. (2026-09-26)
+
 ## [3.11.0] - 2026-09-26 — Camellia
 
 - **Tsubaki.3 and Tsubaki.3 Flash get what they actually take.** Sizes snap to the model's own grid and range (16 px on DiT models; 512–2496 on Tsubaki.3 and Flash), so 768×432 goes out as 912×512 and the size line shows what is sent. Face Fix and Quality Tag read disabled on models that don't take them and keep their state across a model switch. Quality Tag sends the picked version's own tag instead of a fixed "Masterpiece". A Flash negative prompt, and Enhance Details or Face Fix on Tsubaki and community DiT models, are no longer sent behind a greyed-out control. The prompt helper goes out as Tsubaki.3's creativity level.

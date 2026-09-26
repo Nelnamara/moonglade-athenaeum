@@ -2,7 +2,7 @@
 
 The HARD RULE (moonglade-internal/DECISIONS.md, 2026-08-09): easter eggs and the
 features they unlock get ZERO mention in any public artifact -- not CHANGELOG.md,
-docs/, wiki/, README. Forbidden: the hidden trigger mechanics, real achievement
+ROADMAP.md, docs/, wiki/, README. Forbidden: the hidden trigger mechanics, real achievement
 progress numbers, the roster count, specific achievement/feat names, and how-to-earn
 thresholds. The .dat seals the roster so discovery takes effort; a doc that lists it
 is a no-effort shortcut around the seal (owner, 2026-09-08, after two live leaks --
@@ -21,8 +21,14 @@ import pytest
 from tests.conftest import _SEALED_DONOR
 
 ROOT = Path(__file__).resolve().parent.parent
+# ROADMAP.md is in the set because it is the DEFAULT home for planned work (CLAUDE.md's
+# split rule), so it is where a spoiler is most likely to be written next -- an item about
+# an easter-egg-gated surface belongs in the private companion roadmap, and anything said
+# here about the area a hidden feat gates has to describe nothing (EASTER_EGGS.md's ceiling).
+# It was outside the guard until 2026-09-10, which made "the public roadmap passes the
+# spoiler test" a claim about a file the test never opened.
 PUBLIC_DOCS = (
-    [ROOT / "CHANGELOG.md", ROOT / "README.md"]
+    [ROOT / "CHANGELOG.md", ROOT / "README.md", ROOT / "ROADMAP.md"]
     + sorted((ROOT / "docs").glob("*.md"))
     + sorted((ROOT / "wiki").glob("*.md"))
 )

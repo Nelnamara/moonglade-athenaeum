@@ -17,10 +17,23 @@ import moonglade_gallery as g
 
 from tests.conftest import login_client
 
-# A real (tiny) PNG so PIL-facing paths get decodable bytes.
+# PNG-SHAPED bytes: a real signature and header, but a broken IDAT CRC, so
+# Pillow refuses to decode it. Fine for every test here, which is about bytes
+# going in and the same bytes coming out -- and NOT fine for anything that has
+# to look like an image to Pillow (the coded tree's read-only scan decodes its
+# candidates). Use _real_png() for those.
 PNG_1PX = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000d49444154789c626001000000ffff03000006000557bfabd40000000049454e44ae426082")
+
+
+def _real_png(color=(200, 30, 30)):
+    """Bytes Pillow genuinely decodes."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color).save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _build(tmp_path, assets=None, payloads=None):
@@ -179,39 +192,59 @@ def test_write_banner_flat_renders_a_container_sourced_active_asset(tmp_path):
         g._role_rel("banner_main", "deadbeef.png"): buf.getvalue(),
     })
     assert g._write_banner_flat(tmp_path, "banner_main") is True
-    assert (g.branding_root() / "banner.png").is_file(), (
-        "the rendered flat must be a REAL loose file (derived per-install state)")
+    # The render is derived per-install state, so it lives in the app cache
+    # outside the coded tree (2026-09-10), never at the coded root.
+    flat = g.banner_cache_dir(tmp_path) / "banner.png"
+    assert flat.is_file(), "a container-sourced active asset must still render"
+    assert not (g.branding_root() / "banner.png").exists()
+    # ...and it is stamped with the pick it came from, so the startup ensure
+    # pass can tell "still current" from "the pick moved".
+    rec = g._read_banner_record(tmp_path, "banner.png")
+    assert rec["kind"] == "slot" and rec["asset_id"] == "deadbeef"
 
 
 # ---------------------------------------------------------------------------
 # The discovery mechanic must not false-fire off shipped defaults
 # ---------------------------------------------------------------------------
+def _flag(tmp_path):
+    return (g.load_telemetry(tmp_path).get("flags") or {}).get("branding_custom_file")
+
+
 def test_container_alone_never_earns_the_discovery_flag(tmp_path):
-    """A fresh install with ONLY the container (zero loose marks) must not set
+    """A fresh install with ONLY the container (zero loose art) must not set
     branding_custom_file -- the exact regression adversarial review caught in
-    the previous attempt, now guarded from day one."""
+    the previous attempt, now guarded from day one.
+
+    Swept TWICE on purpose. The first sweep on any install records its baseline
+    of what was already on disk and reports nothing by construction; the second
+    is the one that could actually fire, and a container-aware check would make
+    it fire here with zero user action."""
     _build(tmp_path)
     g.set_telemetry_out(tmp_path)
     g.sweep_telemetry(tmp_path)
-    t = g.load_telemetry(tmp_path)
-    assert not (t.get("flags") or {}).get("branding_custom_file"), (
+    g.sweep_telemetry(tmp_path)
+    assert not _flag(tmp_path), (
         "the sealed container alone earned the discovery flag with zero user action")
 
 
 def test_a_real_loose_mark_still_earns_the_discovery_flag(tmp_path):
-    """...and the guard must not overcorrect: an actual on-disk mark (manifest
-    entry + loose png) still fires the flag exactly as before."""
+    """...and the guard must not overcorrect: art that lands in the tree AFTER
+    this install's baseline was taken still fires the flag, container or no
+    container."""
     _build(tmp_path)
+    g.set_telemetry_out(tmp_path)
+    g.sweep_telemetry(tmp_path)               # baseline: this tree, as shipped
+    assert not _flag(tmp_path)
+
     mdir = g._role_dir("marks")
     mdir.mkdir(parents=True, exist_ok=True)
     (mdir / "marks.json").write_text(json.dumps(
         {"marks": [{"id": "dropped", "label": "dropped", "kind": "tile"}]}))
-    (mdir / "dropped.png").write_bytes(PNG_1PX)
-    g.set_telemetry_out(tmp_path)
+    (mdir / "dropped.png").write_bytes(_real_png())
+
     g.sweep_telemetry(tmp_path)
-    t = g.load_telemetry(tmp_path)
-    assert (t.get("flags") or {}).get("branding_custom_file"), (
-        "a genuine loose mark no longer earns the flag -- the guard overcorrected")
+    assert _flag(tmp_path), (
+        "a genuine drop no longer earns the flag -- the guard overcorrected")
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +261,21 @@ def test_branding_route_serves_container_assets(tmp_path):
 
 
 def test_branding_route_loose_still_wins_over_container(tmp_path):
+    """The loose-then-container contract, at the serve boundary: a real file in
+    the coded tree beats the pack's copy of the same coded rel.
+
+    Asserted on a TREE asset (a mark), not on banner.png. The three banner flats
+    stopped being tree assets on 2026-09-10 -- they are per-install RENDERS and
+    the route reads them from banner_cache_dir() only, never from the coded root
+    -- so a flat is the one rel that cannot demonstrate this rule. The flat's own
+    order is pinned in tests/test_branding_tree_rules.py."""
     _build(tmp_path)
-    loose = g.branding_root() / "banner.png"
+    loose = g.branding_root() / g._role_rel("marks", "mark_4.png")
     loose.parent.mkdir(parents=True, exist_ok=True)
-    loose.write_bytes(b"LOOSE BANNER")
+    loose.write_bytes(b"LOOSE MARK")
     client = login_client(tmp_path)
-    r = client.get("/branding/banner.png")
-    assert r.status_code == 200 and r.data == b"LOOSE BANNER"
+    r = client.get("/branding/marks/mark_4.png")
+    assert r.status_code == 200 and r.data == b"LOOSE MARK"
 
 
 def test_branding_route_traversal_still_rejected(tmp_path):
