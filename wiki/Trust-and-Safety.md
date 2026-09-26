@@ -26,7 +26,9 @@ One page, plain language, for anyone deciding whether to hand this tool their Pi
   explicitly. A **single-image** delete asks PixAI what it still has of that generation
   first and tells you which of two things the click will do — remove just this picture, or,
   when it is the last one that generation still has on PixAI, remove the whole generation
-  record. It never sends a delete on a generation it could not read.
+  record. It never sends a delete on a generation it could not read. Whenever a delete
+  removes a whole generation record, the dialog also says if that generation is published on
+  PixAI: its own description of that delete says the published artwork goes with it.
 - **Claim your own daily rewards** (credits/stamina) — a routine entitlement, not something
   that costs you anything, but it's still a real account change, so it's covered by the same
   guarantees below.

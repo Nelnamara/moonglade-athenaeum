@@ -238,7 +238,11 @@ def test_build_reference_video_matches_real_submit():
     assert rv["referenceVideoMediaIds"] == [] and rv["referenceAudioMediaIds"] == []
     # New-gen platform: top-level `channel` string alongside legacy `isPrivate` (both sent).
     assert p["channel"] == "normal" and p["isPrivate"] is False and p["enablePreview"] is True
-    assert p["modelId"] == core.REFVIDEO_MODEL_ID
+    # Rewritten ON PURPOSE (SCOPE_2026-09-26 V2, "never another model's id"): the builder's
+    # modelId is now the model's OWN id (video_model_id), no longer a v4.0.1 default applied
+    # to every engine -- which is still exactly REFVIDEO_MODEL_ID for the v4.0.1 submit this
+    # test pins, so the default engine's wire is byte-identical.
+    assert p["modelId"] == core.video_model_id("v4.0.1") == core.REFVIDEO_MODEL_ID
     assert "referenceVideo" in p and "i2vPro" not in p   # distinct from i2v
 
 
@@ -743,7 +747,9 @@ def test_15s_snaps_down_for_models_that_cannot_render_it():
 def test_15s_is_allowed_for_the_v4_family():
     for model in core.VIDEO_15S_MODELS:
         assert core._snap_video_duration(15, model) == 15, model
-    assert set(core.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1"}
+    # Widened ON PURPOSE (SCOPE_2026-09-26 V3): both Tsubaki engines render 15 s -- the
+    # owner's two tbkv tasks are 15 s on the wire, and their panel offers 5/10/15.
+    assert set(core.VIDEO_15S_MODELS) == {"v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
 
 def test_snap_without_a_model_keeps_the_original_behaviour():
@@ -852,8 +858,12 @@ def test_audio_fields_only_go_to_models_that_take_them():
     error sent an entire evening's debugging after a moderation problem that did not exist.
 
     Pinned as an exact set because narrowing it by guesswork already happened once -- an
-    earlier cut assumed "v4.0 family only" and v3.2 really does carry audio."""
-    assert set(core.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1"}
+    earlier cut assumed "v4.0 family only" and v3.2 really does carry audio.
+
+    Widened ON PURPOSE (SCOPE_2026-09-26 V3): measured, not guessed -- both of the owner's
+    tbkv tasks carry generateAudio true + audioLanguage english, and the tbkv panel has an
+    audio language."""
+    assert set(core.VIDEO_AUDIO_MODELS) == {"v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1"}
 
     for model in core.VIDEO_AUDIO_MODELS:
         i2v = core.build_video_parameters("x", "1", model=model, generate_audio=True,

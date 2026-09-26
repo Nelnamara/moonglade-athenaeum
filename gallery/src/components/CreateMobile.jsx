@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
-  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered,
+  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered, qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
-import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
+import { EDIT_CAPS, editAspectLabel, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
@@ -553,8 +553,14 @@ export default function CreateMobile({
               </button>
               {s.ref && (
                 <>
+                  {/* SCOPE_2026-09-26 G3, as the desktop dock: a context-image reference
+                      carries no strength, so the slider reads disabled. */}
                   <input type="range" min="0.1" max="0.9" step="0.05" value={s.refStrength}
                     className="cm-range"
+                    disabled={refIsContext(s)}
+                    title={refIsContext(s)
+                      ? "This model uses the reference as a context image — strength doesn't apply"
+                      : "Reference strength"}
                     onChange={(e) => set({ refStrength: e.target.value })} />
                   <b className="cm-refval">{Number(s.refStrength).toFixed(2)}</b>
                   <button type="button" className="cm-chipx cm-refx" title="Clear reference"
@@ -747,12 +753,17 @@ function ImageAdvanced({ s, set, setLora, m }) {
 
       <div className="cm-lbl">Boosters</div>
       <div className="cm-chiprow">
+        {/* Owner ruling 1 (SCOPE_2026-09-26): disabled on a model that does not take them;
+            the chip's on/off state is kept (never disarmed) and buildPayload withholds it. */}
         <button type="button" className={"glm-metal cm-chip" + (s.boosters.face ? " on" : "")}
+          disabled={m && m.compat_face === false}
+          title={m && m.compat_face === false ? "This model doesn't take Face Fix" : "Face Fix"}
           onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
           Face Fix
         </button>
         <button type="button" className={"glm-metal cm-chip" + (s.boosters.quality ? " on" : "")}
-          title="Prefixes PixAI's Masterpiece quality tag"
+          disabled={m && m.compat_quality === false}
+          title={qualityTagTitle(m)}
           onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
           Quality Tag
         </button>
@@ -782,7 +793,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
       <div className="cm-subhead">Negative prompt</div>
       <textarea className="cm-ta" rows={2} value={s.negative}
         placeholder="lowres, bad hands, watermark"
-        disabled={m && m.compat_neg === false}
+        disabled={(m && m.compat_neg === false) || refIsContext(s)}
         onChange={(e) => set({ negative: e.target.value })} />
     </>
   );
@@ -823,7 +834,7 @@ function EditAdvanced({ edit }) {
       <div className="cm-subhead">Aspect</div>
       <select className="cm-select" value={edit.s.aspect}
         onChange={(e) => edit.set({ aspect: e.target.value })}>
-        {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
+        {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
       </select>
     </>
   );

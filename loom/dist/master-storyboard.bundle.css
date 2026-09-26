@@ -1159,6 +1159,10 @@ button.mgcp-chip .mgico {
   border-color: var(--accent-soft,#4fc99a);
   color: var(--text,#d6d2e2);
 }
+.gen-drawer .mgd-neg:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
 .gen-drawer .mgd-chip {
   display: inline-flex;
   align-items: center;
@@ -1582,6 +1586,13 @@ button.mgcp-chip .mgico {
 }
 .gen-drawer .mgd-slot.filled {
   border-style: solid;
+}
+.gen-drawer .mgd-slot.off {
+  cursor: not-allowed;
+  opacity: .35;
+}
+.gen-drawer .mgd-slot.off.filled {
+  cursor: pointer;
 }
 .gen-drawer .mgd-slot.filled.audio {
   background:

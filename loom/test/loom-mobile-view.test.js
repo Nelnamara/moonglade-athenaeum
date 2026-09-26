@@ -839,7 +839,9 @@ describe("Image/Edit/Reference tabs (fourth increment, 2026-08-03) -- LoomV2's o
       "High priority &middot; Turbo (faster)", "Prompt helper"]) {
       assert.ok(loomMobileSrc.includes(label), `expected the Image tab to render "${label}"`);
     }
-    assert.match(loomMobileSrc, /resolveGenDims\(imgAdv\)/);
+    // CHANGED ON PURPOSE (SCOPE_2026-09-26 G1): the readout passes the picked model's size
+    // grid, the same step buildImgGenBody sends (16 on every DiT family, else 8).
+    assert.match(loomMobileSrc, /resolveGenDims\(imgAdv, genStepFor\(imgModel && imgModel\.model_type\)\)/);
   });
 });
 

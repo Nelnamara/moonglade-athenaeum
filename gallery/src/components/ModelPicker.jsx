@@ -67,10 +67,21 @@ const LORA_CATS = [
   ["realistic", "Realistic"], ["pose", "Pose"], ["clothing", "Clothing"],
   ["background", "Background"], ["detail", "Detail"], ["other", "Other"],
 ];
+/* [chip key, label, tokens sent]. The key is the chip's own identity (and what the multi-select
+   stores); the third column, when present, is the set of model_type tokens that chip SENDS.
+   "Community DiT" sends a PAIR since 2026-09-26 (SCOPE_2026-09-26 G8): USER_DIT26A_MODEL is the
+   2026-07-26 live measurement, USER_DIT26B_MODEL (a user-trained DiT.3) was read from PixAI's
+   BUNDLE -- ModelFilter.helper groups them as `userdit26` and its one Community DiT option sends
+   both. No new chip, no new label. Mirrors moonglade_backup.MODEL_TYPE_FILTERS. */
 const BASE_TYPES = [
   ["", "All"], ["MMDIT26B_MODEL", "DiT.3"], ["MMDIT26A_MODEL", "DiT.2"], ["DIT7_MODEL", "DiT.1"],
-  ["USER_DIT26A_MODEL", "Community DiT"], ["SDXL_MODEL", "SDXL"], ["SD_V1_MODEL", "SD 1.5"],
+  ["USER_DIT26A_MODEL", "Community DiT", ["USER_DIT26A_MODEL", "USER_DIT26B_MODEL"]],
+  ["SDXL_MODEL", "SDXL"], ["SD_V1_MODEL", "SD 1.5"],
 ];
+const typeTokens = (key) => {
+  const row = BASE_TYPES.find((r) => r[0] === key);
+  return (row && row[2]) || [key];
+};
 const SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most Used"], ["newest", "Latest"]];
 
 export default function ModelPicker({
@@ -119,7 +130,10 @@ export default function ModelPicker({
         u += "&sort=" + encodeURIComponent(sort) + "&category=" + encodeURIComponent(category) +
              "&posted=" + encodeURIComponent(posted) + "&source=" + encodeURIComponent(source) +
              "&license=" + encodeURIComponent(license);
-        modelTypes.forEach((t) => { u += "&model_type=" + encodeURIComponent(t); });
+        // A chip may stand for more than one token (Community DiT -> both user-DiT enums).
+        modelTypes.forEach((t) => typeTokens(t).forEach((tok) => {
+          u += "&model_type=" + encodeURIComponent(tok);
+        }));
       }
     }
     if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);

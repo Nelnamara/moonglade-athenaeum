@@ -210,6 +210,19 @@ def _clear_profile_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_gate_caches():
+    """The SCOPE_2026-09-26 image gate caches the version-keyed /features and /size-config
+    reads exactly as _model_profiles caches /inference-profiles (keyed by version_id, with a
+    TTL). Same isolation: one test's model rules must never answer another test's gate.
+    Both reads go through _rest_get, which _no_live_card_network already blocks."""
+    core._features_cache.clear()
+    core._size_config_cache.clear()
+    yield
+    core._features_cache.clear()
+    core._size_config_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->
@@ -227,6 +240,23 @@ def _no_live_card_network(monkeypatch):
     # live resolve_user_id lookup. Setting the global -- not stubbing the function -- keeps
     # resolve_user_id itself testable in test_auth.
     monkeypatch.setattr(core, "USER_ID", "0", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_config(monkeypatch):
+    """PixAI's public dynamic config (GET <api>/config/<key> -- trainLoraModels,
+    trainLoraStatus) sits OUTSIDE the /v2 routes `_no_live_card_network` blocks, so it gets
+    its own block (SCOPE_2026-09-26 E7): core._config_get is the ONE reader of that road and
+    raises here, so every caller falls back exactly as it does when PixAI is unreachable
+    (training_config -> the snapshot, training_pause -> open). A test that wants an answer
+    patches core._config_get itself. The per-key cache is cleared around every test so one
+    test's config cannot answer another's."""
+    def _blocked(*a, **k):
+        raise core.PixAIError("live /config blocked in tests")
+    monkeypatch.setattr(core, "_config_get", _blocked)
+    core._config_cache.clear()
+    yield
+    core._config_cache.clear()
 
 
 # Captured at import, before `_no_live_card_network` (below) swaps them for a raising

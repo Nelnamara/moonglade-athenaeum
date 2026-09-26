@@ -16,23 +16,37 @@ import { PRICE_KEY_SKIP } from "./priceProbeCore.js";
    it, keeps the fact in one home. */
 export const EDIT_PRICE_KEY_SKIP = PRICE_KEY_SKIP.concat(["instruction"]);
 
+/* Re-read 2026-09-26 (SCOPE_2026-09-26 E1/E2), in step with core.EDIT_MODELS -- a parity test
+   (tests/test_edit_upload.py) reads both tables and fails if their aspects or defaults differ:
+     - Edit Pro's published default is 3:5, and it offers 3:5 and 5:3.
+     - Reference Pro publishes no default aspect, so PixAI shows an "Auto" choice and sends no
+       aspect ratio at all. "auto" is that choice as a VALUE: the server omits aspectRatio for
+       it and PixAI picks the frame. It is not a promise to keep the source's frame, and no
+       label here may say it is. */
+export const EDIT_ASPECT_AUTO = "auto";
 export const EDIT_CAPS = {
   "edit-pro": {
     label: "Edit Pro", max_refs: 4,
     resolutions: ["1K", "2K"],
     qualities: ["low", "medium", "high"],
-    aspects: ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
-    def: { resolution: "1K", quality: "medium", aspect: "3:4" },
+    aspects: ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
+    def: { resolution: "1K", quality: "medium", aspect: "3:5" },
   },
   "reference-pro": {
     label: "Reference Pro", max_refs: 10,
     resolutions: ["2K", "4K"],
     qualities: [],
-    aspects: ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
-    def: { resolution: "2K", quality: "", aspect: "3:4" },
+    aspects: [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
+    def: { resolution: "2K", quality: "", aspect: EDIT_ASPECT_AUTO },
   },
 };
 export const DEFAULT_EDIT_MODEL = "edit-pro";
+
+/* The one place an aspect VALUE becomes the words on screen -- EditTab's select and its dock
+   summary, and CreateMobile's Edit select, all read it, so "auto" never shows raw beside
+   "16:9". Ratios read as themselves. */
+const EDIT_ASPECT_LABELS = { [EDIT_ASPECT_AUTO]: "Auto" };
+export const editAspectLabel = (a) => EDIT_ASPECT_LABELS[a] || a;
 
 // Fix: face/hand box colors and the classic's minimum drag size (DISPLAY px).
 export const FIX_COLORS = { face: "#b692e6", hand: "#4fc99a" };
@@ -143,8 +157,11 @@ export function switchEditModel(s, next) {
     resolution !== s.resolution
       ? caps.label + " offers " + caps.resolutions.join("/") + " only — resolution corrected to " + resolution + "."
       : "",
+    // Leaving Auto for a model with a published default takes that default (PixAI's own
+    // rule); the note names both through the label map, never the raw "auto".
     aspect !== s.aspect
-      ? caps.label + " has no " + s.aspect + " — aspect corrected to " + aspect + "."
+      ? caps.label + " has no " + editAspectLabel(s.aspect) + " — aspect corrected to " +
+        editAspectLabel(aspect) + "."
       : "",
   ].filter(Boolean).join(" ");
   return {

@@ -456,17 +456,38 @@ export function snap8(n) {
   return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
 }
 
+// snap8 on any grid (SCOPE_2026-09-26 G1): round to the nearest multiple of `step` and clamp to
+// [64, 4096] aligned to that step. snapStep(n, 8) === snap8(n) for every n. The server's gate
+// also enforces the model's /size-config range (Tsubaki.3: 512-2496) and says so in the
+// receipt the badge shows; the Loom snaps to the step only.
+export function snapStep(n, step) {
+  const st = Number(step) > 0 ? Number(step) : 8;
+  const lo = Math.ceil(64 / st) * st, hi = Math.floor(4096 / st) * st;
+  return Math.max(lo, Math.min(hi, Math.round((Number(n) || 0) / st) * st));
+}
+
+// Every DiT family takes sizes on a 16 px grid, everything else on 8 -- PixAI's own model-*.js
+// `Se(e){return e&&W(e)?16:8}`, the same six the server's gate lists (moonglade_backup
+// DIT_SIZE_STEP_TYPES). Unknown -> 8, today's grid.
+const DIT_STEP16 = new Set(["DIT7_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL", "MMDIT26B_MODEL",
+  "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"]);
+export function genStepFor(modelType) {
+  return DIT_STEP16.has(String(modelType || "").toUpperCase()) ? 16 : 8;
+}
+
 // Ported from moonglade_gallery.py's Gen.dims(), minus the DOM reads: custom W×H (both > 0)
 // wins; otherwise an aspect-ratio pair scaled so the long edge equals `size`. Same shape,
-// now unit-tested here instead of only ever exercised by hand in a browser.
-export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
+// now unit-tested here instead of only ever exercised by hand in a browser. `step` (default 8,
+// today's grid) is the picked model's size grid -- genStepFor(imgModel.model_type).
+export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}, step = 8) {
+  const snap = (n) => snapStep(n, step);
   const cw = Number(customW) || 0, ch = Number(customH) || 0;
-  if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
+  if (cw > 0 && ch > 0) return { w: snap(cw), h: snap(ch), custom: true };
   const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
   const sz = Number(size) || 1024;
   const w = rw >= rh ? sz : (sz * rw / rh);
   const h = rw >= rh ? (sz * rh / rw) : sz;
-  return { w: snap8(w), h: snap8(h), custom: false };
+  return { w: snap(w), h: snap(h), custom: false };
 }
 
 // The Image tab's full /api/generate (and /api/price preview) body -- ONE shape shared by
@@ -478,7 +499,8 @@ export function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}
 export function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
   const a = imgAdv || {};
   const dims = resolveGenDims({ aspectW: a.aspectW, aspectH: a.aspectH, size: a.size,
-                                customW: a.customW, customH: a.customH });
+                                customW: a.customW, customH: a.customH },
+                              genStepFor(imgModel && imgModel.model_type));
   return {
     model_id: (imgModel && imgModel.model_id) || "",
     // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one

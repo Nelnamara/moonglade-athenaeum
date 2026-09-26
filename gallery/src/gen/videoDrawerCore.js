@@ -5,7 +5,9 @@
    component consumes all of these. */
 
 // Full site roster, in PixAI's real model-picker order -- newest first, V2.7 last
-// (private/VIDEO_MODELS.md, owner screenshots 2026-07-18). All seven are selectable.
+// (private/VIDEO_MODELS.md, owner screenshots 2026-07-18; the two Tsubaki engines slot in after
+// the V4.0 pair exactly where tools.json i2vPro.models lists them, 2026-09-26). All nine are
+// selectable; the grid grows to 9 chips.
 // This REAL roster is the data source (drift 22): the DC's demo VIDEO_MODELS (rates, demo caps)
 // is the visual spec for the ENGINE card / chips / palette only, never swapped in here. The
 // '~2.5× cost' chip on V4.0 Preview is not in the DC's caps (fidelity checklist, EXTRA) -- kept:
@@ -13,6 +15,10 @@
 export const MODELS = [
   { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5× cost"] },
   { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+  // The version titles PixAI returns for these two ids (PROBE_2026-09-26 V01). tbkv1.0 prices
+  // at 2,380/s on the wire against 4,200+/s for tbkv1.0.1 -- hence its 'cheap' chip.
+  { value: "tbkv1.0.1", label: "Tsubaki Video", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+  { value: "tbkv1.0", label: "Tsubaki Video Flash", caps: ["multi-ref", "audio", "15s", "end-frame", "cheap"] },
   { value: "v3.2", label: "V3.2", caps: ["audio", "prompt-following"] },
   { value: "v3.0.2", label: "V3.0 Lite", caps: ["complex motion", "cheap"] },
   { value: "v3.0", label: "V3.0 (High Consistency)", caps: ["high-consistency", "action presets", "start/end"] },
@@ -25,7 +31,14 @@ export const DEFAULT_MODEL = "v4.0.1";
 // Free-card eligibility per engine (real roster: the two 'no card' engines). Absent => cards
 // apply. Static capability knowledge for the ENGINE card's meta line (DC 2900 videoModelMeta) --
 // the PRICE, and whether a card actually covers THIS clip, stays CostBadge's truth.
-export const MODEL_CARD = { "v3.0.1": false, "v2.7": false };
+// null => NO claim either way: the Tsubaki engines' card coverage is unobserved (and the site
+// lets a non-member generate on them without a card), so the meta line defers to the badge.
+export const MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
+// The meta-line / chip-title wording for each MODEL_CARD value, in one place.
+export function cardClaim(v) {
+  const c = MODEL_CARD[v];
+  return c === false ? "never card-covered" : c === null ? "card coverage checked at price time" : "V4.0 cards apply";
+}
 // The DC's capStyle kind tiers (DC 1877-1880): 'hot' = emerald, 'crown' = pink, else plain.
 // Mapped by cap TEXT so the real caps above stay plain strings.
 export const CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
@@ -38,7 +51,7 @@ export function modelCaps(v) {
 }
 // DC 2900: videoModelMeta = maxDur + 's max · ' + (card ? 'V4.0 cards apply' : 'never card-covered').
 export function modelMeta(v) {
-  return (MODEL_MAXDUR[v] || 10) + "s max · " + (MODEL_CARD[v] === false ? "never card-covered" : "V4.0 cards apply");
+  return (MODEL_MAXDUR[v] || 10) + "s max · " + cardClaim(v);
 }
 export const SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
 
@@ -46,9 +59,22 @@ export const SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi
 // supports (private/GENERATOR_SURFACE.md, owner screenshots 2026-07-18): Multi-Reference (r2v)
 // is exclusive to the V4.0 pair; First+Last (flf) is on the three V3.0-gen models; V2.7 and V3.0
 // Flash are First Frame only.
+//
+// The Tsubaki engines take all three (owner ruling 2, 2026-09-26). Their First Frame / First &
+// Last half (i2vPro) is BUNDLE-GROUNDED (helper--EEE6Q9r.js `I()`, the field picker `X`) and
+// price-quoted (21,000 for 5 s, 63,000 for 15 s on tbkv1.0.1); no tbkv i2vPro task is on the
+// wire yet -- the owner's first First Frame run is the dispatch proof. Multi-Reference's STORED
+// shape is on the wire (both of his tbkv tasks), but those were made on the site's REST
+// reference-video route with no numeric modelId; this app submits referenceVideo over GraphQL
+// with tbkv's own modelId, and that submit has not run yet -- a drawer Multi-Reference run on
+// tbkv is its own dispatch proof. The tbkv i2vPro block carries only picker X's fields:
+// model, mediaId, usePromptsHelper, prompts, mode, duration, tailMediaId, generateAudio,
+// audioLanguage (no negative, no camera -- see MODEL_FIELDS).
 export const MODEL_VMODES = {
   "v4.0": ["i2v", "flf", "r2v"],
   "v4.0.1": ["i2v", "flf", "r2v"],
+  "tbkv1.0.1": ["i2v", "flf", "r2v"],
+  "tbkv1.0": ["i2v", "flf", "r2v"],
   "v3.2": ["i2v", "flf"],
   "v3.0.2": ["i2v", "flf"],
   "v3.0": ["i2v", "flf"],
@@ -56,10 +82,48 @@ export const MODEL_VMODES = {
   "v2.7": ["i2v"],
 };
 
-// Per-model MAX duration. 15s is exclusive to the v4.0 pair; absent => 10s cap. Enabling V2.7 /
+// Per-model MAX duration. 15s is the v4.0 pair's and the Tsubaki pair's (both tbkv tasks on the
+// wire are 15 s -- moonglade_backup.VIDEO_15S_MODELS); absent => 10s cap. Enabling V2.7 /
 // V3.0 Flash without this would newly expose a 15s option PixAI does not support on those
 // engines, at ~84,000 credits for a V2.7 clip with no card to cover it.
-export const MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15 };
+export const MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15, "tbkv1.0": 15, "tbkv1.0.1": 15 };
+
+// Per-engine allowed durations, mirroring moonglade_backup.VIDEO_MODEL_DURATIONS. The Tsubaki
+// panel (and the stored i2vPro schema) has 5/10/15 only -- no 6 s stop. Absent => DURATIONS
+// (the existing engines keep their 6 s stop, unchanged). The drawer dims a stop the engine does
+// not take (the over-cap stop's styling) and applyModelGating snaps onto the set.
+export const MODEL_DURATIONS = { "tbkv1.0": [5, 10, 15], "tbkv1.0.1": [5, 10, 15] };
+export function durationsFor(model) { return MODEL_DURATIONS[model] || DURATIONS; }
+export function durationAllowed(model, d) {
+  return durationsFor(model).indexOf(+d) >= 0 && +d <= (MODEL_MAXDUR[model] || 10);
+}
+
+// Per-engine fields, mirroring moonglade_backup.VIDEO_NO_NEGATIVE_MODELS / VIDEO_NO_CAMERA_MODELS:
+// the Tsubaki panel has no negative prompt and no camera. The drawer shows both controls
+// disabled there, and buildPayload sends '' / 'unset' -- typed text stays in the box, unsent.
+// Absent => both taken (v4.0.1 with a negative is on the wire and rendered).
+export const MODEL_FIELDS = {
+  "tbkv1.0": { negative: false, camera: false },
+  "tbkv1.0.1": { negative: false, camera: false },
+};
+export function modelTakes(model, field) {
+  const f = MODEL_FIELDS[model];
+  return !f || f[field] !== false;
+}
+
+// Per-engine Multi-Reference caps, mirroring moonglade_backup.VIDEO_REF_CAPS (the tbkv panel's
+// multiReference: 6 images, 0 videos, 3 audio). Absent => this drawer's own banks (6 images,
+// 3 videos, 1 audio slot). A video cap of 0 HOLDS the video refs (never deletes them) and keeps
+// them out of the payload; the server refuses them on such an engine as a backstop.
+export const MODEL_REFCAPS = {
+  "tbkv1.0": { images: 6, videos: 0, audios: 3 },
+  "tbkv1.0.1": { images: 6, videos: 0, audios: 3 },
+};
+const DEFAULT_REFCAPS = { images: 6, videos: 3, audios: 1 };
+export function refCap(model, kind) {
+  const c = MODEL_REFCAPS[model];
+  return (c && c[kind] != null) ? c[kind] : DEFAULT_REFCAPS[kind];
+}
 
 // The primary bank's label per mode (DC 2851/2858 bank.label; casing is the DC's).
 export const MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
@@ -94,10 +158,13 @@ export const AUDIO_LANGS = [
 // so an out-of-range shot duration (a hand-typed "8") never lands the <select> on a value with
 // no matching <option>, which resolves to "" and silently submits duration:0.
 export const DURATIONS = [5, 6, 10, 15];
-export function snapDuration(d) {
+// `model` (optional) snaps onto that engine's own set -- 6 -> 5 on a Tsubaki engine -- the same
+// rule as the server's _snap_video_duration(d, model). Omitted, the shared four as before.
+export function snapDuration(d, model) {
   d = Number(d);
   if (!isFinite(d)) return 5;
-  return DURATIONS.reduce((best, v) => (Math.abs(v - d) < Math.abs(best - d) ? v : best));
+  const set = model ? durationsFor(model) : DURATIONS;
+  return set.reduce((best, v) => (Math.abs(v - d) < Math.abs(best - d) ? v : best));
 }
 
 // A slot item: {media_id, thumb, is_nsfw}. Accepts either media_id or the mid alias, and fills a
@@ -186,6 +253,9 @@ export function applyMode(s, m, userDriven) {
   s.modeNote = (userDriven && from === "r2v" && m !== "r2v") ? heldRefsNotice(s, m) : "";
 }
 
+// The held-video-refs note an engine with a video cap of 0 shows (see applyModelGating).
+const NO_VIDEO_REFS_NOTE = " takes no video references.";
+
 // Dims modes a model doesn't support (MODEL_VMODES) + switches off an invalid one; clamps
 // duration to the model's cap. `userDriven` gates the notice: a real engine pick that drops the
 // shot mode explains itself in the DC's pickVideoModel words (DC 2232-2246) -- '<engine> has no
@@ -213,6 +283,25 @@ export function applyModelGating(s, userDriven) {
   // divergence (the MODEL_MAXDUR comment cites ~84,000 credits for a V2.7 15s clip).
   const maxDur = MODEL_MAXDUR[s.model] || 10;
   if (s.duration > maxDur) s.duration = maxDur;
+  // ...and onto the engine's own duration set (6 s on a Tsubaki engine -> 5 s), for the same
+  // reason: the priced + submitted payload must carry a length this engine takes. The server
+  // snaps identically, so this only keeps the quote honest about it.
+  if (!durationAllowed(s.model, s.duration)) s.duration = snapDuration(s.duration, s.model);
+  // An engine that takes NO video references (Tsubaki: 0) HOLDS them -- the bank keeps every
+  // pick, buildPayload leaves them out, and the note says so. Never deleted: switch back to an
+  // engine that takes them and they go out again. The note is NOT userDriven-gated: a Loom shot
+  // or a handoff that prefills video refs into a drawer already on Tsubaki would otherwise quote
+  // and submit a job without them with only a dimmed slot to show it (review V-R5). Unlike the
+  // re-sync silence above, this sentence is about the CURRENT banks, never the previous shot's.
+  // Only the clearing branch stays userDriven: a prefill resets modeNote itself.
+  const heldVids = (s.vidSlots || []).filter((x) => x && x.media_id).length;
+  if (s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
+    const m = MODELS.find((x) => x.value === s.model);
+    s.modeNote = (m ? m.label : s.model) + NO_VIDEO_REFS_NOTE + " Still held: " + heldVids
+      + (heldVids === 1 ? " video ref" : " video refs") + ". Nothing was deleted.";
+  } else if (userDriven && s.modeNote && s.modeNote.indexOf(NO_VIDEO_REFS_NOTE) >= 0) {
+    s.modeNote = "";   // that sentence is about the PREVIOUS engine -- never leave it standing
+  }
 }
 
 // The gallery lightbox / bulk-bar "Send to Video" entry. Image refs only. >1 forces r2v. Writes
@@ -268,17 +357,23 @@ export function applyPrefill(s, o) {
 // The submit/price payload. promptText is passed in (it comes from the contenteditable). Pure.
 export function buildPayload(s, promptText) {
   const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
-  const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id) : [];
+  // Held video refs past the engine's cap (all of them on a Tsubaki engine) stay in the bank
+  // and out of the payload -- what is priced is what is sent.
+  const video_refs = s.mode === "r2v"
+    ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos"))
+    : [];
   const audio_refs = (s.mode === "r2v" && s.audSlot && s.audSlot.media_id) ? [s.audSlot.media_id] : [];
   return {
     mode: s.mode.toUpperCase(),
     prompt: promptText || "",
-    negative: (s.negative || "").trim(),
+    // An engine without the field gets '' / 'unset' (MODEL_FIELDS); the typed text stays in
+    // the box (s.negative / s.camera untouched), it is just not sent.
+    negative: modelTakes(s.model, "negative") ? (s.negative || "").trim() : "",
     images, video_refs, audio_refs,
     duration: +s.duration,
     audio: s.audioGen,
     video_model: s.model,
-    camera_movement: (s.mode !== "r2v" ? s.camera : ""),
+    camera_movement: (s.mode !== "r2v" ? (modelTakes(s.model, "camera") ? s.camera : "unset") : ""),
     quality: s.quality,
     audio_language: s.audioLanguage,
     is_private: (s.channel === "enhanced"),

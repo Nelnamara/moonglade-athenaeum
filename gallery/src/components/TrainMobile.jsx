@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
+import { acceptCostField } from "../gen/trainCore.js";
 import "../styles/train.css";
 import "../styles/train-mobile.css";
 
@@ -22,9 +23,12 @@ import "../styles/train-mobile.css";
    kept exactly; only the fixed "4" is a placeholder replaced with the true number.
 
    Category/Model Type use the same real values desktop's build already corrected the
-   design's own placeholder demo lists to (9 real PixAI categories; DiT.2/DiT.1/SDXL/
-   SD 1.5 architectures with real curated base models + real per-arch pricing) -- not
-   re-litigated here, just reused. */
+   design's own placeholder demo lists to (9 real PixAI categories; the DiT.3/DiT.2/DiT.1/
+   SDXL/SD 1.5 architectures with PixAI's own training base list + per-arch pricing) -- not
+   re-litigated here, just reused. Cost, free runs and the pre-selected base follow
+   TrainOverlay.jsx's header (SCOPE_2026-09-26 E7): quota or a training free card makes a run
+   free, otherwise its price is quoted, and the default base is the server's
+   default_version_id (the first SDXL row), not the first group's first model. */
 
 const CATEGORIES = [
   ["character", "Character"], ["animal", "Animal"], ["style", "Style"],
@@ -33,6 +37,16 @@ const CATEGORIES = [
 ];
 const MIN_IMAGES = 10;
 const MAX_IMAGES = 100;
+
+/* The base the panel pre-selects: the server's `default_version_id` -- PixAI's own default,
+   the first SDXL row of its training list (SCOPE_2026-09-26 E7) -- and the Model Type group
+   that holds it. Never "the first group's first model": DiT.3 (Tsubaki.3, 100,000 credits)
+   sorts first now, so that rule would pre-select the most expensive base on the list. */
+function defaultBase(groups, versionId) {
+  const gi = groups.findIndex((g) => g.models.some((m) => m.version_id === versionId));
+  if (gi >= 0) return { archIdx: gi, baseModel: versionId };
+  return { archIdx: 0, baseModel: "" };
+}
 
 export default function TrainMobile({ onClose }) {
   const [csrf, setCsrf] = useState("");
@@ -65,7 +79,9 @@ export default function TrainMobile({ onClose }) {
       .then((d) => {
         const gs = d.groups || [];
         setGroups(gs);
-        if (gs.length && gs[0].models.length) setBaseModel(gs[0].models[0].version_id);
+        const def = defaultBase(gs, d.default_version_id || "");
+        setArchIdx(def.archIdx);
+        setBaseModel(def.baseModel);
       });
   }, []);
 
@@ -102,8 +118,7 @@ export default function TrainMobile({ onClose }) {
     setBusy(true); setErr("");
     try {
       const res = await apiPost("/api/train/submit",
-        { ...body(), confirm: true,
-          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
+        { ...body(), confirm: true, ...acceptCostField(ask, acceptCost) });
       // Same as PublishMobile: the error note lives under the sheet -- close it
       // so the failure is actually visible instead of a silent button revert.
       if (res.error) { setErr(res.error); closeSheet(); return; }
@@ -116,16 +131,18 @@ export default function TrainMobile({ onClose }) {
     <div className="trm-wrap">
       {done ? (
         <div className="trm-donebox">
-          ✓ Training submitted{done.was_free ? " — it used one of your free trainings" : ""}.
+          ✓ Training submitted{done.used_card ? " — it used your training free card"
+            : done.was_free ? " — it used one of your free trainings" : ""}.
         </div>
       ) : (
         <>
           <div className={"trm-cost" + (quota === 0 ? " paid" : "")}>
             {quota === null ? "checking your free trainings…"
               : quota > 0 ? "✓ " + quota + " free training" + (quota === 1 ? "" : "s") + " left — this one costs nothing."
+                  + (selectedPrice != null ? " (Normally " + selectedPrice.toLocaleString() + " credits.)" : "")
               : (selectedPrice != null
-                  ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits."
-                  : "⚠ No free trainings left — check the price on PixAI.")}
+                  ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits, unless a training free card covers it."
+                  : "⚠ No free trainings left, and PixAI's price list has no price for this base.")}
           </div>
 
           <div className="trm-dshead">
@@ -195,11 +212,13 @@ export default function TrainMobile({ onClose }) {
             <div className="pubm-confirmmeta">
               <b>{name || "Untitled LoRA"}</b> · {(groups[archIdx] || {}).label} · {ask.image_count} images · {category || "no category"}
             </div>
-            <div className="pubm-note" style={{ marginBottom: 12 }}>{ask.cost_note}</div>
+            <div className="pubm-note" style={{ marginBottom: 12 }}>{ask.cost_note}{ask.image_note ? " " + ask.image_note : ""}</div>
             {!ask.is_free && (
               <label className="pubm-toggle" style={{ marginBottom: 12 }}>
                 <input type="checkbox" checked={acceptCost} onChange={(e) => setAcceptCost(e.target.checked)} />
-                <span>I've checked the price on PixAI and want to spend credits.</span>
+                <span>{ask.price != null
+                  ? "Spend " + ask.price.toLocaleString() + " credits on this training."
+                  : "Spend credits on this training — the amount could not be quoted."}</span>
               </label>
             )}
             <div className="glm-sheet-actions">

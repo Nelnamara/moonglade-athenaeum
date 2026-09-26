@@ -695,27 +695,44 @@ ${"=".repeat(48)}
   function overLoraCap(loras, cap) {
     return cap != null && (loras || []).length > cap;
   }
-  function snap8(n) {
-    return Math.max(64, Math.min(4096, Math.round((Number(n) || 0) / 8) * 8));
+  function snapStep(n, step) {
+    const st = Number(step) > 0 ? Number(step) : 8;
+    const lo = Math.ceil(64 / st) * st, hi = Math.floor(4096 / st) * st;
+    return Math.max(lo, Math.min(hi, Math.round((Number(n) || 0) / st) * st));
   }
-  function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}) {
+  var DIT_STEP16 = /* @__PURE__ */ new Set([
+    "DIT7_MODEL",
+    "DIT7B_MODEL",
+    "MMDIT26A_MODEL",
+    "MMDIT26B_MODEL",
+    "USER_DIT26A_MODEL",
+    "USER_DIT26B_MODEL"
+  ]);
+  function genStepFor(modelType) {
+    return DIT_STEP16.has(String(modelType || "").toUpperCase()) ? 16 : 8;
+  }
+  function resolveGenDims({ aspectW, aspectH, size, customW, customH } = {}, step = 8) {
+    const snap = (n) => snapStep(n, step);
     const cw = Number(customW) || 0, ch = Number(customH) || 0;
-    if (cw > 0 && ch > 0) return { w: snap8(cw), h: snap8(ch), custom: true };
+    if (cw > 0 && ch > 0) return { w: snap(cw), h: snap(ch), custom: true };
     const rw = Number(aspectW) || 1, rh = Number(aspectH) || 1;
     const sz = Number(size) || 1024;
     const w = rw >= rh ? sz : sz * rw / rh;
     const h = rw >= rh ? sz * rh / rw : sz;
-    return { w: snap8(w), h: snap8(h), custom: false };
+    return { w: snap(w), h: snap(h), custom: false };
   }
   function buildImgGenBody(imgModel, imgLoras, imgAdv, prompt) {
     const a = imgAdv || {};
-    const dims = resolveGenDims({
-      aspectW: a.aspectW,
-      aspectH: a.aspectH,
-      size: a.size,
-      customW: a.customW,
-      customH: a.customH
-    });
+    const dims = resolveGenDims(
+      {
+        aspectW: a.aspectW,
+        aspectH: a.aspectH,
+        size: a.size,
+        customW: a.customW,
+        customH: a.customH
+      },
+      genStepFor(imgModel && imgModel.model_type)
+    );
     return {
       model_id: imgModel && imgModel.model_id || "",
       // picker-parity-round2 (problem 4): the CHOSEN version, when the owner picked one
@@ -2157,10 +2174,14 @@ ${"=".repeat(48)}
     ["MMDIT26B_MODEL", "DiT.3"],
     ["MMDIT26A_MODEL", "DiT.2"],
     ["DIT7_MODEL", "DiT.1"],
-    ["USER_DIT26A_MODEL", "Community DiT"],
+    ["USER_DIT26A_MODEL", "Community DiT", ["USER_DIT26A_MODEL", "USER_DIT26B_MODEL"]],
     ["SDXL_MODEL", "SDXL"],
     ["SD_V1_MODEL", "SD 1.5"]
   ];
+  var typeTokens = (key) => {
+    const row = BASE_TYPES.find((r) => r[0] === key);
+    return row && row[2] || [key];
+  };
   var SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most Used"], ["newest", "Latest"]];
   function ModelPicker({
     kind = "base",
@@ -2209,9 +2230,9 @@ ${"=".repeat(48)}
         u += "&src=" + encodeURIComponent(src);
         if (src !== "bookmark") {
           u += "&sort=" + encodeURIComponent(sort) + "&category=" + encodeURIComponent(category) + "&posted=" + encodeURIComponent(posted) + "&source=" + encodeURIComponent(source) + "&license=" + encodeURIComponent(license);
-          modelTypes.forEach((t) => {
-            u += "&model_type=" + encodeURIComponent(t);
-          });
+          modelTypes.forEach((t) => typeTokens(t).forEach((tok) => {
+            u += "&model_type=" + encodeURIComponent(tok);
+          }));
         }
       }
       if (kind === "lora" && baseType) u += "&base_type=" + encodeURIComponent(baseType);
@@ -2482,6 +2503,42 @@ ${"=".repeat(48)}
     ));
   }
 
+  // ../gallery/src/gen/genCore.js
+  var ASPECTS = [
+    ["1:1", 1],
+    ["3:4", 3 / 4],
+    ["4:3", 4 / 3],
+    ["2:3", 2 / 3],
+    ["3:2", 3 / 2],
+    ["9:16", 9 / 16],
+    ["16:9", 16 / 9],
+    ["3:1", 3]
+  ];
+  function adjustedText(list) {
+    const short = (v) => {
+      const t = v == null ? "off" : String(v);
+      return t.length > 24 ? t.slice(0, 23) + "\u2026" : t;
+    };
+    return (Array.isArray(list) ? list : []).map((a) => (a && a.field) + " " + short(a && a.asked) + "\u2192" + short(a && a.used)).join(", ");
+  }
+  function friendlyGenErr2(raw) {
+    const e = String(raw || "");
+    const add = (hint) => e + " \u2014 " + hint;
+    if (/insufficient|40300010|balance/i.test(e))
+      return add("your credit balance can't cover this one. Claim your daily credits or lower the size/count.");
+    if (/maxLength|too long/i.test(e))
+      return add("the prompt is over PixAI's length limit \u2014 trim it and try again.");
+    if (/NSFW_DETECTED|40300032/i.test(e))
+      return add("PixAI's moderation flagged the source image, not your prompt.");
+    if (/moderation|blocked|violat/i.test(e))
+      return add("PixAI's moderation rejected this one.");
+    if (/inferenceProfile|quality mode|profile/i.test(e))
+      return add("that quality mode isn't available for this model \u2014 try Auto.");
+    if (/LORA_NUM_EXCEEDED|40300027/i.test(e))
+      return add("too many LoRAs for your membership tier.");
+    return e;
+  }
+
   // ../gallery/src/components/CostBadge.jsx
   function fmt2(n) {
     return Number(n).toLocaleString();
@@ -2559,7 +2616,11 @@ ${"=".repeat(48)}
     } else {
       main = note3 || (props.hint || "").trim() || DEFAULT_HINT;
     }
-    const text = main + (sub ? " \xB7 " + sub.text : "");
+    const adjTxt = state === "free" || state === "paid" ? adjustedText(d.adjusted) : "";
+    const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+    if (adj) tip = (tip ? tip + " " : "") + adj + ".";
+    const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
+    const text = main + (noteLine ? " \xB7 " + noteLine.text : "");
     const stack = !!props.stack;
     let line = "";
     if (stack) {
@@ -2574,10 +2635,11 @@ ${"=".repeat(48)}
         parts.push(fmt2(countN) + " images");
       }
       const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
+      if (adj) parts.push(adj);
       if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
       line = parts.join(" \xB7 ");
     }
-    return { state, warn, compact, stack, short, main, sub, title, val, lab, tip, dot, text, line, d };
+    return { state, warn, compact, stack, short, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2670,7 +2732,7 @@ ${"=".repeat(48)}
            card-short note keeps its own amber line beneath -- the honesty content of that
            state is not something a tighter layout gets to hide */
         /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : m.main), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
-      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null),
+      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.noteLine ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.noteLine.title }, m.noteLine.text) : null),
       m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tip) : null
     );
   });
@@ -2720,6 +2782,10 @@ ${"=".repeat(48)}
   var MODELS = [
     { value: "v4.0", label: "V4.0 Preview", caps: ["multi-ref", "audio", "15s", "top quality", "~2.5\xD7 cost"] },
     { value: "v4.0.1", label: "V4.0 Lite Preview", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+    // The version titles PixAI returns for these two ids (PROBE_2026-09-26 V01). tbkv1.0 prices
+    // at 2,380/s on the wire against 4,200+/s for tbkv1.0.1 -- hence its 'cheap' chip.
+    { value: "tbkv1.0.1", label: "Tsubaki Video", caps: ["multi-ref", "audio", "15s", "end-frame"] },
+    { value: "tbkv1.0", label: "Tsubaki Video Flash", caps: ["multi-ref", "audio", "15s", "end-frame", "cheap"] },
     { value: "v3.2", label: "V3.2", caps: ["audio", "prompt-following"] },
     { value: "v3.0.2", label: "V3.0 Lite", caps: ["complex motion", "cheap"] },
     { value: "v3.0", label: "V3.0 (High Consistency)", caps: ["high-consistency", "action presets", "start/end"] },
@@ -2727,7 +2793,11 @@ ${"=".repeat(48)}
     { value: "v2.7", label: "V2.7 (High Dynamics)", caps: ["camera moves", "dynamic", "no card"] }
   ];
   var DEFAULT_MODEL = "v4.0.1";
-  var MODEL_CARD = { "v3.0.1": false, "v2.7": false };
+  var MODEL_CARD = { "v3.0.1": false, "v2.7": false, "tbkv1.0": null, "tbkv1.0.1": null };
+  function cardClaim(v) {
+    const c = MODEL_CARD[v];
+    return c === false ? "never card-covered" : c === null ? "card coverage checked at price time" : "V4.0 cards apply";
+  }
   var CAP_KIND = { "top quality": "crown", "cheap": "hot", "fastest": "hot", "default": "hot" };
   function modelCaps(v) {
     const m = MODELS.find((x) => x.value === v);
@@ -2736,19 +2806,45 @@ ${"=".repeat(48)}
     return caps;
   }
   function modelMeta(v) {
-    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + (MODEL_CARD[v] === false ? "never card-covered" : "V4.0 cards apply");
+    return (MODEL_MAXDUR[v] || 10) + "s max \xB7 " + cardClaim(v);
   }
   var SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi-Reference" };
   var MODEL_VMODES = {
     "v4.0": ["i2v", "flf", "r2v"],
     "v4.0.1": ["i2v", "flf", "r2v"],
+    "tbkv1.0.1": ["i2v", "flf", "r2v"],
+    "tbkv1.0": ["i2v", "flf", "r2v"],
     "v3.2": ["i2v", "flf"],
     "v3.0.2": ["i2v", "flf"],
     "v3.0": ["i2v", "flf"],
     "v3.0.1": ["i2v"],
     "v2.7": ["i2v"]
   };
-  var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15 };
+  var MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15, "tbkv1.0": 15, "tbkv1.0.1": 15 };
+  var MODEL_DURATIONS = { "tbkv1.0": [5, 10, 15], "tbkv1.0.1": [5, 10, 15] };
+  function durationsFor(model) {
+    return MODEL_DURATIONS[model] || DURATIONS;
+  }
+  function durationAllowed(model, d) {
+    return durationsFor(model).indexOf(+d) >= 0 && +d <= (MODEL_MAXDUR[model] || 10);
+  }
+  var MODEL_FIELDS = {
+    "tbkv1.0": { negative: false, camera: false },
+    "tbkv1.0.1": { negative: false, camera: false }
+  };
+  function modelTakes(model, field) {
+    const f = MODEL_FIELDS[model];
+    return !f || f[field] !== false;
+  }
+  var MODEL_REFCAPS = {
+    "tbkv1.0": { images: 6, videos: 0, audios: 3 },
+    "tbkv1.0.1": { images: 6, videos: 0, audios: 3 }
+  };
+  var DEFAULT_REFCAPS = { images: 6, videos: 3, audios: 1 };
+  function refCap(model, kind) {
+    const c = MODEL_REFCAPS[model];
+    return c && c[kind] != null ? c[kind] : DEFAULT_REFCAPS[kind];
+  }
   var MODE_LBL = { i2v: "Start frame", flf: "Start frame", r2v: "Image references" };
   var MODE_PH = {
     i2v: "Describe the motion \u2014 \u2018slow cinematic pan right, gentle waves\u2026\u2019",
@@ -2776,10 +2872,11 @@ ${"=".repeat(48)}
     ["none", "SE only (no dialogue)"]
   ];
   var DURATIONS = [5, 6, 10, 15];
-  function snapDuration(d) {
+  function snapDuration(d, model) {
     d = Number(d);
     if (!isFinite(d)) return 5;
-    return DURATIONS.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
+    const set = model ? durationsFor(model) : DURATIONS;
+    return set.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
   }
   function refItem(r) {
     const mid = String(r.media_id || r.mid);
@@ -2827,6 +2924,7 @@ ${"=".repeat(48)}
     }
     s.modeNote = userDriven && from === "r2v" && m !== "r2v" ? heldRefsNotice(s, m) : "";
   }
+  var NO_VIDEO_REFS_NOTE = " takes no video references.";
   function applyModelGating(s, userDriven) {
     const allowed = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
     if (allowed.indexOf(s.mode) === -1) {
@@ -2840,6 +2938,14 @@ ${"=".repeat(48)}
     }
     const maxDur = MODEL_MAXDUR[s.model] || 10;
     if (s.duration > maxDur) s.duration = maxDur;
+    if (!durationAllowed(s.model, s.duration)) s.duration = snapDuration(s.duration, s.model);
+    const heldVids = (s.vidSlots || []).filter((x) => x && x.media_id).length;
+    if (s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
+      const m = MODELS.find((x) => x.value === s.model);
+      s.modeNote = (m ? m.label : s.model) + NO_VIDEO_REFS_NOTE + " Still held: " + heldVids + (heldVids === 1 ? " video ref" : " video refs") + ". Nothing was deleted.";
+    } else if (userDriven && s.modeNote && s.modeNote.indexOf(NO_VIDEO_REFS_NOTE) >= 0) {
+      s.modeNote = "";
+    }
   }
   function applySetRefs(s, refs) {
     if (!Array.isArray(refs)) return;
@@ -2878,19 +2984,21 @@ ${"=".repeat(48)}
   }
   function buildPayload(s, promptText2) {
     const images = primaryBank(s).filter((x) => x && x.media_id).map((x) => x.media_id);
-    const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id) : [];
+    const video_refs = s.mode === "r2v" ? s.vidSlots.filter((x) => x && x.media_id).map((x) => x.media_id).slice(0, refCap(s.model, "videos")) : [];
     const audio_refs = s.mode === "r2v" && s.audSlot && s.audSlot.media_id ? [s.audSlot.media_id] : [];
     return {
       mode: s.mode.toUpperCase(),
       prompt: promptText2 || "",
-      negative: (s.negative || "").trim(),
+      // An engine without the field gets '' / 'unset' (MODEL_FIELDS); the typed text stays in
+      // the box (s.negative / s.camera untouched), it is just not sent.
+      negative: modelTakes(s.model, "negative") ? (s.negative || "").trim() : "",
       images,
       video_refs,
       audio_refs,
       duration: +s.duration,
       audio: s.audioGen,
       video_model: s.model,
-      camera_movement: s.mode !== "r2v" ? s.camera : "",
+      camera_movement: s.mode !== "r2v" ? modelTakes(s.model, "camera") ? s.camera : "unset" : "",
       quality: s.quality,
       audio_language: s.audioLanguage,
       is_private: s.channel === "enhanced",
@@ -2907,7 +3015,7 @@ ${"=".repeat(48)}
   function flfMissingStart(s) {
     return s.mode === "flf" && !(s.slots[0] && s.slots[0].media_id) && !!(s.slots[1] && s.slots[1].media_id);
   }
-  function friendlyGenErr2(raw) {
+  function friendlyGenErr3(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
     let hint = "";
@@ -3047,35 +3155,6 @@ ${"=".repeat(48)}
     };
   }
 
-  // ../gallery/src/gen/genCore.js
-  var ASPECTS = [
-    ["1:1", 1],
-    ["3:4", 3 / 4],
-    ["4:3", 4 / 3],
-    ["2:3", 2 / 3],
-    ["3:2", 3 / 2],
-    ["9:16", 9 / 16],
-    ["16:9", 16 / 9],
-    ["3:1", 3]
-  ];
-  function friendlyGenErr3(raw) {
-    const e = String(raw || "");
-    const add = (hint) => e + " \u2014 " + hint;
-    if (/insufficient|40300010|balance/i.test(e))
-      return add("your credit balance can't cover this one. Claim your daily credits or lower the size/count.");
-    if (/maxLength|too long/i.test(e))
-      return add("the prompt is over PixAI's length limit \u2014 trim it and try again.");
-    if (/NSFW_DETECTED|40300032/i.test(e))
-      return add("PixAI's moderation flagged the source image, not your prompt.");
-    if (/moderation|blocked|violat/i.test(e))
-      return add("PixAI's moderation rejected this one.");
-    if (/inferenceProfile|quality mode|profile/i.test(e))
-      return add("that quality mode isn't available for this model \u2014 try Auto.");
-    if (/LORA_NUM_EXCEEDED|40300027/i.test(e))
-      return add("too many LoRAs for your membership tier.");
-    return e;
-  }
-
   // ../gallery/src/gen/submitTask.js
   async function submitTask(route, payload, { label, emit: emit5, count, onPhase }) {
     let d;
@@ -3094,10 +3173,10 @@ ${"=".repeat(48)}
       return null;
     }
     if (d.error || !d.task_id) {
-      emit5({ kind: "err", text: friendlyGenErr3(d.error || "Submit failed.") });
+      emit5({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
       return null;
     }
-    const adj = (d.adjusted || []).map((a) => a.field + " " + a.asked + "\u2192" + a.used).join(", ");
+    const adj = adjustedText(d.adjusted);
     if (adj && window.Toast) {
       window.Toast.show({
         kind: "err",
@@ -3127,7 +3206,7 @@ ${"=".repeat(48)}
       } else if (phase === "failed") {
         emit5({
           kind: "err",
-          text: friendlyGenErr3(data2.error || data2.reason || data2.status || "failed")
+          text: friendlyGenErr2(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
         emit5({
@@ -3519,7 +3598,7 @@ ${"=".repeat(48)}
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
           emit5("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
         } else if (phase === "failed") {
-          const msg = friendlyGenErr2(d.error || "task " + (d.status || "failed"));
+          const msg = friendlyGenErr3(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
           emit5("mg-error", { error: msg });
         } else if (phase === "stalled") {
@@ -3598,7 +3677,6 @@ ${"=".repeat(48)}
     }, []);
     const s = st.current;
     const allowedModes = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-    const maxDur = MODEL_MAXDUR[s.model] || 10;
     const chosenModel = MODELS.find((m) => m.value === s.model);
     const isR2v = s.mode === "r2v";
     const canGo = !s.hostBusy && !s.rendering && probe.canSubmit;
@@ -3621,14 +3699,15 @@ ${"=".repeat(48)}
       rerender();
       reprice();
     };
-    const slotBox = ({ key, item, bank, index, caption, badge, title }) => /* @__PURE__ */ react_global_shim_default.createElement(
+    const slotBox = ({ key, item, bank, index, caption, badge, title, off }) => /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         key,
-        className: "mgd-slot" + (item ? " filled" : ""),
+        className: "mgd-slot" + (item ? " filled" : "") + (off ? " off" : ""),
         title,
+        "aria-disabled": off || void 0,
         "data-nsfw": item && item.is_nsfw ? "1" : void 0,
-        onClick: () => item ? removeSlot(bank, index) : requestPick(bank, index)
+        onClick: () => item ? removeSlot(bank, index) : off ? null : requestPick(bank, index)
       },
       item ? /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, caption),
       item && badge ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, badge) : null
@@ -3646,17 +3725,20 @@ ${"=".repeat(48)}
       }));
       if (iv.nextIndex >= 0) imgs.push(slotBox({ key: "img+", item: null, bank: "primary", index: iv.nextIndex, caption: "+ image", title: "Pick from your gallery" }));
       banks.push({ label: MODE_LBL.r2v, note: "up to 6", slots: imgs });
-      const vv = bankView(s.vidSlots, 3);
+      const vCap = refCap(s.model, "videos");
+      const vv = bankView(s.vidSlots, vCap > 0 ? vCap : 3);
       const vids = vv.filled.map(({ item, index }, n) => slotBox({
         key: "vid" + index,
         item,
         bank: "vid",
         index,
         badge: "@video" + (n + 1),
-        title: "Video reference " + (n + 1)
+        off: vCap === 0,
+        title: vCap === 0 ? "Video reference " + (n + 1) + " \u2014 held, not sent: not on this engine (click to remove)" : "Video reference " + (n + 1)
       }));
-      if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
-      banks.push({ label: "Video references", note: "up to 3", slots: vids });
+      if (vCap === 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: -1, caption: "+ video", title: "not on this engine", off: true }));
+      else if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
+      banks.push({ label: "Video references", note: vCap === 0 ? "not on this engine" : "up to " + vCap, slots: vids });
     } else {
       banks.push({ label: MODE_LBL[s.mode], note: "", slots: [slotBox({
         key: "start",
@@ -3687,13 +3769,16 @@ ${"=".repeat(48)}
         onBlur: onCeBlur
       }
     );
+    const negOn = modelTakes(s.model, "negative");
     const negativeField = /* @__PURE__ */ react_global_shim_default.createElement(
       "textarea",
       {
         className: inDock ? "mgdock-neg" : "mgd-neg",
         rows: inDock ? 1 : void 0,
-        placeholder: "blurry, extra fingers, watermark",
+        placeholder: negOn ? "blurry, extra fingers, watermark" : "not used by this engine",
         value: s.negative,
+        disabled: !negOn,
+        title: negOn ? void 0 : "Negative prompt \u2014 not used by this engine (kept, not sent)",
         onChange: (e) => {
           st.current.negative = e.target.value;
           rerender();
@@ -3780,7 +3865,7 @@ ${"=".repeat(48)}
           if (f) uploadAudio(f);
         }
       }
-    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, onChange: (e) => {
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-cam-wrap" + (isR2v ? " hid" : ""), "aria-hidden": isR2v || void 0 }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "CAMERA"), /* @__PURE__ */ react_global_shim_default.createElement("select", { className: "mgd-sel mgd-cam", value: s.camera, tabIndex: isR2v ? -1 : void 0, disabled: !modelTakes(s.model, "camera"), title: modelTakes(s.model, "camera") ? void 0 : "Camera \u2014 not used by this engine (kept, not sent)", onChange: (e) => {
       st.current.camera = e.target.value;
       rerender();
       reprice();
@@ -3794,7 +3879,7 @@ ${"=".repeat(48)}
           role: "radio",
           "aria-checked": sel,
           className: "mgd-engchip" + (sel ? " sel" : ""),
-          title: m.label + " \u2014 " + modes + " \xB7 " + (MODEL_MAXDUR[m.value] || 10) + "s max \xB7 " + (MODEL_CARD[m.value] === false ? "no card" : "card"),
+          title: m.label + " \u2014 " + modes + " \xB7 " + (MODEL_MAXDUR[m.value] || 10) + "s max \xB7 " + (MODEL_CARD[m.value] === false ? "no card" : MODEL_CARD[m.value] === null ? "card coverage checked at price time" : "card"),
           onClick: () => pickVideoModel(m.value)
         },
         /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-engdot" }),
@@ -3850,7 +3935,7 @@ ${"=".repeat(48)}
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
     ) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durhd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-sec" }, "DURATION"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-durval" }, s.duration, "s")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-stops mgd-dur", role: "radiogroup", "aria-label": "Duration" }, [5, 6, 10, 15].map((d) => {
-      const ok = d <= maxDur;
+      const ok = durationAllowed(s.model, d);
       return /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
@@ -7485,7 +7570,7 @@ ${"=".repeat(48)}
             onChange: (ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))
           }
         )))), /* @__PURE__ */ React.createElement("div", { className: "lv-dim", style: { fontSize: 11, marginTop: 5 } }, (() => {
-          const d = resolveGenDims(imgAdv);
+          const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type));
           return "\u2192 " + d.w + " \xD7 " + d.h + (d.custom ? " \xB7 custom" : " px");
         })()), /* @__PURE__ */ React.createElement("div", { className: "lv-row2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Mode"), /* @__PURE__ */ React.createElement(
           "select",
@@ -9108,12 +9193,14 @@ ${"=".repeat(48)}
       if (!p) return noInputMsg;
       if (p.loading) return "checking\u2026";
       const tally = p.pr ? tallyPrices([p.pr]) : null;
-      return tally ? formatCostEstimate(tally) : "\u2014";
+      const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
+      return (tally ? formatCostEstimate(tally) : "\u2014") + (adj ? " \xB7 Adjusted before sending: " + adj : "");
     };
     const priceTitle = (priceState, id) => {
       const p = priceState[id];
       const tally = p && p.pr ? tallyPrices([p.pr]) : null;
-      return tally ? costTooltip(tally) : "";
+      const adj = p && p.pr ? adjustedText(p.pr.adjusted) : "";
+      return (tally ? costTooltip(tally) : "") + (adj ? "\nAdjusted before sending: " + adj : "");
     };
     const [editSub, setEditSub] = useState2("edit");
     const [fixTag, setFixTag] = useState2("face");
@@ -9795,7 +9882,7 @@ ${"=".repeat(48)}
             onChange: (ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))
           }
         )))), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, (() => {
-          const d = resolveGenDims(imgAdv);
+          const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type));
           return "\u2192 " + d.w + " \xD7 " + d.h + (d.custom ? " \xB7 custom" : " px");
         })()), /* @__PURE__ */ React.createElement("div", { className: "lm-row2" }, /* @__PURE__ */ React.createElement("div", { className: "lm-col" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement(
           "select",

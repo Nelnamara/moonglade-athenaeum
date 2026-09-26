@@ -809,3 +809,56 @@ def test_the_core_docstring_records_what_challenge_actually_does():
     doc = inspect.getdoc(core.publish_artwork_from_task) or ""
     assert "DOES NOT ENTER A CONTEST" in doc
     assert "contest_enter" in doc
+
+
+# ------------------------------------------------ the board's paging (SCOPE_2026-09-26 E4)
+
+def _paged_board(total_page):
+    """A contest board of `total_page` pages, one contest on each."""
+    return {p: {"data": [{"id": str(p), "title": {"en": "C%d" % p}, "slug": "c%d" % p,
+                          "type": "community", "runtimeStatus": "running", "mediaId": ""}],
+                "page": p, "pageSize": 50, "totalPage": total_page}
+            for p in range(1, total_page + 1)}
+
+
+def test_the_board_is_read_to_its_own_last_page_at_the_sweeps_pace(pixai, monkeypatch):
+    """The 2026-09-26 board answered totalPage 7 -- one past the old hard ceiling of 6, so
+    its oldest page silently fell off. It is read to its own `totalPage` now, 0.35 s apart."""
+    board = _paged_board(7)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    naps = []
+    monkeypatch.setattr(core.time, "sleep", naps.append)
+    rows = core.list_contests(pixai, active_only=False)
+    assert [r["id"] for r in rows] == [str(p) for p in range(1, 8)]
+    assert [c.params["page"] for c in pixai.calls] == list(range(1, 8))
+    assert naps == [0.35] * 6                      # between pages, never before the first
+    assert core._CONTEST_MAX_PAGES == 20
+
+
+def test_a_one_page_board_is_one_read_and_no_pause(pixai, monkeypatch):
+    board = _paged_board(1)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    naps = []
+    monkeypatch.setattr(core.time, "sleep", naps.append)
+    assert len(core.list_contests(pixai)) == 1
+    assert len(pixai.calls) == 1 and naps == []
+
+
+def test_the_ceiling_stops_a_runaway_board_and_says_so(pixai, monkeypatch, caplog):
+    board = _paged_board(25)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    with caplog.at_level("WARNING"):
+        rows = core.list_contests(pixai)
+    assert len(rows) == 20 and len(pixai.calls) == 20
+    assert any("20-page ceiling" in r.getMessage() and "25 pages" in r.getMessage()
+               for r in caplog.records)
+
+
+def test_totalpage_ending_the_walk_logs_nothing(pixai, monkeypatch, caplog):
+    board = _paged_board(3)
+    pixai.on("/contest/list", lambda call: board[call.params["page"]])
+    monkeypatch.setattr(core.time, "sleep", lambda s: None)
+    with caplog.at_level("WARNING"):
+        core.list_contests(pixai)
+    assert not [r for r in caplog.records if "ceiling" in r.getMessage()]

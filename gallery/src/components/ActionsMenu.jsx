@@ -109,6 +109,36 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
       )}</>
     );
   }
+  /* PUBLISHED ARTWORK (SCOPE_2026-09-26 E5). PixAI's own contract says its task delete also
+     deletes the task's linked artwork, and every task here goes by the whole-task delete. The
+     preview counts the artworks it knows of -- each task's live `artworkIds`, else the
+     catalog's artwork_id -- and says so in ONE more sentence of the dialog's own text: no
+     badge, no thumbnail marker. "may", because whether the delete this app sends cascades the
+     same way is unconfirmed. A blank artwork_id is "not known", so this never says none are
+     published; when the catalog could not answer at all it says publication was not checked.
+     Same words as the per-image dialog (moonglade_gallery.published_delete_note).
+     PART-CHECKED: when only some tasks went unchecked, or a count was just given, "whether any
+     of these are published was not checked" would contradict what the dialog does know, so it
+     says how many tasks went unchecked instead. */
+  const published = Number(data.published) || 0;
+  const uncheckedTasks = Number(data.published_unchecked_tasks) || 0;
+  let uncheckedNote = "";
+  if (data.published_unchecked === true) {
+    uncheckedNote = (published > 0 || (uncheckedTasks > 0 && uncheckedTasks < t.tasks))
+      ? (uncheckedTasks > 0
+          ? uncheckedTasks + " of the " + t.tasks + " tasks " + (uncheckedTasks === 1 ? "was" : "were")
+          : "Some of the tasks were") +
+        " not checked for published artwork" +
+        (published > 0 ? "." : " — deleting a task may remove its published artwork too.")
+      : "Whether any of these are published on PixAI was not checked — deleting a task may remove its published artwork too.";
+  }
+  const publishedNote = [
+    published > 0
+      ? published + " of these " + (published === 1 ? "is" : "are") + " published on PixAI. " +
+        "Deleting the " + (t.tasks === 1 ? "task" : "tasks") + " may remove the published artwork too."
+      : "",
+    uncheckedNote,
+  ].filter(Boolean).join(" ");
   const strip = (media) => (
     <div className="cd-strip">
       {media.map((m) => (
@@ -142,7 +172,7 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
     <div className="lb" role="dialog" aria-modal="true" onClick={onCancel}>
       <div className="cd-inner" onClick={(e) => e.stopPropagation()}>
         <div className="cd-head">Delete from PixAI — the whole blast radius</div>
-        <p className="cd-summary">{head}</p>
+        <p className="cd-summary">{head}{publishedNote && <> {publishedNote}</>}</p>
         {/* The live check's three sentences, in the same plain voice as the counts above
             and only when there is something to say. "MORE", not "of them": these files are
             not among the ones the headline just said were going -- add them to it. The
@@ -373,7 +403,9 @@ export default function ActionsMenu({
       (data && data.error ? data.error + "\n\n" : "") +
       "The preview of exactly what that takes could not be loaded, so: this deletes the whole " +
       "TASK behind each selection (every image in the batch, including ones you did not " +
-      "select), from the cloud AND your backup. It is IRREVERSIBLE."
+      "select), from the cloud AND your backup. It is IRREVERSIBLE.\n\n" +
+      // No preview, no count: the published-artwork sentence's own "not checked" form.
+      "Whether any of these are published on PixAI was not checked — deleting a task may remove its published artwork too."
     )) await deleteCloud(ids);
   });
 

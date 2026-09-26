@@ -16,6 +16,22 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-09-26 — Camellia
+
+- **Tsubaki.3 and Tsubaki.3 Flash get what they actually take.** Sizes snap to the model's own grid and range (16 px on DiT models; 512–2496 on Tsubaki.3 and Flash), so 768×432 goes out as 912×512 and the size line shows what is sent. Face Fix and Quality Tag read disabled on models that don't take them and keep their state across a model switch. Quality Tag sends the picked version's own tag instead of a fixed "Masterpiece". A Flash negative prompt, and Enhance Details or Face Fix on Tsubaki and community DiT models, are no longer sent behind a greyed-out control. The prompt helper goes out as Tsubaki.3's creativity level.
+- **A reference image on Tsubaki.3 or Flash is a context image now**, PixAI's Character/Style Reference, priced with its surcharge. Strength doesn't apply and the slider says so, on desktop and phone. A reference plus LoRAs is refused before any spend rather than one being silently dropped. An Upscale of a Tsubaki.3 picture already at PixAI's size ceiling is refused instead of quietly becoming a new generation.
+- **The cost badge names every adjustment before you spend.** When the app changes a request to fit the model, the badge's note line says what changed, in the Generate drawer, on the phone Create screen and in the Loom (desktop and phone). The price, the free-card check and the submit all read the same checked request.
+- **Tsubaki Video and Tsubaki Video Flash are in the Video drawer**, the CLI and Remix, with First Frame, First & Last and Multi-Reference, 15 s and audio. They take 5, 10 or 15 s; the negative box, camera and video references read disabled on them, and held video references stay held and named rather than deleted. New `--video-ratio` for Tsubaki reference videos.
+- **Reference videos are priced with their real lengths.** A 15 s job with a 10 s reference clip quoted about 126,000 credits and now quotes about 105,000, because the clip's measured length is sent instead of PixAI's flat 15 s fallback. If any length is unknown, the preview says so. Every engine now sends its own model id with a reference video.
+- **Video titles are real names.** Collected videos store the task's numeric model id and the model's title (for example "Tsubaki Video v1.0"); older rows are repaired once on first open.
+- **Edit card:** Reference Pro offers Auto as its default aspect, as PixAI's Edit does; Edit Pro gains 3:5 and 5:3 and defaults to 3:5. The Loom's Edit and Reference shots follow suit.
+- **Train a LoRA:** Tsubaki.3 (DiT.3) can be trained. Bases and prices come from PixAI's own training config, training free cards are checked and used, the confirm names the amount and closes if the quote changes, trigger words follow PixAI's rules, and images PixAI won't train on are named and refused. A free run shows the base's normal price, and the desktop picture picker keeps loading as you scroll instead of stopping at your 60 newest pictures.
+- **Delete from PixAI** says when a generation being deleted is published on PixAI and may take the published artwork with it.
+- **Lineage:** a Tsubaki.3 or Flash picture made from a reference names its source in Image Details; existing ones are re-read by the next `--backfill-lineage`. The contest board is read to its last page.
+
+### Under the hood
+- One per-model image gate applied once at build (sizes, strips, context images, LoRA weight ranges); receipts ride `/api/price`. Per-engine video rules are hand-kept tables with a parity test. One-time catalog repairs are guarded by a marker table so they never replay. READ_ONLY now stops a CLI `--confirm` before any PixAI lookup. (2026-09-26, SCOPE_2026-09-26 Tsubaki.3 parity.)
+
 ## [3.10.3] - 2026-09-08 — Signed For
 
 - **An install carrying an older art pack now updates to the current one.** A pack placed by hand (rather than fetched by the setup wizard) was trusted for good, so even after a newer pack was published the app kept the old one and never offered the update. It now notices when the installed pack is not the one the current build expects and fetches the new one, the same as a fresh setup would. (2026-09-08)

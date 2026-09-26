@@ -8,6 +8,7 @@ import CostBadge from "./CostBadge.jsx";
 import {
   MODELS, MODEL_VMODES, MODEL_MAXDUR, MODE_LBL, MODE_PH, CHANNEL_CAP, CAMERA_OPTS, AUDIO_LANGS,
   DEFAULT_MODEL, MODEL_CARD, SHOT_LABEL, modelCaps, modelMeta, bankView,
+  durationAllowed, modelTakes, refCap,
   friendlyGenErr, refItem, primaryBank, setPrimaryBank, buildPayload, hasAnyRef,
   applyMode as applyModeState,
   applyModelGating as gateModelState,
@@ -23,9 +24,10 @@ import "../styles/gen-drawer.css";
 
 /* VideoDrawer -- the React port of static/mg-generate-drawer.js's <mg-generate-drawer> (no-vanilla
    campaign, component 7, the last one). The shared VIDEO generation form: 3 modes (i2v / first-
-   last-frame / reference-to-video), 6 image + 3 video + 1 audio ref banks, the 7-model roster
-   with capability gating, negative prompt, Channel, live cost (embedded React CostBadge), and
-   submit. Mounted by the gallery's Generate dock (Video tab), mobile's Video mode, and the Loom's
+   last-frame / reference-to-video), 6 image + 3 video + 1 audio ref banks, the 9-model roster
+   with capability gating (per-engine tables in videoDrawerCore.js -- modes, durations, the
+   negative/camera fields, reference caps), negative prompt, Channel, live cost (embedded React
+   CostBadge), and submit. Mounted by the gallery's Generate dock (Video tab), mobile's Video mode, and the Loom's
    video drawer.
 
    SUBMIT RIDES THE ROAD (2026-08-23). This drawer no longer POSTs /api/loom/generate itself and
@@ -523,7 +525,6 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // ---- render --------------------------------------------------------------------------------
   const s = st.current;
   const allowedModes = MODEL_VMODES[s.model] || ["i2v", "flf", "r2v"];
-  const maxDur = MODEL_MAXDUR[s.model] || 10;
   const chosenModel = MODELS.find((m) => m.value === s.model);
   const isR2v = s.mode === "r2v";
   // Go is DISABLED (not awaited) until the probe's settled verdict is for the payload this form
@@ -556,10 +557,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   };
   // One reference / frame slot: DC slotBox (54px, radius 9, dashed while empty, solid once
   // filled), the empty caption, and the '@imageN' / '@videoN' badge Multi-Reference alone carries.
-  const slotBox = ({ key, item, bank, index, caption, badge, title }) => (
-    <div key={key} className={"mgd-slot" + (item ? " filled" : "")} title={title}
+  // `off` = the engine does not take this kind of reference (a Tsubaki engine's video bank):
+  // dimmed and not-allowed like a dimmed shot mode / duration stop, the empty slot ignores the
+  // click, and a HELD pick can still be clicked away (it is never removed for the user).
+  const slotBox = ({ key, item, bank, index, caption, badge, title, off }) => (
+    <div key={key} className={"mgd-slot" + (item ? " filled" : "") + (off ? " off" : "")} title={title}
+      aria-disabled={off || undefined}
       data-nsfw={item && item.is_nsfw ? "1" : undefined}
-      onClick={() => (item ? removeSlot(bank, index) : requestPick(bank, index))}>
+      onClick={() => (item ? removeSlot(bank, index) : (off ? null : requestPick(bank, index)))}>
       {item ? <img src={item.thumb} alt="" /> : <div className="mgd-slotcap">{caption}</div>}
       {item && badge ? <div className="mgd-slot-tag">{badge}</div> : null}
     </div>
@@ -574,11 +579,18 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       badge: "@image" + (n + 1), title: "Image reference " + (n + 1) }));
     if (iv.nextIndex >= 0) imgs.push(slotBox({ key: "img+", item: null, bank: "primary", index: iv.nextIndex, caption: "+ image", title: "Pick from your gallery" }));
     banks.push({ label: MODE_LBL.r2v, note: "up to 6", slots: imgs });
-    const vv = bankView(s.vidSlots, 3);
+    // The video cap is the ENGINE's (videoDrawerCore.refCap: 3 here, 0 on a Tsubaki engine).
+    // At 0 the bank still shows every held pick -- dimmed, not sent (buildPayload leaves them
+    // out) -- plus a dimmed '+ video' reading "not on this engine"; nothing is deleted.
+    const vCap = refCap(s.model, "videos");
+    const vv = bankView(s.vidSlots, vCap > 0 ? vCap : 3);
     const vids = vv.filled.map(({ item, index }, n) => slotBox({ key: "vid" + index, item, bank: "vid", index,
-      badge: "@video" + (n + 1), title: "Video reference " + (n + 1) }));
-    if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
-    banks.push({ label: "Video references", note: "up to 3", slots: vids });
+      badge: "@video" + (n + 1), off: vCap === 0,
+      title: vCap === 0 ? "Video reference " + (n + 1) + " — held, not sent: not on this engine (click to remove)"
+        : "Video reference " + (n + 1) }));
+    if (vCap === 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: -1, caption: "+ video", title: "not on this engine", off: true }));
+    else if (vv.nextIndex >= 0) vids.push(slotBox({ key: "vid+", item: null, bank: "vid", index: vv.nextIndex, caption: "+ video", title: "Pick from your gallery" }));
+    banks.push({ label: "Video references", note: vCap === 0 ? "not on this engine" : "up to " + vCap, slots: vids });
   } else {
     banks.push({ label: MODE_LBL[s.mode], note: "", slots: [slotBox({ key: "start", item: s.slots[0], bank: "primary", index: 0,
       caption: "pick", title: s.slots[0] ? "Start frame" : "Pick from your gallery" })] });
@@ -598,9 +610,13 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     <div ref={ceRef} className={"mgd-ce" + (inDock ? " mgdock-prompt-ce" : "")} contentEditable suppressContentEditableWarning
       data-placeholder={MODE_PH[s.mode]} onInput={onCeInput} onBlur={onCeBlur} />
   );
+  // Disabled on an engine without a negative prompt (videoDrawerCore.MODEL_FIELDS -- the Tsubaki
+  // engines): the typed text stays in the box and buildPayload sends '' for it.
+  const negOn = modelTakes(s.model, "negative");
   const negativeField = (
     <textarea className={inDock ? "mgdock-neg" : "mgd-neg"} rows={inDock ? 1 : undefined}
-      placeholder="blurry, extra fingers, watermark" value={s.negative}
+      placeholder={negOn ? "blurry, extra fingers, watermark" : "not used by this engine"} value={s.negative}
+      disabled={!negOn} title={negOn ? undefined : "Negative prompt — not used by this engine (kept, not sent)"}
       onChange={(e) => { st.current.negative = e.target.value; rerender(); reprice(); }} />
   );
   const costLine = (
@@ -713,7 +729,7 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               so each change re-prices like every other priced field. */}
           <div className={"mgd-cam-wrap" + (isR2v ? " hid" : "")} aria-hidden={isR2v || undefined}>
             <div className="mgd-sec">CAMERA</div>
-            <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
+            <select className="mgd-sel mgd-cam" value={s.camera} tabIndex={isR2v ? -1 : undefined} disabled={!modelTakes(s.model, "camera")} title={modelTakes(s.model, "camera") ? undefined : "Camera — not used by this engine (kept, not sent)"} onChange={(e) => { st.current.camera = e.target.value; rerender(); reprice(); }}>
               {CAMERA_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
@@ -739,7 +755,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
               return (
                 <div key={m.value} role="radio" aria-checked={sel}
                   className={"mgd-engchip" + (sel ? " sel" : "")}
-                  title={m.label + " — " + modes + " · " + (MODEL_MAXDUR[m.value] || 10) + "s max · " + (MODEL_CARD[m.value] === false ? "no card" : "card")}
+                  title={m.label + " — " + modes + " · " + (MODEL_MAXDUR[m.value] || 10) + "s max · "
+                    + (MODEL_CARD[m.value] === false ? "no card" : MODEL_CARD[m.value] === null ? "card coverage checked at price time" : "card")}
                   onClick={() => pickVideoModel(m.value)}>
                   <span className="mgd-engdot" />
                   <span className="mgd-englabel">{m.label}</span>
@@ -790,16 +807,17 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
           ) : null}
           {/* DURATION (§45 drift): moved to the foot of the right slab, under MODE & CHANNEL
               (was in the ENGINE slab) -- DC 1479-1487. Label + live 'Ns' readout, then four
-              segmented stops. A stop above the REAL engine cap (MODEL_MAXDUR -- the spend gate
-              applyModelGating clamps to) stays visible but dimmed, not-allowed, titled, and its
-              click is ignored -- never removed. */}
+              segmented stops. A stop the engine does not take -- above its REAL cap
+              (MODEL_MAXDUR), or outside its own set (MODEL_DURATIONS: no 6 s on a Tsubaki
+              engine) -- stays visible but dimmed, not-allowed, titled, and its click is
+              ignored -- never removed. applyModelGating snaps onto the same rule. */}
           <div className="mgd-durhd">
             <div className="mgd-sec">DURATION</div>
             <div className="mgd-durval">{s.duration}s</div>
           </div>
           <div className="mgd-stops mgd-dur" role="radiogroup" aria-label="Duration">
             {[5, 6, 10, 15].map((d) => {
-              const ok = d <= maxDur;
+              const ok = durationAllowed(s.model, d);
               return (
                 <button key={d} type="button" role="radio" aria-checked={d === s.duration} aria-disabled={!ok}
                   className={"mgd-stop" + (d === s.duration ? " on" : "") + (ok ? "" : " off")}
