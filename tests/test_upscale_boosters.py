@@ -816,22 +816,37 @@ def test_enhance_details_is_gated_on_the_model_declaring_upscale_support():
 
 
 def test_booster_gate_does_not_touch_quality_tag_or_face_fix():
-    """Quality Tag is a MEMBERSHIP question (PixAI crowns it) and Face Fix has no
-    compatibility key at all -- neither is decided by extra.compatibility, so neither is
-    gated here. Pinned so a later pass doesn't quietly extend the capability gate over a
-    product decision the owner has not made.
+    """REVERSED ON PURPOSE by owner ruling 1 (SCOPE_2026-09-26, recorded in DECISIONS): the
+    Face Fix and Quality Tag chips READ DISABLED on a model that does not take them. This pin
+    used to hold that neither was gated, because Face Fix had no compatibility key and Quality
+    Tag was an owner decision not yet made. Both premises changed: PixAI's version-keyed
+    /features publishes enableADetailer (merged into `compatibility` server-side, plus the
+    MMDiT / user-DiT model-type rule), and each version publishes its own quality tag
+    (extra.qualityTags) -- Tsubaki.3, Flash and Tsubaki.2 publish none. The owner ruled.
+
+    What still holds, and is still pinned: the chips are DISABLED, never disarmed -- their
+    on/off state survives a model switch (the modeAfterApply lesson), and buildPayload is what
+    withholds them from the request.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    jsx = (root / "gallery" / "src" / "components" / "CreateMobile.jsx").read_text(encoding="utf-8")
-    row = jsx.split('<div className="cm-lbl">Boosters</div>')[1].split("Prompt helper")[0]
-    chips = row.split("<button")
-    face = next(c for c in chips if "Face Fix" in c)
-    qual = next(c for c in chips if "Quality Tag" in c)
-    assert "disabled" not in face and "compat" not in face, \
-        "Face Fix has no compatibility flag to gate on"
-    assert "disabled" not in qual and "compat" not in qual, \
-        "Quality Tag gating is an owner decision"
-    # ...and the disarm-on-model-change patch touches hires only.
+    for rel, anchor, stop in (
+            (("gallery", "src", "components", "CreateMobile.jsx"),
+             '<div className="cm-lbl">Boosters</div>', "Prompt helper"),
+            (("gallery", "src", "components", "GenerateDrawer.jsx"),
+             '<div className="mgdock-chips">', "Enhance Details")):
+        jsx = root.joinpath(*rel).read_text(encoding="utf-8")
+        row = jsx.split(anchor)[1].split(stop)[0]
+        chips = row.split("<button")[1:]          # [0] is whatever precedes the first chip
+        face = next(c for c in chips if "Face Fix" in c)
+        qual = next(c for c in chips if "Quality Tag" in c)
+        assert "disabled={m && m.compat_face === false}" in face, rel[-1]
+        assert "disabled={m && m.compat_quality === false}" in qual, rel[-1]
+    # ...and the disarm-on-model-change patch still touches hires only.
     use = (root / "gallery" / "src" / "gen" / "useGenerate.js").read_text(encoding="utf-8")
     assert "face: false" not in use and "quality: false" not in use, \
-        "the capability gate must not disarm Face Fix or Quality Tag"
+        "a model switch must disable, never disarm, Face Fix or Quality Tag"
+    assert 'compat_face: cget(v, "enableADetailer")' in use
+    # The payload withholds what the chip shows as not applying.
+    core_js = (root / "gallery" / "src" / "gen" / "genCore.js").read_text(encoding="utf-8")
+    assert "!!s.boosters.face && !(m && m.compat_face === false)" in core_js
+    assert "!!s.boosters.quality && !(m && m.compat_quality === false)" in core_js

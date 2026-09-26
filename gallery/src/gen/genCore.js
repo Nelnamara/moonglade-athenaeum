@@ -79,16 +79,81 @@ export const STEPS_FALLBACK = 25;
 
 const d8 = (n) => Math.max(64, Math.min(4096, Math.round(n / 8) * 8));
 
+/* The model's size rule (SCOPE_2026-09-26 G1). `rule` is /api/model-version's size_rule
+   {step, lo, hi} -- the SAME rule the server's gate snaps to (moonglade_backup._snap_size),
+   in the same arithmetic, so the drawer's "→ W × H px" line is the size that is sent.
+   It is the APP'S OWN rule, not PixAI's: a size already on the step and inside [lo, hi]
+   passes untouched (2048×1152, 816×2448, 1088×1824 never move); a failing one is scaled
+   proportionally -- long side down to hi if over, then short side up to lo if under, the
+   long side winning -- each side rounded half-up to the step, then clamped into [lo, hi].
+   No rule (unknown architecture) -> the size as given. Pinned against the Python by
+   tests/test_tsubaki3_image_gate.py (all 32 aspect × size presets). */
+export function snapSize(w, h, rule) {
+  if (!rule || !(Number(rule.step) > 0)) return { width: w, height: h };
+  const step = Number(rule.step), lo = Number(rule.lo), hi = Number(rule.hi);
+  if (w % step === 0 && h % step === 0 && w >= lo && w <= hi && h >= lo && h <= hi) {
+    return { width: w, height: h };
+  }
+  const longSide = Math.max(w, h), shortSide = Math.min(w, h);
+  let s = 1.0;
+  if (longSide > hi) s = hi / longSide;
+  if (shortSide > 0 && shortSide * s < lo) s = lo / shortSide;
+  if (longSide * s > hi) s = hi / longSide;
+  const r = (x) => Math.floor(x / step + 0.5) * step;
+  return {
+    width: Math.min(hi, Math.max(lo, r(w * s))),
+    height: Math.min(hi, Math.max(lo, r(h * s))),
+  };
+}
+
 /* Resolution: custom W×H (both set) wins; else aspect scaled so the LONG edge is
-   the size select; /8 snapped, 64..4096 -- the classic dims() contract. */
+   the size select; /8 snapped, 64..4096 -- the classic dims() contract -- and then onto
+   the picked model's size rule when it has one (see snapSize). */
 export function dims(s) {
+  const rule = s.model && s.model.size_rule;
   const cw = parseInt(s.customW, 10), ch = parseInt(s.customH, 10);
-  if (cw > 0 && ch > 0) return { width: d8(cw), height: d8(ch) };
+  if (cw > 0 && ch > 0) return snapSize(d8(cw), d8(ch), rule);
   const r = s.aspect || 1;
   const size = s.size || 1024;
   return r >= 1
-    ? { width: d8(size), height: d8(size / r) }
-    : { width: d8(size * r), height: d8(size) };
+    ? snapSize(d8(size), d8(size / r), rule)
+    : snapSize(d8(size * r), d8(size), rule);
+}
+
+/* A reference on this model goes out as a CONTEXT IMAGE, not img2img (SCOPE_2026-09-26 G3):
+   /api/model-version says context_images === true only when PixAI's /features answered
+   modelType MMDIT26B_MODEL with contextImages on -- the exact condition the server's gate
+   converts on. A context image carries no strength and no negative prompt, so the STRENGTH
+   slider and the negative box read disabled while one is set, and the negative is not sent. */
+export function refIsContext(s) {
+  return !!(s && s.ref && s.model && s.model.context_images === true);
+}
+
+/* The Quality Tag chip's tooltip, read from the picked version's own tag (G4). */
+export function qualityTagTitle(m) {
+  if (m && m.compat_quality === false) return "This model version publishes no quality tag";
+  const q = m && m.quality_tag;
+  if (q && (q.prefix || q.suffix)) {
+    const bits = [];
+    if (q.prefix) bits.push("before: " + q.prefix);
+    if (q.suffix) bits.push("after: " + q.suffix);
+    return "Adds this model's own quality tag (" + bits.join(" · ") + ")";
+  }
+  return "Adds PixAI's quality tag to the prompt";
+}
+
+/* One line of text for a server receipt (`adjusted`: [{field, asked, used, why}]). `used`
+   null means the field is not sent -- read "off". A long value (a negative prompt the
+   model does not take) is shortened. Shared by the submit result line (submitTask.js) and
+   the cost badge's note line, so the two say the same thing. */
+export function adjustedText(list) {
+  const short = (v) => {
+    const t = v == null ? "off" : String(v);
+    return t.length > 24 ? t.slice(0, 23) + "…" : t;
+  };
+  return (Array.isArray(list) ? list : [])
+    .map((a) => (a && a.field) + " " + short(a && a.asked) + "→" + short(a && a.used))
+    .join(", ");
 }
 
 /* LoRA weight bounds come from the SELECTED BASE model's architecture, not the
@@ -139,6 +204,14 @@ export function goGate(s, loraCap) {
 export function buildPayload(s) {
   const { width, height } = dims(s);
   const hires = s.boosters.hires && !(s.model && s.model.compat_upscale === false);
+  // SCOPE_2026-09-26 G2/G3/G4 (owner ruling 1): what the drawer shows as not applying is
+  // not sent. The chip STATE is kept across a model switch (never disarmed) -- only the
+  // payload withholds it -- and a negative typed into a disabled box stays in the box,
+  // unsent.
+  const m = s.model;
+  const noNeg = !!(m && m.compat_neg === false) || refIsContext(s);
+  const face = !!s.boosters.face && !(m && m.compat_face === false);
+  const quality = !!s.boosters.quality && !(m && m.compat_quality === false);
   // One effective steps value for BOTH steps and the mirrored denoise steps --
   // the classic sends its ||25 fallback to both (review: sending null to one and
   // a number to the other made the upscale pass stop mirroring sampling steps).
@@ -147,7 +220,7 @@ export function buildPayload(s) {
     version_id: s.model ? s.model.version_id : "",
     model_id: s.model ? s.model.model_id : "",
     prompt: s.prompt,
-    negative: s.negative,
+    negative: noNeg ? "" : s.negative,
     width, height,
     mode: s.mode || "auto",
     steps: eff,
@@ -161,8 +234,11 @@ export function buildPayload(s) {
     upscale: hires ? MG_HIRES.ratio : null,
     upscale_denoise: hires ? MG_HIRES.denoise : null,
     upscale_denoise_steps: hires ? eff : null,
-    face_fix: !!s.boosters.face,
-    quality_tag: s.boosters.quality ? "Masterpiece" : null,
+    face_fix: face,
+    // "Masterpiece" is the ON signal and the fallback: the server swaps in the chosen
+    // version's own tag at build time (G4), and keeps this literal only when it could not
+    // read the version row.
+    quality_tag: quality ? "Masterpiece" : null,
     loras: s.loras.filter((l) => l.version_id)
       .map((l) => ({ version_id: l.version_id, weight: Number(l.weight) })),
   };

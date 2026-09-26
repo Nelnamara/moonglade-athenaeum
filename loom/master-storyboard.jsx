@@ -41,6 +41,9 @@ import {
   // called here (shotPayload/moveCardToAct look missing but are deliberate local wrappers
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
+  // The picked model's size grid for the two "→ W × H" readouts (SCOPE_2026-09-26 G1), the
+  // same step buildImgGenBody sends.
+  genStepFor,
 } from "./src/loom-mutations.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
@@ -2516,7 +2519,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               </div></div>
           </div>
           <div className="lv-dim" style={{ fontSize: 11, marginTop: 5 }}>
-            {(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
+            {(() => { const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type)); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
           </div>
           <div className="lv-row2">
             <div><label className="lv-lab">Mode</label>
@@ -5248,7 +5251,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                           onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
                       </div></div>
                   </div>
-                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
+                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type)); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
                   <div className="lm-row2">
                     <div className="lm-col"><span className="lm-microlab">Mode</span>
                       <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.mode}
