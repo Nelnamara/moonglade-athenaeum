@@ -10882,17 +10882,20 @@ _TRAIN_ARCHS = (
     ("SD_V1_MODEL",    "SD 1.5"),
 )
 
-# PixAI's curated training-base list is NOT the public generationModels catalog (the
-# owner caught this -- my first build pulled the general model-picker feed). The real
-# list is served bundled with the pricing matrix by the train page's own config, which
-# is NOT reachable through any documented endpoint or the RE harvest (probed exhaustively
-# 2026-08-06: the connection's `feed` arg is ignored, `category:"in-house"` only covers
-# SD 1.5, and the SDXL officials aren't in the public catalog at all). So this is a
-# CAPTURED SNAPSHOT of that config (owner pasted the real response 2026-08-06). It matches
-# the site exactly. To refresh when PixAI adds base models: on the train-lora page, capture
-# the config response (models[] + pricing) and replace both constants below.
+# PixAI's curated training-base list is NOT the public generationModels catalog (the owner
+# caught this -- the first build pulled the general model-picker feed). Both of PixAI's train
+# pages read it, bundled with the pricing matrix and the dataset's image rule, from the public
+# dynamic-config key `trainLoraModels`: GET <api>/config/trainLoraModels, no credential needed.
+# The 2026-08-06 note here called that config "NOT reachable through any documented endpoint";
+# it was wrong -- the key sat in the bundle all along, and the 2026-09-26 probe read it with a
+# plain GET (SCOPE_2026-09-26 E7, probe findings SURF-13 / T07). training_config() now reads it
+# live through _config_get, cached, and falls back to the snapshot below on any failure, so a
+# failed read still offers and prices every base the site offered on 2026-09-26 -- Tsubaki.3
+# (DiT.3, 100,000 credits) included. To refresh the snapshot, capture that GET and replace the
+# three constants below.
 _TRAIN_BASE_MODELS = [
     # (version_id, model_id, title, modelType, usage, cover)
+    ("2024383379556065549", "2024383378759147749", "Tsubaki.3", "MMDIT26B_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/87954a09-c834-48eb-ae0b-698cd9c7f471"),
     ("1983308862240288769", "1982880136609467518", "Tsubaki.2", "MMDIT26A_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/b03c47d1-fcfa-4502-af96-7ef049ebaade"),
     ("1894092844569363483", "1884107375027888751", "Tsubaki", "DIT7_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/98cd261b-9a65-42cd-916b-df27b5e61607"),
     ("1844843519625072849", "1844843518698131638", "Illustrious-v1.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2e0591cc-50fa-4e37-89c6-e641cf65c483"),
@@ -10915,72 +10918,292 @@ _TRAIN_BASE_MODELS = [
     ("1648918115270508582", "1648918113336934437", "Anything V5", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/e0e7b6a7-baa5-4178-adbe-36610797019f"),
 ]
 
-# Real training prices per architecture (captured with the model list 2026-08-06). PixAI
-# prices training from this matrix, keyed by modelType: `price` for a fresh dataset,
-# `reuse` when re-using an existing dataset, `retrain` for a re-run. A free-training quota
-# unit overrides all of this to 0. `originalPrice` (when present) is the pre-discount tag.
+# Training prices per architecture (the same config's pricing.pricesByModelType, 2026-09-26
+# capture). PixAI's basic trainer prices a run from this matrix, keyed by modelType: `price` for
+# a fresh dataset -- the only tier this app quotes, since it never reuses a dataset or retrains
+# -- `reuse` when re-using an existing dataset, `retrain` for a re-run. `originalPrice` (when
+# present) is the pre-discount tag and is never what a run costs. A usable free-training quota
+# overrides all of it to 0, and so does a matching training free card.
 _TRAIN_PRICING = {
     "SD_V1_MODEL":    {"price": 25000, "retrain": 25000, "reuse": 12500},
     "SDXL_MODEL":     {"price": 25000, "retrain": 25000, "reuse": 12500, "originalPrice": 75000},
     "DIT7_MODEL":     {"price": 50000, "retrain": 50000, "reuse": 25000, "originalPrice": 150000},
     "MMDIT26A_MODEL": {"price": 100000, "retrain": 50000, "reuse": 50000, "originalPrice": 200000},
+    "MMDIT26B_MODEL": {"price": 100000, "retrain": 70000, "reuse": 70000},
 }
 
+# The dataset's image rule (the same config's imageConstraints, 2026-09-26 capture): every
+# image at least minWidth wide AND minHeight high, its long side over its short side at most
+# maxAspectRatio. This is the SERVER's rule shape -- the contract's TRAINING_IMAGE_REJECTED
+# error carries exactly these fields -- and it is stricter than the basic wizard's own client
+# check (a 262,144-pixel count and a 1:3..3:1 ratio: an 800x400 image passes that and fails
+# this), so this per-side rule is the safe superset (probe T04, verifier correction).
+_TRAIN_IMAGE_CONSTRAINTS = {"minWidth": 512, "minHeight": 512, "maxAspectRatio": 3}
 
-def training_price_for_version(version_id):
-    """The base training price (fresh dataset) for the base model behind version_id, from
-    the captured pricing matrix -- or None if the version isn't a known base or its type
-    isn't priced. None means 'unknown', which the caller must treat as the unsafe case."""
-    arch = next((m[3] for m in _TRAIN_BASE_MODELS if m[0] == str(version_id)), None)
-    row = _TRAIN_PRICING.get(arch or "")
+# The architectures whose trigger words must be at least 30 characters (PixAI's own
+# TrainLoraFlowHeader rule, unchanged since August: DiT.2 and DiT.3).
+_TRAIN_LONG_TRIGGER_TYPES = ("MMDIT26A_MODEL", "MMDIT26B_MODEL")
+TRAIN_TRIGGER_MAX = 256
+TRAIN_TRIGGER_MIN_DIT = 30
+
+
+# --- PixAI's public dynamic config (GET <api>/config/<key>) --------------------------------
+# The site reads a handful of keys off this road (trainLoraModels, trainLoraStatus, constants,
+# ...). It sits OUTSIDE the /v2 REST routes, so tests/conftest.py's _rest_get/_rest_post block
+# never covered it: _config_get is the ONE reader, and an autouse conftest fixture blocks it, so
+# no test can reach PixAI through it. Anonymous (no credential is sent -- the 2026-09-26 probe
+# read both training keys with a plain GET), short timeout, single attempt, read-only.
+CONFIG_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/config"
+# Cached per key, the _model_profiles discipline: an hour for an answer, a minute for a failure
+# (so an unreachable key is retried once a minute, not on every call). conftest clears it.
+_CONFIG_TTL = 3600.0
+_CONFIG_FAIL_TTL = 60.0
+_config_cache = {}                           # key -> (fetched_at_monotonic, dict|None)
+
+
+def _config_get(key, timeout=10):
+    """GET one public dynamic-config key. Returns the parsed JSON; raises PixAIError on a
+    non-2xx or a transport failure. Callers go through _cached_config, which fails soft."""
+    try:
+        r = requests.get(CONFIG_API_BASE + "/" + str(key), timeout=timeout)
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    except requests.RequestException as e:
+        raise PixAIError("config {} unreachable: {}".format(key, e))
+    if not r.ok:
+        raise PixAIError("config {} -> HTTP {}".format(key, r.status_code))
+    return r.json()
+
+
+def _cached_config(key, ttl=_CONFIG_TTL):
+    """The config dict for `key`, or None when it could not be read (cached for
+    _CONFIG_FAIL_TTL) or did not answer with a JSON object. Never raises."""
+    now = time.monotonic()
+    hit = _config_cache.get(key)
+    if hit is not None and (now - hit[0]) < (ttl if hit[1] is not None else _CONFIG_FAIL_TTL):
+        return hit[1]
+    try:
+        data = _config_get(key)
+    except Exception:                                   # noqa: BLE001 -- fail soft to today
+        data = None
+    if not isinstance(data, dict):
+        data = None
+    _config_cache[key] = (now, data)
+    return data
+
+
+def _train_models_from(raw):
+    """The live config's models[] as the app's row dicts, or None when it has none usable."""
+    rows = (raw or {}).get("models") if isinstance(raw, dict) else None
+    out = []
+    for m in rows if isinstance(rows, list) else []:
+        if not isinstance(m, dict):
+            continue
+        vid, mtype = str(m.get("versionId") or "").strip(), str(m.get("modelType") or "").strip()
+        if not vid or not mtype:
+            continue
+        out.append({"version_id": vid, "model_id": str(m.get("modelId") or ""),
+                    "title": str(m.get("modelName") or vid), "model_type": mtype,
+                    "usage": str(m.get("usage") or ""), "cover": str(m.get("coverUrl") or "")})
+    return out or None
+
+
+def _train_pricing_from(raw):
+    """The live config's pricing.pricesByModelType, integers only, or None when absent."""
+    table = (((raw or {}).get("pricing") or {}).get("pricesByModelType")
+             if isinstance(raw, dict) else None)
+    if not isinstance(table, dict):
+        return None
+    out = {}
+    for mtype, row in table.items():
+        if not isinstance(row, dict):
+            continue
+        clean = {}
+        for k in ("price", "retrain", "reuse", "originalPrice"):
+            try:
+                if row.get(k) is not None:
+                    clean[k] = int(row[k])
+            except (TypeError, ValueError):
+                pass
+        if "price" in clean:
+            out[str(mtype)] = clean
+    return out or None
+
+
+def _train_constraints_from(raw):
+    """imageConstraints off the live config, each field falling back on its own to the
+    snapshot's when absent or not a positive number."""
+    live = (raw or {}).get("imageConstraints") if isinstance(raw, dict) else None
+    out = dict(_TRAIN_IMAGE_CONSTRAINTS)
+    for k in out:
+        try:
+            v = float((live or {}).get(k))
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            out[k] = v
+    return out
+
+
+def training_config():
+    """PixAI's basic-training config: {models, pricing, image_constraints, live}.
+
+    Read live from /config/trainLoraModels (cached, see _cached_config) and falling back,
+    piece by piece, to the 2026-09-26 snapshot above: a failed read, or a body missing a
+    piece, never leaves the panel with nothing to offer or price. `live` says whether the
+    model list itself came off the wire. Read-only; never raises."""
+    raw = _cached_config("trainLoraModels")
+    live_models = _train_models_from(raw)
+    models = live_models or [
+        {"version_id": v, "model_id": mid, "title": title, "model_type": mtype,
+         "usage": usage, "cover": cover}
+        for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS]
+    pricing = _train_pricing_from(raw) or {k: dict(v) for k, v in _TRAIN_PRICING.items()}
+    return {"models": models, "pricing": pricing,
+            "image_constraints": _train_constraints_from(raw), "live": bool(live_models)}
+
+
+def training_model_type(version_id, config=None):
+    """The architecture (modelType) of a training base, by VERSION id; None if unknown."""
+    cfg = config or training_config()
+    return next((m["model_type"] for m in cfg["models"]
+                 if m["version_id"] == str(version_id)), None)
+
+
+def training_price_for_version(version_id, config=None):
+    """The training price (fresh dataset: `price`, never originalPrice) for the base behind
+    version_id, from the live config (snapshot fallback) -- or None if the version isn't a
+    known base or its type isn't priced. None means 'unknown', which the caller must treat as
+    the unsafe case. The quote and the confirm both read it through the same cache, so they
+    cannot disagree within the cache's hour."""
+    cfg = config or training_config()
+    row = cfg["pricing"].get(training_model_type(version_id, cfg) or "")
     return row.get("price") if row else None
 
 
-def list_trainable_base_models(session=None, per_type=None):
+def default_training_base(config=None):
+    """The base the panel pre-selects: the first SDXL row of the list, else the first row --
+    PixAI's own default (`e.find(SdxlModel) ?? e[0]`). Never "the first group's first model":
+    with Tsubaki.3 in the list that would pre-select the 100,000-credit base."""
+    cfg = config or training_config()
+    offered = [m for m in cfg["models"] if m["model_type"] in dict(_TRAIN_ARCHS)]
+    pick = next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None) or \
+        (offered[0] if offered else None)
+    return pick["version_id"] if pick else ""
+
+
+def list_trainable_base_models(session=None, per_type=None, config=None):
     """The base models a LoRA can be trained on, grouped by architecture -- the train
-    page's Model Type -> Model Theme picker. Served from PixAI's own curated config (see
-    _TRAIN_BASE_MODELS' note). `session` is accepted but unused: the list is a captured
-    snapshot, not a live query, because the real config endpoint isn't reachable. Each
-    model dict: {version_id, model_id, title, cover, usage}. version_id is what
-    `submit_training(base_model_id=...)` takes."""
+    page's Model Type -> Model Theme picker, in _TRAIN_ARCHS order. Served from PixAI's own
+    config (training_config: live, snapshot fallback); `session` is accepted but unused, as
+    the config read is anonymous. Each model dict: {version_id, model_id, title, cover, usage}.
+    version_id is what `submit_training(base_model_id=...)` takes. An architecture this app has
+    no label for is left out, as the site's own chip list does."""
+    cfg = config or training_config()
     groups = []
     for arch, label in _TRAIN_ARCHS:
-        models = [
-            {"version_id": v, "model_id": mid, "title": title, "cover": cover, "usage": usage}
-            for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS if mtype == arch
-        ]
+        models = [{"version_id": m["version_id"], "model_id": m["model_id"], "title": m["title"],
+                   "cover": m["cover"], "usage": m["usage"]}
+                  for m in cfg["models"] if m["model_type"] == arch]
         if models:
-            price = (_TRAIN_PRICING.get(arch) or {}).get("price")
+            price = (cfg["pricing"].get(arch) or {}).get("price")
             groups.append({"arch": arch, "label": label, "models": models, "price": price})
     return groups
 
 
 def training_free_quota(session):
-    """How many FREE LoRA trainings the account has left. PixAI tracks these as a QUOTA
-    under the currency `free::user_lora_training` -- NOT as a kaisuuken free card (the
-    card pool is generation-only, which is why /v2/kaisuuken/summary never lists one).
-    Read-only. Returns an int; 0 on any failure, which is the safe direction: 0 means
-    'treat this as paid', never 'assume it's free'."""
+    """How many FREE LoRA trainings this account can use right now -- the membership quota
+    under the currency `free::user_lora_training`, counted ONLY for a member. Read-only.
+
+    PixAI's own trainer counts the quota only when `me.membership.tier != null` (tier 0
+    counts), and prices the run in full otherwise (probe T09): so this returns quotaAmount when
+    the membership tier -- read in the SAME query as the quota -- is present, and 0 when it is
+    absent, null, or the read failed. 0 is the safe direction: it means 'treat this as paid',
+    never 'assume it's free', so the paid confirm's accept_credit_cost applies.
+
+    The quota is ONE of the two ways a training runs free. The other is a training free card
+    (kaisuuken type `training-task`): PixAI's site checks for one too and attaches it --
+    match_training_kaisuuken. (Owner ruling 4, 2026-09-26: the 2026-07-26 note "the free
+    trainings ARE cards" and the old docstring here, "the quota, NOT a card", were each half
+    right.)"""
     try:
         d = gql_adhoc(session,
-                      "query($currency:String!){ me { id quotaAmount(currency:$currency) } }",
+                      "query($currency:String!){ me { id membership { tier }"
+                      " quotaAmount(currency:$currency) } }",
                       {"currency": _TRAIN_FREE_CURRENCY}) or {}
-        return int(((d.get("me") or {}).get("quotaAmount")) or 0)
-    except (PixAIError, TypeError, ValueError):
+        me = d.get("me") or {}
+        membership = me.get("membership")
+        tier = membership.get("tier") if isinstance(membership, dict) else None
+        if tier is None:
+            return 0
+        return max(0, int(me.get("quotaAmount") or 0))
+    except (PixAIError, requests.RequestException, TypeError, ValueError, AttributeError):
         return 0
 
 
+def match_training_kaisuuken(session, base_version_id, raise_on_error=False):
+    """The read-only training free-card check: /v2/kaisuuken/check with PixAI's own training
+    shape {type: "training-task", baseModelId: <base VERSION id>, version: 2} (the site's
+    useKaisuukenMatch). Same result and coverage rules as match_kaisuuken; nothing is
+    consumed until createTrainingTask carries the returned id."""
+    return match_kaisuuken(session, None, enrich=True, raise_on_error=raise_on_error,
+                           training_base_model_id=base_version_id)
+
+
+# The training pause switch's cache clock: PixAI's own pages poll it once a minute.
+_TRAIN_STATUS_TTL = 60.0
+
+
+def training_pause():
+    """None when LoRA training is open -- or when the pause switch could not be read, which
+    proceeds exactly as before this check existed -- else {"resumes_at": iso-or-""}.
+
+    PixAI's public /config/trainLoraStatus: paused when `state == "PAUSED"` or
+    `disabled == true` (its trainLoraStatus module); `resumesAt` is named only when it parses
+    to a time still in the future. While paused the site redirects both train pages to a
+    notice; this app refuses the submit instead. Read-only, cached for a minute."""
+    raw = _cached_config("trainLoraStatus", ttl=_TRAIN_STATUS_TTL)
+    if not isinstance(raw, dict):
+        return None
+    if not (raw.get("state") == "PAUSED" or raw.get("disabled") is True):
+        return None
+    resumes = ""
+    ra = raw.get("resumesAt")
+    if isinstance(ra, str) and ra.strip():
+        try:
+            when = datetime.datetime.fromisoformat(ra.strip().replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=datetime.timezone.utc)
+            if when > datetime.datetime.now(datetime.timezone.utc):
+                resumes = when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        except ValueError:
+            pass
+    return {"resumes_at": resumes}
+
+
 def normalize_trigger_words(text):
-    """PixAI's own trigger-word rules, from the train-LoRA form: no leading/trailing
-    spaces and no consecutive spaces (the form states both). Returns the cleaned string."""
-    return " ".join(str(text or "").split())
+    """PixAI's own trigger-word normalizer, in its order (the train page's he()): runs of
+    CR/LF become ", "; any whitespace run becomes one space; a run of commas with spaces
+    between them becomes one ", "; lowercase; then leading and trailing commas and whitespace
+    are stripped. The string validate_training checks -- and the one submitted -- is this."""
+    s = str(text or "")
+    s = re.sub(r"[\r\n]+", ", ", s)
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r",\s*(?:,\s*)+", ", ", s)
+    s = s.lower()
+    return re.sub(r"^[,\s]+|[,\s]+$", "", s)
 
 
 def validate_training(base_model_id, media_ids, title, trigger_words, category,
-                      training_task_id=""):
+                      training_task_id="", config=None):
     """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
     refused here instead of burning a round trip -- or worse, a free-training quota unit.
-    Returns the normalized trigger words. Raises PixAIError with a plain-language reason."""
+    Returns the normalized trigger words. Raises PixAIError with a plain-language reason.
+
+    Trigger words follow PixAI's rule on the NORMALIZED string: empty refused, over 256
+    characters refused, and under 30 refused on a DiT.2 / DiT.3 base (MMDIT26A / MMDIT26B).
+    The image rule needs each image's size, which this has no way to know -- the caller runs
+    check_training_images over its own catalog."""
     # base_model_id is the model VERSION id (list_trainable_base_models' version_id) --
     # PixAI's baseModelId input takes the version, not the model, id.
     if not base_model_id:
@@ -10997,19 +11220,71 @@ def validate_training(base_model_id, media_ids, title, trigger_words, category,
     tw = normalize_trigger_words(trigger_words)
     if not tw:
         raise PixAIError("trigger words are required -- they're how you summon the LoRA")
-    if len(tw) > 200:
-        raise PixAIError("trigger words are too long")
+    if len(tw) > TRAIN_TRIGGER_MAX:
+        raise PixAIError("trigger words are too long -- %d characters at most, yours are %d"
+                         % (TRAIN_TRIGGER_MAX, len(tw)))
+    if training_model_type(base_model_id, config) in _TRAIN_LONG_TRIGGER_TYPES \
+            and len(tw) < TRAIN_TRIGGER_MIN_DIT:
+        raise PixAIError("trigger words must be at least %d characters on a DiT.2 or DiT.3 "
+                         "base -- yours are %d" % (TRAIN_TRIGGER_MIN_DIT, len(tw)))
     if str(category or "") not in TRAIN_CATEGORIES:
         raise PixAIError("pick a category (%s)" % "/".join(TRAIN_CATEGORIES))
     return tw
+
+
+def check_training_images(media_ids, dims, constraints=None):
+    """Hold each dataset image to PixAI's training image rule (training_config's
+    image_constraints: each side at least minWidth / minHeight, long side over short side at
+    most maxAspectRatio). `dims` is {media_id: (width, height)} from the caller's catalog.
+
+    Returns (rejected, unchecked): `rejected` is [{media_id, width, height, why}] for images
+    the rule refuses; `unchecked` lists the ids whose size is unknown (not in `dims`, or not
+    positive numbers) -- those are NOT passed as checked, the caller says they were not.
+
+    This app REFUSES a run holding a rejected image, naming each one. PixAI's own basic
+    wizard silently drops them and trains on the rest; refusing is deliberate here, so a paid
+    run never trains on a different dataset than the one picked."""
+    c = dict(_TRAIN_IMAGE_CONSTRAINTS)
+    c.update(constraints or training_config()["image_constraints"])
+    min_w, min_h, max_ar = float(c["minWidth"]), float(c["minHeight"]), float(c["maxAspectRatio"])
+    rejected, unchecked = [], []
+    for mid in [str(m) for m in (media_ids or []) if str(m).strip()]:
+        wh = (dims or {}).get(mid)
+        try:
+            w, h = float(wh[0]), float(wh[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            w = h = 0.0
+        if not (w > 0 and h > 0):
+            unchecked.append(mid)
+            continue
+        if w < min_w or h < min_h:
+            why = "smaller than %dx%d" % (min_w, min_h)
+        elif max(w, h) / min(w, h) > max_ar:
+            why = "longer than %g:1" % max_ar
+        else:
+            continue
+        rejected.append({"media_id": mid, "width": int(w), "height": int(h), "why": why})
+    return rejected, unchecked
+
+
+def describe_rejected_training_images(rejected):
+    """The refusal's own words for check_training_images' `rejected` list."""
+    shown = ", ".join("%s (%dx%d, %s)" % (r["media_id"], r["width"], r["height"], r["why"])
+                      for r in rejected[:8])
+    more = " and %d more" % (len(rejected) - 8) if len(rejected) > 8 else ""
+    return ("PixAI won't train on %d of these image%s -- remove %s and try again: %s%s."
+            % (len(rejected), "" if len(rejected) == 1 else "s",
+               "it" if len(rejected) == 1 else "them", shown, more))
 
 
 def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
                     training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
     """Submit a real LoRA training task to PixAI (`createTrainingTask`).
 
-    SPENDS unless the account has free-training quota left (see training_free_quota) --
-    so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for exactly the reason
+    SPENDS unless the account has usable free-training quota left (training_free_quota) or
+    the caller attaches a matching training free card (`kaisuuken_id`, from
+    match_training_kaisuuken) -- so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for
+    exactly the reason
     every other spend path does. A lost response after the server accepted the task
     would, on retry, start a SECOND training and consume a second quota unit (or a real
     credit charge, which for training is large). _check_read_only gates it like every
@@ -12147,7 +12422,8 @@ def _target_model_id(parameters):
 _KAISUUKEN_CHECK_VERSION = 2
 
 
-def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
+def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False, *,
+                    training_base_model_id=""):
     """POST /v2/kaisuuken/check (protocol version 2, see _KAISUUKEN_CHECK_VERSION) with a
     generation's `parameters` and return the best matching TICKET as
       {id, expiresAt, templateId, total, consumeAmount, covered, balance_unknown, name?}
@@ -12169,9 +12445,21 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     generation's own model when more than one template is eligible -- so an Edit gen spends
     an Edit card, not a same-expiry Reference card that merely also matched -- and (b) attach
     the card's human `name` for honest UI ("Edit Pro Only covers this", not a guess). The
-    default (False) keeps the original single-call behavior for every existing caller."""
-    if not parameters:
+    default (False) keeps the original single-call behavior for every existing caller.
+
+    `training_base_model_id` switches the body to PixAI's TRAINING check (the site's
+    useKaisuukenMatch, owner ruling 4, 2026-09-26): {type: "training-task", baseModelId:
+    <the base VERSION id>, version: 2}, with no `parameters` at all. The answer is read with
+    exactly the same rules. match_training_kaisuuken is the named way in."""
+    training_base = str(training_base_model_id or "").strip()
+    if not parameters and not training_base:
         return None
+    if training_base:
+        body = {"type": "training-task", "baseModelId": training_base,
+                "version": _KAISUUKEN_CHECK_VERSION}
+    else:
+        body = {"type": "generation-task", "parameters": parameters,
+                "version": _KAISUUKEN_CHECK_VERSION}
     try:
         # `version: 2` is load-bearing (issue #15, live-verified 2026-08-16). Without it PixAI
         # runs its v1 matcher, which knows only single-ticket cards and answers `matches: []`
@@ -12180,9 +12468,7 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
         # the multi-ticket match plus `consumeAmount` = tickets this job COSTS. NOTE the server
         # does NOT filter by balance: a 15s job comes back matched even when held < needed, so
         # coverage is decided HERE (see `covered` below), the one place every caller reads it.
-        data = _rest_post(session, "/kaisuuken/check",
-                          {"type": "generation-task", "parameters": parameters,
-                           "version": _KAISUUKEN_CHECK_VERSION}) or {}
+        data = _rest_post(session, "/kaisuuken/check", body) or {}
     except (PixAIError, ValueError):
         if raise_on_error:
             raise
@@ -12238,7 +12524,7 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     pool = covered_pool or matches
     # (A) When several cards are eligible, prefer the one whose model IS this generation's
     # model; fall back to the full set if none match (or we didn't enrich).
-    want = _target_model_id(parameters)
+    want = training_base or _target_model_id(parameters)
     if enrich and want and len(pool) > 1:
         preferred = [mt for mt in pool
                      if str((by_tid.get(mt.get("templateId")) or {}).get("model_version_id") or "") == want]

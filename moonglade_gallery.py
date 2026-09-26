@@ -1130,6 +1130,28 @@ def task_media(db_path, task_id):
         return [dict(r) for r in rows]
 
 
+def media_dims(db_path, media_ids):
+    """{media_id: (width, height)} for the given ids this catalog knows a positive size for,
+    as ints; an id with no row, or a blank / zero / unreadable size, is simply absent. The
+    LoRA-training image rule (core.check_training_images) reads it and lists an absent id as
+    not checked. Chunked for SQLite's bound-parameter cap."""
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    out = {}
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), _TASK_CHUNK):
+            chunk = ids[i:i + _TASK_CHUNK]
+            for r in con.execute(
+                    "SELECT media_id, width, height FROM catalog WHERE media_id IN ({})"
+                    .format(",".join("?" * len(chunk))), chunk):
+                try:
+                    w, h = int(float(r["width"] or 0)), int(float(r["height"] or 0))
+                except (TypeError, ValueError):
+                    continue
+                if w > 0 and h > 0:
+                    out[str(r["media_id"])] = (w, h)
+    return out
+
+
 def published_delete_note(published, unchecked=False, tasks=1):
     """The delete dialogs' sentence about published artwork (SCOPE_2026-09-26 E5), or "".
 
@@ -15767,8 +15789,10 @@ def create_app(out_dir: Path):
     @app.route("/api/train/quota")
     @tier(LOGIN)
     def api_train_quota():
-        """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
-        NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
+        """How many FREE LoRA trainings this account can use (PixAI's membership quota
+        `free::user_lora_training`, counted only for a member -- core.training_free_quota).
+        A training free card is the other free road; the submit preview checks for one per
+        base (core.match_training_kaisuuken). Read-only, free."""
         try:
             core, session = _gen_session()
             return jsonify({"free_trainings": core.training_free_quota(session)})
@@ -15782,11 +15806,19 @@ def create_app(out_dir: Path):
         """Trainable base models grouped by architecture (the train panel's Model Type ->
         Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
         needs, its real title, and a cover -- fixing the earlier build, which used the
-        generic market search and rendered raw model ids with no architecture grouping."""
+        generic market search and rendered raw model ids with no architecture grouping.
+
+        Off PixAI's own training config (core.training_config: /config/trainLoraModels,
+        cached, the 2026-09-26 snapshot as fallback), so Tsubaki.3 (DiT.3) is offered and
+        priced. `default_version_id` is the base the panel pre-selects -- the first SDXL
+        row, PixAI's own default (SCOPE_2026-09-26 E7) -- not the first group's first
+        model, which with DiT.3 listed first would be the 100,000-credit base."""
         try:
             core, session = _gen_session()
-            return jsonify({"groups": core.list_trainable_base_models(),
-                            "pricing": core._TRAIN_PRICING})
+            cfg = core.training_config()
+            return jsonify({"groups": core.list_trainable_base_models(config=cfg),
+                            "pricing": cfg["pricing"],
+                            "default_version_id": core.default_training_base(cfg)})
         except Exception as e:
             return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -15835,16 +15867,31 @@ def create_app(out_dir: Path):
 
         Without `confirm: true` this makes NO mutating call: it validates the request
         with the site's own rules and reports the real cost position (how many free
-        trainings remain, whether this one is free).
+        trainings remain, whether a training free card covers it, what it costs).
 
-        COST SAFETY. PixAI prices training CLIENT-side from a matrix, so there is no
-        server value to quote (documented in ../moonglade-internal/private/GENERATOR_SURFACE.md). That gives
-        exactly two honest states:
-          * free quota > 0  -> this training is FREE and consumes one quota unit.
-          * free quota == 0 -> it costs real credits, and this app CANNOT say how many.
-            The confirmed call is then REFUSED unless the caller also sends
-            `accept_credit_cost: true`, so nobody spends a large unknown amount by
-            clicking the same button they used when it was free.
+        VALIDATION (SCOPE_2026-09-26 E7), before anything else: PixAI's trigger-word rules
+        on the normalized string (core.validate_training), and its image rule over this
+        catalog's own image sizes (core.check_training_images). An image the rule refuses
+        refuses the whole run, named; an image whose size the catalog does not know is
+        listed as not checked, never passed as checked.
+
+        COST. PixAI's train pages price a run from the same config the base list comes
+        from (core.training_config -- `price` for a fresh dataset), so the app quotes the
+        real number now; the "cannot say how many" this used to say stopped being true on
+        2026-09-26. A run is FREE when either
+          * the account is a member (membership tier present, 0 included) with free-training
+            quota left -- it consumes one quota unit; or
+          * a training free card matches the base (core.match_training_kaisuuken, checked
+            only when the quota does not cover the run) -- its id rides the submit.
+        Anything else charges credits, and the confirmed call is REFUSED unless the caller
+        also sends `accept_credit_cost: true` -- including a run whose price could not be
+        quoted -- so nobody spends by clicking the button they used when it was free. A
+        card check that FAILS on the confirm refuses rather than guessing the run is paid
+        (the same rule the generation spend path follows).
+
+        PAUSE. On the confirm, after validation and before the submit, PixAI's
+        /config/trainLoraStatus switch is read (core.training_pause); a paused service
+        refuses, naming when it expects to resume. A failed read proceeds as before.
         READ_ONLY still refuses the confirmed form inside core. Explicit-token CSRF."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
@@ -15859,29 +15906,78 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
 
+        cfg = core.training_config()
         try:
-            tw = core.validate_training(base_model_id, media_ids, title, trigger, category)
+            tw = core.validate_training(base_model_id, media_ids, title, trigger, category,
+                                        config=cfg)
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+        rejected, unchecked = core.check_training_images(
+            media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
+        if rejected:
+            return jsonify({"error": core.describe_rejected_training_images(rejected),
+                            "rejected_images": rejected}), 400
+        image_note = ("" if not unchecked else
+                      "%d image%s could not be checked against PixAI's size rule (this library "
+                      "doesn't know %s size)." % (len(unchecked),
+                                                  "" if len(unchecked) == 1 else "s",
+                                                  "its" if len(unchecked) == 1 else "their"))
+        confirming = bool(body.get("confirm"))
 
         free_left = core.training_free_quota(session)
-        is_free = free_left > 0
-        price = core.training_price_for_version(base_model_id)   # credits, or None if unknown
-        if is_free:
+        free_by_quota = free_left > 0
+        # credits, or None; the same cached config the validation above just read
+        price = core.training_price_for_version(base_model_id)
+        # The training free card (owner ruling 4): checked only when the quota does not
+        # already make the run free. Read-only; the card is spent only by the submit that
+        # carries its id. On the confirm a FAILED check refuses (see the docstring).
+        card, card_checked = None, True
+        if not free_by_quota:
+            try:
+                best = core.match_training_kaisuuken(session, base_model_id,
+                                                     raise_on_error=True)
+            except Exception as e:                    # noqa: BLE001
+                best, card_checked = None, False
+                if confirming:
+                    return jsonify({"error": "Lost to the Void -- the free-card check didn't "
+                                             "come back before submitting, so nothing was "
+                                             "spent. Wait a moment and try again. (%s)"
+                                             % _redact_host_paths(str(e))[:160]}), 502
+            if best and best.get("id") and core.card_covers(best):
+                card = best
+        free_by_card = card is not None
+        is_free = free_by_quota or free_by_card
+        if free_by_quota:
             cost_note = "Free — uses 1 of your %d free trainings." % free_left
+        elif free_by_card:
+            cost_note = ("Free — your training free card%s covers this base, and it is "
+                         "used up by this run." % (" (%s)" % card["name"]
+                                                   if card.get("name") else ""))
         elif price is not None:
-            cost_note = ("No free trainings left — this base costs %s credits to train."
-                         % "{:,}".format(price))
+            cost_note = ("No free trainings or training free card for this base — it costs "
+                         "%s credits to train." % "{:,}".format(price))
         else:
-            cost_note = ("No free trainings left, and this app can't price this base — "
-                         "check the cost on PixAI before going ahead.")
-        if not bool(body.get("confirm")):
+            cost_note = ("No free trainings or training free card for this base, and PixAI's "
+                         "price list has no price for it — the amount could not be quoted.")
+        if not free_by_quota and not card_checked:
+            cost_note += " (Your free cards couldn't be checked just now.)"
+        if not confirming:
             return jsonify({
                 "preview": True, "image_count": len(media_ids),
                 "title": title.strip(), "trigger_words": tw, "category": category,
                 "free_trainings_left": free_left, "is_free": is_free,
+                "free_by": "quota" if free_by_quota else ("card" if free_by_card else None),
+                "card": ({"name": card.get("name"), "expires": card.get("expiresAt")}
+                         if card else None),
                 "price": price, "cost_note": cost_note,
+                "unchecked_images": unchecked, "image_note": image_note,
             })
+        pause = core.training_pause()
+        if pause is not None:
+            return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing was "
+                                     "submitted. Runs already training carry on." %
+                                     (" -- it expects to be back around %s" % pause["resumes_at"]
+                                      if pause.get("resumes_at") else "")}), 409
         if not is_free and not bool(body.get("accept_credit_cost")):
             return jsonify({"error": "This training charges credits (%s). Re-send with "
                                      "accept_credit_cost to proceed."
@@ -15889,7 +15985,8 @@ def create_app(out_dir: Path):
                                         else "amount unknown")}), 402
         try:
             task = core.submit_training(session, base_model_id, media_ids, title, trigger,
-                                        category)
+                                        category,
+                                        kaisuuken_id=(card["id"] if free_by_card else ""))
         except Exception as e:
             return jsonify({"error": str(e)}), 502
         # The Academy (loras_trained): a LoRA training this server actually submitted.
@@ -15899,7 +15996,9 @@ def create_app(out_dir: Path):
         except Exception:
             pass
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
-                        "free_trainings_left": max(0, free_left - 1) if is_free else 0})
+                        "used_card": free_by_card,
+                        "free_trainings_left": (max(0, free_left - 1) if free_by_quota
+                                                else free_left)})
 
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 

@@ -1193,6 +1193,11 @@ def _train_setup(tmp_path, monkeypatch, free_quota=9):
     calls = []
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "training_free_quota", lambda s: free_quota)
+    # No training free card by default (owner ruling 4, SCOPE_2026-09-26 E7: the route now
+    # checks for one whenever the quota does not cover the run). Stubbed here on purpose --
+    # conftest's REST block would otherwise make the confirm's card check FAIL, which
+    # refuses the submit. tests/test_training_parity.py covers the card itself.
+    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
 
     def _submit(session, *a, **kw):
         calls.append(("submit", a, kw))
@@ -1231,9 +1236,10 @@ def test_train_confirmed_submits_when_free(tmp_path, monkeypatch):
 
 
 def test_train_refuses_to_spend_credits_without_explicit_acceptance(tmp_path, monkeypatch):
-    """With no free quota the cost is real AND unquotable (PixAI prices client-side),
-    so the same click that was free must NOT silently spend. 402 until the caller
-    explicitly accepts."""
+    """With no free quota (and no training free card) the cost is real, so the same click
+    that was free must NOT silently spend. 402 until the caller explicitly accepts. (The
+    price is quotable now -- PixAI's own training config -- but acceptance is still asked
+    for every paid run, SCOPE_2026-09-26 E7.)"""
     cli, calls = _train_setup(tmp_path, monkeypatch, free_quota=0)
     # a REAL base model version -> the preview quotes its real price (Illustrious = SDXL = 25k)
     body = dict(_GOOD_TRAIN, base_model_id="1844843519625072849")
@@ -1282,7 +1288,10 @@ def test_list_trainable_base_models_is_the_curated_snapshot_grouped_by_arch():
     grouped by architecture with the friendly labels and each model's VERSION id."""
     groups = core.list_trainable_base_models()
     labels = [g["label"] for g in groups]
-    assert labels == ["DiT.2", "DiT.1", "SDXL", "SD 1.5"]     # DiT.3 has no models -> dropped
+    # DiT.3 is offered ON PURPOSE since SCOPE_2026-09-26 E7 (probe T06): PixAI's own training
+    # config lists Tsubaki.3 (MMDIT26B) at 100,000 credits, so the snapshot fallback does too.
+    assert labels == ["DiT.3", "DiT.2", "DiT.1", "SDXL", "SD 1.5"]
+    assert core.training_price_for_version("2024383379556065549") == 100000   # Tsubaki.3
     sdxl = next(g for g in groups if g["label"] == "SDXL")
     titles = [m["title"] for m in sdxl["models"]]
     assert "Illustrious-v1.0" in titles and "NoobAI XL" in titles   # the real curated set

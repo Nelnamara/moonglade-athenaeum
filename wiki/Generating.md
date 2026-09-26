@@ -102,6 +102,31 @@ you have a base model selected the list is still limited to LoRAs that fit it.
 rather than a fault — with a base model selected, only LoRAs matching its architecture are
 shown. Clear the base model to see all of them.
 
+### Training your own LoRA
+
+**Train** in the side rail (on the phone: **Train a LoRA**) sends a basic LoRA training run to
+PixAI. It spends, so it previews first and only starts when you confirm.
+
+- **Base models** are PixAI's own training list — DiT.3 (Tsubaki.3), DiT.2 (Tsubaki.2), DiT.1,
+  SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
+  PixAI can't be reached. The panel starts on the first SDXL base, the same one PixAI's own
+  page starts on.
+- **What it costs** is shown before you start. A run is free when your membership still has
+  free trainings left (they only count while you are a member), or when you hold a training
+  free card for that base — the card is used up by the run. Otherwise the panel quotes PixAI's
+  own price for that base and asks you to tick that you will spend it.
+- **Trigger words** are tidied the way PixAI tidies them before they are sent: line breaks
+  become commas, extra spaces and repeated commas are removed, and everything is lowercased.
+  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30.
+- **Images**: between 10 and 100, each at least 512 pixels on both sides and no longer than
+  3:1. If an image fails that rule the run is refused and the image is named — PixAI's own
+  page quietly drops such images and trains on the rest, and this app would rather not train
+  on a different set than the one you picked. An image whose size your library doesn't know
+  is listed as not checked.
+- **If PixAI has paused new training runs**, starting one is refused (nothing is spent) and,
+  when PixAI says, the message names when it expects to be back. Runs already training carry
+  on.
+
 ## On the CLI
 
 ```bash

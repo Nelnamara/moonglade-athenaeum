@@ -229,6 +229,23 @@ def _no_live_card_network(monkeypatch):
     monkeypatch.setattr(core, "USER_ID", "0", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_config(monkeypatch):
+    """PixAI's public dynamic config (GET <api>/config/<key> -- trainLoraModels,
+    trainLoraStatus) sits OUTSIDE the /v2 routes `_no_live_card_network` blocks, so it gets
+    its own block (SCOPE_2026-09-26 E7): core._config_get is the ONE reader of that road and
+    raises here, so every caller falls back exactly as it does when PixAI is unreachable
+    (training_config -> the snapshot, training_pause -> open). A test that wants an answer
+    patches core._config_get itself. The per-key cache is cleared around every test so one
+    test's config cannot answer another's."""
+    def _blocked(*a, **k):
+        raise core.PixAIError("live /config blocked in tests")
+    monkeypatch.setattr(core, "_config_get", _blocked)
+    core._config_cache.clear()
+    yield
+    core._config_cache.clear()
+
+
 # Captured at import, before `_no_live_card_network` (below) swaps them for a raising
 # stub. The `pixai` fixture puts the real delegates back so a /v2 call reaches the FAKE
 # and is refused BY PATH there, rather than dying on a generic "blocked" message.
