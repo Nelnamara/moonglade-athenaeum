@@ -113,7 +113,16 @@ describe("receipts -- used:null reads 'off'", () => {
     assert.match(sub, /const adj = adjustedText\(d\.adjusted\);/);
     const badge = read("../../gallery/src/components/CostBadge.jsx");
     assert.match(badge, /adjustedText\(d\.adjusted\)/);
-    assert.match(badge, /\{m\.adj \? <span className="mgc-sub" title=\{m\.adj\}>\{m\.adj\}<\/span> : null\}/);
+    // In the EXISTING note line, never a line of its own (review F5): the block form's one
+    // mgc-sub note carries it (after the expiry / card-short note, or in the empty slot), and
+    // the stack form's second line carries it before the balance.
+    assert.match(badge, /sub \? \{ text: sub\.text \+ " · " \+ adj, title: sub\.title \+ " · " \+ adj/);
+    assert.match(badge, /: \{ text: adj, title: adj, days: null \}\)/);
+    assert.match(badge, /\{m\.noteLine \? <span className="mgc-sub" title=\{m\.noteLine\.title\}>\{m\.noteLine\.text\}<\/span> : null\}/);
+    assert.match(badge, /if \(adj\) parts\.push\(adj\);[^\n]*\n\s*if \(balanceN != null\) parts\.push/);
+    assert.doesNotMatch(badge, /\{m\.adj \?/, "no sibling span for the receipt");
+    assert.equal((badge.match(/className="mgc-sub"/g) || []).length, 3,
+      "the chip's, the stack's card-short and the block form's note -- no fourth");
   });
 });
 
