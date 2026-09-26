@@ -309,6 +309,19 @@ def test_delete_preview_rows_expands_each_task_to_its_whole_batch(tmp_path):
     assert [r["media_id"] for r in blast["sel_rows"]] == ["a1", "imp"]
 
 
+def test_the_delete_verbs_carry_artwork_id_for_the_published_count(tmp_path):
+    """The delete dialogs' published-artwork fallback (SCOPE_2026-09-26 E5) reads the
+    catalog's artwork_id over a task's WHOLE membership -- both verbs must hand it over."""
+    db = _seed(tmp_path, [
+        _row(media_id="a1", task_id="T1", filename="a1.png"),
+        _row(media_id="a2", task_id="T1", filename="a2.png", artwork_id="ART2"),
+    ])
+    members = delete_preview_rows(db, ["a1"])["members_by_task"]["T1"]
+    assert {m["media_id"]: m["artwork_id"] for m in members} == {"a1": "", "a2": "ART2"}
+    assert {r["media_id"]: r["artwork_id"] for r in task_media(db, "T1")} == \
+        {"a1": "", "a2": "ART2"}
+
+
 def test_delete_preview_rows_caps_displayed_imports_only(tmp_path):
     """The cap is a DISPLAY bound: local_rows stops, local_only keeps counting,
     because the totals are what the user reads to decide."""

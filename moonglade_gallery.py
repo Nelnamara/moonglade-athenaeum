@@ -1120,13 +1120,36 @@ def task_media(db_path, task_id):
 
     `cloud_deleted_at` rides along for the third caller: a row carrying it is one
     whose local copy is the only copy left anywhere, so the bulk purge has to know
-    which rows to walk around before it takes the rest."""
+    which rows to walk around before it takes the rest. `artwork_id` (2026-09-26) is the
+    per-image delete dialog's catalog fallback for "is this generation published"."""
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id, is_video, filename, cloud_deleted_at "
+            "SELECT media_id, is_video, filename, cloud_deleted_at, artwork_id "
             "FROM catalog WHERE task_id=?",
             (str(task_id),)).fetchall()
         return [dict(r) for r in rows]
+
+
+def published_delete_note(published, unchecked=False, tasks=1):
+    """The delete dialogs' sentence about published artwork (SCOPE_2026-09-26 E5), or "".
+
+    PixAI's own contract says its task delete also deletes the task's linked artwork. Whether
+    the GraphQL delete this app sends does the same is unconfirmed, hence "may". `published`
+    counts artworks the dialog knows of; a blank catalog artwork_id is "not known", so this
+    never says that none are published -- when publication could not be looked up at all
+    (`unchecked`) it says exactly that instead. The per-image dialog words it here; the bulk
+    dialog (ActionsMenu.jsx) words the same two sentences from the preview's counts, and a
+    guard on each side pins the wording."""
+    parts = []
+    n = int(published or 0)
+    if n > 0:
+        parts.append("{} of these {} published on PixAI. Deleting the {} may remove the "
+                     "published artwork too.".format(n, "is" if n == 1 else "are",
+                                                     "task" if tasks == 1 else "tasks"))
+    if unchecked:
+        parts.append("Whether any of these are published on PixAI was not checked "
+                     "— deleting a task may remove its published artwork too.")
+    return " ".join(parts)
 
 
 def mark_cloud_deleted(db_path, media_id, when):
@@ -1213,7 +1236,10 @@ def _members_of_tasks(con, task_ids):
             # check: it is one of the two sources _rows_the_bulk_purge_must_keep keeps
             # rows back from, and reading it here costs nothing -- same statement, one
             # more column, so the chunked-pass guarantee above is untouched.
-            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at "
+            # artwork_id rides along the same way (2026-09-26, SCOPE_2026-09-26 E5): the
+            # preview's published-artwork count falls back to it for a task the live check
+            # did not read (over its 40-task cap, or unanswered).
+            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at, artwork_id "
             "FROM catalog WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
         for r in rows:
             out.setdefault(r["task_id"], []).append(dict(r))
@@ -11880,10 +11906,16 @@ def create_app(out_dir: Path):
                     if str(r["media_id"]) not in keep]
         return []
 
-    def _delete_image_message(plan, rows):
+    def _delete_image_message(plan, rows, task_id=""):
         """The dialog's own words, in plain language, off the live read.
 
-        Every number here is PixAI's answer about this task, never a count of local rows."""
+        Every number here is PixAI's answer about this task, never a count of local rows --
+        save one fallback: when the live read carried no artworkIds at all, whether the
+        generation is published comes from the catalog's artwork_id over the task's whole
+        membership (SCOPE_2026-09-26 E5). Only the whole-task branch says anything about
+        published artwork: that branch sends deleteGenerationTask, the delete PixAI's
+        contract says takes the linked artwork with it. What a one-image deleteBatchMedia
+        does to an artwork is unknown, so the per-image branch makes no claim."""
         if plan.plan == "per-image":
             n = plan.live_siblings
             return ("This removes only this image from PixAI. {} other image{} in its "
@@ -11901,6 +11933,16 @@ def create_app(out_dir: Path):
                         "stay here — your copy is the only one left.".format(
                             len(plan.keep_media),
                             "" if len(plan.keep_media) == 1 else "s"))
+            members = task_media(db_path, task_id) if task_id else []
+            if plan.artwork_ids is not None:
+                published = min(len(plan.artwork_ids), max(1, len(members)))
+                unchecked = False
+            else:
+                published = sum(1 for r in members if str(r.get("artwork_id") or "").strip())
+                unchecked = not myart_coverage(db_path)["artworks"]
+            note = published_delete_note(published, unchecked)
+            if note:
+                msg += " " + note
             return msg
         return plan.reason
 
@@ -12017,7 +12059,7 @@ def create_app(out_dir: Path):
             return jsonify({"plan": plan.plan, "reason": plan.reason,
                             "live_siblings": plan.live_siblings,
                             "local_rows": [r["media_id"] for r in rows],
-                            "message": _delete_image_message(plan, rows)})
+                            "message": _delete_image_message(plan, rows, tid)})
 
         # The cloud delete has already fired and cannot be taken back, so the row goes in now
         # -- what it records is what PixAI did, in the plan's own words. A local purge that
@@ -12177,8 +12219,11 @@ def create_app(out_dir: Path):
         also gets the budget's REMAINING time as its socket timeout, so the confirm dialog
         is bounded by DELETE_PREVIEW_LIVE_BUDGET_S rather than by the transport's 60s.
 
-        Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
-        that answered, and the set of task ids that did not."""
+        Returns (gone_by_task, unverified, artworks_by_task) -- {task_id: {media_id, ...}}
+        for every task that answered, the set of task ids that did not, and {task_id:
+        (artwork_id, ...)} for every answered task whose read carried `artworkIds` (the
+        published-artwork count the dialog words, SCOPE_2026-09-26 E5; a task missing from it
+        falls back to the catalog, see api_delete_preview)."""
         import moonglade_backup as core   # lazy: avoid import cycle
         ids = [str(t) for t in task_ids]
         try:
@@ -12186,7 +12231,7 @@ def create_app(out_dir: Path):
         except Exception:                            # noqa: BLE001 -- no key, bad config
             # Nothing to read WITH. Every task is unverified; the preview still answers
             # from the catalog exactly as it did before this existed.
-            return {}, set(ids)
+            return {}, set(ids), {}
 
         # THE CEILING IS WALL-CLOCK, and it is enforced in three places because one is not
         # enough (2026-09-07, correcting the same day's build, which checked it only here):
@@ -12218,12 +12263,13 @@ def create_app(out_dir: Path):
                 stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
                 if stamp:
                     mark_cloud_deleted(db_path, mid, stamp)
-            return tid, gone_ids
+            # The same read already carries the task's published artworks -- no second call.
+            return tid, (gone_ids, core.task_artwork_ids(task))
 
         # Every task starts unverified and EARNS its way out, so a task whose worker never
         # answers -- the case the deadline exists for -- is counted the safe way by default
         # rather than by remembering to add it.
-        gone, unverified = {}, set(ids)
+        gone, unverified, artworks = {}, set(ids), {}
         from concurrent.futures import (ThreadPoolExecutor, as_completed,
                                         TimeoutError as _FutureTimeout)
         # NOT a `with` block: its __exit__ is shutdown(wait=True), which waits for every
@@ -12239,7 +12285,9 @@ def create_app(out_dir: Path):
                     except Exception:                # noqa: BLE001 -- a dead worker is unverified
                         continue
                     if res is not None:
-                        gone[tid] = res
+                        gone[tid], aw = res
+                        if aw is not None:
+                            artworks[tid] = aw
                         unverified.discard(tid)
             except _FutureTimeout:
                 pass                                 # the ceiling; the rest stay unverified
@@ -12247,7 +12295,7 @@ def create_app(out_dir: Path):
             # Don't wait. A stalled read is already bounded by its own socket timeout and
             # writes nothing anyone is still listening to; the route answers now.
             ex.shutdown(wait=False, cancel_futures=True)
-        return gone, unverified
+        return gone, unverified, artworks
 
     def _preview_entry(row, selected_ids, gone_ids=()):
         """One /api/delete-preview media entry: what it is, whether the user actually
@@ -12317,7 +12365,20 @@ def create_app(out_dir: Path):
           unverified    how many could not be (a blip, no credentials, or the budget)
           already_gone  IMAGES PixAI has already dropped -- subtract from totals.media for
                         "will be deleted"
-          estimate      True when the selection was over the cap and nothing was read"""
+          estimate      True when the selection was over the cap and nothing was read
+
+        PUBLISHED ARTWORK (2026-09-26, SCOPE_2026-09-26 E5). PixAI's own contract says its
+        task delete "soft-deletes a task ...: its linked artwork is deleted" -- and every
+        task this dialog previews goes by the whole-task delete. Two more fields say how
+        much published work that may take, for the dialog to put in one sentence:
+          published            artworks across the selection's tasks: each task's LIVE
+                               `artworkIds` off the read above (capped at its file count),
+                               else -- over the live cap, or a task that did not answer --
+                               the catalog rows of that task carrying an artwork_id. A
+                               blank artwork_id is "not known", never "not published".
+          published_unchecked  True when some task fell back to the catalog AND the catalog
+                               records no artwork at all (the artworks sync has never filled
+                               it), so publication was simply not checked."""
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -12335,12 +12396,22 @@ def create_app(out_dir: Path):
         # The live check, before the loop that spends it. Over the cap it does not happen
         # at all -- estimate, and the modal says so.
         estimate = len(task_ids) > DELETE_PREVIEW_LIVE_CAP
-        gone_by_task, unverified = ({}, set()) if estimate else _preview_live_gone(task_ids)
+        gone_by_task, unverified, artworks_by_task = (
+            ({}, set(), {}) if estimate else _preview_live_gone(task_ids))
 
         tasks, total_media, already_gone = [], 0, 0
+        published, from_catalog = 0, False
         for tid in task_ids:
             members = blast["members_by_task"].get(tid, [])
             total_media += len(members)
+            # Published artwork, over the task's FULL membership (the delete takes the whole
+            # task, not just the picked rows) -- see the docstring.
+            if tid in artworks_by_task:
+                published += min(len(artworks_by_task[tid]), max(1, len(members)))
+            else:
+                from_catalog = True
+                published += sum(1 for m in members
+                                 if str(m.get("artwork_id") or "").strip())
             # A task that answered: the union of what the read says PixAI has dropped and
             # what the catalog was already told the last time anything read this task --
             # exactly the two sources _rows_the_bulk_purge_must_keep keeps back from, so
@@ -12375,6 +12446,9 @@ def create_app(out_dir: Path):
             "unverified": len(unverified),
             "already_gone": already_gone,
             "estimate": estimate,
+            "published": published,
+            "published_unchecked": bool(
+                from_catalog and task_ids and not myart_coverage(db_path)["artworks"]),
             "totals": {
                 "selected": len(sel_rows),
                 "tasks": len(task_ids),

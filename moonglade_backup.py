@@ -2786,10 +2786,25 @@ def delete_task_gql(session, task_id):
 #: deletedAt stamp when it turned out to be one of those. `keep_media_deleted_at` carries WHEN
 #: PixAI deleted each of `keep_media`, as (media_id, deletedAt) pairs -- so a caller holding a
 #: catalog can record the fact off the read this plan already made, rather than making a
-#: second one (moonglade_gallery's /api/delete-image does exactly that).
+#: second one (moonglade_gallery's /api/delete-image does exactly that). `artwork_ids` is the
+#: task's published artworks off that same read (getTaskById's `artworkIds`), or None when the
+#: read did not carry the field -- None is "not known", never "not published". PixAI's own
+#: contract says its task delete also deletes the task's linked artwork, so the whole-task
+#: branch's dialog names them (SCOPE_2026-09-26 E5).
 ImageDeletePlan = namedtuple(
     "ImageDeletePlan",
-    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at")
+    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at artwork_ids",
+    defaults=(None,))
+
+
+def task_artwork_ids(task):
+    """The published-artwork ids a task read carries (`artworkIds`), deduped in order -- or
+    None when the read has no such list (a failed read, or a shape without the field), which
+    callers must treat as UNKNOWN rather than as "nothing published"."""
+    ids = (task or {}).get("artworkIds") if isinstance(task, dict) else None
+    if not isinstance(ids, list):
+        return None
+    return tuple(dict.fromkeys(str(a) for a in ids if a not in (None, "")))
 
 
 def _image_delete_plan(task, media_id):
@@ -2800,7 +2815,8 @@ def _image_delete_plan(task, media_id):
     return ImageDeletePlan(plan, reason, live_siblings, gone,
                            str((entry or {}).get("deletedAt") or ""),
                            tuple((m, str((batch_entry(batch, m) or {}).get("deletedAt") or ""))
-                                 for m in gone))
+                                 for m in gone),
+                           task_artwork_ids(task))
 
 
 def plan_image_delete(session, task_id, media_id):
@@ -2848,7 +2864,7 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
             "What this delete would do changed while the dialog was open, so nothing was "
             "deleted. Open it again to see where the image stands now.",
             plan.live_siblings, plan.keep_media, plan.cloud_deleted_at,
-            plan.keep_media_deleted_at)
+            plan.keep_media_deleted_at, plan.artwork_ids)
     if plan.plan == "per-image":
         delete_batch_media_gql(session, task_id, media_id)
     else:

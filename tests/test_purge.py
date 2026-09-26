@@ -728,3 +728,110 @@ def test_delete_preview_answers_inside_its_budget_when_a_read_hangs(tmp_path, mo
     assert 0 < given["S2"] <= 0.3, (
         "the read was handed the transport's own 60s ({}) instead of what the budget had "
         "left".format(given["S2"]))
+
+
+# ---------------------------------------------------------------------------
+# PUBLISHED ARTWORK (SCOPE_2026-09-26 E5, probe finding SURF-06). PixAI's own contract says
+# its task delete also deletes the task's linked artwork. The preview counts the artworks it
+# knows of -- live `artworkIds` off the read it already makes, over each task's FULL
+# membership; the catalog's artwork_id for a task it did not read -- and the dialog says so.
+# A blank artwork_id is "not known", never "not published".
+# ---------------------------------------------------------------------------
+
+def _published(task, artwork_ids):
+    t = dict(task)
+    t["artworkIds"] = list(artwork_ids)
+    return t
+
+
+def test_delete_preview_counts_published_artwork_off_the_live_read(tmp_path, monkeypatch):
+    """Selecting ONE picture of a batch still takes the whole task, so the count is over
+    the task's full membership: the published sibling counts though it was not picked."""
+    _seed(tmp_path, [
+        _row(media_id="p1", task_id="P1", filename="p1.png"),
+        _row(media_id="p2", task_id="P1", filename="p2.png"),
+        _row(media_id="q1", task_id="Q1", filename="q1.png"),
+    ], {})
+    _fake_session(monkeypatch)
+    live = {"P1": _published(_live_task("P1", ["p1", "p2"]), ["A-p2"]),
+            "Q1": _published(_live_task("Q1", ["q1"]), [])}
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: live[str(tid)])
+
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["p1", "q1"]}).get_json()
+    assert body["published"] == 1
+    assert body["published_unchecked"] is False
+
+
+def test_delete_preview_caps_a_tasks_artworks_at_its_files(tmp_path, monkeypatch):
+    _seed(tmp_path, [_row(media_id="r1", task_id="R1", filename="r1.png")], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: _published(
+        _live_task("R1", ["r1"]), ["A1", "A2", "A1"]))
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["r1"]}).get_json()
+    assert body["published"] == 1
+
+
+def test_delete_preview_falls_back_to_the_catalog_over_the_live_cap(tmp_path, monkeypatch):
+    """Over the cap nothing is read, so the count is the catalog's artwork_id rows -- over
+    each task's whole membership, and a blank artwork_id never counts either way."""
+    n = g.DELETE_PREVIEW_LIVE_CAP + 1
+    rows = [_row(media_id="e{}".format(i), task_id="E{}".format(i),
+                 filename="e{}.png".format(i)) for i in range(n)]
+    rows.append(_row(media_id="e0b", task_id="E0", filename="e0b.png", artwork_id="ART0"))
+    rows[3]["artwork_id"] = "ART3"
+    _seed(tmp_path, rows, {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, tid, **k: pytest.fail("over the cap nothing is read"))
+    body = login_client(tmp_path).post("/api/delete-preview", json={
+        "media_ids": ["e{}".format(i) for i in range(n)]}).get_json()
+    assert body["estimate"] is True
+    assert body["published"] == 2
+    assert body["published_unchecked"] is False     # the catalog does record artworks
+
+
+def test_delete_preview_says_publication_was_not_checked_when_nothing_can_answer(
+        tmp_path, monkeypatch):
+    """A task the live read could not answer falls back to the catalog; a catalog the
+    artworks sync never filled cannot say anything, so the preview says it did not check
+    -- rather than a 0 the dialog would have to read as "none published"."""
+    _seed(tmp_path, [_row(media_id="u1", task_id="U1", filename="u1.png")], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: None)
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["u1"]}).get_json()
+    assert body["unverified"] == 1
+    assert body["published"] == 0 and body["published_unchecked"] is True
+
+
+def test_a_read_without_artwork_ids_is_unknown_not_unpublished(tmp_path, monkeypatch):
+    """A task read that answered but carries no artworkIds list is NOT "nothing published":
+    it falls back to the catalog like an unread task."""
+    _seed(tmp_path, [
+        _row(media_id="w1", task_id="W1", filename="w1.png", artwork_id="ARTW"),
+    ], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql",
+                        lambda s, tid, **k: _live_task("W1", ["w1"]))   # no artworkIds key
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["w1"]}).get_json()
+    assert body["unverified"] == 0
+    assert body["published"] == 1
+
+
+def test_published_delete_note_wording():
+    """The per-image dialog's sentence (the bulk dialog words the same from these counts --
+    loom/test/cloud-delete-dialog.test.js pins that side)."""
+    note = g.published_delete_note
+    assert note(0) == ""
+    assert note(1) == ("1 of these is published on PixAI. Deleting the task may remove the "
+                       "published artwork too.")
+    assert note(3, tasks=2) == ("3 of these are published on PixAI. Deleting the tasks may "
+                                "remove the published artwork too.")
+    assert note(0, unchecked=True) == (
+        "Whether any of these are published on PixAI was not checked — deleting a task "
+        "may remove its published artwork too.")
+    for n in range(0, 4):
+        assert "none" not in note(n).lower() and "not published" not in note(n).lower()
