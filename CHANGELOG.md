@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **Tsubaki.3 Unlimited Mode.** While your account holds PixAI's Unlimited Mode for Tsubaki.3, the Generate drawer and the phone Create screen show a "∞ Tsubaki.3 Unlimited Mode" switch under the model, with the days you have left. Switched on, a band over the prompt says so, the cost badge reads "Free ∞", and Mode is held on Pro, the count on 1 and High priority off. A reference picture or a size over 1792 × 1792 can't be used, and the drawer says why instead of letting you press Generate. One Unlimited Mode picture runs at a time. Anything Unlimited Mode doesn't allow is refused before it is sent — never quietly turned into a paid generation — and a free card is never used on one. The app only reads your Unlimited Mode status from PixAI; claiming it stays on PixAI's own site. (2026-09-26)
+
 ## [3.12.0] - 2026-09-26 — House Rules
 
 - **An achievement celebration rebuilt to its committed Design Handoff.** The build had drifted from its design page — a missing glow layer behind the mascot, an inverted stacking order, the toast in the wrong place and the wrong material, a different arrival and teardown, no reduced-motion rule. It goes back to the page point for point; its audio is unchanged. (2026-09-11)
