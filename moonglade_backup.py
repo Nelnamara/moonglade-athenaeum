@@ -8428,8 +8428,14 @@ def chat_editing_scenes(session):
     """List PixAI's AI-Tools 'chat editing scenes' -- the browse half of the Bridge AI-Tools
     tier. Read-only: returns the raw scene configs (each carries sceneId, modelId, presets,
     selectors, custom, refImages, permission.membershipTier). The gen drawer reads each scene's
-    control schema from here to render its form. Runs on the mirror JWT (a website surface);
-    pass make_mirror_session()."""
+    control schema from here to render its form.
+
+    Which credential: the scene LIST answers on the API key too (all 34 scenes, 2026-09-26
+    probe). The app still browses only behind the armed Bridge, by decision (DECISIONS
+    2026-08-18, "the AI-Tools tier splits by FUNCTION") -- /api/scenes passes
+    make_mirror_session() -- and the SUBMIT (submit_scene) stays JWT-only: a scene submitted
+    on the API key reaped unstarted when that was tried (DECISIONS 2026-08-18; not
+    re-tested by the 2026-09-26 probe)."""
     d = gql_adhoc(session, _SCENE_LIST_Q, {}) or {}
     return d.get("chatEditingScenes") or []
 
