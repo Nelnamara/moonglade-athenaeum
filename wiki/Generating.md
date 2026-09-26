@@ -126,9 +126,11 @@ PixAI. It spends, so it previews first and only starts when you confirm.
   SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
   PixAI can't be reached. The panel starts on the first SDXL base, the same one PixAI's own
   page starts on.
-- **What it costs** is shown before you start. A run is free when your membership still has
+- **What it costs** is shown before you start, with the base's normal price beside a free
+  run. A run is free when your membership still has
   free trainings left (they only count while you are a member), or when you hold a training
-  free card for that base — the card is used up by the run. If you have both, this app uses one
+  free card for that base — the card is used up by the run. If your free cards can't be
+  checked at that moment, the run is quoted as paid and starts only if you tick the amount. If you have both, this app uses one
   of your free trainings and keeps the card (PixAI's own page would use the card). Otherwise
   the panel quotes PixAI's own price for that base and asks you to tick that you will spend
   that amount. Change the base, the images or any field after the quote and the quote closes —

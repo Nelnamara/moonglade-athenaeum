@@ -139,6 +139,7 @@ export default function TrainMobile({ onClose }) {
           <div className={"trm-cost" + (quota === 0 ? " paid" : "")}>
             {quota === null ? "checking your free trainings…"
               : quota > 0 ? "✓ " + quota + " free training" + (quota === 1 ? "" : "s") + " left — this one costs nothing."
+                  + (selectedPrice != null ? " (Normally " + selectedPrice.toLocaleString() + " credits.)" : "")
               : (selectedPrice != null
                   ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits, unless a training free card covers it."
                   : "⚠ No free trainings left, and PixAI's price list has no price for this base.")}

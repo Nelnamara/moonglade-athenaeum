@@ -16021,9 +16021,9 @@ def create_app(out_dir: Path):
         the AMOUNT they showed (a number; `true` only when no amount could be quoted), and a
         number that is no longer this run's price refuses with 409: the acknowledgement is
         for the price the user read, not for whatever the base picked since costs. A card
-        check that FAILS on the confirm refuses rather than guessing the run is paid (the
-        rule the generation spend path follows; single attempt -- no new retry on a spend
-        path).
+        check that FAILS treats the run as paid (owner, 2026-09-26): the preview says the
+        cards couldn't be checked, and the confirm goes through only on that paid
+        acknowledgement. Single attempt -- no new retry on a spend path.
 
         PAUSE. On the confirm, after validation and before the submit, PixAI's
         /config/trainLoraStatus switch is read (core.training_pause); a paused service
@@ -16080,20 +16080,16 @@ def create_app(out_dir: Path):
         # whatever the quota and attaches a matching card even when the quota covers the run
         # (so there the card is spent and the quota kept); here a member holding both spends a
         # quota unit and keeps the card. Recorded in DECISIONS with the other differences.
-        # Read-only; the card is spent only by the submit that carries its id. On the confirm
-        # a FAILED check refuses (see the docstring).
+        # Read-only; the card is spent only by the submit that carries its id. A FAILED check
+        # never refuses (owner, 2026-09-26): the run is treated as paid, so the paid confirm's
+        # acknowledgement -- which names the amount -- is what lets it through.
         card, card_checked = None, True
         if not free_by_quota:
             try:
                 best = core.match_training_kaisuuken(session, base_model_id,
                                                      raise_on_error=True)
-            except Exception as e:                    # noqa: BLE001
+            except Exception:                         # noqa: BLE001
                 best, card_checked = None, False
-                if confirming:
-                    return jsonify({"error": "Lost to the Void -- the free-card check didn't "
-                                             "come back before submitting, so nothing was "
-                                             "spent. Wait a moment and try again. (%s)"
-                                             % _redact_host_paths(str(e))[:160]}), 502
             # A card whose held count is UNKNOWN is not taken as covering, although
             # card_covers() assumes a 1-ticket job is covered: PixAI's own training check
             # keeps only matches with consumeAmount <= total, so it would not attach it
@@ -16115,6 +16111,8 @@ def create_app(out_dir: Path):
         else:
             cost_note = ("No free trainings or training free card for this base, and PixAI's "
                          "price list has no price for it — the amount could not be quoted.")
+        if is_free and price is not None:
+            cost_note += " (Normally %s credits.)" % "{:,}".format(price)
         if not free_by_quota and not card_checked:
             cost_note += " (Your free cards couldn't be checked just now.)"
         if not confirming:

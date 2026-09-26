@@ -341,15 +341,20 @@ def test_a_short_card_is_not_free(tmp_path, monkeypatch):
     assert post(dict(_BODY, confirm=True)).status_code == 402
 
 
-def test_a_failed_card_check_refuses_the_confirm_and_is_said_in_the_preview(
+def test_a_failed_card_check_charges_the_ticked_price_and_is_said_in_the_preview(
         tmp_path, monkeypatch):
+    # Owner call 2026-09-26: a failed free-card check at confirm charges the price the user
+    # ticked; it never refuses. Without the tick nothing is spent.
     post, calls = _train_client(tmp_path, monkeypatch, quota=0,
                                 card_error=core.PixAIError("blip"))
     prev = post(_BODY).get_json()
     assert prev["is_free"] is False and "couldn't be checked" in prev["cost_note"]
-    r = post(dict(_BODY, confirm=True, accept_credit_cost=True))
-    assert r.status_code == 502 and "nothing was spent" in r.get_json()["error"]
+    assert post(dict(_BODY, confirm=True)).status_code == 402
     assert not [c for c in calls if c[0] == "submit"]
+    r = post(dict(_BODY, confirm=True, accept_credit_cost=prev["price"]))
+    assert r.status_code == 200, r.get_json()
+    submits = [c for c in calls if c[0] == "submit"]
+    assert len(submits) == 1 and submits[0][2]["kaisuuken_id"] == ""
 
 
 def test_read_only_refuses_the_confirm_before_the_card_check_or_the_pause_read(
