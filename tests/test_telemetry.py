@@ -811,7 +811,9 @@ def test_train_submit_hook_bumps_loras_trained(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
     monkeypatch.setattr(core, "validate_training", lambda *a, **k: "nel druid")
     monkeypatch.setattr(core, "training_free_quota", lambda s: 9)
-    monkeypatch.setattr(core, "training_price_for_version", lambda v: None)
+    # (v, config=None): the route prices off the config object it validated with (review fix
+    # 2026-09-26, SCOPE_2026-09-26 E7), so the stub takes that second argument too.
+    monkeypatch.setattr(core, "training_price_for_version", lambda v, config=None: None)
     monkeypatch.setattr(core, "submit_training", lambda *a, **k: {"id": "trn1", "refId": "model9"})
     save_catalog(tmp_path / "catalog.db", [])
     cli = login_client(tmp_path)

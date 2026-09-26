@@ -33,6 +33,17 @@ task, with the ones you actually selected outlined in gold. Anything you importe
 PixAI task) is listed separately as a local-only removal, so the count adds up. Nothing is
 sent until you press **Continue…** and type `DELETE`.
 
+**Published work can go with it.** PixAI's own description of its task delete says it also
+deletes the task's published artwork. Whether the delete this app sends does the same has not
+been confirmed, so when any of the generations you are deleting is published, the dialog says
+how many, in its opening lines: *"2 of these are published on PixAI. Deleting the tasks may
+remove the published artwork too."* The count comes from the same check the dialog already
+makes with PixAI for each generation. For a generation it did not check — a selection too big
+to check one by one, or one PixAI did not answer about — it uses what your library last recorded from
+the published-artwork sync. If that sync has never recorded anything, the dialog says
+publication was not checked rather than implying nothing is published — or, when it did
+check some of the generations, how many of them it could not check.
+
 **Images you had already deleted on PixAI are left alone.** Before it removes anything
 locally, this reads each generation back from PixAI. Any image of that generation PixAI has
 already dropped keeps its file and its catalog row exactly where they are — PixAI has no copy
@@ -59,11 +70,16 @@ another picture left. So there are two cases, and the button tells you which one
 
 - **Other images of the batch are still on PixAI.** Only this image goes. The dialog says
   how many stay — *"This removes only this image from PixAI. 3 other images in its batch
-  stay."* Locally, only this one file moves to your trash folder.
+  stay."* Locally, only this one file moves to your trash folder. This case says nothing
+  about published artwork: what removing one picture does to a published artwork is not
+  known.
 - **This is the last image of that generation still on PixAI.** PixAI has no way to leave a
   generation with nothing in it, so it removes the **whole generation record** — which is
   also what happens when a generation only ever made one image. The dialog says so, and
-  **names every local file that will move to your trash folder** with it.
+  **names every local file that will move to your trash folder** with it. If that generation
+  is published on PixAI, the dialog says that too: removing the whole generation record may
+  remove the published artwork with it (PixAI's own description of that delete says it does;
+  for the delete this app sends it is not confirmed).
 
 The count comes from PixAI, asked fresh at the moment you click. It is not a count of what
 your library holds: a sibling you deleted from PixAI's own website is gone there while its

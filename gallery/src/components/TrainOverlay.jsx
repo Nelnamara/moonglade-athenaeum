@@ -4,6 +4,7 @@ import "../styles/overlays.css";
 import "../styles/publish.css";
 import "../styles/train.css";
 import useScrollLock from "../hooks/useScrollLock.js";
+import { acceptCostField, normalizeTrigger } from "../gen/trainCore.js";
 
 /* Train a LoRA — Frontend Gallery.dc.html's ovTrain (markup L392-500+), on the real
    createTrainingTask pipeline.
@@ -22,12 +23,17 @@ import useScrollLock from "../hooks/useScrollLock.js";
      separate submitted field: PixAI's own form uses modelType for validation/pricing and
      derives the actual model from the chosen base, which is what baseModelId carries.
 
-   COST. This is the app's newest spend path, so it leads with the truth rather than a
-   button: PixAI grants a free-training QUOTA (currency `free::user_lora_training` — not
-   a kaisuuken card, which is generation-only), and the panel shows how many are left.
-   With quota it is genuinely free. With none, PixAI prices training client-side so this
-   app CANNOT quote the amount; the server refuses that submit unless the extra
-   accept-cost acknowledgment is sent, and this panel makes you tick it deliberately. */
+   COST. This is a spend path, so it leads with the truth rather than a button. A run is
+   free two ways, as on PixAI's own trainer (owner ruling 4, 2026-09-26): the membership's
+   free-training QUOTA (currency `free::user_lora_training`, counted only for a member),
+   shown here as "N free trainings left"; or a training free card for the chosen base, which
+   the server checks when you press Train it and the quota does not cover the run (PixAI's own
+   page checks it either way -- a deliberate difference, see api_train_submit) and names in the
+   confirm. Otherwise the run costs credits, and the price IS quoted -- it comes from PixAI's
+   own training price list (SCOPE_2026-09-26 E7; the old "this app cannot quote the amount"
+   stopped being true). The server still refuses a paid submit unless the accept-cost
+   acknowledgment is sent -- the AMOUNT the box named, refused if the run no longer costs that
+   -- and this panel makes you tick it deliberately. */
 
 // PixAI's real LoRA categories + their display labels, probed live off the train-lora
 // page 2026-08-06 (the design's character/style/concept was placeholder). "detail"
@@ -39,6 +45,16 @@ const CATEGORIES = [
 ];
 const MIN_IMAGES = 10;
 const MAX_IMAGES = 100;
+
+/* The base the panel pre-selects: the server's `default_version_id` -- PixAI's own default,
+   the first SDXL row of its training list (SCOPE_2026-09-26 E7) -- and the Model Type group
+   that holds it. Never "the first group's first model": DiT.3 (Tsubaki.3, 100,000 credits)
+   sorts first now, so that rule would pre-select the most expensive base on the list. */
+function defaultBase(groups, versionId) {
+  const gi = groups.findIndex((g) => g.models.some((m) => m.version_id === versionId));
+  if (gi >= 0) return { archIdx: gi, baseModel: versionId };
+  return { archIdx: 0, baseModel: "" };
+}
 
 export default function TrainOverlay({ onClose }) {
   useScrollLock();
@@ -72,9 +88,18 @@ export default function TrainOverlay({ onClose }) {
       .then((d) => {
         const gs = d.groups || [];
         setGroups(gs);
-        if (gs.length && gs[0].models.length) setBaseModel(gs[0].models[0].version_id);
+        const def = defaultBase(gs, d.default_version_id || "");
+        setArchIdx(def.archIdx);
+        setBaseModel(def.baseModel);
       });
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* A quote is for ONE form. The base chips, the dataset and the fields stay live while the
+     confirm panel is open, so any change takes the panel down with its ticked acknowledgement:
+     otherwise "Spend 25,000 credits" could stay ticked over a base picked afterwards that costs
+     100,000. (The server refuses that too -- the confirm sends the amount, see acceptCostField.) */
+  useEffect(() => { setAsk(null); setAcceptCost(false); },
+    [baseModel, archIdx, picked, trigger, name, category]);
 
   // Selecting a Model Type shows that architecture's models and defaults to its first.
   const pickArch = (i) => {
@@ -109,8 +134,7 @@ export default function TrainOverlay({ onClose }) {
     setBusy(true); setErr("");
     try {
       const res = await apiPost("/api/train/submit",
-        { ...body(), confirm: true,
-          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
+        { ...body(), confirm: true, ...acceptCostField(ask, acceptCost) });
       if (res.error) { setErr(res.error); return; }
       setDone(res); setAsk(null);
       if (typeof res.free_trainings_left === "number") setQuota(res.free_trainings_left);
@@ -139,8 +163,8 @@ export default function TrainOverlay({ onClose }) {
               : quota > 0
                 ? "✓ " + quota + " free training" + (quota === 1 ? "" : "s") + " left — this one costs nothing."
                 : (selectedPrice != null
-                    ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits to train."
-                    : "⚠ No free trainings left. Training charges real credits — check the price on PixAI before going ahead.")}
+                    ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits to train, unless a training free card covers it."
+                    : "⚠ No free trainings left, and PixAI's price list has no price for this base.")}
           </div>
 
           <div className="mgtr-body">
@@ -183,11 +207,13 @@ export default function TrainOverlay({ onClose }) {
                 <textarea className="mgpub-in" rows={2} value={trigger}
                   placeholder="eg: hatsune miku, aqua hair, twin tails"
                   onChange={(e) => setTrigger(e.target.value)} />
-                <span className="mgtr-trigcount">{trigger.trim().length}</span>
+                {/* The length the server checks: the normalized string, counted as PixAI counts it. */}
+                <span className="mgtr-trigcount">{normalizeTrigger(trigger).length}</span>
               </div>
               <div className="mgpub-hint">
-                Stick to letters, numbers and common symbols. No double spaces, and none
-                at the start or end — those get cleaned up before submitting.
+                Stick to letters, numbers and common symbols. Line breaks become commas,
+                extra spaces and repeated commas are tidied, and it's lowercased before
+                submitting. Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30.
               </div>
 
               <label className="mgpub-lab">Category</label>
@@ -239,7 +265,8 @@ export default function TrainOverlay({ onClose }) {
 
               {done ? (
                 <div className="mgpub-note ok">
-                  ✓ Training submitted{done.was_free ? " — it used one of your free trainings" : ""}.
+                  ✓ Training submitted{done.used_card ? " — it used your training free card"
+                    : done.was_free ? " — it used one of your free trainings" : ""}.
                   {done.task && done.task.refId ? " PixAI is building it now; it'll appear on your models page." : ""}
                 </div>
               ) : ask ? (
@@ -247,12 +274,14 @@ export default function TrainOverlay({ onClose }) {
                   <div className="t">Start this training on PixAI?</div>
                   <div className="b">
                     <b>{ask.title}</b> · {ask.image_count} images · {ask.category}
-                    <div className="n">{ask.cost_note}</div>
+                    <div className="n">{ask.cost_note}{ask.image_note ? " " + ask.image_note : ""}</div>
                     {!ask.is_free && (
                       <label className="mgtr-accept">
                         <input type="checkbox" checked={acceptCost}
                           onChange={(e) => setAcceptCost(e.target.checked)} />
-                        <span>I've checked the price on PixAI and want to spend credits.</span>
+                        <span>{ask.price != null
+                          ? "Spend " + ask.price.toLocaleString() + " credits on this training."
+                          : "Spend credits on this training — the amount could not be quoted."}</span>
                       </label>
                     )}
                   </div>

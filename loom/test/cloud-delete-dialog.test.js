@@ -196,3 +196,58 @@ describe("a task strip says what the task actually is", () => {
     assert.doesNotMatch(menu, /className="cd-tlbl">whole batch/);
   });
 });
+
+/* PUBLISHED ARTWORK (SCOPE_2026-09-26 E5). PixAI's own contract says its task delete also
+   deletes the task's linked artwork, and every task in this dialog goes by the whole-task
+   delete. The route counts what it knows (live artworkIds, else the catalog's artwork_id);
+   the dialog says so in ONE more sentence of its own text -- no badge, no thumbnail marker --
+   in the same words as the per-image dialog (moonglade_gallery.published_delete_note). */
+const server = readFileSync(path.resolve(__dirname, "../../moonglade_gallery.py"), "utf8")
+  .replace(/\r\n/g, "\n");
+
+describe("the published-artwork sentence", () => {
+  test("it is worded from the route's own counts, in the opening lines", () => {
+    assert.match(menu, /const published = Number\(data\.published\) \|\| 0;/);
+    assert.match(menu, /data\.published_unchecked === true/);
+    assert.match(menu,
+      /<p className="cd-summary">\{head\}\{publishedNote && <> \{publishedNote\}<\/>\}<\/p>/);
+  });
+
+  test("the words: N of these, may remove, and never 'none published'", () => {
+    assert.ok(menu.includes('" of these " + (published === 1 ? "is" : "are") + " published on PixAI. "'));
+    assert.ok(menu.includes('"Deleting the " + (t.tasks === 1 ? "task" : "tasks") + " may remove the published artwork too."'));
+    assert.ok(menu.includes(
+      "Whether any of these are published on PixAI was not checked — deleting a task may remove its published artwork too."));
+    assert.doesNotMatch(menu, /none (of these )?(is|are) published/i);
+    assert.doesNotMatch(menu, /not published on PixAI/);
+  });
+
+  test("the per-image dialog says the same words", () => {
+    assert.ok(server.includes('"{} of these {} published on PixAI. Deleting the {} may remove the "'));
+    assert.ok(server.includes('"published artwork too."'));
+    assert.match(server,
+      /"Whether any of these are published on PixAI was not checked "\s*"— deleting a task may remove its published artwork too\."/);
+  });
+
+  /* Part-checked (review fix, 2026-09-26): some tasks answered live and some fell back to a
+     catalog the artworks sync never filled. "Whether any of these are published was not
+     checked" would contradict the count just given, so the dialog names how many TASKS went
+     unchecked -- the same words as published_delete_note's part-checked form. */
+  test("a part-checked selection says how many tasks went unchecked, never 'whether any'", () => {
+    assert.match(menu, /const uncheckedTasks = Number\(data\.published_unchecked_tasks\) \|\| 0;/);
+    assert.match(menu, /\(published > 0 \|\| \(uncheckedTasks > 0 && uncheckedTasks < t\.tasks\)\)/);
+    assert.ok(menu.includes('uncheckedTasks + " of the " + t.tasks + " tasks " + (uncheckedTasks === 1 ? "was" : "were")'));
+    assert.ok(menu.includes('" not checked for published artwork"'));
+    assert.ok(menu.includes('(published > 0 ? "." : " — deleting a task may remove its published artwork too.")'));
+    assert.ok(server.includes('"{} of the {} tasks {}"'));
+    assert.ok(server.includes('"{} not checked for published artwork{}"'));
+    assert.match(server, /"published_unchecked_tasks": published_unchecked_tasks,/);
+  });
+
+  test("no badge and no thumbnail marker: the strip is untouched", () => {
+    const strip = menu.slice(menu.indexOf("const strip = (media) => ("),
+      menu.indexOf("const taskLabel = (media) =>"));
+    assert.ok(strip.length > 0);
+    assert.doesNotMatch(strip, /publish/i);
+  });
+});

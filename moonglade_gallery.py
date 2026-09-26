@@ -388,6 +388,37 @@ _MIGRATIONS = [
     # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
     # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
     "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
+    # ONE-TIME DATA REPAIRS (2026-09-26). A repair that must run ONCE -- not on every new
+    # process, which is how often migrate() replays this list -- records its name here and
+    # guards its own statement on that name, so each repair is three idempotent statements:
+    # the table, the guarded UPDATE, the marker. The MARKER IS CONDITIONAL on the repair's
+    # own postcondition, never written blind: migrate() swallows every OperationalError, so
+    # an UPDATE that failed on "database is locked" followed by an unconditional marker would
+    # record a repair that never ran, and it would never run again. Conditional, a failed
+    # UPDATE leaves no marker and the next process retries it. Not a catalog column: nothing
+    # reads it but the guards below, so the CATALOG_FIELDS three-place contract does not apply.
+    "CREATE TABLE IF NOT EXISTS catalog_repairs (name TEXT PRIMARY KEY)",
+    # LINEAGE FOR CONTEXT IMAGES (SCOPE_2026-09-26 E3). Until this pass source_media_of_task
+    # never read parameters.contextImages, so a Tsubaki.3 / Flash picture made from a
+    # reference filed as an ORIGINAL -- and --backfill-lineage stamped lineage_checked on it,
+    # the "confirmed original" marker that makes every later run skip the task forever.
+    # Clear that stamp ONCE on MMDIT26B rows (Tsubaki.3 2024383379556065549, Flash
+    # 2050048243034896798) that still have no source, so the next --backfill-lineage re-reads
+    # them with the fixed reader. Once, not on every open: a plain Tsubaki.3 txt2img has no
+    # source either and is correctly re-stamped by that run; clearing it again on every
+    # process start would re-fetch every one of them on every backfill.
+    "UPDATE catalog SET lineage_checked = '' "
+    "WHERE COALESCE(lineage_checked, '') != '' AND COALESCE(source_media_id, '') = '' "
+    "AND model_id IN ('2024383379556065549', '2050048243034896798') "
+    "AND NOT EXISTS (SELECT 1 FROM catalog_repairs WHERE name = 'lineage-context-images')",
+    # The marker, only once no stamped sourceless MMDIT26B row is left -- i.e. only when the
+    # UPDATE above really ran (see ONE-TIME DATA REPAIRS). On a file with no catalog table
+    # yet this fails like the UPDATE does, harmlessly: the repair then runs on the first
+    # open that has one, where there is nothing stamped for it to clear.
+    "INSERT OR IGNORE INTO catalog_repairs (name) SELECT 'lineage-context-images' "
+    "WHERE NOT EXISTS (SELECT 1 FROM catalog WHERE COALESCE(lineage_checked, '') != '' "
+    "AND COALESCE(source_media_id, '') = '' "
+    "AND model_id IN ('2024383379556065549', '2050048243034896798'))",
     # VIDEO ROW REPAIR (2026-09-26) -- a data statement, not DDL; see _VIDEO_ROW_REPAIR_SQL.
     # Last, so every column it reads (is_video, video_model) already exists.
     _VIDEO_ROW_REPAIR_SQL,
@@ -435,10 +466,14 @@ def _catalog_key(db_path):
 
 def migrate(db_path, force=False):
     """Bring an existing catalog.db up to the current schema by running
-    _MIGRATIONS. Idempotent: every statement is an ALTER TABLE ADD COLUMN or a
+    _MIGRATIONS. Idempotent: almost every statement is an ALTER TABLE ADD COLUMN or a
     CREATE INDEX IF NOT EXISTS, and the OperationalError a re-run raises ("duplicate
-    column name") is the success case, not a failure -- or a one-time data repair
-    (an UPDATE) whose own WHERE matches nothing once it has run.
+    column name") is the success case, not a failure. The rest are the ONE-TIME DATA
+    REPAIRS (2026-09-26): an idempotent UPDATE whose own WHERE matches nothing once it has
+    run (the video-row repair), or a CREATE TABLE IF NOT EXISTS catalog_repairs, then per
+    repair an UPDATE guarded on its name there and a marker INSERT guarded on the repair's
+    own postcondition -- so an OperationalError swallowed here (a locked file, say) leaves
+    the repair unmarked for the next process to run, rather than marked and never run.
 
     Memoized per process per resolved path -- the second and every later call for
     the same catalog returns without opening anything. That is what lets create_app
@@ -1138,13 +1173,70 @@ def task_media(db_path, task_id):
 
     `cloud_deleted_at` rides along for the third caller: a row carrying it is one
     whose local copy is the only copy left anywhere, so the bulk purge has to know
-    which rows to walk around before it takes the rest."""
+    which rows to walk around before it takes the rest. `artwork_id` (2026-09-26) is the
+    per-image delete dialog's catalog fallback for "is this generation published"."""
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id, is_video, filename, cloud_deleted_at "
+            "SELECT media_id, is_video, filename, cloud_deleted_at, artwork_id "
             "FROM catalog WHERE task_id=?",
             (str(task_id),)).fetchall()
         return [dict(r) for r in rows]
+
+
+def media_dims(db_path, media_ids):
+    """{media_id: (width, height)} for the given ids this catalog knows a positive size for,
+    as ints; an id with no row, or a blank / zero / unreadable size, is simply absent. The
+    LoRA-training image rule (core.check_training_images) reads it and lists an absent id as
+    not checked. Chunked for SQLite's bound-parameter cap."""
+    ids = [str(m) for m in (media_ids or []) if str(m).strip()]
+    out = {}
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), _TASK_CHUNK):
+            chunk = ids[i:i + _TASK_CHUNK]
+            for r in con.execute(
+                    "SELECT media_id, width, height FROM catalog WHERE media_id IN ({})"
+                    .format(",".join("?" * len(chunk))), chunk):
+                try:
+                    w, h = int(float(r["width"] or 0)), int(float(r["height"] or 0))
+                except (TypeError, ValueError):
+                    continue
+                if w > 0 and h > 0:
+                    out[str(r["media_id"])] = (w, h)
+    return out
+
+
+def published_delete_note(published, unchecked=False, tasks=1, unchecked_tasks=None):
+    """The delete dialogs' sentence about published artwork (SCOPE_2026-09-26 E5), or "".
+
+    PixAI's own contract says its task delete also deletes the task's linked artwork. Whether
+    the GraphQL delete this app sends does the same is unconfirmed, hence "may". `published`
+    counts artworks the dialog knows of; a blank catalog artwork_id is "not known", so this
+    never says that none are published -- when publication could not be looked up at all
+    (`unchecked`) it says exactly that instead.
+
+    PART-CHECKED. When only some of the tasks could not be checked (`unchecked_tasks` of
+    `tasks`), or a count was just given, "whether any of these are published was not checked"
+    would contradict what the dialog does know -- so it says how many tasks went unchecked.
+
+    The per-image dialog words it here; the bulk dialog (ActionsMenu.jsx) words the same
+    sentences from the preview's counts, and a guard on each side pins the wording."""
+    parts = []
+    n = int(published or 0)
+    if n > 0:
+        parts.append("{} of these {} published on PixAI. Deleting the {} may remove the "
+                     "published artwork too.".format(n, "is" if n == 1 else "are",
+                                                     "task" if tasks == 1 else "tasks"))
+    if unchecked:
+        k = int(unchecked_tasks or 0)
+        if n > 0 or 0 < k < tasks:
+            parts.append("{} not checked for published artwork{}".format(
+                ("{} of the {} tasks {}".format(k, tasks, "was" if k == 1 else "were")
+                 if k > 0 else "Some of the tasks were"),
+                "." if n > 0 else " — deleting a task may remove its published artwork too."))
+        else:
+            parts.append("Whether any of these are published on PixAI was not checked "
+                         "— deleting a task may remove its published artwork too.")
+    return " ".join(parts)
 
 
 def mark_cloud_deleted(db_path, media_id, when):
@@ -1231,7 +1323,10 @@ def _members_of_tasks(con, task_ids):
             # check: it is one of the two sources _rows_the_bulk_purge_must_keep keeps
             # rows back from, and reading it here costs nothing -- same statement, one
             # more column, so the chunked-pass guarantee above is untouched.
-            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at "
+            # artwork_id rides along the same way (2026-09-26, SCOPE_2026-09-26 E5): the
+            # preview's published-artwork count falls back to it for a task the live check
+            # did not read (over its 40-task cap, or unanswered).
+            "SELECT media_id, task_id, is_video, poster_media_id, cloud_deleted_at, artwork_id "
             "FROM catalog WHERE task_id IN ({})".format(",".join("?" * len(chunk))), chunk)
         for r in rows:
             out.setdefault(r["task_id"], []).append(dict(r))
@@ -11937,10 +12032,16 @@ def create_app(out_dir: Path):
                     if str(r["media_id"]) not in keep]
         return []
 
-    def _delete_image_message(plan, rows):
+    def _delete_image_message(plan, rows, task_id=""):
         """The dialog's own words, in plain language, off the live read.
 
-        Every number here is PixAI's answer about this task, never a count of local rows."""
+        Every number here is PixAI's answer about this task, never a count of local rows --
+        save one fallback: when the live read carried no artworkIds at all, whether the
+        generation is published comes from the catalog's artwork_id over the task's whole
+        membership (SCOPE_2026-09-26 E5). Only the whole-task branch says anything about
+        published artwork: that branch sends deleteGenerationTask, the delete PixAI's
+        contract says takes the linked artwork with it. What a one-image deleteBatchMedia
+        does to an artwork is unknown, so the per-image branch makes no claim."""
         if plan.plan == "per-image":
             n = plan.live_siblings
             return ("This removes only this image from PixAI. {} other image{} in its "
@@ -11958,6 +12059,21 @@ def create_app(out_dir: Path):
                         "stay here — your copy is the only one left.".format(
                             len(plan.keep_media),
                             "" if len(plan.keep_media) == 1 else "s"))
+            members = task_media(db_path, task_id) if task_id else []
+            if plan.artwork_ids is not None:
+                # Capped at the task's size ON PIXAI, never at the rows this library holds:
+                # the delete takes PixAI's whole batch, and a library missing some of its
+                # images must not under-count what may go with it. On this branch that batch
+                # is this, the last live image, plus every member already deleted there.
+                published = min(len(plan.artwork_ids),
+                                max(1, len(members), len(plan.keep_media) + 1))
+                unchecked = False
+            else:
+                published = sum(1 for r in members if str(r.get("artwork_id") or "").strip())
+                unchecked = not myart_coverage(db_path)["artworks"]
+            note = published_delete_note(published, unchecked)
+            if note:
+                msg += " " + note
             return msg
         return plan.reason
 
@@ -12074,7 +12190,7 @@ def create_app(out_dir: Path):
             return jsonify({"plan": plan.plan, "reason": plan.reason,
                             "live_siblings": plan.live_siblings,
                             "local_rows": [r["media_id"] for r in rows],
-                            "message": _delete_image_message(plan, rows)})
+                            "message": _delete_image_message(plan, rows, tid)})
 
         # The cloud delete has already fired and cannot be taken back, so the row goes in now
         # -- what it records is what PixAI did, in the plan's own words. A local purge that
@@ -12234,8 +12350,12 @@ def create_app(out_dir: Path):
         also gets the budget's REMAINING time as its socket timeout, so the confirm dialog
         is bounded by DELETE_PREVIEW_LIVE_BUDGET_S rather than by the transport's 60s.
 
-        Returns (gone_by_task, unverified) -- {task_id: {media_id, ...}} for every task
-        that answered, and the set of task ids that did not."""
+        Returns (gone_by_task, unverified, artworks_by_task) -- {task_id: {media_id, ...}}
+        for every task that answered, the set of task ids that did not, and {task_id:
+        ((artwork_id, ...), batch_size)} for every answered task whose read carried
+        `artworkIds` -- batch_size being the task's image count ON PIXAI -- (the
+        published-artwork count the dialog words, SCOPE_2026-09-26 E5; a task missing from it
+        falls back to the catalog, see api_delete_preview)."""
         import moonglade_backup as core   # lazy: avoid import cycle
         ids = [str(t) for t in task_ids]
         try:
@@ -12243,7 +12363,7 @@ def create_app(out_dir: Path):
         except Exception:                            # noqa: BLE001 -- no key, bad config
             # Nothing to read WITH. Every task is unverified; the preview still answers
             # from the catalog exactly as it did before this existed.
-            return {}, set(ids)
+            return {}, set(ids), {}
 
         # THE CEILING IS WALL-CLOCK, and it is enforced in three places because one is not
         # enough (2026-09-07, correcting the same day's build, which checked it only here):
@@ -12275,12 +12395,15 @@ def create_app(out_dir: Path):
                 stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
                 if stamp:
                     mark_cloud_deleted(db_path, mid, stamp)
-            return tid, gone_ids
+            # The same read already carries the task's published artworks -- no second call --
+            # and the task's size on PixAI, which is what the artwork count is capped at.
+            return tid, (gone_ids, core.task_artwork_ids(task),
+                         len(batch) if isinstance(batch, list) else 0)
 
         # Every task starts unverified and EARNS its way out, so a task whose worker never
         # answers -- the case the deadline exists for -- is counted the safe way by default
         # rather than by remembering to add it.
-        gone, unverified = {}, set(ids)
+        gone, unverified, artworks = {}, set(ids), {}
         from concurrent.futures import (ThreadPoolExecutor, as_completed,
                                         TimeoutError as _FutureTimeout)
         # NOT a `with` block: its __exit__ is shutdown(wait=True), which waits for every
@@ -12296,7 +12419,9 @@ def create_app(out_dir: Path):
                     except Exception:                # noqa: BLE001 -- a dead worker is unverified
                         continue
                     if res is not None:
-                        gone[tid] = res
+                        gone[tid], aw, batch_n = res
+                        if aw is not None:
+                            artworks[tid] = (aw, batch_n)
                         unverified.discard(tid)
             except _FutureTimeout:
                 pass                                 # the ceiling; the rest stay unverified
@@ -12304,7 +12429,7 @@ def create_app(out_dir: Path):
             # Don't wait. A stalled read is already bounded by its own socket timeout and
             # writes nothing anyone is still listening to; the route answers now.
             ex.shutdown(wait=False, cancel_futures=True)
-        return gone, unverified
+        return gone, unverified, artworks
 
     def _preview_entry(row, selected_ids, gone_ids=()):
         """One /api/delete-preview media entry: what it is, whether the user actually
@@ -12374,7 +12499,24 @@ def create_app(out_dir: Path):
           unverified    how many could not be (a blip, no credentials, or the budget)
           already_gone  IMAGES PixAI has already dropped -- subtract from totals.media for
                         "will be deleted"
-          estimate      True when the selection was over the cap and nothing was read"""
+          estimate      True when the selection was over the cap and nothing was read
+
+        PUBLISHED ARTWORK (2026-09-26, SCOPE_2026-09-26 E5). PixAI's own contract says its
+        task delete "soft-deletes a task ...: its linked artwork is deleted" -- and every
+        task this dialog previews goes by the whole-task delete. Two more fields say how
+        much published work that may take, for the dialog to put in one sentence:
+          published            artworks across the selection's tasks: each task's LIVE
+                               `artworkIds` off the read above (capped at the task's image
+                               count on PixAI, or its library rows if that is more), else --
+                               over the live cap, or a task that did not answer -- the
+                               catalog rows of that task carrying an artwork_id. A blank
+                               artwork_id is "not known", never "not published".
+          published_unchecked  True when some task fell back to the catalog AND the catalog
+                               records no artwork at all (the artworks sync has never filled
+                               it), so publication was simply not checked.
+          published_unchecked_tasks  how many tasks that is (0 when checked), so a dialog
+                               that also has a live count can say "K of the N tasks were not
+                               checked" instead of contradicting the count."""
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -12392,12 +12534,25 @@ def create_app(out_dir: Path):
         # The live check, before the loop that spends it. Over the cap it does not happen
         # at all -- estimate, and the modal says so.
         estimate = len(task_ids) > DELETE_PREVIEW_LIVE_CAP
-        gone_by_task, unverified = ({}, set()) if estimate else _preview_live_gone(task_ids)
+        gone_by_task, unverified, artworks_by_task = (
+            ({}, set(), {}) if estimate else _preview_live_gone(task_ids))
 
         tasks, total_media, already_gone = [], 0, 0
+        published, from_catalog = 0, 0
         for tid in task_ids:
             members = blast["members_by_task"].get(tid, [])
             total_media += len(members)
+            # Published artwork, over the task's FULL membership (the delete takes the whole
+            # task, not just the picked rows) -- see the docstring. The live count is capped at
+            # the task's size ON PIXAI (or its library rows, if more): a library that never
+            # collected some of a task's images must not under-count what the delete may take.
+            if tid in artworks_by_task:
+                aw, batch_n = artworks_by_task[tid]
+                published += min(len(aw), max(1, len(members), batch_n))
+            else:
+                from_catalog += 1
+                published += sum(1 for m in members
+                                 if str(m.get("artwork_id") or "").strip())
             # A task that answered: the union of what the read says PixAI has dropped and
             # what the catalog was already told the last time anything read this task --
             # exactly the two sources _rows_the_bulk_purge_must_keep keeps back from, so
@@ -12420,6 +12575,10 @@ def create_app(out_dir: Path):
         # part of what the button removes, and the dialog has to show them or its
         # file count won't add up. Capped on the same DISPLAY budget as the tasks.
         local_entries = [_preview_entry(m, selected) for m in blast["local_rows"]]
+        # The tasks whose publication nobody could answer: they fell back to a catalog the
+        # artworks sync has never filled.
+        published_unchecked_tasks = (
+            from_catalog if from_catalog and not myart_coverage(db_path)["artworks"] else 0)
 
         return jsonify({
             "tasks": tasks,
@@ -12432,6 +12591,9 @@ def create_app(out_dir: Path):
             "unverified": len(unverified),
             "already_gone": already_gone,
             "estimate": estimate,
+            "published": published,
+            "published_unchecked": bool(published_unchecked_tasks),
+            "published_unchecked_tasks": published_unchecked_tasks,
             "totals": {
                 "selected": len(sel_rows),
                 "tasks": len(task_ids),
@@ -15757,8 +15919,10 @@ def create_app(out_dir: Path):
     @app.route("/api/train/quota")
     @tier(LOGIN)
     def api_train_quota():
-        """How many FREE LoRA trainings are left (PixAI quota `free::user_lora_training`,
-        NOT a kaisuuken card -- the card pool is generation-only). Read-only, free."""
+        """How many FREE LoRA trainings this account can use (PixAI's membership quota
+        `free::user_lora_training`, counted only for a member -- core.training_free_quota).
+        A training free card is the other free road; the submit preview checks for one per
+        base (core.match_training_kaisuuken). Read-only, free."""
         try:
             core, session = _gen_session()
             return jsonify({"free_trainings": core.training_free_quota(session)})
@@ -15772,11 +15936,19 @@ def create_app(out_dir: Path):
         """Trainable base models grouped by architecture (the train panel's Model Type ->
         Model Theme picker). Read-only, free. Each model carries the VERSION id the submit
         needs, its real title, and a cover -- fixing the earlier build, which used the
-        generic market search and rendered raw model ids with no architecture grouping."""
+        generic market search and rendered raw model ids with no architecture grouping.
+
+        Off PixAI's own training config (core.training_config: /config/trainLoraModels,
+        cached, the 2026-09-26 snapshot as fallback), so Tsubaki.3 (DiT.3) is offered and
+        priced. `default_version_id` is the base the panel pre-selects -- the first SDXL
+        row, PixAI's own default (SCOPE_2026-09-26 E7) -- not the first group's first
+        model, which with DiT.3 listed first would be the 100,000-credit base."""
         try:
             core, session = _gen_session()
-            return jsonify({"groups": core.list_trainable_base_models(),
-                            "pricing": core._TRAIN_PRICING})
+            cfg = core.training_config()
+            return jsonify({"groups": core.list_trainable_base_models(config=cfg),
+                            "pricing": cfg["pricing"],
+                            "default_version_id": core.default_training_base(cfg)})
         except Exception as e:
             return jsonify({"groups": [], "error": _redact_host_paths(str(e))[:200]}), 200
 
@@ -15825,16 +15997,37 @@ def create_app(out_dir: Path):
 
         Without `confirm: true` this makes NO mutating call: it validates the request
         with the site's own rules and reports the real cost position (how many free
-        trainings remain, whether this one is free).
+        trainings remain, whether a training free card covers it, what it costs).
 
-        COST SAFETY. PixAI prices training CLIENT-side from a matrix, so there is no
-        server value to quote (documented in ../moonglade-internal/private/GENERATOR_SURFACE.md). That gives
-        exactly two honest states:
-          * free quota > 0  -> this training is FREE and consumes one quota unit.
-          * free quota == 0 -> it costs real credits, and this app CANNOT say how many.
-            The confirmed call is then REFUSED unless the caller also sends
-            `accept_credit_cost: true`, so nobody spends a large unknown amount by
-            clicking the same button they used when it was free.
+        VALIDATION (SCOPE_2026-09-26 E7), before anything else: PixAI's trigger-word rules
+        on the normalized string (core.validate_training), and its image rule over this
+        catalog's own image sizes (core.check_training_images). An image the rule refuses
+        refuses the whole run, named; an image whose size the catalog does not know is
+        listed as not checked, never passed as checked.
+
+        COST. PixAI's train pages price a run from the same config the base list comes
+        from (core.training_config -- `price` for a fresh dataset), so the app quotes the
+        real number now; the "cannot say how many" this used to say stopped being true on
+        2026-09-26. A run is FREE when either
+          * the account is a member (membership tier present, 0 included) with free-training
+            quota left -- it consumes one quota unit; or
+          * a training free card matches the base (core.match_training_kaisuuken, checked
+            only when the quota does not cover the run -- a deliberate difference from the
+            site, see the comment at the check) and its held count is known to cover it --
+            its id rides the submit.
+        Anything else charges credits, and the confirmed call is REFUSED unless the caller
+        also sends `accept_credit_cost` -- including a run whose price could not be quoted --
+        so nobody spends by clicking the button they used when it was free. The panels send
+        the AMOUNT they showed (a number; `true` only when no amount could be quoted), and a
+        number that is no longer this run's price refuses with 409: the acknowledgement is
+        for the price the user read, not for whatever the base picked since costs. A card
+        check that FAILS on the confirm refuses rather than guessing the run is paid (the
+        rule the generation spend path follows; single attempt -- no new retry on a spend
+        path).
+
+        PAUSE. On the confirm, after validation and before the submit, PixAI's
+        /config/trainLoraStatus switch is read (core.training_pause); a paused service
+        refuses, naming when it expects to resume. A failed read proceeds as before.
         READ_ONLY still refuses the confirmed form inside core. Explicit-token CSRF."""
         body = request.get_json(silent=True) or {}
         if not _check_csrf(body):
@@ -15849,37 +16042,119 @@ def create_app(out_dir: Path):
         except Exception as e:
             return jsonify({"error": "PixAI session unavailable: %s" % e}), 502
 
+        cfg = core.training_config()
         try:
-            tw = core.validate_training(base_model_id, media_ids, title, trigger, category)
+            tw = core.validate_training(base_model_id, media_ids, title, trigger, category,
+                                        config=cfg)
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+        rejected, unchecked = core.check_training_images(
+            media_ids, media_dims(db_path, media_ids), cfg["image_constraints"])
+        if rejected:
+            return jsonify({"error": core.describe_rejected_training_images(rejected),
+                            "rejected_images": rejected}), 400
+        image_note = ("" if not unchecked else
+                      "%d image%s could not be checked against PixAI's size rule (this library "
+                      "doesn't know %s size)." % (len(unchecked),
+                                                  "" if len(unchecked) == 1 else "s",
+                                                  "its" if len(unchecked) == 1 else "their"))
+        confirming = bool(body.get("confirm"))
+        if confirming:
+            # READ_ONLY refuses the spend BEFORE the confirm's own reads -- the free-card
+            # check and the pause switch -- so a read-only install makes no call on the
+            # account for a submit it is going to refuse (the rule core.submit follows for
+            # the generation card check). submit_training still checks it too.
+            try:
+                core._check_read_only("submit a LoRA training task")
+            except Exception as e:                    # noqa: BLE001
+                return jsonify({"error": str(e)}), 502
 
         free_left = core.training_free_quota(session)
-        is_free = free_left > 0
-        price = core.training_price_for_version(base_model_id)   # credits, or None if unknown
-        if is_free:
+        free_by_quota = free_left > 0
+        # credits, or None -- off `cfg`, the very config the validation above read, so one
+        # request can never validate against the live config and price off the snapshot
+        price = core.training_price_for_version(base_model_id, cfg)
+        # The training free card (owner ruling 4): checked only when the quota does not
+        # already make the run free -- "before a paid run", as SCOPE_2026-09-26 E7 words it.
+        # A DELIBERATE DIFFERENCE FROM THE SITE: PixAI's basic trainer runs the card check
+        # whatever the quota and attaches a matching card even when the quota covers the run
+        # (so there the card is spent and the quota kept); here a member holding both spends a
+        # quota unit and keeps the card. Recorded in DECISIONS with the other differences.
+        # Read-only; the card is spent only by the submit that carries its id. On the confirm
+        # a FAILED check refuses (see the docstring).
+        card, card_checked = None, True
+        if not free_by_quota:
+            try:
+                best = core.match_training_kaisuuken(session, base_model_id,
+                                                     raise_on_error=True)
+            except Exception as e:                    # noqa: BLE001
+                best, card_checked = None, False
+                if confirming:
+                    return jsonify({"error": "Lost to the Void -- the free-card check didn't "
+                                             "come back before submitting, so nothing was "
+                                             "spent. Wait a moment and try again. (%s)"
+                                             % _redact_host_paths(str(e))[:160]}), 502
+            # A card whose held count is UNKNOWN is not taken as covering, although
+            # card_covers() assumes a 1-ticket job is covered: PixAI's own training check
+            # keeps only matches with consumeAmount <= total, so it would not attach it
+            # either -- and here it would skip the paid acknowledgement on a 25k-100k run.
+            if best and best.get("id") and core.card_covers(best) \
+                    and not best.get("balance_unknown"):
+                card = best
+        free_by_card = card is not None
+        is_free = free_by_quota or free_by_card
+        if free_by_quota:
             cost_note = "Free — uses 1 of your %d free trainings." % free_left
+        elif free_by_card:
+            cost_note = ("Free — your training free card%s covers this base, and it is "
+                         "used up by this run." % (" (%s)" % card["name"]
+                                                   if card.get("name") else ""))
         elif price is not None:
-            cost_note = ("No free trainings left — this base costs %s credits to train."
-                         % "{:,}".format(price))
+            cost_note = ("No free trainings or training free card for this base — it costs "
+                         "%s credits to train." % "{:,}".format(price))
         else:
-            cost_note = ("No free trainings left, and this app can't price this base — "
-                         "check the cost on PixAI before going ahead.")
-        if not bool(body.get("confirm")):
+            cost_note = ("No free trainings or training free card for this base, and PixAI's "
+                         "price list has no price for it — the amount could not be quoted.")
+        if not free_by_quota and not card_checked:
+            cost_note += " (Your free cards couldn't be checked just now.)"
+        if not confirming:
             return jsonify({
                 "preview": True, "image_count": len(media_ids),
                 "title": title.strip(), "trigger_words": tw, "category": category,
                 "free_trainings_left": free_left, "is_free": is_free,
+                "free_by": "quota" if free_by_quota else ("card" if free_by_card else None),
+                "card": ({"name": card.get("name"), "expires": card.get("expiresAt")}
+                         if card else None),
                 "price": price, "cost_note": cost_note,
+                "unchecked_images": unchecked, "image_note": image_note,
             })
-        if not is_free and not bool(body.get("accept_credit_cost")):
+        pause = core.training_pause()
+        if pause is not None:
+            return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing was "
+                                     "submitted. Runs already training carry on." %
+                                     (" — it expects to be back around %s" % pause["resumes_at"]
+                                      if pause.get("resumes_at") else "")}), 409
+        accepted = body.get("accept_credit_cost")
+        if not is_free and not bool(accepted):
             return jsonify({"error": "This training charges credits (%s). Re-send with "
                                      "accept_credit_cost to proceed."
                                      % (("{:,}".format(price)) if price is not None
                                         else "amount unknown")}), 402
+        # The acknowledgement names an amount (the panels send the price they showed): it
+        # must still be THIS run's price. A base changed after the quote, or a price list that
+        # moved, refuses here instead of charging a number nobody accepted.
+        if not is_free and isinstance(accepted, (int, float)) \
+                and not isinstance(accepted, bool) and accepted != price:
+            return jsonify({"error": "The price changed since you accepted it — you accepted "
+                                     "%s credits, and this training costs %s. Nothing was "
+                                     "spent; check the cost and confirm again."
+                                     % ("{:,}".format(int(accepted)),
+                                        ("{:,}".format(price)) if price is not None
+                                        else "an amount that could not be quoted")}), 409
         try:
             task = core.submit_training(session, base_model_id, media_ids, title, trigger,
-                                        category)
+                                        category,
+                                        kaisuuken_id=(card["id"] if free_by_card else ""))
         except Exception as e:
             return jsonify({"error": str(e)}), 502
         # The Academy (loras_trained): a LoRA training this server actually submitted.
@@ -15889,7 +16164,9 @@ def create_app(out_dir: Path):
         except Exception:
             pass
         return jsonify({"submitted": True, "task": task, "was_free": is_free,
-                        "free_trainings_left": max(0, free_left - 1) if is_free else 0})
+                        "used_card": free_by_card,
+                        "free_trainings_left": (max(0, free_left - 1) if free_by_quota
+                                                else free_left)})
 
     _telem_day = {"day": None}   # once-per-day throttle for the passive marks
 
