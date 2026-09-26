@@ -58,6 +58,9 @@
 .gen-drawer .mgd-ce+.mgd-lbl{margin-top:10px;}
 .gen-drawer .mgd-neg{width:100%;box-sizing:border-box;background:var(--surface0,#211f3a);border:1px solid var(--surface1,#3a3460);border-radius:6px;color:var(--subtext,#9a93ab);padding:6px 9px;font-size:12.5px;font-family:inherit;min-height:32px;resize:vertical;margin-top:6px;}
 .gen-drawer .mgd-neg:focus{outline:none;border-color:var(--accent-soft,#4fc99a);color:var(--text,#d6d2e2);}
+/* Disabled on an engine without a negative prompt (the Tsubaki video engines, 2026-09-26): the
+   dock negative's own :disabled dimming (dock.css), for the inline drawer. */
+.gen-drawer .mgd-neg:disabled{opacity:.45;cursor:not-allowed;}
 .gen-drawer .mgd-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface1,#3a3460);border:1px solid var(--overlay0,#6a6088);border-radius:5px;padding:1px 6px 1px 2px;font-size:11.5px;color:var(--lavender,#b692e6);margin:0 2px;vertical-align:-3px;cursor:default;user-select:none;}
 .gen-drawer .mgd-chip img{width:16px;height:16px;border-radius:3px;object-fit:cover;}
 /* The CAMERA / audio-language <select> (DC 1404 / 1434, one identical style string). */
@@ -164,6 +167,10 @@
    badge (DC 1369) sits bottom-left in mauve. Clicking a filled slot removes it (DC), so no ×. */
 .gen-drawer .mgd-slot{position:relative;width:54px;height:54px;border-radius:9px;display:grid;place-items:center;overflow:hidden;cursor:pointer;border:1px dashed var(--surface1,#3a3460);background:rgba(12,10,28,.7);}
 .gen-drawer .mgd-slot.filled{border-style:solid;}
+/* .off = the engine takes no reference of this kind (a Tsubaki engine's video bank): dimmed and
+   not-allowed like a dimmed shot mode, still titled; a held pick in it is not sent. */
+.gen-drawer .mgd-slot.off{cursor:not-allowed;opacity:.35;}
+.gen-drawer .mgd-slot.off.filled{cursor:pointer;}   /* a held pick can still be clicked away */
 .gen-drawer .mgd-slot.filled.audio{background:linear-gradient(150deg,#3a2b63 0%,#191338 100%);}
 .gen-drawer .mgd-slot.filled.audio .mgd-slotcap{font-size:16px;color:var(--lavender,#b692e6);}
 .gen-drawer .mgd-slotcap{font-size:9.5px;color:var(--subtext,#9a93ab);text-align:center;}
