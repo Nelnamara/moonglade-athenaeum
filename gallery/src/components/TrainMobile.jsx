@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
+import { acceptCostField } from "../gen/trainCore.js";
 import "../styles/train.css";
 import "../styles/train-mobile.css";
 
@@ -117,8 +118,7 @@ export default function TrainMobile({ onClose }) {
     setBusy(true); setErr("");
     try {
       const res = await apiPost("/api/train/submit",
-        { ...body(), confirm: true,
-          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
+        { ...body(), confirm: true, ...acceptCostField(ask, acceptCost) });
       // Same as PublishMobile: the error note lives under the sheet -- close it
       // so the failure is actually visible instead of a silent button revert.
       if (res.error) { setErr(res.error); closeSheet(); return; }

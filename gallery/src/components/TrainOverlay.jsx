@@ -4,6 +4,7 @@ import "../styles/overlays.css";
 import "../styles/publish.css";
 import "../styles/train.css";
 import useScrollLock from "../hooks/useScrollLock.js";
+import { acceptCostField, normalizeTrigger } from "../gen/trainCore.js";
 
 /* Train a LoRA — Frontend Gallery.dc.html's ovTrain (markup L392-500+), on the real
    createTrainingTask pipeline.
@@ -26,11 +27,13 @@ import useScrollLock from "../hooks/useScrollLock.js";
    free two ways, as on PixAI's own trainer (owner ruling 4, 2026-09-26): the membership's
    free-training QUOTA (currency `free::user_lora_training`, counted only for a member),
    shown here as "N free trainings left"; or a training free card for the chosen base, which
-   the server checks when you press Train it and names in the confirm. Otherwise the run
-   costs credits, and the price IS quoted -- it comes from PixAI's own training price list
-   (SCOPE_2026-09-26 E7; the old "this app cannot quote the amount" stopped being true). The
-   server still refuses a paid submit unless the accept-cost acknowledgment is sent, and
-   this panel makes you tick it deliberately. */
+   the server checks when you press Train it and the quota does not cover the run (PixAI's own
+   page checks it either way -- a deliberate difference, see api_train_submit) and names in the
+   confirm. Otherwise the run costs credits, and the price IS quoted -- it comes from PixAI's
+   own training price list (SCOPE_2026-09-26 E7; the old "this app cannot quote the amount"
+   stopped being true). The server still refuses a paid submit unless the accept-cost
+   acknowledgment is sent -- the AMOUNT the box named, refused if the run no longer costs that
+   -- and this panel makes you tick it deliberately. */
 
 // PixAI's real LoRA categories + their display labels, probed live off the train-lora
 // page 2026-08-06 (the design's character/style/concept was placeholder). "detail"
@@ -91,6 +94,13 @@ export default function TrainOverlay({ onClose }) {
       });
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* A quote is for ONE form. The base chips, the dataset and the fields stay live while the
+     confirm panel is open, so any change takes the panel down with its ticked acknowledgement:
+     otherwise "Spend 25,000 credits" could stay ticked over a base picked afterwards that costs
+     100,000. (The server refuses that too -- the confirm sends the amount, see acceptCostField.) */
+  useEffect(() => { setAsk(null); setAcceptCost(false); },
+    [baseModel, archIdx, picked, trigger, name, category]);
+
   // Selecting a Model Type shows that architecture's models and defaults to its first.
   const pickArch = (i) => {
     setArchIdx(i);
@@ -124,8 +134,7 @@ export default function TrainOverlay({ onClose }) {
     setBusy(true); setErr("");
     try {
       const res = await apiPost("/api/train/submit",
-        { ...body(), confirm: true,
-          ...(ask && !ask.is_free ? { accept_credit_cost: acceptCost } : {}) });
+        { ...body(), confirm: true, ...acceptCostField(ask, acceptCost) });
       if (res.error) { setErr(res.error); return; }
       setDone(res); setAsk(null);
       if (typeof res.free_trainings_left === "number") setQuota(res.free_trainings_left);
@@ -198,7 +207,8 @@ export default function TrainOverlay({ onClose }) {
                 <textarea className="mgpub-in" rows={2} value={trigger}
                   placeholder="eg: hatsune miku, aqua hair, twin tails"
                   onChange={(e) => setTrigger(e.target.value)} />
-                <span className="mgtr-trigcount">{trigger.trim().length}</span>
+                {/* The length the server checks: the normalized string, counted as PixAI counts it. */}
+                <span className="mgtr-trigcount">{normalizeTrigger(trigger).length}</span>
               </div>
               <div className="mgpub-hint">
                 Stick to letters, numbers and common symbols. Line breaks become commas,

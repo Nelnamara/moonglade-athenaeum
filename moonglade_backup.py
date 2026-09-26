@@ -11203,6 +11203,16 @@ def normalize_trigger_words(text):
     return re.sub(r"^[,\s]+|[,\s]+$", "", s)
 
 
+def trigger_word_length(text):
+    """A trigger-word string's length as PixAI's page measures it: JavaScript's
+    `String.length`, i.e. UTF-16 code units -- a character outside the Basic Multilingual
+    Plane, such as an emoji, counts 2. Python's len() would count it once, and so let through a
+    256-emoji string PixAI refuses as too long while refusing a 15-emoji DiT.3 trigger it
+    accepts. The train panel's counter shows the same number (normalizeTrigger in
+    gallery/src/gen/trainCore.js)."""
+    return len(str(text or "").encode("utf-16-le")) // 2
+
+
 def validate_training(base_model_id, media_ids, title, trigger_words, category,
                       training_task_id="", config=None):
     """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
@@ -11229,13 +11239,16 @@ def validate_training(base_model_id, media_ids, title, trigger_words, category,
     tw = normalize_trigger_words(trigger_words)
     if not tw:
         raise PixAIError("trigger words are required -- they're how you summon the LoRA")
-    if len(tw) > TRAIN_TRIGGER_MAX:
+    # Counted the way the site counts them (trigger_word_length: JavaScript's `length`, UTF-16
+    # code units), so an emoji is 2 here as it is there.
+    units = trigger_word_length(tw)
+    if units > TRAIN_TRIGGER_MAX:
         raise PixAIError("trigger words are too long -- %d characters at most, yours are %d"
-                         % (TRAIN_TRIGGER_MAX, len(tw)))
+                         % (TRAIN_TRIGGER_MAX, units))
     if training_model_type(base_model_id, config) in _TRAIN_LONG_TRIGGER_TYPES \
-            and len(tw) < TRAIN_TRIGGER_MIN_DIT:
+            and units < TRAIN_TRIGGER_MIN_DIT:
         raise PixAIError("trigger words must be at least %d characters on a DiT.2 or DiT.3 "
-                         "base -- yours are %d" % (TRAIN_TRIGGER_MIN_DIT, len(tw)))
+                         "base -- yours are %d" % (TRAIN_TRIGGER_MIN_DIT, units))
     if str(category or "") not in TRAIN_CATEGORIES:
         raise PixAIError("pick a category (%s)" % "/".join(TRAIN_CATEGORIES))
     return tw
@@ -11281,9 +11294,8 @@ def describe_rejected_training_images(rejected):
     shown = ", ".join("%s (%dx%d, %s)" % (r["media_id"], r["width"], r["height"], r["why"])
                       for r in rejected[:8])
     more = " and %d more" % (len(rejected) - 8) if len(rejected) > 8 else ""
-    return ("PixAI won't train on %d of these image%s -- remove %s and try again: %s%s."
-            % (len(rejected), "" if len(rejected) == 1 else "s",
-               "it" if len(rejected) == 1 else "them", shown, more))
+    return ("PixAI won't train on %d of these images — remove %s and try again: %s%s."
+            % (len(rejected), "it" if len(rejected) == 1 else "them", shown, more))
 
 
 def submit_training(session, base_model_id, media_ids, title, trigger_words, category,

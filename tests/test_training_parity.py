@@ -321,6 +321,10 @@ def test_a_matching_training_card_makes_the_run_free_and_rides_the_submit(tmp_pa
 
 
 def test_the_quota_wins_before_any_card_check(tmp_path, monkeypatch):
+    # A DELIBERATE DIFFERENCE from PixAI's basic trainer, which runs the card check whatever
+    # the quota and attaches a matching card even when the quota covers the run. The scope
+    # (E7, ruling 4) checks a card "before a paid run"; api_train_submit says so at the check,
+    # and DECISIONS records it with the other differences. Changing it is the owner's call.
     post, calls = _train_client(tmp_path, monkeypatch, quota=3, card=_CARD)
     prev = post(_BODY).get_json()
     assert prev["free_by"] == "quota"
@@ -449,3 +453,91 @@ def test_the_training_docs_no_longer_say_the_price_cannot_be_quoted():
     backup = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
     assert "this app CANNOT say how many" not in gallery
     assert not re.search(r"is NOT reachable through any documented endpoint", backup)
+
+
+# ------------------------------------------------ review fixes (2026-09-26, E7)
+
+def test_the_acknowledged_amount_must_be_this_runs_price(tmp_path, monkeypatch):
+    """Quote on the SDXL default (25,000), tick "Spend 25,000 credits", then switch the base
+    to Tsubaki.3 before pressing Start: the confirm carries the amount the box named, and a
+    run that now costs 100,000 is refused with nothing submitted."""
+    post, calls = _train_client(tmp_path, monkeypatch, quota=0)
+    prev = post(_BODY).get_json()
+    assert prev["price"] == 25000
+    r = post(dict(_BODY, base_model_id=T3, trigger_words="a moonlit night elf druid in the grove",
+                  confirm=True, accept_credit_cost=25000))
+    assert r.status_code == 409 and "nothing was spent" in r.get_json()["error"].lower()
+    assert "25,000" in r.get_json()["error"] and "100,000" in r.get_json()["error"]
+    assert not [c for c in calls if c[0] == "submit"]
+    # the amount that IS the price goes through; so does a bare true (no amount to name)
+    assert post(dict(_BODY, confirm=True, accept_credit_cost=25000)).get_json()["submitted"]
+    assert post(dict(_BODY, confirm=True, accept_credit_cost=True)).get_json()["submitted"]
+    # a bool is never read as an amount (True == 1 in Python)
+    assert len([c for c in calls if c[0] == "submit"]) == 2
+
+
+def test_the_panels_send_the_amount_and_drop_a_stale_quote():
+    """Source guard: both panels send acceptCostField (the amount), and the desktop panel --
+    whose base chips stay live under the confirm -- clears the quote on any form change."""
+    for name in ("TrainOverlay.jsx", "TrainMobile.jsx"):
+        src = (ROOT / "gallery" / "src" / "components" / name).read_text(encoding="utf-8")
+        assert "...acceptCostField(ask, acceptCost)" in src, name
+        assert "accept_credit_cost: acceptCost" not in src, name
+    overlay = (ROOT / "gallery" / "src" / "components" / "TrainOverlay.jsx").read_text(
+        encoding="utf-8")
+    assert re.search(r"useEffect\(\(\) => \{ setAsk\(null\); setAcceptCost\(false\); \},\s*"
+                     r"\[baseModel, archIdx, picked, trigger, name, category\]\);", overlay)
+
+
+def test_a_card_of_unknown_balance_is_not_free(tmp_path, monkeypatch):
+    """PixAI's own training check keeps only matches with consumeAmount <= total, so a card
+    whose held count could not be read is not attached there -- and here it must not skip the
+    paid acknowledgement on a 25,000-100,000 credit run."""
+    post, calls = _train_client(tmp_path, monkeypatch, quota=0,
+                                card=dict(_CARD, total=None, covered=True,
+                                          balance_unknown=True))
+    prev = post(_BODY).get_json()
+    assert prev["is_free"] is False and prev["free_by"] is None
+    assert post(dict(_BODY, confirm=True)).status_code == 402
+    d = post(dict(_BODY, confirm=True, accept_credit_cost=25000)).get_json()
+    assert d["submitted"] is True
+    assert [c for c in calls if c[0] == "submit"][0][2]["kaisuuken_id"] == ""
+
+
+def test_one_request_prices_off_the_config_it_validated_with(tmp_path, monkeypatch):
+    """The route reads the training config once and prices from THAT read: a cache entry
+    expiring between validation and pricing must not mix a live answer with the snapshot."""
+    post, _ = _train_client(tmp_path, monkeypatch, quota=0)
+    live = core.training_config()
+    live["pricing"] = dict(live["pricing"], SDXL_MODEL={"price": 31000})
+    snapshot = core.training_config()                  # SDXL at the snapshot's 25,000
+    answers = iter([live])                             # the first read answers live...
+    monkeypatch.setattr(core, "training_config", lambda: next(answers, snapshot))
+    assert post(_BODY).get_json()["price"] == 31000    # ...and the price is that read's
+
+
+@pytest.mark.parametrize("base, trigger, ok", [
+    (ILLUSTRIOUS, "\U0001F319" * 128, True),        # 256 UTF-16 units: the limit exactly
+    (ILLUSTRIOUS, "\U0001F319" * 129, False),       # 258 units: too long on PixAI (len() 129)
+    (T3, "\U0001F319" * 15, True),                  # 30 units: long enough on DiT.3 (len() 15)
+    (T3, "\U0001F319" * 14 + "a", False),           # 29 units
+])
+def test_trigger_words_are_counted_as_the_site_counts_them(base, trigger, ok):
+    """JavaScript's `length` -- UTF-16 code units -- is what PixAI's own rule measures, so an
+    emoji counts 2 on both limits."""
+    if ok:
+        assert _validate(base, trigger) == trigger
+    else:
+        with pytest.raises(core.PixAIError):
+            _validate(base, trigger)
+    assert core.trigger_word_length("\U0001F319a") == 3
+
+
+def test_the_image_refusal_reads_right_for_one_image():
+    one = core.describe_rejected_training_images(
+        [{"media_id": "4", "width": 800, "height": 400, "why": "smaller than 512x512"}])
+    assert one.startswith("PixAI won't train on 1 of these images — remove it and try again")
+    two = core.describe_rejected_training_images(
+        [{"media_id": str(i), "width": 300, "height": 300, "why": "smaller than 512x512"}
+         for i in range(2)])
+    assert "2 of these images — remove them" in two

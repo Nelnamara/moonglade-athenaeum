@@ -15928,12 +15928,18 @@ def create_app(out_dir: Path):
           * the account is a member (membership tier present, 0 included) with free-training
             quota left -- it consumes one quota unit; or
           * a training free card matches the base (core.match_training_kaisuuken, checked
-            only when the quota does not cover the run) -- its id rides the submit.
+            only when the quota does not cover the run -- a deliberate difference from the
+            site, see the comment at the check) and its held count is known to cover it --
+            its id rides the submit.
         Anything else charges credits, and the confirmed call is REFUSED unless the caller
-        also sends `accept_credit_cost: true` -- including a run whose price could not be
-        quoted -- so nobody spends by clicking the button they used when it was free. A
-        card check that FAILS on the confirm refuses rather than guessing the run is paid
-        (the same rule the generation spend path follows).
+        also sends `accept_credit_cost` -- including a run whose price could not be quoted --
+        so nobody spends by clicking the button they used when it was free. The panels send
+        the AMOUNT they showed (a number; `true` only when no amount could be quoted), and a
+        number that is no longer this run's price refuses with 409: the acknowledgement is
+        for the price the user read, not for whatever the base picked since costs. A card
+        check that FAILS on the confirm refuses rather than guessing the run is paid (the
+        rule the generation spend path follows; single attempt -- no new retry on a spend
+        path).
 
         PAUSE. On the confirm, after validation and before the submit, PixAI's
         /config/trainLoraStatus switch is read (core.training_pause); a paused service
@@ -15981,11 +15987,17 @@ def create_app(out_dir: Path):
 
         free_left = core.training_free_quota(session)
         free_by_quota = free_left > 0
-        # credits, or None; the same cached config the validation above just read
-        price = core.training_price_for_version(base_model_id)
+        # credits, or None -- off `cfg`, the very config the validation above read, so one
+        # request can never validate against the live config and price off the snapshot
+        price = core.training_price_for_version(base_model_id, cfg)
         # The training free card (owner ruling 4): checked only when the quota does not
-        # already make the run free. Read-only; the card is spent only by the submit that
-        # carries its id. On the confirm a FAILED check refuses (see the docstring).
+        # already make the run free -- "before a paid run", as SCOPE_2026-09-26 E7 words it.
+        # A DELIBERATE DIFFERENCE FROM THE SITE: PixAI's basic trainer runs the card check
+        # whatever the quota and attaches a matching card even when the quota covers the run
+        # (so there the card is spent and the quota kept); here a member holding both spends a
+        # quota unit and keeps the card. Recorded in DECISIONS with the other differences.
+        # Read-only; the card is spent only by the submit that carries its id. On the confirm
+        # a FAILED check refuses (see the docstring).
         card, card_checked = None, True
         if not free_by_quota:
             try:
@@ -15998,7 +16010,12 @@ def create_app(out_dir: Path):
                                              "come back before submitting, so nothing was "
                                              "spent. Wait a moment and try again. (%s)"
                                              % _redact_host_paths(str(e))[:160]}), 502
-            if best and best.get("id") and core.card_covers(best):
+            # A card whose held count is UNKNOWN is not taken as covering, although
+            # card_covers() assumes a 1-ticket job is covered: PixAI's own training check
+            # keeps only matches with consumeAmount <= total, so it would not attach it
+            # either -- and here it would skip the paid acknowledgement on a 25k-100k run.
+            if best and best.get("id") and core.card_covers(best) \
+                    and not best.get("balance_unknown"):
                 card = best
         free_by_card = card is not None
         is_free = free_by_quota or free_by_card
@@ -16031,13 +16048,25 @@ def create_app(out_dir: Path):
         if pause is not None:
             return jsonify({"error": "PixAI has paused new LoRA training runs%s, so nothing was "
                                      "submitted. Runs already training carry on." %
-                                     (" -- it expects to be back around %s" % pause["resumes_at"]
+                                     (" — it expects to be back around %s" % pause["resumes_at"]
                                       if pause.get("resumes_at") else "")}), 409
-        if not is_free and not bool(body.get("accept_credit_cost")):
+        accepted = body.get("accept_credit_cost")
+        if not is_free and not bool(accepted):
             return jsonify({"error": "This training charges credits (%s). Re-send with "
                                      "accept_credit_cost to proceed."
                                      % (("{:,}".format(price)) if price is not None
                                         else "amount unknown")}), 402
+        # The acknowledgement names an amount (the panels send the price they showed): it
+        # must still be THIS run's price. A base changed after the quote, or a price list that
+        # moved, refuses here instead of charging a number nobody accepted.
+        if not is_free and isinstance(accepted, (int, float)) \
+                and not isinstance(accepted, bool) and accepted != price:
+            return jsonify({"error": "The price changed since you accepted it — you accepted "
+                                     "%s credits, and this training costs %s. Nothing was "
+                                     "spent; check the cost and confirm again."
+                                     % ("{:,}".format(int(accepted)),
+                                        ("{:,}".format(price)) if price is not None
+                                        else "an amount that could not be quoted")}), 409
         try:
             task = core.submit_training(session, base_model_id, media_ids, title, trigger,
                                         category,

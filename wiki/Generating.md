@@ -113,11 +113,17 @@ PixAI. It spends, so it previews first and only starts when you confirm.
   page starts on.
 - **What it costs** is shown before you start. A run is free when your membership still has
   free trainings left (they only count while you are a member), or when you hold a training
-  free card for that base — the card is used up by the run. Otherwise the panel quotes PixAI's
-  own price for that base and asks you to tick that you will spend it.
+  free card for that base — the card is used up by the run. If you have both, this app uses one
+  of your free trainings and keeps the card (PixAI's own page would use the card). Otherwise
+  the panel quotes PixAI's own price for that base and asks you to tick that you will spend
+  that amount. Change the base, the images or any field after the quote and the quote closes —
+  press **Train it** (on the phone: **Preview & start training**) again for a fresh one; a run
+  is never started at a price you did not tick.
 - **Trigger words** are tidied the way PixAI tidies them before they are sent: line breaks
   become commas, extra spaces and repeated commas are removed, and everything is lowercased.
-  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30.
+  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. On the desktop panel the
+  counter beside the box shows the tidied length, counted the way PixAI counts it (an emoji
+  counts as 2).
 - **Images**: between 10 and 100, each at least 512 pixels on both sides and no longer than
   3:1. If an image fails that rule the run is refused and the image is named — PixAI's own
   page quietly drops such images and trains on the rest, and this app would rather not train
