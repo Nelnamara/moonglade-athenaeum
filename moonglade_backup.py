@@ -8602,9 +8602,15 @@ def clamp_edit_config(model_id, resolution, quality, aspect):
 
     "auto" passes only for a model whose table lists it -- one that publishes no default
     aspect (Reference Pro). On Edit Pro it is not a legal value and snaps to the model's
-    default (3:5), exactly like any other aspect the model does not offer."""
+    default (3:5), exactly like any other aspect the model does not offer. On a model OUTSIDE
+    the table (a banked Toolbox preset pins one, e.g. PixAI Edit v3.0) "auto" -- or no aspect
+    at all -- becomes the pre-table 3:4 (_EDIT_ASPECT_UNKNOWN_MODEL): what such a model does
+    with no aspectRatio is unobserved, so it fails open to what every edit sent before "auto"
+    existed. Any other aspect still passes through unchanged there."""
     spec = edit_model_by_id(model_id)
     if not spec:
+        if not aspect or aspect == EDIT_ASPECT_AUTO:
+            aspect = _EDIT_ASPECT_UNKNOWN_MODEL
         return resolution, quality, aspect
     if not spec["qualities"]:
         quality = ""                                   # model exposes no quality knob
@@ -8688,13 +8694,16 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     `aspect_ratio` left unset (or blank) takes the model's own table default
     (edit_default_aspect). "auto" sends NO aspectRatio at all -- PixAI's own shape for a
     model with no published default (the owner's Reference Pro edits on the wire) -- which
-    leaves the frame to PixAI.
+    leaves the frame to PixAI. Only for a model whose table lists "auto": on any other model
+    (Edit Pro, or one outside the table) "auto" is not a value it takes, so it gets that
+    model's default instead (3:5 on Edit Pro, the pre-table 3:4 off the table).
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
         raise PixAIError("edit needs at least one source media_id")
     mid = str(model_id or EDIT_PRO_MODEL_ID)
-    if not aspect_ratio:
+    if not aspect_ratio or (aspect_ratio == EDIT_ASPECT_AUTO and EDIT_ASPECT_AUTO not in
+                            ((edit_model_by_id(mid) or {}).get("aspects") or ())):
         aspect_ratio = edit_default_aspect(mid)
     model_config = {"resolution": resolution}
     if aspect_ratio != EDIT_ASPECT_AUTO:

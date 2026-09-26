@@ -268,3 +268,37 @@ def test_edit_caps_and_edit_models_agree():
         aspects, dflt = js[key]
         assert aspects == spec["aspects"], key
         assert dflt == spec["default"], key
+
+
+# ---- a model OUTSIDE the table (review fix, SCOPE_2026-09-26 E1) ----
+
+EDIT_V3 = "1917311758307382235"      # PixAI Edit (v3.0): in neither EDIT_MODELS nor the config
+
+
+def test_auto_on_a_model_outside_the_table_fails_open_to_3_4():
+    """What a model outside EDIT_MODELS does with no aspectRatio is unobserved, so "auto" --
+    or no aspect -- is the pre-table 3:4 there, in the clamp AND in the builder; any other
+    aspect still passes through unchanged."""
+    assert core.clamp_edit_config("999", "1K", "medium", "auto") == ("1K", "medium", "3:4")
+    assert core.clamp_edit_config("999", "1K", "medium", "")[2] == "3:4"
+    assert core.clamp_edit_config("999", "1K", "medium", "16:9")[2] == "16:9"
+    for mid in ("999", EDIT_V3):
+        p = core.build_chat_edit_parameters("x", ["10"], model_id=mid, aspect_ratio="auto")
+        assert p["chat"]["modelConfig"]["aspectRatio"] == "3:4", mid
+    # and on Edit Pro, which publishes a default, "auto" is its default -- never "no aspect"
+    ep = core.build_chat_edit_parameters("x", ["10"], aspect_ratio="auto")
+    assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
+
+
+def test_a_preset_on_an_off_table_model_from_an_auto_card_sends_3_4():
+    """The road the review found: a banked Toolbox preset pins PixAI Edit v3.0, and the Edit
+    card is sitting on Reference Pro's default, Auto. The preset's model does not list Auto,
+    so the submit must carry the old 3:4 -- not an unobserved no-aspect shape."""
+    pre = {"prompt": "<preset prompt>", "scene_id": "character-card", "model_id": EDIT_V3}
+    rs = core.RequestResolver(preset=lambda user, name: pre if name == "cc" else None)
+    p = core._edit_parameters_from_payload(
+        {"source": "55", "preset": "cc", "edit_model": "reference-pro", "aspect": "auto",
+         "resolution": "2K", "quality": ""}, "", rs)
+    assert p["chat"]["modelId"] == EDIT_V3
+    assert p["chat"]["modelConfig"]["aspectRatio"] == "3:4"
+    assert p["sceneId"] == "character-card"
