@@ -90,8 +90,11 @@ def traced(monkeypatch):
 
 
 def _ddl(statements):
+    # The _MIGRATIONS statements: DDL, plus the one-time data repairs that ride the same
+    # list (an idempotent "UPDATE catalog ..." -- the 2026-09-26 video-row repair).
     return [s for s in statements
-            if s.strip().upper().startswith(("ALTER ", "CREATE INDEX", "CREATE TABLE"))]
+            if s.strip().upper().startswith(("ALTER ", "CREATE INDEX", "CREATE TABLE",
+                                             "UPDATE CATALOG "))]
 
 
 # --------------------------------------------------------------- the road

@@ -270,6 +270,40 @@ def init_db(db_path):
     con.close()
 
 
+# The video engines that publish a numeric version id: moonglade_backup.VIDEO_MODELS' non-empty
+# `model_id`s, copied here because this module is the base the backup module imports (it cannot
+# import them back at load time). tests/test_video_tsubaki.py fails if the two drift.
+# v3.0.1 and v2.7 have no id and are deliberately absent -- their rows keep the name.
+_VIDEO_NAME_TO_ID = {
+    "v4.0.1": "2003969750675682808",
+    "v4.0": "2003968021137101826",
+    "tbkv1.0.1": "2054378086834851904",
+    "tbkv1.0": "2042030623542642408",
+    "v3.2": "1961182207978260675",
+    "v3.0.2": "2014412117889628958",
+    "v3.0": "1919508300549460046",
+}
+
+# VIDEO ROW REPAIR (2026-09-26, PROBE_2026-09-26 V09). Every video collected at create time
+# before this date stored the ENGINE NAME in model_id ("tbkv1.0.1", "v4.0.1") -- from the
+# submitted block -- where every other road stores the numeric version id, so one model sat in
+# the catalog under two ids and --fix-models handed the name to the version lookup. This moves
+# the name to video_model and puts the engine's own id in model_id. Idempotent by its WHERE: a
+# repaired row's model_id is numeric and never matches again; rows of a name with no id (v3.0.1,
+# v2.7) and unknown names are left exactly as they are. model_name is left for --fix-models to
+# title (owner ruling 3: video model names are dynamic) -- and CLEARED when it is only what the
+# old name-as-id lookup could leave behind: --fix-models --relabel-removed's "Unknown or removed
+# model" stamp, or the engine name itself. A stamp would otherwise read as a resolved name to
+# _needs_model_fix and block the real title forever (review V-R3). SQLite evaluates every SET
+# expression against the row as it was, so model_id is still the engine name inside that CASE.
+_VIDEO_ROW_REPAIR_SQL = (
+    "UPDATE catalog SET video_model = model_id, "
+    "model_name = CASE WHEN model_name IN ('Unknown or removed model', model_id) THEN '' "
+    "ELSE model_name END, model_id = CASE model_id "
+    + " ".join("WHEN '{}' THEN '{}'".format(n, i) for n, i in _VIDEO_NAME_TO_ID.items())
+    + " END WHERE is_video = '1' AND model_id IN ("
+    + ", ".join("'{}'".format(n) for n in _VIDEO_NAME_TO_ID) + ")")
+
 _MIGRATIONS = [
     "ALTER TABLE catalog ADD COLUMN batch TEXT DEFAULT ''",
     "ALTER TABLE catalog ADD COLUMN artwork_id TEXT DEFAULT ''",
@@ -354,6 +388,9 @@ _MIGRATIONS = [
     # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
     # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
     "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
+    # VIDEO ROW REPAIR (2026-09-26) -- a data statement, not DDL; see _VIDEO_ROW_REPAIR_SQL.
+    # Last, so every column it reads (is_video, video_model) already exists.
+    _VIDEO_ROW_REPAIR_SQL,
 ]
 
 # ---------------------------------------------------------------------------
@@ -400,7 +437,8 @@ def migrate(db_path, force=False):
     """Bring an existing catalog.db up to the current schema by running
     _MIGRATIONS. Idempotent: every statement is an ALTER TABLE ADD COLUMN or a
     CREATE INDEX IF NOT EXISTS, and the OperationalError a re-run raises ("duplicate
-    column name") is the success case, not a failure.
+    column name") is the success case, not a failure -- or a one-time data repair
+    (an UPDATE) whose own WHERE matches nothing once it has run.
 
     Memoized per process per resolved path -- the second and every later call for
     the same catalog returns without opening anything. That is what lets create_app
@@ -6419,6 +6457,45 @@ def find_files_for_media_id(out_dir, media_id, include_gallery=False, exts=None)
     return files_for(out_dir, media_id,
                      kinds=(("image",) if exts is None else exts),
                      exclude=exclude)
+
+
+def find_local_video_file(out_dir, mid, row=None):
+    """Resolve a catalog media_id to its local video file on disk: try the catalog's
+    stored filename first, then fall back to the shared media-id matcher (SAME exact
+    media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
+    other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
+    have neither, so a quarantined file was a valid hit and a shorter media_id could
+    match as a substring of a longer, unrelated one's filename). find_files_for_media_id
+    defaults to images, hence the explicit exts=_VIDEO_EXTS. Returns a Path or None.
+
+    Lifted out of create_app on 2026-09-26 (moved, not changed) so the CLI's
+    --reference-video length lookup reads the one answer the app's _find_local_video_file
+    gives its four callers. `row` is the media id's catalog row (or None / {} for "none").
+
+    _VIDEO_EXTS, not a hand-written tuple: the local copy was missing .m4v, which
+    run_import_local DOES copy in and catalog as is_video='1' (its media_exts is
+    _IMAGE_EXTS | _VIDEO_EXTS). Harmless while the only callers were Loom handoff/
+    duration -- a .m4v is never a generated shot -- but the detail page's existence
+    check runs over a whole catalog, so the short list would have reported a perfectly
+    present imported clip as missing from disk."""
+    out_dir = Path(out_dir)
+    vid_exts = _VIDEO_EXTS
+    row = row or {}
+    fn = row.get("filename") or ""
+    if fn:
+        cand = out_dir / fn
+        # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
+        # path resolves outside the library. /video-file already refuses that (relative_to
+        # + send_from_directory's own safe_join), which is exactly why this branch has to
+        # agree: without the check THIS resolver says "present" for a file the serving
+        # route will 404, and the detail page draws a player over it and says nothing --
+        # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
+        # part: relative_to alone does not normalise, so `..` walks straight through it.
+        if (_is_under(cand.resolve(), out_dir.resolve())
+                and cand.is_file() and cand.suffix.lower() in vid_exts):
+            return cand
+    fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
+    return fallback[0] if fallback else None
 # ---------------------------------------------------------------------------
 # END LIBRARY SCAN
 # ---------------------------------------------------------------------------
@@ -13557,6 +13634,10 @@ def create_app(out_dir: Path):
                     "prompt_helper": False,
                     "negative": "",                      # r2v carries no negative (builder omits it)
                     "prompt": str(rv.get("prompt") or ""),
+                    # The source's output aspect ratio (Tsubaki engines only). Read so the
+                    # Remix can SAY it is not carried -- the drawer has no ratio picker yet,
+                    # and a hidden carried ratio would be priced and sent unseen (2026-09-26).
+                    "ratio": str(rv.get("ratio") or ""),
                     "start": None, "end": None,
                     "image_refs": _mrefs(rv.get("referenceImageMediaIds")),
                     "video_refs": _mrefs(rv.get("referenceVideoMediaIds")),
@@ -16620,13 +16701,20 @@ def create_app(out_dir: Path):
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup)
 
+    _video_len_cache = []   # the one cached lookup for this app (built on first use)
+
     def _video_duration_lookup(media_id):
         """A reference video's real length in seconds, or None, for
-        referenceVideo.inputVideoDurations (RequestResolver.video_duration). Scaffold
-        (2026-09-26): returns None, so nothing changes yet. The video lane fills it (the
-        local file's measured length first, then the catalog), and it must stay a pure
-        local read -- /api/price runs it on every keystroke."""
-        return None
+        referenceVideo.inputVideoDurations (RequestResolver.video_duration): the local
+        file's measured length (media_tools.duration on what _find_local_video_file's rule
+        finds), else the catalog's video_duration, else None -- core.make_video_duration_lookup,
+        the same helper the CLI's --reference-video uses against --out. A pure local read,
+        cached per media id for this app's life: /api/price runs it on every keystroke, and
+        the quote, the drawer's spend and the Loom's spend all read one cached answer."""
+        import moonglade_backup as core
+        if not _video_len_cache:
+            _video_len_cache.append(core.make_video_duration_lookup(out_dir, db_path))
+        return _video_len_cache[0](media_id)
 
     _presets_lock = threading.Lock()
 
@@ -18160,13 +18248,9 @@ __DESIGN_TOKENS__
         return jsonify({"ok": True})
 
     def _find_local_video_file(mid, row=None):
-        """Resolve a catalog media_id to its local video file on disk: try the catalog's
-        stored filename first, then fall back to the shared media-id matcher (SAME exact
-        media_id_of(p) == mid check and _duplicates/_deleted quarantine exclusion as every
-        other matcher in this file -- B17, audit 2026-07-21: a bare glob fallback used to
-        have neither, so a quarantined file was a valid hit and a shorter media_id could
-        match as a substring of a longer, unrelated one's filename). find_files_for_media_id
-        defaults to images, hence the explicit exts=vid_exts. Returns a Path or None.
+        """Resolve a catalog media_id to its local video file on disk -- the app-bound face
+        of the module-level find_local_video_file (which holds the whole rule and its
+        reasons), supplying this library's out_dir and, when the caller has none, its row.
 
         Shared by /api/loom/handoff (frame extraction), /api/loom/video-duration
         (footage-import fallback probe), the detail page's does-this-clip-exist check, and
@@ -18174,36 +18258,16 @@ __DESIGN_TOKENS__
         /video-file resolved `row["filename"]` on its own, the page could decide a clip was
         present (via the fallback here) and then link to a URL that 404s, which draws a dead
         player and says nothing -- the very failure the detail-page check was added to stop.
-        One resolver, four callers, one answer.
+        One resolver, four callers, one answer. (The fifth, since 2026-09-26, is the
+        reference-video length lookup -- core.make_video_duration_lookup -- which calls the
+        module-level function so the CLI's --reference-video reads the same answer.)
 
         `row` is an already-loaded catalog row, passed by callers that just fetched it so
         this doesn't repeat a primary-key SELECT they already paid for. It is a cache, not
         an override: pass a DIFFERENT row and you get a different file, which is why only
         the two callers holding this exact mid's row use it."""
-        import moonglade_backup as core
-        # core._VIDEO_EXTS, not a hand-written tuple: the local copy was missing .m4v, which
-        # core.run_import_local DOES copy in and catalog as is_video='1' (its media_exts is
-        # _IMAGE_EXTS | _VIDEO_EXTS). Harmless while the only callers were Loom handoff/
-        # duration -- a .m4v is never a generated shot -- but the detail page's existence
-        # check below runs over a whole catalog, so the short list would have reported a
-        # perfectly present imported clip as missing from disk.
-        vid_exts = core._VIDEO_EXTS
-        row = (row if row is not None else get_row(db_path, mid)) or {}
-        fn = row.get("filename") or ""
-        if fn:
-            cand = out_dir / fn
-            # The catalog's `filename` is joined onto out_dir, so a row carrying a traversing
-            # path resolves outside the library. /video-file already refuses that (relative_to
-            # + send_from_directory's own safe_join), which is exactly why this branch has to
-            # agree: without the check THIS resolver says "present" for a file the serving
-            # route will 404, and the detail page draws a player over it and says nothing --
-            # M30's own symptom, reached by a different road. `.resolve()` is the load-bearing
-            # part: relative_to alone does not normalise, so `..` walks straight through it.
-            if (_is_under(cand.resolve(), Path(out_dir).resolve())
-                    and cand.is_file() and cand.suffix.lower() in vid_exts):
-                return cand
-        fallback = find_files_for_media_id(out_dir, mid, exts=vid_exts)
-        return fallback[0] if fallback else None
+        return find_local_video_file(out_dir, mid,
+                                     row if row is not None else get_row(db_path, mid))
 
     @app.route("/api/loom/handoff", methods=["POST"])
     @tier(LOGIN)

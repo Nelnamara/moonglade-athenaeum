@@ -172,23 +172,32 @@ def test_i2v_diverges_on_prompt_over_maxlen():
 # =============================================================================
 # reference-video road -- run_reference_video builds via build_reference_video_parameters
 # =============================================================================
-def test_refvideo_diverges_on_nondefault_model_id():
-    """run_reference_video passes NO model_id, so a non-default --video-model still submits
-    the v4.0.1 numeric id (the builder default); the web R2V road recomputes the id for the
-    chosen model. Different modelId on a spend path."""
-    model = "v4.0"
-    # exactly what run_reference_video._build() does with these args:
-    cli = core.build_reference_video_parameters(
-        "a pan @image1", image_media_ids=["55"], video_media_ids=[], audio_media_ids=[],
-        model=model, duration=core._snap_video_duration(5, model), mode="professional",
-        generate_audio=False, audio_language="english", is_private=True, kaisuuken_id="")
-    web = core.build_request(
-        {"mode": "R2V", "images": ["55"], "prompt": "a pan @image1", "duration": 5,
-         "video_model": model, "quality": "professional", "is_private": True},
-        mode="video", resolve=None).parameters
-    assert cli["modelId"] == core.REFVIDEO_MODEL_ID              # v4.0.1's id, unconditionally
-    assert web["modelId"] == core.video_model_id(model)         # the chosen model's id
-    assert cli["modelId"] != web["modelId"]
+def test_refvideo_modelid_now_agrees_on_a_nondefault_model():
+    """Rewritten ON PURPOSE (SCOPE_2026-09-26 V2, "never another model's id"). This used to
+    pin a DIVERGENCE: run_reference_video passed no model_id, so the builder's v4.0.1 default
+    went out on every engine while the web R2V road sent the chosen model's id. The builder
+    now defaults to the model's OWN id (video_model_id), so the CLI and the web road agree --
+    and the reference-video bullet of DECISIONS' "CLI create runners stay off the payload
+    road" no longer holds. A tbkv engine sends its own id too, and an engine with no id
+    omits the key rather than borrowing v4.0.1's."""
+    for model in ("v4.0", "v3.2", "tbkv1.0.1"):
+        # exactly what run_reference_video._build() does with these args:
+        cli = core.build_reference_video_parameters(
+            "a pan @image1", image_media_ids=["55"], video_media_ids=[], audio_media_ids=[],
+            model=model, duration=core._snap_video_duration(5, model), mode="professional",
+            generate_audio=False, audio_language="english", is_private=True, kaisuuken_id="")
+        web = core.build_request(
+            {"mode": "R2V", "images": ["55"], "prompt": "a pan @image1", "duration": 5,
+             "video_model": model, "quality": "professional", "is_private": True},
+            mode="video", resolve=None).parameters
+        assert cli["modelId"] == web["modelId"] == core.video_model_id(model), model
+        assert cli["modelId"] != core.REFVIDEO_MODEL_ID, model
+    # v4.0.1 -- the default engine -- is byte-identical to before: its own id IS that id.
+    assert core.build_reference_video_parameters(
+        "x", image_media_ids=["55"], model="v4.0.1")["modelId"] == core.REFVIDEO_MODEL_ID
+    # An engine with no published id omits the key (the i2v builder's rule), never "".
+    assert "modelId" not in core.build_reference_video_parameters(
+        "x", image_media_ids=["55"], model="v9.9-unknown")
 
 
 # =============================================================================

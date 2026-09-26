@@ -5,20 +5,25 @@
    real mapping matrix (§2.2) directly.
 
    Why a catalog row AND a task read: the row alone recovers engine + duration + prompt and
-   little else (r2v tasks carry no video_model/video_mode/source_media_id column -- §2.2), so
-   the task read is the feature. But the row is the fallback when the task can't be read, and
-   it is the ONLY place a numeric engine id lands (`--sync-videos` writes the numeric modelId,
-   the dock writes the name -- §2.2), so the row still feeds the engine resolve. */
+   little else, so the task read is the feature. But the row is the fallback when the task
+   can't be read, and it can carry the engine as a numeric modelId -- `--sync-videos` always
+   wrote the number, and since 2026-09-26 every collected video row does too (with the engine
+   NAME in video_model, which is tried first) -- so the row still feeds the engine resolve. */
 
-import { MODELS, MODEL_MAXDUR, snapDuration } from "./videoDrawerCore.js";
+import { MODELS, MODEL_MAXDUR, snapDuration, modelTakes } from "./videoDrawerCore.js";
 
 // Numeric top-level `modelId` -> engine NAME. Mirror of moonglade_backup.VIDEO_MODELS (the
-// five engines that publish a numeric id; v3.0.1 / v2.7 have none). A catalog-only remix, or
+// seven engines that publish a numeric id; v3.0.1 / v2.7 have none). A catalog-only remix, or
 // a task whose engine field is blank, falls back to the row's model_id, which `--sync-videos`
-// records as this number rather than the "v4.0.1"-style name the drawer speaks.
+// (and, since 2026-09-26, every collected video row) records as this number rather than the
+// "v4.0.1"-style name the drawer speaks. The two Tsubaki ids ship in the same change as that
+// catalog fix, so a catalog-only Remix of a tbkv clip resolves instead of reading "engine no
+// longer in the roster" (loom/test/video-roster-parity.test.js holds the two tables together).
 export const NUMERIC_TO_NAME = {
   "2003969750675682808": "v4.0.1",
   "2003968021137101826": "v4.0",
+  "2054378086834851904": "tbkv1.0.1",
+  "2042030623542642408": "tbkv1.0",
   "1961182207978260675": "v3.2",
   "2014412117889628958": "v3.0.2",
   "1919508300549460046": "v3.0",
@@ -51,6 +56,15 @@ function clampNote(prefill, engine, notes) {
   }
 }
 
+// A recovered negative prompt or camera move on an engine that takes neither (the Tsubaki
+// engines -- videoDrawerCore.MODEL_FIELDS). The prefill still restores them into the box / the
+// select, and buildPayload leaves them out; this is the sentence that says so up front.
+function fieldsNote(prefill, engine, notes) {
+  const neg = !!(prefill.negative && !modelTakes(engine, "negative"));
+  const cam = !!(prefill.camera && prefill.camera !== "unset" && !modelTakes(engine, "camera"));
+  if (neg || cam) notes.push("negative prompt / camera not used by this engine");
+}
+
 /* (row, taskParams) -> { prefill, notes }. `taskParams` is the /api/video-task-params body, or
    null / {error} when the task couldn't be read -- in which case the recipe comes from the
    catalog row alone, disclosed. Only keys actually recovered are set on `prefill`, so
@@ -74,6 +88,7 @@ export function videoRemixFromRow(row, taskParams) {
     if (row.negative_prompt) prefill.negative = row.negative_prompt;
     prefill.prompt = row.prompt_full || row.prompt_preview || "";
     clampNote(prefill, engine, notes);
+    fieldsNote(prefill, engine, notes);
     notes.push("no task record — recipe from the catalog only");
     notes.push("camera / audio / channel unknown");
     return { prefill, notes };
@@ -131,6 +146,12 @@ export function videoRemixFromRow(row, taskParams) {
     if (tp.start && !tp.start.in_lib) notes.push("start frame isn't in your library");
   }
 
+  // The output aspect ratio (Tsubaki reference videos) is NOT carried: the drawer has no ratio
+  // picker yet, and a ratio riding along unseen would be priced and sent without the drawer
+  // showing it. Say so; PixAI infers the ratio from the references when it is omitted.
+  if (tp.ratio && tp.ratio !== "adaptive") notes.push("aspect ratio " + tp.ratio + " not carried — PixAI will infer it");
+
   clampNote(prefill, engine, notes);
+  fieldsNote(prefill, engine, notes);
   return { prefill, notes };
 }

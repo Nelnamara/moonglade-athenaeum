@@ -313,13 +313,43 @@ def _stub_video_task(monkeypatch, out):
 
 
 def test_video_task_row_is_identical_to_the_old_builder(tmp_path, monkeypatch):
+    """Identical to the old builder EXCEPT model_id / model_name, changed ON PURPOSE by
+    SCOPE_2026-09-26 V7 and owner ruling 3 (video model names are dynamic). The old builder
+    filed the SUBMITTED block's engine name in model_id and no model_name. Now the stored
+    task wins: its numeric modelId when it is the engine's own id, else the engine named by
+    the TASK's video block (FM video_model, not the submitted 'i2v-pro'), and model_name is
+    the version title, falling back to the VIDEO_MODELS label. FM's model_id 'V-MODEL' is not
+    numeric, so this case lands on the name and the label; the numeric case is the next
+    test. _old_download_video_task stays verbatim (it is the golden's record of c4546f7)."""
     path, result = _stub_video_task(monkeypatch, tmp_path)
     sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
     core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
                               {"i2vPro": dict(sent)})
-    _same(_row(tmp_path / "catalog.db", "v-golden"),
-          _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
-                                   result, "a moonlit elf", sent, VSHARED, VDETAIL, FM))
+    want = _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
+                                    result, "a moonlit elf", sent, VSHARED, VDETAIL, FM)
+    want.update(model_id=FM["video_model"],                          # V7: the task's engine
+                model_name=core.VIDEO_MODELS[FM["video_model"]]["label"])   # ruling 3
+    _same(_row(tmp_path / "catalog.db", "v-golden"), want)
+
+
+def test_video_task_row_with_a_numeric_task_modelid_files_the_id_and_its_title(tmp_path,
+                                                                               monkeypatch):
+    """The deliberate V7 / ruling 3 change on a REAL video task, which carries a numeric
+    top-level modelId: model_id is that id and model_name is its version title. Everything
+    else is still the old builder's row."""
+    path, result = _stub_video_task(monkeypatch, tmp_path)
+    own = core.video_model_id(FM["video_model"])
+    fm = dict(FM, model_id=own)
+    monkeypatch.setattr(core, "extract_full_meta", lambda r: dict(fm))
+    monkeypatch.setattr(core, "model_name_gql",
+                        lambda s, mid, **k: {own: "V3.0 Lite v3.0.2"}.get(mid, mid))
+    sent = {"model": "i2v-pro", "negativePrompts": "blurry", "duration": 9}
+    core._download_video_task(object(), result, TASK_ID, tmp_path, _Args(),
+                              {"i2vPro": dict(sent)})
+    want = _old_download_video_task(TASK_ID, VOUT, path, tmp_path, "https://x/v.mp4",
+                                    result, "a moonlit elf", sent, VSHARED, VDETAIL, fm)
+    want.update(model_id=own, model_name="V3.0 Lite v3.0.2")        # V7 / ruling 3
+    _same(_row(tmp_path / "catalog.db", "v-golden"), want)
 
 
 def test_video_task_carries_local_fields(tmp_path, monkeypatch):
