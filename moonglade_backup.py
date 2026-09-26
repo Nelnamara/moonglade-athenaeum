@@ -3920,13 +3920,19 @@ def _attach_features(session, meta):
       contextImages "on" -- the exact condition under which the gate sends a reference as a
       context image. None when /features could not be read.
     - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
-      when the architecture is unknown. The drawer's dims() applies the identical snap, so
-      its "-> W x H px" line is what is sent."""
+      when /features could not be read. The drawer's dims() applies the identical snap, so
+      its "-> W x H px" line is what is sent.
+
+    The architecture comes from /features ONLY, never the version row's own modelType: the
+    model-type rule applies "only when /features supplied it" and G1's step takes its
+    modelType "from /features" (SCOPE G1/G2), which is exactly when the gate applies them.
+    With /features down the gate changes nothing, so the drawer merges nothing and keeps
+    today's size rule (size_rule None) -- what it shows stays what is sent."""
     vid = str(meta.get("version_id") or "")
     if not vid:
         return meta
     feats = _model_features(session, vid)
-    mtype = ((feats or {}).get("model_type") or meta.get("model_type") or "").strip().upper()
+    mtype = feats["model_type"] if feats else ""
     compat = dict(meta.get("compatibility") or {})
     if feats:
         for name, status in feats["status"].items():
@@ -3939,8 +3945,10 @@ def _attach_features(session, meta):
     meta["compatibility"] = compat
     meta["context_images"] = None if feats is None else _context_images_on(feats)
     ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
+    # The gate runs G1 whenever /features answered (an empty modelType included, on the
+    # step-8 rule), so the drawer carries a rule exactly then.
     meta["size_rule"] = (_size_rule(mtype, ranges, meta.get("restrictions"))
-                         if mtype else None)
+                         if feats is not None else None)
     return meta
 
 
@@ -9039,6 +9047,13 @@ def run_generate(args):
     session = None
     adjusted = []
     if not existing_task:
+        if getattr(args, "confirm", False):
+            # READ_ONLY refuses a --confirm run BEFORE the gate's read-only PixAI lookups
+            # (/inference-profiles, /features, /size-config) and before any gate refusal, so
+            # a READ_ONLY install never calls PixAI on a spend path and always reads the
+            # READ_ONLY message (review R8). An EXTRA, earlier call: the existing guard below,
+            # ahead of _apply_kaisuuken, stays exactly where it is.
+            _check_read_only("submit a generation (spends credits)")
         try:
             session = _make_session(getattr(args, "token", None))
         except Exception:
@@ -9047,6 +9062,7 @@ def run_generate(args):
             session = None
         if session is not None:
             params, adjusted = _gate_image_params(session, params)
+            _refuse_lost_upscale(args, params)
 
     if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
@@ -9802,7 +9818,7 @@ def _gate_image_params(session, params):
     G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
     shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
     loraParameters) are replaced, never mutated, so the caller's dict is never touched.
-    Raises PixAIError for the one refusal (a reference plus LoRAs on a context-image model) --
+    Raises PixAIError for the one refusal (a reference plus LoRAs on an MMDIT26B model) --
     at build time that is the badge's note and costs nothing."""
     adjusted = []
     if not isinstance(params, dict) or not params.get("modelId"):
@@ -9871,14 +9887,28 @@ def _gate_image_params(session, params):
     # the upload resolver. With a LoRA the site silently DROPS the context image; this
     # REFUSES instead (the LoRA-cap precedent: dropping either changes the picture asked
     # for, and a refusal costs nothing).
-    if _context_images_on(feats) and p.get("mediaId") and "contextImages" not in p:
-        lmap = p.get("lora")
-        if isinstance(lmap, dict) and lmap:
+    # The refusal covers every MMDIT26B version, whatever its contextImages status ("Reference
+    # AND a non-empty lora on MMDIT26B -> refuse"): where contextImages is off the reference
+    # would go out as img2img, a shape the site hard-excludes there. A LoRA counts in either
+    # form -- the `lora` map or `loraParameters` (a --params-json or hand-built dict can carry
+    # only the list) -- and a reference counts as a mediaId or an already-built contextImages
+    # list, which PixAI would silently drop beside the LoRA while the quote kept its surcharge.
+    # The Upscale road has already exited above, so an Upscale is never refused here.
+    if mtype == "MMDIT26B_MODEL" and (p.get("mediaId") or p.get("contextImages")):
+        lmap, lpar = p.get("lora"), p.get("loraParameters")
+        if (isinstance(lmap, dict) and lmap) or (isinstance(lpar, list) and lpar):
             raise PixAIError(_CONTEXT_REF_LORA_REFUSAL)
+    if _context_images_on(feats) and p.get("mediaId") and "contextImages" not in p:
         q = _own()
         ref = str(q.pop("mediaId"))
-        q.pop("strength", None)           # a context image carries no strength
         q["contextImages"] = [ref]
+        # A context image carries no strength. Dropping it is a receipt like any other gate
+        # change: the drawer's latest row already shows the slider disabled, but the phone
+        # Create screen, the CLI's --ref-strength, Remix and an older version picked in the
+        # version selector do not (review F6/R1, 2026-09-26).
+        if "strength" in q:
+            adjusted.append({"field": "strength", "asked": q.pop("strength"), "used": None,
+                             "why": "a context image carries no strength"})
         for fld, why in (("negativePrompts", "a context image takes no negative prompt "
                                              "(PixAI drops it there too)"),
                          ("colorPalette", "a context image takes no colour palette")):
@@ -9911,10 +9941,17 @@ def _gate_image_params(session, params):
     if mtype == "MMDIT26B_MODEL":
         ph = p.get("promptHelper")
         extra_ok = "extra" not in p or isinstance(p.get("extra"), dict)
+        ctx = bool(p.get("contextImages"))
+        asked = "off"
+        # A shape with NO promptHelper at all (--params-json, a hand-built dict; the app's
+        # own builder always emits one) still gets medium when context images are sent --
+        # "when context images are sent: ... creativity medium", a receipt entry like the
+        # off -> medium case (review F3). Without context images it is left absent.
+        if "promptHelper" not in p and ctx and extra_ok:
+            ph, asked = {}, None
         if isinstance(ph, dict) and "creativity" not in ph and extra_ok:
             on = bool(ph.get("userWantToEnable",
                              ph.get("withStage", ph.get("enable", False))))
-            ctx = bool(p.get("contextImages"))
             level = "medium" if (on or ctx) else "off"
             new_ph = {k: v for k, v in ph.items()
                       if k not in ("withStage", "enable", "userWantToEnable")}
@@ -9923,7 +9960,7 @@ def _gate_image_params(session, params):
             q = _own()
             q["promptHelper"] = new_ph
             if ctx and not on:
-                adjusted.append({"field": "promptHelper", "asked": "off", "used": "medium",
+                adjusted.append({"field": "promptHelper", "asked": asked, "used": "medium",
                                  "why": "a context image runs the prompt helper at medium, "
                                         "as PixAI's own site does"})
             natural = q.pop("naturalPrompts", None)
@@ -10018,6 +10055,42 @@ def _gate_params_for_model(session, params):
     caller's dict), and a shallow COPY only when a field actually changes. Raises PixAIError
     on the gate's one refusal (see _gate_image_params); price_task turns that into None."""
     return _gate_image_params(session, params)[0]
+
+
+_LOST_UPSCALE_REFUSAL = ("No upscale is possible at this size -- the picture is already at "
+                         "PixAI's upscale ceiling")
+
+
+def _refuse_lost_upscale(args, params):
+    """Refuse an Upscale that the build turned into a new context-image generation.
+
+    The gate recognises the Upscale road on the BUILT dict (a top-level mediaId with enlarge
+    or upscale), and _gen_parameters drops the ratio when it rounds to 1.0 or the source is
+    already at PixAI's output ceiling. On a context-image model the gate then reads what is
+    left as a new generation and sends the reference as a context image -- an Upscale click
+    billed as a new Tsubaki.3 generation, the hazard SCOPE_2026-09-26 v2 names (review
+    F7/R4). The intent is read off the caller's args: a reference plus an enlarge or upscale
+    ratio above 1.0. A refusal costs nothing.
+
+    Narrow on purpose: it fires only when the gate CONVERTED the reference. Anywhere else the
+    dropped ratio leaves a same-size img2img plus its clamp receipt, exactly as before this
+    branch -- the drawer's own img2img with Enhance Details past the Hires ceiling reaches
+    that same built shape on SDXL, and refusing it would change a non-DiT generation. The
+    Upscale panel never sends such a ratio (its goReady refuses <= 1 and the ceiling), so
+    only a hand-made POST or the CLI reaches this."""
+    def _asked(raw):
+        try:
+            return float(raw) > 1.0
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(params, dict) or not params.get("contextImages"):
+        return
+    if params.get("enlarge") or params.get("upscale"):
+        return
+    if not str(getattr(args, "ref_media_id", "") or "").strip():
+        return
+    if _asked(getattr(args, "enlarge", None)) or _asked(getattr(args, "upscale", None)):
+        raise PixAIError(_LOST_UPSCALE_REFUSAL)
 
 
 def submit_generation(session, params):
@@ -10229,7 +10302,9 @@ class GenerationRequest:
 class RequestResolver:
     """The lookups `build_request` cannot do on its own, supplied by the caller.
 
-    model_version(model_id, client_version_id) -> version id   -- needs a session
+    model_version(model_id, client_version_id) -> the chosen version ROW (the
+                          list_model_versions meta dict: version_id, quality_tag, ...)
+                          or a bare version id                  -- needs a session
     preset(user, name) -> banked Toolbox preset dict or None   -- per-account store
     media_id(value)    -> an id PixAI accepts as an INPUT      -- uploads; SUBMIT only
     gate(params)       -> (params, adjusted)                   -- the per-model gate,
@@ -10637,6 +10712,7 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     if rs.gate is not None:
         params, gate_adjusted = rs.gate(params)
         adjusted = list(adjusted) + list(gate_adjusted or [])
+        _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
     return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card, model_version_id=args.model,
                              lora_version_ids=lora_ids, adjusted=adjusted)
@@ -12841,7 +12917,7 @@ def price_task(session, params):
     # sent (quote == charge for DiT/SDXL). Local reassignment only -- the caller's params
     # object is left untouched. Since 2026-09-26 this is a BACKSTOP: the road hands in a dict
     # already gated at build, for which the gate returns the SAME object. Its one refusal (a
-    # reference plus LoRAs on a context-image model) is "no price", never a raise -- this
+    # reference plus LoRAs on an MMDIT26B model) is "no price", never a raise -- this
     # function fails soft.
     try:
         params = _gate_params_for_model(session, params)

@@ -102,12 +102,16 @@ class FakeRest:
         self.price = price
         self.calls = []
         self.priced = []
+        self.version_lists = {}          # model id -> the /generation-model/<id>/versions rows
 
     def __call__(self, session, path, params=None, **k):
         self.calls.append(path)
         if path == "/task-price":
             self.priced.append(dict(params or {}))
             return {"actualPrice": self.price}
+        m = re.match(r"^/generation-model/([^/]+)/versions$", path)
+        if m and m.group(1) in self.version_lists:
+            return self.version_lists[m.group(1)]
         m = re.match(r"^/generation-model/([^/]+)/(features|size-config|inference-profiles)$",
                      path)
         if m and m.group(1) in self.models:
@@ -390,6 +394,62 @@ def test_the_upscale_panel_payload_rides_the_road_untouched(rest):
     assert req.adjusted == []
 
 
+@pytest.mark.parametrize("ratio,size", [(1.04, 1000), (2, 4096)])
+def test_an_upscale_whose_ratio_the_build_drops_is_refused_not_billed_as_a_new_generation(
+        ratio, size, rest, monkeypatch, tmp_path):
+    """Review F7/R4. The road is recognised on the BUILT dict, and _gen_parameters drops a
+    ratio that rounds to 1.0 or that the ceiling clamp lands on 1.0. On Tsubaki.3 what is left
+    would become a new context-image generation (snapped, helper forced, ~5,100) -- so the
+    build refuses instead. The Upscale panel's own goReady keeps the UI off this path."""
+    payload = {"version_id": T3, "prompt": "", "ref_media_id": "M1", "ref_strength": 0.55,
+               "enlarge": ratio, "width": size, "height": size}
+    with pytest.raises(core.PixAIError) as err:
+        _road(payload)
+    assert str(err.value) == ("No upscale is possible at this size -- the picture is "
+                              "already at PixAI's upscale ceiling")
+    # the Hires method the same way
+    hires = dict(payload, enlarge=None, upscale=ratio)
+    with pytest.raises(core.PixAIError):
+        _road(hires)
+    # ...and the CLI, before anything is priced or submitted
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: pytest.fail("card check"))
+    with pytest.raises(core.PixAIError) as err:
+        core.run_generate(_cli_args(tmp_path, ref_media_id="M1", enlarge=ratio, width=size,
+                                    height=size, face_fix=False, confirm=False))
+    assert "No upscale is possible" in str(err.value)
+
+
+def test_a_dropped_ratio_off_a_context_image_model_keeps_todays_same_size_img2img(rest):
+    """Narrow on purpose: on SDXL (and on Tsubaki.2, which takes img2img) a dropped ratio is
+    the same-size img2img plus its clamp receipt it has always been -- the drawer's own
+    img2img with Enhance Details past the Hires ceiling reaches this same built shape."""
+    for vid in (SDXL, T2):
+        req = _road({"version_id": vid, "prompt": "<prompt>", "ref_media_id": "M1",
+                     "ref_strength": 0.55, "upscale": 2, "width": 2048, "height": 2048})
+        p = req.parameters
+        assert p["mediaId"] == "M1" and p["strength"] == 0.55, vid
+        assert "upscale" not in p and "contextImages" not in p, vid
+        assert {"field": "upscale", "asked": 2.0, "used": 1.0} in req.adjusted, vid
+
+
+def test_img2img_plus_hires_on_a_dit_model_rides_the_upscale_road_as_the_spec_reads(rest):
+    """Pins an OPEN QUESTION for the owner (review F8). The spec's road test -- a top-level
+    mediaId with enlarge or upscale -- also matches a reference generation with Enhance
+    Details (CLI --ref-media-id --upscale, a hand POST, or the drawer on an older DiT version
+    whose row carries no merged compat_upscale). On MMDIT26A/B and USER_DIT26A/B the road
+    then wins over G2's never-Hires-or-Face-Fix rule, and over G1 and G10 too. The code
+    follows the spec literally until the owner rules which one wins."""
+    p = {"modelId": T2, "prompts": "<prompt>", "mediaId": "M1", "strength": 0.5,
+         "width": 1000, "height": 1000, "batchSize": 1, "priority": core.PRIORITY_TURBO,
+         "enableADetailer": True, "upscale": 1.5, "upscaleDenoisingStrength": 0.6,
+         "upscaleDenoisingSteps": 25, "upscaleSampler": ""}
+    out, adjusted = gate(p)
+    assert adjusted == []
+    assert out["upscale"] == 1.5 and out["enableADetailer"] is True
+    assert (out["width"], out["height"]) == (1000, 1000)
+
+
 # =============================================================================
 # G3 -- a reference on MMDIT26B becomes a context image
 # =============================================================================
@@ -415,6 +475,32 @@ def test_a_reference_on_mmdit26b_goes_out_as_a_context_image(vid, rest):
     assert by["negativePrompts"]["used"] is None
     assert by["promptHelper"] == {"field": "promptHelper", "asked": "off", "used": "medium",
                                   "why": by["promptHelper"]["why"]}
+    # the dropped strength is a receipt too (review F6/R1): the phone's slider, the CLI's
+    # --ref-strength and an older version picked in the selector do not show it disabled
+    assert by["strength"] == {"field": "strength", "asked": 0.7, "used": None,
+                              "why": "a context image carries no strength"}
+
+
+def test_context_images_with_no_prompt_helper_at_all_still_run_at_medium(rest):
+    """Review F3: a shape with no promptHelper (--params-json, a hand-built dict) is sent at
+    creativity medium when context images go, with a receipt; without them it stays absent."""
+    p = img(T3, mediaId="M1", strength=0.5)
+    p.pop("promptHelper")
+    out, adjusted = gate(p)
+    assert out["contextImages"] == ["M1"]
+    assert out["promptHelper"] == {"creativity": "medium",
+                                   "forcePromptHelperDetectionSide": "server"}
+    assert out["extra"] == {"naturalPrompts": "<prompt>"} and "naturalPrompts" not in out
+    ph = [a for a in adjusted if a["field"] == "promptHelper"]
+    assert ph == [{"field": "promptHelper", "asked": None, "used": "medium",
+                   "why": ph[0]["why"]}]
+    again, more = gate(out)
+    assert again is out and more == []
+    bare = img(T3)
+    bare.pop("promptHelper")
+    out, adjusted = gate(bare)
+    assert "promptHelper" not in out
+    assert not [a for a in adjusted if a["field"] == "promptHelper"]
 
 
 def test_a_reference_keeps_todays_shape_where_context_images_do_not_apply(rest):
@@ -443,6 +529,34 @@ def test_a_reference_plus_a_lora_on_tsubaki3_is_refused_never_trimmed(rest):
     raw = core._gen_parameters(args)
     assert raw["mediaId"] == "M1" and raw["lora"] == {"L1": 0.7}
     assert core.price_task(object(), raw) is None
+
+
+def test_the_reference_plus_lora_refusal_covers_every_form_on_mmdit26b(rest):
+    """Review F2/R5. The spec's rule is 'Reference AND a non-empty lora on MMDIT26B', so it
+    holds whatever the version's contextImages status (off: the reference would go as img2img,
+    which the site hard-excludes there); a LoRA counts in the loraParameters list alone; and
+    an already-built contextImages list is a reference too (PixAI would drop it beside the
+    LoRA while the quote kept its surcharge). Never on the Upscale road, never off MMDIT26B."""
+    rest.models["V-NOCTX"] = {"features": features("MMDIT26B_MODEL",
+                                                   dict(T3_STATUS, contextImages="off")),
+                              "size-config": SIZE_CONFIG, "inference-profiles": None}
+    one = {"lora": {"L1": 0.7}}
+    only_list = {"lora": {}, "loraParameters": [{"versionId": "L1", "weight": 0.7}]}
+    for vid, extra in ((T3, only_list), (FLASH, only_list), ("V-NOCTX", one),
+                       ("V-NOCTX", only_list)):
+        with pytest.raises(core.PixAIError) as err:
+            gate(img(vid, mediaId="M1", strength=0.5, **extra))
+        assert "can't combine a reference image with LoRAs" in str(err.value), vid
+    with pytest.raises(core.PixAIError):
+        gate(img(T3, contextImages=["C1"], **one))
+    # not refused: the Upscale road (it exits first), MMDIT26A (img2img plus a LoRA is a
+    # shape it takes), and a LoRA with no reference
+    road, _ = gate(img(T3, mediaId="M1", strength=0.5, enlarge=2.0, **one))
+    assert road["mediaId"] == "M1" and road["lora"] == {"L1": 0.7}
+    t2, _ = gate(img(T2, mediaId="M1", strength=0.5, **one))
+    assert t2["mediaId"] == "M1" and t2["lora"] == {"L1": 0.7}
+    plain, _ = gate(img(T3, **one))
+    assert plain["lora"] == {"L1": 0.7}
 
 
 def test_context_images_are_priced(rest):
@@ -668,6 +782,24 @@ def test_read_only_still_refuses_before_any_tripwire_with_the_real_gate(rest, mo
     assert "READ_ONLY" in str(err.value)
 
 
+@pytest.mark.parametrize("extra", [{}, {"ref_media_id": "M1", "lora": [("L1", 0.7)]}])
+def test_run_generate_confirm_refuses_read_only_before_the_gates_pixai_reads(extra,
+                                                                            monkeypatch,
+                                                                            tmp_path):
+    """Review R8. A --confirm run on a READ_ONLY install is refused before the gate's
+    read-only lookups (/inference-profiles, /features, /size-config) reach PixAI, and before
+    a gate refusal (a Tsubaki.3 reference beside a LoRA) could speak instead of READ_ONLY.
+    tests/test_read_only_cli_paths.py cannot see this: its params carry no modelId."""
+    def tripwire(*a, **k):
+        raise AssertionError("PixAI was read before the READ_ONLY refusal")
+    monkeypatch.setattr(core, "_rest_get", tripwire)
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    with pytest.raises(core.PixAIError) as err:
+        core.run_generate(_cli_args(tmp_path, **extra))
+    assert "READ_ONLY" in str(err.value)
+
+
 # =============================================================================
 # G4 / G5 / G9 -- the version row
 # =============================================================================
@@ -764,7 +896,62 @@ def test_attach_features_model_type_rule_and_unknowns(rest):
     blind = core._version_row_to_meta({"id": BLIND, "modelType": "SDXL_MODEL", "extra": {}})
     core._attach_features(object(), blind)
     assert blind["compatibility"] == {} and blind["context_images"] is None
-    assert blind["size_rule"] == {"step": 8, "lo": 64, "hi": 4096}
+    assert blind["size_rule"] is None                # today's drawer rule, as the gate does
+    sdxl = core._version_row_to_meta({"id": SDXL, "modelType": "SDXL_MODEL", "extra": {}})
+    core._attach_features(object(), sdxl)
+    assert sdxl["size_rule"] == {"step": 8, "lo": 64, "hi": 4096}
+
+
+def test_attach_features_takes_the_architecture_from_features_only(rest):
+    """Review F1: the model-type rule applies 'only when /features supplied it' and the step's
+    modelType comes 'from /features'. With /features down the gate changes nothing, so the
+    drawer must not withhold Face Fix / Enhance Details or snap to 16 off the row's own
+    modelType -- what it shows stays what is sent."""
+    rest.models["V-DOWN"] = {"features": core.PixAIError("503"), "size-config": SIZE_CONFIG,
+                             "inference-profiles": T3_PROFILES}
+    meta = core._version_row_to_meta({"id": "V-DOWN", "modelType": "MMDIT26A_MODEL",
+                                      "extra": {}})
+    core._attach_features(object(), meta)
+    assert meta["compatibility"] == {}
+    assert meta["size_rule"] is None and meta["context_images"] is None
+    assert not [c for c in rest.calls if c.endswith("/size-config")]
+    out, adjusted = gate(img("V-DOWN", enableADetailer=True, width=1000, height=1000))
+    assert out["enableADetailer"] is True and out["width"] == 1000 and adjusted == []
+
+
+def test_the_drawers_all_versions_read_carries_the_rule_features_and_compat(rest,
+                                                                            monkeypatch,
+                                                                            tmp_path):
+    """Review R2. useGenerate.applyModelRow fetches /api/model-version?all=1, which goes
+    through list_model_versions: its latest row is the ONLY place the drawer gets size_rule,
+    context_images and the merged compat falses (owner ruling 1's disabled chips). One
+    /features and one /size-config read for the model -- never one per row."""
+    rest.version_lists["M"] = [{"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}},
+                               {"id": "V-OLD", "modelType": "MMDIT26B_MODEL", "extra": {}}]
+
+    def check(versions):
+        assert [v["version_id"] for v in versions] == [T3, "V-OLD"]
+        latest, old = versions
+        assert latest["size_rule"] == T3_RULE and latest["context_images"] is True
+        assert latest["compatibility"]["enableADetailer"] is False
+        assert latest["compatibility"]["upscale"] is False
+        assert latest["profiles"] == ["pro", "ultra"]
+        # an older row is "unknown" -- the no-N+1 contract; the gate still applies to it
+        assert old["size_rule"] is None and old["context_images"] is None
+        assert old["profiles"] is None and old["compatibility"] == {}
+        for suffix in ("/features", "/size-config", "/inference-profiles"):
+            assert [c for c in rest.calls if c.endswith(suffix)] == \
+                ["/generation-model/" + T3 + suffix], suffix
+
+    check(core.list_model_versions(object(), "M"))
+    # ...and through the route the drawer actually calls (fresh caches, fresh call log)
+    for cache in (core._features_cache, core._size_config_cache, core._profile_cache):
+        cache.clear()
+    rest.calls.clear()
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    cli = login_client(tmp_path)
+    d = cli.get("/api/model-version?model_id=M&all=1").get_json()
+    check(d["versions"])
 
 
 # =============================================================================
@@ -827,15 +1014,27 @@ def test_api_price_returns_adjusted_for_a_flash_negative(tmp_path, monkeypatch):
 # conftest isolation for the new caches
 # =============================================================================
 
-_seen = {}
-
-
 def test_gate_caches_fill_during_a_test(rest):
     gate(img(T3))
     assert T3 in core._features_cache and T3 in core._size_config_cache
-    _seen["filled"] = True
 
 
-def test_gate_caches_start_empty_in_the_next_test():
-    assert _seen.get("filled"), "runs after the test above"
+def test_gate_caches_start_empty_in_every_test():
+    """Order-independent (review F10/R3): true when run alone, and after the test above it
+    still catches a missing conftest clear."""
+    assert core._features_cache == {} and core._size_config_cache == {}
+
+
+def test_the_conftest_fixture_clears_both_caches_before_and_after_the_test():
+    from tests import conftest
+    fixture = getattr(conftest._clear_gate_caches, "__wrapped__", conftest._clear_gate_caches)
+    gen = fixture()
+    core._features_cache["X"] = (0, {})
+    core._size_config_cache["X"] = (0, [])
+    next(gen)                                        # the setup half
+    assert core._features_cache == {} and core._size_config_cache == {}
+    core._features_cache["Y"] = (0, {})
+    core._size_config_cache["Y"] = (0, [])
+    with pytest.raises(StopIteration):
+        next(gen)                                    # the teardown half
     assert core._features_cache == {} and core._size_config_cache == {}

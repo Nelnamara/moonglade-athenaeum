@@ -161,6 +161,10 @@ def test_model_version_single_resolve_fetches_the_modes_the_model_offers(tmp_pat
         if path.endswith("/inference-profiles"):
             return {"profiles": [{"profileName": "pro", "profileFlag": "default"},
                                  {"profileName": "ultra", "profileFlag": "membershipOnly"}]}
+        if path.endswith("/features"):
+            # /features names the architecture (lane-G review F1: the only source of it),
+            # which is what makes the /size-config read below happen for this DiT family.
+            return {"modelType": "MMDIT26A_MODEL", "features": []}
         return [{"id": "V2", "modelType": "MMDIT26A_MODEL", "createdAt": ""}]
 
     monkeypatch.setattr(core, "_rest_get", rest)
