@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import "../styles/overlays.css";
 import "../styles/publish.css";
 import "../styles/train.css";
 import useScrollLock from "../hooks/useScrollLock.js";
+import { scrollParentOf } from "../picker/mergeRows.js";
 import { acceptCostField, normalizeTrigger } from "../gen/trainCore.js";
 
 /* Train a LoRA — Frontend Gallery.dc.html's ovTrain (markup L392-500+), on the real
@@ -61,6 +62,33 @@ export default function TrainOverlay({ onClose }) {
   const [csrf, setCsrf] = useState("");
   const [quota, setQuota] = useState(null);
   const [pool, setPool] = useState([]);       // recent library images to choose from
+  // The pool pages on scroll (owner, 2026-09-26: "capped like old image picker bugs" -- it read
+  // one page of 60 and stopped). Same mechanism as ModelPicker's load-more: a 1px sentinel after
+  // the tiles, observed from the scrolling pane (.mgtr-left) with a page of head start.
+  const poolPage = useRef(0);
+  const poolPages = useRef(1);
+  const poolBusy = useRef(false);
+  const poolEnd = useRef(null);
+  const loadMorePool = useCallback(() => {
+    if (poolBusy.current || poolPage.current >= poolPages.current) return;
+    poolBusy.current = true;
+    const next = poolPage.current + 1;
+    apiGet("/api/next/library?page=" + next + "&page_size=60&media=image&sort=newest")
+      .then((d) => {
+        poolBusy.current = false;
+        if (!d || d.error) return;              // transient: the next scroll retries
+        poolPage.current = next;
+        poolPages.current = Number(d.pages) || next;
+        const incoming = d.items || [];
+        setPool((old) => {
+          const seen = new Set(old.map((x) => x.media_id));
+          const fresh = incoming.filter((x) => x && x.media_id && !seen.has(x.media_id)
+            && seen.add(x.media_id));
+          return fresh.length ? old.concat(fresh) : old;
+        });
+      })
+      .catch(() => { poolBusy.current = false; });
+  }, []);
   const [picked, setPicked] = useState([]);   // media_ids in the dataset
   // Trainable base models grouped by architecture -- the real Model Type -> Model Theme
   // structure (each group is one architecture: DiT.2, DiT.1, SDXL, SD 1.5).
@@ -82,8 +110,7 @@ export default function TrainOverlay({ onClose }) {
     apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
     apiGet("/api/train/quota")
       .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0));
-    apiGet("/api/next/library?page=1&page_size=60&media=image&sort=newest")
-      .then((d) => setPool(d.items || []));
+    loadMorePool();
     apiGet("/api/train/models")
       .then((d) => {
         const gs = d.groups || [];
@@ -93,6 +120,16 @@ export default function TrainOverlay({ onClose }) {
         setBaseModel(def.baseModel);
       });
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const el = poolEnd.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMorePool();
+    }, { root: scrollParentOf(el), rootMargin: "720px 0px", threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMorePool, pool.length]);
 
   /* A quote is for ONE form. The base chips, the dataset and the fields stay live while the
      confirm panel is open, so any change takes the panel down with its ticked acknowledgement:
@@ -195,6 +232,7 @@ export default function TrainOverlay({ onClose }) {
                   );
                 })}
               </div>
+              <div ref={poolEnd} className="mgtr-poolend" aria-hidden="true" />
             </div>
 
             {/* RIGHT: the form */}
