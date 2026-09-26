@@ -627,12 +627,18 @@ def test_model_type_filter_mapping_is_measured_not_guessed():
     assert m["DiT.3"] == "MMDIT26B_MODEL"
     assert m["DiT.2"] == "MMDIT26A_MODEL"
     assert m["DiT.1"] == "DIT7_MODEL", "their DiT.1 is DIT7_MODEL, not DIT7B_MODEL"
+    # CHANGED ON PURPOSE (SCOPE_2026-09-26 G8): Community DiT sends BOTH user-trained DiT
+    # enums as a pair. USER_DIT26A_MODEL is the 2026-07-26 live measurement; the pair was
+    # read from PixAI's bundle (ModelFilter.helper `userdit26`), not a live request -- one
+    # option, no new chip, no new label.
+    assert m["Community DiT"] == ("USER_DIT26A_MODEL", "USER_DIT26B_MODEL")
     # Every mapped token must be one this app is willing to send.
-    for label, token in core.MODEL_TYPE_FILTERS:
-        if token.startswith("ANY_"):
-            continue
-        assert token in core.LORA_BASE_MODEL_TYPES, \
-            "{} maps to {}, which is not on the send whitelist".format(label, token)
+    for label, tokens in core.MODEL_TYPE_FILTERS:
+        for token in (tokens if isinstance(tokens, tuple) else (tokens,)):
+            if token.startswith("ANY_"):
+                continue
+            assert token in core.LORA_BASE_MODEL_TYPES, \
+                "{} maps to {}, which is not on the send whitelist".format(label, token)
 
 
 def test_upscale_works_without_a_recorded_model(monkeypatch, tmp_path, pixai):

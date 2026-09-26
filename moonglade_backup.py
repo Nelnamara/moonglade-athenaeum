@@ -3146,6 +3146,10 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
                          "DIT7_MODEL", "DIT7A_MODEL", "DIT7B_MODEL", "DIT7C_MODEL",
                          "DIT7D_MODEL", "DIT9_MODEL",
                          "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL",
+                         # A user-TRAINED DiT.3 (Tsubaki.3 architecture). Read from PixAI's
+                         # bundle 2026-09-26 (ModelFilter.helper's `userdit26` group), not a
+                         # live request -- SCOPE_2026-09-26 G8.
+                         "USER_DIT26B_MODEL",
                          "Z_IMAGE_V1_MODEL")
 
 # Their Model Type filter, as a label -> enum mapping. The first four rows are MEASURED off live
@@ -3192,12 +3196,18 @@ def market_sort(name):
 
 
 # ALL SEVEN MEASURED off live requests (2026-07-26) -- none is inferred from its name.
+#
+# One exception, dated: "Community DiT" maps to a PAIR since 2026-09-26 (SCOPE_2026-09-26 G8).
+# USER_DIT26A_MODEL is the 2026-07-26 measurement; USER_DIT26B_MODEL (a user-trained DiT.3)
+# was read from PixAI's BUNDLE, not a live request -- ModelFilter.helper groups the two as
+# `userdit26: ["USER_DIT26A_MODEL", "USER_DIT26B_MODEL"]` and its one Community DiT option
+# sends both. No new chip, no new label: the existing option expands to the pair.
 MODEL_TYPE_FILTERS = (
     ("All", "ANY_MODEL"),
     ("DiT.3", "MMDIT26B_MODEL"),
     ("DiT.2", "MMDIT26A_MODEL"),
     ("DiT.1", "DIT7_MODEL"),
-    ("Community DiT", "USER_DIT26A_MODEL"),
+    ("Community DiT", ("USER_DIT26A_MODEL", "USER_DIT26B_MODEL")),
     ("SDXL", "SDXL_MODEL"),
     ("SD 1.5", "SD_V1_MODEL"),
 )
@@ -3751,7 +3761,43 @@ def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
-            "compatibility": {}, "restrictions": {}, "profiles": None}
+            "compatibility": {}, "restrictions": {}, "profiles": None,
+            "quality_tag": None, "size_rule": None, "context_images": None}
+
+
+def _version_quality_tag(extra):
+    """The version's own Quality Tag booster value: extra.qualityTags[0] as {prefix, suffix}
+    when either half is non-empty, else None (SCOPE_2026-09-26 G4, T3-07).
+
+    PixAI's site takes the tag per version (modelParams `d=Array.isArray(u)&&u.length>0?
+    {...u[0],...}:void 0`): SDXL/DiT.1 versions carry real tags, Tsubaki.3 publishes one
+    with both halves empty, and Flash / Tsubaki.2 / some SDXL versions publish none. None
+    therefore means "this version has no quality tag to add" -- the chip reads disabled and
+    nothing is sent -- NOT "unknown"; an unreadable row never reaches this function."""
+    tags = extra.get("qualityTags") if isinstance(extra, dict) else None
+    if not isinstance(tags, list) or not tags or not isinstance(tags[0], dict):
+        return None
+    pre = tags[0].get("prefix")
+    suf = tags[0].get("suffix")
+    pre = pre if isinstance(pre, str) else ""
+    suf = suf if isinstance(suf, str) else ""
+    if not (pre.strip() or suf.strip()):
+        return None
+    return {"prefix": pre, "suffix": suf}
+
+
+def _routed_default_negative(routed):
+    """extra.routedNegativePrompts.default when the block parses as PixAI's own schema does
+    it -- {default: string <= 4096, contextImage: string <= 4096}, BOTH keys (modelParams
+    `pe`/`Q`) -- else None (SCOPE_2026-09-26 G5, T3-09)."""
+    if not isinstance(routed, dict):
+        return None
+    d, c = routed.get("default"), routed.get("contextImage")
+    if not (isinstance(d, str) and isinstance(c, str)):
+        return None
+    if len(d) > 4096 or len(c) > 4096:
+        return None
+    return d
 
 
 def _version_row_to_meta(r):
@@ -3778,17 +3824,30 @@ def _version_row_to_meta(r):
     - profiles: PLACEHOLDER ONLY here (always None). The allowed inference-profile set is
       NOT in this row -- it comes from a second, version-keyed route, so the CALLERS fill it
       via _attach_profiles (see below). Kept in the shape so every row a caller hands out
-      has the same keys whether or not that caller ran the second read."""
+      has the same keys whether or not that caller ran the second read.
+    - quality_tag: the version's own Quality Tag ({prefix, suffix}) or None -- see
+      _version_quality_tag (SCOPE_2026-09-26 G4).
+    - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
+      _attach_features on the opt-in path that already pays the profile read.
+    - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
+      when that block parses, the route PixAI's own site pre-fills from; otherwise the
+      legacy extra.negativePrompts (SCOPE_2026-09-26 G5)."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     compat = extra.get("compatibility")
     restrictions = extra.get("restrictions")
+    model_type = (r.get("modelType") or "").strip()
+    negative = (extra.get("negativePrompts") or "").strip()
+    if model_type.upper() == "MMDIT26B_MODEL":
+        routed = _routed_default_negative(extra.get("routedNegativePrompts"))
+        if routed is not None:
+            negative = routed.strip()
     return {
         "version_id": str(r.get("id") or ""),
-        "model_type": (r.get("modelType") or "").strip(),
+        "model_type": model_type,
         "lora_base_model_type": (r.get("loraBaseModelType") or "").strip() if r.get("loraBaseModelType") else "",
         "trigger_words": (extra.get("triggerWords") or extra.get("trainedWords") or "").strip(),
-        "negative_prompt": (extra.get("negativePrompts") or "").strip(),
+        "negative_prompt": negative,
         "sampling_method": (extra.get("samplingMethod") or "").strip(),
         "sampling_steps": extra.get("samplingSteps"),
         "cfg_scale": extra.get("cfgScale"),
@@ -3796,6 +3855,9 @@ def _version_row_to_meta(r):
         "compatibility": compat if isinstance(compat, dict) else {},
         "restrictions": restrictions if isinstance(restrictions, dict) else {},
         "profiles": None,
+        "quality_tag": _version_quality_tag(extra),
+        "size_rule": None,
+        "context_images": None,
     }
 
 
@@ -3829,8 +3891,56 @@ def _attach_profiles(session, meta):
     if not isinstance(rows, list):
         meta["profiles"] = None
         return meta
+    # A `hidden` profile is not offered in the drawer (SCOPE_2026-09-26 G9, T3-18b). Filtered
+    # HERE ONLY -- the drawer's list. _model_profiles and the gate keep the full list, so the
+    # gate's default-profile fill cannot change, and a hidden profile a CLI or Remix submits
+    # is not refused (fail open). PixAI's own picker does not filter hidden profiles either;
+    # this just keeps the drawer from offering one. No captured profile is hidden today.
     meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
-                        if isinstance(p, dict) and p.get("profileName")]
+                        if isinstance(p, dict) and p.get("profileName")
+                        and p.get("profileFlag") != "hidden"]
+    return meta
+
+
+def _attach_features(session, meta):
+    """Fill what the Generate drawer needs from the version-keyed /features and /size-config
+    reads, and return the same dict (mutated in place). SCOPE_2026-09-26 G1/G2/G3.
+
+    Runs ONLY beside _attach_profiles -- the opt-in reads that already pay a second GET for
+    the drawer's applied row -- and never on resolve_version_meta's default path (the LoRA /
+    Remix resolves read none of this; red team 2026-09-07). Both reads share the price/submit
+    gate's cache (_model_features / _model_size_config), so this adds no GET per keystroke.
+
+    - compatibility: merges only FALSE values -- every /features entry whose status is
+      literally "off", plus enableADetailer and upscale off for MMDIT26A/B and USER_DIT26A/B
+      (the site's tracker `be`/`Te`, which never sends either there). It never overwrites a
+      key extra.compatibility already sets and never adds `true`, so the drawer's existing
+      compat_* gates (cget: absent = unknown = fail open) just pick the new falses up.
+    - context_images: True only when /features answered with modelType MMDIT26B_MODEL and
+      contextImages "on" -- the exact condition under which the gate sends a reference as a
+      context image. None when /features could not be read.
+    - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
+      when the architecture is unknown. The drawer's dims() applies the identical snap, so
+      its "-> W x H px" line is what is sent."""
+    vid = str(meta.get("version_id") or "")
+    if not vid:
+        return meta
+    feats = _model_features(session, vid)
+    mtype = ((feats or {}).get("model_type") or meta.get("model_type") or "").strip().upper()
+    compat = dict(meta.get("compatibility") or {})
+    if feats:
+        for name, status in feats["status"].items():
+            if status == "off" and name not in compat:
+                compat[name] = False
+    if mtype in NO_HIRES_FACEFIX_TYPES:
+        for name in ("enableADetailer", "upscale"):
+            if name not in compat:
+                compat[name] = False
+    meta["compatibility"] = compat
+    meta["context_images"] = None if feats is None else _context_images_on(feats)
+    ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
+    meta["size_rule"] = (_size_rule(mtype, ranges, meta.get("restrictions"))
+                         if mtype else None)
     return meta
 
 
@@ -3874,7 +3984,10 @@ def resolve_version_meta(session, model_id, with_profiles=False):
     # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
     # ONLY for a caller that asked -- see the docstring: the LoRA/remix resolves never read
     # `profiles`, and paying a PixAI GET for them was pure cost (red team 2026-09-07).
-    return _attach_profiles(session, meta) if with_profiles else meta
+    # The features/size-config reads ride the same opt-in (SCOPE_2026-09-26 G1/G2).
+    if not with_profiles:
+        return meta
+    return _attach_features(session, _attach_profiles(session, meta))
 
 
 def list_model_versions(session, model_id):
@@ -3914,6 +4027,7 @@ def list_model_versions(session, model_id):
         # would be exactly the N+1 this function's own contract above rules out.
         if meta["is_latest"]:
             _attach_profiles(session, meta)
+            _attach_features(session, meta)     # same row, same opt-in (SCOPE_2026-09-26)
         out.append(meta)
     return out
 
@@ -7589,6 +7703,9 @@ LORA_WEIGHT_RANGES = {
     "MMDIT26A_MODEL":    (0.0, 1.2),   # DiT.2 / Tsubaki.2
     "MMDIT26B_MODEL":    (0.0, 1.2),   # DiT.3 -- had no entry at all before today
     "USER_DIT26A_MODEL": (0.0, 1.2),   # a user-TRAINED DiT.2, which is what the owner's own are
+    # A user-trained DiT.3. PixAI's stepUp table (`Ua`) puts it in the same 0..1.2 range as
+    # every other DiT family (bundle, 2026-09-26; SCOPE_2026-09-26 G8).
+    "USER_DIT26B_MODEL": (0.0, 1.2),
     # Stable Diffusion -- the only two the owner specified as -2..+2.
     "SD_V1_MODEL":       (-2.0, 2.0),
     "SDXL_MODEL":        (-2.0, 2.0),
@@ -7923,7 +8040,14 @@ def _gen_parameters(args):
     # submits exactly as before.
     if qtag and getattr(args, "is_member", None) is False:
         qtag = ""
-    if qtag:
+    # SCOPE_2026-09-26 G4: the web road resolves the booster to the chosen VERSION's own tag
+    # ({prefix, suffix}, extra.qualityTags[0]) at build time and hands it over here; the CLI
+    # never sets it, so `--quality-tag` still sends {"prefix": <text>} exactly as before.
+    qobj = getattr(args, "quality_tag_obj", None)
+    if qtag and isinstance(qobj, dict):
+        params["qualityTag"] = {"prefix": str(qobj.get("prefix") or ""),
+                                "suffix": str(qobj.get("suffix") or "")}
+    elif qtag:
         params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
@@ -8870,6 +8994,26 @@ def _outputs_or_raise(result, found, empty_message):
     raise EmptyOutputsError(empty_message)
 
 
+def _print_gate_receipt(adjusted, gated=True):
+    """The CLI's half of the SCOPE_2026-09-26 receipt: what the per-model gate changed,
+    printed under the parameters (used None = not sent, printed "off"). A long value -- a
+    negative prompt the model does not take -- is shortened to its first characters.
+    `gated=False` is a preview that could not reach the model's rules (offline / no key)."""
+    if not gated:
+        print("(Not checked against this model's own rules -- offline or no key. A --confirm "
+              "run checks them before it submits.)")
+        return
+
+    def _short(v):
+        s = "off" if v is None else str(v)
+        return s if len(s) <= 40 else s[:39] + "…"
+    for a in adjusted or []:
+        why = a.get("why")
+        print("  adjusted: {} {} -> {}{}".format(
+            a.get("field"), _short(a.get("asked")), _short(a.get("used")),
+            " ({})".format(why) if why else ""))
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -8884,9 +9028,30 @@ def run_generate(args):
     params = _gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
 
+    # SCOPE_2026-09-26 G7: gate ONCE, right after the build, and use that one dict for the
+    # preview print, _preview_card_note, _apply_kaisuuken and submit_generation -- so the card
+    # is matched against the shape that is sent (the backstop gates inside price_task and
+    # submit_generation return this same object). The gate needs a session for its
+    # read-only lookups; a PREVIEW that cannot make one (offline, no key) prints the ungated
+    # build and says so, exactly as its card note already fails soft. A --confirm run makes
+    # its session here and fails as it always did when it cannot. A --task-id recovery
+    # submits nothing, so it is not gated.
+    session = None
+    adjusted = []
+    if not existing_task:
+        try:
+            session = _make_session(getattr(args, "token", None))
+        except Exception:
+            if getattr(args, "confirm", False):
+                raise
+            session = None
+        if session is not None:
+            params, adjusted = _gate_image_params(session, params)
+
     if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
+        _print_gate_receipt(adjusted, gated=session is not None)
         _preview_card_note(args, params)
         print("\nThis would SPEND PixAI credits (unless free above). Re-run with --confirm to submit.")
         return {"submitted": False}
@@ -8894,7 +9059,9 @@ def run_generate(args):
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
     init_db(db_path)                  # generation can seed a fresh backup
-    session = _make_session(getattr(args, "token", None))
+    if session is None:
+        session = _make_session(getattr(args, "token", None))
+    _print_gate_receipt(adjusted, gated=True)
     thumb_dir = out / "gallery" / "thumbs"
     from moonglade_gallery import make_thumbnail
 
@@ -9422,62 +9589,435 @@ def _model_profiles(session, version_id):
     return profiles
 
 
-def _gate_params_for_model(session, params):
-    """Gate a plain-image createGenerationTask's field set on the model's ARCHITECTURE, so
-    the shape we PRICE and the shape we SUBMIT agree with what the model actually honors
-    (PixAI new-gen platform, 2026-08-25). Called from BOTH submit_generation and price_task
-    with the IDENTICAL helper, so the cost badge cannot diverge from the real charge.
+# =============================================================================
+# The per-model image gate (SCOPE_2026-09-26_tsubaki3-parity-fixes, lane G)
+# =============================================================================
+# One gate, applied ONCE at build (build_request's image road via RequestResolver.gate, and
+# the CLI run_generate right after _gen_parameters), so the dict that is quoted, card-matched
+# and submitted is one object. The calls inside price_task and submit_generation stay as
+# BACKSTOPS for callers off the road and return the SAME object for already-gated input
+# (every rule below copies only when a field actually changes).
+#
+# What it reads, all version-keyed (the model-keyed /versions route 404s on the version id a
+# submit carries), cached with the _model_profiles discipline (an hour on success, 60 s on a
+# failure, short timeout, fail soft to today's shape):
+#   /inference-profiles  -- the 2026-08-25 profile branch, unchanged
+#   /features            -- {modelType, features:[{featureName, status, ...}]}
+#   /size-config         -- {ranges:[{minWidth, maxWidth, minHeight, maxHeight, step, ...}]}
+#                           read only for the DiT families
+#
+# Every change the NEW rules make is one receipt entry {field, asked, used, why}
+# (used: None = not sent), handed back beside the dict so /api/price, /api/generate and the
+# CLI preview can say what was changed BEFORE a spend. The profile branch predates the
+# receipt and is left exactly as it was, silent included (it fires on every DiT submit the
+# drawer makes -- steps/cfg the drawer already shows as not applying).
 
-    The architecture signal is the VERSION-keyed inference-profile set (_model_profiles):
-    - NON-EMPTY -> DiT (MMDIT26A/B). The site sends `inferenceProfile` and omits
-      `samplingSteps`/`cfgScale`/`samplingMethod`/`clipSkip`. So: ensure a profile is present
-      (fill the model's DEFAULT-flagged profile when the user left it on auto -- and if NO row
-      is flagged default, leave it ABSENT so the SERVER picks its own default: omitting keeps
-      quote == charge, whereas synthesizing a possibly-invalid profile would reintroduce the
-      divergence) and drop the four ignored/rejected fields.
-    - EMPTY `[]` -> SDXL (a definitive 200). Keep `samplingSteps`/`cfgScale`; ensure
-      `inferenceProfile` is NOT present (SDXL rejects pro/ultra -- the drop-and-retry in
-      submit_generation was papering over exactly this).
+# Every DiT family snaps sizes to 16, everything else to 8: PixAI's own model-*.js
+# `function Se(e){return e&&W(e)?16:8}` (W = these six).
+DIT_SIZE_STEP_TYPES = frozenset((
+    "DIT7_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL", "MMDIT26B_MODEL",
+    "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"))
+# Never Hires, never Face Fix: the site's tracker `be` (MMDIT26A|B) and `Te` (USER_DIT26A|B),
+# whatever /features says -- applied only when /features supplied the modelType.
+NO_HIRES_FACEFIX_TYPES = frozenset((
+    "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"))
+_HIRES_FIELDS = ("upscale", "upscaleDenoisingStrength", "upscaleDenoisingSteps",
+                 "upscaleSampler")
+# A /features entry strips its fields only on a LITERAL status "off"; a feature absent from
+# the list counts as on (the site's `Ce()` / `u(i, X, !0)` default). `enlarge` and
+# `enlargeModel` are never stripped (the site keeps them on every model). samplingSteps,
+# cfgScale, samplingMethod and clipSkip stay owned by the profile branch alone -- they drive
+# the SDXL price, so /features is never a second authority over them. refImage is G3's.
+_FEATURE_STRIP_FIELDS = (
+    ("negativePrompt", ("negativePrompts",), "this model takes no negative prompt"),
+    ("upscale", _HIRES_FIELDS, "this model takes no Enhance Details (Hires) pass"),
+    ("enableADetailer", ("enableADetailer",), "this model takes no Face Fix"),
+)
+_GATE_READ_TIMEOUT = 10                     # seconds; short -- /api/price runs this per keystroke
+_SIZE_FALLBACK_RANGE = (64, 4096)           # today's web clamp (_gen_args_from_web_payload)
+_features_cache = {}                        # version_id -> (fetched_at_monotonic, parsed|None)
+_size_config_cache = {}                     # version_id -> (fetched_at_monotonic, ranges|None)
+_CONTEXT_REF_LORA_REFUSAL = ("Tsubaki.3 can't combine a reference image with LoRAs "
+                             "— remove one")
 
-    BEST-EFFORT + FAIL-SOFT: no `modelId`, a non-image submit (video/edit/enhance flow through
-    submit_generation too and must pass untouched), or a profile set that cannot be determined
-    (None) all return the params UNCHANGED -- a failed lookup never breaks a submit or changes
-    its spend outcome versus today. Non-mutating: returns the ORIGINAL object on every no-op
-    path (so submit_generation's own in-place inferenceProfile drop-and-retry still mutates the
-    caller's dict), and a shallow COPY only when it actually gates. The profile GET is the only
-    new network call, and it is read-only."""
-    if not params or not params.get("modelId"):
-        return params
+
+def _cached_version_read(cache, session, version_id, suffix, parse):
+    """One version-keyed GET /v2/generation-model/<version><suffix>, parsed, with the
+    _model_profiles cache discipline: a parsed answer is kept for _PROFILE_CACHE_TTL, a
+    failure (any exception, or a body `parse` refuses as None) for _PROFILE_FAIL_TTL, and
+    every failure returns None -- the caller's "unknown, change nothing". Read-only."""
+    vid = str(version_id or "").strip()
+    if not vid:
+        return None
+    now = time.monotonic()
+    hit = cache.get(vid)
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    try:
+        value = parse(_rest_get(session, "/generation-model/" + vid + suffix,
+                                timeout=_GATE_READ_TIMEOUT))
+    except Exception:
+        value = None
+    cache[vid] = (now, value)
+    return value
+
+
+def _parse_features(data):
+    """/features body -> {"model_type": "MMDIT26B_MODEL", "status": {featureName: status}},
+    or None for a body without a `features` list. Status strings are kept LITERAL: a strip
+    fires on exactly "off" (captured 2026-09-26: auth/T3v_features.json, Flashv_features)."""
+    if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+        return None
+    status = {}
+    for f in data["features"]:
+        if isinstance(f, dict) and isinstance(f.get("featureName"), str) and f["featureName"]:
+            status[f["featureName"]] = f.get("status")
+    return {"model_type": str(data.get("modelType") or "").strip().upper(), "status": status}
+
+
+def _parse_size_config(data):
+    """/size-config body -> [(minWidth, maxWidth, minHeight, maxHeight), ...], or None for a
+    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges)."""
+    if not isinstance(data, dict) or not isinstance(data.get("ranges"), list):
+        return None
+    out = []
+    for r in data["ranges"]:
+        if not isinstance(r, dict):
+            continue
+        try:
+            out.append((int(r["minWidth"]), int(r["maxWidth"]),
+                        int(r["minHeight"]), int(r["maxHeight"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _model_features(session, version_id):
+    """The version's /features, parsed (see _parse_features), or None. Cached, fail soft."""
+    return _cached_version_read(_features_cache, session, version_id, "/features",
+                                _parse_features)
+
+
+def _model_size_config(session, version_id):
+    """The version's /size-config ranges (see _parse_size_config), or None. Cached, fail
+    soft. No /v2/model-config read in this branch: its top-level 512-2048 is overridden by
+    its own per-range rules, and its projected XL range equals /size-config's."""
+    return _cached_version_read(_size_config_cache, session, version_id, "/size-config",
+                                _parse_size_config)
+
+
+def _context_images_on(feats):
+    """True when /features says a reference goes out as a context image: modelType
+    MMDIT26B_MODEL and contextImages status "on". ABSENT counts as OFF for this one feature
+    (the site's `M()` default), unlike every strip rule."""
+    return bool(feats) and feats.get("model_type") == "MMDIT26B_MODEL" \
+        and feats["status"].get("contextImages") == "on"
+
+
+def _size_rule(model_type, ranges=None, restrictions=None):
+    """{step, lo, hi} for a version (SCOPE_2026-09-26 G1, T3-02/03/04 as corrected).
+
+    step  -- extra.restrictions.width.step (else height.step) when the version publishes one
+             (the site's modelParams `Ce()`); else 16 for the six DiT families, else 8. The
+             gate cannot see `restrictions` (the version-keyed routes carry no `extra`), so it
+             always takes the model-type step; the drawer's rule honours a published step. No
+             captured version publishes one today.
+    lo/hi -- the UNION of the version's /size-config ranges, step-aligned inward:
+             lo = ceil(min/step)*step, hi = floor(max/step)*step (Tsubaki.3 and Flash today:
+             512-2496). No ranges -> today's 64-4096 clamp, on the step."""
+    step = 0
+    if isinstance(restrictions, dict):
+        for side in ("width", "height"):
+            r = restrictions.get(side)
+            if isinstance(r, dict):
+                try:
+                    step = int(r.get("step") or 0)
+                except (TypeError, ValueError):
+                    step = 0
+                if step > 0:
+                    break
+    if step <= 0:
+        step = 16 if str(model_type or "").strip().upper() in DIT_SIZE_STEP_TYPES else 8
+    lo_raw, hi_raw = _SIZE_FALLBACK_RANGE
+    if ranges:
+        lo_raw = min(min(r[0], r[2]) for r in ranges)
+        hi_raw = max(max(r[1], r[3]) for r in ranges)
+    lo, hi = -(-lo_raw // step) * step, hi_raw // step * step
+    if lo > hi:
+        lo = -(-_SIZE_FALLBACK_RANGE[0] // step) * step
+        hi = _SIZE_FALLBACK_RANGE[1] // step * step
+    return {"step": step, "lo": lo, "hi": hi}
+
+
+def _snap_size(width, height, rule):
+    """Snap (width, height) onto a size rule -- the APP'S OWN rule, not the site's (its
+    nearest paths are sizeConfigRuleValues `at()`, useHeldTaskPrice `R()` and `dt()`).
+
+    A size already on the step and inside [lo, hi] passes UNTOUCHED (2048x1152, 816x2448 and
+    1088x1824 never move). A failing size is scaled proportionally -- the long side down to
+    hi if over, then the short side up to lo if under, the long side winning when both cannot
+    hold -- then each side rounds HALF-UP with floor(x/step + 0.5)*step (never Python's
+    half-to-even round(), so this agrees with genCore.js's snapSize, which is the same
+    arithmetic in JS) and is clamped into [lo, hi]. 768x432 on Tsubaki.3 -> 912x512."""
+    import math
+    step, lo, hi = rule["step"], rule["lo"], rule["hi"]
+    w, h = width, height
+    if w % step == 0 and h % step == 0 and lo <= w <= hi and lo <= h <= hi:
+        return w, h
+    long_side, short_side = max(w, h), min(w, h)
+    s = 1.0
+    if long_side > hi:
+        s = hi / long_side
+    if short_side > 0 and short_side * s < lo:
+        s = lo / short_side
+    if long_side * s > hi:
+        s = hi / long_side
+
+    def _r(x):
+        return int(math.floor(x / step + 0.5)) * step
+    return min(hi, max(lo, _r(w * s))), min(hi, max(lo, _r(h * s)))
+
+
+def _lora_out_of_range(weight, lo, hi):
+    """The clamped weight when `weight` is a number outside [lo, hi], else None (in range,
+    or not a number -- left exactly as it is)."""
+    if isinstance(weight, bool):
+        return None
+    try:
+        w = float(weight)
+    except (TypeError, ValueError):
+        return None
+    if lo <= w <= hi:
+        return None
+    return max(lo, min(hi, w))
+
+
+def _gate_image_params(session, params):
+    """THE per-model image gate: params -> (params, adjusted). See the section comment.
+
+    Order: the 2026-08-25 profile branch (unchanged) -> the Upscale road exits -> /features
+    (unknown -> exit, today's shape) -> G3 context image -> G2 strips -> G6 prompt helper ->
+    G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
+    shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
+    loraParameters) are replaced, never mutated, so the caller's dict is never touched.
+    Raises PixAIError for the one refusal (a reference plus LoRAs on a context-image model) --
+    at build time that is the badge's note and costs nothing."""
+    adjusted = []
+    if not isinstance(params, dict) or not params.get("modelId"):
+        return params, adjusted
     # Video (i2vPro/referenceVideo) is the only non-image submit carrying a TOP-LEVEL
     # modelId; instruct-edit (chat.modelId) and enhance (workflowName) have none, so the
     # modelId guard already skips them. Skip video explicitly.
     if "i2vPro" in params or "referenceVideo" in params:
-        return params
+        return params, adjusted
+    p = params
+
+    def _own():
+        nonlocal p
+        if p is params:
+            p = dict(params)
+        return p
+
+    # --- the profile branch (2026-08-25), behaviour unchanged ---------------------------
+    # NON-EMPTY profiles -> DiT: the site sends inferenceProfile and omits samplingSteps /
+    # cfgScale / samplingMethod / clipSkip, so fill the DEFAULT-flagged profile when the user
+    # left it on auto (none flagged -> leave it ABSENT so the server picks; never synthesize)
+    # and drop the four. EMPTY [] -> SDXL (a definitive 200): steps/cfg drive the cost; strip
+    # a profile SDXL would reject. None -> could not determine: today's shape.
     try:
         profiles = _model_profiles(session, params["modelId"])
     except Exception:
-        return params
-    if profiles is None:
-        return params                       # couldn't determine -> today's behavior, unchanged
-    if profiles:                            # non-empty -> DiT (profile-driven)
-        p = dict(params)
+        profiles = None
+    if profiles:
         if not p.get("inferenceProfile"):
             default = ""
             for r in profiles:
                 if isinstance(r, dict) and r.get("profileFlag") == "default":
                     default = str(r.get("profileName") or "").strip()
                     break
-            # A default was flagged -> send it. NONE flagged -> leave inferenceProfile ABSENT
-            # so the server applies its own default (quote == charge); never synthesize one.
             if default:
-                p["inferenceProfile"] = default
+                _own()["inferenceProfile"] = default
         for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
-            p.pop(k, None)
-        return p
-    # profiles == [] -> SDXL: steps/cfg drive cost; strip a profile the model would reject.
-    p = dict(params)
-    p.pop("inferenceProfile", None)
-    return p
+            if k in p:
+                _own().pop(k)
+    elif profiles is not None:
+        if "inferenceProfile" in p:
+            _own().pop("inferenceProfile")
+
+    # --- SCOPE_2026-09-26 rules --------------------------------------------------------
+    # A chat-kind shape (the Fix's synthesized price shape carries a top-level modelId) is
+    # not text-to-image; none of the rules below describe it.
+    if "chat" in p:
+        return p, adjusted
+    # The UPSCALE road: a top-level mediaId together with enlarge or upscale is an Upscale
+    # panel request, and it passes the new rules untouched -- no size snap, no strip, never a
+    # context image. What PixAI does with an upscale of a Tsubaki picture is unobserved; the
+    # site upscales on a fixed version, the app on the source's own (DECISIONS 2026-07-27 /
+    # 2026-08-23), and changing that is the owner's call. The profile branch above still
+    # applies, exactly as it has since 2026-08-25.
+    if p.get("mediaId") and (p.get("enlarge") or p.get("upscale")):
+        return p, adjusted
+    feats = _model_features(session, params["modelId"])
+    if feats is None:
+        return p, adjusted              # /features unobserved -> today's shape, unchanged
+    mtype = feats["model_type"]
+    status = feats["status"]
+
+    # G3 -- a reference on MMDIT26B becomes a context image (T3-14/15, EDIT-5). The site's
+    # only reference path there is contextImages (it hard-excludes mediaId+strength on
+    # MMDIT26B). ONE id -- the drawer has one slot. The catalog id goes as-is, never through
+    # the upload resolver. With a LoRA the site silently DROPS the context image; this
+    # REFUSES instead (the LoRA-cap precedent: dropping either changes the picture asked
+    # for, and a refusal costs nothing).
+    if _context_images_on(feats) and p.get("mediaId") and "contextImages" not in p:
+        lmap = p.get("lora")
+        if isinstance(lmap, dict) and lmap:
+            raise PixAIError(_CONTEXT_REF_LORA_REFUSAL)
+        q = _own()
+        ref = str(q.pop("mediaId"))
+        q.pop("strength", None)           # a context image carries no strength
+        q["contextImages"] = [ref]
+        for fld, why in (("negativePrompts", "a context image takes no negative prompt "
+                                             "(PixAI drops it there too)"),
+                         ("colorPalette", "a context image takes no colour palette")):
+            if fld in q:
+                adjusted.append({"field": fld, "asked": q.pop(fld), "used": None, "why": why})
+
+    # G2 -- strip what the model does not take (T3-05/06/08/10/15).
+    stripped = set()
+
+    def _strip(fld, why):
+        if fld in p and fld not in stripped:
+            stripped.add(fld)
+            adjusted.append({"field": fld, "asked": p[fld], "used": None, "why": why})
+            _own().pop(fld)
+    for feature, fields, why in _FEATURE_STRIP_FIELDS:
+        if status.get(feature) == "off":
+            for fld in fields:
+                _strip(fld, why)
+    if mtype in NO_HIRES_FACEFIX_TYPES:
+        for fld in _HIRES_FIELDS + ("enableADetailer",):
+            _strip(fld, "PixAI never sends Hires or Face Fix to this model type")
+
+    # G6 -- the prompt helper on MMDIT26B is a creativity level (T3-11). The legacy shape
+    # maps on -> medium, off -> off (the site's own legacy converter, task-*.js G()/z());
+    # effective context images force medium. Never withStage / enable / userWantToEnable on
+    # MMDIT26B. naturalPrompts moves under `extra` (merged into any existing extra) and is
+    # sent only when the level is not off. Idempotent: a promptHelper that already carries
+    # `creativity` is left alone. The pure shape change is not a receipt (the user's on/off
+    # is kept); a context image forcing an OFF helper to medium is.
+    if mtype == "MMDIT26B_MODEL":
+        ph = p.get("promptHelper")
+        extra_ok = "extra" not in p or isinstance(p.get("extra"), dict)
+        if isinstance(ph, dict) and "creativity" not in ph and extra_ok:
+            on = bool(ph.get("userWantToEnable",
+                             ph.get("withStage", ph.get("enable", False))))
+            ctx = bool(p.get("contextImages"))
+            level = "medium" if (on or ctx) else "off"
+            new_ph = {k: v for k, v in ph.items()
+                      if k not in ("withStage", "enable", "userWantToEnable")}
+            new_ph["creativity"] = level
+            new_ph["forcePromptHelperDetectionSide"] = "server"
+            q = _own()
+            q["promptHelper"] = new_ph
+            if ctx and not on:
+                adjusted.append({"field": "promptHelper", "asked": "off", "used": "medium",
+                                 "why": "a context image runs the prompt helper at medium, "
+                                        "as PixAI's own site does"})
+            natural = q.pop("naturalPrompts", None)
+            extra = dict(q["extra"]) if isinstance(q.get("extra"), dict) else {}
+            if level == "off":
+                extra.pop("naturalPrompts", None)
+            elif natural:
+                extra["naturalPrompts"] = natural
+            if extra:
+                q["extra"] = extra
+            else:
+                q.pop("extra", None)
+
+    # G10 -- LoRA weights held to the architecture's range (T3-19 correction). Only when
+    # /features supplied the modelType; lora_weight_range() gives the union -2..2 (today's
+    # bound) for anything it does not list. One receipt entry per LoRA.
+    wlo, whi = lora_weight_range(mtype)
+    clamped = {}
+    lmap = p.get("lora")
+    if isinstance(lmap, dict):
+        new_map, changed = {}, False
+        for lvid, w in lmap.items():
+            c = _lora_out_of_range(w, wlo, whi)
+            if c is None:
+                new_map[lvid] = w
+            else:
+                new_map[lvid] = c
+                changed = True
+                clamped.setdefault(str(lvid), (w, c))
+        if changed:
+            _own()["lora"] = new_map
+    llist = p.get("loraParameters")
+    if isinstance(llist, list):
+        new_list, changed = [], False
+        for e in llist:
+            c = _lora_out_of_range(e.get("weight"), wlo, whi) if isinstance(e, dict) else None
+            if c is None:
+                new_list.append(e)
+            else:
+                new_list.append(dict(e, weight=c))
+                changed = True
+                clamped.setdefault(str(e.get("versionId")), (e.get("weight"), c))
+        if changed:
+            _own()["loraParameters"] = new_list
+    for lvid, (asked, used) in clamped.items():
+        adjusted.append({"field": "lora " + lvid, "asked": asked, "used": used,
+                         "why": "LoRA weights on this model type run {:g} to {:g}".format(
+                             wlo, whi)})
+
+    # G1 -- the size grid and range (T3-02/03/04 as corrected). Lives HERE, not in
+    # _gen_parameters._dim, so the CLI's plain build stays byte-identical.
+    try:
+        w, h = int(p.get("width")), int(p.get("height"))
+    except (TypeError, ValueError):
+        w = h = 0
+    if w > 0 and h > 0:
+        ranges = (_model_size_config(session, params["modelId"])
+                  if mtype in DIT_SIZE_STEP_TYPES else None)
+        rule = _size_rule(mtype, ranges)
+        w2, h2 = _snap_size(w, h, rule)
+        why = "this model takes sizes on a {} px grid from {} to {}".format(
+            rule["step"], rule["lo"], rule["hi"])
+        if w2 != w:
+            adjusted.append({"field": "width", "asked": w, "used": w2, "why": why})
+            _own()["width"] = w2
+        if h2 != h:
+            adjusted.append({"field": "height", "asked": h, "used": h2, "why": why})
+            _own()["height"] = h2
+    return p, adjusted
+
+
+def _gate_params_for_model(session, params):
+    """Gate a plain-image createGenerationTask's field set on the model, so the shape we
+    PRICE and the shape we SUBMIT agree with what the model actually honors. Called from BOTH
+    submit_generation and price_task with the IDENTICAL helper, so the cost badge cannot
+    diverge from the real charge.
+
+    Since 2026-09-26 this is the BACKSTOP form of _gate_image_params (the dict only, no
+    receipt): the web road and the CLI gate once at build and hand an already-gated dict in,
+    for which this returns the SAME object. For a caller off the road it applies the whole
+    gate. The 2026-08-25 architecture branch it grew from is unchanged inside it:
+    - NON-EMPTY inference profiles -> DiT. Fill the DEFAULT-flagged profile on auto (none
+      flagged -> leave it ABSENT so the server picks; never synthesize) and drop
+      samplingSteps/cfgScale/samplingMethod/clipSkip.
+    - EMPTY `[]` -> SDXL (a definitive 200). Keep steps/cfg; strip inferenceProfile.
+
+    BEST-EFFORT + FAIL-SOFT: no `modelId`, a non-image submit (video/edit/enhance flow through
+    submit_generation too and must pass untouched), or a lookup that cannot be determined all
+    leave the params as they are -- a failed lookup never breaks a submit or changes its spend
+    outcome versus today. Non-mutating: returns the ORIGINAL object on every no-op path (so
+    submit_generation's own in-place inferenceProfile drop-and-retry still mutates the
+    caller's dict), and a shallow COPY only when a field actually changes. Raises PixAIError
+    on the gate's one refusal (see _gate_image_params); price_task turns that into None."""
+    return _gate_image_params(session, params)[0]
 
 
 def submit_generation(session, params):
@@ -9729,6 +10269,12 @@ def model_version_resolver(session):
     resolve_version_meta, and only when the payload carried no version_id and no
     mode at all), which is precisely a badge quoting one model while the submit
     sent another.
+
+    Returns the chosen version ROW (the list_model_versions meta dict, with `version_id`)
+    whenever it read the rows, and the plain version-id string otherwise (no model_id, or a
+    model that listed nothing). SCOPE_2026-09-26 G4: build_request reads the version's own
+    quality tag off that row, so the rule costs no new GET. build_request accepts either
+    form, so a resolver that returns a bare id (older callers, test stubs) still works.
     """
     def _resolve(model_id, client_version_id=""):
         mid = str(model_id or "").strip()
@@ -9739,9 +10285,9 @@ def model_version_resolver(session):
         chosen = next((v for v in versions if v.get("version_id") == vid),
                       None) if vid else None
         if chosen:
-            return chosen["version_id"]
+            return chosen
         if versions:
-            return versions[0]["version_id"]
+            return versions[0]
         return vid
     return _resolve
 
@@ -9749,13 +10295,15 @@ def model_version_resolver(session):
 def gate_resolver(session):
     """The build-time gate for RequestResolver.gate: params -> (params, adjusted).
 
-    Scaffold (2026-09-26, SCOPE_2026-09-26_tsubaki3-parity-fixes): an identity gate, so
-    wiring it through the quote and spend resolvers changes nothing yet. The image lane
-    replaces this body with the per-model gate (size grid, feature strips, context images,
-    the MMDIT26B prompt helper), returning the gated dict and one receipt entry per change.
-    """
+    SCOPE_2026-09-26_tsubaki3-parity-fixes: the per-model image gate (_gate_image_params --
+    the size grid, the feature strips, a reference as a context image, the MMDIT26B prompt
+    helper, the LoRA weight range), bound to `session`, returning the gated dict and one
+    receipt entry per change. The SAME function for a quote and a spend: the gallery's
+    _price_resolver and _submit_resolver both hand it their session, so the dict /api/price
+    prices and card-matches is the dict the submit sends. A refusal raises PixAIError, which
+    build_request's callers already render (the badge as its note)."""
     def _gate(params):
-        return params, []
+        return _gate_image_params(session, params)
     return _gate
 
 
@@ -10050,8 +10598,14 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
+    row = None
     if rs.model_version is not None:
-        args.model = rs.model_version(p.get("model_id") or "", args.model)
+        got = rs.model_version(p.get("model_id") or "", args.model)
+        if isinstance(got, dict):          # the chosen version ROW (model_version_resolver)
+            row = got
+            args.model = str(got.get("version_id") or "")
+        else:
+            args.model = got
     lora_ids = [vid for vid, _w in (args.lora or [])]
     if not args.model:
         return GenerationRequest(mode="image", no_card=args.no_card, note="pick a model",
@@ -10059,9 +10613,33 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     # Same entitlement the submit applies, so the badge cannot quote a price for a
     # members-only option that will be stripped before it is sent.
     args.is_member = is_member
-    return GenerationRequest(mode="image", parameters=_gen_parameters(args),
+    # SCOPE_2026-09-26 G4 -- the Quality Tag booster sends the chosen VERSION's own tag, at
+    # build time and never in the gate (the gate's version-keyed routes carry no `extra`).
+    # Row read with a non-empty half -> that {prefix, suffix}. Row read with none (Tsubaki.3,
+    # Flash, Tsubaki.2, some SDXL) -> no qualityTag, as PixAI's own site sends, with a receipt
+    # entry because the booster was asked for. No row (no model_id, nothing listed) -> today's
+    # literal prefix. The drawer reads the chip disabled for the no-tag case.
+    if args.quality_tag and row is not None and "quality_tag" in row:
+        qt = row.get("quality_tag")
+        if isinstance(qt, dict):
+            args.quality_tag_obj = qt
+        else:
+            args.clamped.append({"field": "qualityTag", "asked": args.quality_tag,
+                                 "used": None,
+                                 "why": "this model version publishes no quality tag"})
+            args.quality_tag = ""
+    params = _gen_parameters(args)
+    adjusted = args.clamped
+    # G7 -- ONE gate, applied ONCE, here. The gated dict IS req.parameters: price() prices and
+    # card-matches it, submit() attaches the card to it and sends it, and the backstop gates
+    # inside price_task/submit_generation return this same object. A gate refusal raises
+    # PixAIError like any builder refusal (the badge's note; nothing is spent).
+    if rs.gate is not None:
+        params, gate_adjusted = rs.gate(params)
+        adjusted = list(adjusted) + list(gate_adjusted or [])
+    return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card, model_version_id=args.model,
-                             lora_version_ids=lora_ids, adjusted=args.clamped)
+                             lora_version_ids=lora_ids, adjusted=adjusted)
 
 
 def price(session, req):
@@ -10078,7 +10656,21 @@ def price(session, req):
 
     `cards` is the HELD count (kept under its old name for the badge's "(N left)"); the
     job's ticket cost is `cards_needed`, and `card_short` is the honest flag the badge
-    renders as "not enough -- costs the full price"."""
+    renders as "not enough -- costs the full price".
+
+    `adjusted` (SCOPE_2026-09-26 receipts) rides beside the cost whenever the build rewrote
+    anything -- a clamp, or the per-model gate's snap/strip/conversion -- so the drawer's and
+    the Loom's badges can say so BEFORE a spend. Absent when nothing was changed, the same
+    rule /api/generate's response follows (a key on every answer is a key clients ignore).
+    The object priced and card-matched here is req.parameters, already gated at build."""
+    out = _price_answer(session, req)
+    if req.adjusted:
+        out["adjusted"] = list(req.adjusted)
+    return out
+
+
+def _price_answer(session, req):
+    """price()'s verdict, minus the receipt (see price)."""
     if req.parameters is None:
         return {"cost": None, "free": False, "note": req.note}
     if req.price_note:
@@ -12226,7 +12818,12 @@ _PRICE_SCALARS = frozenset((
     "lightning", "vaeModelId", "workflowName", "sceneId", "watermark"))
 _PRICE_NESTED = frozenset((
     "controlNets", "ipAdapter", "animateDiff", "workflow", "i2vPro", "referenceVideo",
-    "t2i2v", "inputs", "chat", "inpaint", "loraParameters"))
+    "t2i2v", "inputs", "chat", "inpaint", "loraParameters",
+    # SCOPE_2026-09-26 G3: the task-price schema takes contextImages as URL-encoded JSON, and
+    # it moves the price (live quote 2026-09-26: 5,100 for one image, 6,000 for two at
+    # 1632x912 pro). Landed in the SAME commit as the gate that sends it, so the badge never
+    # quotes a context-image job without its surcharge.
+    "contextImages"))
 # The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
 # differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
 # upscaleSampler and qualityTag. They are real submit params, but they are not in this
@@ -12242,8 +12839,14 @@ def price_task(session, params):
         return None
     # Same architecture gate the submit applies, so the badge prices the shape that will be
     # sent (quote == charge for DiT/SDXL). Local reassignment only -- the caller's params
-    # object (which price() also hands to match_kaisuuken) is left untouched.
-    params = _gate_params_for_model(session, params)
+    # object is left untouched. Since 2026-09-26 this is a BACKSTOP: the road hands in a dict
+    # already gated at build, for which the gate returns the SAME object. Its one refusal (a
+    # reference plus LoRAs on a context-image model) is "no price", never a raise -- this
+    # function fails soft.
+    try:
+        params = _gate_params_for_model(session, params)
+    except PixAIError:
+        return None
     q = {}
     for k, v in params.items():
         if v is None:

@@ -168,5 +168,10 @@ def test_model_version_single_resolve_fetches_the_modes_the_model_offers(tmp_pat
     d = client.get("/api/model-version?model_id=M1").get_json()
     assert d["version_id"] == "V2"
     assert d["profiles"] == ["pro", "ultra"]
+    # CHANGED ON PURPOSE (SCOPE_2026-09-26 G1/G2): the opt-in resolve now also reads the
+    # version's /features and, for a DiT family (MMDIT26A here), /size-config -- the drawer's
+    # disabled chips and size rule. Both share the gate's version-keyed cache.
     assert calls == ["/generation-model/M1/versions",
-                     "/generation-model/V2/inference-profiles"]
+                     "/generation-model/V2/inference-profiles",
+                     "/generation-model/V2/features",
+                     "/generation-model/V2/size-config"]

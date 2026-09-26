@@ -13387,6 +13387,9 @@ def create_app(out_dir: Path):
             # inference-profiles read (the ?all=1 branch's own is_latest row is the other).
             # Every other caller of resolve_version_meta -- the LoRA/remix path below --
             # leaves it off and stays at one read (red team 2026-09-07).
+            # The same opt-in carries the version's size rule, the false compatibility
+            # entries from /features and whether a reference goes out as a context image
+            # (core._attach_features, SCOPE_2026-09-26) -- read from the gate's own cache.
             return jsonify(core.resolve_version_meta(session, mid, with_profiles=True))
         except Exception as e:
             return jsonify({"error": _redact_host_paths(str(e))[:200], "version_id": ""}), 200
@@ -16894,7 +16897,12 @@ def create_app(out_dir: Path):
         core.build_request, so the badge quotes the request that will actually submit --
         it is not a second, price-flavoured road that happens to agree. /api/price is the
         one caller that does NOT pin a mode: it serves every road, so the payload's own
-        `mode` picks one."""
+        `mode` picks one.
+
+        The answer carries `adjusted` (SCOPE_2026-09-26) whenever the build rewrote the
+        request -- a clamp, or the per-model gate's size snap / strip / context-image
+        conversion -- so the badge says so BEFORE a spend, not only in /api/generate's
+        response after it. The gate is _price_resolver's, the same one the submit uses."""
         try:
             user = str(session.get("user") or "")
             # NOT `core, session = _gen_session()` -- session is assigned that way further
