@@ -16,6 +16,8 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-09-26 — House Rules
+
 - **An achievement celebration rebuilt to its committed Design Handoff.** The build had drifted from its design page — a missing glow layer behind the mascot, an inverted stacking order, the toast in the wrong place and the wrong material, a different arrival and teardown, no reduced-motion rule. It goes back to the page point for point; its audio is unchanged. (2026-09-11)
 - **A celebration of its own plays alone.** When a feat has its own celebration, the standard achievement toast waits for it to finish instead of playing over it, and the generic star-rain and confetti it replaces never fire under it — whichever of the two arrives first. A Folio replay clicked during one waits for it too, instead of stacking a second toast. (2026-09-11)
 - **The achievement parade keeps every earn.** A second wave of earns arriving while the previous parade was bowing out could silently drop the earns still queued behind it; they play now. Escape keeps closing the Folio while a parade bows out. (2026-09-11)
