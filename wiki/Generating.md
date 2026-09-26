@@ -227,9 +227,10 @@ Notes:
   sent); **no video references** in Multi-Reference (images and audio only — video references
   you already picked are held, dimmed and not sent, never deleted); and a reference video can
   set an **output aspect ratio** (CLI `--video-ratio`; the drawer has no ratio picker yet, so a
-  Remix names the source's ratio and lets PixAI infer it). Their Multi-Reference half is proven
-  on real runs; First Frame and First & Last follow PixAI's own site and price quotes, and the
-  first real First Frame run is the proof they dispatch.
+  Remix names the source's ratio and lets PixAI infer it). Multi-Reference jobs on these
+  engines have run on PixAI's own site, but Moonglade sends them a different way, and that has
+  not run yet; First Frame and First & Last follow PixAI's own site and price quotes. The first
+  real run of each mode from Moonglade is the proof it goes through.
 - **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
   drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
 - **A longer clip costs more tickets.** A video card is a book of tickets and a clip uses
@@ -416,8 +417,8 @@ output seconds *plus* the length of every video reference. Moonglade sends each 
 clip's real length — measured from the file in your library, or the length it was generated
 at — and the web badge and the CLI preview both show that price. If any reference's length
 can't be read (the clip isn't in your library), it sends none, and PixAI prices a flat 15 s
-of input in total — the badge says so. That can be more than the truth for one short clip
-and less for two or more long ones.
+of input in total — the CLI preview prints a note saying so. That can be more than the truth
+for one short clip and less for two or more long ones.
 
 ## Upload a local image (`--upload`)
 
