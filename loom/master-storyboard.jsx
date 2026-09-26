@@ -72,6 +72,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
+import { adjustedText } from "../gallery/src/gen/genCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
@@ -4489,12 +4490,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     if (!p) return noInputMsg;
     if (p.loading) return "checking…";
     const tally = p.pr ? tallyPrices([p.pr]) : null;
-    return tally ? formatCostEstimate(tally) : "—";
+    // The server's pre-spend receipt (SCOPE_2026-09-26 G7), in the same words as the
+    // desktop CostBadge's note line, so a phone spend is never resized in silence.
+    const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
+    return (tally ? formatCostEstimate(tally) : "—") + (adj ? " · Adjusted before sending: " + adj : "");
   };
   const priceTitle = (priceState, id) => {
     const p = priceState[id];
     const tally = p && p.pr ? tallyPrices([p.pr]) : null;
-    return tally ? costTooltip(tally) : "";
+    const adj = p && p.pr ? adjustedText(p.pr.adjusted) : "";
+    return (tally ? costTooltip(tally) : "") + (adj ? "\nAdjusted before sending: " + adj : "");
   };
 
   // ---- Fixer -- the seventh and FINAL increment (2026-08-03), closing the one disclosed gap

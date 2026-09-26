@@ -553,8 +553,14 @@ export default function CreateMobile({
               </button>
               {s.ref && (
                 <>
+                  {/* SCOPE_2026-09-26 G3, as the desktop dock: a context-image reference
+                      carries no strength, so the slider reads disabled. */}
                   <input type="range" min="0.1" max="0.9" step="0.05" value={s.refStrength}
                     className="cm-range"
+                    disabled={refIsContext(s)}
+                    title={refIsContext(s)
+                      ? "This model uses the reference as a context image — strength doesn't apply"
+                      : "Reference strength"}
                     onChange={(e) => set({ refStrength: e.target.value })} />
                   <b className="cm-refval">{Number(s.refStrength).toFixed(2)}</b>
                   <button type="button" className="cm-chipx cm-refx" title="Clear reference"
