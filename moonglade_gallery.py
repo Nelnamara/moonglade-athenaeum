@@ -290,10 +290,16 @@ _VIDEO_NAME_TO_ID = {
 # the catalog under two ids and --fix-models handed the name to the version lookup. This moves
 # the name to video_model and puts the engine's own id in model_id. Idempotent by its WHERE: a
 # repaired row's model_id is numeric and never matches again; rows of a name with no id (v3.0.1,
-# v2.7) and unknown names are left exactly as they are. model_name is left blank for
-# --fix-models to title (owner ruling 3: video model names are dynamic).
+# v2.7) and unknown names are left exactly as they are. model_name is left for --fix-models to
+# title (owner ruling 3: video model names are dynamic) -- and CLEARED when it is only what the
+# old name-as-id lookup could leave behind: --fix-models --relabel-removed's "Unknown or removed
+# model" stamp, or the engine name itself. A stamp would otherwise read as a resolved name to
+# _needs_model_fix and block the real title forever (review V-R3). SQLite evaluates every SET
+# expression against the row as it was, so model_id is still the engine name inside that CASE.
 _VIDEO_ROW_REPAIR_SQL = (
-    "UPDATE catalog SET video_model = model_id, model_id = CASE model_id "
+    "UPDATE catalog SET video_model = model_id, "
+    "model_name = CASE WHEN model_name IN ('Unknown or removed model', model_id) THEN '' "
+    "ELSE model_name END, model_id = CASE model_id "
     + " ".join("WHEN '{}' THEN '{}'".format(n, i) for n, i in _VIDEO_NAME_TO_ID.items())
     + " END WHERE is_video = '1' AND model_id IN ("
     + ", ".join("'{}'".format(n) for n in _VIDEO_NAME_TO_ID) + ")")

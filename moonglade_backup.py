@@ -7963,8 +7963,10 @@ VIDEO_MODELS = {
     # stamped on the owner's own tbkv tasks (2060014126868040808 -> tbkv1.0,
     # 2060390260986220957 -> tbkv1.0.1), and the labels are the version titles a read-only
     # getGenerationModelByVersionId returns for those ids. The site itself never sends a
-    # numeric modelId for video -- the server maps the name -- so these ride only where this
-    # app already sends one (free-card matching, see build_video_parameters' docstring).
+    # numeric modelId for video -- the server maps the name. This app sends these ids on the
+    # REFERENCE path only (SCOPE_2026-09-26 V2: its own id, never v4.0.1's; the probe priced a
+    # tbkv1.0.1 reference video the same with its own id, v4.0.1's and none). A tbkv i2vPro
+    # carries NO top-level modelId, as on the site -- see VIDEO_I2V_NO_MODELID_MODELS.
     "tbkv1.0.1": {"model_id": "2054378086834851904", "label": "Tsubaki Video"},
     "tbkv1.0":   {"model_id": "2042030623542642408", "label": "Tsubaki Video Flash"},
     "v3.2":   {"model_id": "1961182207978260675", "label": "V3.2"},
@@ -7982,6 +7984,19 @@ def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
     return (VIDEO_MODELS.get((name or "").strip()) or {}).get("model_id", "")
+
+
+def _video_model_id_fits(engine, model_id):
+    """Is `model_id` a version id this video engine's row may carry (and be titled from)?
+    An engine VIDEO_MODELS knows takes only its own id, so v2.7 / v3.0.1 (no id) take none:
+    their real tasks carry 1648918127446573124, an IMAGE checkpoint. An engine the roster
+    does not know (or a row with no engine recorded) takes any id, as before."""
+    engine = str(engine or "").strip()
+    if engine not in VIDEO_MODELS:
+        return True
+    return str(model_id or "").strip() == video_model_id(engine) != ""
+
+
 VIDEO_CHANNELS = ("private", "normal")   # private = the site's "Private" channel (was "Enhanced" until 2026-08-18)
 
 
@@ -8014,6 +8029,15 @@ VIDEO_REF_CAPS = {m: {"images": 6, "videos": 0, "audios": 3} for m in TSUBAKI_VI
 # Omitted (or "adaptive") lets PixAI infer the ratio from the references.
 VIDEO_RATIO_MODELS = TSUBAKI_VIDEO_MODELS
 VIDEO_RATIOS = ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9")
+
+# i2vPro engines that go out with NO top-level modelId, whatever VIDEO_MODELS knows. No tbkv
+# i2vPro task exists yet, from the site or from this app (PROBE_2026-09-26 V02 and its open
+# capture: "the modelId it stamps" is unobserved). The site's i2vPro submit sends the name only,
+# and the probe's tbkv i2vPro price quotes (21,000 for 5 s, 63,000 for 15 s) were taken on that
+# shape. So the unobserved field stays at today's behaviour -- omitted, as it was before tbkv
+# joined VIDEO_MODELS -- and the owner's first First Frame run tests one new thing, not two.
+# Remove an engine from here once a real tbkv i2vPro task shows what the server stamps.
+VIDEO_I2V_NO_MODELID_MODELS = TSUBAKI_VIDEO_MODELS
 
 
 def video_model_durations(model):
@@ -8066,7 +8090,9 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     that IDENTICAL modelId, and omitting modelId altogether priced the same as sending it.
     The earlier "REQUIRED" note came from a v4.0 submit where dropping modelId lost the
     free-card match -- that is a CARD-MATCHING requirement, not a model-resolution one, so
-    we still send it whenever VIDEO_MODELS knows one. When it doesn't (v2.7, v3.0.1 -- no
+    we still send it whenever VIDEO_MODELS knows one -- except on the Tsubaki engines, whose
+    i2vPro goes out in the site's name-only shape until a real task shows what the server
+    stamps (VIDEO_I2V_NO_MODELID_MODELS). When it doesn't (v2.7, v3.0.1 -- no
     numeric id published and no card covers them anyway) the key is OMITTED rather than
     sent empty: absent is the shape the probe actually exercised; `modelId: ""` is not.
 
@@ -8120,7 +8146,9 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         "enablePreview": True,
         "hidePrompts": False,
     }
-    _mid = str(model_id or video_model_id(model))
+    # A Tsubaki i2vPro sends no modelId at all, even one passed in (VIDEO_I2V_NO_MODELID_MODELS).
+    _mid = ("" if str(model).strip() in VIDEO_I2V_NO_MODELID_MODELS
+            else str(model_id or video_model_id(model)))
     if _mid:                                  # omit rather than send "" -- see docstring
         params["modelId"] = _mid
     if kaisuuken_id:
@@ -9308,27 +9336,44 @@ def _video_row_model(session, result, params, sent, fm):
     """(model_id, model_name) for a video row being catalogued live (PROBE_2026-09-26 V09,
     owner ruling 3 of 2026-09-26).
 
-    model_id is the task's numeric top-level `modelId` -- what PixAI stamped on the stored
-    task (fm, from getTaskById), else the one this app submitted -- and only when it IS
-    numeric; otherwise the engine NAME from the video block, so a row is never left with ''
-    when the engine is known. It used to be the engine name unconditionally, which split one
-    model across two ids (--sync-videos writes the number) and handed "tbkv1.0.1" to the
-    version lookup as if it were a version id.
+    THE STORED TASK WINS. The engine is the task's own video block (fm.video_model), and the
+    submitted block (`sent`) only fills in when the task has none. model_id is the TASK's
+    numeric top-level `modelId` (what PixAI stamped on the stored task, from getTaskById);
+    the submitted params' modelId counts only when it is this engine's own id. On the
+    `--generate-video --task-id` recovery road `params` is rebuilt from the CLI args, not
+    read from the task (engine defaulting to v4.0.1), so trusting it filed a recovered
+    Tsubaki or V3.0 Flash clip under V4.0 Lite's id and title (review f-V-F1).
+
+    An engine VIDEO_MODELS knows takes only ITS OWN id (video_model_id). Real v2.7 and
+    v3.0.1 tasks carry modelId 1648918127446573124, an IMAGE checkpoint (see
+    build_video_parameters' docstring); titling that id would file an image model's name on
+    a video row, so such a row keeps the engine name, as the repair migration leaves v2.7 /
+    v3.0.1 rows (review f-V-F2 / V-R2; the owner can widen this). An engine the roster does
+    not know yet takes any numeric id. Otherwise the engine NAME, so a row is never left
+    with '' when the engine is known. It used to be the engine name unconditionally, which
+    split one model across two ids (--sync-videos writes the number) and handed "tbkv1.0.1"
+    to the version lookup as if it were a version id.
 
     model_name is the version's own title from model_name_gql for a numeric id ("Tsubaki
     Video v1.0"), falling back to the VIDEO_MODELS label for the engine. Video model names
     are dynamic now (ruling 3, reversing 2026-08-15's "a video row's model_name stays
     blank"): the Tsubaki engines are the first to carry a name rather than a version string.
     A lookup failure costs the label, never the row."""
-    engine = str((sent or {}).get("model") or (fm or {}).get("video_model") or "").strip()
+    engine = str((fm or {}).get("video_model") or (sent or {}).get("model") or "").strip()
+    task_params = (result or {}).get("parameters")
+    task_params = task_params if isinstance(task_params, dict) else {}
     mid = ""
-    for cand in ((fm or {}).get("model_id"), (result or {}).get("parameters", {}).get("modelId")
-                 if isinstance((result or {}).get("parameters"), dict) else None,
-                 (params or {}).get("modelId") if isinstance(params, dict) else None):
+    for cand in ((fm or {}).get("model_id"), task_params.get("modelId")):
         c = str(cand or "").strip()
         if c.isdigit():
             mid = c
             break
+    if not mid and isinstance(params, dict):
+        c = str(params.get("modelId") or "").strip()
+        if c and c == video_model_id(engine):
+            mid = c
+    if mid and not _video_model_id_fits(engine, mid):
+        mid = ""
     name = ""
     if mid:
         got = _resolved_model_name(session, {}, mid)
@@ -10254,6 +10299,22 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         # referenceVideo for everything else carrying refs. Only the latter reads the input
         # video lengths, and only the former could have carried a negative or a camera move.
         i2v_road = (shot == "I2V" and imgs) or (shot == "FLF" and len(imgs) >= 2)
+        # A length this engine does not take is snapped by build_shot_video_params (6 -> 5 on
+        # a Tsubaki engine, 15 -> 10 on a 10 s engine); say so rather than change it silently.
+        # The drawer snaps on the client first (applyModelGating), so this is the receipt for
+        # a Remix-built or hand-rolled payload (review f-V-F5).
+        asked_dur = p.get("duration") or 5
+        used_dur = _snap_video_duration(asked_dur, vmodel)
+        try:
+            dur_moved = float(asked_dur) != used_dur
+        except (TypeError, ValueError):
+            dur_moved = True
+        if dur_moved:
+            takes = [d for d in video_model_durations(vmodel)
+                     if d != 15 or vmodel in VIDEO_15S_MODELS]
+            adjusted.append({"field": "duration", "asked": asked_dur, "used": used_dur,
+                             "why": "this engine takes {} s".format(
+                                 "/".join(str(d) for d in takes))})
         durations = []
         if not i2v_road and vids:
             # V5: each reference video's real length, through the SAME lookup the quote and
@@ -10547,6 +10608,28 @@ def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll
             "saved": got["saved"], "paid_credit": paid}
 
 
+def _i2v_cli_unsent_notes(args):
+    """The receipts for what --generate-video was asked for and does not send (the CLI's half
+    of the receipts rule; build_request records the web road's). A Tsubaki engine has no
+    negative prompt and no camera move (VIDEO_NO_NEGATIVE_MODELS / VIDEO_NO_CAMERA_MODELS --
+    build_video_parameters drops both), and --video-ratio belongs to --reference-video.
+    --params-json is sent exactly as given, so only the ratio note applies to it."""
+    notes = []
+    if (getattr(args, "video_ratio", "") or "").strip():
+        notes.append("--video-ratio applies to --reference-video only (not sent).")
+    if getattr(args, "params_json", ""):
+        return notes
+    model = str(getattr(args, "video_model", "") or getattr(args, "model", "")
+                or DEFAULT_VIDEO_MODEL).strip()
+    label = (VIDEO_MODELS.get(model) or {}).get("label") or model
+    if (getattr(args, "negative", "") or "").strip() and model in VIDEO_NO_NEGATIVE_MODELS:
+        notes.append("negative prompt not used by {} (not sent).".format(label))
+    cam = (getattr(args, "camera_movement", "") or "").strip()
+    if cam and cam != "unset" and model in VIDEO_NO_CAMERA_MODELS:
+        notes.append("camera not used by {} (not sent).".format(label))
+    return notes
+
+
 def run_generate_video(args):
     """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
     poll to completion, download the mp4 into videos/, and catalog it (source='api',
@@ -10568,6 +10651,8 @@ def run_generate_video(args):
             i2v.get("model"), i2v.get("mode"), i2v.get("duration"),
             "  +audio" if i2v.get("generateAudio") else "",
             "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
+        for n in _i2v_cli_unsent_notes(args):
+            print("  note: " + n)
         # No hardcoded reference price here: the line below prints THIS clip's real cost from
         # /task-price (and the card verdict for it). A fixed "a 5s clip costs ~27,500" used to
         # sit right above the true "~82,500" for a 15s clip -- two numbers on one screen for
@@ -10588,6 +10673,8 @@ def run_generate_video(args):
         print("Fetching existing video task (no credits):", task_id)
     else:
         _check_read_only("submit a video generation (spends credits)")
+        for n in _i2v_cli_unsent_notes(args):
+            print("  note: " + n)
         print("Submitting VIDEO generation task (this spends credits)...")
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
@@ -10606,7 +10693,12 @@ def run_generate_video(args):
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
-    saved = _download_video_task(session, result, task_id, out, args, params)
+    # A recovered task is filed from ITS OWN parameters, as collect_generation does. `params`
+    # here was rebuilt from this run's CLI args (engine defaulting to v4.0.1), not read from
+    # the task, so handing it over filed a recovered clip under another engine's model, and
+    # its prompt / negative / duration fallbacks read the args too (review f-V-F1).
+    saved = _download_video_task(session, result, task_id, out, args,
+                                 (result.get("parameters") or {}) if existing_task else params)
     print("Generated + cataloged {} video(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -10916,12 +11008,18 @@ def _needs_model_fix(row):
     fail (retried and printed every --sync) or answer "unresolved", which --relabel-removed
     then stamps permanently (PROBE_2026-09-26 V09). Those rows are repaired offline by the
     gallery's catalog migration instead. A video row WITH a numeric id and a blank name is
-    filled like any other row: video model names are dynamic (owner ruling 3, 2026-09-26)."""
+    filled like any other row: video model names are dynamic (owner ruling 3, 2026-09-26) --
+    unless the id is not its engine's own (_video_model_id_fits): --sync-videos files a v2.7 /
+    v3.0.1 clip under the IMAGE checkpoint its task carried, and titling that would put an
+    image model's name on a video row (review V-R2)."""
     mid = (row.get("model_id") or "").strip()
     name = (row.get("model_name") or "").strip()
     if not mid and name.isdigit():
         mid = name  # model_name itself is the numeric id
     if not mid or not mid.isdigit():
+        return ""
+    if (str(row.get("is_video") or "").strip() == "1"
+            and not _video_model_id_fits(row.get("video_model"), mid)):
         return ""
     if not name or name == mid or name.isdigit():
         return mid
