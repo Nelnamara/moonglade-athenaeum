@@ -11565,6 +11565,14 @@ def run_watch(args):
 # "Active" is the server-computed `runtimeStatus == "running"` -- no client date math.
 # Read-only: browsing contests never spends. See ../moonglade-internal/private/APP_OPERATIONS_FULL.md.
 _CONTEST_PAGE_SIZE = 50
+# The contest board's page CEILING and pace (SCOPE_2026-09-26 E4). list_contests stops at the
+# board's own `totalPage`; this ceiling only bounds a board that keeps growing -- it was a bare
+# 6, and the 2026-09-26 board already answered totalPage 7 at 50 a page (330 contests), so the
+# oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
+# (moonglade_gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
+# paced requests.
+_CONTEST_MAX_PAGES = 20
+_CONTEST_PAGE_PAUSE = 0.35
 
 
 def _contest_title(t):
@@ -11575,13 +11583,17 @@ def _contest_title(t):
     return t or ""
 
 
-def list_contests(session, active_only=False, max_pages=6):
+def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
     """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
     keeps just the currently-running ones (runtimeStatus=='running'). Pages through
-    /v2/contest/list up to max_pages (the board is ~2 pages). Read-only, no spend."""
+    /v2/contest/list until the board's own `totalPage`, never past `max_pages`
+    (_CONTEST_MAX_PAGES), pausing _CONTEST_PAGE_PAUSE between pages; when the ceiling rather
+    than `totalPage` ends the walk, the log says so. Read-only, no spend."""
     out = []
     page = 1
     while True:
+        if page > 1:
+            time.sleep(_CONTEST_PAGE_PAUSE)
         d = _rest_get(session, "/contest/list",
                       params={"page": page, "pageSize": _CONTEST_PAGE_SIZE}) or {}
         rows = d.get("data") or []
@@ -11625,7 +11637,14 @@ def list_contests(session, active_only=False, max_pages=6):
                 "result_url": r.get("resultUrl") or "",
             })
         total_page = int(d.get("totalPage") or 1)
-        if page >= total_page or page >= max_pages:
+        if page >= total_page:
+            break
+        if page >= max_pages:
+            import moonglade_logging
+            moonglade_logging.get_logger().warning(
+                "contest board: stopped at the %d-page ceiling; the board reports %d pages, "
+                "so its oldest %d page(s) were not read", max_pages, total_page,
+                total_page - page)
             break
         page += 1
     return out
