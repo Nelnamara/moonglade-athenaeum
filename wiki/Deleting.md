@@ -41,7 +41,8 @@ remove the published artwork too."* The count comes from the same check the dial
 makes with PixAI for each generation. For a generation it did not check — a selection too big
 to check one by one, or one PixAI did not answer about — it uses what your library last recorded from
 the published-artwork sync. If that sync has never recorded anything, the dialog says
-publication was not checked rather than implying nothing is published.
+publication was not checked rather than implying nothing is published — or, when it did
+check some of the generations, how many of them it could not check.
 
 **Images you had already deleted on PixAI are left alone.** Before it removes anything
 locally, this reads each generation back from PixAI. Any image of that generation PixAI has

@@ -229,6 +229,21 @@ describe("the published-artwork sentence", () => {
       /"Whether any of these are published on PixAI was not checked "\s*"— deleting a task may remove its published artwork too\."/);
   });
 
+  /* Part-checked (review fix, 2026-09-26): some tasks answered live and some fell back to a
+     catalog the artworks sync never filled. "Whether any of these are published was not
+     checked" would contradict the count just given, so the dialog names how many TASKS went
+     unchecked -- the same words as published_delete_note's part-checked form. */
+  test("a part-checked selection says how many tasks went unchecked, never 'whether any'", () => {
+    assert.match(menu, /const uncheckedTasks = Number\(data\.published_unchecked_tasks\) \|\| 0;/);
+    assert.match(menu, /\(published > 0 \|\| \(uncheckedTasks > 0 && uncheckedTasks < t\.tasks\)\)/);
+    assert.ok(menu.includes('uncheckedTasks + " of the " + t.tasks + " tasks " + (uncheckedTasks === 1 ? "was" : "were")'));
+    assert.ok(menu.includes('" not checked for published artwork"'));
+    assert.ok(menu.includes('(published > 0 ? "." : " — deleting a task may remove its published artwork too.")'));
+    assert.ok(server.includes('"{} of the {} tasks {}"'));
+    assert.ok(server.includes('"{} not checked for published artwork{}"'));
+    assert.match(server, /"published_unchecked_tasks": published_unchecked_tasks,/);
+  });
+
   test("no badge and no thumbnail marker: the strip is untouched", () => {
     const strip = menu.slice(menu.indexOf("const strip = (media) => ("),
       menu.indexOf("const taskLabel = (media) =>"));

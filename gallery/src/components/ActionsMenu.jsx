@@ -116,16 +116,28 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
      badge, no thumbnail marker. "may", because whether the delete this app sends cascades the
      same way is unconfirmed. A blank artwork_id is "not known", so this never says none are
      published; when the catalog could not answer at all it says publication was not checked.
-     Same words as the per-image dialog (moonglade_gallery.published_delete_note). */
+     Same words as the per-image dialog (moonglade_gallery.published_delete_note).
+     PART-CHECKED: when only some tasks went unchecked, or a count was just given, "whether any
+     of these are published was not checked" would contradict what the dialog does know, so it
+     says how many tasks went unchecked instead. */
   const published = Number(data.published) || 0;
+  const uncheckedTasks = Number(data.published_unchecked_tasks) || 0;
+  let uncheckedNote = "";
+  if (data.published_unchecked === true) {
+    uncheckedNote = (published > 0 || (uncheckedTasks > 0 && uncheckedTasks < t.tasks))
+      ? (uncheckedTasks > 0
+          ? uncheckedTasks + " of the " + t.tasks + " tasks " + (uncheckedTasks === 1 ? "was" : "were")
+          : "Some of the tasks were") +
+        " not checked for published artwork" +
+        (published > 0 ? "." : " — deleting a task may remove its published artwork too.")
+      : "Whether any of these are published on PixAI was not checked — deleting a task may remove its published artwork too.";
+  }
   const publishedNote = [
     published > 0
       ? published + " of these " + (published === 1 ? "is" : "are") + " published on PixAI. " +
         "Deleting the " + (t.tasks === 1 ? "task" : "tasks") + " may remove the published artwork too."
       : "",
-    data.published_unchecked === true
-      ? "Whether any of these are published on PixAI was not checked — deleting a task may remove its published artwork too."
-      : "",
+    uncheckedNote,
   ].filter(Boolean).join(" ");
   const strip = (media) => (
     <div className="cd-strip">

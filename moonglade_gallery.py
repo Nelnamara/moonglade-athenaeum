@@ -1167,16 +1167,21 @@ def media_dims(db_path, media_ids):
     return out
 
 
-def published_delete_note(published, unchecked=False, tasks=1):
+def published_delete_note(published, unchecked=False, tasks=1, unchecked_tasks=None):
     """The delete dialogs' sentence about published artwork (SCOPE_2026-09-26 E5), or "".
 
     PixAI's own contract says its task delete also deletes the task's linked artwork. Whether
     the GraphQL delete this app sends does the same is unconfirmed, hence "may". `published`
     counts artworks the dialog knows of; a blank catalog artwork_id is "not known", so this
     never says that none are published -- when publication could not be looked up at all
-    (`unchecked`) it says exactly that instead. The per-image dialog words it here; the bulk
-    dialog (ActionsMenu.jsx) words the same two sentences from the preview's counts, and a
-    guard on each side pins the wording."""
+    (`unchecked`) it says exactly that instead.
+
+    PART-CHECKED. When only some of the tasks could not be checked (`unchecked_tasks` of
+    `tasks`), or a count was just given, "whether any of these are published was not checked"
+    would contradict what the dialog does know -- so it says how many tasks went unchecked.
+
+    The per-image dialog words it here; the bulk dialog (ActionsMenu.jsx) words the same
+    sentences from the preview's counts, and a guard on each side pins the wording."""
     parts = []
     n = int(published or 0)
     if n > 0:
@@ -1184,8 +1189,15 @@ def published_delete_note(published, unchecked=False, tasks=1):
                      "published artwork too.".format(n, "is" if n == 1 else "are",
                                                      "task" if tasks == 1 else "tasks"))
     if unchecked:
-        parts.append("Whether any of these are published on PixAI was not checked "
-                     "— deleting a task may remove its published artwork too.")
+        k = int(unchecked_tasks or 0)
+        if n > 0 or 0 < k < tasks:
+            parts.append("{} not checked for published artwork{}".format(
+                ("{} of the {} tasks {}".format(k, tasks, "was" if k == 1 else "were")
+                 if k > 0 else "Some of the tasks were"),
+                "." if n > 0 else " — deleting a task may remove its published artwork too."))
+        else:
+            parts.append("Whether any of these are published on PixAI was not checked "
+                         "— deleting a task may remove its published artwork too.")
     return " ".join(parts)
 
 
@@ -11972,7 +11984,12 @@ def create_app(out_dir: Path):
                             "" if len(plan.keep_media) == 1 else "s"))
             members = task_media(db_path, task_id) if task_id else []
             if plan.artwork_ids is not None:
-                published = min(len(plan.artwork_ids), max(1, len(members)))
+                # Capped at the task's size ON PIXAI, never at the rows this library holds:
+                # the delete takes PixAI's whole batch, and a library missing some of its
+                # images must not under-count what may go with it. On this branch that batch
+                # is this, the last live image, plus every member already deleted there.
+                published = min(len(plan.artwork_ids),
+                                max(1, len(members), len(plan.keep_media) + 1))
                 unchecked = False
             else:
                 published = sum(1 for r in members if str(r.get("artwork_id") or "").strip())
@@ -12258,7 +12275,8 @@ def create_app(out_dir: Path):
 
         Returns (gone_by_task, unverified, artworks_by_task) -- {task_id: {media_id, ...}}
         for every task that answered, the set of task ids that did not, and {task_id:
-        (artwork_id, ...)} for every answered task whose read carried `artworkIds` (the
+        ((artwork_id, ...), batch_size)} for every answered task whose read carried
+        `artworkIds` -- batch_size being the task's image count ON PIXAI -- (the
         published-artwork count the dialog words, SCOPE_2026-09-26 E5; a task missing from it
         falls back to the catalog, see api_delete_preview)."""
         import moonglade_backup as core   # lazy: avoid import cycle
@@ -12300,8 +12318,10 @@ def create_app(out_dir: Path):
                 stamp = str((core.batch_entry(batch, mid) or {}).get("deletedAt") or "")
                 if stamp:
                     mark_cloud_deleted(db_path, mid, stamp)
-            # The same read already carries the task's published artworks -- no second call.
-            return tid, (gone_ids, core.task_artwork_ids(task))
+            # The same read already carries the task's published artworks -- no second call --
+            # and the task's size on PixAI, which is what the artwork count is capped at.
+            return tid, (gone_ids, core.task_artwork_ids(task),
+                         len(batch) if isinstance(batch, list) else 0)
 
         # Every task starts unverified and EARNS its way out, so a task whose worker never
         # answers -- the case the deadline exists for -- is counted the safe way by default
@@ -12322,9 +12342,9 @@ def create_app(out_dir: Path):
                     except Exception:                # noqa: BLE001 -- a dead worker is unverified
                         continue
                     if res is not None:
-                        gone[tid], aw = res
+                        gone[tid], aw, batch_n = res
                         if aw is not None:
-                            artworks[tid] = aw
+                            artworks[tid] = (aw, batch_n)
                         unverified.discard(tid)
             except _FutureTimeout:
                 pass                                 # the ceiling; the rest stay unverified
@@ -12409,13 +12429,17 @@ def create_app(out_dir: Path):
         task this dialog previews goes by the whole-task delete. Two more fields say how
         much published work that may take, for the dialog to put in one sentence:
           published            artworks across the selection's tasks: each task's LIVE
-                               `artworkIds` off the read above (capped at its file count),
-                               else -- over the live cap, or a task that did not answer --
-                               the catalog rows of that task carrying an artwork_id. A
-                               blank artwork_id is "not known", never "not published".
+                               `artworkIds` off the read above (capped at the task's image
+                               count on PixAI, or its library rows if that is more), else --
+                               over the live cap, or a task that did not answer -- the
+                               catalog rows of that task carrying an artwork_id. A blank
+                               artwork_id is "not known", never "not published".
           published_unchecked  True when some task fell back to the catalog AND the catalog
                                records no artwork at all (the artworks sync has never filled
-                               it), so publication was simply not checked."""
+                               it), so publication was simply not checked.
+          published_unchecked_tasks  how many tasks that is (0 when checked), so a dialog
+                               that also has a live count can say "K of the N tasks were not
+                               checked" instead of contradicting the count."""
         body = request.get_json(silent=True) or {}
         # dict.fromkeys: deduped, order preserved. The blast radius is a set of FILES, so
         # a repeated id must not inflate "you picked N" (or drive `unselected` negative)
@@ -12437,16 +12461,19 @@ def create_app(out_dir: Path):
             ({}, set(), {}) if estimate else _preview_live_gone(task_ids))
 
         tasks, total_media, already_gone = [], 0, 0
-        published, from_catalog = 0, False
+        published, from_catalog = 0, 0
         for tid in task_ids:
             members = blast["members_by_task"].get(tid, [])
             total_media += len(members)
             # Published artwork, over the task's FULL membership (the delete takes the whole
-            # task, not just the picked rows) -- see the docstring.
+            # task, not just the picked rows) -- see the docstring. The live count is capped at
+            # the task's size ON PIXAI (or its library rows, if more): a library that never
+            # collected some of a task's images must not under-count what the delete may take.
             if tid in artworks_by_task:
-                published += min(len(artworks_by_task[tid]), max(1, len(members)))
+                aw, batch_n = artworks_by_task[tid]
+                published += min(len(aw), max(1, len(members), batch_n))
             else:
-                from_catalog = True
+                from_catalog += 1
                 published += sum(1 for m in members
                                  if str(m.get("artwork_id") or "").strip())
             # A task that answered: the union of what the read says PixAI has dropped and
@@ -12471,6 +12498,10 @@ def create_app(out_dir: Path):
         # part of what the button removes, and the dialog has to show them or its
         # file count won't add up. Capped on the same DISPLAY budget as the tasks.
         local_entries = [_preview_entry(m, selected) for m in blast["local_rows"]]
+        # The tasks whose publication nobody could answer: they fell back to a catalog the
+        # artworks sync has never filled.
+        published_unchecked_tasks = (
+            from_catalog if from_catalog and not myart_coverage(db_path)["artworks"] else 0)
 
         return jsonify({
             "tasks": tasks,
@@ -12484,8 +12515,8 @@ def create_app(out_dir: Path):
             "already_gone": already_gone,
             "estimate": estimate,
             "published": published,
-            "published_unchecked": bool(
-                from_catalog and task_ids and not myart_coverage(db_path)["artworks"]),
+            "published_unchecked": bool(published_unchecked_tasks),
+            "published_unchecked_tasks": published_unchecked_tasks,
             "totals": {
                 "selected": len(sel_rows),
                 "tasks": len(task_ids),

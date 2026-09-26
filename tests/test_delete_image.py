@@ -691,3 +691,19 @@ def test_the_plan_carries_the_reads_artwork_ids():
     plan = core._image_delete_plan(_with_artworks(_lone_task("z1"), ["A", "B", "A"]), "z1")
     assert plan.artwork_ids == ("A", "B")
     assert core._image_delete_plan(_lone_task("z1"), "z1").artwork_ids is None
+
+
+def test_the_whole_task_count_is_capped_at_pixais_batch_not_the_librarys_rows(
+        tmp_path, monkeypatch):
+    """The last live image of a three-image batch whose two siblings were deleted on PixAI and
+    never collected here: the library holds one row, PixAI's batch holds three, and three
+    artworks are published. The whole-task delete may take all three, so the dialog says 3 --
+    capping at the library's one row would under-count (review fix 2026-09-26, E5)."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _with_artworks(_live_task(("a", True), ("b", True), ("c", False)),
+                                       ["A1", "A2", "A3"]))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, [_row(media_id="c", task_id="T1", filename="c.png")])
+    d = cli.post("/api/delete-image", json={"media_id": "c", "confirm": False}).get_json()
+    assert d["plan"] == "whole-task"
+    assert "3 of these are published on PixAI" in d["message"], d["message"]

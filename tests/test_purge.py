@@ -764,6 +764,9 @@ def test_delete_preview_counts_published_artwork_off_the_live_read(tmp_path, mon
 
 
 def test_delete_preview_caps_a_tasks_artworks_at_its_files(tmp_path, monkeypatch):
+    # "Its files" = the task's images ON PIXAI (the live batch), or its library rows if more
+    # (review fix 2026-09-26, E5): here both are 1, so two artwork ids still read as 1. The
+    # batch-over-rows case is test_delete_preview_caps_the_live_count_at_pixais_batch_...
     _seed(tmp_path, [_row(media_id="r1", task_id="R1", filename="r1.png")], {})
     _fake_session(monkeypatch)
     monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: _published(
@@ -835,3 +838,59 @@ def test_published_delete_note_wording():
         "may remove its published artwork too.")
     for n in range(0, 4):
         assert "none" not in note(n).lower() and "not published" not in note(n).lower()
+
+
+# ---- review fixes (SCOPE_2026-09-26 E5): PixAI's batch, and a part-checked selection ----
+
+def test_delete_preview_caps_the_live_count_at_pixais_batch_not_the_librarys_rows(
+        tmp_path, monkeypatch):
+    """The delete takes the task's whole batch ON PIXAI. A library that holds one of a
+    task's four images must not report one published artwork when four are: the cap is the
+    live batch's size (or the library's rows, if more), never the library's rows alone."""
+    _seed(tmp_path, [_row(media_id="k1", task_id="K1", filename="k1.png")], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: _published(
+        _live_task("K1", ["k1", "k2", "k3", "k4"]), ["A1", "A2", "A3", "A4"]))
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["k1"]}).get_json()
+    assert body["published"] == 4
+
+
+def test_delete_preview_counts_the_tasks_it_could_not_check(tmp_path, monkeypatch):
+    """One task answered live with a published artwork; the other did not answer and the
+    catalog has no artworks at all to fall back on. The preview says how many tasks went
+    unchecked, so the dialog can word it without contradicting the count it just gave."""
+    _seed(tmp_path, [
+        _row(media_id="l1", task_id="L1", filename="l1.png"),
+        _row(media_id="n1", task_id="N1", filename="n1.png"),
+    ], {})
+    _fake_session(monkeypatch)
+    monkeypatch.setattr(core, "task_detail_gql", lambda s, tid, **k: (
+        _published(_live_task("L1", ["l1"]), ["A1"]) if tid == "L1" else None))
+    body = login_client(tmp_path).post("/api/delete-preview",
+                                       json={"media_ids": ["l1", "n1"]}).get_json()
+    assert body["published"] == 1
+    assert body["published_unchecked"] is True and body["published_unchecked_tasks"] == 1
+    assert g.published_delete_note(body["published"], body["published_unchecked"],
+                                   tasks=body["totals"]["tasks"],
+                                   unchecked_tasks=body["published_unchecked_tasks"]) == (
+        "1 of these is published on PixAI. Deleting the tasks may remove the published "
+        "artwork too. 1 of the 2 tasks was not checked for published artwork.")
+
+
+def test_published_delete_note_part_checked_wording():
+    """Part-checked, the second sentence names how many tasks went unchecked instead of
+    "whether any of these are published was not checked", which would contradict a count
+    (loom/test/cloud-delete-dialog.test.js pins the bulk dialog's copy of these words)."""
+    note = g.published_delete_note
+    assert note(0, unchecked=True, tasks=3, unchecked_tasks=2) == (
+        "2 of the 3 tasks were not checked for published artwork — deleting a task may "
+        "remove its published artwork too.")
+    assert note(2, unchecked=True, tasks=5, unchecked_tasks=1).endswith(
+        "1 of the 5 tasks was not checked for published artwork.")
+    # every task unchecked: the whole-selection sentence, unchanged
+    assert note(0, unchecked=True, tasks=2, unchecked_tasks=2).startswith(
+        "Whether any of these are published on PixAI was not checked")
+    # a note that gives a count never also says "whether any ... was not checked"
+    for n, k in ((1, 1), (2, 1), (3, 4)):
+        assert "Whether any" not in note(n, unchecked=True, tasks=5, unchecked_tasks=k)
