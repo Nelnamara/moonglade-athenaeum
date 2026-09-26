@@ -20,10 +20,25 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | **Model** picker | `modelId` | search resolves the correct *version* id automatically |
 | **LoRAs** → Add | `lora` + `loraParameters` | search → pick → weight; stack several |
 | **Aspect** / dimensions | `width`/`height` | presets at SDXL-friendly dims |
-| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
+| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range; the "→ W × H px" line is the size that is sent |
 | **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
 | **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
 | **High priority** | `priority` | off = Turbo (500) if your membership covers it, otherwise standard (0) — both free; on = High (1000), faster and **costs extra credits** |
+
+A control the picked model does not take reads **disabled** and is not sent: Face Fix and
+Enhance Details on Tsubaki.2, Tsubaki.3, Flash and community-trained DiT models; Quality Tag on
+any model version that publishes no quality tag of its own (Tsubaki.2, Tsubaki.3, Flash and
+some SDXL models); the negative prompt on Tsubaki.3 Flash. The drawer reads this off the
+model's newest version. On an older version picked from the version list, Face Fix, Enhance
+Details and the negative box can stay live and the size line keeps the /8 rule. The server
+still drops or moves what that version does not take, and the cost badge names it before you
+spend.
+
+On Tsubaki.3 and Flash a **reference** image goes out as a context image (their
+Character/Style Reference): strength does not apply, and it cannot be combined with LoRAs — the
+cost badge says so instead of a price. Whenever the server adjusts a request (a size moved onto
+the model's grid, a field the model ignores, a reference's strength), the cost badge names the
+change **before** you spend.
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs

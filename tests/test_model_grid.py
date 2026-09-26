@@ -313,13 +313,22 @@ def test_version_meta_does_not_read_profiles_unless_asked(monkeypatch):
     assert m["profiles"] is None                         # the key is still always present
     assert calls == ["/generation-model/M1/versions"]    # exactly one read, no /inference-profiles
 
-    # ...and the opt-in caller (the mode bar's own route) pays exactly one more.
+    # ...and the opt-in caller (the mode bar's own route) pays the version-keyed reads.
+    # CHANGED ON PURPOSE (SCOPE_2026-09-26 G1/G2): the same opt-in now also reads the
+    # version's /features and -- for a DiT family -- /size-config, which carry the drawer's
+    # disabled chips and size rule. They share the price/submit gate's cache, so a pick still
+    # costs one read of each per version per hour. The default path above is unchanged.
+    # /size-config is read only when /features NAMES a DiT family (lane-G review F1: the
+    # architecture comes from /features alone, as in the gate). This stub's /features answers
+    # no feature list, so the architecture is unknown and /size-config is not read;
+    # tests/test_generate_model_id.py pins the DiT case with a real /features answer.
     calls.clear()
     core._profile_cache.clear()
     m2 = core.resolve_version_meta(object(), "M1", with_profiles=True)
     assert m2["profiles"] == ["lite", "standard", "pro", "ultra"]
     assert calls == ["/generation-model/M1/versions",
-                     "/generation-model/V7/inference-profiles"]
+                     "/generation-model/V7/inference-profiles",
+                     "/generation-model/V7/features"]
 
 
 def test_resolve_latest_version_stays_a_one_read_wrapper(monkeypatch):

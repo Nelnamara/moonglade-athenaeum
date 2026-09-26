@@ -92,11 +92,19 @@ test("base models get Model Type chips, LoRAs get categories -- not the same con
   // Every token measured off a live request 2026-07-26. A wrong enum here does not error -- it
   // returns the wrong rows, or none, and reads as an empty result, so none of these may drift.
   [["MMDIT26B_MODEL", "DiT.3"], ["MMDIT26A_MODEL", "DiT.2"], ["DIT7_MODEL", "DiT.1"],
-   ["USER_DIT26A_MODEL", "Community DiT"], ["SDXL_MODEL", "SDXL"],
+   ["SDXL_MODEL", "SDXL"],
    ["SD_V1_MODEL", "SD 1.5"]].forEach(([token, label]) => {
     assert.match(src, new RegExp('\\["' + token + '", "' + label + '"\\]'),
       label + ' must map to ' + token + ' (measured, not inferred)');
   });
+  // CHANGED ON PURPOSE (SCOPE_2026-09-26 G8): Community DiT keeps its key and label and now
+  // SENDS a pair. USER_DIT26A_MODEL is the 2026-07-26 live measurement; USER_DIT26B_MODEL was
+  // read from PixAI's bundle (ModelFilter.helper `userdit26`), not a live request. No new chip.
+  assert.match(src,
+    /\["USER_DIT26A_MODEL", "Community DiT", \["USER_DIT26A_MODEL", "USER_DIT26B_MODEL"\]\]/,
+    "Community DiT must send both user-trained DiT enums, as the site's own filter does");
+  assert.equal((src.match(/\["[A-Z0-9_]+", "Community DiT"/g) || []).length, 1,
+    "one Community DiT chip, no new label");
 
   // Community DiT is USER_DIT26A_MODEL, NOT DIT9_MODEL. Both were plausible and the wrong one
   // fails silently, which is why it was captured rather than guessed.
@@ -114,8 +122,11 @@ test("Model Type is multi-select, and All means clear", () => {
   assert.match(src, /!v \? \[\]/, "the All chip must clear the set rather than select a token");
   assert.match(src, /old\.filter\(\(x\) => x !== v\)/, "clicking a chosen chip must REMOVE it");
   assert.match(src, /old\.concat\(v\)/, "clicking a new chip must ADD it");
-  // Sent as a REPEATED param, matching the server reading request.args.getlist.
-  assert.match(src, /modelTypes\.forEach\(\(t\) => \{ u \+= "&model_type=" \+ encodeURIComponent\(t\)/);
+  // Sent as a REPEATED param, matching the server reading request.args.getlist. CHANGED ON
+  // PURPOSE (SCOPE_2026-09-26 G8): each chosen chip expands to the tokens it sends (the
+  // Community DiT pair), still one repeated `model_type` param per token.
+  assert.match(src,
+    /modelTypes\.forEach\(\(t\) => typeTokens\(t\)\.forEach\(\(tok\) => \{\s*u \+= "&model_type=" \+ encodeURIComponent\(tok\)/);
 });
 
 test("filters are hidden on the bookmark list, where the server cannot honour them", () => {

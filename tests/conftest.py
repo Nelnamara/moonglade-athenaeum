@@ -210,6 +210,19 @@ def _clear_profile_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clear_gate_caches():
+    """The SCOPE_2026-09-26 image gate caches the version-keyed /features and /size-config
+    reads exactly as _model_profiles caches /inference-profiles (keyed by version_id, with a
+    TTL). Same isolation: one test's model rules must never answer another test's gate.
+    Both reads go through _rest_get, which _no_live_card_network already blocks."""
+    core._features_cache.clear()
+    core._size_config_cache.clear()
+    yield
+    core._features_cache.clear()
+    core._size_config_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_card_network(monkeypatch):
     """The card list/match hit PixAI's live /v2 REST API. Keep unit tests offline by
     default: _rest_get/_rest_post raise (so list_kaisuukens -> [] and match_kaisuuken ->

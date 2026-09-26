@@ -3,7 +3,7 @@ import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
   ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
-  modeOffered, planLoraRestore,
+  modeOffered, planLoraRestore, qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
 import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
@@ -878,7 +878,14 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   {s.ref && (
                     <>
                       <span className="mgdock-lbl">STRENGTH</span>
+                      {/* SCOPE_2026-09-26 G3: on a context-image model (Tsubaki.3 / Flash) the
+                          reference goes out as a context image, which carries no strength --
+                          the slider reads disabled rather than pretending to steer it. */}
                       <input type="range" min="0.1" max="1" step="0.05" value={s.refStrength}
+                        disabled={refIsContext(s)}
+                        title={refIsContext(s)
+                          ? "This model uses the reference as a context image — strength doesn't apply"
+                          : "Reference strength"}
                         onChange={(e) => set({ refStrength: e.target.value })} />
                       <b className="gd-w">{Number(s.refStrength).toFixed(2)}</b>
                       <button className="gd-mini" onClick={() => set({ ref: null })}>&times;</button>
@@ -991,14 +998,20 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     onChange={(e) => set({ seed: e.target.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "") })} />
                 </div>
                 <div className="mgdock-chips">
+                  {/* Owner ruling 1 (SCOPE_2026-09-26): Face Fix and Quality Tag read
+                      disabled on a model that does not take them. The chip's on/off STATE is
+                      kept across a model switch (never disarmed); buildPayload withholds it. */}
                   <button type="button"
                     className={"mgdock-chip" + (s.boosters.face ? " on" : "")}
+                    disabled={m && m.compat_face === false}
+                    title={m && m.compat_face === false ? "This model doesn't take Face Fix" : "Face Fix"}
                     onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
                     Face Fix
                   </button>
                   <button type="button"
                     className={"mgdock-chip" + (s.boosters.quality ? " on" : "")}
-                    title="Prefixes PixAI's Masterpiece quality tag"
+                    disabled={m && m.compat_quality === false}
+                    title={qualityTagTitle(m)}
                     onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
                     Quality Tag
                   </button>
@@ -1221,7 +1234,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 {tab === "image" && (
                   <textarea className="mgdock-neg" rows={1} value={s.negative}
                     placeholder="lowres, text"
-                    disabled={m && m.compat_neg === false}
+                    disabled={(m && m.compat_neg === false) || refIsContext(s)}
                     onChange={(e) => set({ negative: e.target.value })} />
                 )}
                 <div ref={setVideoNegEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />

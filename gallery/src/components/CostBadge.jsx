@@ -1,6 +1,7 @@
 import React, {
   forwardRef, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
+import { adjustedText } from "../gen/genCore.js";
 import "../styles/cost-badge.css";
 
 /* CostBadge — the React port of static/mg-cost-badge.js's <mg-cost-badge> custom element:
@@ -204,7 +205,23 @@ function build(view, props) {
   } else {
     main = note || (props.hint || "").trim() || DEFAULT_HINT;
   }
-  const text = main + (sub ? " · " + sub.text : "");
+  // The server's receipt (SCOPE_2026-09-26): /api/price answers `adjusted` when the request
+  // it priced is not the one configured -- a clamp, a size snapped onto the model's grid, a
+  // field the model does not take. Said on the settled states, in the note line, BEFORE the
+  // spend, in the same words the submit's result line uses (genCore.adjustedText).
+  const adjTxt = (state === "free" || state === "paid") ? adjustedText(d.adjusted) : "";
+  const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
+  if (adj) tip = (tip ? tip + " " : "") + adj + ".";
+  // ONE note line, never a line of its own ("copy in an existing line"): the receipt joins
+  // the block form's existing note -- after a free card's expiry or the card-short sentence,
+  // or in the empty note slot when there is none. The stack form's note line is its second
+  // line (below); the chip has no room, so there it rides in the hover tip, the same place
+  // the card-short note goes on the chip.
+  const noteLine = adj
+    ? (sub ? { text: sub.text + " · " + adj, title: sub.title + " · " + adj, days: sub.days }
+      : { text: adj, title: adj, days: null })
+    : sub;
+  const text = main + (noteLine ? " · " + noteLine.text : "");
   // The stack's second line (DC costSubLine): settled facts first ('<card> card', 'N images',
   // the free card's expiry), the balance last. Read off the same `d` as the main line -- the
   // card name is the server's, the count and balance are the host's own real data. Idle,
@@ -224,10 +241,11 @@ function build(view, props) {
     }
     const balanceN = (props.balance != null && props.balance !== "" && isFinite(Number(props.balance)))
       ? Number(props.balance) : null;
+    if (adj) parts.push(adj);                // the receipt, before the balance
     if (balanceN != null) parts.push(fmt(balanceN) + " credits");
     line = parts.join(" · ");
   }
-  return { state, warn, compact, stack, short, main, sub, title, val, lab, tip, dot, text, line, d };
+  return { state, warn, compact, stack, short, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
 }
 
 function detailOf(m) {
@@ -334,7 +352,7 @@ const CostBadge = forwardRef(function CostBadge(props, ref) {
       ) : (
         <>
           {m.main}
-          {m.sub ? <span className="mgc-sub" title={m.sub.title}>{m.sub.text}</span> : null}
+          {m.noteLine ? <span className="mgc-sub" title={m.noteLine.title}>{m.noteLine.text}</span> : null}
         </>
       )}
       {/* aria-hidden: the tip duplicates the chip/text and this is an aria-live region — it

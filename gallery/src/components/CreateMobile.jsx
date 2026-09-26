@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
-  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered,
+  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered, qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
 import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
@@ -747,12 +747,17 @@ function ImageAdvanced({ s, set, setLora, m }) {
 
       <div className="cm-lbl">Boosters</div>
       <div className="cm-chiprow">
+        {/* Owner ruling 1 (SCOPE_2026-09-26): disabled on a model that does not take them;
+            the chip's on/off state is kept (never disarmed) and buildPayload withholds it. */}
         <button type="button" className={"glm-metal cm-chip" + (s.boosters.face ? " on" : "")}
+          disabled={m && m.compat_face === false}
+          title={m && m.compat_face === false ? "This model doesn't take Face Fix" : "Face Fix"}
           onClick={() => set({ boosters: { ...s.boosters, face: !s.boosters.face } })}>
           Face Fix
         </button>
         <button type="button" className={"glm-metal cm-chip" + (s.boosters.quality ? " on" : "")}
-          title="Prefixes PixAI's Masterpiece quality tag"
+          disabled={m && m.compat_quality === false}
+          title={qualityTagTitle(m)}
           onClick={() => set({ boosters: { ...s.boosters, quality: !s.boosters.quality } })}>
           Quality Tag
         </button>
@@ -782,7 +787,7 @@ function ImageAdvanced({ s, set, setLora, m }) {
       <div className="cm-subhead">Negative prompt</div>
       <textarea className="cm-ta" rows={2} value={s.negative}
         placeholder="lowres, bad hands, watermark"
-        disabled={m && m.compat_neg === false}
+        disabled={(m && m.compat_neg === false) || refIsContext(s)}
         onChange={(e) => set({ negative: e.target.value })} />
     </>
   );

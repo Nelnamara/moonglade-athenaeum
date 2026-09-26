@@ -320,3 +320,74 @@ def test_the_road_is_pinned_by_the_caller_so_a_payload_cannot_switch_it(road):
     assert pinned.mode == "image"
     assert pinned.parameters["inferenceProfile"] == "i2v"   # lowercased by _gen_parameters
     assert "i2vPro" not in pinned.parameters
+
+
+# --- (e) the build-time gate (SCOPE_2026-09-26 G7) ---------------------------------------
+# Under conftest the REAL gate is a no-op (its reads are blocked, so it fails soft to the
+# ungated shape), which means the identity tests above prove nothing about a gate that
+# CHANGES the dict. These re-run them with a stub gate that really does: it returns a NEW
+# dict with a moved size, exactly the kind of object the real gate hands back. (The real
+# gate is driven end to end in tests/test_tsubaki3_image_gate.py.)
+
+def _changing_gate(params):
+    out = dict(params)
+    out["width"], out["height"] = 912, 512
+    return out, [{"field": "width", "asked": params.get("width"), "used": 912,
+                  "why": "stub"}]
+
+
+def _gated_build(payload):
+    return core.build_request(payload, mode="image",
+                              resolve=core.RequestResolver(gate=_changing_gate))
+
+
+GATED_IMAGE = {"version_id": "V1", "prompt": "a moonwell", "width": 768, "height": 432}
+
+
+def test_a_gate_that_changes_the_dict_still_prices_and_submits_one_object(road):
+    """price() prices AND card-matches req.parameters, submit() attaches the card to it and
+    sends it -- and req.parameters is the GATED dict, not the build it came from."""
+    sess = FakeSession()
+    req = _gated_build(GATED_IMAGE)
+    assert (req.parameters["width"], req.parameters["height"]) == (912, 512)
+    quoted = core.price(sess, req)
+    core.submit(sess, req)
+    priced, = road["priced"]
+    submitted, = road["submitted"]
+    assert priced is submitted is req.parameters
+    assert road["matched"][0] is req.parameters and road["matched"][1] is req.parameters
+    assert quoted["adjusted"] == req.adjusted and req.adjusted[0]["used"] == 912
+
+
+def test_with_a_changing_gate_the_card_is_still_the_only_difference(road):
+    sess = FakeSession()
+    req = _gated_build(GATED_IMAGE)
+    before = dict(req.parameters)
+    core.price(sess, req)
+    core.submit(sess, req)
+    after = dict(req.parameters)
+    after.pop("kaisuukenId", None)
+    assert after == before
+
+
+def test_a_gated_request_still_refuses_under_read_only_before_any_tripwire(monkeypatch):
+    req = _gated_build(GATED_IMAGE)
+
+    def tripwire(name):
+        def _boom(*a, **k):
+            raise AssertionError("READ_ONLY did not stop the call before " + name)
+        return _boom
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
+               "submit_generation", "submit_fixer", "_session_for_create"):
+        monkeypatch.setattr(core, fn, tripwire(fn))
+    with pytest.raises(core.PixAIError) as err:
+        core.submit(FakeSession(), req)
+    assert "READ_ONLY" in str(err.value)
+
+
+def test_price_carries_no_receipt_key_when_nothing_was_changed(road):
+    """A key on every answer is a key clients learn to ignore -- the same rule
+    /api/generate's response follows."""
+    quoted = core.price(FakeSession(), _build({"version_id": "V1", "prompt": "x"}))
+    assert "adjusted" not in quoted

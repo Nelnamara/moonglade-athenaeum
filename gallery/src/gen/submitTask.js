@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { friendlyGenErr } from "./genCore.js";
+import { adjustedText, friendlyGenErr } from "./genCore.js";
 
 /* ONE submit path for every spend route the pilot touches: /api/generate, /api/edit,
    /api/fix, /api/enhance, /api/scene, /api/loom/generate. The classic has runTask; this is
@@ -55,8 +55,8 @@ export async function submitTask(route, payload, { label, emit, count, onPhase }
     emit({ kind: "err", text: friendlyGenErr(d.error || "Submit failed.") });
     return null;
   }
-  const adj = (d.adjusted || [])
-    .map((a) => a.field + " " + a.asked + "→" + a.used).join(", ");
+  // `used: null` (a field the model does not take, not sent) reads "off" (SCOPE_2026-09-26).
+  const adj = adjustedText(d.adjusted);
   if (adj && window.Toast) {
     window.Toast.show({
       kind: "err", title: "Settings were adjusted before submitting", msg: adj,
