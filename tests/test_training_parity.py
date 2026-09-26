@@ -348,6 +348,20 @@ def test_a_failed_card_check_refuses_the_confirm_and_is_said_in_the_preview(
     assert not [c for c in calls if c[0] == "submit"]
 
 
+def test_read_only_refuses_the_confirm_before_the_card_check_or_the_pause_read(
+        tmp_path, monkeypatch):
+    """The confirm's new reads (the card check, the pause switch) must not reach the account
+    for a submit READ_ONLY is going to refuse -- the rule core.submit follows."""
+    post, calls = _train_client(tmp_path, monkeypatch, quota=0, card=_CARD)
+    reads = _live_config(monkeypatch, {"trainLoraStatus": {"state": "OPEN"}})
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    assert post(_BODY).get_json()["preview"] is True          # the preview still answers
+    del calls[:]
+    r = post(dict(_BODY, confirm=True, accept_credit_cost=True))
+    assert r.status_code == 502 and "READ_ONLY" in r.get_json()["error"]
+    assert calls == [] and "trainLoraStatus" not in reads
+
+
 def test_a_non_member_with_quota_pays_and_must_accept(tmp_path, monkeypatch, pixai):
     """The whole of T09: quota left but no membership -> not free, and the paid confirm's
     acknowledgement applies."""

@@ -15923,6 +15923,15 @@ def create_app(out_dir: Path):
                                                   "" if len(unchecked) == 1 else "s",
                                                   "its" if len(unchecked) == 1 else "their"))
         confirming = bool(body.get("confirm"))
+        if confirming:
+            # READ_ONLY refuses the spend BEFORE the confirm's own reads -- the free-card
+            # check and the pause switch -- so a read-only install makes no call on the
+            # account for a submit it is going to refuse (the rule core.submit follows for
+            # the generation card check). submit_training still checks it too.
+            try:
+                core._check_read_only("submit a LoRA training task")
+            except Exception as e:                    # noqa: BLE001
+                return jsonify({"error": str(e)}), 502
 
         free_left = core.training_free_quota(session)
         free_by_quota = free_left > 0
