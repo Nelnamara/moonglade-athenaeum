@@ -4551,10 +4551,13 @@ def build_catalog_row(media_id, *, fm=None, known=None,
                                                                ruling 2026-08-15)
       clip_skip          GEN, IMG                              fm
       model_id           SV, GEN, VID, IMG, EDIT               parameters.modelId / the
-                                                               submitted block / fm /
+                                                               task's numeric modelId, else
+                                                               the engine name (VID,
+                                                               _video_row_model) / fm /
                                                                chat.modelId
-      model_name         GEN, IMG, EDIT                        _resolved_model_name /
-                                                               _edit_model_label
+      model_name         GEN, IMG, EDIT, VID                   _resolved_model_name /
+                                                               _edit_model_label /
+                                                               _video_row_model
       loras              GEN, IMG                              _resolved_loras (resolved
                                                                names+weights, not fm)
       paid_credit        SV, GEN, VID, IMG, EDIT               _paid_credit_str -- TASK-level,
@@ -7947,7 +7950,7 @@ DEFAULT_VIDEO_MODEL = "v4.0.1"
 # Video enums banked from the generator i18n (2026-07-02):
 VIDEO_CAMERA_MOVES = ("unset", "horizontal", "pan", "roll", "tilt", "vertical-pan", "zoom")
 VIDEO_AUDIO_LANGS = ("english", "japanese", "chinese", "korean", "none")  # "none" = SE only
-VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 is v4.0-only
+VIDEO_DURATIONS = (5, 6, 10, 15)                  # 15: VIDEO_15S_MODELS only; per engine: VIDEO_MODEL_DURATIONS
 
 # Video model registry: the `.model` NAME a submit carries -> its numeric top-level
 # `modelId` (+ a UI label). A real (card-covered) submit carries BOTH; WITHOUT the modelId

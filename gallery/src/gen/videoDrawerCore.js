@@ -79,7 +79,8 @@ export const MODEL_VMODES = {
   "v2.7": ["i2v"],
 };
 
-// Per-model MAX duration. 15s is exclusive to the v4.0 pair; absent => 10s cap. Enabling V2.7 /
+// Per-model MAX duration. 15s is the v4.0 pair's and the Tsubaki pair's (both tbkv tasks on the
+// wire are 15 s -- moonglade_backup.VIDEO_15S_MODELS); absent => 10s cap. Enabling V2.7 /
 // V3.0 Flash without this would newly expose a 15s option PixAI does not support on those
 // engines, at ~84,000 credits for a V2.7 clip with no card to cover it.
 export const MODEL_MAXDUR = { "v4.0": 15, "v4.0.1": 15, "tbkv1.0": 15, "tbkv1.0.1": 15 };
