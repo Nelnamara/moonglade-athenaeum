@@ -4,7 +4,7 @@ import {
   ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
   dims, goGate, loraIncompat, loraRange, loraStep, modeOffered,
 } from "../gen/genCore.js";
-import { EDIT_CAPS, editCaps, refTag } from "../gen/editCore.js";
+import { EDIT_CAPS, editAspectLabel, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
@@ -823,7 +823,7 @@ function EditAdvanced({ edit }) {
       <div className="cm-subhead">Aspect</div>
       <select className="cm-select" value={edit.s.aspect}
         onChange={(e) => edit.set({ aspect: e.target.value })}>
-        {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
+        {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
       </select>
     </>
   );

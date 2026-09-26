@@ -8501,25 +8501,45 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # via the model-capability probe 2026-07-06 (extra.chatEditing). Drives the Edit card's model
 # picker + its resolution/quality/aspect option lists + reference-image cap. Reference Pro
 # exposes NO quality option (qualities empty) and adds 21:9; Edit Pro is 1K/2K, Reference 2K/4K.
+#
+# Re-read 2026-09-26 (the preset roster's extra.chatEditing, SCOPE_2026-09-26 E1/E2):
+#   * Edit Pro publishes defaultAspectRatio "3:5" and offers 3:5 and 5:3 on top of the eleven
+#     below, so its default moved from 3:4 to 3:5.
+#   * Reference Pro publishes NO defaultAspectRatio. For a model like that PixAI's own aspect
+#     control shows an "Auto" tile, selected by default, and sends no aspectRatio at all -- the
+#     owner's two Reference Pro edits on the wire carry modelConfig {resolution} only. "auto"
+#     is therefore an aspect VALUE here, first in Reference Pro's list and its default, and
+#     build_chat_edit_parameters omits aspectRatio for it. Auto leaves the frame to PixAI; it
+#     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
+#     come back 2:3), so no copy anywhere may say it does.
+# editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
+# reads both and fails if their aspects or defaults drift apart.
+EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
         "label": "Edit Pro", "max_refs": 4,
         "resolutions": ["1K", "2K"],
         "qualities": ["low", "medium", "high"],
-        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
-        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:4"},
+        "aspects": ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "1:3", "3:1"],
+        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
     },
     "reference-pro": {
         "model_id": "1948514378441961474",
         "label": "Reference Pro", "max_refs": 10,
         "resolutions": ["2K", "4K"],
         "qualities": [],
-        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
-        "default": {"resolution": "2K", "quality": "", "aspect": "3:4"},
+        "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "21:9"],
+        "default": {"resolution": "2K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
     },
 }
 DEFAULT_EDIT_MODEL = "edit-pro"
+# The aspect an edit on a model OUTSIDE the table gets when nobody picked one. What such a
+# model does with no aspectRatio is unobserved, so this fails open to the value every edit sent
+# before the table defaults existed (SCOPE_2026-09-26's rule for unobserved behaviour).
+_EDIT_ASPECT_UNKNOWN_MODEL = "3:4"
 
 # The model PixAI runs a hand/face Fix on -- the same CHAT model the Edit card calls
 # Reference Pro. A Fix submit (POST /v2/task/fixer, just {mediaId, boxes}) never names a
@@ -8545,10 +8565,22 @@ def edit_model_by_id(model_id):
     return None
 
 
+def edit_default_aspect(model_id):
+    """The aspect an edit on `model_id` gets when the caller picked none: the model's own table
+    default ("auto" for Reference Pro, which publishes none; "3:5" for Edit Pro), or the
+    pre-table 3:4 for a model the table does not know (see _EDIT_ASPECT_UNKNOWN_MODEL)."""
+    spec = edit_model_by_id(model_id)
+    return spec["default"]["aspect"] if spec else _EDIT_ASPECT_UNKNOWN_MODEL
+
+
 def clamp_edit_config(model_id, resolution, quality, aspect):
     """Snap an edit's (resolution, quality, aspect) to the resolved model's real capabilities,
     so NO path -- preset, stale UI, old client -- can send an option the model rejects (the
-    preset-with-Reference-Pro bug). Unknown models pass through unchanged. Returns the tuple."""
+    preset-with-Reference-Pro bug). Unknown models pass through unchanged. Returns the tuple.
+
+    "auto" passes only for a model whose table lists it -- one that publishes no default
+    aspect (Reference Pro). On Edit Pro it is not a legal value and snaps to the model's
+    default (3:5), exactly like any other aspect the model does not offer."""
     spec = edit_model_by_id(model_id)
     if not spec:
         return resolution, quality, aspect
@@ -8618,7 +8650,7 @@ def _is_local_source(src):
 
 
 def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
-                               resolution="1K", aspect_ratio="3:4", quality="medium",
+                               resolution="1K", aspect_ratio=None, quality="medium",
                                kaisuuken_id="", scene_id=""):
     """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
     block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
@@ -8630,19 +8662,31 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     passes one explicitly -- same opt-in shape as the other build_*_parameters builders.
     Without one the server charges credits, so this still stays behind --confirm like
     all spend paths.
+
+    `aspect_ratio` left unset (or blank) takes the model's own table default
+    (edit_default_aspect). "auto" sends NO aspectRatio at all -- PixAI's own shape for a
+    model with no published default (the owner's Reference Pro edits on the wire) -- which
+    leaves the frame to PixAI.
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
         raise PixAIError("edit needs at least one source media_id")
+    mid = str(model_id or EDIT_PRO_MODEL_ID)
+    if not aspect_ratio:
+        aspect_ratio = edit_default_aspect(mid)
+    model_config = {"resolution": resolution}
+    if aspect_ratio != EDIT_ASPECT_AUTO:
+        model_config["aspectRatio"] = aspect_ratio
+    # quality is omitted when empty -- Reference Pro exposes no quality option, so sending
+    # one would be a bogus knob; Edit Pro still sends low/medium/high.
+    if quality:
+        model_config["quality"] = quality
     params = {"chat": {
         "prompts": prompt or "",
         "mediaId": ids[0],
         "mediaIds": ids,
-        "modelId": str(model_id or EDIT_PRO_MODEL_ID),
-        # quality is omitted when empty -- Reference Pro exposes no quality option, so sending
-        # one would be a bogus knob; Edit Pro still sends low/medium/high.
-        "modelConfig": dict({"resolution": resolution, "aspectRatio": aspect_ratio},
-                            **({"quality": quality} if quality else {})),
+        "modelId": mid,
+        "modelConfig": model_config,
     }}
     if scene_id:
         params["sceneId"] = str(scene_id)
@@ -8655,7 +8699,9 @@ def _edit_config_from_args(args):
     """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
     model_id = getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID
     resolution = getattr(args, "edit_resolution", "") or "1K"
-    aspect_ratio = getattr(args, "edit_aspect", "") or "3:4"
+    # No --edit-aspect -> the model's own default (Edit Pro 3:5, Reference Pro auto), not a
+    # fixed 3:4 that clamp would then keep on every model offering it (SCOPE_2026-09-26 E1).
+    aspect_ratio = getattr(args, "edit_aspect", "") or edit_default_aspect(model_id)
     quality = getattr(args, "edit_quality", "") or "medium"
     # Same guard the web /api/edit path already runs (_edit_params_from_payload ->
     # clamp_edit_config) -- without it the CLI can submit a resolution/quality/aspect
@@ -9898,8 +9944,10 @@ def _edit_parameters_from_payload(p, user, resolve):
     q = p.get("quality")
     if q is None:
         q = "medium"
+    # never send an invalid knob; a payload with no aspect takes the model's own default
+    # (Edit Pro 3:5, Reference Pro auto) -- SCOPE_2026-09-26 E1.
     res, q, asp = clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
-                                    (p.get("aspect") or "3:4"))   # never send an invalid knob
+                                    (p.get("aspect") or edit_default_aspect(model_id)))
     kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
                   model_id=model_id)
     # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
@@ -14658,8 +14706,10 @@ def main():
                      help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
     gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
                      help="edit output resolution (default 1K; e.g. 1K/2K)")
-    gen.add_argument("--edit-aspect", dest="edit_aspect", default="3:4",
-                     help="edit output aspect ratio (default 3:4)")
+    gen.add_argument("--edit-aspect", dest="edit_aspect", default="",
+                     help="edit output aspect ratio (default: the edit model's own -- Edit Pro "
+                          "3:5; Reference Pro 'auto', which sends no aspect ratio and leaves "
+                          "the frame to PixAI)")
     gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
                      help="edit quality tier (default medium)")
     gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",

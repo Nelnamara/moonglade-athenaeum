@@ -1543,8 +1543,10 @@ def test_clamp_edit_config_snaps_to_model_caps():
     the resolved model doesn't support is snapped to a valid one — no path sends an invalid knob."""
     # Reference Pro: no quality knob + 1K unsupported -> quality dropped, resolution -> 2K default
     assert core.clamp_edit_config("1948514378441961474", "1K", "medium", "21:9") == ("2K", "", "21:9")
-    # Edit Pro: 4K unsupported -> 1K default; valid quality kept; unknown aspect -> default 3:4
-    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:4")
+    # Edit Pro: 4K unsupported -> 1K default; valid quality kept; unknown aspect -> default.
+    # The default moved 3:4 -> 3:5 ON PURPOSE (SCOPE_2026-09-26 E2): Edit Pro's own
+    # extra.chatEditing publishes defaultAspectRatio "3:5" and adds 3:5 / 5:3.
+    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "4K", "high", "nope") == ("1K", "high", "3:5")
     # unknown model -> pass through untouched
     assert core.clamp_edit_config("999", "8K", "ultra", "5:1") == ("8K", "ultra", "5:1")
 

@@ -153,3 +153,118 @@ def test_edit_preview_shows_the_clamped_config_not_the_raw_defaults(tmp_path, ca
     out = capsys.readouterr().out
     assert '"resolution": "2K"' in out
     assert '"quality"' not in out   # reference-pro exposes no quality knob at all
+
+
+# ---- Auto aspect and the per-model defaults (SCOPE_2026-09-26 E1/E2) ----
+
+REF_PRO = "1948514378441961474"
+
+
+def test_auto_aspect_sends_no_aspect_ratio():
+    """Reference Pro publishes no default aspect, so PixAI's own Edit sends NO aspectRatio
+    (the owner's two Reference Pro edits on the wire: modelConfig {resolution: "2K"}, nothing
+    else). "auto" is that choice; it must leave the key out entirely, never send "auto"."""
+    p = core.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
+                                        aspect_ratio="auto", quality="")
+    assert p["chat"]["modelConfig"] == {"resolution": "2K"}
+
+
+def test_an_unset_aspect_takes_the_models_own_default():
+    """No aspect picked -> the model's table default, not a fixed 3:4: Reference Pro goes
+    out as Auto (no aspectRatio), Edit Pro as 3:5. A model the table does not know keeps
+    the pre-table 3:4 (its behaviour without one is unobserved)."""
+    ref = core.build_chat_edit_parameters("x", ["10"], model_id=REF_PRO, resolution="2K",
+                                          quality="")
+    assert "aspectRatio" not in ref["chat"]["modelConfig"]
+    ep = core.build_chat_edit_parameters("x", ["10"])
+    assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
+    other = core.build_chat_edit_parameters("x", ["10"], model_id="999")
+    assert other["chat"]["modelConfig"]["aspectRatio"] == "3:4"
+
+
+def test_clamp_keeps_auto_only_where_the_model_offers_it():
+    assert core.clamp_edit_config(REF_PRO, "2K", "", "auto") == ("2K", "", "auto")
+    # Edit Pro publishes a default, so Auto is not one of its values: it snaps to 3:5,
+    # the same "leaving Auto takes the model's default" rule PixAI's own control follows.
+    assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "1K", "medium", "auto") == \
+        ("1K", "medium", "3:5")
+    for a in ("3:5", "5:3"):              # Edit Pro's two new ratios are legal now
+        assert core.clamp_edit_config(core.EDIT_PRO_MODEL_ID, "1K", "medium", a)[2] == a
+
+
+def test_cli_with_no_edit_aspect_takes_the_models_default(tmp_path):
+    """--edit-aspect defaults to "" now, so the chosen model decides."""
+    cfg = core._edit_config_from_args(_edit_args(tmp_path, edit_model=REF_PRO, edit_aspect=""))
+    assert cfg["aspect_ratio"] == "auto"
+    cfg = core._edit_config_from_args(_edit_args(tmp_path, edit_model="", edit_aspect=""))
+    assert cfg["aspect_ratio"] == "3:5"
+    import inspect
+    assert 'dest="edit_aspect", default=""' in inspect.getsource(core.main)
+
+
+def test_web_payload_with_no_aspect_takes_the_models_default():
+    rs = core.RequestResolver()
+    ref = core._edit_parameters_from_payload(
+        {"source": "55", "instruction": "x", "edit_model": "reference-pro"}, "", rs)
+    assert ref["chat"]["modelConfig"] == {"resolution": "2K"}
+    ep = core._edit_parameters_from_payload(
+        {"source": "55", "instruction": "x", "edit_model": "edit-pro"}, "", rs)
+    assert ep["chat"]["modelConfig"]["aspectRatio"] == "3:5"
+
+
+def test_the_priced_auto_edit_is_the_submitted_one(tmp_path, monkeypatch):
+    """The badge's /api/price and the /api/edit spend must build the SAME chat block for an
+    Auto edit -- no aspectRatio on either, nothing else different (the owner's two wire edits
+    paid the 2K price, 8,000, with no aspectRatio)."""
+    from moonglade_gallery import CATALOG_FIELDS, create_app, save_catalog
+    from tests.conftest import login_test_client
+    save_catalog(tmp_path / "catalog.db", [dict({f: "" for f in CATALOG_FIELDS},
+                                                media_id="1", filename="a_1.png")])
+    seen = {}
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "price_task", lambda s, params: seen.update(priced=params) or 8000)
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    monkeypatch.setattr(core, "submit",
+                        lambda s, req, **k: seen.update(sent=req.parameters) or {"task_id": "t1"})
+    cli = login_test_client(create_app(tmp_path))
+    body = {"mode": "edit", "edit_model": "reference-pro", "source": "55",
+            "instruction": "make it night", "resolution": "2K", "quality": "",
+            "aspect": "auto"}
+    cli.post("/api/price", json=body)
+    assert cli.post("/api/edit", json=body).get_json().get("task_id") == "t1"
+    assert seen["priced"]["chat"] == seen["sent"]["chat"]
+    assert "aspectRatio" not in seen["sent"]["chat"]["modelConfig"]
+
+
+def _js_edit_caps():
+    """editCore.js's EDIT_CAPS, read off the source text: {key: (aspects, default)}."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "gallery" / "src" / "gen" / "editCore.js"
+           ).read_text(encoding="utf-8").replace("\r\n", "\n")
+    consts = dict(re.findall(r'export const (\w+) = "([^"]*)";', src))
+
+    def _val(tok):
+        tok = tok.strip()
+        return tok.strip('"') if tok.startswith('"') else consts[tok]   # e.g. EDIT_ASPECT_AUTO
+    body = src[src.index("export const EDIT_CAPS = {"):]
+    body = body[:body.index("\n};")]
+    out = {}
+    for key, block in re.findall(r'"([\w-]+)": \{(.*?)\n  \}', body, re.S):
+        aspects = [_val(t) for t in
+                   re.search(r"aspects: \[([^\]]*)\]", block).group(1).split(",") if t.strip()]
+        d = re.search(r"def: \{([^}]*)\}", block).group(1)
+        out[key] = (aspects, {k: _val(v) for k, v in re.findall(r"(\w+): ([^,]+)", d)})
+    return out
+
+
+def test_edit_caps_and_edit_models_agree():
+    """The two hand-kept tables (core.EDIT_MODELS and editCore.js EDIT_CAPS) must list the
+    same aspects, in the same order, and the same defaults -- otherwise the drawer offers or
+    pre-selects an aspect the server then snaps away (SCOPE_2026-09-26 E2)."""
+    js = _js_edit_caps()
+    assert set(js) == set(core.EDIT_MODELS)
+    for key, spec in core.EDIT_MODELS.items():
+        aspects, dflt = js[key]
+        assert aspects == spec["aspects"], key
+        assert dflt == spec["default"], key

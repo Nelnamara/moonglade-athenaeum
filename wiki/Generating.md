@@ -259,7 +259,7 @@ python moonglade_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt ".
 |---|---|---|
 | `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits) |
 | `--edit-resolution` | `1K` | output resolution (`1K`/`2K`/…) |
-| `--edit-aspect` | `3:4` | output aspect ratio |
+| `--edit-aspect` | the model's own | output aspect ratio. Edit Pro defaults to `3:5` (it also offers `5:3`). Reference Pro defaults to `auto`, which sends no aspect ratio and lets PixAI choose the frame — it does not promise to keep your source's shape |
 | `--edit-quality` | `medium` | quality tier |
 
 The four are clamped to what the chosen model really supports before submit — e.g.
