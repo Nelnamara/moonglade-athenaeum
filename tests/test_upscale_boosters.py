@@ -821,8 +821,11 @@ def test_enhance_details_is_gated_on_the_model_declaring_upscale_support():
         "the Enhance Details chip itself must disable on an explicit upscale:false"
 
 
-def test_booster_gate_does_not_touch_quality_tag_or_face_fix():
-    """REVERSED ON PURPOSE by owner ruling 1 (SCOPE_2026-09-26, recorded in DECISIONS): the
+def test_booster_gate_disables_but_never_disarms_quality_tag_and_face_fix():
+    """Formerly test_booster_gate_does_not_touch_quality_tag_or_face_fix, renamed with its
+    reversal so a failure names what actually broke.
+
+    REVERSED ON PURPOSE by owner ruling 1 (SCOPE_2026-09-26, recorded in DECISIONS): the
     Face Fix and Quality Tag chips READ DISABLED on a model that does not take them. This pin
     used to hold that neither was gated, because Face Fix had no compatibility key and Quality
     Tag was an owner decision not yet made. Both premises changed: PixAI's version-keyed
