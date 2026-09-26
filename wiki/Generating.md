@@ -196,18 +196,20 @@ python moonglade_backup.py --generate-video --task-id <id>
 
 ### Video models and shot-mode gating
 
-Seven video engines are selectable (newest first), and they are **not interchangeable** —
+Nine video engines are selectable (newest first), and they are **not interchangeable** —
 each has its own duration cap, free-card eligibility, and which of the Loom's four
 [Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
 drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
-enforces the current model's cap (see below); an out-of-range value (e.g. inherited from
-an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain
-integer with no enforced choices — pass any of the four to match the drawer's behavior.
+enforces the current model's lengths (see below); an out-of-range value (e.g. inherited from
+an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain integer
+that snaps the same way, to the nearest length the chosen model takes.
 
 | Model (`--video-model`) | Max duration | Free card ever? | Shot modes available |
 |---|---|---|---|
 | V4.0 Preview (`v4.0`) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
 | V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| Tsubaki Video (`tbkv1.0.1`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
+| Tsubaki Video Flash (`tbkv1.0`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
 | V3.2 (`v3.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
@@ -215,19 +217,28 @@ integer with no enforced choices — pass any of the four to match the drawer's 
 | V2.7 (High Dynamics) (`v2.7`) | 10s | **No — never covered** | First Frame only |
 
 Notes:
-- **Multi-Reference (R2V) only works on the V4.0 pair.** First+Last (FLF) also works on
-  the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
+- **Multi-Reference (R2V) only works on the V4.0 pair and the Tsubaki pair.** First+Last (FLF)
+  also works on the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
   (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
   submit a combination PixAI would reject.
+- **The Tsubaki engines are different in four ways.** They take **5, 10 or 15 seconds — no 6**
+  (the 6 stop reads dimmed, and a 6 s request goes out as 5); **no negative prompt and no
+  camera move** (both controls read disabled — anything you typed stays in the box but is not
+  sent); **no video references** in Multi-Reference (images and audio only — video references
+  you already picked are held, dimmed and not sent, never deleted); and a reference video can
+  set an **output aspect ratio** (CLI `--video-ratio`; the drawer has no ratio picker yet, so a
+  Remix names the source's ratio and lets PixAI infer it). Their Multi-Reference half is proven
+  on real runs; First Frame and First & Last follow PixAI's own site and price quotes, and the
+  first real First Frame run is the proof they dispatch.
 - **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
   drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
 - **A longer clip costs more tickets.** A video card is a book of tickets and a clip uses
   one per 5 seconds (5s = 1, 10s = 2, 15s = 3), so "you have a V4.0 card" is not the whole
   question — see [Free cards and videos](#free-cards-and-videos).
-- **15s is exclusive to the V4.0 pair.** Every other model caps at 10s, and the web
-  drawer disables + hides the 15s option entirely once you pick a capped model (rather
-  than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
-  hand-typed `--duration 15` on a non-V4.0 model is on you to avoid.
+- **15s is exclusive to the V4.0 pair and the Tsubaki pair.** Every other model caps at 10s,
+  and the web drawer dims the 15s option once you pick a capped model (rather than letting
+  you choose it and fail at submit); the CLI snaps a `--duration 15` on a capped model down
+  to 10.
 
 ### Video tuning flags
 
@@ -397,7 +408,16 @@ python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2>
 | `--ref-audio` | a reference — **media_id only**, *not* a local file, **repeatable**. PixAI's uploader takes images and videos only, so there's nothing to upload a bare audio file as. To use audio from your own machine, put it into a video (even just a still image with the audio track) and pass that with `--ref-video`. |
 | `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
 | `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 tickets — see [Free cards and videos](#free-cards-and-videos)) |
+| `--video-ratio` | Tsubaki engines only (`--video-model tbkv1.0.1` / `tbkv1.0`): the output aspect ratio — `adaptive`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9` or `21:9`. Left out (or `adaptive`), PixAI works it out from the references |
 | `--confirm` | **required** to submit |
+
+**A video reference is priced by its length, too.** PixAI bills a reference video over the
+output seconds *plus* the length of every video reference. Moonglade sends each reference
+clip's real length — measured from the file in your library, or the length it was generated
+at — and the web badge and the CLI preview both show that price. If any reference's length
+can't be read (the clip isn't in your library), it sends none, and PixAI prices a flat 15 s
+of input in total — the badge says so. That can be more than the truth for one short clip
+and less for two or more long ones.
 
 ## Upload a local image (`--upload`)
 
