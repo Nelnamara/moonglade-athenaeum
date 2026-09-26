@@ -354,6 +354,26 @@ _MIGRATIONS = [
     # image's entry in its task's outputs.batch. Per-ROW and permanent, unlike the
     # task-level deleted_remote above, which --reconcile-deleted rewrites on every run.
     "ALTER TABLE catalog ADD COLUMN cloud_deleted_at TEXT DEFAULT ''",
+    # ONE-TIME DATA REPAIRS (2026-09-26). A repair that must run ONCE -- not on every new
+    # process, which is how often migrate() replays this list -- records its name here and
+    # guards its own statement on that name, so each repair is three idempotent statements:
+    # the table, the guarded UPDATE, the marker. Not a catalog column: nothing reads it but
+    # the guards below, so the CATALOG_FIELDS three-place contract does not apply.
+    "CREATE TABLE IF NOT EXISTS catalog_repairs (name TEXT PRIMARY KEY)",
+    # LINEAGE FOR CONTEXT IMAGES (SCOPE_2026-09-26 E3). Until this pass source_media_of_task
+    # never read parameters.contextImages, so a Tsubaki.3 / Flash picture made from a
+    # reference filed as an ORIGINAL -- and --backfill-lineage stamped lineage_checked on it,
+    # the "confirmed original" marker that makes every later run skip the task forever.
+    # Clear that stamp ONCE on MMDIT26B rows (Tsubaki.3 2024383379556065549, Flash
+    # 2050048243034896798) that still have no source, so the next --backfill-lineage re-reads
+    # them with the fixed reader. Once, not on every open: a plain Tsubaki.3 txt2img has no
+    # source either and is correctly re-stamped by that run; clearing it again on every
+    # process start would re-fetch every one of them on every backfill.
+    "UPDATE catalog SET lineage_checked = '' "
+    "WHERE COALESCE(lineage_checked, '') != '' AND COALESCE(source_media_id, '') = '' "
+    "AND model_id IN ('2024383379556065549', '2050048243034896798') "
+    "AND NOT EXISTS (SELECT 1 FROM catalog_repairs WHERE name = 'lineage-context-images')",
+    "INSERT OR IGNORE INTO catalog_repairs (name) VALUES ('lineage-context-images')",
 ]
 
 # ---------------------------------------------------------------------------

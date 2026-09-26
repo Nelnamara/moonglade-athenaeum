@@ -11030,7 +11030,15 @@ def source_media_of_task(task):
       * edit/reference  -> parameters.chat.mediaId          (kind "edit")
       * enhance/plugin  -> parameters.inputs.image.media_id (kind "enhance")
       * upscale/hires   -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
-    A plain txt2img has no input image and returns (None, None)."""
+      * context image   -> parameters.contextImages[0]      (kind "derived")
+    A plain txt2img has no input image and returns (None, None).
+
+    Context images (SCOPE_2026-09-26 E3): a Tsubaki.3 / Flash generation made from a
+    reference carries its source ONLY in `contextImages` -- no top-level mediaId, no chat
+    block (the owner's seven 2026-09-23 runs) -- and a site Edit-dialog instruction edit of
+    a Tsubaki picture has the same shape, so the two cannot be told apart from parameters
+    and both file as "derived", the img2img kind. With two or more context images the FIRST
+    is the source; which one "counts" beyond that is a design call not made here."""
     params = ((task or {}).get("parameters") or {})
     if not isinstance(params, dict):
         return (None, None)
@@ -11064,6 +11072,9 @@ def source_media_of_task(task):
     if mid:
         ratio = params.get("upscale") or params.get("enlarge")
         return (str(mid), "upscale" if ratio else "derived")
+    ctx = params.get("contextImages")
+    if isinstance(ctx, list) and ctx and ctx[0] and str(ctx[0]).strip():
+        return (str(ctx[0]).strip(), "derived")
     return (None, None)
 
 

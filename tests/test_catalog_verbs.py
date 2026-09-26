@@ -90,8 +90,12 @@ def traced(monkeypatch):
 
 
 def _ddl(statements):
+    # UPDATE / INSERT count too (2026-09-26, on purpose): _MIGRATIONS now carries one-time
+    # data repairs (SCOPE_2026-09-26 E3's lineage re-read), and a plain catalog() open must
+    # run none of those either, while the first open must run every one.
     return [s for s in statements
-            if s.strip().upper().startswith(("ALTER ", "CREATE INDEX", "CREATE TABLE"))]
+            if s.strip().upper().startswith(("ALTER ", "CREATE INDEX", "CREATE TABLE",
+                                             "UPDATE ", "INSERT "))]
 
 
 # --------------------------------------------------------------- the road
