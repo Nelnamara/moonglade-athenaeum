@@ -162,3 +162,43 @@ def test_the_backfill_rereads_the_owners_runs_after_the_repair(monkeypatch, tmp_
     del fetched[:]
     core.run_backfill_lineage(args)
     assert fetched == []
+
+
+def _markers(db):
+    con = sqlite3.connect(str(db))
+    try:
+        return [r[0] for r in con.execute("SELECT name FROM catalog_repairs")]
+    finally:
+        con.close()
+
+
+def test_a_repair_that_failed_is_not_marked_done_and_runs_next_time(tmp_path, monkeypatch):
+    """migrate() swallows every OperationalError, so a repair UPDATE that hit a locked file
+    must not be followed by its marker -- the marker is conditional on the repair's own
+    postcondition. The next process then runs it."""
+    import moonglade_gallery as g
+    db = _pre_release_catalog(tmp_path, [_row("m1", "t1", T3, lineage_checked="1")])
+    real_connect = g.sqlite3.connect
+
+    class _LockedOnce:
+        """A connection whose repair UPDATE fails the way a busy D: catalog does."""
+        def __init__(self, con):
+            self._con = con
+
+        def execute(self, sql, *a):
+            if sql.startswith("UPDATE catalog SET lineage_checked"):
+                raise sqlite3.OperationalError("database is locked")
+            return self._con.execute(sql, *a)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    monkeypatch.setattr(g.sqlite3, "connect", lambda *a, **k: _LockedOnce(real_connect(*a, **k)))
+    migrate(db, force=True)
+    monkeypatch.setattr(g.sqlite3, "connect", real_connect)
+    assert _markers(db) == []                               # not recorded as done...
+    assert _by_media(db)["m1"]["lineage_checked"] == "1"    # ...because it did not run
+
+    migrate(db, force=True)                                 # the next process start
+    assert _markers(db) == ["lineage-context-images"]
+    assert _by_media(db)["m1"]["lineage_checked"] == ""

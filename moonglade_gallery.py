@@ -357,8 +357,12 @@ _MIGRATIONS = [
     # ONE-TIME DATA REPAIRS (2026-09-26). A repair that must run ONCE -- not on every new
     # process, which is how often migrate() replays this list -- records its name here and
     # guards its own statement on that name, so each repair is three idempotent statements:
-    # the table, the guarded UPDATE, the marker. Not a catalog column: nothing reads it but
-    # the guards below, so the CATALOG_FIELDS three-place contract does not apply.
+    # the table, the guarded UPDATE, the marker. The MARKER IS CONDITIONAL on the repair's
+    # own postcondition, never written blind: migrate() swallows every OperationalError, so
+    # an UPDATE that failed on "database is locked" followed by an unconditional marker would
+    # record a repair that never ran, and it would never run again. Conditional, a failed
+    # UPDATE leaves no marker and the next process retries it. Not a catalog column: nothing
+    # reads it but the guards below, so the CATALOG_FIELDS three-place contract does not apply.
     "CREATE TABLE IF NOT EXISTS catalog_repairs (name TEXT PRIMARY KEY)",
     # LINEAGE FOR CONTEXT IMAGES (SCOPE_2026-09-26 E3). Until this pass source_media_of_task
     # never read parameters.contextImages, so a Tsubaki.3 / Flash picture made from a
@@ -373,7 +377,14 @@ _MIGRATIONS = [
     "WHERE COALESCE(lineage_checked, '') != '' AND COALESCE(source_media_id, '') = '' "
     "AND model_id IN ('2024383379556065549', '2050048243034896798') "
     "AND NOT EXISTS (SELECT 1 FROM catalog_repairs WHERE name = 'lineage-context-images')",
-    "INSERT OR IGNORE INTO catalog_repairs (name) VALUES ('lineage-context-images')",
+    # The marker, only once no stamped sourceless MMDIT26B row is left -- i.e. only when the
+    # UPDATE above really ran (see ONE-TIME DATA REPAIRS). On a file with no catalog table
+    # yet this fails like the UPDATE does, harmlessly: the repair then runs on the first
+    # open that has one, where there is nothing stamped for it to clear.
+    "INSERT OR IGNORE INTO catalog_repairs (name) SELECT 'lineage-context-images' "
+    "WHERE NOT EXISTS (SELECT 1 FROM catalog WHERE COALESCE(lineage_checked, '') != '' "
+    "AND COALESCE(source_media_id, '') = '' "
+    "AND model_id IN ('2024383379556065549', '2050048243034896798'))",
 ]
 
 # ---------------------------------------------------------------------------
@@ -418,9 +429,13 @@ def _catalog_key(db_path):
 
 def migrate(db_path, force=False):
     """Bring an existing catalog.db up to the current schema by running
-    _MIGRATIONS. Idempotent: every statement is an ALTER TABLE ADD COLUMN or a
+    _MIGRATIONS. Idempotent: almost every statement is an ALTER TABLE ADD COLUMN or a
     CREATE INDEX IF NOT EXISTS, and the OperationalError a re-run raises ("duplicate
-    column name") is the success case, not a failure.
+    column name") is the success case, not a failure. The rest are the ONE-TIME DATA
+    REPAIRS (2026-09-26): a CREATE TABLE IF NOT EXISTS catalog_repairs, then per repair an
+    UPDATE guarded on its name there and a marker INSERT guarded on the repair's own
+    postcondition -- so an OperationalError swallowed here (a locked file, say) leaves the
+    repair unmarked for the next process to run, rather than marked and never run.
 
     Memoized per process per resolved path -- the second and every later call for
     the same catalog returns without opening anything. That is what lets create_app
