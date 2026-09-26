@@ -25,6 +25,7 @@ git tags. Full prose notes for tagged versions live on
 - The render harness is hermetic: every module-scoped server fixture pins its own asset root, seeds its own sealed container from the private donor, and pins the clock the achievement metrics read, so the suite behaves identically with or without a real pack beside the checkout and whatever the hour it runs in. A session-wide guard fails the run if any test changed the real asset tree, and `tests/test_fixture_hermeticity.py` asserts the pins outside the browser-gated module. (2026-09-11)
 - `tools/ci_local.py` is the committed pre-merge command: it runs CI's commands on this machine, refuses to start on a machine that would skip the bundle or harness gates, and reads the run's junit report to fail if a skip-prone gate did not actually run. (2026-09-11)
 - The two public-doc guards now cover `ROADMAP.md`. (2026-09-11)
+- The Moonglade MCP server gets a PixAI session of its own, its first account tool (tag suggestions) and a duplicate finder. (2026-09-26)
 
 ## [3.11.0] - 2026-09-26 — Camellia
 
