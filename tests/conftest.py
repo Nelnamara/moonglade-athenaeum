@@ -435,12 +435,16 @@ def _clear_gate_caches():
     """The SCOPE_2026-09-26 image gate caches the version-keyed /features and /size-config
     reads exactly as _model_profiles caches /inference-profiles (keyed by version_id, with a
     TTL). Same isolation: one test's model rules must never answer another test's gate.
-    Both reads go through _rest_get, which _no_live_card_network already blocks."""
+    Both reads go through _rest_get, which _no_live_card_network already blocks. The
+    Unlimited Mode status cache (SCOPE_2026-09-26_unlimited-mode) is the same kind of read
+    and is cleared with them."""
     core._features_cache.clear()
     core._size_config_cache.clear()
+    core._unlimited_cache.clear()
     yield
     core._features_cache.clear()
     core._size_config_cache.clear()
+    core._unlimited_cache.clear()
 
 
 @pytest.fixture(autouse=True)

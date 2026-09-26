@@ -17801,19 +17801,35 @@ def create_app(out_dir: Path):
             model_version=core.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
             gate=core.gate_resolver(gsession),
-            video_duration=_video_duration_lookup)
+            video_duration=_video_duration_lookup,
+            unlimited=core.unlimited_resolver(gsession))
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
         a generation OUTPUT, and PixAI refuses one as an input on the Edit and Fix paths
-        (the Loom's video routes resolve their own frames -- see loom_generate). The gate
-        and the video-length lookup are the SAME ones the quote uses."""
+        (the Loom's video routes resolve their own frames -- see loom_generate). The gate,
+        the video-length lookup and the Unlimited Mode check are the SAME ones the quote
+        uses."""
         return core.RequestResolver(
             model_version=core.model_version_resolver(gsession),
             preset=lambda u, name: _load_presets(u).get(name),
             media_id=lambda v: _input_media_id(core, gsession, v),
             gate=core.gate_resolver(gsession),
-            video_duration=_video_duration_lookup)
+            video_duration=_video_duration_lookup,
+            unlimited=core.unlimited_resolver(gsession))
+
+    def _lane_job_running(core):
+        """True while the app's own job log holds an Unlimited Mode task that has not
+        finished. PixAI's site allows one lane task at a time; the log (not a drawer's React
+        state -- two useGenerate hooks, lost on reload) is the one record that survives
+        (SCOPE_2026-09-26_unlimited-mode §8.6). A lane task started on PixAI's own site is
+        not in it; PixAI's refusal covers that case, and nothing is spent."""
+        try:
+            return any(j.get("lane") == core.UNLIMITED_LANE
+                       and j.get("status") not in core._JOBS_TERMINAL
+                       for j in core.read_jobs(out_dir))
+        except Exception:
+            return False
 
     _video_len_cache = []   # the one cached lookup for this app (built on first use)
 
@@ -18142,6 +18158,14 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
+            # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode §8.6/§8.9): READ_ONLY refuses
+            # FIRST, before the entitlement read and the gate's reads below, as run_generate
+            # does -- then one lane task at a time, off the app's own job log.
+            lane = core.asks_unlimited(body)
+            if lane:
+                core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+                if _lane_job_running(core):
+                    return jsonify({"error": core.UNLIMITED_BUSY}), 400
             # Members-only options are dropped for an account PixAI reports as non-member.
             # Handed to the builder (not decided inside it) so the CLI keeps its own path
             # and /api/price passes the identical flag -- the badge must quote the shape
@@ -18179,6 +18203,11 @@ def create_app(out_dir: Path):
                                              _cap, "" if _cap == 1 else "s",
                                              len(req.lora_version_ids) - _cap)}), 400
             task_id = core.submit(session, req)["task_id"]
+            if req.unlimited:
+                # The lane mark on the job, written by the server rather than trusted from the
+                # client's own registration, so the one-at-a-time rule above can read it.
+                _log_job(task_id, status="running", type="generate", lane=core.UNLIMITED_LANE,
+                         source="web")
             try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
                 lvids = req.lora_version_ids
                 if lvids:

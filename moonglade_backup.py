@@ -3778,7 +3778,8 @@ def _empty_version_meta():
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
             "compatibility": {}, "restrictions": {}, "profiles": None,
-            "quality_tag": None, "size_rule": None, "context_images": None}
+            "quality_tag": None, "size_rule": None, "context_images": None,
+            "unlimited": None}
 
 
 def _version_quality_tag(extra):
@@ -3845,6 +3846,8 @@ def _version_row_to_meta(r):
       _version_quality_tag (SCOPE_2026-09-26 G4).
     - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
       _attach_features on the opt-in path that already pays the profile read.
+    - unlimited: PLACEHOLDER (None), filled by _attach_unlimited on that same path for a
+      version in UNLIMITED_VERSIONS (SCOPE_2026-09-26_unlimited-mode S2).
     - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
       when that block parses, the route PixAI's own site pre-fills from; otherwise the
       legacy extra.negativePrompts (SCOPE_2026-09-26 G5)."""
@@ -3874,6 +3877,7 @@ def _version_row_to_meta(r):
         "quality_tag": _version_quality_tag(extra),
         "size_rule": None,
         "context_images": None,
+        "unlimited": None,
     }
 
 
@@ -3968,6 +3972,29 @@ def _attach_features(session, meta):
     return meta
 
 
+def _attach_unlimited(session, meta):
+    """Fill `unlimited` -- the drawer's Unlimited Mode toggle -- and return the same dict
+    (mutated in place). SCOPE_2026-09-26_unlimited-mode S2, as amended (§8.4).
+
+    Runs beside _attach_features on the same opt-in path, and reads ONLY for a version in
+    UNLIMITED_VERSIONS (the site asks the status for Tsubaki.3's id alone); every other
+    version stays None without a GET. The answer is infinite_mode_status's
+    {owned, expires_at, days_left} plus `size`: the lane's size limit (_lane_size_rule) off
+    the gate's own cached /size-config read, so the drawer locks exactly the sizes the build
+    refuses. None when the status read failed -- the drawer offers nothing."""
+    vid = str(meta.get("version_id") or "")
+    meta["unlimited"] = None
+    if vid not in UNLIMITED_VERSIONS:
+        return meta
+    status = infinite_mode_status(session, vid)
+    if status is None:
+        return meta
+    rule = meta.get("size_rule") or {}
+    meta["unlimited"] = dict(status, size=_lane_size_rule(
+        _model_size_config(session, vid), int(rule.get("step") or 16)))
+    return meta
+
+
 def resolve_version_meta(session, model_id, with_profiles=False):
     """Resolve a model's latest generatable version AND the metadata we were throwing away.
     One GET /v2/generation-model/{id}/versions call returns everything below; the earlier
@@ -4008,10 +4035,11 @@ def resolve_version_meta(session, model_id, with_profiles=False):
     # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
     # ONLY for a caller that asked -- see the docstring: the LoRA/remix resolves never read
     # `profiles`, and paying a PixAI GET for them was pure cost (red team 2026-09-07).
-    # The features/size-config reads ride the same opt-in (SCOPE_2026-09-26 G1/G2).
+    # The features/size-config reads ride the same opt-in (SCOPE_2026-09-26 G1/G2), and so
+    # does the Unlimited Mode status (SCOPE_2026-09-26_unlimited-mode S2).
     if not with_profiles:
         return meta
-    return _attach_features(session, _attach_profiles(session, meta))
+    return _attach_unlimited(session, _attach_features(session, _attach_profiles(session, meta)))
 
 
 def list_model_versions(session, model_id):
@@ -4052,6 +4080,7 @@ def list_model_versions(session, model_id):
         if meta["is_latest"]:
             _attach_profiles(session, meta)
             _attach_features(session, meta)     # same row, same opt-in (SCOPE_2026-09-26)
+            _attach_unlimited(session, meta)    # ...and the Unlimited Mode status (S2)
         out.append(meta)
     return out
 
@@ -10457,6 +10486,249 @@ def _refuse_lost_upscale(args, params):
         raise PixAIError(_LOST_UPSCALE_REFUSAL)
 
 
+# =============================================================================
+# Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode, §8 amendments binding)
+# =============================================================================
+# A lane request is an ordinary Tsubaki.3 image submit carrying `parameters.lane =
+# "infinite"`; PixAI runs it free while the account holds the entitlement, and stamps its own
+# priority (300) on it. The app never claims the entitlement -- that is an account action the
+# owner takes on PixAI's site -- and only ever READS its status.
+#
+# Four rules hold on every road (§2, §8.2-3):
+#   - refuse, never silently drop: a lane request that breaks a rule is refused at build with
+#     one plain sentence, before any spend;
+#   - a lane request never touches a card (no /v2/kaisuuken/check, no kaisuukenId), keyed on
+#     the params' own `lane`, whatever road built them;
+#   - a lane request is never resubmitted as anything else (neither of submit_generation's
+#     automatic resubmits fires on it);
+#   - the entitlement is read live (cached briefly), never assumed.
+
+UNLIMITED_LANE = "infinite"
+# The versions the lane is offered on: PixAI's own site asks the status for Tsubaki.3's id and
+# no other (§8.4). Not "any MMDIT26B" -- Flash is MMDIT26B too and has no lane.
+UNLIMITED_VERSIONS = frozenset(("2024383379556065549",))
+# The status is cached RAW, keyed by (version, the identity that creates), and the expiry is
+# compared with the clock at every check (§8.8): an hour's success TTL is too long for a grant
+# that ends on a fixed date, so success keeps 5 minutes and a failure the gate's own minute.
+_UNLIMITED_CACHE_TTL = 300.0
+_UNLIMITED_FAIL_TTL = 60.0
+_unlimited_cache = {}                       # (version_id, identity) -> (fetched_at, raw|None)
+
+UNLIMITED_BUSY = "An Unlimited Mode picture is still being made"
+_UNLIMITED_REFUSED = "PixAI refused this as an Unlimited Mode task, so nothing was spent"
+_UNLIMITED_NO_CARD = "Unlimited Mode never uses a free card — remove the card from this request"
+_UNLIMITED_UNWIRED = "Unlimited Mode can't be checked on this road, so nothing was sent"
+_UNLIMITED_T3_ONLY = "Unlimited Mode runs on Tsubaki.3 only"
+_UNLIMITED_IMAGE_ONLY = "Unlimited Mode is for Tsubaki.3 image generation only"
+_UNLIMITED_UNREAD = ("Couldn't read this model's settings from PixAI, so Unlimited Mode can't "
+                     "be checked — try again in a minute")
+_UNLIMITED_UNCONFIRMED = ("Couldn't confirm your Unlimited Mode with PixAI, so nothing was "
+                          "sent — try again in a minute")
+_UNLIMITED_ENDED = "Your Unlimited Mode has ended"
+_UNLIMITED_NOT_HELD = "Unlimited Mode isn't active on this account"
+
+
+def asks_unlimited(payload):
+    """True when a web payload asks for the lane (the drawer's `unlimited: true`)."""
+    return isinstance(payload, dict) and payload.get("unlimited") in (True, "1", "true", "on")
+
+
+def is_lane_request(params):
+    """True for ANY createGenerationTask params carrying a `lane` -- the web road's, a CLI
+    --params-json, a banked --dump-params shape. The spend choke keys on this (§8.3)."""
+    return isinstance(params, dict) and bool(params.get("lane"))
+
+
+def _unlimited_identity():
+    """The identity that will CREATE: the browser JWT when Mirror to PixAI is on, else the
+    API key. The entitlement is read, and cached, under that identity (§8.8)."""
+    return "mirror" if mirror_enabled() else "key"
+
+
+def _unlimited_session(session, identity):
+    """The session the status is read on: the caller's for the API key; for the mirror, the
+    stored browser JWT when it is usable, else None (the read then fails soft). Built
+    directly, never through make_mirror_session: a read must not roll the token forward."""
+    if identity != "mirror":
+        return session
+    jwt = load_mirror_state().get("jwt") or ""
+    return _mirror_session_from(jwt) if _jwt_usable(jwt) else None
+
+
+def _unlimited_raw(session, version_id):
+    """GET /v2/generation-model-version/<version>/infinite-mode, RAW, cached (see
+    _unlimited_cache). A body is kept only when it carries a boolean `owned`; anything else
+    -- an exception, a non-2xx, a strange body, an unusable mirror session -- is a failure,
+    cached for _UNLIMITED_FAIL_TTL, and returns None. Read-only."""
+    vid = str(version_id or "").strip()
+    if not vid:
+        return None
+    identity = _unlimited_identity()
+    key = (vid, identity)
+    now = time.monotonic()
+    hit = _unlimited_cache.get(key)
+    if hit is not None:
+        ttl = _UNLIMITED_CACHE_TTL if hit[1] is not None else _UNLIMITED_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    raw = None
+    try:
+        s = _unlimited_session(session, identity)
+        if s is not None:
+            data = _rest_get(s, "/generation-model-version/" + vid + "/infinite-mode",
+                             timeout=_GATE_READ_TIMEOUT)
+            if isinstance(data, dict) and isinstance(data.get("owned"), bool):
+                raw = data
+    except Exception:
+        raw = None
+    _unlimited_cache[key] = (now, raw)
+    return raw
+
+
+def _expiry_epoch(value):
+    """PixAI's expiresAt as epoch seconds, or None. ISO 8601 is what the route answers (the
+    site reads it with `new Date(...)`); epoch seconds or milliseconds are tolerated."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) / 1000.0 if value > 1e12 else float(value)
+    try:
+        d = datetime.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=datetime.timezone.utc)
+    return d.timestamp()
+
+
+def infinite_mode_status(session, version_id, now=None):
+    """The account's Unlimited Mode on a version -> {owned, expires_at, days_left}, or None
+    when the status could not be read. S1, as amended (§8.8).
+
+    `owned` is True only when PixAI says owned AND expiresAt is still in the future, compared
+    with the clock on EVERY call (the raw answer is cached, the verdict never is), so nothing
+    goes out as a lane request after the grant ends. `days_left` is whole days remaining,
+    rounded up -- the site's own count (29 on 2026-09-26 for a 2026-10-25 grant); 0 when not
+    owned. Read-only: never the claim route."""
+    import math
+    raw = _unlimited_raw(session, version_id)
+    if raw is None:
+        return None
+    exp = _expiry_epoch(raw.get("expiresAt"))
+    t = time.time() if now is None else now
+    owned = raw.get("owned") is True and exp is not None and exp > t
+    return {"owned": owned,
+            "expires_at": raw.get("expiresAt") if exp is not None else None,
+            "days_left": int(math.ceil((exp - t) / 86400.0)) if owned else 0}
+
+
+def _lane_size_rule(ranges, step):
+    """The lane's size limit off a version's /size-config ranges, or None without them: the
+    site's own rule -- the area fits the SMALLEST range's max area and the size lies inside a
+    range. `max_side` is the largest square on the model's step inside that area (Tsubaki.3:
+    1800 x 1800 is the area, and 1800 is off the 16 px grid, so 1792 x 1792 -- §8.5)."""
+    import math
+    if not ranges:
+        return None
+    step = max(1, int(step or 1))
+    max_area = min(r[1] * r[3] for r in ranges)
+    return {"max_area": max_area, "max_side": math.isqrt(max_area) // step * step,
+            "ranges": [list(r) for r in ranges]}
+
+
+def _lane_size_ok(width, height, rule):
+    """True when (width, height) passes _lane_size_rule's limit."""
+    return (width * height <= rule["max_area"]
+            and any(r[0] <= width <= r[1] and r[2] <= height <= r[3] for r in rule["ranges"]))
+
+
+def _unlimited_check(session, params, version_id):
+    """The lane's eligibility, on the GATED dict (S3, §8.4-5): refuse with one sentence, or
+    return a COPY carrying `lane` with `priority` removed (PixAI stamps its own 300 on a lane
+    task; the site's build sends none -- §8.2). The caller's dict is never mutated.
+
+    Order: the version pin (no read) -> the gated shape (the gate's three cached reads must all
+    have answered, or the gate passed an unsnapped, unconverted dict) -> the entitlement ->
+    the site's own rules: Pro mode, batch 1, no reference, no workflow or recipe, no card, no
+    High priority, and the size actually sent (after the 16 px snap)."""
+    vid = str(version_id or "").strip()
+    if vid not in UNLIMITED_VERSIONS:
+        raise PixAIError(_UNLIMITED_T3_ONLY)
+    feats = _model_features(session, vid)
+    profiles = _model_profiles(session, vid)
+    ranges = _model_size_config(session, vid)
+    if not feats or not profiles or not ranges:
+        raise PixAIError(_UNLIMITED_UNREAD)
+    if feats["model_type"] != "MMDIT26B_MODEL":
+        raise PixAIError(_UNLIMITED_T3_ONLY)
+    status = infinite_mode_status(session, vid)
+    if status is None:
+        raise PixAIError(_UNLIMITED_UNCONFIRMED)
+    if not status["owned"]:
+        raise PixAIError(_UNLIMITED_ENDED if status["expires_at"] else _UNLIMITED_NOT_HELD)
+    p = params
+    if str(p.get("inferenceProfile") or "").strip().lower() != "pro":
+        raise PixAIError("Unlimited Mode runs on Pro mode — pick Pro")
+    try:
+        batch = int(p.get("batchSize") or 1)
+    except (TypeError, ValueError):
+        batch = 0
+    if batch != 1:
+        raise PixAIError("Unlimited Mode makes one picture at a time — set the count to 1")
+    if p.get("mediaId") or p.get("contextImages"):
+        raise PixAIError("Unlimited Mode can't use a reference picture — remove it")
+    if p.get("workflowId") or p.get("recipeIds"):
+        raise PixAIError("Unlimited Mode can't use a workflow or a recipe")
+    if p.get("kaisuukenId"):
+        raise PixAIError(_UNLIMITED_NO_CARD)
+    if p.get("priority") in (PRIORITY_HIGH, PRIORITY_XHIGH):
+        raise PixAIError("Unlimited Mode can't use High priority — turn it off")
+    rule = _lane_size_rule(ranges, _size_rule(feats["model_type"], ranges)["step"])
+    try:
+        w, h = int(p.get("width")), int(p.get("height"))
+    except (TypeError, ValueError):
+        w = h = 0
+    if not (w > 0 and h > 0 and _lane_size_ok(w, h, rule)):
+        raise PixAIError("Unlimited Mode: this size is too large — up to {0} × {0}".format(
+            rule["max_side"]))
+    out = dict(p)
+    out["lane"] = UNLIMITED_LANE
+    out.pop("priority", None)
+    return out
+
+
+def unlimited_resolver(session):
+    """The build-time lane check for RequestResolver.unlimited: (params, version_id) -> the
+    lane params, or a PixAIError. The SAME function for a quote and a spend (the gallery's
+    _price_resolver and _submit_resolver), like gate_resolver. A resolver WITHOUT it refuses a
+    lane request (§8.10) -- a road that cannot read the entitlement never sends one."""
+    def _check(params, version_id):
+        return _unlimited_check(session, params, version_id)
+    return _check
+
+
+def _graphql_reason(err):
+    """PixAI's own words out of a gql_mutate refusal ("GraphQL error: [{message, extensions:
+    {code}}]"): the messages, each with its code when it has one. The raw text otherwise."""
+    s = str(err)
+    head = "GraphQL error: "
+    if s.startswith(head):
+        try:
+            errs = json.loads(s[len(head):])
+            bits = []
+            for e in errs if isinstance(errs, list) else []:
+                if isinstance(e, dict):
+                    code = (e.get("extensions") or {}).get("code") \
+                        if isinstance(e.get("extensions"), dict) else None
+                    msg = str(e.get("message") or "").strip()
+                    bits.append(msg + (" ({})".format(code) if code else ""))
+            if any(bits):
+                return "; ".join(b for b in bits if b)
+        except ValueError:
+            pass
+    return s
+
+
 def submit_generation(session, params):
     """Submit a createGenerationTask and return the task id immediately -- no wait, no
     download. The card (if any) must already be attached to `params`. Raises on no id.
@@ -10476,8 +10748,17 @@ def submit_generation(session, params):
     transparently re-POSTed after a lost response is a second generation and a second
     charge. The inferenceProfile re-submit below is a different thing and is safe -- it
     only fires on a PixAIError, which means PixAI answered with a GraphQL error and
-    REJECTED the task, so there is nothing created and nothing charged to duplicate."""
+    REJECTED the task, so there is nothing created and nothing charged to duplicate.
+
+    An Unlimited Mode request (ANY params carrying `lane`, whatever road built them --
+    SCOPE_2026-09-26_unlimited-mode §8.2-3) is exempt from BOTH resubmits: dropping its
+    profile or its Turbo would send a different task than the lane request that was asked
+    for, and the Turbo fallback would also flip the process-wide _turbo_refused. It goes out
+    once; PixAI's refusal comes back in plain words. It never carries a card."""
     _check_read_only("submit a generation (spends credits)")
+    lane = is_lane_request(params)
+    if lane and params.get("kaisuukenId"):
+        raise PixAIError(_UNLIMITED_NO_CARD)
     # Mirror routing (review F4/F5): after the READ_ONLY gate, the create rides the browser
     # JWT session when the toggle is on (else this is a pass-through, unchanged). submit_
     # generation is create-only -- it returns the task id and never polls/collects -- so
@@ -10493,6 +10774,13 @@ def submit_generation(session, params):
     try:
         created = gql_mutate(session, _GEN_MUTATION, {"parameters": params})
     except PixAIError as e:
+        if lane:
+            # Never retried as anything else (§8.2). A GraphQL error is PixAI refusing the
+            # task, so nothing exists and nothing was spent; anything else is passed on as it
+            # came, because it does not prove that.
+            if str(e).startswith("GraphQL error"):
+                raise PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+            raise
         if "inferenceProfile" in str(e) and "inferenceProfile" in params:
             dropped = params.pop("inferenceProfile")
             print("  mode '{}' not supported by this model; retrying on the "
@@ -10649,6 +10937,10 @@ class GenerationRequest:
                       that FIRED. Clamping is substitution on a paid path, so
                       the route hands it back in the response rather than
                       charging for a different generation in silence.
+    unlimited         an Unlimited Mode request that passed _unlimited_check
+                      (`parameters` carries lane "infinite"). price() answers it
+                      free without a card check and submit() never runs one --
+                      and no `no_card` a caller passes can put the card back.
     """
     mode: str = "image"
     parameters: dict = None
@@ -10660,6 +10952,7 @@ class GenerationRequest:
     model_version_id: str = ""
     lora_version_ids: list = field(default_factory=list)
     adjusted: list = field(default_factory=list)
+    unlimited: bool = False
 
 
 @dataclass
@@ -10677,6 +10970,9 @@ class RequestResolver:
                           [{field, asked, used, why}] (see gate_resolver)
     video_duration(media_id) -> seconds or None                -- a reference video's
                           real length, for referenceVideo.inputVideoDurations
+    unlimited(params, version_id) -> lane params               -- the Unlimited Mode
+                          check (see unlimited_resolver); absent = a lane request
+                          is refused on this road
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
@@ -10689,6 +10985,7 @@ class RequestResolver:
     media_id: object = None
     gate: object = None
     video_duration: object = None
+    unlimited: object = None
 
 
 def model_version_resolver(session):
@@ -10941,6 +11238,11 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     rs = resolve if resolve is not None else RequestResolver()
     road = str(mode or p.get("mode") or "").strip()
     no_card = bool(p.get("no_card"))
+    # Unlimited Mode is a Tsubaki.3 IMAGE lane. Asked for on any other road it is refused,
+    # never quietly ignored into a paid job (SCOPE_2026-09-26_unlimited-mode §2).
+    lane = asks_unlimited(p)
+    if lane and road in ("edit", "fix", "video", "I2V", "FLF", "R2V", "enhance"):
+        raise PixAIError(_UNLIMITED_IMAGE_ONLY)
 
     if road == "edit":
         params = _edit_parameters_from_payload(p, user, rs)
@@ -11121,9 +11423,16 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         params, gate_adjusted = rs.gate(params)
         adjusted = list(adjusted) + list(gate_adjusted or [])
         _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
+    # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode S3): checked AFTER the one gate and its
+    # profile fill, on the dict that will be quoted and sent. A road without the entitlement
+    # lookup, or without the gate, cannot vouch for the lane and refuses it (§8.4, §8.10).
+    if lane:
+        if rs.unlimited is None or rs.gate is None:
+            raise PixAIError(_UNLIMITED_UNWIRED)
+        params = rs.unlimited(params, args.model)
     return GenerationRequest(mode="image", parameters=params,
-                             no_card=args.no_card, model_version_id=args.model,
-                             lora_version_ids=lora_ids, adjusted=adjusted)
+                             no_card=args.no_card or lane, model_version_id=args.model,
+                             lora_version_ids=lora_ids, adjusted=adjusted, unlimited=lane)
 
 
 def price(session, req):
@@ -11159,6 +11468,15 @@ def _price_answer(session, req):
         return {"cost": None, "free": False, "note": req.note}
     if req.price_note:
         return {"cost": None, "free": False, "note": req.price_note}
+    if req.unlimited:
+        # S4: free by the entitlement, never by a card -- no /v2/kaisuuken/check at all. The
+        # list price rides along as `list_cost` when /v2/task-price answers (what PixAI's
+        # price route says of a lane request is unobserved; the verdict does not depend on it).
+        out = {"cost": 0, "free": True, "unlimited": True}
+        listed = price_task(session, req.parameters)
+        if listed is not None:
+            out["list_cost"] = listed
+        return out
     cost = price_task(session, req.parameters)
     best = None if req.no_card else match_kaisuuken(session, req.parameters, enrich=True)
     covered = card_covers(best)
@@ -11200,6 +11518,11 @@ def submit(session, req, *, no_card=None):
         return {"task_id": submit_fixer(session, req.media_id, req.boxes)}
     if req.parameters is None:
         raise PixAIError(req.note or "nothing to submit")
+    if req.unlimited:
+        # S5: the card step is skipped outright for a lane request -- keyed on req.unlimited,
+        # which the `no_card` argument cannot override (§8.10). submit_generation guards the
+        # params' own `lane` too, for every road that reaches it (§8.3).
+        return {"task_id": submit_generation(session, req.parameters)}
     from types import SimpleNamespace
     skip = req.no_card if no_card is None else bool(no_card)
     # Passing the flag through rather than branching around the call keeps
@@ -14009,8 +14332,18 @@ def _apply_kaisuuken(session, params, args):
     check before real money moves, and a transient glitch is not the same fact as "no
     free card exists" -- treating them the same silently spends credits on a generation
     that may have just been shown as free. Aborting surfaces the problem instead of
-    guessing with the user's money (audit: `fail-open`, 2026-07-21)."""
+    guessing with the user's money (audit: `fail-open`, 2026-07-21).
+
+    An Unlimited Mode request (params carrying `lane`, from ANY road -- a CLI --params-json
+    or a banked --dump-params shape included) never touches a card: no check runs and no id
+    is attached, and a card asked for beside the lane is refused rather than dropped
+    (SCOPE_2026-09-26_unlimited-mode §8.3)."""
     explicit = (getattr(args, "kaisuuken_id", "") or "").strip()
+    if is_lane_request(params):
+        if explicit or params.get("kaisuukenId"):
+            raise PixAIError(_UNLIMITED_NO_CARD)
+        print("  Unlimited Mode: no free card is checked or attached.")
+        return ""
     if explicit:
         params["kaisuukenId"] = explicit
         print("  attaching your --kaisuuken-id (free card): {}".format(explicit))
@@ -14075,6 +14408,12 @@ def _preview_card_note(args, params):
     silent) if offline or unauthenticated, so previews still work with no network."""
     def _fmt(n):
         return "~{:,} credits".format(n) if n is not None else "credits"
+    if is_lane_request(params):
+        # A lane request never touches a card, at quote or at submit (SCOPE_2026-09-26_
+        # unlimited-mode §2) -- so no /v2/kaisuuken/check here either.
+        print("Unlimited Mode request: no free card is checked or attached. PixAI runs it "
+              "free on an active Unlimited Mode, or refuses it.")
+        return
     if getattr(args, "no_card", False):
         try:
             session = _make_session(getattr(args, "token", None))
