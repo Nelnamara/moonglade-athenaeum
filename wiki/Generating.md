@@ -20,10 +20,25 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | **Model** picker | `modelId` | search resolves the correct *version* id automatically |
 | **LoRAs** → Add | `lora` + `loraParameters` | search → pick → weight; stack several |
 | **Aspect** / dimensions | `width`/`height` | presets at SDXL-friendly dims |
-| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 |
+| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range; the "→ W × H px" line is the size that is sent |
 | **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
 | **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
 | **High priority** | `priority` | off = Turbo (500) if your membership covers it, otherwise standard (0) — both free; on = High (1000), faster and **costs extra credits** |
+
+A control the picked model does not take reads **disabled** and is not sent: Face Fix and
+Enhance Details on Tsubaki.2, Tsubaki.3, Flash and community-trained DiT models; Quality Tag on
+any model version that publishes no quality tag of its own (Tsubaki.2, Tsubaki.3, Flash and
+some SDXL models); the negative prompt on Tsubaki.3 Flash. The drawer reads this off the
+model's newest version. On an older version picked from the version list, Face Fix, Enhance
+Details and the negative box can stay live and the size line keeps the /8 rule. The server
+still drops or moves what that version does not take, and the cost badge names it before you
+spend.
+
+On Tsubaki.3 and Flash a **reference** image goes out as a context image (their
+Character/Style Reference): strength does not apply, and it cannot be combined with LoRAs — the
+cost badge says so instead of a price. Whenever the server adjusts a request (a size moved onto
+the model's grid, a field the model ignores, a reference's strength), the cost badge names the
+change **before** you spend.
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
@@ -101,6 +116,39 @@ you have a base model selected the list is still limited to LoRAs that fit it.
 **If Bookmarked looks emptier than you expect**, that is usually the compatibility filter
 rather than a fault — with a base model selected, only LoRAs matching its architecture are
 shown. Clear the base model to see all of them.
+
+### Training your own LoRA
+
+**Train** in the side rail (on the phone: **Train a LoRA**) sends a basic LoRA training run to
+PixAI. It spends, so it previews first and only starts when you confirm.
+
+- **Base models** are PixAI's own training list — DiT.3 (Tsubaki.3), DiT.2 (Tsubaki.2), DiT.1,
+  SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
+  PixAI can't be reached. The panel starts on the first SDXL base, the same one PixAI's own
+  page starts on.
+- **What it costs** is shown before you start, with the base's normal price beside a free
+  run. A run is free when your membership still has
+  free trainings left (they only count while you are a member), or when you hold a training
+  free card for that base — the card is used up by the run. If your free cards can't be
+  checked at that moment, the run is quoted as paid and starts only if you tick the amount. If you have both, this app uses one
+  of your free trainings and keeps the card (PixAI's own page would use the card). Otherwise
+  the panel quotes PixAI's own price for that base and asks you to tick that you will spend
+  that amount. Change the base, the images or any field after the quote and the quote closes —
+  press **Train it** (on the phone: **Preview & start training**) again for a fresh one; a run
+  is never started at a price you did not tick.
+- **Trigger words** are tidied the way PixAI tidies them before they are sent: line breaks
+  become commas, extra spaces and repeated commas are removed, and everything is lowercased.
+  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. On the desktop panel the
+  counter beside the box shows the tidied length, counted the way PixAI counts it (an emoji
+  counts as 2).
+- **Images**: between 10 and 100, each at least 512 pixels on both sides and no longer than
+  3:1. If an image fails that rule the run is refused and the image is named — PixAI's own
+  page quietly drops such images and trains on the rest, and this app would rather not train
+  on a different set than the one you picked. An image whose size your library doesn't know
+  is listed as not checked.
+- **If PixAI has paused new training runs**, starting one is refused (nothing is spent) and,
+  when PixAI says, the message names when it expects to be back. Runs already training carry
+  on.
 
 ## On the CLI
 
@@ -196,18 +244,20 @@ python moonglade_backup.py --generate-video --task-id <id>
 
 ### Video models and shot-mode gating
 
-Seven video engines are selectable (newest first), and they are **not interchangeable** —
+Nine video engines are selectable (newest first), and they are **not interchangeable** —
 each has its own duration cap, free-card eligibility, and which of the Loom's four
 [Shot modes](The-Loom#shot-modes) (I2V / FLF / R2V / V2V) it actually supports. The web
 drawer's duration picker offers exactly four values — **5, 6, 10, and 15 seconds** — and
-enforces the current model's cap (see below); an out-of-range value (e.g. inherited from
-an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain
-integer with no enforced choices — pass any of the four to match the drawer's behavior.
+enforces the current model's lengths (see below); an out-of-range value (e.g. inherited from
+an older Loom project) snaps to the nearest one. The CLI's `--duration` is a plain integer
+that snaps the same way, to the nearest length the chosen model takes.
 
 | Model (`--video-model`) | Max duration | Free card ever? | Shot modes available |
 |---|---|---|---|
 | V4.0 Preview (`v4.0`) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
 | V4.0 Lite Preview (`v4.0.1`, default) | 15s | Yes (V4.0 cards) | First Frame · First+Last · Multi-Reference |
+| Tsubaki Video (`tbkv1.0.1`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
+| Tsubaki Video Flash (`tbkv1.0`) | 15s (5 / 10 / 15 only) | Not established — the cost badge checks each clip | First Frame · First+Last · Multi-Reference |
 | V3.2 (`v3.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 Lite (`v3.0.2`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
 | V3.0 (High Consistency) (`v3.0`) | 10s | Yes (V4.0 cards) | First Frame · First+Last |
@@ -215,19 +265,29 @@ integer with no enforced choices — pass any of the four to match the drawer's 
 | V2.7 (High Dynamics) (`v2.7`) | 10s | **No — never covered** | First Frame only |
 
 Notes:
-- **Multi-Reference (R2V) only works on the V4.0 pair.** First+Last (FLF) also works on
-  the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
+- **Multi-Reference (R2V) only works on the V4.0 pair and the Tsubaki pair.** First+Last (FLF)
+  also works on the three V3.0-generation models. V3.0 Flash and V2.7 only ever offer First Frame
   (I2V) — the drawer hides the mode buttons a model can't do rather than letting you
   submit a combination PixAI would reject.
+- **The Tsubaki engines are different in four ways.** They take **5, 10 or 15 seconds — no 6**
+  (the 6 stop reads dimmed, and a 6 s request goes out as 5); **no negative prompt and no
+  camera move** (both controls read disabled — anything you typed stays in the box but is not
+  sent); **no video references** in Multi-Reference (images and audio only — video references
+  you already picked are held, dimmed and not sent, never deleted); and a reference video can
+  set an **output aspect ratio** (CLI `--video-ratio`; the drawer has no ratio picker yet, so a
+  Remix names the source's ratio and lets PixAI infer it). Multi-Reference jobs on these
+  engines have run on PixAI's own site, but Moonglade sends them a different way, and that has
+  not run yet; First Frame and First & Last follow PixAI's own site and price quotes. The first
+  real run of each mode from Moonglade is the proof it goes through.
 - **Free cards are V4.0-specific.** V3.0 Flash and V2.7 always cost real credits — the
   drawer's cost badge correctly reads "no card" for them; that's expected, not a bug.
 - **A longer clip costs more tickets.** A video card is a book of tickets and a clip uses
   one per 5 seconds (5s = 1, 10s = 2, 15s = 3), so "you have a V4.0 card" is not the whole
   question — see [Free cards and videos](#free-cards-and-videos).
-- **15s is exclusive to the V4.0 pair.** Every other model caps at 10s, and the web
-  drawer disables + hides the 15s option entirely once you pick a capped model (rather
-  than letting you choose it and fail at submit); the CLI has no equivalent guard, so a
-  hand-typed `--duration 15` on a non-V4.0 model is on you to avoid.
+- **15s is exclusive to the V4.0 pair and the Tsubaki pair.** Every other model caps at 10s,
+  and the web drawer dims the 15s option once you pick a capped model (rather than letting
+  you choose it and fail at submit); the CLI snaps a `--duration 15` on a capped model down
+  to 10.
 
 ### Video tuning flags
 
@@ -259,7 +319,7 @@ python moonglade_backup.py --edit-image --edit-src "C:\pics\her.png" --prompt ".
 |---|---|---|
 | `--edit-model` | Edit Pro | edit model id (e.g. Reference Pro's id for reference-style edits) |
 | `--edit-resolution` | `1K` | output resolution (`1K`/`2K`/…) |
-| `--edit-aspect` | `3:4` | output aspect ratio |
+| `--edit-aspect` | the model's own | output aspect ratio. Edit Pro defaults to `3:5` (it also offers `5:3`). Reference Pro defaults to `auto`, which sends no aspect ratio and lets PixAI choose the frame — it does not promise to keep your source's shape |
 | `--edit-quality` | `medium` | quality tier |
 
 The four are clamped to what the chosen model really supports before submit — e.g.
@@ -397,7 +457,16 @@ python moonglade_backup.py --reference-video --ref-image <id1> --ref-image <id2>
 | `--ref-audio` | a reference — **media_id only**, *not* a local file, **repeatable**. PixAI's uploader takes images and videos only, so there's nothing to upload a bare audio file as. To use audio from your own machine, put it into a video (even just a still image with the audio track) and pass that with `--ref-video`. |
 | `--prompt` | cite refs by `@imageN` / `@videoN` / `@audioN` |
 | `--duration` / `--video-mode` / `--audio` | as with `--generate-video` (15s uses 3 V4.0 tickets — see [Free cards and videos](#free-cards-and-videos)) |
+| `--video-ratio` | Tsubaki engines only (`--video-model tbkv1.0.1` / `tbkv1.0`): the output aspect ratio — `adaptive`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9` or `21:9`. Left out (or `adaptive`), PixAI works it out from the references |
 | `--confirm` | **required** to submit |
+
+**A video reference is priced by its length, too.** PixAI bills a reference video over the
+output seconds *plus* the length of every video reference. Moonglade sends each reference
+clip's real length — measured from the file in your library, or the length it was generated
+at — and the web badge and the CLI preview both show that price. If any reference's length
+can't be read (the clip isn't in your library), it sends none, and PixAI prices a flat 15 s
+of input in total — the CLI preview prints a note saying so. That can be more than the truth
+for one short clip and less for two or more long ones.
 
 ## Upload a local image (`--upload`)
 

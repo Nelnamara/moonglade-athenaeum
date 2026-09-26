@@ -4779,3 +4779,38 @@ def test_phone_lora_sheet_head_and_search_box_are_on_screen_and_tappable(logged_
     # and the probe must say so.
     page.evaluate("() => document.querySelector('.glm-body').appendChild(document.querySelector('.cm-modelwrap'))")
     assert _sheet_geometry(page)["insideScroller"] is True, "the scroller probe cannot see a sheet that IS inside .glm-body -- it proves nothing"
+
+
+def test_the_train_dataset_pool_pages_past_its_first_60(
+        paged_library_server, render_browser, monkeypatch):
+    """Owner, 2026-09-26, on the Tsubaki.3 boop walk: the Train a LoRA image picker "does not
+    continuous scroll and is capped like old image picker bugs". TrainOverlay read ONE page of 60
+    from /api/next/library and never asked for another, so a dataset could only come from the 60
+    newest pictures. The pool now pages on scroll through a sentinel observed from its scrolling
+    pane (.mgtr-left), the ModelPicker mechanism. On the 120-row library that is two pages: all
+    120 must arrive, each once."""
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        page.locator("button.mgx-nav", has_text="Train").first.click()
+        page.wait_for_selector(".mgtr-tile")
+        page.wait_for_function("() => document.querySelectorAll('.mgtr-tile').length >= 60")
+        page.evaluate("() => { const L = document.querySelector('.mgtr-left'); "
+                      "L.scrollTop = L.scrollHeight; }")
+        page.wait_for_function(
+            "() => document.querySelectorAll('.mgtr-tile').length >= 120", timeout=8000)
+        srcs = page.evaluate(
+            "() => [...document.querySelectorAll('.mgtr-tile img')].map(i => i.getAttribute('src'))")
+        assert len(srcs) == 120 and len(set(srcs)) == 120, (
+            "the pool must hold both pages, each picture once: {} tiles, {} distinct".format(
+                len(srcs), len(set(srcs))))
+    finally:
+        ctx.close()

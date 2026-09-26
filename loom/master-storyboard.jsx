@@ -41,6 +41,9 @@ import {
   // called here (shotPayload/moveCardToAct look missing but are deliberate local wrappers
   // over the aliased buildShotPayload/mvCardToAct imports).
   buildImgGenBody, resolveGenDims,
+  // The picked model's size grid for the two "→ W × H" readouts (SCOPE_2026-09-26 G1), the
+  // same step buildImgGenBody sends.
+  genStepFor,
 } from "./src/loom-mutations.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
@@ -69,6 +72,7 @@ import MgArtFilters from "../gallery/src/art/artFilters.js";
 import GalleryPicker from "../gallery/src/components/GalleryPicker.jsx";
 import ModelPicker from "../gallery/src/components/ModelPicker.jsx";
 import CostBadge from "../gallery/src/components/CostBadge.jsx";
+import { adjustedText } from "../gallery/src/gen/genCore.js";
 import VideoDrawer from "../gallery/src/components/VideoDrawer.jsx";
 import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
@@ -2516,7 +2520,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               </div></div>
           </div>
           <div className="lv-dim" style={{ fontSize: 11, marginTop: 5 }}>
-            {(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
+            {(() => { const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type)); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}
           </div>
           <div className="lv-row2">
             <div><label className="lv-lab">Mode</label>
@@ -4486,12 +4490,16 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
     if (!p) return noInputMsg;
     if (p.loading) return "checking…";
     const tally = p.pr ? tallyPrices([p.pr]) : null;
-    return tally ? formatCostEstimate(tally) : "—";
+    // The server's pre-spend receipt (SCOPE_2026-09-26 G7), in the same words as the
+    // desktop CostBadge's note line, so a phone spend is never resized in silence.
+    const adj = p.pr ? adjustedText(p.pr.adjusted) : "";
+    return (tally ? formatCostEstimate(tally) : "—") + (adj ? " · Adjusted before sending: " + adj : "");
   };
   const priceTitle = (priceState, id) => {
     const p = priceState[id];
     const tally = p && p.pr ? tallyPrices([p.pr]) : null;
-    return tally ? costTooltip(tally) : "";
+    const adj = p && p.pr ? adjustedText(p.pr.adjusted) : "";
+    return (tally ? costTooltip(tally) : "") + (adj ? "\nAdjusted before sending: " + adj : "");
   };
 
   // ---- Fixer -- the seventh and FINAL increment (2026-08-03), closing the one disclosed gap
@@ -5248,7 +5256,7 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                           onChange={(ev) => setImgAdv((a) => ({ ...a, customH: ev.target.value }))} />
                       </div></div>
                   </div>
-                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
+                  <div className="lm-hint">{(() => { const d = resolveGenDims(imgAdv, genStepFor(imgModel && imgModel.model_type)); return "→ " + d.w + " × " + d.h + (d.custom ? " · custom" : " px"); })()}</div>
                   <div className="lm-row2">
                     <div className="lm-col"><span className="lm-microlab">Mode</span>
                       <select className="lm-gensel" style={{ marginTop: 0 }} value={imgAdv.mode}

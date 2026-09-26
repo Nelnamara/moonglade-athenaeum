@@ -35,7 +35,7 @@ QUICK START
   python moonglade_backup.py --max 40    # small test first
 """
 
-__version__ = "3.10.3"
+__version__ = "3.11.0"
 
 import argparse
 import base64
@@ -2786,10 +2786,25 @@ def delete_task_gql(session, task_id):
 #: deletedAt stamp when it turned out to be one of those. `keep_media_deleted_at` carries WHEN
 #: PixAI deleted each of `keep_media`, as (media_id, deletedAt) pairs -- so a caller holding a
 #: catalog can record the fact off the read this plan already made, rather than making a
-#: second one (moonglade_gallery's /api/delete-image does exactly that).
+#: second one (moonglade_gallery's /api/delete-image does exactly that). `artwork_ids` is the
+#: task's published artworks off that same read (getTaskById's `artworkIds`), or None when the
+#: read did not carry the field -- None is "not known", never "not published". PixAI's own
+#: contract says its task delete also deletes the task's linked artwork, so the whole-task
+#: branch's dialog names them (SCOPE_2026-09-26 E5).
 ImageDeletePlan = namedtuple(
     "ImageDeletePlan",
-    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at")
+    "plan reason live_siblings keep_media cloud_deleted_at keep_media_deleted_at artwork_ids",
+    defaults=(None,))
+
+
+def task_artwork_ids(task):
+    """The published-artwork ids a task read carries (`artworkIds`), deduped in order -- or
+    None when the read has no such list (a failed read, or a shape without the field), which
+    callers must treat as UNKNOWN rather than as "nothing published"."""
+    ids = (task or {}).get("artworkIds") if isinstance(task, dict) else None
+    if not isinstance(ids, list):
+        return None
+    return tuple(dict.fromkeys(str(a) for a in ids if a not in (None, "")))
 
 
 def _image_delete_plan(task, media_id):
@@ -2800,7 +2815,8 @@ def _image_delete_plan(task, media_id):
     return ImageDeletePlan(plan, reason, live_siblings, gone,
                            str((entry or {}).get("deletedAt") or ""),
                            tuple((m, str((batch_entry(batch, m) or {}).get("deletedAt") or ""))
-                                 for m in gone))
+                                 for m in gone),
+                           task_artwork_ids(task))
 
 
 def plan_image_delete(session, task_id, media_id):
@@ -2848,7 +2864,7 @@ def delete_image_routed(session, task_id, media_id, confirmed_plan=None):
             "What this delete would do changed while the dialog was open, so nothing was "
             "deleted. Open it again to see where the image stands now.",
             plan.live_siblings, plan.keep_media, plan.cloud_deleted_at,
-            plan.keep_media_deleted_at)
+            plan.keep_media_deleted_at, plan.artwork_ids)
     if plan.plan == "per-image":
         delete_batch_media_gql(session, task_id, media_id)
     else:
@@ -3146,6 +3162,10 @@ LORA_BASE_MODEL_TYPES = ("SDXL_MODEL", "SD_V1_MODEL", "SD3_MEDIUM_MODEL",
                          "DIT7_MODEL", "DIT7A_MODEL", "DIT7B_MODEL", "DIT7C_MODEL",
                          "DIT7D_MODEL", "DIT9_MODEL",
                          "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL",
+                         # A user-TRAINED DiT.3 (Tsubaki.3 architecture). Read from PixAI's
+                         # bundle 2026-09-26 (ModelFilter.helper's `userdit26` group), not a
+                         # live request -- SCOPE_2026-09-26 G8.
+                         "USER_DIT26B_MODEL",
                          "Z_IMAGE_V1_MODEL")
 
 # Their Model Type filter, as a label -> enum mapping. The first four rows are MEASURED off live
@@ -3192,12 +3212,18 @@ def market_sort(name):
 
 
 # ALL SEVEN MEASURED off live requests (2026-07-26) -- none is inferred from its name.
+#
+# One exception, dated: "Community DiT" maps to a PAIR since 2026-09-26 (SCOPE_2026-09-26 G8).
+# USER_DIT26A_MODEL is the 2026-07-26 measurement; USER_DIT26B_MODEL (a user-trained DiT.3)
+# was read from PixAI's BUNDLE, not a live request -- ModelFilter.helper groups the two as
+# `userdit26: ["USER_DIT26A_MODEL", "USER_DIT26B_MODEL"]` and its one Community DiT option
+# sends both. No new chip, no new label: the existing option expands to the pair.
 MODEL_TYPE_FILTERS = (
     ("All", "ANY_MODEL"),
     ("DiT.3", "MMDIT26B_MODEL"),
     ("DiT.2", "MMDIT26A_MODEL"),
     ("DiT.1", "DIT7_MODEL"),
-    ("Community DiT", "USER_DIT26A_MODEL"),
+    ("Community DiT", ("USER_DIT26A_MODEL", "USER_DIT26B_MODEL")),
     ("SDXL", "SDXL_MODEL"),
     ("SD 1.5", "SD_V1_MODEL"),
 )
@@ -3751,7 +3777,43 @@ def _empty_version_meta():
     return {"version_id": "", "model_type": "", "lora_base_model_type": "",
             "trigger_words": "", "negative_prompt": "", "sampling_method": "",
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
-            "compatibility": {}, "restrictions": {}, "profiles": None}
+            "compatibility": {}, "restrictions": {}, "profiles": None,
+            "quality_tag": None, "size_rule": None, "context_images": None}
+
+
+def _version_quality_tag(extra):
+    """The version's own Quality Tag booster value: extra.qualityTags[0] as {prefix, suffix}
+    when either half is non-empty, else None (SCOPE_2026-09-26 G4, T3-07).
+
+    PixAI's site takes the tag per version (modelParams `d=Array.isArray(u)&&u.length>0?
+    {...u[0],...}:void 0`): SDXL/DiT.1 versions carry real tags, Tsubaki.3 publishes one
+    with both halves empty, and Flash / Tsubaki.2 / some SDXL versions publish none. None
+    therefore means "this version has no quality tag to add" -- the chip reads disabled and
+    nothing is sent -- NOT "unknown"; an unreadable row never reaches this function."""
+    tags = extra.get("qualityTags") if isinstance(extra, dict) else None
+    if not isinstance(tags, list) or not tags or not isinstance(tags[0], dict):
+        return None
+    pre = tags[0].get("prefix")
+    suf = tags[0].get("suffix")
+    pre = pre if isinstance(pre, str) else ""
+    suf = suf if isinstance(suf, str) else ""
+    if not (pre.strip() or suf.strip()):
+        return None
+    return {"prefix": pre, "suffix": suf}
+
+
+def _routed_default_negative(routed):
+    """extra.routedNegativePrompts.default when the block parses as PixAI's own schema does
+    it -- {default: string <= 4096, contextImage: string <= 4096}, BOTH keys (modelParams
+    `pe`/`Q`) -- else None (SCOPE_2026-09-26 G5, T3-09)."""
+    if not isinstance(routed, dict):
+        return None
+    d, c = routed.get("default"), routed.get("contextImage")
+    if not (isinstance(d, str) and isinstance(c, str)):
+        return None
+    if len(d) > 4096 or len(c) > 4096:
+        return None
+    return d
 
 
 def _version_row_to_meta(r):
@@ -3778,17 +3840,30 @@ def _version_row_to_meta(r):
     - profiles: PLACEHOLDER ONLY here (always None). The allowed inference-profile set is
       NOT in this row -- it comes from a second, version-keyed route, so the CALLERS fill it
       via _attach_profiles (see below). Kept in the shape so every row a caller hands out
-      has the same keys whether or not that caller ran the second read."""
+      has the same keys whether or not that caller ran the second read.
+    - quality_tag: the version's own Quality Tag ({prefix, suffix}) or None -- see
+      _version_quality_tag (SCOPE_2026-09-26 G4).
+    - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
+      _attach_features on the opt-in path that already pays the profile read.
+    - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
+      when that block parses, the route PixAI's own site pre-fills from; otherwise the
+      legacy extra.negativePrompts (SCOPE_2026-09-26 G5)."""
     extra = r.get("extra") if isinstance(r.get("extra"), dict) else {}
     caps = extra.get("capabilities")
     compat = extra.get("compatibility")
     restrictions = extra.get("restrictions")
+    model_type = (r.get("modelType") or "").strip()
+    negative = (extra.get("negativePrompts") or "").strip()
+    if model_type.upper() == "MMDIT26B_MODEL":
+        routed = _routed_default_negative(extra.get("routedNegativePrompts"))
+        if routed is not None:
+            negative = routed.strip()
     return {
         "version_id": str(r.get("id") or ""),
-        "model_type": (r.get("modelType") or "").strip(),
+        "model_type": model_type,
         "lora_base_model_type": (r.get("loraBaseModelType") or "").strip() if r.get("loraBaseModelType") else "",
         "trigger_words": (extra.get("triggerWords") or extra.get("trainedWords") or "").strip(),
-        "negative_prompt": (extra.get("negativePrompts") or "").strip(),
+        "negative_prompt": negative,
         "sampling_method": (extra.get("samplingMethod") or "").strip(),
         "sampling_steps": extra.get("samplingSteps"),
         "cfg_scale": extra.get("cfgScale"),
@@ -3796,6 +3871,9 @@ def _version_row_to_meta(r):
         "compatibility": compat if isinstance(compat, dict) else {},
         "restrictions": restrictions if isinstance(restrictions, dict) else {},
         "profiles": None,
+        "quality_tag": _version_quality_tag(extra),
+        "size_rule": None,
+        "context_images": None,
     }
 
 
@@ -3829,8 +3907,64 @@ def _attach_profiles(session, meta):
     if not isinstance(rows, list):
         meta["profiles"] = None
         return meta
+    # A `hidden` profile is not offered in the drawer (SCOPE_2026-09-26 G9, T3-18b). Filtered
+    # HERE ONLY -- the drawer's list. _model_profiles and the gate keep the full list, so the
+    # gate's default-profile fill cannot change, and a hidden profile a CLI or Remix submits
+    # is not refused (fail open). PixAI's own picker does not filter hidden profiles either;
+    # this just keeps the drawer from offering one. No captured profile is hidden today.
     meta["profiles"] = [str(p.get("profileName")).strip() for p in rows
-                        if isinstance(p, dict) and p.get("profileName")]
+                        if isinstance(p, dict) and p.get("profileName")
+                        and p.get("profileFlag") != "hidden"]
+    return meta
+
+
+def _attach_features(session, meta):
+    """Fill what the Generate drawer needs from the version-keyed /features and /size-config
+    reads, and return the same dict (mutated in place). SCOPE_2026-09-26 G1/G2/G3.
+
+    Runs ONLY beside _attach_profiles -- the opt-in reads that already pay a second GET for
+    the drawer's applied row -- and never on resolve_version_meta's default path (the LoRA /
+    Remix resolves read none of this; red team 2026-09-07). Both reads share the price/submit
+    gate's cache (_model_features / _model_size_config), so this adds no GET per keystroke.
+
+    - compatibility: merges only FALSE values -- every /features entry whose status is
+      literally "off", plus enableADetailer and upscale off for MMDIT26A/B and USER_DIT26A/B
+      (the site's tracker `be`/`Te`, which never sends either there). It never overwrites a
+      key extra.compatibility already sets and never adds `true`, so the drawer's existing
+      compat_* gates (cget: absent = unknown = fail open) just pick the new falses up.
+    - context_images: True only when /features answered with modelType MMDIT26B_MODEL and
+      contextImages "on" -- the exact condition under which the gate sends a reference as a
+      context image. None when /features could not be read.
+    - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
+      when /features could not be read. The drawer's dims() applies the identical snap, so
+      its "-> W x H px" line is what is sent.
+
+    The architecture comes from /features ONLY, never the version row's own modelType: the
+    model-type rule applies "only when /features supplied it" and G1's step takes its
+    modelType "from /features" (SCOPE G1/G2), which is exactly when the gate applies them.
+    With /features down the gate changes nothing, so the drawer merges nothing and keeps
+    today's size rule (size_rule None) -- what it shows stays what is sent."""
+    vid = str(meta.get("version_id") or "")
+    if not vid:
+        return meta
+    feats = _model_features(session, vid)
+    mtype = feats["model_type"] if feats else ""
+    compat = dict(meta.get("compatibility") or {})
+    if feats:
+        for name, status in feats["status"].items():
+            if status == "off" and name not in compat:
+                compat[name] = False
+    if mtype in NO_HIRES_FACEFIX_TYPES:
+        for name in ("enableADetailer", "upscale"):
+            if name not in compat:
+                compat[name] = False
+    meta["compatibility"] = compat
+    meta["context_images"] = None if feats is None else _context_images_on(feats)
+    ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
+    # The gate runs G1 whenever /features answered (an empty modelType included, on the
+    # step-8 rule), so the drawer carries a rule exactly then.
+    meta["size_rule"] = (_size_rule(mtype, ranges, meta.get("restrictions"))
+                         if feats is not None else None)
     return meta
 
 
@@ -3874,7 +4008,10 @@ def resolve_version_meta(session, model_id, with_profiles=False):
     # profiles, so the drawer can dim a mode this model does not offer. Fails soft to None.
     # ONLY for a caller that asked -- see the docstring: the LoRA/remix resolves never read
     # `profiles`, and paying a PixAI GET for them was pure cost (red team 2026-09-07).
-    return _attach_profiles(session, meta) if with_profiles else meta
+    # The features/size-config reads ride the same opt-in (SCOPE_2026-09-26 G1/G2).
+    if not with_profiles:
+        return meta
+    return _attach_features(session, _attach_profiles(session, meta))
 
 
 def list_model_versions(session, model_id):
@@ -3914,6 +4051,7 @@ def list_model_versions(session, model_id):
         # would be exactly the N+1 this function's own contract above rules out.
         if meta["is_latest"]:
             _attach_profiles(session, meta)
+            _attach_features(session, meta)     # same row, same opt-in (SCOPE_2026-09-26)
         out.append(meta)
     return out
 
@@ -4172,6 +4310,11 @@ def extract_full_meta(task):
     # to drop. All pure reads from the task dict; steps/sampler/cfg get a model-preset fallback
     # in the caller (needs the network), the rest resolve here.
     i2v = params.get("i2vPro") if isinstance(params.get("i2vPro"), dict) else {}
+    # A video task carries ONE of two blocks, and both name the engine and the quality
+    # tier the same way (`model`, `mode`). Reading only i2vPro left every reference-video
+    # row's video_model / video_mode blank on every capture road (PROBE_2026-09-26 V09).
+    vblock = i2v or (params.get("referenceVideo")
+                     if isinstance(params.get("referenceVideo"), dict) else {})
     ii = outputs.get("inferenceInfo") if isinstance(outputs.get("inferenceInfo"), dict) else {}
     stages = ii.get("stages") if isinstance(ii.get("stages"), dict) else {}
     qtag = params.get("qualityTag") if isinstance(params.get("qualityTag"), dict) else {}
@@ -4231,8 +4374,8 @@ def extract_full_meta(task):
         "updated_at":        str(task.get("updatedAt") or ""),
         "retry_count":       ("" if retry is None else str(retry)),
         "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
-        "video_mode":        str(i2v.get("mode") or ""),
-        "video_model":       str(i2v.get("model") or ""),
+        "video_mode":        str(vblock.get("mode") or ""),
+        "video_model":       str(vblock.get("model") or ""),
         # BATCH IDENTITY (issue #33): blank at TASK level on purpose -- outputs.batch is an
         # ordered array with one entry per output, so the index is a per-ROW fact. The raw
         # list is parked under _batch (private, never persisted: _merge_full and the backfill
@@ -4546,10 +4689,13 @@ def build_catalog_row(media_id, *, fm=None, known=None,
                                                                ruling 2026-08-15)
       clip_skip          GEN, IMG                              fm
       model_id           SV, GEN, VID, IMG, EDIT               parameters.modelId / the
-                                                               submitted block / fm /
+                                                               task's numeric modelId, else
+                                                               the engine name (VID,
+                                                               _video_row_model) / fm /
                                                                chat.modelId
-      model_name         GEN, IMG, EDIT                        _resolved_model_name /
-                                                               _edit_model_label
+      model_name         GEN, IMG, EDIT, VID                   _resolved_model_name /
+                                                               _edit_model_label /
+                                                               _video_row_model
       loras              GEN, IMG                              _resolved_loras (resolved
                                                                names+weights, not fm)
       paid_credit        SV, GEN, VID, IMG, EDIT               _paid_credit_str -- TASK-level,
@@ -7589,6 +7735,9 @@ LORA_WEIGHT_RANGES = {
     "MMDIT26A_MODEL":    (0.0, 1.2),   # DiT.2 / Tsubaki.2
     "MMDIT26B_MODEL":    (0.0, 1.2),   # DiT.3 -- had no entry at all before today
     "USER_DIT26A_MODEL": (0.0, 1.2),   # a user-TRAINED DiT.2, which is what the owner's own are
+    # A user-trained DiT.3. PixAI's stepUp table (`Ua`) puts it in the same 0..1.2 range as
+    # every other DiT family (bundle, 2026-09-26; SCOPE_2026-09-26 G8).
+    "USER_DIT26B_MODEL": (0.0, 1.2),
     # Stable Diffusion -- the only two the owner specified as -2..+2.
     "SD_V1_MODEL":       (-2.0, 2.0),
     "SDXL_MODEL":        (-2.0, 2.0),
@@ -7923,7 +8072,14 @@ def _gen_parameters(args):
     # submits exactly as before.
     if qtag and getattr(args, "is_member", None) is False:
         qtag = ""
-    if qtag:
+    # SCOPE_2026-09-26 G4: the web road resolves the booster to the chosen VERSION's own tag
+    # ({prefix, suffix}, extra.qualityTags[0]) at build time and hands it over here; the CLI
+    # never sets it, so `--quality-tag` still sends {"prefix": <text>} exactly as before.
+    qobj = getattr(args, "quality_tag_obj", None)
+    if qtag and isinstance(qobj, dict):
+        params["qualityTag"] = {"prefix": str(qobj.get("prefix") or ""),
+                                "suffix": str(qobj.get("suffix") or "")}
+    elif qtag:
         params["qualityTag"] = {"prefix": qtag}      # their "Quality Tag" booster
     if getattr(args, "kaisuuken_id", ""):
         params["kaisuukenId"] = str(args.kaisuuken_id)   # spend a free card instead of credits
@@ -7942,7 +8098,7 @@ DEFAULT_VIDEO_MODEL = "v4.0.1"
 # Video enums banked from the generator i18n (2026-07-02):
 VIDEO_CAMERA_MOVES = ("unset", "horizontal", "pan", "roll", "tilt", "vertical-pan", "zoom")
 VIDEO_AUDIO_LANGS = ("english", "japanese", "chinese", "korean", "none")  # "none" = SE only
-VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 is v4.0-only
+VIDEO_DURATIONS = (5, 6, 10, 15)                  # 15: VIDEO_15S_MODELS only; per engine: VIDEO_MODEL_DURATIONS
 
 # Video model registry: the `.model` NAME a submit carries -> its numeric top-level
 # `modelId` (+ a UI label). A real (card-covered) submit carries BOTH; WITHOUT the modelId
@@ -7951,6 +8107,16 @@ VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 i
 VIDEO_MODELS = {
     "v4.0.1": {"model_id": "2003969750675682808", "label": "V4.0 Lite Preview"},
     "v4.0":   {"model_id": "2003968021137101826", "label": "V4.0 Preview (full)"},
+    # The two Tsubaki video engines (PROBE_2026-09-26 V01/V13). The ids are the ones PixAI
+    # stamped on the owner's own tbkv tasks (2060014126868040808 -> tbkv1.0,
+    # 2060390260986220957 -> tbkv1.0.1), and the labels are the version titles a read-only
+    # getGenerationModelByVersionId returns for those ids. The site itself never sends a
+    # numeric modelId for video -- the server maps the name. This app sends these ids on the
+    # REFERENCE path only (SCOPE_2026-09-26 V2: its own id, never v4.0.1's; the probe priced a
+    # tbkv1.0.1 reference video the same with its own id, v4.0.1's and none). A tbkv i2vPro
+    # carries NO top-level modelId, as on the site -- see VIDEO_I2V_NO_MODELID_MODELS.
+    "tbkv1.0.1": {"model_id": "2054378086834851904", "label": "Tsubaki Video"},
+    "tbkv1.0":   {"model_id": "2042030623542642408", "label": "Tsubaki Video Flash"},
     "v3.2":   {"model_id": "1961182207978260675", "label": "V3.2"},
     "v3.0.2": {"model_id": "2014412117889628958", "label": "V3.0 Lite"},
     "v3.0":   {"model_id": "1919508300549460046", "label": "V3.0"},
@@ -7966,7 +8132,83 @@ def video_model_id(name):
     """Numeric top-level `modelId` for a video `.model` name ('' if unknown). A submit MUST
     include this or PixAI can't resolve the model and no free card can match."""
     return (VIDEO_MODELS.get((name or "").strip()) or {}).get("model_id", "")
+
+
+def _video_model_id_fits(engine, model_id):
+    """Is `model_id` a version id this video engine's row may carry (and be titled from)?
+    An engine VIDEO_MODELS knows takes only its own id, so v2.7 / v3.0.1 (no id) take none:
+    their real tasks carry 1648918127446573124, an IMAGE checkpoint. An engine the roster
+    does not know (or a row with no engine recorded) takes any id, as before."""
+    engine = str(engine or "").strip()
+    if engine not in VIDEO_MODELS:
+        return True
+    return str(model_id or "").strip() == video_model_id(engine) != ""
+
+
 VIDEO_CHANNELS = ("private", "normal")   # private = the site's "Private" channel (was "Enhanced" until 2026-08-18)
+
+
+# --- Per-engine capability tables (Tsubaki video, PROBE_2026-09-26 V03-V06) ---------------
+# Video models have no /features, /inference-profiles or /size-config data (both tbkv ids
+# answer empty lists there), so these are hand-kept tables checked against the site's own
+# panel matrix (helper--EEE6Q9r.js `I()`, the i2vPro field picker `X`) and tools.json. An
+# engine ABSENT from a table keeps today's behaviour exactly -- every table here only ever
+# narrows what a listed engine is sent.
+TSUBAKI_VIDEO_MODELS = ("tbkv1.0", "tbkv1.0.1")
+
+# Allowed durations per engine. The tbkv panel offers 5/10/15 (default 5) with or without a
+# tail frame, and the stored i2vPro schema has only ever allowed "5"/"10"/"15". Absent =>
+# VIDEO_DURATIONS (the existing engines keep their 6 s stop, unchanged by this table).
+VIDEO_MODEL_DURATIONS = {m: (5, 10, 15) for m in TSUBAKI_VIDEO_MODELS}
+
+# Engines whose panel has no negative prompt / no camera movement. The site's picker `X`
+# adds negativePrompts / cameraMovement only when the panel enables them, and the tbkv panel
+# enables neither. Other engines are unchanged on purpose: a v4.0.1 i2vPro with a negative
+# is on the wire (task 2058947728431110088) and rendered.
+VIDEO_NO_NEGATIVE_MODELS = TSUBAKI_VIDEO_MODELS
+VIDEO_NO_CAMERA_MODELS = TSUBAKI_VIDEO_MODELS
+
+# Multi-Reference caps per engine (the tbkv panel's multiReference `D`: images 6, videos 0,
+# audio 3). Only the VIDEO cap is enforced at build time (a video reference sent to an
+# engine that takes none); absent => no cap here, as today.
+VIDEO_REF_CAPS = {m: {"images": 6, "videos": 0, "audios": 3} for m in TSUBAKI_VIDEO_MODELS}
+
+# referenceVideo.ratio: tbkv-only, reference-path only, the 9 values of the site's `Qe`.
+# Omitted (or "adaptive") lets PixAI infer the ratio from the references.
+VIDEO_RATIO_MODELS = TSUBAKI_VIDEO_MODELS
+VIDEO_RATIOS = ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9")
+
+# i2vPro engines that go out with NO top-level modelId, whatever VIDEO_MODELS knows. No tbkv
+# i2vPro task exists yet, from the site or from this app (PROBE_2026-09-26 V02 and its open
+# capture: "the modelId it stamps" is unobserved). The site's i2vPro submit sends the name only,
+# and the probe's tbkv i2vPro price quotes (21,000 for 5 s, 63,000 for 15 s) were taken on that
+# shape. So the unobserved field stays at today's behaviour -- omitted, as it was before tbkv
+# joined VIDEO_MODELS -- and the owner's first First Frame run tests one new thing, not two.
+# Remove an engine from here once a real tbkv i2vPro task shows what the server stamps.
+VIDEO_I2V_NO_MODELID_MODELS = TSUBAKI_VIDEO_MODELS
+
+
+def video_model_durations(model):
+    """The durations (seconds) this engine accepts -- its own set when VIDEO_MODEL_DURATIONS
+    lists it, else the shared VIDEO_DURATIONS."""
+    return VIDEO_MODEL_DURATIONS.get(str(model or "").strip(), VIDEO_DURATIONS)
+
+
+def _check_video_ref_caps(model, video_media_ids):
+    """Refuse video references an engine cannot take (PixAIError at BUILD time: the badge
+    shows it as its note and nothing is created or charged). Only engines listed in
+    VIDEO_REF_CAPS are capped; the drawer holds such refs back and never sends them, so this
+    is the backstop for the CLI and a hand-rolled payload."""
+    cap = (VIDEO_REF_CAPS.get(str(model or "").strip()) or {}).get("videos")
+    n = len([v for v in (video_media_ids or []) if str(v).strip()])
+    if cap is not None and n > cap:
+        label = (VIDEO_MODELS.get(str(model).strip()) or {}).get("label") or model
+        if cap == 0:
+            raise PixAIError("{} takes no video references -- remove the {} video "
+                             "reference{} (nothing was created or charged).".format(
+                                 label, n, "" if n == 1 else "s"))
+        raise PixAIError("{} takes at most {} video references, not {} -- remove {} "
+                         "(nothing was created or charged).".format(label, cap, n, n - cap))
 
 
 def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
@@ -7996,7 +8238,9 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
     that IDENTICAL modelId, and omitting modelId altogether priced the same as sending it.
     The earlier "REQUIRED" note came from a v4.0 submit where dropping modelId lost the
     free-card match -- that is a CARD-MATCHING requirement, not a model-resolution one, so
-    we still send it whenever VIDEO_MODELS knows one. When it doesn't (v2.7, v3.0.1 -- no
+    we still send it whenever VIDEO_MODELS knows one -- except on the Tsubaki engines, whose
+    i2vPro goes out in the site's name-only shape until a real task shows what the server
+    stamps (VIDEO_I2V_NO_MODELID_MODELS). When it doesn't (v2.7, v3.0.1 -- no
     numeric id published and no card covers them anyway) the key is OMITTED rather than
     sent empty: absent is the shape the probe actually exercised; `modelId: ""` is not.
 
@@ -8027,11 +8271,16 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         i2v["audioLanguage"] = audio_language
     if tail_media_id:
         i2v["tailMediaId"] = str(tail_media_id)
-    if negative:
+    # Neither field on an engine whose panel has none (VIDEO_NO_NEGATIVE_MODELS /
+    # VIDEO_NO_CAMERA_MODELS): the tbkv i2vPro block carries only the site's picker `X`
+    # fields. The tbkv i2vPro half is bundle-grounded and price-quoted, not yet on the wire;
+    # an unsupported field is how v3.0.2's audio flag came back as a false NSFW refusal.
+    if negative and str(model).strip() not in VIDEO_NO_NEGATIVE_MODELS:
         i2v["negativePrompts"] = negative
     # cameraMovement is v2.7-style camera-dropdown; only send when a real move is picked
     # (the verified v4.0 submit omits it entirely -> keep it out by default).
-    if camera_movement and camera_movement != "unset":
+    if (camera_movement and camera_movement != "unset"
+            and str(model).strip() not in VIDEO_NO_CAMERA_MODELS):
         i2v["cameraMovement"] = camera_movement
     params = {
         "priority": 1000,
@@ -8045,7 +8294,9 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         "enablePreview": True,
         "hidePrompts": False,
     }
-    _mid = str(model_id or video_model_id(model))
+    # A Tsubaki i2vPro sends no modelId at all, even one passed in (VIDEO_I2V_NO_MODELID_MODELS).
+    _mid = ("" if str(model).strip() in VIDEO_I2V_NO_MODELID_MODELS
+            else str(model_id or video_model_id(model)))
     if _mid:                                  # omit rather than send "" -- see docstring
         params["modelId"] = _mid
     if kaisuuken_id:
@@ -8060,24 +8311,51 @@ REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 refere
 
 def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
                                      audio_media_ids=(), model="v4.0.1",
-                                     model_id=REFVIDEO_MODEL_ID, duration=5,
+                                     model_id=None, duration=5,
                                      mode="professional", generate_audio=False,
                                      audio_language="english", is_private=False,
-                                     priority=1000, kaisuuken_id=""):
+                                     priority=1000, kaisuuken_id="", ratio="",
+                                     input_video_durations=None):
     """Build createGenerationTask `parameters` for a REFERENCE video (multi-image / video /
     audio reference). VERIFIED shape (2026-07-02) -- a top-level `referenceVideo` block,
     NOT i2vPro. The prompt references inputs by position with @image1/@video1/@audio1
-    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing."""
+    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing.
+
+    `model_id` defaults to THIS model's own numeric id (video_model_id), and the key is
+    omitted when there is none -- the i2v builder's rule. It used to default to v4.0.1's id,
+    so a reference video on any other engine went out paired with a different model's id
+    (PROBE_2026-09-26 V02); a quote does not move with it (the three modelId variants of a
+    tbkv1.0.1 reference video all priced 63,000), but the free-card match keys on it.
+
+    `ratio` is sent only for the Tsubaki engines (VIDEO_RATIO_MODELS), one of VIDEO_RATIOS,
+    and omitted when empty or "adaptive" (PixAI's contract: omitted = adaptive = inferred
+    from the references). It is PROVEN only on the site's REST reference-video route; this
+    app submits `referenceVideo` over GraphQL, where acceptance is unobserved (probe capture
+    item). A refusal is not retried -- the spend path's single attempt stands.
+
+    `input_video_durations` is each reference video's length in seconds, in
+    `referenceVideoMediaIds` order, or None/[] for the old empty list. The caller decides
+    all-or-nothing (see input_video_durations()); this only sends what it is given, as
+    positive floats. PixAI floors each entry and bills the output seconds PLUS the input
+    seconds; an empty list is priced as a flat 15 s of input in total."""
+    _check_video_ref_caps(model, video_media_ids)
     rv = {
         "mode": mode,
         "model": model,
         "prompt": prompt or "",
         "duration": int(duration),
-        "inputVideoDurations": [],
+        "inputVideoDurations": [float(d) for d in (input_video_durations or [])],
         "referenceAudioMediaIds": [str(m) for m in (audio_media_ids or [])],
         "referenceImageMediaIds": [str(m) for m in (image_media_ids or [])],
         "referenceVideoMediaIds": [str(m) for m in (video_media_ids or [])],
     }
+    r = str(ratio or "").strip()
+    if r and str(model).strip() in VIDEO_RATIO_MODELS:
+        if r not in VIDEO_RATIOS:
+            raise PixAIError("aspect ratio {!r} is not one PixAI takes -- use one of {} "
+                             "(nothing was created or charged).".format(r, ", ".join(VIDEO_RATIOS)))
+        if r != "adaptive":
+            rv["ratio"] = r
     # Audio only for models that take it -- the SAME table the i2v builder gates on, see
     # VIDEO_AUDIO_MODELS. Sending these to a model without audio support comes back as
     # "This image contains sensitive or NSFW content": a CONTENT complaint for an
@@ -8094,11 +8372,98 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
-        "modelId": str(model_id),
     }
+    _mid = str(video_model_id(model) if model_id is None else (model_id or ""))
+    if _mid:                                  # omit rather than send "" -- see docstring
+        params["modelId"] = _mid
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)
     return params
+
+
+def input_video_durations(video_media_ids, lookup):
+    """referenceVideo.inputVideoDurations for these reference videos, ALL OR NOTHING.
+
+    Returns (durations, unknown): each video's length from `lookup(media_id)` (seconds or
+    None) in the given order when every one is known and positive, else ([], True) -- the
+    exact list the app always sent before, never a partial one (a short list is priced as a
+    flat 15 s of input in total, and which positions it would cover is unobserved). `unknown`
+    is False when there are no video references at all, or when every length resolved.
+    A `lookup` of None (a caller with no library to read) is the old behaviour."""
+    vids = [str(v) for v in (video_media_ids or []) if str(v).strip()]
+    if not vids:
+        return [], False
+    if lookup is None:
+        return [], True
+    out = []
+    for v in vids:
+        try:
+            secs = lookup(v)
+            secs = float(secs) if secs is not None else None
+        except (TypeError, ValueError, OSError, PixAIError):
+            secs = None
+        if secs is None or not secs > 0:                     # None, <= 0 (or NaN)
+            return [], True
+        out.append(secs)
+    return out, False
+
+
+# The receipt line a reference video carries when a length could not be read. Worded to the
+# probe's finding, not to a direction: PixAI prices a missing list as a flat 15 s of input in
+# TOTAL, which is more than one short clip and less than two long ones.
+INPUT_VIDEO_UNKNOWN_WHY = ("input video length unknown — PixAI prices a flat 15 s of input "
+                           "in total")
+
+
+def make_video_duration_lookup(out_dir, db_path=None):
+    """A reference video's real length in seconds, or None -> RequestResolver.video_duration.
+
+    Order (SCOPE_2026-09-26 V5): the local file's measured length (media_tools.duration on
+    the file the gallery's one video resolver finds -- the catalog filename, else the
+    media-id matcher); else the catalog's `video_duration` (the clip's REQUESTED length --
+    acceptable because PixAI floors each entry, and a 10 s output measures ~10.04 s); else
+    None. No network read, ever: /api/price runs this on every keystroke.
+
+    The answer is cached per media id for the life of the returned callable (one per gallery
+    app, one per CLI run), so a quote and the spend that follows it read the same number even
+    if a file lands in between, and a miss does not re-walk the library per keystroke."""
+    from moonglade_gallery import find_local_video_file, get_row
+    out = Path(out_dir)
+    dbp = Path(db_path) if db_path else out / "catalog.db"
+    cache = {}
+    lock = threading.Lock()
+
+    def _lookup(media_id):
+        mid = str(media_id or "").strip()
+        if not mid:
+            return None
+        with lock:
+            if mid in cache:
+                return cache[mid]
+        row = {}
+        try:
+            if dbp.is_file():
+                row = get_row(dbp, mid) or {}
+        except Exception:                            # noqa: BLE001 -- a lookup never breaks a quote
+            row = {}
+        secs = None
+        try:
+            f = find_local_video_file(out, mid, row)
+            if f is not None:
+                secs = duration(str(f))
+        except Exception:                            # noqa: BLE001
+            secs = None
+        if secs is None or not secs > 0:
+            try:
+                secs = float(row.get("video_duration") or 0) or None
+            except (TypeError, ValueError):
+                secs = None
+            if secs is not None and not secs > 0:
+                secs = None
+        with lock:
+            cache[mid] = secs
+        return secs
+    return _lookup
 
 
 # Only the v4.0 family renders a 15-second clip. VIDEO_DURATIONS has carried the note
@@ -8106,7 +8471,10 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
 # other model went straight to PixAI, which refuses the mutation -- no task is created, so
 # nothing appears on the account and the client shows an instant unexplained decline. A rule
 # that lives only in a comment is not a rule.
-VIDEO_15S_MODELS = ("v4.0", "v4.0.1")
+# The Tsubaki engines render 15 s too: both of the owner's tbkv tasks (2060014126868040808,
+# 2060390260986220957) are 15 s reference videos, and the tbkv panel offers 5/10/15
+# (PROBE_2026-09-26 V04 -- before this they silently snapped a 15 s request down to 10).
+VIDEO_15S_MODELS = ("v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1")
 
 
 # PixAI rejects a video prompt over this with a raw GraphQL validation error
@@ -8126,6 +8494,9 @@ VIDEO_PROMPT_MAXLEN = 2000
 #   v3.0.2   (both fields ABSENT)                           <- omit
 #   v2.7     (both fields ABSENT)                           <- omit
 #   v3.0.1   generateAudio=False, audioLanguage absent      <- omit (never seen carrying audio)
+#   tbkv1.0    generateAudio=True audioLanguage=english     <- audio supported (2026-09-26:
+#   tbkv1.0.1  generateAudio=True audioLanguage=english        both on the wire; the tbkv
+#                                                              panel has audioLanguage)
 #
 # Sending them regardless is NOT harmless, and this is the bug that cost an evening. A controlled
 # pair on media id 747704233721405654 with model v3.0.2: PixAI's own site submitted it WITHOUT the
@@ -8136,21 +8507,24 @@ VIDEO_PROMPT_MAXLEN = 2000
 #
 # An earlier cut of this guessed "v4.0 family only" and a pre-existing test caught it: v3.2 really
 # does carry audio. Hence the survey. Do not narrow this list without measuring the model first.
-VIDEO_AUDIO_MODELS = ("v3.2", "v4.0", "v4.0.1")
+VIDEO_AUDIO_MODELS = ("v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1")
 
 
 def _snap_video_duration(d, model=""):
     """Snap a requested duration (seconds) to the nearest allowed PixAI video length.
 
-    `model` (optional) additionally enforces the 15s restriction: 15 is v4.0-only, so any other
-    model snaps down to 10 rather than being sent a length PixAI will reject. Omitting `model`
-    keeps the original model-blind behavior exactly, which is what the CLI's own preview path
-    and the pre-existing tests pin."""
+    `model` (optional) additionally enforces the engine's own rules: an engine listed in
+    VIDEO_MODEL_DURATIONS snaps to ITS set (6 -> 5 on a Tsubaki engine, whose panel and stored
+    schema have no 6), and 15 is VIDEO_15S_MODELS-only, so any other model snaps down to 10
+    rather than being sent a length PixAI will reject. Omitting `model` keeps the original
+    model-blind behavior exactly, which is what the CLI's own preview path and the pre-existing
+    tests pin."""
     try:
         d = float(d)
     except (TypeError, ValueError):
         return 5
-    snapped = min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+    allowed = video_model_durations(model) if model else VIDEO_DURATIONS
+    snapped = min(allowed, key=lambda v: abs(v - d))
     if snapped == 15 and model and str(model).strip() not in VIDEO_15S_MODELS:
         return 10
     return snapped
@@ -8160,7 +8534,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional", negative="", is_private=False,
-                            use_prompt_helper=False):
+                            use_prompt_helper=False, input_video_durations=None):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -8171,7 +8545,14 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
     oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set.
     `use_prompt_helper` (the Generate dock's 'Video prompt helper' switch, off by default)
-    likewise only reaches i2vPro.usePromptsHelper -- referenceVideo has no such field."""
+    likewise only reaches i2vPro.usePromptsHelper -- referenceVideo has no such field.
+
+    Every engine sends its OWN modelId or none (PROBE_2026-09-26 V02): the reference path
+    used to fall back to v4.0.1's id for an engine VIDEO_MODELS did not know, pairing
+    `model: "tbkv1.0.1"` with another model's id. `input_video_durations` (the caller's
+    all-or-nothing list, see input_video_durations()) reaches only referenceVideo, and an
+    engine that takes no video references refuses them here (build_reference_video_parameters)
+    rather than sending them."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -8209,7 +8590,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  is_private=is_private,
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
-                                                 model_id=(mid_num or REFVIDEO_MODEL_ID))
+                                                 model_id=mid_num,
+                                                 input_video_durations=input_video_durations)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -8428,8 +8810,14 @@ def chat_editing_scenes(session):
     """List PixAI's AI-Tools 'chat editing scenes' -- the browse half of the Bridge AI-Tools
     tier. Read-only: returns the raw scene configs (each carries sceneId, modelId, presets,
     selectors, custom, refImages, permission.membershipTier). The gen drawer reads each scene's
-    control schema from here to render its form. Runs on the mirror JWT (a website surface);
-    pass make_mirror_session()."""
+    control schema from here to render its form.
+
+    Which credential: the scene LIST answers on the API key too (all 34 scenes, 2026-09-26
+    probe). The app still browses only behind the armed Bridge, by decision (DECISIONS
+    2026-08-18, "the AI-Tools tier splits by FUNCTION") -- /api/scenes passes
+    make_mirror_session() -- and the SUBMIT (submit_scene) stays JWT-only: a scene submitted
+    on the API key reaped unstarted when that was tried (DECISIONS 2026-08-18; not
+    re-tested by the 2026-09-26 probe)."""
     d = gql_adhoc(session, _SCENE_LIST_Q, {}) or {}
     return d.get("chatEditingScenes") or []
 
@@ -8501,25 +8889,45 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 # via the model-capability probe 2026-07-06 (extra.chatEditing). Drives the Edit card's model
 # picker + its resolution/quality/aspect option lists + reference-image cap. Reference Pro
 # exposes NO quality option (qualities empty) and adds 21:9; Edit Pro is 1K/2K, Reference 2K/4K.
+#
+# Re-read 2026-09-26 (the preset roster's extra.chatEditing, SCOPE_2026-09-26 E1/E2):
+#   * Edit Pro publishes defaultAspectRatio "3:5" and offers 3:5 and 5:3 on top of the eleven
+#     below, so its default moved from 3:4 to 3:5.
+#   * Reference Pro publishes NO defaultAspectRatio. For a model like that PixAI's own aspect
+#     control shows an "Auto" tile, selected by default, and sends no aspectRatio at all -- the
+#     owner's two Reference Pro edits on the wire carry modelConfig {resolution} only. "auto"
+#     is therefore an aspect VALUE here, first in Reference Pro's list and its default, and
+#     build_chat_edit_parameters omits aspectRatio for it. Auto leaves the frame to PixAI; it
+#     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
+#     come back 2:3), so no copy anywhere may say it does.
+# editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
+# reads both and fails if their aspects or defaults drift apart.
+EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
         "label": "Edit Pro", "max_refs": 4,
         "resolutions": ["1K", "2K"],
         "qualities": ["low", "medium", "high"],
-        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "1:3", "3:1"],
-        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:4"},
+        "aspects": ["3:5", "5:3", "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "1:3", "3:1"],
+        "default": {"resolution": "1K", "quality": "medium", "aspect": "3:5"},
     },
     "reference-pro": {
         "model_id": "1948514378441961474",
         "label": "Reference Pro", "max_refs": 10,
         "resolutions": ["2K", "4K"],
         "qualities": [],
-        "aspects": ["16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "21:9"],
-        "default": {"resolution": "2K", "quality": "", "aspect": "3:4"},
+        "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "21:9"],
+        "default": {"resolution": "2K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
     },
 }
 DEFAULT_EDIT_MODEL = "edit-pro"
+# The aspect an edit on a model OUTSIDE the table gets when nobody picked one. What such a
+# model does with no aspectRatio is unobserved, so this fails open to the value every edit sent
+# before the table defaults existed (SCOPE_2026-09-26's rule for unobserved behaviour).
+_EDIT_ASPECT_UNKNOWN_MODEL = "3:4"
 
 # The model PixAI runs a hand/face Fix on -- the same CHAT model the Edit card calls
 # Reference Pro. A Fix submit (POST /v2/task/fixer, just {mediaId, boxes}) never names a
@@ -8545,12 +8953,30 @@ def edit_model_by_id(model_id):
     return None
 
 
+def edit_default_aspect(model_id):
+    """The aspect an edit on `model_id` gets when the caller picked none: the model's own table
+    default ("auto" for Reference Pro, which publishes none; "3:5" for Edit Pro), or the
+    pre-table 3:4 for a model the table does not know (see _EDIT_ASPECT_UNKNOWN_MODEL)."""
+    spec = edit_model_by_id(model_id)
+    return spec["default"]["aspect"] if spec else _EDIT_ASPECT_UNKNOWN_MODEL
+
+
 def clamp_edit_config(model_id, resolution, quality, aspect):
     """Snap an edit's (resolution, quality, aspect) to the resolved model's real capabilities,
     so NO path -- preset, stale UI, old client -- can send an option the model rejects (the
-    preset-with-Reference-Pro bug). Unknown models pass through unchanged. Returns the tuple."""
+    preset-with-Reference-Pro bug). Unknown models pass through unchanged. Returns the tuple.
+
+    "auto" passes only for a model whose table lists it -- one that publishes no default
+    aspect (Reference Pro). On Edit Pro it is not a legal value and snaps to the model's
+    default (3:5), exactly like any other aspect the model does not offer. On a model OUTSIDE
+    the table (a banked Toolbox preset pins one, e.g. PixAI Edit v3.0) "auto" -- or no aspect
+    at all -- becomes the pre-table 3:4 (_EDIT_ASPECT_UNKNOWN_MODEL): what such a model does
+    with no aspectRatio is unobserved, so it fails open to what every edit sent before "auto"
+    existed. Any other aspect still passes through unchanged there."""
     spec = edit_model_by_id(model_id)
     if not spec:
+        if not aspect or aspect == EDIT_ASPECT_AUTO:
+            aspect = _EDIT_ASPECT_UNKNOWN_MODEL
         return resolution, quality, aspect
     if not spec["qualities"]:
         quality = ""                                   # model exposes no quality knob
@@ -8618,7 +9044,7 @@ def _is_local_source(src):
 
 
 def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
-                               resolution="1K", aspect_ratio="3:4", quality="medium",
+                               resolution="1K", aspect_ratio=None, quality="medium",
                                kaisuuken_id="", scene_id=""):
     """Build createGenerationTask's `parameters` for an instruct edit (the `chat`
     block), verified against a real Edit-Pro submit (2026-07-01). `media_ids` is one
@@ -8630,19 +9056,34 @@ def build_chat_edit_parameters(prompt, media_ids, model_id=EDIT_PRO_MODEL_ID, *,
     passes one explicitly -- same opt-in shape as the other build_*_parameters builders.
     Without one the server charges credits, so this still stays behind --confirm like
     all spend paths.
+
+    `aspect_ratio` left unset (or blank) takes the model's own table default
+    (edit_default_aspect). "auto" sends NO aspectRatio at all -- PixAI's own shape for a
+    model with no published default (the owner's Reference Pro edits on the wire) -- which
+    leaves the frame to PixAI. Only for a model whose table lists "auto": on any other model
+    (Edit Pro, or one outside the table) "auto" is not a value it takes, so it gets that
+    model's default instead (3:5 on Edit Pro, the pre-table 3:4 off the table).
     """
     ids = [str(m) for m in (media_ids or []) if str(m).strip()]
     if not ids:
         raise PixAIError("edit needs at least one source media_id")
+    mid = str(model_id or EDIT_PRO_MODEL_ID)
+    if not aspect_ratio or (aspect_ratio == EDIT_ASPECT_AUTO and EDIT_ASPECT_AUTO not in
+                            ((edit_model_by_id(mid) or {}).get("aspects") or ())):
+        aspect_ratio = edit_default_aspect(mid)
+    model_config = {"resolution": resolution}
+    if aspect_ratio != EDIT_ASPECT_AUTO:
+        model_config["aspectRatio"] = aspect_ratio
+    # quality is omitted when empty -- Reference Pro exposes no quality option, so sending
+    # one would be a bogus knob; Edit Pro still sends low/medium/high.
+    if quality:
+        model_config["quality"] = quality
     params = {"chat": {
         "prompts": prompt or "",
         "mediaId": ids[0],
         "mediaIds": ids,
-        "modelId": str(model_id or EDIT_PRO_MODEL_ID),
-        # quality is omitted when empty -- Reference Pro exposes no quality option, so sending
-        # one would be a bogus knob; Edit Pro still sends low/medium/high.
-        "modelConfig": dict({"resolution": resolution, "aspectRatio": aspect_ratio},
-                            **({"quality": quality} if quality else {})),
+        "modelId": mid,
+        "modelConfig": model_config,
     }}
     if scene_id:
         params["sceneId"] = str(scene_id)
@@ -8655,7 +9096,9 @@ def _edit_config_from_args(args):
     """Pull the modelConfig knobs (with defaults) out of CLI/GUI args."""
     model_id = getattr(args, "edit_model", "") or EDIT_PRO_MODEL_ID
     resolution = getattr(args, "edit_resolution", "") or "1K"
-    aspect_ratio = getattr(args, "edit_aspect", "") or "3:4"
+    # No --edit-aspect -> the model's own default (Edit Pro 3:5, Reference Pro auto), not a
+    # fixed 3:4 that clamp would then keep on every model offering it (SCOPE_2026-09-26 E1).
+    aspect_ratio = getattr(args, "edit_aspect", "") or edit_default_aspect(model_id)
     quality = getattr(args, "edit_quality", "") or "medium"
     # Same guard the web /api/edit path already runs (_edit_params_from_payload ->
     # clamp_edit_config) -- without it the CLI can submit a resolution/quality/aspect
@@ -8870,6 +9313,26 @@ def _outputs_or_raise(result, found, empty_message):
     raise EmptyOutputsError(empty_message)
 
 
+def _print_gate_receipt(adjusted, gated=True):
+    """The CLI's half of the SCOPE_2026-09-26 receipt: what the per-model gate changed,
+    printed under the parameters (used None = not sent, printed "off"). A long value -- a
+    negative prompt the model does not take -- is shortened to its first characters.
+    `gated=False` is a preview that could not reach the model's rules (offline / no key)."""
+    if not gated:
+        print("(Not checked against this model's own rules -- offline or no key. A --confirm "
+              "run checks them before it submits.)")
+        return
+
+    def _short(v):
+        s = "off" if v is None else str(v)
+        return s if len(s) <= 40 else s[:39] + "…"
+    for a in adjusted or []:
+        why = a.get("why")
+        print("  adjusted: {} {} -> {}{}".format(
+            a.get("field"), _short(a.get("asked")), _short(a.get("used")),
+            " ({})".format(why) if why else ""))
+
+
 def run_generate(args):
     """Create images via PixAI (createGenerationTask), poll to completion, download
     the results into the backup, and catalog them as source='api'. GUARDED: without
@@ -8884,9 +9347,38 @@ def run_generate(args):
     params = _gen_parameters(args)
     existing_task = (getattr(args, "task_id", "") or "").strip()
 
+    # SCOPE_2026-09-26 G7: gate ONCE, right after the build, and use that one dict for the
+    # preview print, _preview_card_note, _apply_kaisuuken and submit_generation -- so the card
+    # is matched against the shape that is sent (the backstop gates inside price_task and
+    # submit_generation return this same object). The gate needs a session for its
+    # read-only lookups; a PREVIEW that cannot make one (offline, no key) prints the ungated
+    # build and says so, exactly as its card note already fails soft. A --confirm run makes
+    # its session here and fails as it always did when it cannot. A --task-id recovery
+    # submits nothing, so it is not gated.
+    session = None
+    adjusted = []
+    if not existing_task:
+        if getattr(args, "confirm", False):
+            # READ_ONLY refuses a --confirm run BEFORE the gate's read-only PixAI lookups
+            # (/inference-profiles, /features, /size-config) and before any gate refusal, so
+            # a READ_ONLY install never calls PixAI on a spend path and always reads the
+            # READ_ONLY message (review R8). An EXTRA, earlier call: the existing guard below,
+            # ahead of _apply_kaisuuken, stays exactly where it is.
+            _check_read_only("submit a generation (spends credits)")
+        try:
+            session = _make_session(getattr(args, "token", None))
+        except Exception:
+            if getattr(args, "confirm", False):
+                raise
+            session = None
+        if session is not None:
+            params, adjusted = _gate_image_params(session, params)
+            _refuse_lost_upscale(args, params)
+
     if not existing_task and not getattr(args, "confirm", False):
         print("=== PixAI createGenerationTask (PREVIEW -- no credits spent) ===")
         print(json.dumps({"parameters": params}, indent=2))
+        _print_gate_receipt(adjusted, gated=session is not None)
         _preview_card_note(args, params)
         print("\nThis would SPEND PixAI credits (unless free above). Re-run with --confirm to submit.")
         return {"submitted": False}
@@ -8894,7 +9386,9 @@ def run_generate(args):
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "catalog.db"
     init_db(db_path)                  # generation can seed a fresh backup
-    session = _make_session(getattr(args, "token", None))
+    if session is None:
+        session = _make_session(getattr(args, "token", None))
+    _print_gate_receipt(adjusted, gated=True)
     thumb_dir = out / "gallery" / "thumbs"
     from moonglade_gallery import make_thumbnail
 
@@ -9098,6 +9592,58 @@ def run_generate(args):
             "videos": len(videos)}
 
 
+def _video_row_model(session, result, params, sent, fm):
+    """(model_id, model_name) for a video row being catalogued live (PROBE_2026-09-26 V09,
+    owner ruling 3 of 2026-09-26).
+
+    THE STORED TASK WINS. The engine is the task's own video block (fm.video_model), and the
+    submitted block (`sent`) only fills in when the task has none. model_id is the TASK's
+    numeric top-level `modelId` (what PixAI stamped on the stored task, from getTaskById);
+    the submitted params' modelId counts only when it is this engine's own id. On the
+    `--generate-video --task-id` recovery road `params` is rebuilt from the CLI args, not
+    read from the task (engine defaulting to v4.0.1), so trusting it filed a recovered
+    Tsubaki or V3.0 Flash clip under V4.0 Lite's id and title (review f-V-F1).
+
+    An engine VIDEO_MODELS knows takes only ITS OWN id (video_model_id). Real v2.7 and
+    v3.0.1 tasks carry modelId 1648918127446573124, an IMAGE checkpoint (see
+    build_video_parameters' docstring); titling that id would file an image model's name on
+    a video row, so such a row keeps the engine name, as the repair migration leaves v2.7 /
+    v3.0.1 rows (review f-V-F2 / V-R2; the owner can widen this). An engine the roster does
+    not know yet takes any numeric id. Otherwise the engine NAME, so a row is never left
+    with '' when the engine is known. It used to be the engine name unconditionally, which
+    split one model across two ids (--sync-videos writes the number) and handed "tbkv1.0.1"
+    to the version lookup as if it were a version id.
+
+    model_name is the version's own title from model_name_gql for a numeric id ("Tsubaki
+    Video v1.0"), falling back to the VIDEO_MODELS label for the engine. Video model names
+    are dynamic now (ruling 3, reversing 2026-08-15's "a video row's model_name stays
+    blank"): the Tsubaki engines are the first to carry a name rather than a version string.
+    A lookup failure costs the label, never the row."""
+    engine = str((fm or {}).get("video_model") or (sent or {}).get("model") or "").strip()
+    task_params = (result or {}).get("parameters")
+    task_params = task_params if isinstance(task_params, dict) else {}
+    mid = ""
+    for cand in ((fm or {}).get("model_id"), task_params.get("modelId")):
+        c = str(cand or "").strip()
+        if c.isdigit():
+            mid = c
+            break
+    if not mid and isinstance(params, dict):
+        c = str(params.get("modelId") or "").strip()
+        if c and c == video_model_id(engine):
+            mid = c
+    if mid and not _video_model_id_fits(engine, mid):
+        mid = ""
+    name = ""
+    if mid:
+        got = _resolved_model_name(session, {}, mid)
+        if got and got != mid and not str(got).isdigit():
+            name = str(got)
+    if not name:
+        name = (VIDEO_MODELS.get(engine) or {}).get("label", "")
+    return (mid or engine), name
+
+
 def _download_video_task(session, result, task_id, out, args, params):
     """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
@@ -9108,6 +9654,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     fm = extract_full_meta(result)   # issue #18: the full generation surface for the video row
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
+    model_id, model_name = _video_row_model(session, result, params, sent, fm)
 
     from moonglade_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
@@ -9142,7 +9689,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             poster_media_id=o.get("poster_media_id", ""),
             paid_credit=_paid_credit_str(result),   # actual cost, task-level
             video_duration=str(shared.get("duration") or sent.get("duration") or ""),
-            model_id=str(sent.get("model") or ""),
+            model_id=model_id, model_name=model_name,
             width=str(detail.get("width") or ""),
             height=str(detail.get("height") or ""))
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
@@ -9422,62 +9969,492 @@ def _model_profiles(session, version_id):
     return profiles
 
 
-def _gate_params_for_model(session, params):
-    """Gate a plain-image createGenerationTask's field set on the model's ARCHITECTURE, so
-    the shape we PRICE and the shape we SUBMIT agree with what the model actually honors
-    (PixAI new-gen platform, 2026-08-25). Called from BOTH submit_generation and price_task
-    with the IDENTICAL helper, so the cost badge cannot diverge from the real charge.
+# =============================================================================
+# The per-model image gate (SCOPE_2026-09-26_tsubaki3-parity-fixes, lane G)
+# =============================================================================
+# One gate, applied ONCE at build (build_request's image road via RequestResolver.gate, and
+# the CLI run_generate right after _gen_parameters), so the dict that is quoted, card-matched
+# and submitted is one object. The calls inside price_task and submit_generation stay as
+# BACKSTOPS for callers off the road and return the SAME object for already-gated input
+# (every rule below copies only when a field actually changes).
+#
+# What it reads, all version-keyed (the model-keyed /versions route 404s on the version id a
+# submit carries), cached with the _model_profiles discipline (an hour on success, 60 s on a
+# failure, short timeout, fail soft to today's shape):
+#   /inference-profiles  -- the 2026-08-25 profile branch, unchanged
+#   /features            -- {modelType, features:[{featureName, status, ...}]}
+#   /size-config         -- {ranges:[{minWidth, maxWidth, minHeight, maxHeight, step, ...}]}
+#                           read only for the DiT families
+#
+# Every change the NEW rules make is one receipt entry {field, asked, used, why}
+# (used: None = not sent), handed back beside the dict so /api/price, /api/generate and the
+# CLI preview can say what was changed BEFORE a spend. The profile branch predates the
+# receipt and is left exactly as it was, silent included (it fires on every DiT submit the
+# drawer makes -- steps/cfg the drawer already shows as not applying).
 
-    The architecture signal is the VERSION-keyed inference-profile set (_model_profiles):
-    - NON-EMPTY -> DiT (MMDIT26A/B). The site sends `inferenceProfile` and omits
-      `samplingSteps`/`cfgScale`/`samplingMethod`/`clipSkip`. So: ensure a profile is present
-      (fill the model's DEFAULT-flagged profile when the user left it on auto -- and if NO row
-      is flagged default, leave it ABSENT so the SERVER picks its own default: omitting keeps
-      quote == charge, whereas synthesizing a possibly-invalid profile would reintroduce the
-      divergence) and drop the four ignored/rejected fields.
-    - EMPTY `[]` -> SDXL (a definitive 200). Keep `samplingSteps`/`cfgScale`; ensure
-      `inferenceProfile` is NOT present (SDXL rejects pro/ultra -- the drop-and-retry in
-      submit_generation was papering over exactly this).
+# Every DiT family snaps sizes to 16, everything else to 8: PixAI's own model-*.js
+# `function Se(e){return e&&W(e)?16:8}` (W = these six).
+DIT_SIZE_STEP_TYPES = frozenset((
+    "DIT7_MODEL", "DIT7B_MODEL", "MMDIT26A_MODEL", "MMDIT26B_MODEL",
+    "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"))
+# Never Hires, never Face Fix: the site's tracker `be` (MMDIT26A|B) and `Te` (USER_DIT26A|B),
+# whatever /features says -- applied only when /features supplied the modelType.
+NO_HIRES_FACEFIX_TYPES = frozenset((
+    "MMDIT26A_MODEL", "MMDIT26B_MODEL", "USER_DIT26A_MODEL", "USER_DIT26B_MODEL"))
+_HIRES_FIELDS = ("upscale", "upscaleDenoisingStrength", "upscaleDenoisingSteps",
+                 "upscaleSampler")
+# A /features entry strips its fields only on a LITERAL status "off"; a feature absent from
+# the list counts as on (the site's `Ce()` / `u(i, X, !0)` default). `enlarge` and
+# `enlargeModel` are never stripped (the site keeps them on every model). samplingSteps,
+# cfgScale, samplingMethod and clipSkip stay owned by the profile branch alone -- they drive
+# the SDXL price, so /features is never a second authority over them. refImage is G3's.
+_FEATURE_STRIP_FIELDS = (
+    ("negativePrompt", ("negativePrompts",), "this model takes no negative prompt"),
+    ("upscale", _HIRES_FIELDS, "this model takes no Enhance Details (Hires) pass"),
+    ("enableADetailer", ("enableADetailer",), "this model takes no Face Fix"),
+)
+_GATE_READ_TIMEOUT = 10                     # seconds; short -- /api/price runs this per keystroke
+_SIZE_FALLBACK_RANGE = (64, 4096)           # today's web clamp (_gen_args_from_web_payload)
+_features_cache = {}                        # version_id -> (fetched_at_monotonic, parsed|None)
+_size_config_cache = {}                     # version_id -> (fetched_at_monotonic, ranges|None)
+_CONTEXT_REF_LORA_REFUSAL = ("Tsubaki.3 can't combine a reference image with LoRAs "
+                             "— remove one")
 
-    BEST-EFFORT + FAIL-SOFT: no `modelId`, a non-image submit (video/edit/enhance flow through
-    submit_generation too and must pass untouched), or a profile set that cannot be determined
-    (None) all return the params UNCHANGED -- a failed lookup never breaks a submit or changes
-    its spend outcome versus today. Non-mutating: returns the ORIGINAL object on every no-op
-    path (so submit_generation's own in-place inferenceProfile drop-and-retry still mutates the
-    caller's dict), and a shallow COPY only when it actually gates. The profile GET is the only
-    new network call, and it is read-only."""
-    if not params or not params.get("modelId"):
-        return params
+
+def _cached_version_read(cache, session, version_id, suffix, parse):
+    """One version-keyed GET /v2/generation-model/<version><suffix>, parsed, with the
+    _model_profiles cache discipline: a parsed answer is kept for _PROFILE_CACHE_TTL, a
+    failure (any exception, or a body `parse` refuses as None) for _PROFILE_FAIL_TTL, and
+    every failure returns None -- the caller's "unknown, change nothing". Read-only."""
+    vid = str(version_id or "").strip()
+    if not vid:
+        return None
+    now = time.monotonic()
+    hit = cache.get(vid)
+    if hit is not None:
+        ttl = _PROFILE_CACHE_TTL if hit[1] is not None else _PROFILE_FAIL_TTL
+        if (now - hit[0]) < ttl:
+            return hit[1]
+    try:
+        value = parse(_rest_get(session, "/generation-model/" + vid + suffix,
+                                timeout=_GATE_READ_TIMEOUT))
+    except Exception:
+        value = None
+    cache[vid] = (now, value)
+    return value
+
+
+def _parse_features(data):
+    """/features body -> {"model_type": "MMDIT26B_MODEL", "status": {featureName: status}},
+    or None for a body without a `features` list. Status strings are kept LITERAL: a strip
+    fires on exactly "off" (captured 2026-09-26: auth/T3v_features.json, Flashv_features)."""
+    if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+        return None
+    status = {}
+    for f in data["features"]:
+        if isinstance(f, dict) and isinstance(f.get("featureName"), str) and f["featureName"]:
+            status[f["featureName"]] = f.get("status")
+    return {"model_type": str(data.get("modelType") or "").strip().upper(), "status": status}
+
+
+def _parse_size_config(data):
+    """/size-config body -> [(minWidth, maxWidth, minHeight, maxHeight), ...], or None for a
+    body without a `ranges` list. [] is a real answer (a CHAT model has no ranges)."""
+    if not isinstance(data, dict) or not isinstance(data.get("ranges"), list):
+        return None
+    out = []
+    for r in data["ranges"]:
+        if not isinstance(r, dict):
+            continue
+        try:
+            out.append((int(r["minWidth"]), int(r["maxWidth"]),
+                        int(r["minHeight"]), int(r["maxHeight"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _model_features(session, version_id):
+    """The version's /features, parsed (see _parse_features), or None. Cached, fail soft."""
+    return _cached_version_read(_features_cache, session, version_id, "/features",
+                                _parse_features)
+
+
+def _model_size_config(session, version_id):
+    """The version's /size-config ranges (see _parse_size_config), or None. Cached, fail
+    soft. No /v2/model-config read in this branch: its top-level 512-2048 is overridden by
+    its own per-range rules, and its projected XL range equals /size-config's."""
+    return _cached_version_read(_size_config_cache, session, version_id, "/size-config",
+                                _parse_size_config)
+
+
+def _context_images_on(feats):
+    """True when /features says a reference goes out as a context image: modelType
+    MMDIT26B_MODEL and contextImages status "on". ABSENT counts as OFF for this one feature
+    (the site's `M()` default), unlike every strip rule."""
+    return bool(feats) and feats.get("model_type") == "MMDIT26B_MODEL" \
+        and feats["status"].get("contextImages") == "on"
+
+
+def _size_rule(model_type, ranges=None, restrictions=None):
+    """{step, lo, hi} for a version (SCOPE_2026-09-26 G1, T3-02/03/04 as corrected).
+
+    step  -- extra.restrictions.width.step (else height.step) when the version publishes one
+             (the site's modelParams `Ce()`); else 16 for the six DiT families, else 8. The
+             gate cannot see `restrictions` (the version-keyed routes carry no `extra`), so it
+             always takes the model-type step; the drawer's rule honours a published step. No
+             captured version publishes one today.
+    lo/hi -- the UNION of the version's /size-config ranges, step-aligned inward:
+             lo = ceil(min/step)*step, hi = floor(max/step)*step (Tsubaki.3 and Flash today:
+             512-2496). No ranges -> today's 64-4096 clamp, on the step."""
+    step = 0
+    if isinstance(restrictions, dict):
+        for side in ("width", "height"):
+            r = restrictions.get(side)
+            if isinstance(r, dict):
+                try:
+                    step = int(r.get("step") or 0)
+                except (TypeError, ValueError):
+                    step = 0
+                if step > 0:
+                    break
+    if step <= 0:
+        step = 16 if str(model_type or "").strip().upper() in DIT_SIZE_STEP_TYPES else 8
+    lo_raw, hi_raw = _SIZE_FALLBACK_RANGE
+    if ranges:
+        lo_raw = min(min(r[0], r[2]) for r in ranges)
+        hi_raw = max(max(r[1], r[3]) for r in ranges)
+    lo, hi = -(-lo_raw // step) * step, hi_raw // step * step
+    if lo > hi:
+        lo = -(-_SIZE_FALLBACK_RANGE[0] // step) * step
+        hi = _SIZE_FALLBACK_RANGE[1] // step * step
+    return {"step": step, "lo": lo, "hi": hi}
+
+
+def _snap_size(width, height, rule):
+    """Snap (width, height) onto a size rule -- the APP'S OWN rule, not the site's (its
+    nearest paths are sizeConfigRuleValues `at()`, useHeldTaskPrice `R()` and `dt()`).
+
+    A size already on the step and inside [lo, hi] passes UNTOUCHED (2048x1152, 816x2448 and
+    1088x1824 never move). A failing size is scaled proportionally -- the long side down to
+    hi if over, then the short side up to lo if under, the long side winning when both cannot
+    hold -- then each side rounds HALF-UP with floor(x/step + 0.5)*step (never Python's
+    half-to-even round(), so this agrees with genCore.js's snapSize, which is the same
+    arithmetic in JS) and is clamped into [lo, hi]. 768x432 on Tsubaki.3 -> 912x512."""
+    import math
+    step, lo, hi = rule["step"], rule["lo"], rule["hi"]
+    w, h = width, height
+    if w % step == 0 and h % step == 0 and lo <= w <= hi and lo <= h <= hi:
+        return w, h
+    long_side, short_side = max(w, h), min(w, h)
+    s = 1.0
+    if long_side > hi:
+        s = hi / long_side
+    if short_side > 0 and short_side * s < lo:
+        s = lo / short_side
+    if long_side * s > hi:
+        s = hi / long_side
+
+    def _r(x):
+        return int(math.floor(x / step + 0.5)) * step
+    return min(hi, max(lo, _r(w * s))), min(hi, max(lo, _r(h * s)))
+
+
+def _lora_out_of_range(weight, lo, hi):
+    """The clamped weight when `weight` is a number outside [lo, hi], else None (in range,
+    or not a number -- left exactly as it is)."""
+    if isinstance(weight, bool):
+        return None
+    try:
+        w = float(weight)
+    except (TypeError, ValueError):
+        return None
+    if lo <= w <= hi:
+        return None
+    return max(lo, min(hi, w))
+
+
+def _gate_image_params(session, params):
+    """THE per-model image gate: params -> (params, adjusted). See the section comment.
+
+    Order: the 2026-08-25 profile branch (unchanged) -> the Upscale road exits -> /features
+    (unknown -> exit, today's shape) -> G3 context image -> G2 strips -> G6 prompt helper ->
+    G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
+    shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
+    loraParameters) are replaced, never mutated, so the caller's dict is never touched.
+    Raises PixAIError for the one refusal (a reference plus LoRAs on an MMDIT26B model) --
+    at build time that is the badge's note and costs nothing."""
+    adjusted = []
+    if not isinstance(params, dict) or not params.get("modelId"):
+        return params, adjusted
     # Video (i2vPro/referenceVideo) is the only non-image submit carrying a TOP-LEVEL
     # modelId; instruct-edit (chat.modelId) and enhance (workflowName) have none, so the
     # modelId guard already skips them. Skip video explicitly.
     if "i2vPro" in params or "referenceVideo" in params:
-        return params
+        return params, adjusted
+    p = params
+
+    def _own():
+        nonlocal p
+        if p is params:
+            p = dict(params)
+        return p
+
+    # --- the profile branch (2026-08-25), behaviour unchanged ---------------------------
+    # NON-EMPTY profiles -> DiT: the site sends inferenceProfile and omits samplingSteps /
+    # cfgScale / samplingMethod / clipSkip, so fill the DEFAULT-flagged profile when the user
+    # left it on auto (none flagged -> leave it ABSENT so the server picks; never synthesize)
+    # and drop the four. EMPTY [] -> SDXL (a definitive 200): steps/cfg drive the cost; strip
+    # a profile SDXL would reject. None -> could not determine: today's shape.
     try:
         profiles = _model_profiles(session, params["modelId"])
     except Exception:
-        return params
-    if profiles is None:
-        return params                       # couldn't determine -> today's behavior, unchanged
-    if profiles:                            # non-empty -> DiT (profile-driven)
-        p = dict(params)
+        profiles = None
+    if profiles:
         if not p.get("inferenceProfile"):
             default = ""
             for r in profiles:
                 if isinstance(r, dict) and r.get("profileFlag") == "default":
                     default = str(r.get("profileName") or "").strip()
                     break
-            # A default was flagged -> send it. NONE flagged -> leave inferenceProfile ABSENT
-            # so the server applies its own default (quote == charge); never synthesize one.
             if default:
-                p["inferenceProfile"] = default
+                _own()["inferenceProfile"] = default
         for k in ("samplingSteps", "cfgScale", "samplingMethod", "clipSkip"):
-            p.pop(k, None)
-        return p
-    # profiles == [] -> SDXL: steps/cfg drive cost; strip a profile the model would reject.
-    p = dict(params)
-    p.pop("inferenceProfile", None)
-    return p
+            if k in p:
+                _own().pop(k)
+    elif profiles is not None:
+        if "inferenceProfile" in p:
+            _own().pop("inferenceProfile")
+
+    # --- SCOPE_2026-09-26 rules --------------------------------------------------------
+    # A chat-kind shape (the Fix's synthesized price shape carries a top-level modelId) is
+    # not text-to-image; none of the rules below describe it.
+    if "chat" in p:
+        return p, adjusted
+    # The UPSCALE road: a top-level mediaId together with enlarge or upscale is an Upscale
+    # panel request, and it passes the new rules untouched -- no size snap, no strip, never a
+    # context image. What PixAI does with an upscale of a Tsubaki picture is unobserved; the
+    # site upscales on a fixed version, the app on the source's own (DECISIONS 2026-07-27 /
+    # 2026-08-23), and changing that is the owner's call. The profile branch above still
+    # applies, exactly as it has since 2026-08-25.
+    if p.get("mediaId") and (p.get("enlarge") or p.get("upscale")):
+        return p, adjusted
+    feats = _model_features(session, params["modelId"])
+    if feats is None:
+        return p, adjusted              # /features unobserved -> today's shape, unchanged
+    mtype = feats["model_type"]
+    status = feats["status"]
+
+    # G3 -- a reference on MMDIT26B becomes a context image (T3-14/15, EDIT-5). The site's
+    # only reference path there is contextImages (it hard-excludes mediaId+strength on
+    # MMDIT26B). ONE id -- the drawer has one slot. The catalog id goes as-is, never through
+    # the upload resolver. With a LoRA the site silently DROPS the context image; this
+    # REFUSES instead (the LoRA-cap precedent: dropping either changes the picture asked
+    # for, and a refusal costs nothing).
+    # The refusal covers every MMDIT26B version, whatever its contextImages status ("Reference
+    # AND a non-empty lora on MMDIT26B -> refuse"): where contextImages is off the reference
+    # would go out as img2img, a shape the site hard-excludes there. A LoRA counts in either
+    # form -- the `lora` map or `loraParameters` (a --params-json or hand-built dict can carry
+    # only the list) -- and a reference counts as a mediaId or an already-built contextImages
+    # list, which PixAI would silently drop beside the LoRA while the quote kept its surcharge.
+    # The Upscale road has already exited above, so an Upscale is never refused here.
+    if mtype == "MMDIT26B_MODEL" and (p.get("mediaId") or p.get("contextImages")):
+        lmap, lpar = p.get("lora"), p.get("loraParameters")
+        if (isinstance(lmap, dict) and lmap) or (isinstance(lpar, list) and lpar):
+            raise PixAIError(_CONTEXT_REF_LORA_REFUSAL)
+    if _context_images_on(feats) and p.get("mediaId") and "contextImages" not in p:
+        q = _own()
+        ref = str(q.pop("mediaId"))
+        q["contextImages"] = [ref]
+        # A context image carries no strength. Dropping it is a receipt like any other gate
+        # change: the drawer's latest row already shows the slider disabled, but the phone
+        # Create screen, the CLI's --ref-strength, Remix and an older version picked in the
+        # version selector do not (review F6/R1, 2026-09-26).
+        if "strength" in q:
+            adjusted.append({"field": "strength", "asked": q.pop("strength"), "used": None,
+                             "why": "a context image carries no strength"})
+        for fld, why in (("negativePrompts", "a context image takes no negative prompt "
+                                             "(PixAI drops it there too)"),
+                         ("colorPalette", "a context image takes no colour palette")):
+            if fld in q:
+                adjusted.append({"field": fld, "asked": q.pop(fld), "used": None, "why": why})
+
+    # G2 -- strip what the model does not take (T3-05/06/08/10/15).
+    stripped = set()
+
+    def _strip(fld, why):
+        if fld in p and fld not in stripped:
+            stripped.add(fld)
+            adjusted.append({"field": fld, "asked": p[fld], "used": None, "why": why})
+            _own().pop(fld)
+    for feature, fields, why in _FEATURE_STRIP_FIELDS:
+        if status.get(feature) == "off":
+            for fld in fields:
+                _strip(fld, why)
+    if mtype in NO_HIRES_FACEFIX_TYPES:
+        for fld in _HIRES_FIELDS + ("enableADetailer",):
+            _strip(fld, "PixAI never sends Hires or Face Fix to this model type")
+
+    # G6 -- the prompt helper on MMDIT26B is a creativity level (T3-11). The legacy shape
+    # maps on -> medium, off -> off (the site's own legacy converter, task-*.js G()/z());
+    # effective context images force medium. Never withStage / enable / userWantToEnable on
+    # MMDIT26B. naturalPrompts moves under `extra` (merged into any existing extra) and is
+    # sent only when the level is not off. Idempotent: a promptHelper that already carries
+    # `creativity` is left alone. The pure shape change is not a receipt (the user's on/off
+    # is kept); a context image forcing an OFF helper to medium is.
+    if mtype == "MMDIT26B_MODEL":
+        ph = p.get("promptHelper")
+        extra_ok = "extra" not in p or isinstance(p.get("extra"), dict)
+        ctx = bool(p.get("contextImages"))
+        asked = "off"
+        # A shape with NO promptHelper at all (--params-json, a hand-built dict; the app's
+        # own builder always emits one) still gets medium when context images are sent --
+        # "when context images are sent: ... creativity medium", a receipt entry like the
+        # off -> medium case (review F3). Without context images it is left absent.
+        if "promptHelper" not in p and ctx and extra_ok:
+            ph, asked = {}, None
+        if isinstance(ph, dict) and "creativity" not in ph and extra_ok:
+            on = bool(ph.get("userWantToEnable",
+                             ph.get("withStage", ph.get("enable", False))))
+            level = "medium" if (on or ctx) else "off"
+            new_ph = {k: v for k, v in ph.items()
+                      if k not in ("withStage", "enable", "userWantToEnable")}
+            new_ph["creativity"] = level
+            new_ph["forcePromptHelperDetectionSide"] = "server"
+            q = _own()
+            q["promptHelper"] = new_ph
+            if ctx and not on:
+                adjusted.append({"field": "promptHelper", "asked": asked, "used": "medium",
+                                 "why": "a context image runs the prompt helper at medium, "
+                                        "as PixAI's own site does"})
+            natural = q.pop("naturalPrompts", None)
+            extra = dict(q["extra"]) if isinstance(q.get("extra"), dict) else {}
+            if level == "off":
+                extra.pop("naturalPrompts", None)
+            elif natural:
+                extra["naturalPrompts"] = natural
+            if extra:
+                q["extra"] = extra
+            else:
+                q.pop("extra", None)
+
+    # G10 -- LoRA weights held to the architecture's range (T3-19 correction). Only when
+    # /features supplied the modelType; lora_weight_range() gives the union -2..2 (today's
+    # bound) for anything it does not list. One receipt entry per LoRA.
+    wlo, whi = lora_weight_range(mtype)
+    clamped = {}
+    lmap = p.get("lora")
+    if isinstance(lmap, dict):
+        new_map, changed = {}, False
+        for lvid, w in lmap.items():
+            c = _lora_out_of_range(w, wlo, whi)
+            if c is None:
+                new_map[lvid] = w
+            else:
+                new_map[lvid] = c
+                changed = True
+                clamped.setdefault(str(lvid), (w, c))
+        if changed:
+            _own()["lora"] = new_map
+    llist = p.get("loraParameters")
+    if isinstance(llist, list):
+        new_list, changed = [], False
+        for e in llist:
+            c = _lora_out_of_range(e.get("weight"), wlo, whi) if isinstance(e, dict) else None
+            if c is None:
+                new_list.append(e)
+            else:
+                new_list.append(dict(e, weight=c))
+                changed = True
+                clamped.setdefault(str(e.get("versionId")), (e.get("weight"), c))
+        if changed:
+            _own()["loraParameters"] = new_list
+    for lvid, (asked, used) in clamped.items():
+        adjusted.append({"field": "lora " + lvid, "asked": asked, "used": used,
+                         "why": "LoRA weights on this model type run {:g} to {:g}".format(
+                             wlo, whi)})
+
+    # G1 -- the size grid and range (T3-02/03/04 as corrected). Lives HERE, not in
+    # _gen_parameters._dim, so the CLI's plain build stays byte-identical.
+    try:
+        w, h = int(p.get("width")), int(p.get("height"))
+    except (TypeError, ValueError):
+        w = h = 0
+    if w > 0 and h > 0:
+        ranges = (_model_size_config(session, params["modelId"])
+                  if mtype in DIT_SIZE_STEP_TYPES else None)
+        rule = _size_rule(mtype, ranges)
+        w2, h2 = _snap_size(w, h, rule)
+        why = "this model takes sizes on a {} px grid from {} to {}".format(
+            rule["step"], rule["lo"], rule["hi"])
+        if w2 != w:
+            adjusted.append({"field": "width", "asked": w, "used": w2, "why": why})
+            _own()["width"] = w2
+        if h2 != h:
+            adjusted.append({"field": "height", "asked": h, "used": h2, "why": why})
+            _own()["height"] = h2
+    return p, adjusted
+
+
+def _gate_params_for_model(session, params):
+    """Gate a plain-image createGenerationTask's field set on the model, so the shape we
+    PRICE and the shape we SUBMIT agree with what the model actually honors. Called from BOTH
+    submit_generation and price_task with the IDENTICAL helper, so the cost badge cannot
+    diverge from the real charge.
+
+    Since 2026-09-26 this is the BACKSTOP form of _gate_image_params (the dict only, no
+    receipt): the web road and the CLI gate once at build and hand an already-gated dict in,
+    for which this returns the SAME object. For a caller off the road it applies the whole
+    gate. The 2026-08-25 architecture branch it grew from is unchanged inside it:
+    - NON-EMPTY inference profiles -> DiT. Fill the DEFAULT-flagged profile on auto (none
+      flagged -> leave it ABSENT so the server picks; never synthesize) and drop
+      samplingSteps/cfgScale/samplingMethod/clipSkip.
+    - EMPTY `[]` -> SDXL (a definitive 200). Keep steps/cfg; strip inferenceProfile.
+
+    BEST-EFFORT + FAIL-SOFT: no `modelId`, a non-image submit (video/edit/enhance flow through
+    submit_generation too and must pass untouched), or a lookup that cannot be determined all
+    leave the params as they are -- a failed lookup never breaks a submit or changes its spend
+    outcome versus today. Non-mutating: returns the ORIGINAL object on every no-op path (so
+    submit_generation's own in-place inferenceProfile drop-and-retry still mutates the
+    caller's dict), and a shallow COPY only when a field actually changes. Raises PixAIError
+    on the gate's one refusal (see _gate_image_params); price_task turns that into None."""
+    return _gate_image_params(session, params)[0]
+
+
+_LOST_UPSCALE_REFUSAL = ("No upscale is possible at this size -- the picture is already at "
+                         "PixAI's upscale ceiling")
+
+
+def _refuse_lost_upscale(args, params):
+    """Refuse an Upscale that the build turned into a new context-image generation.
+
+    The gate recognises the Upscale road on the BUILT dict (a top-level mediaId with enlarge
+    or upscale), and _gen_parameters drops the ratio when it rounds to 1.0 or the source is
+    already at PixAI's output ceiling. On a context-image model the gate then reads what is
+    left as a new generation and sends the reference as a context image -- an Upscale click
+    billed as a new Tsubaki.3 generation, the hazard SCOPE_2026-09-26 v2 names (review
+    F7/R4). The intent is read off the caller's args: a reference plus an enlarge or upscale
+    ratio above 1.0. A refusal costs nothing.
+
+    Narrow on purpose: it fires only when the gate CONVERTED the reference. Anywhere else the
+    dropped ratio leaves a same-size img2img plus its clamp receipt, exactly as before this
+    branch -- the drawer's own img2img with Enhance Details past the Hires ceiling reaches
+    that same built shape on SDXL, and refusing it would change a non-DiT generation. The
+    Upscale panel never sends such a ratio (its goReady refuses <= 1 and the ceiling), so
+    only a hand-made POST or the CLI reaches this."""
+    def _asked(raw):
+        try:
+            return float(raw) > 1.0
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(params, dict) or not params.get("contextImages"):
+        return
+    if params.get("enlarge") or params.get("upscale"):
+        return
+    if not str(getattr(args, "ref_media_id", "") or "").strip():
+        return
+    if _asked(getattr(args, "enlarge", None)) or _asked(getattr(args, "upscale", None)):
+        raise PixAIError(_LOST_UPSCALE_REFUSAL)
 
 
 def submit_generation(session, params):
@@ -9689,17 +10666,29 @@ class GenerationRequest:
 class RequestResolver:
     """The lookups `build_request` cannot do on its own, supplied by the caller.
 
-    model_version(model_id, client_version_id) -> version id   -- needs a session
+    model_version(model_id, client_version_id) -> the chosen version ROW (the
+                          list_model_versions meta dict: version_id, quality_tag, ...)
+                          or a bare version id                  -- needs a session
     preset(user, name) -> banked Toolbox preset dict or None   -- per-account store
     media_id(value)    -> an id PixAI accepts as an INPUT      -- uploads; SUBMIT only
+    gate(params)       -> (params, adjusted)                   -- the per-model gate,
+                          applied ONCE at build so the quoted, card-matched and
+                          submitted dict is one object; `adjusted` is receipt entries
+                          [{field, asked, used, why}] (see gate_resolver)
+    video_duration(media_id) -> seconds or None                -- a reference video's
+                          real length, for referenceVideo.inputVideoDurations
 
     `media_id` is deliberately absent when pricing. /api/price fires on every
     keystroke in the drawer, and resolving there would upload the same file once
-    per character; a quote needs the SHAPE, not an upload-kind id.
+    per character; a quote needs the SHAPE, not an upload-kind id. `gate` and
+    `video_duration` are supplied IDENTICALLY to a quote and a spend -- they change
+    the shape, so a quote without them would price something the submit never sends.
     """
     model_version: object = None
     preset: object = None
     media_id: object = None
+    gate: object = None
+    video_duration: object = None
 
 
 def model_version_resolver(session):
@@ -9719,6 +10708,12 @@ def model_version_resolver(session):
     resolve_version_meta, and only when the payload carried no version_id and no
     mode at all), which is precisely a badge quoting one model while the submit
     sent another.
+
+    Returns the chosen version ROW (the list_model_versions meta dict, with `version_id`)
+    whenever it read the rows, and the plain version-id string otherwise (no model_id, or a
+    model that listed nothing). SCOPE_2026-09-26 G4: build_request reads the version's own
+    quality tag off that row, so the rule costs no new GET. build_request accepts either
+    form, so a resolver that returns a bare id (older callers, test stubs) still works.
     """
     def _resolve(model_id, client_version_id=""):
         mid = str(model_id or "").strip()
@@ -9729,11 +10724,28 @@ def model_version_resolver(session):
         chosen = next((v for v in versions if v.get("version_id") == vid),
                       None) if vid else None
         if chosen:
-            return chosen["version_id"]
+            return chosen
         if versions:
-            return versions[0]["version_id"]
+            return versions[0]
         return vid
     return _resolve
+
+
+def gate_resolver(session):
+    """The build-time gate for RequestResolver.gate: params -> (params, adjusted).
+
+    SCOPE_2026-09-26_tsubaki3-parity-fixes: the per-model image gate (_gate_image_params --
+    the size grid, the feature strips, a reference as a context image, the MMDIT26B prompt
+    helper, the LoRA weight range), bound to `session`, returning the gated dict and one
+    receipt entry per change. The SAME function for a quote and a spend: the gallery's
+    _price_resolver and _submit_resolver both hand it their session, so the dict /api/price
+    prices and card-matches is the dict the submit sends. A refusal raises PixAIError, which
+    build_request's callers already render (the badge as its note)."""
+    def _gate(params):
+        return _gate_image_params(session, params)
+    return _gate
+
+
 def _gen_args_from_web_payload(p):
     """Turn the Generate drawer's JSON into the SAME argparse-like namespace the CLI
     feeds to _gen_parameters -- so web + CLI build identical params (one source
@@ -9873,8 +10885,10 @@ def _edit_parameters_from_payload(p, user, resolve):
     q = p.get("quality")
     if q is None:
         q = "medium"
+    # never send an invalid knob; a payload with no aspect takes the model's own default
+    # (Edit Pro 3:5, Reference Pro auto) -- SCOPE_2026-09-26 E1.
     res, q, asp = clamp_edit_config(model_id, (p.get("resolution") or "1K"), q,
-                                    (p.get("aspect") or "3:4"))   # never send an invalid knob
+                                    (p.get("aspect") or edit_default_aspect(model_id)))
     kwargs = dict(resolution=res, aspect_ratio=asp, quality=q, scene_id=scene_id,
                   model_id=model_id)
     # multi-image: sources[] (primary + extra refs) if the client sent them, else [source];
@@ -9979,19 +10993,61 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         if not has_ref:
             return GenerationRequest(mode="video", no_card=no_card,
                                      note="pick a source image")
+        vmodel = (p.get("video_model") or "").strip() or DEFAULT_VIDEO_MODEL
+        negative = (p.get("negative") or "").strip()
+        camera = (p.get("camera_movement") or "")
+        adjusted = []
+        # Which submit shape build_shot_video_params will take: i2vPro for a framed I2V/FLF,
+        # referenceVideo for everything else carrying refs. Only the latter reads the input
+        # video lengths, and only the former could have carried a negative or a camera move.
+        i2v_road = (shot == "I2V" and imgs) or (shot == "FLF" and len(imgs) >= 2)
+        # A length this engine does not take is snapped by build_shot_video_params (6 -> 5 on
+        # a Tsubaki engine, 15 -> 10 on a 10 s engine); say so rather than change it silently.
+        # The drawer snaps on the client first (applyModelGating), so this is the receipt for
+        # a Remix-built or hand-rolled payload (review f-V-F5).
+        asked_dur = p.get("duration") or 5
+        used_dur = _snap_video_duration(asked_dur, vmodel)
+        try:
+            dur_moved = float(asked_dur) != used_dur
+        except (TypeError, ValueError):
+            dur_moved = True
+        if dur_moved:
+            takes = [d for d in video_model_durations(vmodel)
+                     if d != 15 or vmodel in VIDEO_15S_MODELS]
+            adjusted.append({"field": "duration", "asked": asked_dur, "used": used_dur,
+                             "why": "this engine takes {} s".format(
+                                 "/".join(str(d) for d in takes))})
+        durations = []
+        if not i2v_road and vids:
+            # V5: each reference video's real length, through the SAME lookup the quote and
+            # the spend both carry (RequestResolver.video_duration) -- all or nothing.
+            durations, unknown = input_video_durations(vids, rs.video_duration)
+            if unknown:
+                adjusted.append({"field": "inputVideoDurations", "asked": "measured lengths",
+                                 "used": [], "why": INPUT_VIDEO_UNKNOWN_WHY})
+        if i2v_road:
+            # V6: the builder drops both on an engine whose panel has neither; say so.
+            if negative and vmodel in VIDEO_NO_NEGATIVE_MODELS:
+                adjusted.append({"field": "negativePrompts", "asked": negative, "used": None,
+                                 "why": "negative prompt not used by this engine"})
+            if camera and camera != "unset" and vmodel in VIDEO_NO_CAMERA_MODELS:
+                adjusted.append({"field": "cameraMovement", "asked": camera, "used": None,
+                                 "why": "camera not used by this engine"})
         params = build_shot_video_params(
             shot, (p.get("prompt") or "").strip(), image_ids=imgs,
             video_ids=vids, audio_ids=auds,
             duration=p.get("duration") or 5,
             generate_audio=bool(p.get("generate_audio") or p.get("audio")),
             model=(p.get("video_model") or ""),
-            camera_movement=(p.get("camera_movement") or ""),
+            camera_movement=camera,
             quality=(p.get("quality") or "professional"),
             audio_language=(p.get("audio_language") or "english"),
-            negative=(p.get("negative") or "").strip(),
+            negative=negative,
             is_private=bool(p.get("is_private")),
-            use_prompt_helper=bool(p.get("prompt_helper")))
-        return GenerationRequest(mode="video", parameters=params, no_card=no_card)
+            use_prompt_helper=bool(p.get("prompt_helper")),
+            input_video_durations=durations)
+        return GenerationRequest(mode="video", parameters=params, no_card=no_card,
+                                 adjusted=adjusted)
 
     if road == "enhance":
         src = str(p.get("source") or "").strip()
@@ -10025,8 +11081,14 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
 
     # --- the image road (the payload's own `mode` is the inferenceProfile here) --------
     args = _gen_args_from_web_payload(p)
+    row = None
     if rs.model_version is not None:
-        args.model = rs.model_version(p.get("model_id") or "", args.model)
+        got = rs.model_version(p.get("model_id") or "", args.model)
+        if isinstance(got, dict):          # the chosen version ROW (model_version_resolver)
+            row = got
+            args.model = str(got.get("version_id") or "")
+        else:
+            args.model = got
     lora_ids = [vid for vid, _w in (args.lora or [])]
     if not args.model:
         return GenerationRequest(mode="image", no_card=args.no_card, note="pick a model",
@@ -10034,9 +11096,34 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
     # Same entitlement the submit applies, so the badge cannot quote a price for a
     # members-only option that will be stripped before it is sent.
     args.is_member = is_member
-    return GenerationRequest(mode="image", parameters=_gen_parameters(args),
+    # SCOPE_2026-09-26 G4 -- the Quality Tag booster sends the chosen VERSION's own tag, at
+    # build time and never in the gate (the gate's version-keyed routes carry no `extra`).
+    # Row read with a non-empty half -> that {prefix, suffix}. Row read with none (Tsubaki.3,
+    # Flash, Tsubaki.2, some SDXL) -> no qualityTag, as PixAI's own site sends, with a receipt
+    # entry because the booster was asked for. No row (no model_id, nothing listed) -> today's
+    # literal prefix. The drawer reads the chip disabled for the no-tag case.
+    if args.quality_tag and row is not None and "quality_tag" in row:
+        qt = row.get("quality_tag")
+        if isinstance(qt, dict):
+            args.quality_tag_obj = qt
+        else:
+            args.clamped.append({"field": "qualityTag", "asked": args.quality_tag,
+                                 "used": None,
+                                 "why": "this model version publishes no quality tag"})
+            args.quality_tag = ""
+    params = _gen_parameters(args)
+    adjusted = args.clamped
+    # G7 -- ONE gate, applied ONCE, here. The gated dict IS req.parameters: price() prices and
+    # card-matches it, submit() attaches the card to it and sends it, and the backstop gates
+    # inside price_task/submit_generation return this same object. A gate refusal raises
+    # PixAIError like any builder refusal (the badge's note; nothing is spent).
+    if rs.gate is not None:
+        params, gate_adjusted = rs.gate(params)
+        adjusted = list(adjusted) + list(gate_adjusted or [])
+        _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
+    return GenerationRequest(mode="image", parameters=params,
                              no_card=args.no_card, model_version_id=args.model,
-                             lora_version_ids=lora_ids, adjusted=args.clamped)
+                             lora_version_ids=lora_ids, adjusted=adjusted)
 
 
 def price(session, req):
@@ -10053,7 +11140,21 @@ def price(session, req):
 
     `cards` is the HELD count (kept under its old name for the badge's "(N left)"); the
     job's ticket cost is `cards_needed`, and `card_short` is the honest flag the badge
-    renders as "not enough -- costs the full price"."""
+    renders as "not enough -- costs the full price".
+
+    `adjusted` (SCOPE_2026-09-26 receipts) rides beside the cost whenever the build rewrote
+    anything -- a clamp, or the per-model gate's snap/strip/conversion -- so the drawer's and
+    the Loom's badges can say so BEFORE a spend. Absent when nothing was changed, the same
+    rule /api/generate's response follows (a key on every answer is a key clients ignore).
+    The object priced and card-matched here is req.parameters, already gated at build."""
+    out = _price_answer(session, req)
+    if req.adjusted:
+        out["adjusted"] = list(req.adjusted)
+    return out
+
+
+def _price_answer(session, req):
+    """price()'s verdict, minus the receipt (see price)."""
     if req.parameters is None:
         return {"cost": None, "free": False, "note": req.note}
     if req.price_note:
@@ -10254,6 +11355,28 @@ def web_generate(session, params, out_dir, *, name_length=60, name_sep="_", poll
             "saved": got["saved"], "paid_credit": paid}
 
 
+def _i2v_cli_unsent_notes(args):
+    """The receipts for what --generate-video was asked for and does not send (the CLI's half
+    of the receipts rule; build_request records the web road's). A Tsubaki engine has no
+    negative prompt and no camera move (VIDEO_NO_NEGATIVE_MODELS / VIDEO_NO_CAMERA_MODELS --
+    build_video_parameters drops both), and --video-ratio belongs to --reference-video.
+    --params-json is sent exactly as given, so only the ratio note applies to it."""
+    notes = []
+    if (getattr(args, "video_ratio", "") or "").strip():
+        notes.append("--video-ratio applies to --reference-video only (not sent).")
+    if getattr(args, "params_json", ""):
+        return notes
+    model = str(getattr(args, "video_model", "") or getattr(args, "model", "")
+                or DEFAULT_VIDEO_MODEL).strip()
+    label = (VIDEO_MODELS.get(model) or {}).get("label") or model
+    if (getattr(args, "negative", "") or "").strip() and model in VIDEO_NO_NEGATIVE_MODELS:
+        notes.append("negative prompt not used by {} (not sent).".format(label))
+    cam = (getattr(args, "camera_movement", "") or "").strip()
+    if cam and cam != "unset" and model in VIDEO_NO_CAMERA_MODELS:
+        notes.append("camera not used by {} (not sent).".format(label))
+    return notes
+
+
 def run_generate_video(args):
     """Create an image-to-video clip via PixAI (createGenerationTask + i2vPro params),
     poll to completion, download the mp4 into videos/, and catalog it (source='api',
@@ -10275,6 +11398,8 @@ def run_generate_video(args):
             i2v.get("model"), i2v.get("mode"), i2v.get("duration"),
             "  +audio" if i2v.get("generateAudio") else "",
             "  (first/last-frame)" if i2v.get("tailMediaId") else ""))
+        for n in _i2v_cli_unsent_notes(args):
+            print("  note: " + n)
         # No hardcoded reference price here: the line below prints THIS clip's real cost from
         # /task-price (and the card verdict for it). A fixed "a 5s clip costs ~27,500" used to
         # sit right above the true "~82,500" for a 15s clip -- two numbers on one screen for
@@ -10295,6 +11420,8 @@ def run_generate_video(args):
         print("Fetching existing video task (no credits):", task_id)
     else:
         _check_read_only("submit a video generation (spends credits)")
+        for n in _i2v_cli_unsent_notes(args):
+            print("  note: " + n)
         print("Submitting VIDEO generation task (this spends credits)...")
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc: a re-POSTed createGenerationTask is a second
@@ -10313,7 +11440,12 @@ def run_generate_video(args):
     # Result: getTaskById -> outputs.videos -> fileUrl -> download mp4 (same as --sync-videos).
     result = task_detail_gql(session, task_id) or {}
     _maybe_dump_params(args, result)
-    saved = _download_video_task(session, result, task_id, out, args, params)
+    # A recovered task is filed from ITS OWN parameters, as collect_generation does. `params`
+    # here was rebuilt from this run's CLI args (engine defaulting to v4.0.1), not read from
+    # the task, so handing it over filed a recovered clip under another engine's model, and
+    # its prompt / negative / duration fallbacks read the args too (review f-V-F1).
+    saved = _download_video_task(session, result, task_id, out, args,
+                                 (result.get("parameters") or {}) if existing_task else params)
     print("Generated + cataloged {} video(s):".format(len(saved)))
     for s in saved:
         print("  " + s)
@@ -10365,20 +11497,48 @@ def run_reference_video(args):
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
 
     is_private = (getattr(args, "vchannel", "private") == "private")
+    vmodel = (getattr(args, "video_model", "") or "v4.0.1")
+    ratio = (getattr(args, "video_ratio", "") or "").strip()
+    if not existing_task and not override:
+        # Before any upload: an engine that takes no video references refuses them here,
+        # not after _resolve_refs has already uploaded the local files.
+        _check_video_ref_caps(vmodel, vids)
+
+    # Each --ref-video's real length (SCOPE_2026-09-26 V5), read ONCE from the SOURCES --
+    # a local file is measured directly, a media id through the same lookup the gallery's
+    # quote and spend carry, against --out -- so the preview and the submit (whose ids are
+    # upload ids by then) send the identical list. All or nothing, as on the web road.
+    _lookup = [None]
+
+    def _vid_len(src):
+        if _is_local_source(src):
+            return duration(str(src))
+        if _lookup[0] is None:
+            _lookup[0] = make_video_duration_lookup(out)
+        return _lookup[0](src)
+    in_durs, in_unknown = input_video_durations(vids, _vid_len) if not override else ([], False)
 
     def _build(img_ids, vid_ids, aud_ids):
         # Duration: default 5 (matches the argparse flag + the i2v sibling -- was 15 here,
         # a real 3x cost divergence, B10), snapped to PixAI's allowed lengths before use
-        # for either preview or submit, same as the i2v CLI path (B9).
+        # for either preview or submit, same as the i2v CLI path (B9). No model_id: the
+        # builder sends THIS engine's own id (it used to send v4.0.1's for every engine).
         return build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
-            model=(getattr(args, "video_model", "") or "v4.0.1"),
-            duration=_snap_video_duration(getattr(args, "duration", 5) or 5,
-                                          (getattr(args, "video_model", "") or "v4.0.1")),
+            model=vmodel,
+            duration=_snap_video_duration(getattr(args, "duration", 5) or 5, vmodel),
             mode=getattr(args, "vmode", None) or "professional",
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",
-            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "")
+            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
+            ratio=ratio, input_video_durations=in_durs)
+
+    def _notes():
+        if in_unknown:
+            print("  note: " + INPUT_VIDEO_UNKNOWN_WHY + " (inputVideoDurations sent as []).")
+        if ratio and vmodel not in VIDEO_RATIO_MODELS:
+            print("  note: --video-ratio is only sent to the Tsubaki video engines ({}); "
+                  "not sent for {}.".format(", ".join(VIDEO_RATIO_MODELS), vmodel))
 
     # PREVIEW: no upload, no submit. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
@@ -10389,6 +11549,7 @@ def run_reference_video(args):
             ph = lambda lst: [("<upload:{}>".format(s) if _is_local_source(s) else s) for s in lst]
             prev = _build(ph(imgs), ph(vids), ph(auds))
             print(json.dumps({"parameters": prev}, indent=2))
+            _notes()
             _preview_card_note(args, prev)
         print("\n*** REFERENCE VIDEO IS EXPENSIVE *** (a 15s clip uses 3 V4.0 cards). "
               "Re-run with --confirm to submit.")
@@ -10414,6 +11575,7 @@ def run_reference_video(args):
             params = _build(_resolve_refs(session, imgs, "IMAGE"),
                             _resolve_refs(session, vids, "VIDEO"),
                             _resolve_refs(session, auds, None))
+            _notes()
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
@@ -10585,12 +11747,26 @@ def run_edit_image(args):
 def _needs_model_fix(row):
     """Return the model version-id to resolve if this row's model_name is missing
     or still a raw numeric id; else ''. Handles the case where model_name was
-    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run)."""
+    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run).
+
+    Only a NUMERIC id is ever handed to the version lookup. A video row collected before
+    2026-09-26 stored the engine NAME ("tbkv1.0.1", "v4.0.1") in model_id, and this passed it
+    to getGenerationModelByVersionId as if it were a version id -- a lookup that can only
+    fail (retried and printed every --sync) or answer "unresolved", which --relabel-removed
+    then stamps permanently (PROBE_2026-09-26 V09). Those rows are repaired offline by the
+    gallery's catalog migration instead. A video row WITH a numeric id and a blank name is
+    filled like any other row: video model names are dynamic (owner ruling 3, 2026-09-26) --
+    unless the id is not its engine's own (_video_model_id_fits): --sync-videos files a v2.7 /
+    v3.0.1 clip under the IMAGE checkpoint its task carried, and titling that would put an
+    image model's name on a video row (review V-R2)."""
     mid = (row.get("model_id") or "").strip()
     name = (row.get("model_name") or "").strip()
     if not mid and name.isdigit():
         mid = name  # model_name itself is the numeric id
-    if not mid:
+    if not mid or not mid.isdigit():
+        return ""
+    if (str(row.get("is_video") or "").strip() == "1"
+            and not _video_model_id_fits(row.get("video_model"), mid)):
         return ""
     if not name or name == mid or name.isdigit():
         return mid
@@ -10787,17 +11963,20 @@ _TRAIN_ARCHS = (
     ("SD_V1_MODEL",    "SD 1.5"),
 )
 
-# PixAI's curated training-base list is NOT the public generationModels catalog (the
-# owner caught this -- my first build pulled the general model-picker feed). The real
-# list is served bundled with the pricing matrix by the train page's own config, which
-# is NOT reachable through any documented endpoint or the RE harvest (probed exhaustively
-# 2026-08-06: the connection's `feed` arg is ignored, `category:"in-house"` only covers
-# SD 1.5, and the SDXL officials aren't in the public catalog at all). So this is a
-# CAPTURED SNAPSHOT of that config (owner pasted the real response 2026-08-06). It matches
-# the site exactly. To refresh when PixAI adds base models: on the train-lora page, capture
-# the config response (models[] + pricing) and replace both constants below.
+# PixAI's curated training-base list is NOT the public generationModels catalog (the owner
+# caught this -- the first build pulled the general model-picker feed). Both of PixAI's train
+# pages read it, bundled with the pricing matrix and the dataset's image rule, from the public
+# dynamic-config key `trainLoraModels`: GET <api>/config/trainLoraModels, no credential needed.
+# The 2026-08-06 note here called that config "NOT reachable through any documented endpoint";
+# it was wrong -- the key sat in the bundle all along, and the 2026-09-26 probe read it with a
+# plain GET (SCOPE_2026-09-26 E7, probe findings SURF-13 / T07). training_config() now reads it
+# live through _config_get, cached, and falls back to the snapshot below on any failure, so a
+# failed read still offers and prices every base the site offered on 2026-09-26 -- Tsubaki.3
+# (DiT.3, 100,000 credits) included. To refresh the snapshot, capture that GET and replace the
+# three constants below.
 _TRAIN_BASE_MODELS = [
     # (version_id, model_id, title, modelType, usage, cover)
+    ("2024383379556065549", "2024383378759147749", "Tsubaki.3", "MMDIT26B_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/87954a09-c834-48eb-ae0b-698cd9c7f471"),
     ("1983308862240288769", "1982880136609467518", "Tsubaki.2", "MMDIT26A_MODEL", "animation", "https://images-ng.pixai.art/images/stillThumb/b03c47d1-fcfa-4502-af96-7ef049ebaade"),
     ("1894092844569363483", "1884107375027888751", "Tsubaki", "DIT7_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/98cd261b-9a65-42cd-916b-df27b5e61607"),
     ("1844843519625072849", "1844843518698131638", "Illustrious-v1.0", "SDXL_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/2e0591cc-50fa-4e37-89c6-e641cf65c483"),
@@ -10820,72 +11999,302 @@ _TRAIN_BASE_MODELS = [
     ("1648918115270508582", "1648918113336934437", "Anything V5", "SD_V1_MODEL", "animation", "https://images-ng.pixai.art/images/thumb/e0e7b6a7-baa5-4178-adbe-36610797019f"),
 ]
 
-# Real training prices per architecture (captured with the model list 2026-08-06). PixAI
-# prices training from this matrix, keyed by modelType: `price` for a fresh dataset,
-# `reuse` when re-using an existing dataset, `retrain` for a re-run. A free-training quota
-# unit overrides all of this to 0. `originalPrice` (when present) is the pre-discount tag.
+# Training prices per architecture (the same config's pricing.pricesByModelType, 2026-09-26
+# capture). PixAI's basic trainer prices a run from this matrix, keyed by modelType: `price` for
+# a fresh dataset -- the only tier this app quotes, since it never reuses a dataset or retrains
+# -- `reuse` when re-using an existing dataset, `retrain` for a re-run. `originalPrice` (when
+# present) is the pre-discount tag and is never what a run costs. A usable free-training quota
+# overrides all of it to 0, and so does a matching training free card.
 _TRAIN_PRICING = {
     "SD_V1_MODEL":    {"price": 25000, "retrain": 25000, "reuse": 12500},
     "SDXL_MODEL":     {"price": 25000, "retrain": 25000, "reuse": 12500, "originalPrice": 75000},
     "DIT7_MODEL":     {"price": 50000, "retrain": 50000, "reuse": 25000, "originalPrice": 150000},
     "MMDIT26A_MODEL": {"price": 100000, "retrain": 50000, "reuse": 50000, "originalPrice": 200000},
+    "MMDIT26B_MODEL": {"price": 100000, "retrain": 70000, "reuse": 70000},
 }
 
+# The dataset's image rule (the same config's imageConstraints, 2026-09-26 capture): every
+# image at least minWidth wide AND minHeight high, its long side over its short side at most
+# maxAspectRatio. This is the SERVER's rule shape -- the contract's TRAINING_IMAGE_REJECTED
+# error carries exactly these fields -- and it is stricter than the basic wizard's own client
+# check (a 262,144-pixel count and a 1:3..3:1 ratio: an 800x400 image passes that and fails
+# this), so this per-side rule is the safe superset (probe T04, verifier correction).
+_TRAIN_IMAGE_CONSTRAINTS = {"minWidth": 512, "minHeight": 512, "maxAspectRatio": 3}
 
-def training_price_for_version(version_id):
-    """The base training price (fresh dataset) for the base model behind version_id, from
-    the captured pricing matrix -- or None if the version isn't a known base or its type
-    isn't priced. None means 'unknown', which the caller must treat as the unsafe case."""
-    arch = next((m[3] for m in _TRAIN_BASE_MODELS if m[0] == str(version_id)), None)
-    row = _TRAIN_PRICING.get(arch or "")
+# The architectures whose trigger words must be at least 30 characters (PixAI's own
+# TrainLoraFlowHeader rule, unchanged since August: DiT.2 and DiT.3).
+_TRAIN_LONG_TRIGGER_TYPES = ("MMDIT26A_MODEL", "MMDIT26B_MODEL")
+TRAIN_TRIGGER_MAX = 256
+TRAIN_TRIGGER_MIN_DIT = 30
+
+
+# --- PixAI's public dynamic config (GET <api>/config/<key>) --------------------------------
+# The site reads a handful of keys off this road (trainLoraModels, trainLoraStatus, constants,
+# ...). It sits OUTSIDE the /v2 REST routes, so tests/conftest.py's _rest_get/_rest_post block
+# never covered it: _config_get is the ONE reader, and an autouse conftest fixture blocks it, so
+# no test can reach PixAI through it. Anonymous (no credential is sent -- the 2026-09-26 probe
+# read both training keys with a plain GET), short timeout, single attempt, read-only.
+CONFIG_API_BASE = API_URL.rsplit("/graphql", 1)[0] + "/config"
+# Cached per key, the _model_profiles discipline: an hour for an answer, a minute for a failure
+# (so an unreachable key is retried once a minute, not on every call). conftest clears it.
+_CONFIG_TTL = 3600.0
+_CONFIG_FAIL_TTL = 60.0
+_config_cache = {}                           # key -> (fetched_at_monotonic, dict|None)
+
+
+def _config_get(key, timeout=10):
+    """GET one public dynamic-config key. Returns the parsed JSON; raises PixAIError on a
+    non-2xx or a transport failure. Callers go through _cached_config, which fails soft."""
+    try:
+        r = requests.get(CONFIG_API_BASE + "/" + str(key), timeout=timeout)
+    except requests.exceptions.SSLError:
+        raise PixAIError(_ssl_help())
+    except requests.RequestException as e:
+        raise PixAIError("config {} unreachable: {}".format(key, e))
+    if not r.ok:
+        raise PixAIError("config {} -> HTTP {}".format(key, r.status_code))
+    return r.json()
+
+
+def _cached_config(key, ttl=_CONFIG_TTL):
+    """The config dict for `key`, or None when it could not be read (cached for
+    _CONFIG_FAIL_TTL) or did not answer with a JSON object. Never raises."""
+    now = time.monotonic()
+    hit = _config_cache.get(key)
+    if hit is not None and (now - hit[0]) < (ttl if hit[1] is not None else _CONFIG_FAIL_TTL):
+        return hit[1]
+    try:
+        data = _config_get(key)
+    except Exception:                                   # noqa: BLE001 -- fail soft to today
+        data = None
+    if not isinstance(data, dict):
+        data = None
+    _config_cache[key] = (now, data)
+    return data
+
+
+def _train_models_from(raw):
+    """The live config's models[] as the app's row dicts, or None when it has none usable."""
+    rows = (raw or {}).get("models") if isinstance(raw, dict) else None
+    out = []
+    for m in rows if isinstance(rows, list) else []:
+        if not isinstance(m, dict):
+            continue
+        vid, mtype = str(m.get("versionId") or "").strip(), str(m.get("modelType") or "").strip()
+        if not vid or not mtype:
+            continue
+        out.append({"version_id": vid, "model_id": str(m.get("modelId") or ""),
+                    "title": str(m.get("modelName") or vid), "model_type": mtype,
+                    "usage": str(m.get("usage") or ""), "cover": str(m.get("coverUrl") or "")})
+    return out or None
+
+
+def _train_pricing_from(raw):
+    """The live config's pricing.pricesByModelType, integers only, or None when absent."""
+    table = (((raw or {}).get("pricing") or {}).get("pricesByModelType")
+             if isinstance(raw, dict) else None)
+    if not isinstance(table, dict):
+        return None
+    out = {}
+    for mtype, row in table.items():
+        if not isinstance(row, dict):
+            continue
+        clean = {}
+        for k in ("price", "retrain", "reuse", "originalPrice"):
+            try:
+                if row.get(k) is not None:
+                    clean[k] = int(row[k])
+            except (TypeError, ValueError):
+                pass
+        if "price" in clean:
+            out[str(mtype)] = clean
+    return out or None
+
+
+def _train_constraints_from(raw):
+    """imageConstraints off the live config, each field falling back on its own to the
+    snapshot's when absent or not a positive number."""
+    live = (raw or {}).get("imageConstraints") if isinstance(raw, dict) else None
+    out = dict(_TRAIN_IMAGE_CONSTRAINTS)
+    for k in out:
+        try:
+            v = float((live or {}).get(k))
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            out[k] = v
+    return out
+
+
+def training_config():
+    """PixAI's basic-training config: {models, pricing, image_constraints, live}.
+
+    Read live from /config/trainLoraModels (cached, see _cached_config) and falling back,
+    piece by piece, to the 2026-09-26 snapshot above: a failed read, or a body missing a
+    piece, never leaves the panel with nothing to offer or price. `live` says whether the
+    model list itself came off the wire. Read-only; never raises."""
+    raw = _cached_config("trainLoraModels")
+    live_models = _train_models_from(raw)
+    models = live_models or [
+        {"version_id": v, "model_id": mid, "title": title, "model_type": mtype,
+         "usage": usage, "cover": cover}
+        for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS]
+    pricing = _train_pricing_from(raw) or {k: dict(v) for k, v in _TRAIN_PRICING.items()}
+    return {"models": models, "pricing": pricing,
+            "image_constraints": _train_constraints_from(raw), "live": bool(live_models)}
+
+
+def training_model_type(version_id, config=None):
+    """The architecture (modelType) of a training base, by VERSION id; None if unknown."""
+    cfg = config or training_config()
+    return next((m["model_type"] for m in cfg["models"]
+                 if m["version_id"] == str(version_id)), None)
+
+
+def training_price_for_version(version_id, config=None):
+    """The training price (fresh dataset: `price`, never originalPrice) for the base behind
+    version_id, from the live config (snapshot fallback) -- or None if the version isn't a
+    known base or its type isn't priced. None means 'unknown', which the caller must treat as
+    the unsafe case. The quote and the confirm both read it through the same cache, so they
+    cannot disagree within the cache's hour."""
+    cfg = config or training_config()
+    row = cfg["pricing"].get(training_model_type(version_id, cfg) or "")
     return row.get("price") if row else None
 
 
-def list_trainable_base_models(session=None, per_type=None):
+def default_training_base(config=None):
+    """The base the panel pre-selects: the first SDXL row of the list, else the first row --
+    PixAI's own default (`e.find(SdxlModel) ?? e[0]`). Never "the first group's first model":
+    with Tsubaki.3 in the list that would pre-select the 100,000-credit base."""
+    cfg = config or training_config()
+    offered = [m for m in cfg["models"] if m["model_type"] in dict(_TRAIN_ARCHS)]
+    pick = next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None) or \
+        (offered[0] if offered else None)
+    return pick["version_id"] if pick else ""
+
+
+def list_trainable_base_models(session=None, per_type=None, config=None):
     """The base models a LoRA can be trained on, grouped by architecture -- the train
-    page's Model Type -> Model Theme picker. Served from PixAI's own curated config (see
-    _TRAIN_BASE_MODELS' note). `session` is accepted but unused: the list is a captured
-    snapshot, not a live query, because the real config endpoint isn't reachable. Each
-    model dict: {version_id, model_id, title, cover, usage}. version_id is what
-    `submit_training(base_model_id=...)` takes."""
+    page's Model Type -> Model Theme picker, in _TRAIN_ARCHS order. Served from PixAI's own
+    config (training_config: live, snapshot fallback); `session` is accepted but unused, as
+    the config read is anonymous. Each model dict: {version_id, model_id, title, cover, usage}.
+    version_id is what `submit_training(base_model_id=...)` takes. An architecture this app has
+    no label for is left out, as the site's own chip list does."""
+    cfg = config or training_config()
     groups = []
     for arch, label in _TRAIN_ARCHS:
-        models = [
-            {"version_id": v, "model_id": mid, "title": title, "cover": cover, "usage": usage}
-            for (v, mid, title, mtype, usage, cover) in _TRAIN_BASE_MODELS if mtype == arch
-        ]
+        models = [{"version_id": m["version_id"], "model_id": m["model_id"], "title": m["title"],
+                   "cover": m["cover"], "usage": m["usage"]}
+                  for m in cfg["models"] if m["model_type"] == arch]
         if models:
-            price = (_TRAIN_PRICING.get(arch) or {}).get("price")
+            price = (cfg["pricing"].get(arch) or {}).get("price")
             groups.append({"arch": arch, "label": label, "models": models, "price": price})
     return groups
 
 
 def training_free_quota(session):
-    """How many FREE LoRA trainings the account has left. PixAI tracks these as a QUOTA
-    under the currency `free::user_lora_training` -- NOT as a kaisuuken free card (the
-    card pool is generation-only, which is why /v2/kaisuuken/summary never lists one).
-    Read-only. Returns an int; 0 on any failure, which is the safe direction: 0 means
-    'treat this as paid', never 'assume it's free'."""
+    """How many FREE LoRA trainings this account can use right now -- the membership quota
+    under the currency `free::user_lora_training`, counted ONLY for a member. Read-only.
+
+    PixAI's own trainer counts the quota only when `me.membership.tier != null` (tier 0
+    counts), and prices the run in full otherwise (probe T09): so this returns quotaAmount when
+    the membership tier -- read in the SAME query as the quota -- is present, and 0 when it is
+    absent, null, or the read failed. 0 is the safe direction: it means 'treat this as paid',
+    never 'assume it's free', so the paid confirm's accept_credit_cost applies.
+
+    The quota is ONE of the two ways a training runs free. The other is a training free card
+    (kaisuuken type `training-task`): PixAI's site checks for one too and attaches it --
+    match_training_kaisuuken. (Owner ruling 4, 2026-09-26: the 2026-07-26 note "the free
+    trainings ARE cards" and the old docstring here, "the quota, NOT a card", were each half
+    right.)"""
     try:
         d = gql_adhoc(session,
-                      "query($currency:String!){ me { id quotaAmount(currency:$currency) } }",
+                      "query($currency:String!){ me { id membership { tier }"
+                      " quotaAmount(currency:$currency) } }",
                       {"currency": _TRAIN_FREE_CURRENCY}) or {}
-        return int(((d.get("me") or {}).get("quotaAmount")) or 0)
-    except (PixAIError, TypeError, ValueError):
+        me = d.get("me") or {}
+        membership = me.get("membership")
+        tier = membership.get("tier") if isinstance(membership, dict) else None
+        if tier is None:
+            return 0
+        return max(0, int(me.get("quotaAmount") or 0))
+    except (PixAIError, requests.RequestException, TypeError, ValueError, AttributeError):
         return 0
 
 
+def match_training_kaisuuken(session, base_version_id, raise_on_error=False):
+    """The read-only training free-card check: /v2/kaisuuken/check with PixAI's own training
+    shape {type: "training-task", baseModelId: <base VERSION id>, version: 2} (the site's
+    useKaisuukenMatch). Same result and coverage rules as match_kaisuuken; nothing is
+    consumed until createTrainingTask carries the returned id."""
+    return match_kaisuuken(session, None, enrich=True, raise_on_error=raise_on_error,
+                           training_base_model_id=base_version_id)
+
+
+# The training pause switch's cache clock: PixAI's own pages poll it once a minute.
+_TRAIN_STATUS_TTL = 60.0
+
+
+def training_pause():
+    """None when LoRA training is open -- or when the pause switch could not be read, which
+    proceeds exactly as before this check existed -- else {"resumes_at": iso-or-""}.
+
+    PixAI's public /config/trainLoraStatus: paused when `state == "PAUSED"` or
+    `disabled == true` (its trainLoraStatus module); `resumesAt` is named only when it parses
+    to a time still in the future. While paused the site redirects both train pages to a
+    notice; this app refuses the submit instead. Read-only, cached for a minute."""
+    raw = _cached_config("trainLoraStatus", ttl=_TRAIN_STATUS_TTL)
+    if not isinstance(raw, dict):
+        return None
+    if not (raw.get("state") == "PAUSED" or raw.get("disabled") is True):
+        return None
+    resumes = ""
+    ra = raw.get("resumesAt")
+    if isinstance(ra, str) and ra.strip():
+        try:
+            when = datetime.datetime.fromisoformat(ra.strip().replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=datetime.timezone.utc)
+            if when > datetime.datetime.now(datetime.timezone.utc):
+                resumes = when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        except ValueError:
+            pass
+    return {"resumes_at": resumes}
+
+
 def normalize_trigger_words(text):
-    """PixAI's own trigger-word rules, from the train-LoRA form: no leading/trailing
-    spaces and no consecutive spaces (the form states both). Returns the cleaned string."""
-    return " ".join(str(text or "").split())
+    """PixAI's own trigger-word normalizer, in its order (the train page's he()): runs of
+    CR/LF become ", "; any whitespace run becomes one space; a run of commas with spaces
+    between them becomes one ", "; lowercase; then leading and trailing commas and whitespace
+    are stripped. The string validate_training checks -- and the one submitted -- is this."""
+    s = str(text or "")
+    s = re.sub(r"[\r\n]+", ", ", s)
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r",\s*(?:,\s*)+", ", ", s)
+    s = s.lower()
+    return re.sub(r"^[,\s]+|[,\s]+$", "", s)
+
+
+def trigger_word_length(text):
+    """A trigger-word string's length as PixAI's page measures it: JavaScript's
+    `String.length`, i.e. UTF-16 code units -- a character outside the Basic Multilingual
+    Plane, such as an emoji, counts 2. Python's len() would count it once, and so let through a
+    256-emoji string PixAI refuses as too long while refusing a 15-emoji DiT.3 trigger it
+    accepts. The train panel's counter shows the same number (normalizeTrigger in
+    gallery/src/gen/trainCore.js)."""
+    return len(str(text or "").encode("utf-16-le")) // 2
 
 
 def validate_training(base_model_id, media_ids, title, trigger_words, category,
-                      training_task_id=""):
+                      training_task_id="", config=None):
     """Mirror the site's OWN pre-submit validation (its Er() builder) so a bad request is
     refused here instead of burning a round trip -- or worse, a free-training quota unit.
-    Returns the normalized trigger words. Raises PixAIError with a plain-language reason."""
+    Returns the normalized trigger words. Raises PixAIError with a plain-language reason.
+
+    Trigger words follow PixAI's rule on the NORMALIZED string: empty refused, over 256
+    characters refused, and under 30 refused on a DiT.2 / DiT.3 base (MMDIT26A / MMDIT26B).
+    The image rule needs each image's size, which this has no way to know -- the caller runs
+    check_training_images over its own catalog."""
     # base_model_id is the model VERSION id (list_trainable_base_models' version_id) --
     # PixAI's baseModelId input takes the version, not the model, id.
     if not base_model_id:
@@ -10902,19 +12311,73 @@ def validate_training(base_model_id, media_ids, title, trigger_words, category,
     tw = normalize_trigger_words(trigger_words)
     if not tw:
         raise PixAIError("trigger words are required -- they're how you summon the LoRA")
-    if len(tw) > 200:
-        raise PixAIError("trigger words are too long")
+    # Counted the way the site counts them (trigger_word_length: JavaScript's `length`, UTF-16
+    # code units), so an emoji is 2 here as it is there.
+    units = trigger_word_length(tw)
+    if units > TRAIN_TRIGGER_MAX:
+        raise PixAIError("trigger words are too long -- %d characters at most, yours are %d"
+                         % (TRAIN_TRIGGER_MAX, units))
+    if training_model_type(base_model_id, config) in _TRAIN_LONG_TRIGGER_TYPES \
+            and units < TRAIN_TRIGGER_MIN_DIT:
+        raise PixAIError("trigger words must be at least %d characters on a DiT.2 or DiT.3 "
+                         "base -- yours are %d" % (TRAIN_TRIGGER_MIN_DIT, units))
     if str(category or "") not in TRAIN_CATEGORIES:
         raise PixAIError("pick a category (%s)" % "/".join(TRAIN_CATEGORIES))
     return tw
+
+
+def check_training_images(media_ids, dims, constraints=None):
+    """Hold each dataset image to PixAI's training image rule (training_config's
+    image_constraints: each side at least minWidth / minHeight, long side over short side at
+    most maxAspectRatio). `dims` is {media_id: (width, height)} from the caller's catalog.
+
+    Returns (rejected, unchecked): `rejected` is [{media_id, width, height, why}] for images
+    the rule refuses; `unchecked` lists the ids whose size is unknown (not in `dims`, or not
+    positive numbers) -- those are NOT passed as checked, the caller says they were not.
+
+    This app REFUSES a run holding a rejected image, naming each one. PixAI's own basic
+    wizard silently drops them and trains on the rest; refusing is deliberate here, so a paid
+    run never trains on a different dataset than the one picked."""
+    c = dict(_TRAIN_IMAGE_CONSTRAINTS)
+    c.update(constraints or training_config()["image_constraints"])
+    min_w, min_h, max_ar = float(c["minWidth"]), float(c["minHeight"]), float(c["maxAspectRatio"])
+    rejected, unchecked = [], []
+    for mid in [str(m) for m in (media_ids or []) if str(m).strip()]:
+        wh = (dims or {}).get(mid)
+        try:
+            w, h = float(wh[0]), float(wh[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            w = h = 0.0
+        if not (w > 0 and h > 0):
+            unchecked.append(mid)
+            continue
+        if w < min_w or h < min_h:
+            why = "smaller than %dx%d" % (min_w, min_h)
+        elif max(w, h) / min(w, h) > max_ar:
+            why = "longer than %g:1" % max_ar
+        else:
+            continue
+        rejected.append({"media_id": mid, "width": int(w), "height": int(h), "why": why})
+    return rejected, unchecked
+
+
+def describe_rejected_training_images(rejected):
+    """The refusal's own words for check_training_images' `rejected` list."""
+    shown = ", ".join("%s (%dx%d, %s)" % (r["media_id"], r["width"], r["height"], r["why"])
+                      for r in rejected[:8])
+    more = " and %d more" % (len(rejected) - 8) if len(rejected) > 8 else ""
+    return ("PixAI won't train on %d of these images — remove %s and try again: %s%s."
+            % (len(rejected), "it" if len(rejected) == 1 else "them", shown, more))
 
 
 def submit_training(session, base_model_id, media_ids, title, trigger_words, category,
                     training_task_id="", primary_lora_model_id="", kaisuuken_id=""):
     """Submit a real LoRA training task to PixAI (`createTrainingTask`).
 
-    SPENDS unless the account has free-training quota left (see training_free_quota) --
-    so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for exactly the reason
+    SPENDS unless the account has usable free-training quota left (training_free_quota) or
+    the caller attaches a matching training free card (`kaisuuken_id`, from
+    match_training_kaisuuken) -- so it goes through gql_mutate: SINGLE ATTEMPT, no retry, for
+    exactly the reason
     every other spend path does. A lost response after the server accepted the task
     would, on retry, start a SECOND training and consume a second quota unit (or a real
     credit charge, which for training is large). _check_read_only gates it like every
@@ -10957,7 +12420,15 @@ def source_media_of_task(task):
       * edit/reference  -> parameters.chat.mediaId          (kind "edit")
       * enhance/plugin  -> parameters.inputs.image.media_id (kind "enhance")
       * upscale/hires   -> parameters.mediaId + upscale|enlarge ratio  (kind "upscale")
-    A plain txt2img has no input image and returns (None, None)."""
+      * context image   -> parameters.contextImages[0]      (kind "derived")
+    A plain txt2img has no input image and returns (None, None).
+
+    Context images (SCOPE_2026-09-26 E3): a Tsubaki.3 / Flash generation made from a
+    reference carries its source ONLY in `contextImages` -- no top-level mediaId, no chat
+    block (the owner's seven 2026-09-23 runs) -- and a site Edit-dialog instruction edit of
+    a Tsubaki picture has the same shape, so the two cannot be told apart from parameters
+    and both file as "derived", the img2img kind. With two or more context images the FIRST
+    is the source; which one "counts" beyond that is a design call not made here."""
     params = ((task or {}).get("parameters") or {})
     if not isinstance(params, dict):
         return (None, None)
@@ -10991,6 +12462,9 @@ def source_media_of_task(task):
     if mid:
         ratio = params.get("upscale") or params.get("enlarge")
         return (str(mid), "upscale" if ratio else "derived")
+    ctx = params.get("contextImages")
+    if isinstance(ctx, list) and ctx and ctx[0] and str(ctx[0]).strip():
+        return (str(ctx[0]).strip(), "derived")
     return (None, None)
 
 
@@ -11481,6 +12955,14 @@ def run_watch(args):
 # "Active" is the server-computed `runtimeStatus == "running"` -- no client date math.
 # Read-only: browsing contests never spends. See ../moonglade-internal/private/APP_OPERATIONS_FULL.md.
 _CONTEST_PAGE_SIZE = 50
+# The contest board's page CEILING and pace (SCOPE_2026-09-26 E4). list_contests stops at the
+# board's own `totalPage`; this ceiling only bounds a board that keeps growing -- it was a bare
+# 6, and the 2026-09-26 board already answered totalPage 7 at 50 a page (330 contests), so the
+# oldest page silently fell off. Pages are read 0.35 s apart, the contest sweep's own pace
+# (moonglade_gallery._CONTEST_SYNC_PAUSE): the board is a public read and CLAUDE.md asks for
+# paced requests.
+_CONTEST_MAX_PAGES = 20
+_CONTEST_PAGE_PAUSE = 0.35
 
 
 def _contest_title(t):
@@ -11491,13 +12973,17 @@ def _contest_title(t):
     return t or ""
 
 
-def list_contests(session, active_only=False, max_pages=6):
+def list_contests(session, active_only=False, max_pages=_CONTEST_MAX_PAGES):
     """Return the PixAI contest board as normalized dicts, newest-first. `active_only`
     keeps just the currently-running ones (runtimeStatus=='running'). Pages through
-    /v2/contest/list up to max_pages (the board is ~2 pages). Read-only, no spend."""
+    /v2/contest/list until the board's own `totalPage`, never past `max_pages`
+    (_CONTEST_MAX_PAGES), pausing _CONTEST_PAGE_PAUSE between pages; when the ceiling rather
+    than `totalPage` ends the walk, the log says so. Read-only, no spend."""
     out = []
     page = 1
     while True:
+        if page > 1:
+            time.sleep(_CONTEST_PAGE_PAUSE)
         d = _rest_get(session, "/contest/list",
                       params={"page": page, "pageSize": _CONTEST_PAGE_SIZE}) or {}
         rows = d.get("data") or []
@@ -11541,7 +13027,14 @@ def list_contests(session, active_only=False, max_pages=6):
                 "result_url": r.get("resultUrl") or "",
             })
         total_page = int(d.get("totalPage") or 1)
-        if page >= total_page or page >= max_pages:
+        if page >= total_page:
+            break
+        if page >= max_pages:
+            import moonglade_logging
+            moonglade_logging.get_logger().warning(
+                "contest board: stopped at the %d-page ceiling; the board reports %d pages, "
+                "so its oldest %d page(s) were not read", max_pages, total_page,
+                total_page - page)
             break
         page += 1
     return out
@@ -12022,7 +13515,8 @@ def _target_model_id(parameters):
 _KAISUUKEN_CHECK_VERSION = 2
 
 
-def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
+def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False, *,
+                    training_base_model_id=""):
     """POST /v2/kaisuuken/check (protocol version 2, see _KAISUUKEN_CHECK_VERSION) with a
     generation's `parameters` and return the best matching TICKET as
       {id, expiresAt, templateId, total, consumeAmount, covered, balance_unknown, name?}
@@ -12044,9 +13538,21 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     generation's own model when more than one template is eligible -- so an Edit gen spends
     an Edit card, not a same-expiry Reference card that merely also matched -- and (b) attach
     the card's human `name` for honest UI ("Edit Pro Only covers this", not a guess). The
-    default (False) keeps the original single-call behavior for every existing caller."""
-    if not parameters:
+    default (False) keeps the original single-call behavior for every existing caller.
+
+    `training_base_model_id` switches the body to PixAI's TRAINING check (the site's
+    useKaisuukenMatch, owner ruling 4, 2026-09-26): {type: "training-task", baseModelId:
+    <the base VERSION id>, version: 2}, with no `parameters` at all. The answer is read with
+    exactly the same rules. match_training_kaisuuken is the named way in."""
+    training_base = str(training_base_model_id or "").strip()
+    if not parameters and not training_base:
         return None
+    if training_base:
+        body = {"type": "training-task", "baseModelId": training_base,
+                "version": _KAISUUKEN_CHECK_VERSION}
+    else:
+        body = {"type": "generation-task", "parameters": parameters,
+                "version": _KAISUUKEN_CHECK_VERSION}
     try:
         # `version: 2` is load-bearing (issue #15, live-verified 2026-08-16). Without it PixAI
         # runs its v1 matcher, which knows only single-ticket cards and answers `matches: []`
@@ -12055,9 +13561,7 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
         # the multi-ticket match plus `consumeAmount` = tickets this job COSTS. NOTE the server
         # does NOT filter by balance: a 15s job comes back matched even when held < needed, so
         # coverage is decided HERE (see `covered` below), the one place every caller reads it.
-        data = _rest_post(session, "/kaisuuken/check",
-                          {"type": "generation-task", "parameters": parameters,
-                           "version": _KAISUUKEN_CHECK_VERSION}) or {}
+        data = _rest_post(session, "/kaisuuken/check", body) or {}
     except (PixAIError, ValueError):
         if raise_on_error:
             raise
@@ -12113,7 +13617,7 @@ def match_kaisuuken(session, parameters, enrich=False, raise_on_error=False):
     pool = covered_pool or matches
     # (A) When several cards are eligible, prefer the one whose model IS this generation's
     # model; fall back to the full set if none match (or we didn't enrich).
-    want = _target_model_id(parameters)
+    want = training_base or _target_model_id(parameters)
     if enrich and want and len(pool) > 1:
         preferred = [mt for mt in pool
                      if str((by_tid.get(mt.get("templateId")) or {}).get("model_version_id") or "") == want]
@@ -12201,7 +13705,12 @@ _PRICE_SCALARS = frozenset((
     "lightning", "vaeModelId", "workflowName", "sceneId", "watermark"))
 _PRICE_NESTED = frozenset((
     "controlNets", "ipAdapter", "animateDiff", "workflow", "i2vPro", "referenceVideo",
-    "t2i2v", "inputs", "chat", "inpaint", "loraParameters"))
+    "t2i2v", "inputs", "chat", "inpaint", "loraParameters",
+    # SCOPE_2026-09-26 G3: the task-price schema takes contextImages as URL-encoded JSON, and
+    # it moves the price (live quote 2026-09-26: 5,100 for one image, 6,000 for two at
+    # 1632x912 pro). Landed in the SAME commit as the gate that sends it, so the badge never
+    # quotes a context-image job without its surcharge.
+    "contextImages"))
 # The upscale keys above are why the cost badge tracks an upscale at all -- the two methods
 # differ by roughly 3x at their maximum ratio. Deliberately NOT listed: enlargeModel,
 # upscaleSampler and qualityTag. They are real submit params, but they are not in this
@@ -12217,8 +13726,14 @@ def price_task(session, params):
         return None
     # Same architecture gate the submit applies, so the badge prices the shape that will be
     # sent (quote == charge for DiT/SDXL). Local reassignment only -- the caller's params
-    # object (which price() also hands to match_kaisuuken) is left untouched.
-    params = _gate_params_for_model(session, params)
+    # object is left untouched. Since 2026-09-26 this is a BACKSTOP: the road hands in a dict
+    # already gated at build, for which the gate returns the SAME object. Its one refusal (a
+    # reference plus LoRAs on an MMDIT26B model) is "no price", never a raise -- this
+    # function fails soft.
+    try:
+        params = _gate_params_for_model(session, params)
+    except PixAIError:
+        return None
     q = {}
     for k, v in params.items():
         if v is None:
@@ -14618,6 +16133,11 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
+    gen.add_argument("--video-ratio", dest="video_ratio", default="",
+                     choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
+                     help="--reference-video output aspect ratio, Tsubaki video engines only "
+                          "(tbkv1.0 / tbkv1.0.1): one of " + ", ".join(VIDEO_RATIOS)
+                          + ". Default/adaptive = omitted, PixAI infers it from the references")
     # --enhance / --src / --filter-id / --strength are gone -- see build_filter_parameters'
     # former neighbourhood above for both measurements. Art filters run in the browser now
     # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
@@ -14633,8 +16153,10 @@ def main():
                      help="edit model id (default PixAI Edit Pro {})".format(EDIT_PRO_MODEL_ID))
     gen.add_argument("--edit-resolution", dest="edit_resolution", default="1K",
                      help="edit output resolution (default 1K; e.g. 1K/2K)")
-    gen.add_argument("--edit-aspect", dest="edit_aspect", default="3:4",
-                     help="edit output aspect ratio (default 3:4)")
+    gen.add_argument("--edit-aspect", dest="edit_aspect", default="",
+                     help="edit output aspect ratio (default: the edit model's own -- Edit Pro "
+                          "3:5; Reference Pro 'auto', which sends no aspect ratio and leaves "
+                          "the frame to PixAI)")
     gen.add_argument("--edit-quality", dest="edit_quality", default="medium",
                      help="edit quality tier (default medium)")
     gen.add_argument("--upload", dest="upload_file", default="", metavar="FILE",

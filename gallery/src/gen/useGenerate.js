@@ -58,6 +58,19 @@ export default function useGenerate({ costRef }) {
       compat_steps: cget(v, "samplingSteps"),
       compat_cfg: cget(v, "cfgScale"),
       compat_upscale: cget(v, "upscale"),
+      // SCOPE_2026-09-26 (owner ruling 1): Face Fix and Quality Tag read disabled on a model
+      // that does not take them. Face Fix through the same cget -- the server merges
+      // /features' enableADetailer:false (and the MMDiT / user-DiT model-type rule) into
+      // `compatibility`. Quality Tag from the version's own tag (G4): a row that answered
+      // with no tag is false; a server without the field stays unknown (fail open).
+      compat_face: cget(v, "enableADetailer"),
+      compat_quality: "quality_tag" in v ? !!v.quality_tag : undefined,
+      quality_tag: v.quality_tag || null,
+      // The size rule the server's gate snaps to (G1) and whether a reference goes out as a
+      // context image (G3). Set explicitly on EVERY apply, so a version picked from the list
+      // without them (only the latest row carries them) never inherits the previous one's.
+      size_rule: v.size_rule || null,
+      context_images: v.context_images === true,
       // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
       // null = the server could not determine them -> the drawer dims nothing, exactly as
       // before. An array (including []) is a real answer.

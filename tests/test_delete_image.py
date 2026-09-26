@@ -628,3 +628,82 @@ def test_the_cloud_delete_is_withheld_from_a_lan_session(tmp_path):
     assert lan.status_code == 200, "a logged-in LAN session should still browse details"
     assert lan.get_json().get("can_delete_cloud") is False, (
         "a LAN session was offered cloud deletion")
+
+
+# ---- published artwork in the per-image dialog (SCOPE_2026-09-26 E5) ----------------------
+# Only the WHOLE-TASK branch speaks about it: that branch sends deleteGenerationTask, which
+# PixAI's contract says also deletes the task's linked artwork. What a one-image
+# deleteBatchMedia does to an artwork is unknown, so that branch says nothing.
+
+def _with_artworks(task, ids):
+    t = dict(task)
+    t["artworkIds"] = list(ids)
+    return t
+
+
+def test_a_whole_task_preview_names_the_published_artwork(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _with_artworks(_lone_task("z1"), ["ART1"]))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, [_row(media_id="z1", task_id="T1", filename="z1.png")])
+    d = cli.post("/api/delete-image", json={"media_id": "z1", "confirm": False}).get_json()
+    assert d["plan"] == "whole-task"
+    assert ("1 of these is published on PixAI. Deleting the task may remove the published "
+            "artwork too.") in d["message"], d["message"]
+
+
+def test_a_per_image_preview_makes_no_artwork_claim(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _with_artworks(_all_live(), ["ART1"]))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, _batch(tmp_path))
+    d = cli.post("/api/delete-image", json={"media_id": "b", "confirm": False}).get_json()
+    assert d["plan"] == "per-image"
+    assert "published" not in d["message"], d["message"]
+
+
+def test_an_unpublished_whole_task_preview_says_nothing_about_artwork(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _with_artworks(_lone_task("z1"), []))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, [_row(media_id="z1", task_id="T1", filename="z1.png")])
+    d = cli.post("/api/delete-image", json={"media_id": "z1", "confirm": False}).get_json()
+    assert "published" not in d["message"], d["message"]
+
+
+def test_a_read_without_artwork_ids_falls_back_to_the_catalog(tmp_path, monkeypatch):
+    """No artworkIds on the read is "not known": the catalog answers, and a catalog the
+    artworks sync never filled says publication was not checked -- never "none published"."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _lone_task("z1"))                     # no artworkIds key at all
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, [_row(media_id="z1", task_id="T1", filename="z1.png")])
+    d = cli.post("/api/delete-image", json={"media_id": "z1", "confirm": False}).get_json()
+    assert "was not checked" in d["message"], d["message"]
+
+    cli = _cli(tmp_path, [_row(media_id="z1", task_id="T1", filename="z1.png",
+                               artwork_id="ART9")])
+    d = cli.post("/api/delete-image", json={"media_id": "z1", "confirm": False}).get_json()
+    assert "1 of these is published on PixAI" in d["message"], d["message"]
+
+
+def test_the_plan_carries_the_reads_artwork_ids():
+    plan = core._image_delete_plan(_with_artworks(_lone_task("z1"), ["A", "B", "A"]), "z1")
+    assert plan.artwork_ids == ("A", "B")
+    assert core._image_delete_plan(_lone_task("z1"), "z1").artwork_ids is None
+
+
+def test_the_whole_task_count_is_capped_at_pixais_batch_not_the_librarys_rows(
+        tmp_path, monkeypatch):
+    """The last live image of a three-image batch whose two siblings were deleted on PixAI and
+    never collected here: the library holds one row, PixAI's batch holds three, and three
+    artworks are published. The whole-task delete may take all three, so the dialog says 3 --
+    capping at the library's one row would under-count (review fix 2026-09-26, E5)."""
+    monkeypatch.setattr(core, "_make_session", _session_stub)
+    _reads(monkeypatch, _with_artworks(_live_task(("a", True), ("b", True), ("c", False)),
+                                       ["A1", "A2", "A3"]))
+    _nothing_deletes(monkeypatch)
+    cli = _cli(tmp_path, [_row(media_id="c", task_id="T1", filename="c.png")])
+    d = cli.post("/api/delete-image", json={"media_id": "c", "confirm": False}).get_json()
+    assert d["plan"] == "whole-task"
+    assert "3 of these are published on PixAI" in d["message"], d["message"]

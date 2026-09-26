@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  buildEditPayload, editCaps, editGate, EDIT_CAPS, EDIT_PRICE_KEY_SKIP,
+  buildEditPayload, editAspectLabel, editCaps, editGate, EDIT_CAPS, EDIT_PRICE_KEY_SKIP,
   refTag, switchEditModel,
 } from "../gen/editCore.js";
 import { submitTask, useResultLines } from "../gen/submitTask.js";
@@ -184,7 +184,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
         {s.source ? <img src={"/thumbs/" + s.source + ".jpg"} alt="" /> : <span className="mgdock-chipph" />}
         <span>{EDIT_CAPS[s.model] ? EDIT_CAPS[s.model].label : s.model}</span>
       </span>
-      <span className="mgdock-frames">{used}/{caps.max_refs} refs · {s.resolution} · {s.aspect}</span>
+      <span className="mgdock-frames">{used}/{caps.max_refs} refs · {s.resolution} · {editAspectLabel(s.aspect)}</span>
     </>
   ) : null;
   // The result lines (Submitting… / Queued / ✔ done / ✕ error, incl. the "task MAY exist"
@@ -227,7 +227,7 @@ export default function EditTab({ visible, s, setS, onDroppedNote, dock }) {
             <div className="mgdock-editcap">ASPECT</div>
             <select className="mgdock-editsel" value={s.aspect}
               onChange={(e) => set({ aspect: e.target.value })}>
-              {caps.aspects.map((a) => <option key={a} value={a}>{a}</option>)}
+              {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
             </select>
           </div>
         </div>
