@@ -63,8 +63,11 @@ export const SHOT_LABEL = { i2v: "First Frame", flf: "First & Last", r2v: "Multi
 // The Tsubaki engines take all three (owner ruling 2, 2026-09-26). Their First Frame / First &
 // Last half (i2vPro) is BUNDLE-GROUNDED (helper--EEE6Q9r.js `I()`, the field picker `X`) and
 // price-quoted (21,000 for 5 s, 63,000 for 15 s on tbkv1.0.1); no tbkv i2vPro task is on the
-// wire yet -- the owner's first First Frame run is the dispatch proof. Multi-Reference is on
-// the wire (both of his tbkv tasks). The tbkv i2vPro block carries only picker X's fields:
+// wire yet -- the owner's first First Frame run is the dispatch proof. Multi-Reference's STORED
+// shape is on the wire (both of his tbkv tasks), but those were made on the site's REST
+// reference-video route with no numeric modelId; this app submits referenceVideo over GraphQL
+// with tbkv's own modelId, and that submit has not run yet -- a drawer Multi-Reference run on
+// tbkv is its own dispatch proof. The tbkv i2vPro block carries only picker X's fields:
 // model, mediaId, usePromptsHelper, prompts, mode, duration, tailMediaId, generateAudio,
 // audioLanguage (no negative, no camera -- see MODEL_FIELDS).
 export const MODEL_VMODES = {
@@ -285,10 +288,14 @@ export function applyModelGating(s, userDriven) {
   // snaps identically, so this only keeps the quote honest about it.
   if (!durationAllowed(s.model, s.duration)) s.duration = snapDuration(s.duration, s.model);
   // An engine that takes NO video references (Tsubaki: 0) HOLDS them -- the bank keeps every
-  // pick, buildPayload leaves them out, and a real engine pick says so. Never deleted: switch
-  // back to an engine that takes them and they go out again.
+  // pick, buildPayload leaves them out, and the note says so. Never deleted: switch back to an
+  // engine that takes them and they go out again. The note is NOT userDriven-gated: a Loom shot
+  // or a handoff that prefills video refs into a drawer already on Tsubaki would otherwise quote
+  // and submit a job without them with only a dimmed slot to show it (review V-R5). Unlike the
+  // re-sync silence above, this sentence is about the CURRENT banks, never the previous shot's.
+  // Only the clearing branch stays userDriven: a prefill resets modeNote itself.
   const heldVids = (s.vidSlots || []).filter((x) => x && x.media_id).length;
-  if (userDriven && s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
+  if (s.mode === "r2v" && heldVids && refCap(s.model, "videos") === 0) {
     const m = MODELS.find((x) => x.value === s.model);
     s.modeNote = (m ? m.label : s.model) + NO_VIDEO_REFS_NOTE + " Still held: " + heldVids
       + (heldVids === 1 ? " video ref" : " video refs") + ". Nothing was deleted.";

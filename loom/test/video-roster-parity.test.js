@@ -140,11 +140,21 @@ describe("tbkv in the drawer: what it shows and what it sends", () => {
     assert.deepEqual(buildPayload(s, "").video_refs, ["V1"]);
     assert.equal(s.modeNote, "", "the previous engine's sentence does not stay standing");
   });
-  test("a host re-sync (prefill) holds them silently, the same as every other re-sync", () => {
+  // Changed on purpose (review V-R5; SCOPE_2026-09-26 V1 "names them in the mode note"): this
+  // used to pin SILENCE on a prefill, so a Loom shot or handoff carrying video refs into a
+  // drawer already on Tsubaki quoted and submitted a job without them, with only a dimmed slot
+  // to say so. The note is about the CURRENT banks, so it is not a stale-sentence risk.
+  test("a host re-sync (prefill) holds them AND names them", () => {
     const s = state();
-    applyPrefill(s, { mode: "r2v", video_model: "tbkv1.0", images: [REF("1")], video_refs: [REF("V1")] });
-    assert.equal(s.vidSlots.length, 1);
+    applyPrefill(s, { mode: "r2v", video_model: "tbkv1.0", images: [REF("1")], video_refs: [REF("V1"), REF("V2")] });
+    assert.equal(s.vidSlots.length, 2);
     assert.deepEqual(buildPayload(s, "").video_refs, []);
+    assert.equal(s.modeNote, "Tsubaki Video Flash takes no video references. Still held: 2 video refs. Nothing was deleted.");
+  });
+  test("a prefill onto an engine that takes video refs says nothing about them", () => {
+    const s = state({ model: "tbkv1.0", modeNote: "Tsubaki Video Flash takes no video references. Still held: 1 video ref. Nothing was deleted." });
+    applyPrefill(s, { mode: "r2v", video_model: "v4.0.1", images: [REF("1")], video_refs: [REF("V1")] });
+    assert.deepEqual(buildPayload(s, "").video_refs, ["V1"]);
     assert.equal(s.modeNote, "");
   });
   test("refCap: the drawer's own banks elsewhere, the tbkv panel's caps on tbkv", () => {
