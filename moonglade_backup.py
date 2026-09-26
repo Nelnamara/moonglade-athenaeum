@@ -4172,6 +4172,11 @@ def extract_full_meta(task):
     # to drop. All pure reads from the task dict; steps/sampler/cfg get a model-preset fallback
     # in the caller (needs the network), the rest resolve here.
     i2v = params.get("i2vPro") if isinstance(params.get("i2vPro"), dict) else {}
+    # A video task carries ONE of two blocks, and both name the engine and the quality
+    # tier the same way (`model`, `mode`). Reading only i2vPro left every reference-video
+    # row's video_model / video_mode blank on every capture road (PROBE_2026-09-26 V09).
+    vblock = i2v or (params.get("referenceVideo")
+                     if isinstance(params.get("referenceVideo"), dict) else {})
     ii = outputs.get("inferenceInfo") if isinstance(outputs.get("inferenceInfo"), dict) else {}
     stages = ii.get("stages") if isinstance(ii.get("stages"), dict) else {}
     qtag = params.get("qualityTag") if isinstance(params.get("qualityTag"), dict) else {}
@@ -4231,8 +4236,8 @@ def extract_full_meta(task):
         "updated_at":        str(task.get("updatedAt") or ""),
         "retry_count":       ("" if retry is None else str(retry)),
         "moderation":        str((task.get("moderationAction") or {}).get("promptsModerationAction") or ""),
-        "video_mode":        str(i2v.get("mode") or ""),
-        "video_model":       str(i2v.get("model") or ""),
+        "video_mode":        str(vblock.get("mode") or ""),
+        "video_model":       str(vblock.get("model") or ""),
         # BATCH IDENTITY (issue #33): blank at TASK level on purpose -- outputs.batch is an
         # ordered array with one entry per output, so the index is a per-ROW fact. The raw
         # list is parked under _batch (private, never persisted: _merge_full and the backfill
@@ -7951,6 +7956,14 @@ VIDEO_DURATIONS = (5, 6, 10, 15)                                          # 15 i
 VIDEO_MODELS = {
     "v4.0.1": {"model_id": "2003969750675682808", "label": "V4.0 Lite Preview"},
     "v4.0":   {"model_id": "2003968021137101826", "label": "V4.0 Preview (full)"},
+    # The two Tsubaki video engines (PROBE_2026-09-26 V01/V13). The ids are the ones PixAI
+    # stamped on the owner's own tbkv tasks (2060014126868040808 -> tbkv1.0,
+    # 2060390260986220957 -> tbkv1.0.1), and the labels are the version titles a read-only
+    # getGenerationModelByVersionId returns for those ids. The site itself never sends a
+    # numeric modelId for video -- the server maps the name -- so these ride only where this
+    # app already sends one (free-card matching, see build_video_parameters' docstring).
+    "tbkv1.0.1": {"model_id": "2054378086834851904", "label": "Tsubaki Video"},
+    "tbkv1.0":   {"model_id": "2042030623542642408", "label": "Tsubaki Video Flash"},
     "v3.2":   {"model_id": "1961182207978260675", "label": "V3.2"},
     "v3.0.2": {"model_id": "2014412117889628958", "label": "V3.0 Lite"},
     "v3.0":   {"model_id": "1919508300549460046", "label": "V3.0"},
@@ -7967,6 +7980,60 @@ def video_model_id(name):
     include this or PixAI can't resolve the model and no free card can match."""
     return (VIDEO_MODELS.get((name or "").strip()) or {}).get("model_id", "")
 VIDEO_CHANNELS = ("private", "normal")   # private = the site's "Private" channel (was "Enhanced" until 2026-08-18)
+
+
+# --- Per-engine capability tables (Tsubaki video, PROBE_2026-09-26 V03-V06) ---------------
+# Video models have no /features, /inference-profiles or /size-config data (both tbkv ids
+# answer empty lists there), so these are hand-kept tables checked against the site's own
+# panel matrix (helper--EEE6Q9r.js `I()`, the i2vPro field picker `X`) and tools.json. An
+# engine ABSENT from a table keeps today's behaviour exactly -- every table here only ever
+# narrows what a listed engine is sent.
+TSUBAKI_VIDEO_MODELS = ("tbkv1.0", "tbkv1.0.1")
+
+# Allowed durations per engine. The tbkv panel offers 5/10/15 (default 5) with or without a
+# tail frame, and the stored i2vPro schema has only ever allowed "5"/"10"/"15". Absent =>
+# VIDEO_DURATIONS (the existing engines keep their 6 s stop, unchanged by this table).
+VIDEO_MODEL_DURATIONS = {m: (5, 10, 15) for m in TSUBAKI_VIDEO_MODELS}
+
+# Engines whose panel has no negative prompt / no camera movement. The site's picker `X`
+# adds negativePrompts / cameraMovement only when the panel enables them, and the tbkv panel
+# enables neither. Other engines are unchanged on purpose: a v4.0.1 i2vPro with a negative
+# is on the wire (task 2058947728431110088) and rendered.
+VIDEO_NO_NEGATIVE_MODELS = TSUBAKI_VIDEO_MODELS
+VIDEO_NO_CAMERA_MODELS = TSUBAKI_VIDEO_MODELS
+
+# Multi-Reference caps per engine (the tbkv panel's multiReference `D`: images 6, videos 0,
+# audio 3). Only the VIDEO cap is enforced at build time (a video reference sent to an
+# engine that takes none); absent => no cap here, as today.
+VIDEO_REF_CAPS = {m: {"images": 6, "videos": 0, "audios": 3} for m in TSUBAKI_VIDEO_MODELS}
+
+# referenceVideo.ratio: tbkv-only, reference-path only, the 9 values of the site's `Qe`.
+# Omitted (or "adaptive") lets PixAI infer the ratio from the references.
+VIDEO_RATIO_MODELS = TSUBAKI_VIDEO_MODELS
+VIDEO_RATIOS = ("adaptive", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "21:9")
+
+
+def video_model_durations(model):
+    """The durations (seconds) this engine accepts -- its own set when VIDEO_MODEL_DURATIONS
+    lists it, else the shared VIDEO_DURATIONS."""
+    return VIDEO_MODEL_DURATIONS.get(str(model or "").strip(), VIDEO_DURATIONS)
+
+
+def _check_video_ref_caps(model, video_media_ids):
+    """Refuse video references an engine cannot take (PixAIError at BUILD time: the badge
+    shows it as its note and nothing is created or charged). Only engines listed in
+    VIDEO_REF_CAPS are capped; the drawer holds such refs back and never sends them, so this
+    is the backstop for the CLI and a hand-rolled payload."""
+    cap = (VIDEO_REF_CAPS.get(str(model or "").strip()) or {}).get("videos")
+    n = len([v for v in (video_media_ids or []) if str(v).strip()])
+    if cap is not None and n > cap:
+        label = (VIDEO_MODELS.get(str(model).strip()) or {}).get("label") or model
+        if cap == 0:
+            raise PixAIError("{} takes no video references -- remove the {} video "
+                             "reference{} (nothing was created or charged).".format(
+                                 label, n, "" if n == 1 else "s"))
+        raise PixAIError("{} takes at most {} video references, not {} -- remove {} "
+                         "(nothing was created or charged).".format(label, cap, n, n - cap))
 
 
 def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
@@ -8027,11 +8094,16 @@ def build_video_parameters(prompt, media_id, model=DEFAULT_VIDEO_MODEL, *,
         i2v["audioLanguage"] = audio_language
     if tail_media_id:
         i2v["tailMediaId"] = str(tail_media_id)
-    if negative:
+    # Neither field on an engine whose panel has none (VIDEO_NO_NEGATIVE_MODELS /
+    # VIDEO_NO_CAMERA_MODELS): the tbkv i2vPro block carries only the site's picker `X`
+    # fields. The tbkv i2vPro half is bundle-grounded and price-quoted, not yet on the wire;
+    # an unsupported field is how v3.0.2's audio flag came back as a false NSFW refusal.
+    if negative and str(model).strip() not in VIDEO_NO_NEGATIVE_MODELS:
         i2v["negativePrompts"] = negative
     # cameraMovement is v2.7-style camera-dropdown; only send when a real move is picked
     # (the verified v4.0 submit omits it entirely -> keep it out by default).
-    if camera_movement and camera_movement != "unset":
+    if (camera_movement and camera_movement != "unset"
+            and str(model).strip() not in VIDEO_NO_CAMERA_MODELS):
         i2v["cameraMovement"] = camera_movement
     params = {
         "priority": 1000,
@@ -8060,24 +8132,51 @@ REFVIDEO_MODEL_ID = "2003969750675682808"   # numeric model id for v4.0.1 refere
 
 def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_ids=(),
                                      audio_media_ids=(), model="v4.0.1",
-                                     model_id=REFVIDEO_MODEL_ID, duration=5,
+                                     model_id=None, duration=5,
                                      mode="professional", generate_audio=False,
                                      audio_language="english", is_private=False,
-                                     priority=1000, kaisuuken_id=""):
+                                     priority=1000, kaisuuken_id="", ratio="",
+                                     input_video_durations=None):
     """Build createGenerationTask `parameters` for a REFERENCE video (multi-image / video /
     audio reference). VERIFIED shape (2026-07-02) -- a top-level `referenceVideo` block,
     NOT i2vPro. The prompt references inputs by position with @image1/@video1/@audio1
-    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing."""
+    mentions. `duration` is an int here; channel maps to `isPrivate`. Builder spends nothing.
+
+    `model_id` defaults to THIS model's own numeric id (video_model_id), and the key is
+    omitted when there is none -- the i2v builder's rule. It used to default to v4.0.1's id,
+    so a reference video on any other engine went out paired with a different model's id
+    (PROBE_2026-09-26 V02); a quote does not move with it (the three modelId variants of a
+    tbkv1.0.1 reference video all priced 63,000), but the free-card match keys on it.
+
+    `ratio` is sent only for the Tsubaki engines (VIDEO_RATIO_MODELS), one of VIDEO_RATIOS,
+    and omitted when empty or "adaptive" (PixAI's contract: omitted = adaptive = inferred
+    from the references). It is PROVEN only on the site's REST reference-video route; this
+    app submits `referenceVideo` over GraphQL, where acceptance is unobserved (probe capture
+    item). A refusal is not retried -- the spend path's single attempt stands.
+
+    `input_video_durations` is each reference video's length in seconds, in
+    `referenceVideoMediaIds` order, or None/[] for the old empty list. The caller decides
+    all-or-nothing (see input_video_durations()); this only sends what it is given, as
+    positive floats. PixAI floors each entry and bills the output seconds PLUS the input
+    seconds; an empty list is priced as a flat 15 s of input in total."""
+    _check_video_ref_caps(model, video_media_ids)
     rv = {
         "mode": mode,
         "model": model,
         "prompt": prompt or "",
         "duration": int(duration),
-        "inputVideoDurations": [],
+        "inputVideoDurations": [float(d) for d in (input_video_durations or [])],
         "referenceAudioMediaIds": [str(m) for m in (audio_media_ids or [])],
         "referenceImageMediaIds": [str(m) for m in (image_media_ids or [])],
         "referenceVideoMediaIds": [str(m) for m in (video_media_ids or [])],
     }
+    r = str(ratio or "").strip()
+    if r and str(model).strip() in VIDEO_RATIO_MODELS:
+        if r not in VIDEO_RATIOS:
+            raise PixAIError("aspect ratio {!r} is not one PixAI takes -- use one of {} "
+                             "(nothing was created or charged).".format(r, ", ".join(VIDEO_RATIOS)))
+        if r != "adaptive":
+            rv["ratio"] = r
     # Audio only for models that take it -- the SAME table the i2v builder gates on, see
     # VIDEO_AUDIO_MODELS. Sending these to a model without audio support comes back as
     # "This image contains sensitive or NSFW content": a CONTENT complaint for an
@@ -8094,11 +8193,98 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
         "isPrivate": bool(is_private),
         "enablePreview": True,
         "hidePrompts": False,
-        "modelId": str(model_id),
     }
+    _mid = str(video_model_id(model) if model_id is None else (model_id or ""))
+    if _mid:                                  # omit rather than send "" -- see docstring
+        params["modelId"] = _mid
     if kaisuuken_id:
         params["kaisuukenId"] = str(kaisuuken_id)
     return params
+
+
+def input_video_durations(video_media_ids, lookup):
+    """referenceVideo.inputVideoDurations for these reference videos, ALL OR NOTHING.
+
+    Returns (durations, unknown): each video's length from `lookup(media_id)` (seconds or
+    None) in the given order when every one is known and positive, else ([], True) -- the
+    exact list the app always sent before, never a partial one (a short list is priced as a
+    flat 15 s of input in total, and which positions it would cover is unobserved). `unknown`
+    is False when there are no video references at all, or when every length resolved.
+    A `lookup` of None (a caller with no library to read) is the old behaviour."""
+    vids = [str(v) for v in (video_media_ids or []) if str(v).strip()]
+    if not vids:
+        return [], False
+    if lookup is None:
+        return [], True
+    out = []
+    for v in vids:
+        try:
+            secs = lookup(v)
+            secs = float(secs) if secs is not None else None
+        except (TypeError, ValueError, OSError, PixAIError):
+            secs = None
+        if secs is None or not secs > 0:                     # None, <= 0 (or NaN)
+            return [], True
+        out.append(secs)
+    return out, False
+
+
+# The receipt line a reference video carries when a length could not be read. Worded to the
+# probe's finding, not to a direction: PixAI prices a missing list as a flat 15 s of input in
+# TOTAL, which is more than one short clip and less than two long ones.
+INPUT_VIDEO_UNKNOWN_WHY = ("input video length unknown — PixAI prices a flat 15 s of input "
+                           "in total")
+
+
+def make_video_duration_lookup(out_dir, db_path=None):
+    """A reference video's real length in seconds, or None -> RequestResolver.video_duration.
+
+    Order (SCOPE_2026-09-26 V5): the local file's measured length (media_tools.duration on
+    the file the gallery's one video resolver finds -- the catalog filename, else the
+    media-id matcher); else the catalog's `video_duration` (the clip's REQUESTED length --
+    acceptable because PixAI floors each entry, and a 10 s output measures ~10.04 s); else
+    None. No network read, ever: /api/price runs this on every keystroke.
+
+    The answer is cached per media id for the life of the returned callable (one per gallery
+    app, one per CLI run), so a quote and the spend that follows it read the same number even
+    if a file lands in between, and a miss does not re-walk the library per keystroke."""
+    from moonglade_gallery import find_local_video_file, get_row
+    out = Path(out_dir)
+    dbp = Path(db_path) if db_path else out / "catalog.db"
+    cache = {}
+    lock = threading.Lock()
+
+    def _lookup(media_id):
+        mid = str(media_id or "").strip()
+        if not mid:
+            return None
+        with lock:
+            if mid in cache:
+                return cache[mid]
+        row = {}
+        try:
+            if dbp.is_file():
+                row = get_row(dbp, mid) or {}
+        except Exception:                            # noqa: BLE001 -- a lookup never breaks a quote
+            row = {}
+        secs = None
+        try:
+            f = find_local_video_file(out, mid, row)
+            if f is not None:
+                secs = duration(str(f))
+        except Exception:                            # noqa: BLE001
+            secs = None
+        if secs is None or not secs > 0:
+            try:
+                secs = float(row.get("video_duration") or 0) or None
+            except (TypeError, ValueError):
+                secs = None
+            if secs is not None and not secs > 0:
+                secs = None
+        with lock:
+            cache[mid] = secs
+        return secs
+    return _lookup
 
 
 # Only the v4.0 family renders a 15-second clip. VIDEO_DURATIONS has carried the note
@@ -8106,7 +8292,10 @@ def build_reference_video_parameters(prompt, image_media_ids=(), *, video_media_
 # other model went straight to PixAI, which refuses the mutation -- no task is created, so
 # nothing appears on the account and the client shows an instant unexplained decline. A rule
 # that lives only in a comment is not a rule.
-VIDEO_15S_MODELS = ("v4.0", "v4.0.1")
+# The Tsubaki engines render 15 s too: both of the owner's tbkv tasks (2060014126868040808,
+# 2060390260986220957) are 15 s reference videos, and the tbkv panel offers 5/10/15
+# (PROBE_2026-09-26 V04 -- before this they silently snapped a 15 s request down to 10).
+VIDEO_15S_MODELS = ("v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1")
 
 
 # PixAI rejects a video prompt over this with a raw GraphQL validation error
@@ -8126,6 +8315,9 @@ VIDEO_PROMPT_MAXLEN = 2000
 #   v3.0.2   (both fields ABSENT)                           <- omit
 #   v2.7     (both fields ABSENT)                           <- omit
 #   v3.0.1   generateAudio=False, audioLanguage absent      <- omit (never seen carrying audio)
+#   tbkv1.0    generateAudio=True audioLanguage=english     <- audio supported (2026-09-26:
+#   tbkv1.0.1  generateAudio=True audioLanguage=english        both on the wire; the tbkv
+#                                                              panel has audioLanguage)
 #
 # Sending them regardless is NOT harmless, and this is the bug that cost an evening. A controlled
 # pair on media id 747704233721405654 with model v3.0.2: PixAI's own site submitted it WITHOUT the
@@ -8136,21 +8328,24 @@ VIDEO_PROMPT_MAXLEN = 2000
 #
 # An earlier cut of this guessed "v4.0 family only" and a pre-existing test caught it: v3.2 really
 # does carry audio. Hence the survey. Do not narrow this list without measuring the model first.
-VIDEO_AUDIO_MODELS = ("v3.2", "v4.0", "v4.0.1")
+VIDEO_AUDIO_MODELS = ("v3.2", "v4.0", "v4.0.1", "tbkv1.0", "tbkv1.0.1")
 
 
 def _snap_video_duration(d, model=""):
     """Snap a requested duration (seconds) to the nearest allowed PixAI video length.
 
-    `model` (optional) additionally enforces the 15s restriction: 15 is v4.0-only, so any other
-    model snaps down to 10 rather than being sent a length PixAI will reject. Omitting `model`
-    keeps the original model-blind behavior exactly, which is what the CLI's own preview path
-    and the pre-existing tests pin."""
+    `model` (optional) additionally enforces the engine's own rules: an engine listed in
+    VIDEO_MODEL_DURATIONS snaps to ITS set (6 -> 5 on a Tsubaki engine, whose panel and stored
+    schema have no 6), and 15 is VIDEO_15S_MODELS-only, so any other model snaps down to 10
+    rather than being sent a length PixAI will reject. Omitting `model` keeps the original
+    model-blind behavior exactly, which is what the CLI's own preview path and the pre-existing
+    tests pin."""
     try:
         d = float(d)
     except (TypeError, ValueError):
         return 5
-    snapped = min(VIDEO_DURATIONS, key=lambda v: abs(v - d))
+    allowed = video_model_durations(model) if model else VIDEO_DURATIONS
+    snapped = min(allowed, key=lambda v: abs(v - d))
     if snapped == 15 and model and str(model).strip() not in VIDEO_15S_MODELS:
         return 10
     return snapped
@@ -8160,7 +8355,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional", negative="", is_private=False,
-                            use_prompt_helper=False):
+                            use_prompt_helper=False, input_video_durations=None):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -8171,7 +8366,14 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     2026-07-02 has no negativePrompts field at all. A genuine PixAI API gap, not an
     oversight here -- R2V/V2V shots silently ignore a negative prompt if one is set.
     `use_prompt_helper` (the Generate dock's 'Video prompt helper' switch, off by default)
-    likewise only reaches i2vPro.usePromptsHelper -- referenceVideo has no such field."""
+    likewise only reaches i2vPro.usePromptsHelper -- referenceVideo has no such field.
+
+    Every engine sends its OWN modelId or none (PROBE_2026-09-26 V02): the reference path
+    used to fall back to v4.0.1's id for an engine VIDEO_MODELS did not know, pairing
+    `model: "tbkv1.0.1"` with another model's id. `input_video_durations` (the caller's
+    all-or-nothing list, see input_video_durations()) reaches only referenceVideo, and an
+    engine that takes no video references refuses them here (build_reference_video_parameters)
+    rather than sending them."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -8209,7 +8411,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  is_private=is_private,
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
-                                                 model_id=(mid_num or REFVIDEO_MODEL_ID))
+                                                 model_id=mid_num,
+                                                 input_video_durations=input_video_durations)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -9098,6 +9301,41 @@ def run_generate(args):
             "videos": len(videos)}
 
 
+def _video_row_model(session, result, params, sent, fm):
+    """(model_id, model_name) for a video row being catalogued live (PROBE_2026-09-26 V09,
+    owner ruling 3 of 2026-09-26).
+
+    model_id is the task's numeric top-level `modelId` -- what PixAI stamped on the stored
+    task (fm, from getTaskById), else the one this app submitted -- and only when it IS
+    numeric; otherwise the engine NAME from the video block, so a row is never left with ''
+    when the engine is known. It used to be the engine name unconditionally, which split one
+    model across two ids (--sync-videos writes the number) and handed "tbkv1.0.1" to the
+    version lookup as if it were a version id.
+
+    model_name is the version's own title from model_name_gql for a numeric id ("Tsubaki
+    Video v1.0"), falling back to the VIDEO_MODELS label for the engine. Video model names
+    are dynamic now (ruling 3, reversing 2026-08-15's "a video row's model_name stays
+    blank"): the Tsubaki engines are the first to carry a name rather than a version string.
+    A lookup failure costs the label, never the row."""
+    engine = str((sent or {}).get("model") or (fm or {}).get("video_model") or "").strip()
+    mid = ""
+    for cand in ((fm or {}).get("model_id"), (result or {}).get("parameters", {}).get("modelId")
+                 if isinstance((result or {}).get("parameters"), dict) else None,
+                 (params or {}).get("modelId") if isinstance(params, dict) else None):
+        c = str(cand or "").strip()
+        if c.isdigit():
+            mid = c
+            break
+    name = ""
+    if mid:
+        got = _resolved_model_name(session, {}, mid)
+        if got and got != mid and not str(got).isdigit():
+            name = str(got)
+    if not name:
+        name = (VIDEO_MODELS.get(engine) or {}).get("label", "")
+    return (mid or engine), name
+
+
 def _download_video_task(session, result, task_id, out, args, params):
     """Download + catalog the video output(s) of a completed task. Shared by i2v (i2vPro)
     and reference-video (referenceVideo) -- reads outputs.videos + the submitted block
@@ -9108,6 +9346,7 @@ def _download_video_task(session, result, task_id, out, args, params):
     fm = extract_full_meta(result)   # issue #18: the full generation surface for the video row
     sent = (params.get("i2vPro") or params.get("referenceVideo") or {}) if isinstance(params, dict) else {}
     prompt = shared.get("prompt") or sent.get("prompts") or sent.get("prompt") or ""
+    model_id, model_name = _video_row_model(session, result, params, sent, fm)
 
     from moonglade_gallery import make_thumbnail
     thumb_dir = out / "gallery" / "thumbs"
@@ -9142,7 +9381,7 @@ def _download_video_task(session, result, task_id, out, args, params):
             poster_media_id=o.get("poster_media_id", ""),
             paid_credit=_paid_credit_str(result),   # actual cost, task-level
             video_duration=str(shared.get("duration") or sent.get("duration") or ""),
-            model_id=str(sent.get("model") or ""),
+            model_id=model_id, model_name=model_name,
             width=str(detail.get("width") or ""),
             height=str(detail.get("height") or ""))
         # Poster thumbnail is COSMETIC -- it must never block cataloging the finished video.
@@ -10004,19 +10243,45 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
         if not has_ref:
             return GenerationRequest(mode="video", no_card=no_card,
                                      note="pick a source image")
+        vmodel = (p.get("video_model") or "").strip() or DEFAULT_VIDEO_MODEL
+        negative = (p.get("negative") or "").strip()
+        camera = (p.get("camera_movement") or "")
+        adjusted = []
+        # Which submit shape build_shot_video_params will take: i2vPro for a framed I2V/FLF,
+        # referenceVideo for everything else carrying refs. Only the latter reads the input
+        # video lengths, and only the former could have carried a negative or a camera move.
+        i2v_road = (shot == "I2V" and imgs) or (shot == "FLF" and len(imgs) >= 2)
+        durations = []
+        if not i2v_road and vids:
+            # V5: each reference video's real length, through the SAME lookup the quote and
+            # the spend both carry (RequestResolver.video_duration) -- all or nothing.
+            durations, unknown = input_video_durations(vids, rs.video_duration)
+            if unknown:
+                adjusted.append({"field": "inputVideoDurations", "asked": "measured lengths",
+                                 "used": [], "why": INPUT_VIDEO_UNKNOWN_WHY})
+        if i2v_road:
+            # V6: the builder drops both on an engine whose panel has neither; say so.
+            if negative and vmodel in VIDEO_NO_NEGATIVE_MODELS:
+                adjusted.append({"field": "negativePrompts", "asked": negative, "used": None,
+                                 "why": "negative prompt not used by this engine"})
+            if camera and camera != "unset" and vmodel in VIDEO_NO_CAMERA_MODELS:
+                adjusted.append({"field": "cameraMovement", "asked": camera, "used": None,
+                                 "why": "camera not used by this engine"})
         params = build_shot_video_params(
             shot, (p.get("prompt") or "").strip(), image_ids=imgs,
             video_ids=vids, audio_ids=auds,
             duration=p.get("duration") or 5,
             generate_audio=bool(p.get("generate_audio") or p.get("audio")),
             model=(p.get("video_model") or ""),
-            camera_movement=(p.get("camera_movement") or ""),
+            camera_movement=camera,
             quality=(p.get("quality") or "professional"),
             audio_language=(p.get("audio_language") or "english"),
-            negative=(p.get("negative") or "").strip(),
+            negative=negative,
             is_private=bool(p.get("is_private")),
-            use_prompt_helper=bool(p.get("prompt_helper")))
-        return GenerationRequest(mode="video", parameters=params, no_card=no_card)
+            use_prompt_helper=bool(p.get("prompt_helper")),
+            input_video_durations=durations)
+        return GenerationRequest(mode="video", parameters=params, no_card=no_card,
+                                 adjusted=adjusted)
 
     if road == "enhance":
         src = str(p.get("source") or "").strip()
@@ -10390,20 +10655,48 @@ def run_reference_video(args):
                          "--ref-audio (a media_id or local file), or --task-id to recover.")
 
     is_private = (getattr(args, "vchannel", "private") == "private")
+    vmodel = (getattr(args, "video_model", "") or "v4.0.1")
+    ratio = (getattr(args, "video_ratio", "") or "").strip()
+    if not existing_task and not override:
+        # Before any upload: an engine that takes no video references refuses them here,
+        # not after _resolve_refs has already uploaded the local files.
+        _check_video_ref_caps(vmodel, vids)
+
+    # Each --ref-video's real length (SCOPE_2026-09-26 V5), read ONCE from the SOURCES --
+    # a local file is measured directly, a media id through the same lookup the gallery's
+    # quote and spend carry, against --out -- so the preview and the submit (whose ids are
+    # upload ids by then) send the identical list. All or nothing, as on the web road.
+    _lookup = [None]
+
+    def _vid_len(src):
+        if _is_local_source(src):
+            return duration(str(src))
+        if _lookup[0] is None:
+            _lookup[0] = make_video_duration_lookup(out)
+        return _lookup[0](src)
+    in_durs, in_unknown = input_video_durations(vids, _vid_len) if not override else ([], False)
 
     def _build(img_ids, vid_ids, aud_ids):
         # Duration: default 5 (matches the argparse flag + the i2v sibling -- was 15 here,
         # a real 3x cost divergence, B10), snapped to PixAI's allowed lengths before use
-        # for either preview or submit, same as the i2v CLI path (B9).
+        # for either preview or submit, same as the i2v CLI path (B9). No model_id: the
+        # builder sends THIS engine's own id (it used to send v4.0.1's for every engine).
         return build_reference_video_parameters(
             prompt, image_media_ids=img_ids, video_media_ids=vid_ids, audio_media_ids=aud_ids,
-            model=(getattr(args, "video_model", "") or "v4.0.1"),
-            duration=_snap_video_duration(getattr(args, "duration", 5) or 5,
-                                          (getattr(args, "video_model", "") or "v4.0.1")),
+            model=vmodel,
+            duration=_snap_video_duration(getattr(args, "duration", 5) or 5, vmodel),
             mode=getattr(args, "vmode", None) or "professional",
             generate_audio=bool(getattr(args, "audio", False)),
             audio_language=getattr(args, "audio_language", None) or "english",
-            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "")
+            is_private=is_private, kaisuuken_id=getattr(args, "kaisuuken_id", "") or "",
+            ratio=ratio, input_video_durations=in_durs)
+
+    def _notes():
+        if in_unknown:
+            print("  note: " + INPUT_VIDEO_UNKNOWN_WHY + " (inputVideoDurations sent as []).")
+        if ratio and vmodel not in VIDEO_RATIO_MODELS:
+            print("  note: --video-ratio is only sent to the Tsubaki video engines ({}); "
+                  "not sent for {}.".format(", ".join(VIDEO_RATIO_MODELS), vmodel))
 
     # PREVIEW: no upload, no submit. Local files shown as placeholders.
     if not existing_task and not getattr(args, "confirm", False):
@@ -10414,6 +10707,7 @@ def run_reference_video(args):
             ph = lambda lst: [("<upload:{}>".format(s) if _is_local_source(s) else s) for s in lst]
             prev = _build(ph(imgs), ph(vids), ph(auds))
             print(json.dumps({"parameters": prev}, indent=2))
+            _notes()
             _preview_card_note(args, prev)
         print("\n*** REFERENCE VIDEO IS EXPENSIVE *** (a 15s clip uses 3 V4.0 cards). "
               "Re-run with --confirm to submit.")
@@ -10439,6 +10733,7 @@ def run_reference_video(args):
             params = _build(_resolve_refs(session, imgs, "IMAGE"),
                             _resolve_refs(session, vids, "VIDEO"),
                             _resolve_refs(session, auds, None))
+            _notes()
         print("Submitting REFERENCE VIDEO task (spends credits unless a free card applies)...")
         _apply_kaisuuken(session, params, args)   # free-card check on the API-key session
         # gql_mutate, never gql_adhoc -- a re-POST here is a second charge.
@@ -10610,12 +10905,20 @@ def run_edit_image(args):
 def _needs_model_fix(row):
     """Return the model version-id to resolve if this row's model_name is missing
     or still a raw numeric id; else ''. Handles the case where model_name was
-    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run)."""
+    set to the numeric id (MODEL_DETAIL_HASH was absent on an earlier run).
+
+    Only a NUMERIC id is ever handed to the version lookup. A video row collected before
+    2026-09-26 stored the engine NAME ("tbkv1.0.1", "v4.0.1") in model_id, and this passed it
+    to getGenerationModelByVersionId as if it were a version id -- a lookup that can only
+    fail (retried and printed every --sync) or answer "unresolved", which --relabel-removed
+    then stamps permanently (PROBE_2026-09-26 V09). Those rows are repaired offline by the
+    gallery's catalog migration instead. A video row WITH a numeric id and a blank name is
+    filled like any other row: video model names are dynamic (owner ruling 3, 2026-09-26)."""
     mid = (row.get("model_id") or "").strip()
     name = (row.get("model_name") or "").strip()
     if not mid and name.isdigit():
         mid = name  # model_name itself is the numeric id
-    if not mid:
+    if not mid or not mid.isdigit():
         return ""
     if not name or name == mid or name.isdigit():
         return mid
@@ -14643,6 +14946,11 @@ def main():
                      help="reference video (repeatable; cite as @video1, @video2, ...)")
     gen.add_argument("--ref-audio", dest="ref_audio", action="append", metavar="MEDIA_ID|FILE",
                      help="reference audio (repeatable; cite as @audio1, ...)")
+    gen.add_argument("--video-ratio", dest="video_ratio", default="",
+                     choices=[""] + list(VIDEO_RATIOS), metavar="RATIO",
+                     help="--reference-video output aspect ratio, Tsubaki video engines only "
+                          "(tbkv1.0 / tbkv1.0.1): one of " + ", ".join(VIDEO_RATIOS)
+                          + ". Default/adaptive = omitted, PixAI infers it from the references")
     # --enhance / --src / --filter-id / --strength are gone -- see build_filter_parameters'
     # former neighbourhood above for both measurements. Art filters run in the browser now
     # (static/mg-art-filters.js, the gallery's Edit > Enhance tab): free, offline, no submit.
