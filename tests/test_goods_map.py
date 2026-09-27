@@ -142,11 +142,12 @@ def test_translation_raw_coded_paths_pass_through_and_stay_judged(monkeypatch):
     Translation must never be the thing standing between a guesser and sealed
     art."""
     monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
     for coded, verdict in (
             (g._role_rel("badges", "first-light.png"), ("earned", "first-light")),
             (g._role_rel("rewards", "secret.png"), ("deny", None)),
             (g._role_rel("starfall", "ee_nelstarfall.png"),
-             ("earned", "the-konami-code"))):
+             ("earned", "starfall-feat"))):
         assert g._public_rel_to_coded(coded) == coded, coded
         assert g._seal_rule(g._public_rel_to_coded(coded)) == verdict, coded
 
@@ -163,10 +164,11 @@ def test_route_judges_direct_coded_probes(tmp_path, monkeypatch):
     r = cli.get("/branding/" + g._role_rel("rewards", "claim.png"))
     assert r.status_code == 200 and r.data == b"CLAIM ICON"
     _seed(g._role_rel("starfall", "ee_nelstarfall.png"), b"STARFALL BYTES")
+    monkeypatch.setattr(g, "_moment_ach", lambda: {"starfall": "starfall-feat"})
     monkeypatch.setattr(g, "_earned_achievement_ids", lambda *a, **k: frozenset())
     assert cli.get("/branding/" + g._role_rel("starfall", "ee_nelstarfall.png")).status_code == 404
     monkeypatch.setattr(g, "_earned_achievement_ids",
-                        lambda *a, **k: frozenset({"the-konami-code"}))
+                        lambda *a, **k: frozenset({"starfall-feat"}))
     r = cli.get("/branding/" + g._role_rel("starfall", "ee_nelstarfall.png"))
     assert r.status_code == 200 and r.data == b"STARFALL BYTES"
 
@@ -175,8 +177,12 @@ def test_route_judges_direct_coded_probes(tmp_path, monkeypatch):
 
 def test_seal_table_round_trip(monkeypatch):
     """Every row of the contract's seal table, with every prefix DERIVED from
-    ROLE_CODE -- a retyped prefix is how a seal silently fails open."""
+    ROLE_CODE -- a retyped prefix is how a seal silently fails open. The moment
+    buckets resolve their feat through the roster's `moment` flag (stubbed here --
+    the real roster's flags are proved in tests/test_moment_serve.py)."""
     monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(g, "_moment_ach",
+                        lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
     rr = g._role_rel
     cases = [
         # the D8 exception: the two reward UI icons stay open
@@ -196,9 +202,11 @@ def test_seal_table_round_trip(monkeypatch):
         (rr("mascots_ach", "first-light.webp"), ("earned", "first-light")),
         (rr("mascots_ach", "unknown.png"), ("deny", None)),
         # the whole starfall bucket (art, audio, AND the nested GONK crumb)
-        (rr("starfall", "ee_nelstarfall.png"), ("earned", "the-konami-code")),
-        (rr("starfall", "ee_chime.mp3"), ("earned", "the-konami-code")),
-        (rr("breadcrumb", "README.txt"), ("earned", "the-konami-code")),
+        (rr("starfall", "ee_nelstarfall.png"), ("earned", "starfall-feat")),
+        (rr("starfall", "ee_chime.mp3"), ("earned", "starfall-feat")),
+        (rr("breadcrumb", "README.txt"), ("earned", "starfall-feat")),
+        # the keyturn bucket, a sibling with a gate of its own
+        (rr("keyturn", "ee_keyturn_clip.mp4"), ("earned", "keyturn-feat")),
         # earned banners: great_library gated, the rest (void_banner) sealed shut
         (rr("earned_banners", "great_library.png"), ("earned", "the-great-library")),
         (rr("earned_banners", "void_banner.png"), ("deny", None)),
@@ -224,6 +232,8 @@ def test_seal_is_case_insensitive_no_leak(monkeypatch):
     reported hole: GET /branding/mascots/ACH/<id> translated to A02/ACH/... and
     dodged a case-sensitive A02/ach/ prefix check, and the FS served it anyway."""
     monkeypatch.setattr(g, "_ach_ids", lambda: frozenset({"first-light"}))
+    monkeypatch.setattr(g, "_moment_ach",
+                        lambda: {"starfall": "starfall-feat", "keyturn": "keyturn-feat"})
     rr = g._role_rel
 
     # (a) the exact reported vector, end to end: public mascots/<case>/id -> seal
@@ -244,7 +254,8 @@ def test_seal_is_case_insensitive_no_leak(monkeypatch):
         (rr("rewards", "secret.png"), ("deny", None)),
         (rr("earned_banners", "great_library.png"), ("earned", "the-great-library")),
         (rr("earned_banners", "void_banner.png"), ("deny", None)),
-        (rr("starfall", "ee_nelstarfall.png"), ("earned", "the-konami-code")),
+        (rr("starfall", "ee_nelstarfall.png"), ("earned", "starfall-feat")),
+        (rr("keyturn", "ee_keyturn_clip.mp4"), ("earned", "keyturn-feat")),
     ]
     for rel, want in sealed:
         assert g._seal_rule(rel) == want, rel                     # canonical

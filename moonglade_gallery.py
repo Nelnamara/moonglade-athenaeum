@@ -2232,6 +2232,17 @@ def _derive_sealed(defs):
     defs["_ach_hidden"] = frozenset(a["id"] for a in roster if a.get("hidden"))
     defs["_ach_rung"] = _build_ach_rung(roster)
     defs["_skin_ids"] = {s["id"] for s in defs["skins"]}
+    # The roster FLAGS the code keys on instead of an id (pack v5): `moment` names the
+    # bespoke moment a feat plays, `unlocks` what it opens. {moment: achievement id},
+    # first roster entry wins -- the seal rule and the API resolve "which feat" here,
+    # so no hidden id is ever a literal in this source. A roster without the flag (an
+    # older pack) yields no entry, and every caller fails closed on a missing one.
+    moment_ach = {}
+    for a in roster:
+        m = a.get("moment")
+        if isinstance(m, str) and m:
+            moment_ach.setdefault(m, a["id"])
+    defs["_moment_ach"] = moment_ach
     return defs
 
 
@@ -2244,6 +2255,7 @@ def _ach_ids():       return _sealed_defs()["_ach_ids"]        # noqa: E704
 def _ach_hidden():    return _sealed_defs()["_ach_hidden"]     # noqa: E704
 def _ach_rung():      return _sealed_defs()["_ach_rung"]       # noqa: E704
 def _skin_ids():      return _sealed_defs()["_skin_ids"]       # noqa: E704
+def _moment_ach():    return _sealed_defs()["_moment_ach"]     # noqa: E704
 
 # ---------------------------------------------------------------------------
 # Branding: the banner mark (the animated icon beside the title) is one of the
@@ -2371,7 +2383,23 @@ ROLE_CODE = {
     "earned_banners": _GOODS_MID + "/B0N",
     "starfall":       "ABBA/a2c/0x53746172",
     "breadcrumb":     "ABBA/a2c/0x53746172/GONK",
+    # A sibling of starfall, NOT nested under it: starfall's seal is a prefix
+    # rule gated on a different feat, so a folder inside it would inherit the
+    # wrong gate.
+    "keyturn":        "ABBA/a2c/0x4B6579",
 }
+
+# The bespoke moments' clips: {moment flag: the clip's PUBLIC /branding/ name}.
+# Neutral names on purpose -- the URL is visible in the network tab, so it names
+# the moment, never the feat. The starfall clip rides translation rule 3 into the
+# starfall bucket like the rest of its set; the keyturn clip has its own rule
+# (2b) ahead of that one, into its own bucket.
+_MOMENT_CLIPS = {
+    "starfall": "ee_starfall_clip.mp4",
+    "keyturn":  "ee_keyturn_clip.mp4",
+}
+# Rule 2b: a bare public clip name routed to a bucket OTHER than starfall's.
+_MOMENT_CLIP_ROLES = {"ee_keyturn_clip.mp4": "keyturn"}
 
 
 def _role_rel(role, *tail):
@@ -2407,6 +2435,9 @@ def _public_rel_to_coded(rel):
          those are SERVING rules the route applies after translation; the coded
          root itself is never read for a flat.
       2. top-level system files -> system/<name>
+     2b. a bare moment clip that is not starfall's (_MOMENT_CLIP_ROLES) ->
+         its own role. MUST precede rule 3: the clip's name is also a bare
+         ee_*, and rule 3 would file it under the starfall bucket's seal
       3. bare ee_* filenames -> starfall/<name>
       4. bridge/emotion/<f> -> emotion ; bridge/preset_<f> -> enhance ;
          bridge/<f> -> bridge (the SIX subfolder holds the presets on disk,
@@ -2421,6 +2452,8 @@ def _public_rel_to_coded(rel):
         return rel
     if rel in _SYSTEM_TOP_FILES:                                  # rule 2
         return _role_rel("system", rel)
+    if rel in _MOMENT_CLIP_ROLES:                                 # rule 2b
+        return _role_rel(_MOMENT_CLIP_ROLES[rel], rel)
     if "/" not in rel and rel.startswith("ee_"):                  # rule 3
         return _role_rel("starfall", rel)
     if rel.startswith("bridge/"):                                 # rule 4
@@ -2546,6 +2579,89 @@ def _branding_mtime(rel):
 
 
 # ---------------------------------------------------------------------------
+# HTTP Range for CONTAINER-sourced branding assets (pack v5). A <video> seeks by
+# asking for byte ranges, and the container used to answer every request with the
+# whole body. Loose files never needed this: send_from_directory already ranges.
+#
+# A range is SLICED from bytes that were read and SHA-verified whole, never
+# decoded mid-blob on the fly: Container.get() is the one place that checks an
+# asset against its TOC digest, so a slice of a verified copy is the only slice
+# that is known good. For the moments' clips -- the assets a browser actually
+# ranges, fifty requests to a seek -- the verified copy is kept in a small
+# in-memory cache keyed on the TOC digest (content, not path: a replaced pack
+# that carries the same clip reuses it, a changed clip is a different key). It
+# holds at most one entry per moment, least-recently-used out first.
+# ---------------------------------------------------------------------------
+_moment_clip_cache = {}            # toc sha256 -> verified bytes (insertion = LRU order)
+_moment_clip_cache_lock = threading.Lock()
+
+
+def _moment_clip_rels():
+    """The CODED rels of the moments' clips -- the only assets the cache admits."""
+    return frozenset(_public_rel_to_coded(n) for n in _MOMENT_CLIPS.values())
+
+
+def _container_clip_bytes(rel):
+    """One moment clip's bytes from the container, read and verified ONCE per
+    content digest and served from memory after that. None when the container is
+    absent or does not carry it, or the blob fails its checksum (never cached)."""
+    box = _get_container()
+    sha = box.sha256(rel) if box is not None else None
+    if not sha:
+        return None
+    with _moment_clip_cache_lock:
+        raw = _moment_clip_cache.pop(sha, None)
+        if raw is not None:
+            _moment_clip_cache[sha] = raw          # re-insert: most recently used
+            return raw
+    raw = box.get(rel)                             # whole blob, sha-verified
+    if raw is None:
+        return None
+    with _moment_clip_cache_lock:
+        _moment_clip_cache.pop(sha, None)
+        _moment_clip_cache[sha] = raw
+        while len(_moment_clip_cache) > max(1, len(_MOMENT_CLIPS)):
+            _moment_clip_cache.pop(next(iter(_moment_clip_cache)))
+    return raw
+
+
+def _ranged_bytes_response(response_class, raw, mime):
+    """A 200 / 206 / 416 for an in-memory body, per the request's Range header.
+
+    One satisfiable byte range -> 206 with Content-Range; `bytes=0-1`, a suffix
+    (`bytes=-500`, clamped to the whole body when longer than it) and an open end
+    (`bytes=100-`) all land here. A range that starts at or past the end -> 416
+    with `Content-Range: bytes */<length>`. A header this does not understand --
+    another unit, a malformed spec, several ranges, or an If-Range (these
+    responses carry no validator it could match) -- is IGNORED and the whole body
+    goes out as 200, which is what RFC 9110 permits a server to do. Accept-Ranges
+    is advertised either way so the client knows it may seek."""
+    from werkzeug.http import parse_range_header
+    n = len(raw)
+    resp = None
+    header = request.headers.get("Range")
+    if header and request.method in ("GET", "HEAD") and "If-Range" not in request.headers:
+        rng = parse_range_header(header)
+        if rng is not None and rng.units == "bytes" and len(rng.ranges) == 1:
+            start, stop = rng.ranges[0]            # stop exclusive, None = to the end
+            if start < 0:                          # suffix: the last -start bytes
+                start, stop = max(n + start, 0), n
+            else:
+                stop = n if stop is None else min(stop, n)
+            if start >= n:
+                resp = response_class(b"", status=416)
+                resp.headers["Content-Range"] = "bytes */%d" % n
+            else:
+                resp = response_class(raw[start:stop], status=206, mimetype=mime)
+                resp.headers["Content-Range"] = "bytes %d-%d/%d" % (start, stop - 1, n)
+    if resp is None:
+        resp = response_class(raw, mimetype=mime)
+    resp.headers["Accept-Ranges"] = "bytes"
+    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # The bundle's unlock split, ENFORCED at the serving layer (docs/DECISIONS.md
 # "The bundle's unlock split" 2026-07-27 + the "Mascots-in-Branding" correction
 # 2026-08-06): achievement-bound art -- badge masters, the per-achievement
@@ -2626,11 +2742,17 @@ def _seal_rule(rel):
         if "/" not in aid and aid in _ach_ids():
             return ("earned", aid)
         return ("deny", None)
-    if low.startswith(ROLE_CODE["starfall"].lower() + "/"):
-        # The whole Starfall bucket -- art, audio, AND the GONK folder
-        # inside it (ROLE_CODE['breadcrumb'] nests under starfall, so this
-        # prefix covers it without its own branch).
-        return ("earned", "the-konami-code")
+    for moment in ("starfall", "keyturn"):
+        if low.startswith(ROLE_CODE[moment].lower() + "/"):
+            # A moment's whole bucket -- art, audio, the clip, and for starfall
+            # the GONK folder inside it (ROLE_CODE['breadcrumb'] nests under
+            # starfall, so this prefix covers it without its own branch) -- is
+            # gated on the feat the sealed roster flags with that moment. The
+            # feat is looked up, never named here; a roster that carries no
+            # such flag (no pack, an older pack) DENIES, because this is the
+            # one branch where falling through would fail open.
+            aid = _moment_ach().get(moment)
+            return ("earned", aid) if aid else ("deny", None)
     earned_b = ROLE_CODE["earned_banners"].lower()
     if low == earned_b + "/great_library.png":
         return ("earned", "the-great-library")
@@ -2786,7 +2908,7 @@ def list_marks(out_dir, earned_ids=None):
                         # BOTH the raw id and the display name are spoiler-masked on
                         # the SAME `named` gate: the earlier fix masked only
                         # unlock_name and left `unlock` carrying the raw hidden-feat
-                        # id (e.g. "under-the-hood") to any unearned LOGIN user on
+                        # id to any unearned LOGIN user on
                         # GET /api/branding and /api/panel/summary (spoiler audit
                         # 2026-09-08). `earned` is computed off the local `unlock`
                         # above, and the seal rule reads the binding straight from
@@ -2795,6 +2917,33 @@ def list_marks(out_dir, earned_ids=None):
                         "unlock_name": _ach_name(unlock) if named else "",
                         "earned": earned,
                         "ico": _branding_exists(_role_rel("marks", mid + ".ico"))})
+    return out
+
+
+def _earned_roster_flags(entry):
+    """The sealed roster flags /api/achievements adds to an achievement ONCE IT IS
+    EARNED (pack v5), from its roster `entry`: `unlocks` (what the earn opens, e.g.
+    a Control Panel tab), and for a feat with a bespoke moment `moment`,
+    `moment_clip` (the clip's neutral public /branding/ URL, "" for a moment this
+    build has no clip for) and `moment_copy` (the moment's sealed strings). The
+    caller applies it to earned entries only -- before the earn none of these keys
+    exists in the payload, the same masking unlock_name gets -- and the client keys
+    on these flags, never on an achievement id. {} for an entry with no flags."""
+    out = {}
+    if not isinstance(entry, dict):
+        return out
+    unlocks = entry.get("unlocks")
+    if isinstance(unlocks, str) and unlocks:
+        out["unlocks"] = unlocks
+    moment = entry.get("moment")
+    if isinstance(moment, str) and moment:
+        clip = _MOMENT_CLIPS.get(moment)
+        copy = entry.get("moment_copy")
+        out["moment"] = moment
+        out["moment_clip"] = "/branding/" + clip if clip else ""
+        out["moment_copy"] = ({k: v for k, v in copy.items()
+                               if isinstance(k, str) and isinstance(v, str)}
+                              if isinstance(copy, dict) else {})
     return out
 
 
@@ -14853,16 +15002,22 @@ def create_app(out_dir: Path):
             resp = send_from_directory(str(bdir), coded)
             resp.headers["Cache-Control"] = "no-cache, must-revalidate"   # branding art gets re-cut; never serve a stale copy
             return resp
+        elif coded in _moment_clip_rels():
+            # A moment's clip, container-sourced (no loose copy): verified once,
+            # then sliced from memory for every range the <video> asks for.
+            raw = _container_clip_bytes(coded)
         else:
             # Container fallback keys on the CODED rel (posix separators -- the
             # container's native addressing; loose path == container key, always).
             raw = _branding_bytes(coded)
         if raw is None:
             abort(404)
+        # Every body that reaches here is in memory -- the container's bytes, or a
+        # flat's shipped default read through _branding_bytes -- rather than a file
+        # send_from_directory streams, so it gets the Range handling that would
+        # have given a loose file.
         mime = mimetypes.guess_type(coded)[0] or "application/octet-stream"
-        resp = app.response_class(raw, mimetype=mime)
-        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-        return resp
+        return _ranged_bytes_response(app.response_class, raw, mime)
 
     @app.route("/badge-thumb/<aid>.png", defaults={"ext": "png"})
     @app.route("/badge-thumb/<aid>.webp", defaults={"ext": "webp"})
@@ -14882,7 +15037,7 @@ def create_app(out_dir: Path):
         if not aid or "/" in aid or "\\" in aid or ".." in aid:
             abort(404)
         # Achievement ids are canonically lowercase-kebab; the underlying resolve
-        # is on a case-insensitive FS, so a case-variant (UNDER-THE-HOOD.png)
+        # is on a case-insensitive FS, so a case-variant (an upper-cased <ID>.png)
         # would otherwise skip the hidden-feat gate below (a frozenset of
         # lowercase ids) yet still read the real sealed master -- the same
         # fail-open leak _seal_rule casefolds against. Normalise once here so the
@@ -17086,6 +17241,7 @@ def create_app(out_dir: Path):
         # counted exactly how many secrets were left. One placeholder says only
         # what the placeholder itself already publicizes, and nothing more.
         masked_metrics, n_masked, visible = set(), 0, []
+        sealed_by_id = {r["id"]: r for r in _roster() if isinstance(r, dict)}
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
                 n_masked += 1
@@ -17096,6 +17252,8 @@ def create_app(out_dir: Path):
                 a["roast_nsfw"] = ""
             elif not unleashed:               # uncensored lines stay locked until Triggered
                 a["roast_nsfw"] = ""
+            if a["earned"]:                   # the roster flags go out only once earned
+                a.update(_earned_roster_flags(sealed_by_id.get(a["id"])))
             visible.append(a)
         if n_masked:
             visible.append({
