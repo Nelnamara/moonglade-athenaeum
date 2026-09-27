@@ -5227,3 +5227,57 @@ def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_brandi
     page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
     assert page.evaluate("() => sessionStorage.getItem('mg_panel_tab_request')") is None, (
         "the one-shot is consumed by the gallery that honoured it")
+
+
+def test_the_starfall_is_cast_on_a_phone_by_the_codes_touch_form(logged_in_page):
+    """Owner, 2026-09-26: a phone has no arrow keys, so the starfall could not be cast from one;
+    the code's touch form (moments/touchCode.js) is eight swipes -- up, up, down, down, left,
+    right, left, right -- then two taps off any control. Real touch events through the browser's
+    own input pipeline (CDP Input.dispatchTouchEvent) on an iPhone-shaped page running the phone
+    shell, so a vertical swipe scrolls the page exactly as a finger would; the moment must mount."""
+    clip = _moment_fixture_bytes()
+    page = logged_in_page(**IPHONE_PRO_MAX)
+    feat = _harness_feat("starfall")
+    state = _stub_the_earn(page, feat, earned_now=False)
+    page.route("**/api/ach-event", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps({"ok": True, "next_nonce": "harness"})))
+    _serve_clip_with_ranges(page, _MOMENT_CLIP_URL, clip)
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_function("() => document.readyState === 'complete'")
+    page.wait_for_timeout(800)
+    state["arm"] = True
+
+    # A point that is not on a control, for the two taps (a tap on a control breaks the code).
+    spot = page.evaluate("""() => {
+        const CONTROL = 'a,button,input,textarea,select,label,summary,[role="button"],[contenteditable="true"]';
+        for (let y = 60; y < innerHeight - 40; y += 24) for (let x = 20; x < innerWidth - 20; x += 24) {
+            const el = document.elementFromPoint(x, y);
+            if (el && !el.closest(CONTROL)) return {x, y};
+        }
+        return null;
+    }""")
+    assert spot, "no point on the phone page is free of a control -- nowhere to tap"
+    cdp = page.context.new_cdp_session(page)
+
+    def touch(kind, x, y):
+        pts = [] if kind == "touchEnd" else [{"x": x, "y": y, "id": 1}]
+        cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": pts})
+
+    def swipe(dx, dy):
+        x0, y0 = 215, 420
+        touch("touchStart", x0, y0)
+        for i in range(1, 6):
+            touch("touchMove", x0 + dx * i / 5, y0 + dy * i / 5)
+            page.wait_for_timeout(16)
+        touch("touchEnd", x0 + dx, y0 + dy)
+        page.wait_for_timeout(120)
+
+    for dx, dy in [(0, -140), (0, -140), (0, 140), (0, 140), (-140, 0), (140, 0), (-140, 0), (140, 0)]:
+        swipe(dx, dy)
+    for _ in range(2):
+        touch("touchStart", spot["x"], spot["y"])
+        page.wait_for_timeout(40)
+        touch("touchEnd", spot["x"], spot["y"])
+        page.wait_for_timeout(150)
+
+    page.wait_for_selector('[data-moment="starfall"]', state="attached", timeout=15_000)
