@@ -5806,12 +5806,52 @@ ${"=".repeat(48)}
       resolve = r;
     });
     const id = ++seq2;
-    cur = { id, kind, a, promise, resolve, visible: false, attached: false, skip: null, attachT: 0 };
-    cur.attachT = setTimeout(() => {
-      if (cur && cur.id === id && !cur.attached) finishMoment(id, "no-host");
-    }, ATTACH_CEILING_MS);
+    cur = {
+      id,
+      kind,
+      a,
+      promise,
+      resolve,
+      visible: false,
+      attached: false,
+      skip: null,
+      attachT: 0,
+      ready: false
+    };
+    afterPageSettles(() => {
+      if (!cur || cur.id !== id) return;
+      cur = { ...cur, ready: true };
+      cur.attachT = setTimeout(() => {
+        if (cur && cur.id === id && !cur.attached) finishMoment(id, "no-host");
+      }, ATTACH_CEILING_MS);
+      emit5();
+    });
     emit5();
     return promise;
+  }
+  var PAGE_SETTLE_MS = 2500;
+  function afterPageSettles(fn) {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      fn();
+      return;
+    }
+    let done = false;
+    const go = () => {
+      if (!done) {
+        done = true;
+        fn();
+      }
+    };
+    const idle = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(go, { timeout: PAGE_SETTLE_MS });
+      } else {
+        setTimeout(go, 0);
+      }
+    };
+    setTimeout(go, PAGE_SETTLE_MS * 2);
+    if (document.readyState === "complete") idle();
+    else window.addEventListener("load", idle, { once: true });
   }
   function attachMoment(id, skip) {
     if (!cur || cur.id !== id) return false;
@@ -6057,6 +6097,12 @@ ${"=".repeat(48)}
     useEffect(() => {
       setMomentVisible(id, shown);
     }, [id, shown]);
+    useEffect(() => {
+      if (typeof document === "undefined") return void 0;
+      const up = shown && !leaving;
+      document.body.classList.toggle("mg-moment-up", up);
+      return () => document.body.classList.remove("mg-moment-up");
+    }, [shown, leaving]);
     const onReady = () => {
       const v = videoRef.current;
       if (!v || modeRef.current !== "loading" || doneRef.current || frozenRef.current) return;
@@ -6284,7 +6330,7 @@ ${"=".repeat(48)}
   // ../gallery/src/moments/MomentHost.jsx
   function MomentHost() {
     const cur2 = useSyncExternalStore(subscribe4, currentMoment, currentMoment);
-    if (!cur2 || typeof document === "undefined") return null;
+    if (!cur2 || !cur2.ready || typeof document === "undefined") return null;
     return createPortal(/* @__PURE__ */ react_global_shim_default.createElement(ClipMoment, { key: cur2.id, moment: cur2 }), document.body);
   }
 

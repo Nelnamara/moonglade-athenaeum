@@ -9,6 +9,6 @@ import { currentMoment, subscribe } from "./momentStore.js";
    rest of the celebration layer, keyed by the request so a new moment is a fresh mount. */
 export default function MomentHost() {
   const cur = useSyncExternalStore(subscribe, currentMoment, currentMoment);
-  if (!cur || typeof document === "undefined") return null;
+  if (!cur || !cur.ready || typeof document === "undefined") return null;
   return createPortal(<ClipMoment key={cur.id} moment={cur} />, document.body);
 }

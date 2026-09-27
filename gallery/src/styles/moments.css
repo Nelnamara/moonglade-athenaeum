@@ -65,3 +65,8 @@
    Parity unchanged: 37/37 frames, box and colour 0, max frame diff 0.04% (sub-pixel smoothing of
    a turning glyph). (Owner walk 2026-09-26: "Video plays quite jittery and laggy".) */
 [data-moment] [data-part="star"] { will-change: transform; }
+
+/* The page under a fully-up moment is not drawn (ClipMoment: "THE PAGE UNDER A MOMENT IS NOT
+   DRAWN"). The delay lets the moment's own fade-in finish over the page before it goes; removing
+   the class shows it again at once, before the fade-out. */
+body.mg-moment-up > #root { visibility: hidden; transition: visibility 0s linear .9s; }

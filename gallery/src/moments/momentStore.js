@@ -50,12 +50,46 @@ export function playMoment(a) {
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
   const id = ++seq;
-  cur = { id, kind, a, promise, resolve, visible: false, attached: false, skip: null, attachT: 0 };
-  cur.attachT = setTimeout(() => {
-    if (cur && cur.id === id && !cur.attached) finishMoment(id, "no-host");
-  }, ATTACH_CEILING_MS);
+  cur = { id, kind, a, promise, resolve, visible: false, attached: false, skip: null, attachT: 0,
+          ready: false };
+  // NOT MOUNTED UNTIL THE PAGE HAS SETTLED (owner's walk, 2026-09-26: "laggy on both"). The key
+  // turn is earned on an /api/achievements read, which on a reload is the gallery's own boot:
+  // mounting then put the clip up against the whole first load of a large library. The moment
+  // waits for the page's load event and one idle slot (capped, so a busy page still gets it
+  // within PAGE_SETTLE_MS); a starfall, cast on a page that is long settled, passes straight
+  // through. The moment fades up from its own dark ground, so the wait is not seen.
+  afterPageSettles(() => {
+    if (!cur || cur.id !== id) return;
+    // A NEW object, not a flag flipped on the old one: MomentHost reads the store through
+    // useSyncExternalStore, which re-renders only when the snapshot's identity changes.
+    cur = { ...cur, ready: true };
+    cur.attachT = setTimeout(() => {
+      if (cur && cur.id === id && !cur.attached) finishMoment(id, "no-host");
+    }, ATTACH_CEILING_MS);
+    emit();
+  });
   emit();
   return promise;
+}
+
+const PAGE_SETTLE_MS = 2500;
+
+function afterPageSettles(fn) {
+  if (typeof window === "undefined" || typeof document === "undefined") { fn(); return; }
+  let done = false;
+  const go = () => { if (!done) { done = true; fn(); } };
+  const idle = () => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(go, { timeout: PAGE_SETTLE_MS });
+    } else {
+      setTimeout(go, 0);
+    }
+  };
+  // A load event held up by one slow resource must not hold the moment: it goes regardless
+  // after twice the settle cap.
+  setTimeout(go, PAGE_SETTLE_MS * 2);
+  if (document.readyState === "complete") idle();
+  else window.addEventListener("load", idle, { once: true });
 }
 
 /* The host component, once it has mounted this moment: stops the ceiling above and hands

@@ -187,6 +187,20 @@ export default function ClipMoment({ moment }) {
 
   useEffect(() => { setMomentVisible(id, shown); }, [id, shown]);
 
+  // THE PAGE UNDER A MOMENT IS NOT DRAWN (owner's walk, 2026-09-26: "laggy on both"). The moment
+  // covers the whole viewport on its own dark ground, but the app beneath it -- on the owner's
+  // library, thousands of tiles still decoding and painting, and on a reload the gallery's whole
+  // boot -- kept the compositor busy under the clip. While the moment is fully up, #root is
+  // hidden (moments.css): visibility, not display or content-visibility, so its layout, scroll
+  // position and state are untouched and nothing under the owner moves. It comes back the
+  // instant the moment starts to leave, so the fade-out shows the page as before.
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const up = shown && !leaving;
+    document.body.classList.toggle("mg-moment-up", up);
+    return () => document.body.classList.remove("mg-moment-up");
+  }, [shown, leaving]);
+
   // The video tells us when it can go.
   const onReady = () => {
     const v = videoRef.current;

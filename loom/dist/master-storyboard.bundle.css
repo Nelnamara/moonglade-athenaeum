@@ -1736,6 +1736,10 @@ button.mgcp-chip .mgico {
 [data-moment] [data-part=star] {
   will-change: transform;
 }
+body.mg-moment-up > #root {
+  visibility: hidden;
+  transition: visibility 0s linear .9s;
+}
 
 /* ../gallery/src/styles/notify.css */
 .ach-m2 {
