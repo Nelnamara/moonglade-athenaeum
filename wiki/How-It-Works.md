@@ -6,7 +6,8 @@ Four Python modules around one SQLite catalog, plus the Loom's JS surface.
 moonglade_backup.py   CLI engine: download, organize, generate, sync, delete, reconcile
 moonglade_gallery.py          Flask web gallery + ALL SQLite catalog helpers (the shared base)
 moonglade_similar.py          "more like this" sidecar: CLIP embeddings in Pixeltable (optional dep)
-moonglade_mcp.py          local stdio MCP server: curation tools over the catalog
+moonglade_mcp.py          local stdio MCP server: curation tools over the catalog, a duplicate
+                          finder, and a read-only PixAI tag-suggestion tool
 loom/                     The Loom's JS surface: esbuild bundle + its own `node --test` suite
 ```
 
@@ -68,7 +69,8 @@ pixai_backup/
 ├─ 2024-03/           organize: month folders, descriptive names
 ├─ videos/  imported/ backed-up + imported media
 ├─ gallery/thumbs/    768px JPEG thumbnails (immutable cache)
-├─ gallery/cache/     regenerable caches — e.g. Folio badge thumbnails (machine-local)
+├─ gallery/cache/     regenerable caches — e.g. Folio badge thumbnails and the rendered
+│                     banners (`_banners/`) (machine-local)
 ├─ loom/              the Loom's storyboard store + exports
 ├─ _duplicates/       quarantine from --dedup (reversible)
 ├─ _deleted/          quarantine from a gallery delete (reversible)
