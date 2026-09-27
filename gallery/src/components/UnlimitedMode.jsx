@@ -8,13 +8,14 @@ import "../styles/unlimited.css";
    (GenerateDrawer.jsx) and the phone Create screen (CreateMobile.jsx). SCOPE_2026-09-26_
    unlimited-mode C2/C4; pixel source: moonglade-internal/design/notes/tsubaki3-features/
    pixai-unlimited-mode-toggle.png and pixai-unlimited-mode-prompt-strip.png, rebuilt in the
-   app's tokens (the lane's hue is the emerald token, the mark is ∞).
+   app's tokens (the lane's hue is the fixed --green token -- every skin redefines --emerald, and Nightfallen's
+   is lavender -- the mark is ∞).
 
    Both read and write useGenerate's own `s` / `set` -- no state of their own. The logic is
    genCore.js's (unlimitedOffered / unlimitedBlock / unlimitedPatch ...), so the node suite pins
    the rules and these two only draw them. */
 
-/* C2: the bordered emerald card under the model card -- "∞ Tsubaki.3 Unlimited Mode", a help
+/* C2: the bordered green card under the model card -- "∞ Tsubaki.3 Unlimited Mode", a help
    mark carrying the rules, the switch on the right, "N days left" under it. Rendered only while
    the applied version offers the lane. Turning it ON is refused while something would make the
    server refuse the run (a reference picture, a size over the lane's limit): the switch reads
@@ -48,7 +49,7 @@ export function UnlimitedRow({ s, set, phone }) {
   );
 }
 
-/* C4: the band over the prompt while the lane is on -- "∞ Unlimited Mode is on" in emerald on
+/* C4: the band over the prompt while the lane is on -- "∞ Unlimited Mode is on" in green on
    the left, "Turn off" on the right. It stays up whatever model is applied (§8.1): with the
    switch on over a version that does not offer the lane, this is where it is turned off, and
    the cost badge carries the server's refusal. */

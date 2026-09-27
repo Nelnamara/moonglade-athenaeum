@@ -1,7 +1,8 @@
 /* unlimited.css -- Tsubaki.3 Unlimited Mode's toggle row and prompt strip (UnlimitedMode.jsx),
    shared by the desktop dock and the phone Create screen. SCOPE_2026-09-26_unlimited-mode
    C2/C4, pixel source moonglade-internal/design/notes/tsubaki3-features/ (PixAI's own card and
-   band), rebuilt in the app's tokens: the lane's hue is --emerald, tints are color-mix against
+   band), rebuilt in the app's tokens: the lane's hue is --green (fixed: every skin redefines --emerald as its own magic hue, and
+   Nightfallen's is lavender; PixAI's lane is green in every skin), tints are color-mix against
    transparent, nothing here is a raw colour. Type and spacing follow the dock's own idioms --
    the model row's 11.5px/600 name, the preset note's 10px line and 8px box, the dock switch's
    28x16 track -- and the phone's .cm-* scale where it differs. */
@@ -9,15 +10,15 @@
 /* ---- C2: the toggle row, under the model card ---- */
 .mgunl-row { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px;
   border-radius: 11px;
-  background: color-mix(in oklab, var(--emerald) 7%, transparent);
-  border: 1px solid color-mix(in oklab, var(--emerald) 32%, transparent);
+  background: color-mix(in oklab, var(--green) 7%, transparent);
+  border: 1px solid color-mix(in oklab, var(--green) 48%, transparent);
   transition: border-color .22s, background .22s; }
-.mgunl-row.on { background: color-mix(in oklab, var(--emerald) 12%, transparent);
-  border-color: color-mix(in oklab, var(--emerald) 55%, transparent); }
+.mgunl-row.on { background: color-mix(in oklab, var(--green) 12%, transparent);
+  border-color: color-mix(in oklab, var(--green) 70%, transparent); }
 .mgunl-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mgunl-head .sp { flex: 1 1 auto; }
 .mgunl-mark { flex: none; font-size: 14px; line-height: 1; font-weight: 700;
-  color: var(--emerald); }
+  color: var(--green); }
 .mgunl-title { font-size: 11.5px; font-weight: 600; color: var(--text);
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the help mark: a small ringed "?" whose title carries the rules in one line */
@@ -28,7 +29,7 @@
 /* the reason switching on is refused: one line, the badge's own caution ink */
 .mgunl-why { font-size: 10px; line-height: 1.45; color: var(--peach); padding-left: 20px; }
 
-/* the switch: the dock's 28x16 track, emerald when on */
+/* the switch: the dock's 28x16 track, green when on */
 .mgunl-sw { position: relative; flex: none; display: flex; align-items: center;
   cursor: pointer; user-select: none; }
 .mgunl-sw.off { cursor: not-allowed; }
@@ -38,22 +39,22 @@
 .mgunl-track i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
   border-radius: 50%; background: var(--overlay0);
   transition: transform .25s cubic-bezier(.2, .9, .24, 1), background .25s; }
-.mgunl-sw input:checked + .mgunl-track { background: var(--emerald); }
+.mgunl-sw input:checked + .mgunl-track { background: var(--green); }
 .mgunl-sw input:checked + .mgunl-track i { transform: translateX(12px); background: var(--base); }
 .mgunl-sw input:disabled + .mgunl-track { opacity: .4; }
-.mgunl-sw input:focus-visible + .mgunl-track { outline: 2px solid var(--emerald);
+.mgunl-sw input:focus-visible + .mgunl-track { outline: 2px solid var(--green);
   outline-offset: 2px; }
 
 /* ---- C4: the band over the prompt while the lane is on ---- */
 .mgunl-strip { display: flex; align-items: center; gap: 6px; padding: 6px 12px;
-  background: color-mix(in oklab, var(--emerald) 12%, transparent);
-  border: 1px solid color-mix(in oklab, var(--emerald) 38%, transparent);
+  background: color-mix(in oklab, var(--green) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--green) 52%, transparent);
   animation: mgunlIn .25s ease both; }
 .mgunl-strip .sp { flex: 1 1 auto; }
 .mgunl-strip .mgunl-mark { font-size: 13px; }
-.mgunl-on { font-size: 11px; font-weight: 700; color: var(--emerald); white-space: nowrap; }
+.mgunl-on { font-size: 11px; font-weight: 700; color: var(--green); white-space: nowrap; }
 .mgunl-off { flex: none; padding: 0; border: 0; background: none; cursor: pointer;
-  font: inherit; font-size: 10.5px; color: var(--emerald); text-decoration: underline;
+  font: inherit; font-size: 10.5px; color: var(--green); text-decoration: underline;
   text-underline-offset: 2px; }
 .mgunl-off:hover { color: var(--text); }
 /* dock: the band IS the composer's top edge -- bled out over its 12px/14px padding, the

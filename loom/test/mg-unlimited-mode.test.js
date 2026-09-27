@@ -156,9 +156,9 @@ describe("C5 / §8.7 -- the badge and the finished line know the lane", () => {
     assert.match(submit,
       /paid === 0 \? \(payload\.unlimited \? "free \(Unlimited Mode\)" : "free \(card used\)"\)/);
   });
-  test("the ∞ is the emerald token, never a raw colour", () => {
+  test("the ∞ is the fixed green token (not the skin-tinted emerald), never a raw colour", () => {
     const css = read("../../gallery/src/styles/cost-badge.css");
-    assert.match(css, /\.cost-badge \.mgc-inf \{[^}]*color: var\(--emerald\);/);
+    assert.match(css, /\.cost-badge \.mgc-inf \{[^}]*color: var\(--green\);/);
   });
 });
 
@@ -175,6 +175,7 @@ describe("C2 / C4 -- both surfaces mount the row and the strip", () => {
     const css = read("../../gallery/src/styles/unlimited.css").replace(/\/\*[\s\S]*?\*\//g, "");
     assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b/i, "a raw hex colour");
     assert.doesNotMatch(css, /rgba?\(/i, "a raw rgb colour");
-    assert.match(css, /var\(--emerald\)/);
+    assert.match(css, /var\(--green\)/);
+    assert.doesNotMatch(css, /var\(--emerald\)/, "the lane is green in every skin, never the skin's emerald");
   });
 });

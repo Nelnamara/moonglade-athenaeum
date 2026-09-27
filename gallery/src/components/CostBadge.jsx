@@ -150,7 +150,7 @@ function build(view, props) {
   let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
   // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C5, §8.7): the server answers a
   // lane request {cost: 0, free: true, unlimited: true} with no card involved, and every form
-  // reads "Free ∞" in place of the price and the card line -- the ∞ its own span, in emerald.
+  // reads "Free ∞" in place of the price and the card line -- the ∞ its own span, in the fixed green.
   const lane = state === "free" && d.unlimited === true;
   // Ticket accounting from the response: `cards`/`cards_held` = tickets HELD, `cards_needed` =
   // tickets this job COSTS (absent = 1, the one-job-one-ticket case every image is).

@@ -4934,13 +4934,13 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     inf = page.evaluate("""() => {
         const el = document.querySelector('.mgdock-gocol > .cost-badge .mgc-inf');
         const probe = document.createElement('span');
-        probe.style.color = 'var(--emerald)';
+        probe.style.color = 'var(--green)';
         document.body.appendChild(probe);
         const want = getComputedStyle(probe).color;
         probe.remove();
         return {got: getComputedStyle(el).color, want};
     }""")
-    assert inf["got"] == inf["want"], "the ∞ must be the emerald token: %r" % inf
+    assert inf["got"] == inf["want"], "the ∞ must be the fixed green token: %r" % inf
     assert not [p for p in matched if p.get("lane")], "a lane request reached the card check"
     on = page.evaluate(_UNL_CONTROLS_JS)
     assert on == {"modes": [True, True, True, False, True],
