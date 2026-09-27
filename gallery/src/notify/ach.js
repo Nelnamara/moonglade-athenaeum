@@ -51,7 +51,7 @@ let data = null;                 // last /api/achievements payload (skinName for
         and a dequeue that refuses while it is set.
         The REVERSE direction is closed by whenClear() below: a cast that would otherwise
         paint UNDER something already on screen waits for the screen to be empty first.
-     2. An achievement in BESPOKE_FEATS never gets _fanfare ON AN EARN: its own moment IS
+     2. A bespoke achievement (isBespoke) never gets _fanfare ON AN EARN: its own moment IS
         the fanfare. A Folio REPLAY is not that moment (replay builds the standard moment
         and casts nothing), so suppressing there would leave a celebration thinner than the
         one that shipped before this rule, with nothing replacing it -- the replay keeps its
@@ -59,19 +59,35 @@ let data = null;                 // last /api/achievements payload (skinName for
         second gate any more: rule 1 means nothing is BUILT while one owns the screen, so
         there is no celebration here for flair to ride on.
 
-   Deliberately pure module state: BOTH hosts load this file and the Loom has none of the
-   gallery's bespoke-moment DOM or CSS, so nothing here may read an element, a class or a
-   stylesheet -- the owner of a moment tells us it started and tells us it ended. */
-export const BESPOKE_FEATS = new Set(["the-konami-code", "under-the-hood"]);
+   Deliberately pure module state: BOTH hosts load this file, so nothing here may read an
+   element, a class or a stylesheet -- the owner of a moment tells us it started and tells us
+   it ended.
+
+   WHICH FEATS ARE BESPOKE is the roster's to say, not this file's: an achievement whose
+   object carries a `moment` (the sealed roster flag, present in /api/achievements once the
+   feat is earned) brings its own celebration. No id is named here. */
+export function isBespoke(a) { return !!(a && a.moment); }
 
 let _bespoke = 0;                // depth, not a bool: two moments may overlap and compose
 let _pendingDrain = false;       // the dequeue was asked to run while the gate was closed
 const _whenClear = [];           // callers waiting for the celebration layer to be EMPTY
 
-/* THE LAYER LEDGER. Everything this module paints is body-level and sits ABOVE the cast's
-   own layer -- a moment .ach-m2 at z-index 520, the parade's two chips at 519/521, against
-   .ee-layer's 449 -- so "the celebration layer is clear" has to mean the DOM is empty of
-   all of it. A receded trail card is not a moment, but it is still four dimmed cards
+/* THE MOMENT HOST (review amendment 1). The shell's own "play this feat's moment": a
+   function taking the achievement and returning a Promise that settles when the moment has
+   ENDED -- played out, skipped, or fallen back. notify/index.jsx registers one for every
+   shell that installs the notify system (the desktop gallery, the phone, the Loom), so
+   whichever of them sees the earn first plays it. With none registered an earn simply gets
+   its plain toast, exactly as before moments existed. */
+let _momentHost = null;
+export function registerMomentHost(fn) {
+  _momentHost = typeof fn === "function" ? fn : null;
+  return () => { if (_momentHost === fn) _momentHost = null; };
+}
+
+/* THE LAYER LEDGER. Everything this module paints is body-level and sits ABOVE a bespoke
+   moment -- a moment .ach-m2 at z-index 520, the parade's two chips at 519/521, against a
+   clip moment's 515/516 -- so "the celebration layer is clear" has to mean the DOM is empty
+   of all of it. A receded trail card is not a moment, but it is still four dimmed cards
    painted over a starfall. Every append goes through _mount and every removal through
    _unmount, so the ledger cannot drift from the DOM; the module still reads no element,
    class or stylesheet, it only counts what it put there itself. */
@@ -112,8 +128,8 @@ export function endBespokeMoment() {
    catches the next queued moment rather than racing it.
 
    "Empty" is the DOM, not the queue. Treating a parade's receded trail as clear was the
-   reverse direction left half-open: those cards keep .ach-m2's z-index 520 over the cast's
-   449, and while a hold was armed they could not even time out. Waiting for the whole parade
+   reverse direction left half-open: those cards keep .ach-m2's z-index 520 over a moment's
+   515/516, and while a hold was armed they could not even time out. Waiting for the whole parade
    instead would delay a cast by every earn still in it, so a waiting cast does not wait for
    presented history -- _flushClear takes it down (_hush). What a cast waits for is the
    moment actually being presented, plus the 500ms that history takes to fade. */
@@ -122,6 +138,21 @@ export function whenClear(fn) {
   if (!_cur && !_live.size) { fn(); return; }
   _whenClear.push(fn);
   _flushClear();                 // nothing presenting, only history? then start taking it down
+}
+
+/* Hand one earn to the moment host and hold the celebration layer for as long as its moment
+   plays. The arm happens INSIDE whenClear, exactly as the key-sequence trigger arms its own:
+   a moment never starts under a celebration already on screen, and while it waits for one to
+   leave, the waiting itself closes the gate (_heldOff), so nothing is built in the gap. A
+   host that throws, or whose promise rejects, still releases -- a missed release would hold
+   every later achievement for the rest of the session. */
+function _toMoment(host, a) {
+  whenClear(() => {
+    beginBespokeMoment();
+    let ended;
+    try { ended = Promise.resolve(host(a)); } catch { ended = Promise.resolve(); }
+    ended.then(() => endBespokeMoment(), () => endBespokeMoment());
+  });
 }
 
 /* The one place waiting casts are fired, reached from every removal (_unmount) and from the
@@ -164,15 +195,51 @@ function syncSkin(d) {           // server is source of truth; reconcile the pre
   if (srv !== cur) applySkin(srv);
 }
 
+let _marking = 0;                // marking reads in flight (see noticeAchievements)
+
 function load(mark) {
+  if (mark) _marking++;
+  const done = () => { if (mark && _marking > 0) _marking--; };
   apiGet("/api/achievements" + (mark ? "?mark=1" : ""))
-    .then((d) => { if (d.error) return; data = d; if (mark) toastNew(d); syncSkin(d); });
+    .then((d) => {
+      done();
+      if (d.error) return;
+      data = d;
+      if (mark) toastNew(d);
+      syncSkin(d);
+    }, done);
 }
 
+/* An UNMARKED read (the Folio's, the Control Panel's) can be the read that EARNS a feat --
+   the server sweeps on every /api/achievements -- and its answer then lists it in `newly`
+   without marking it. A bespoke earn seen there does not wait for the next boot: it asks for
+   the marking check, whose answer goes through toastNew like every other, so the moment
+   plays through the same gate. A plain earn keeps today's timing, and nothing here toasts. */
+export function noticeAchievements(d) {
+  if (!d || d.error || _marking) return;
+  const achs = d.achievements || [];
+  const bespoke = (d.newly || []).some((id) => isBespoke(achs.filter((a) => a.id === id)[0]));
+  if (bespoke) check();
+}
+
+/* THE ONE DOOR from an answer to the screen, whichever read produced it. Two steps, in this
+   order, and the order is the rule (review amendment 1):
+     1. every earn that brings its own moment is handed to the moment host FIRST, and its
+        hold is armed through whenClear -> beginBespokeMoment before anything is queued, so
+        no toast from this answer -- its own or another earn's -- can reach the screen ahead
+        of the moment. The host's promise settling is what lifts that hold.
+     2. then every earn is celebrated as it always was, the bespoke ones included -- and
+        FIRST, so the toast that follows a moment is that moment's own feat: it queues now and
+        plays after the moment, without the generic fanfare (_flair). With no host
+        registered, step 1 does nothing and the order is the answer's own, today's path. */
 function toastNew(d) {
-  const newly = (d.newly || [])
+  let newly = (d.newly || [])
     .map((id) => (d.achievements || []).filter((a) => a.id === id)[0])
     .filter(Boolean);
+  if (_momentHost) {
+    newly.forEach((a) => { if (isBespoke(a)) _toMoment(_momentHost, a); });
+    newly = newly.filter(isBespoke).concat(newly.filter((a) => !isBespoke(a)));
+  }
   if (newly.length > 3) {        // a flood -> the TRAIL parade (owner ruling 2026-09-03):
     _floodParade(newly);         // every earn presents, then recedes down-screen behind the next
     return;
@@ -402,7 +469,7 @@ function _fanfare(m, tier) {
    bearing only while the Folio replay had an exemption from that gate, and the exemption is
    what went. A guard that cannot run is a guard nobody can check. */
 function _flair(built, a, opts) {
-  if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;   // the earn: its own moment is the fanfare
+  if (isBespoke(a) && !(opts && opts.replay)) return;   // the earn: its own moment is the fanfare
   const tier = a.tier || "common";
   if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
 }
@@ -796,7 +863,7 @@ function _bind(e, built) {
    Held is not the same as immediate. While a bespoke moment owns the screen -- or while a
    cast waits for the screen -- the entry waits with everything else and plays when the gate
    lifts, driven the whole time by the handle above; the exemption this used to carry put a
-   .ach-m2 at z-index 520 over a cast at 449, which is the overlap owner ruling 2026-09-10
+   .ach-m2 at z-index 520 over a moment at 515/516, which is the overlap owner ruling 2026-09-10
    rules out in BOTH directions.
    opts.line forces the initial roast text (the Folio's ruby-scramble reveal starts from the
    CLEAN line on its own timing). Returns the driver handle useFolio.js consumes; {} only when

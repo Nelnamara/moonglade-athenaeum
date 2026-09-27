@@ -3,6 +3,7 @@ import { apiGet, apiPost } from "../api.js";
 import { note as noteUpdate, subscribe as subscribeUpdate,
          armReceipt as armUpdateReceipt } from "../notify/updateStore.js";
 import { invalidate, peek, put } from "./swrCache.js";
+import { noticeAchievements } from "../notify/ach.js";
 
 /* Control Panel's own fetch/poll/action/power data layer, mechanically lifted out of
    ControlPanelOverlay.jsx (2026-08-03) into its own hook -- summary/achievements fetch,
@@ -87,6 +88,11 @@ async function applySkin(id, achievements, setAchievements) {
   return d;
 }
 
+/* Does this /api/achievements answer unlock the Branding tab? See brandingUnlocked below. */
+export function brandingUnlockedIn(d) {
+  return ((d && d.achievements) || []).some((a) => a && a.unlocks === "branding_tab" && a.earned);
+}
+
 export default function useControlPanel() {
   /* THE FOUR OPEN-TIME READS ARE SEEDED FROM THE SHARED CACHE (hooks/swrCache.js), so a
      reopened Panel paints its summary, its skins, its run history and its standing order in
@@ -104,6 +110,10 @@ export default function useControlPanel() {
      nothing is silently mis-recorded. */
   const [summary, setSummary] = useState(() => peek("/api/panel/summary"));
   const [achievements, setAchievements] = useState(() => peek("/api/achievements"));
+  // True once THIS mount's own /api/achievements read has landed (answered or failed). The
+  // seed above can predate an earn, so a gate that must not act on a stale roster -- the
+  // panel holding a requested Branding tab -- waits for this rather than for `achievements`.
+  const [achievementsFresh, setAchievementsFresh] = useState(false);
   const [summaryErr, setSummaryErr] = useState("");
   const [panelHistory, setPanelHistory] = useState(() => (peek("/api/jobs.panel") || {}).rows || []);
   const [schedule, setSchedule] = useState(() => peek("/api/panel/schedule"));
@@ -217,11 +227,32 @@ export default function useControlPanel() {
     }
     return runAction(action);
   };
-  const fetchAchievements = async () => {
-    try {
-      const d = await apiGet("/api/achievements");
-      if (!d.error) { put("/api/achievements", d); setAchievements(d); }
-    } catch { /* Skins sections just stay hidden without this — non-critical */ }
+  /* Resolves with the roster it read (null when the read failed). ONE read in flight at a
+     time: a caller that asks while one is already out -- the panel honouring a requested tab
+     on the same mount that fires the read below -- waits for that read instead of sweeping
+     the server a second time. */
+  const achInFlight = useRef(null);
+  const fetchAchievements = () => {
+    if (achInFlight.current) return achInFlight.current;
+    const p = (async () => {
+      let got = null;
+      try {
+        const d = await apiGet("/api/achievements");
+        if (!d.error) {
+          put("/api/achievements", d);
+          setAchievements(d);
+          got = d;
+          // This read can be the one that EARNS a feat (the server sweeps on every read);
+          // a feat with its own moment then plays it through ach.js's one gate.
+          noticeAchievements(d);
+        }
+      } catch { /* Skins sections just stay hidden without this — non-critical */ }
+      achInFlight.current = null;
+      setAchievementsFresh(true);
+      return got;
+    })();
+    achInFlight.current = p;
+    return p;
   };
 
   useEffect(() => {
@@ -717,14 +748,14 @@ export default function useControlPanel() {
   // The Branding tab is gated on an EARNED achievement, not a UI-only toggle
   // (owner call, 2026-08-05: gate for real -- the Design Handoff's editor prop
   // defaulted the tab to always-visible because it never had the gate in
-  // context). /api/achievements masks the id of anything not yet earned, so
-  // this reads false until it is real -- no separate visibility check needed.
-  const brandingUnlocked = (achievements?.achievements || []).some(
-    (a) => a.id === "under-the-hood" && a.earned
-  );
+  // context). WHICH achievement is the roster's to say: the one whose `unlocks`
+  // flag names this tab. /api/achievements masks that flag until the feat is
+  // earned, so this reads false until it is real -- no separate visibility
+  // check, and no id named here.
+  const brandingUnlocked = brandingUnlockedIn(achievements);
 
   return {
-    summary, summaryErr, achievements, skins, activeSkin, pickSkin, brandingUnlocked,
+    summary, summaryErr, achievements, achievementsFresh, skins, activeSkin, pickSkin, brandingUnlocked,
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
     fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,

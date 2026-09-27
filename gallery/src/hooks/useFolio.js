@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.js";
 import { sendAchEvent } from "../notify/achNonce.js";
+import { noticeAchievements } from "../notify/ach.js";
 import { peek, put } from "./swrCache.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
@@ -286,6 +287,9 @@ export default function useFolio() {
     apiGet("/api/achievements")
       .then((d) => {
         put("/api/achievements", d);
+        // The read that opens the Folio can be the one that EARNS a feat (the server sweeps
+        // on every read); a feat with its own moment plays it through ach.js's one gate.
+        noticeAchievements(d);
         if (dead) return;
         // An error only surfaces when there is nothing cached to keep showing -- the
         // shared cache's own rule (hooks/swrCache.js).

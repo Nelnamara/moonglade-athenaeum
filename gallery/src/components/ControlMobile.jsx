@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import useControlPanel, { DEDUP_STAGES } from "../hooks/useControlPanel.js";
+import React, { useEffect, useRef, useState } from "react";
+import useControlPanel, { DEDUP_STAGES, brandingUnlockedIn } from "../hooks/useControlPanel.js";
 import {
   ActionChip, SkinsRow, BrandingTab, UsersSubOverlay, TrashSubOverlay, PowerModal,
   MarkArt, fmtEvery, BlurToggleTile,
@@ -104,9 +104,9 @@ function ledgerResult(j) {
   return { text: j.status || "…", good: false };
 }
 
-export default function ControlMobile({ account }) {
+export default function ControlMobile({ account, brandRequest }) {
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements, fetchAchievements,
     panelHistory, schedule,
     fetchSummary, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
@@ -153,6 +153,20 @@ export default function ControlMobile({ account }) {
      shared ledger, one entry per open layer: hooks/useLayerHistory.js. Declared above the
      early returns below, as every hook in this file must be. */
   useLayerHistory(brandOpen, closeBrand);
+  /* A REQUESTED Branding (AppMobile's brandRequest: the key-turn moment's button). Held until
+     an achievements read made for it has answered -- a cached roster from before the earn
+     would say "locked" -- then opened if that answer unlocks it, and dropped if it does not.
+     On a fresh mount the read is the hook's own (fetchAchievements joins the one in flight).
+     Each request is honoured once. */
+  const brandAskedRef = useRef(0);
+  useEffect(() => {
+    if (!brandRequest || brandAskedRef.current === brandRequest) return undefined;
+    brandAskedRef.current = brandRequest;
+    let live = true;
+    fetchAchievements().then((d) => { if (live && brandingUnlockedIn(d)) openBrand(); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandRequest]);
 
   /* ---- THE UPDATE, on the phone (owner ruling 2026-09-07: "phone gets update") ---------
      Nothing about updates showed on this surface before today -- the apply flow was the
