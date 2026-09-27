@@ -306,7 +306,7 @@ def render_server(tmp_path_factory):
     # Two pieces, both load-bearing:
     #
     # 1. The Under-the-Hood earn-state. The Branding tab is gated behind the real
-    #    `under-the-hood` feat (owner decision 2026-08-05, `brandingUnlocked` in
+    #    feat that unlocks the Branding tab (owner decision 2026-08-05, `brandingUnlocked` in
     #    useControlPanel.js) -- and conftest's autouse `_isolated_branding` fixture
     #    (correctly) points branding_root() at an empty per-test tmp dir, so the
     #    sweep_telemetry()/sweep_branding_drops() earn paths can never fire in a test:
@@ -1196,7 +1196,7 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
 
     # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
     # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
-    # The tab is achievement-gated (brandingUnlocked = "under-the-hood" earned; the
+    # The tab is achievement-gated (brandingUnlocked = the feat carrying unlocks: "branding_tab"; the
     # harness seeds branding_custom_file to earn it). Since bundle-v2 the roster is
     # SEALED in moonglade.dat, so that gate can only resolve when the private donor is
     # present -- donor-absent (public CI) the tab never renders. Gate just this block
@@ -4130,7 +4130,10 @@ def test_each_tab_keeps_its_own_scroll(
 # of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
 # -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
 # friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
-_UNDER_THE_HOOD = "under-the-hood"     # the feat the custom-file flag arms
+# The feat the custom-file flag arms, found by the roster flag it carries (never an id
+# literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
+from tests.conftest import donor_feat as _donor_feat
+_UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
 _DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the
@@ -4207,7 +4210,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
-    moonglade.dat, so donor-absent (public CI) there is no `under-the-hood` to earn and no
+    moonglade.dat, so donor-absent (public CI) there is no branding-tab feat to earn and no
     toast to wait for. The adoption half -- the part with no coverage at all -- runs either
     way.
     """

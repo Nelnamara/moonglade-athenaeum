@@ -431,3 +431,28 @@ def test_no_public_file_carries_moment_copy(sealed_donor_present):
                 leaks.append("%s: %s moment_copy.%s" % (path.relative_to(_REPO), moment, key))
     assert scanned, "scanned no public file -- the guard would be a no-op"
     assert not leaks, "sealed moment copy in public files:\n  " + "\n  ".join(sorted(leaks))
+
+
+def test_no_public_file_names_a_moment_feat(sealed_donor_present):
+    """The hidden feats that carry a moment or an unlock are keyed in public code by those
+    roster flags, never by their ids (pack v5; SCOPE_2026-09-11 id-free public source §5).
+    The ids stay internal keys for state files and the sealed roster. Scanned: everything
+    test_no_public_file_carries_moment_copy scans, plus the Python modules and the tests."""
+    roster = json.loads(_SEALED_DONOR.read_text(encoding="utf-8")).get("roster") or []
+    ids = sorted({a["id"] for a in roster
+                  if isinstance(a, dict) and a.get("id") and (a.get("moment") or a.get("unlocks"))})
+    assert ids, "no moment or unlock feat in the donor -- the guard would be a no-op"
+    files = list(_public_files())
+    files += [p for p in _REPO.glob("*.py")]
+    files += [p for p in (_REPO / "tests").glob("*.py")]
+    leaks = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for i, fid in enumerate(ids):
+            if fid in text:
+                leaks.append("%s: moment feat #%d" % (path.relative_to(_REPO), i))
+    assert files, "scanned no public file -- the guard would be a no-op"
+    assert not leaks, "a hidden feat's id in public files:\n  " + "\n  ".join(sorted(leaks))

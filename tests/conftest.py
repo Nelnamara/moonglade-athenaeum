@@ -66,6 +66,20 @@ def seed_sealed_container(container_path):
 MOMENT_FIXTURE_CLIP = Path(__file__).resolve().parent / "fixtures" / "moment_fixture.mp4"
 
 
+def donor_feat(**flags):
+    """The sealed roster's achievement id carrying every given flag (e.g.
+    `donor_feat(unlocks="branding_tab")`), or None without the donor. A test names a hidden
+    feat by its roster flags, never by an id literal: the ids are not public source (pack v5,
+    DECISIONS 2026-09-11 "Hidden-feat ids are keys, not spoilers")."""
+    if not _SEALED_DONOR.is_file():
+        return None
+    roster = json.loads(_SEALED_DONOR.read_text(encoding="utf-8")).get("roster") or []
+    for a in roster:
+        if isinstance(a, dict) and all(a.get(k) == v for k, v in flags.items()):
+            return a.get("id")
+    return None
+
+
 def moment_clip_keys():
     """The container keys (CODED rels) every moment's clip is seeded under -- derived from
     the app's own map and translation, never retyped, so a moved bucket moves the seed too."""
