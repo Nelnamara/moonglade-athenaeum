@@ -39,7 +39,8 @@ why this section exists.
 - **A first-run guide for a customization surface.** *(2026-09-10)* A design session for the
   guidance a user meets the first time they open a customization surface they have not used before
   — the orientation, not the controls. The asset-folder rules it waited on shipped in 3.12.0, so it
-  can be designed against the rules now in force.
+  can be designed against the rules now in force. It may become one instance of the in-app
+  first-run guide below rather than a design of its own.
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does
@@ -175,6 +176,17 @@ why this section exists.
 
 ## Backlog — needs scoping
 
+- **Help, About and first-run guidance — one family.** *(owner, 2026-09-27)* Three related ideas,
+  best designed together:
+  - **An in-app first-run guide.** The setup wizard gets the app installed; a guide would orient a
+    user the first time they reach each main surface (the gallery, the Generate dock, the Loom, the
+    Folio, the Control Panel) — what it is for and where things are, not every control.
+  - **The wiki inside the app.** Render the repo's own `wiki/*.md` in a Help overlay, bundled with
+    the app: it works offline and always describes the installed version (the GitHub wiki follows
+    `master`). Links between pages stay in the app; the Glossary could supply hover definitions.
+  - **An About panel.** The app and art-pack versions, what's new in the installed version (its
+    `CHANGELOG.md` entry, and a natural place to show it once after an update), and links to the
+    wiki, issues and releases.
 - **First run, before the pack: the sign-in page is bare.** Until the setup wizard has downloaded
   the art pack, every branding image 404s by design, so a fresh install's sign-in page shows no
   banner and no mascot; the only art the code carries is the wizard's own downloader mascot
