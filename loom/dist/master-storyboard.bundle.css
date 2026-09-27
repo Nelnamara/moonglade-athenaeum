@@ -1636,6 +1636,104 @@ button.mgcp-chip .mgico {
   color: var(--mauve,#c4a6f0);
 }
 
+/* ../gallery/src/styles/moments.css */
+.mgm-root {
+  --moment-ground: #05040d;
+  --moment-lav: #b692e6;
+  --moment-em: #4fc99a;
+  --moment-loom: #47cbc3;
+  --moment-text: #d6d2e2;
+  --moment-sub: #9a93ab;
+  --moment-sub-sf: #a79ec0;
+  --moment-s0: #211f3a;
+  --moment-s1: #3a3460;
+  --moment-ov: #6a6088;
+  --moment-ink: #1a1030;
+  --moment-white: #ffffff;
+  --moment-caption: #f6f4ef;
+}
+.mgm-root,
+.mgm-root * {
+  box-sizing: content-box;
+}
+.mgm-scrim {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 515;
+  pointer-events: none;
+  background: var(--moment-ground);
+}
+.mgm-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 516;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: normal;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--moment-text);
+}
+.mgm-fade,
+.mgm-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+.mgm-stage,
+.mgm-safe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+}
+.mgm-stage {
+  overflow: hidden;
+  background: var(--moment-ground);
+}
+.mgm-safe {
+  pointer-events: none;
+}
+.mgm-sound {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 22px;
+  font-size: 20px;
+  line-height: 44px;
+  text-align: center;
+  color: var(--moment-text);
+  cursor: pointer;
+  background: rgba(10, 8, 24, .84);
+  border: 1px solid var(--moment-s1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mgm-sound:hover {
+  border-color: var(--moment-lav);
+}
+
 /* ../gallery/src/styles/notify.css */
 .ach-m2 {
   position: fixed;
