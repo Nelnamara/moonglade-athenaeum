@@ -1733,6 +1733,9 @@ button.mgcp-chip .mgico {
 .mgm-sound:hover {
   border-color: var(--moment-lav);
 }
+[data-moment] [data-part=star] {
+  will-change: transform;
+}
 
 /* ../gallery/src/styles/notify.css */
 .ach-m2 {

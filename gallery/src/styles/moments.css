@@ -58,3 +58,10 @@
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .mgm-sound:hover { border-color: var(--moment-lav); }
+
+/* Each falling star on its own compositor layer, so its double glow is rasterised once and the
+   fall and spin are only moved on the GPU. Without it the star rain repainted ~60 blurred glyphs a
+   frame and ran at ~80 fps on a 120 Hz screen (the locked page does the same); with it ~118 fps.
+   Parity unchanged: 37/37 frames, box and colour 0, max frame diff 0.04% (sub-pixel smoothing of
+   a turning glyph). (Owner walk 2026-09-26: "Video plays quite jittery and laggy".) */
+[data-moment] [data-part="star"] { will-change: transform; }

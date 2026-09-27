@@ -191,10 +191,15 @@ export function minType(su) {
    different time from the still's. No flare, no stars, no keycap animation. It lasts the
    moment's own length and ends early on Esc or a click like any other moment.
      starfall  still: arms raised (Cast + .5)   overlay: the toast settled (Cast + 2.1)
-     keyturn   still: the library (Inside + 1)  overlay: final toast and button (Inside + 1.5) */
+     keyturn   still: the library, the clip's LAST shown frame (the page's clamp, the frame its
+               Hold keeps)                      overlay: final toast and button (Inside + 1.5)
+   The key turn's still is the clip's end, not a time inside the Inside beat: its doors are
+   still swinging out of the frame until clip ~14.6 s, and only the frames after that show the
+   whole library interior (owner, 2026-09-26). clipTime() clamps it to the file's own last
+   frame, so a shorter clip holds its end the same way. */
 export const STILL = {
   starfall: { still: (c) => c.Cast + 0.5, overlay: (c) => c.Cast + 2.1 },
-  keyturn: { still: (c) => c.Inside + 1, overlay: (c) => c.Inside + 1.5 },
+  keyturn: { still: () => LEAD + CLIP_DUR - 0.05, overlay: (c) => c.Inside + 1.5 },
 };
 
 /* The moment kinds the roster can name (the sealed `moment` flag). Anything else is not a

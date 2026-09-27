@@ -5384,7 +5384,7 @@ ${"=".repeat(48)}
   }
   var STILL = {
     starfall: { still: (c) => c.Cast + 0.5, overlay: (c) => c.Cast + 2.1 },
-    keyturn: { still: (c) => c.Inside + 1, overlay: (c) => c.Inside + 1.5 }
+    keyturn: { still: () => LEAD + CLIP_DUR - 0.05, overlay: (c) => c.Inside + 1.5 }
   };
   var MOMENT_KINDS = Object.keys(SCENES);
   var LOAD_CEILING_MS = 2e4;

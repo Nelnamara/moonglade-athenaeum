@@ -128,7 +128,13 @@ describe("reduced motion: one still, the overlay settled", () => {
     const S = core.STILL;
     close(S.starfall.still(SF.cues), SF.cues.Cast + 0.5, "Starfall's still: arms raised");
     close(S.starfall.overlay(SF.cues), SF.cues.Cast + 2.1, "its toast settled");
-    close(S.keyturn.still(KT.cues), KT.cues.Inside + 1, "the key turn's still: the library");
+    close(S.keyturn.still(KT.cues), LEAD + CLIP_DUR - 0.05,
+      "the key turn's still: the clip's last shown frame, the whole library interior");
+    close(core.clipTime(S.keyturn.still(KT.cues)), CLIP_DUR - 0.05, "which is the frame the page's clamp holds");
+    assert.ok(core.clipTime(S.keyturn.still(KT.cues)) > 14.6,
+      "past clip ~14.6 s, where the doors have left the frame (owner, 2026-09-26: not the doors opening)");
+    assert.ok(S.keyturn.still(KT.cues) >= KT.cues.Inside && S.keyturn.still(KT.cues) < KT.total, "inside the Inside beat");
+    close(core.clipTime(S.keyturn.still(KT.cues), 2), 2 - 0.05, "a shorter clip holds its own last frame the same way");
     close(S.keyturn.overlay(KT.cues), KT.cues.Inside + 1.5, "its final toast and button");
   });
 
