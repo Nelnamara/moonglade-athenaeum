@@ -7,6 +7,8 @@ import { claimReceipt } from "./updateStore.js";
 import { checkSpikes } from "./spikeStore.js";
 import ToastHost from "./ToastHost.jsx";
 import BannerHost from "./BannerHost.jsx";
+import MomentHost from "../moments/MomentHost.jsx";
+import { playMoment } from "../moments/momentStore.js";
 import "../styles/notify.css";
 
 /* notify/index.jsx -- the one installer for the notify system (no-vanilla campaign, component
@@ -51,6 +53,13 @@ export function installNotify() {
   };
   window.Ach = { check: ach.check, replay: ach.replay };
 
+  /* THE MOMENT HOST, registered BEFORE the first check() below can answer. This installer
+     is the one thing the desktop gallery, the phone and the Loom all run, so registering
+     here is what makes "every shell registers a host" true by construction: an earn that
+     carries its own moment is played by whichever shell sees it, and <MomentHost/> in the
+     root below is what puts it on screen. */
+  ach.registerMomentHost(playMoment);
+
   jobsStore.start();
   ach.check();
   /* THE UPDATE'S RECEIPT (2026-09-05). An apply ends in a reload, and what comes back
@@ -71,14 +80,16 @@ export function installNotify() {
 }
 
 export function NotifyRoot() {
-  /* Two body-level surfaces, not one, since 2026-09-07: the corner toast stack, and the
-     standing update strip (notify/BannerHost.jsx). Both mount here so every shell that
-     renders this root -- the desktop gallery, the phone, the Loom, the setup wizard --
-     gets them without a single one of them knowing they exist. */
+  /* The body-level surfaces: the corner toast stack, the standing update strip
+     (notify/BannerHost.jsx, since 2026-09-07) and the clip moment (moments/MomentHost.jsx).
+     All of them mount here so every shell that renders this root -- the desktop gallery,
+     the phone, the Loom, the setup wizard -- gets them without a single one of them knowing
+     they exist. */
   return (
     <>
       <BannerHost />
       <ToastHost />
+      <MomentHost />
     </>
   );
 }

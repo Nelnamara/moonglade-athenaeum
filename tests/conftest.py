@@ -19,7 +19,7 @@ _SEALED_DONOR = (Path(__file__).resolve().parents[1].parent
 
 def clear_sealed_caches():
     """Reset the three module-level caches that would otherwise answer one install's
-    question with another install's roster.
+    question with another install's roster (and the moments' clip cache beside them).
 
     `_sealed_cache` (the parsed definitions), `_container_cache` (the opened box) and
     `_earned_ids_cache` (a 5s-TTL memo keyed on NOTHING -- out_dir is not part of the key)
@@ -29,6 +29,11 @@ def clear_sealed_caches():
     gallery._sealed_cache.update(path=None, mtime=None, defs=None)
     gallery._container_cache.update(path=None, mtime=None, box=None)
     gallery._earned_ids_cache.update(t=0.0, ids=frozenset())
+    # The moments' verified-clip cache is keyed on content, not on an install, so it
+    # cannot answer with the wrong bytes -- but a test that corrupts a pack must see
+    # the pack, not a clip an earlier test left verified in memory.
+    with gallery._moment_clip_cache_lock:
+        gallery._moment_clip_cache.clear()
 
 
 def seed_sealed_container(container_path):
@@ -50,9 +55,46 @@ def seed_sealed_container(container_path):
     container_path = Path(container_path)
     if _SEALED_DONOR.is_file():
         defs = json.loads(_SEALED_DONOR.read_text(encoding="utf-8"))
-        _mc.write_container(container_path, {"_seed.txt": b"x"},
+        _mc.write_container(container_path, _seed_assets(),
                             {"achievements": json.dumps(defs, separators=(",", ":")).encode("utf-8")})
     clear_sealed_caches()
+
+
+# A tiny PUBLIC H.264 clip (2 s, 320x180, silent colour bars, made with ffmpeg) that stands
+# in for every bespoke moment's clip in a test container. The real clips are sealed art and
+# live only in the pack; no test may read the pack, so the moments are exercised on this.
+MOMENT_FIXTURE_CLIP = Path(__file__).resolve().parent / "fixtures" / "moment_fixture.mp4"
+
+
+def donor_feat(**flags):
+    """The sealed roster's achievement id carrying every given flag (e.g.
+    `donor_feat(unlocks="branding_tab")`), or None without the donor. A test names a hidden
+    feat by its roster flags, never by an id literal: the ids are not public source (pack v5,
+    DECISIONS 2026-09-11 "Hidden-feat ids are keys, not spoilers")."""
+    if not _SEALED_DONOR.is_file():
+        return None
+    roster = json.loads(_SEALED_DONOR.read_text(encoding="utf-8")).get("roster") or []
+    for a in roster:
+        if isinstance(a, dict) and all(a.get(k) == v for k, v in flags.items()):
+            return a.get("id")
+    return None
+
+
+def moment_clip_keys():
+    """The container keys (CODED rels) every moment's clip is seeded under -- derived from
+    the app's own map and translation, never retyped, so a moved bucket moves the seed too."""
+    return sorted(gallery._public_rel_to_coded(name) for name in gallery._MOMENT_CLIPS.values())
+
+
+def _seed_assets():
+    """The assets a seeded test container carries: the placeholder, plus the fixture clip
+    under each moment clip's key. Only written with the donor (the caller's gate): without a
+    roster no moment can be earned, so its clip could never be served anyway."""
+    clip = MOMENT_FIXTURE_CLIP.read_bytes()
+    assets = {"_seed.txt": b"x"}
+    for key in moment_clip_keys():
+        assets[key] = clip
+    return assets
 
 
 # The instant every server fixture's install is pinned to: 13:00 on a Wednesday. Any

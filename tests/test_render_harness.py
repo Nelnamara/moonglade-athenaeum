@@ -306,7 +306,7 @@ def render_server(tmp_path_factory):
     # Two pieces, both load-bearing:
     #
     # 1. The Under-the-Hood earn-state. The Branding tab is gated behind the real
-    #    `under-the-hood` feat (owner decision 2026-08-05, `brandingUnlocked` in
+    #    feat that unlocks the Branding tab (owner decision 2026-08-05, `brandingUnlocked` in
     #    useControlPanel.js) -- and conftest's autouse `_isolated_branding` fixture
     #    (correctly) points branding_root() at an empty per-test tmp dir, so the
     #    sweep_telemetry()/sweep_branding_drops() earn paths can never fire in a test:
@@ -1196,7 +1196,7 @@ def test_control_panel_runs_real_jobs_and_manages_a_real_account(logged_in_page,
 
     # --- Branding tab: a REAL POST /api/branding, picking a real animation from the
     # real MARK_ANIMS list this harness's own out_dir/branding.json now persists.
-    # The tab is achievement-gated (brandingUnlocked = "under-the-hood" earned; the
+    # The tab is achievement-gated (brandingUnlocked = the feat carrying unlocks: "branding_tab"; the
     # harness seeds branding_custom_file to earn it). Since bundle-v2 the roster is
     # SEALED in moonglade.dat, so that gate can only resolve when the private donor is
     # present -- donor-absent (public CI) the tab never renders. Gate just this block
@@ -4130,7 +4130,10 @@ def test_each_tab_keeps_its_own_scroll(
 # of them -- the boot fetch that runs the sweep at all (notify/index.jsx's installNotify
 # -> ach.check() -> GET /api/achievements?mark=1), the serve route that translates the
 # friendly /branding/<role>/... URL back to the coded on-disk rel, and the celebration.
-_UNDER_THE_HOOD = "under-the-hood"     # the feat the custom-file flag arms
+# The feat the custom-file flag arms, found by the roster flag it carries (never an id
+# literal: pack v5 moved the hidden-feat ids out of public source). None without the donor.
+from tests.conftest import donor_feat as _donor_feat
+_UNDER_THE_HOOD = _donor_feat(unlocks="branding_tab")
 _DROP_RGB = (200, 40, 90)              # a colour nothing else in this harness paints, so a
 #                                        served pixel PROVES it came from this exact drop
 _DROP_SIZE = (1200, 300)               # banner_main's own 4:1, so the flat's crop is the
@@ -4207,7 +4210,7 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
 
     The achievement half is donor-gated exactly like the Branding tab in
     test_control_panel_runs_real_jobs_and_manages_a_real_account: the roster is SEALED in
-    moonglade.dat, so donor-absent (public CI) there is no `under-the-hood` to earn and no
+    moonglade.dat, so donor-absent (public CI) there is no branding-tab feat to earn and no
     toast to wait for. The adoption half -- the part with no coverage at all -- runs either
     way.
     """
@@ -4302,6 +4305,17 @@ def test_a_branding_drop_is_adopted_and_the_browser_wears_it(
             assert _UNDER_THE_HOOD in (payload.get("newly") or []), (
                 "the boot fetch did not report the feat as newly earned: newly={!r}"
                 .format(payload.get("newly")))
+            feat = next((a for a in payload.get("achievements") or []
+                         if a.get("id") == _UNDER_THE_HOOD), {})
+            if feat.get("moment"):
+                # A roster that gives the feat its own moment (pack v5) plays that FIRST and
+                # alone; the standard toast follows it. Escape ends it -- the moment's own
+                # tests (below) play it out; this one is about the drop.
+                page.wait_for_selector('[data-moment="%s"]' % feat["moment"], state="attached")
+                page.wait_for_function(_MOMENT_UP_JS, timeout=30_000)
+                assert page.locator(".ach-m2").count() == 0, "the toast came WITH the moment"
+                page.keyboard.press("Escape")
+                page.wait_for_selector("[data-moment]", state="detached", timeout=3_000)
             page.wait_for_selector(".ach-m2")
             shown = page.locator(".ach-m2").first.inner_text()
             assert "Under the Hood" in shown, (
@@ -4955,3 +4969,261 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     assert page.evaluate(_UNL_CONTROLS_JS) == {
         "modes": [False, True, True, False, False], "sizes": [False, False, False, False],
         "counts": [False, False, False, False], "highPriority": False}
+
+
+# ---------------------------------------------------------------------------
+# The clip moments (the celebration-videos build)
+# ---------------------------------------------------------------------------
+# Two feats celebrate with a clip and a UI ceremony over it (gallery/src/moments/). What only
+# a real browser can show is the ORDER the owner sees and the doors out of it: the moment plays
+# first and alone, the feat's standard toast follows it, Escape ends it without closing the
+# overlay under it, and the key turn's button lands on the Control Panel's Branding tab.
+#
+# The earn itself is STUBBED, not earned: the achievement answer is a page.route carrying one
+# harness feat with the lane contract's fields (`moment`, `moment_clip`, `moment_copy`,
+# `unlocks`), so these tests need neither the sealed roster nor the pack -- and they carry no
+# sealed copy, only harness strings. The clip is the public test fixture
+# (tests/fixtures/moment_fixture.mp4: 2 s of silent colour bars, H.264), served through a
+# Range-honouring route the way the real /branding/ route serves it. The feat's beacon is
+# stubbed too, so nothing here writes the module server's shared achievement state.
+_MOMENT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
+                               "moment_fixture.mp4")
+_MOMENT_CLIP_URL = "/branding/harness-moment-clip.mp4"
+# A moment is ON SCREEN (it takes Escape and clicks) once its host has faded in.
+_MOMENT_UP_JS = ("() => { const h = document.querySelector('[data-moment] .mgm-host'); "
+                 "return !!h && getComputedStyle(h).pointerEvents === 'auto'; }")
+
+# Every body-level append/removal of a moment root or a celebration, timestamped, so the tests
+# assert the ORDER the owner sees rather than inferring it from a later snapshot.
+_WATCH_LAYERS_JS = """
+window.__layers = [];
+document.addEventListener('DOMContentLoaded', () => {
+  const note = (kind, n) => {
+    if (n.nodeType !== 1) return;
+    if (n.hasAttribute && n.hasAttribute('data-moment'))
+      window.__layers.push({kind: kind + ':moment', what: n.getAttribute('data-moment'), t: performance.now()});
+    else if (n.classList && n.classList.contains('ach-m2')) {
+      const el = n.querySelector('.n');
+      window.__layers.push({kind: kind + ':toast', what: el ? el.textContent : '', t: performance.now()});
+    }
+  };
+  new MutationObserver((recs) => recs.forEach((r) => {
+    Array.prototype.forEach.call(r.addedNodes, (n) => note('add', n));
+    Array.prototype.forEach.call(r.removedNodes, (n) => note('remove', n));
+  })).observe(document.body, { childList: true });
+});
+"""
+
+
+def _moment_fixture_bytes():
+    assert os.path.isfile(_MOMENT_FIXTURE), (
+        "tests/fixtures/moment_fixture.mp4 is missing -- the public 2 s H.264 test clip the "
+        "moment tests play (ffmpeg smptebars, 320x180, silent). It ships with the pack-v5 lane.")
+    with open(_MOMENT_FIXTURE, "rb") as fh:
+        return fh.read()
+
+
+def _serve_clip_with_ranges(page, url, data):
+    """Serve `data` at `url` the way a media element asks for it: 206 slices for a Range,
+    the whole body with Accept-Ranges otherwise."""
+    size = len(data)
+
+    def handler(route):
+        rng = route.request.headers.get("range")
+        head = {"Content-Type": "video/mp4", "Accept-Ranges": "bytes"}
+        m = re.match(r"bytes=(\d*)-(\d*)$", rng or "")
+        if not m:
+            route.fulfill(status=200, body=data, headers=dict(head, **{"Content-Length": str(size)}))
+            return
+        a, b = m.group(1), m.group(2)
+        start, end = (size - int(b), size - 1) if a == "" else (int(a), int(b) if b else size - 1)
+        end = min(end, size - 1)
+        route.fulfill(status=206, body=data[start:end + 1], headers=dict(head, **{
+            "Content-Range": "bytes %d-%d/%d" % (start, end, size),
+            "Content-Length": str(end - start + 1)}))
+    page.route("**" + url, handler)
+
+
+def _harness_feat(kind):
+    """One EARNED harness feat carrying `kind`'s moment -- the lane contract's shape, with
+    harness strings where the sealed copy would be."""
+    feat = {"id": "harness-moment-" + kind, "name": "Harness Moment Feat", "tier": "feat",
+            "desc": "a harness feat with a moment of its own", "points": 10, "icon": "✨",
+            "earned": True, "bucket": "feat", "hidden": True, "roast": "", "roast_nsfw": "",
+            "moment": kind, "moment_clip": _MOMENT_CLIP_URL}
+    if kind == "starfall":
+        feat["moment_copy"] = {"line": "harness sub-line"}
+    else:
+        feat["unlocks"] = "branding_tab"
+        feat["moment_copy"] = {"title1": "harness title one", "line1": "harness line one",
+                               "title2": "harness title two", "line2": "harness line two",
+                               "button": "Harness button", "caption": "harness caption"}
+    return feat
+
+
+def _stub_the_earn(page, feat, earned_now=True, unmarked_delay_ms=0):
+    """Route every /api/achievements read to an answer holding `feat`. The FIRST marking read
+    after `state["arm"]` is set lists it in `newly`; every other read lists nothing -- which is
+    what the real server does once a mark has recorded it. Returns the state dict."""
+    state = {"arm": earned_now, "marked": False}
+
+    def handler(route):
+        url = route.request.url
+        newly = []
+        if "mark=1" in url and state["arm"] and not state["marked"]:
+            state["marked"] = True
+            newly = [feat["id"]]
+        body = json.dumps({"achievements": [feat], "skins": [], "skin": "moonglade",
+                           "ladders": [], "newly": newly})
+        if unmarked_delay_ms and "mark=1" not in url:
+            import time
+            time.sleep(unmarked_delay_ms / 1000.0)
+        route.fulfill(status=200, content_type="application/json", body=body)
+    page.route(lambda u: "/api/achievements" in u, handler)
+    return state
+
+
+def _layers(page):
+    return page.evaluate("() => window.__layers")
+
+
+def test_the_starfall_moment_plays_first_and_its_standard_toast_follows(logged_in_page):
+    """The key sequence -> the starfall clip moment -> after it has ENDED, the feat's standard
+    toast. Played out in full on the fixture clip (the stage keeps its authored length on the
+    page clock once the 2 s clip has held its last frame)."""
+    clip = _moment_fixture_bytes()
+    page = logged_in_page(**DESKTOP)
+    page.add_init_script(_WATCH_LAYERS_JS)
+    feat = _harness_feat("starfall")
+    state = _stub_the_earn(page, feat, earned_now=False)
+    page.route("**/api/ach-event", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps({"ok": True, "next_nonce": "harness"})))
+    _serve_clip_with_ranges(page, _MOMENT_CLIP_URL, clip)
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".mgx-navspine")
+    # The boot read of this navigation is a marking one; the earn is held back until the key
+    # sequence has been entered, which is when the beacon would record it on a real install.
+    state["arm"] = True
+
+    page.locator("body").click(position={"x": 5, "y": 300})
+    for key in ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight",
+                "ArrowLeft", "ArrowRight", "b", "a"]:
+        page.keyboard.press(key)
+
+    page.wait_for_selector('[data-moment="starfall"]', state="attached", timeout=15_000)
+    page.wait_for_function("() => { const v = document.querySelector('[data-moment] video'); "
+                           "return v && !v.paused; }", timeout=20_000)
+    stage = page.locator("[data-moment-stage]").bounding_box()
+    assert stage and stage["width"] > 0, "the moment mounted with no stage"
+    title = page.locator('[data-moment] [data-part="toast-title"]').inner_text()
+    assert "Elune-adore, " in title, "the greeting is the public part of the toast: %r" % title
+    assert page.locator('[data-moment] [data-part="toast-line"]').inner_text() == "harness sub-line", (
+        "the sub-line is the feat's delivered copy")
+    assert page.locator('[data-moment] [data-part="key"]').count() == 10
+    assert page.locator(".ach-m2").count() == 0, (
+        "the standard toast is on screen WITH the moment -- a bespoke moment plays alone")
+
+    page.wait_for_selector('[data-moment="starfall"]', state="detached", timeout=40_000)
+    page.wait_for_selector(".ach-m2", timeout=10_000)
+    assert "Harness Moment Feat" in page.locator(".ach-m2").first.inner_text()
+    log = _layers(page)
+    kinds = [e["kind"] for e in log]
+    assert kinds.index("add:moment") < kinds.index("remove:moment") < kinds.index("add:toast"), (
+        "the order the owner sees must be: moment, moment gone, THEN its toast -- %r" % log)
+    assert page.locator(".ach-m2 .ee-star").count() == 0, (
+        "no generic fanfare after a moment: the moment was the fanfare")
+    _dismiss_any_achievement_toast(page)
+
+
+def test_escape_ends_a_moment_and_closes_nothing_under_it(logged_in_page):
+    """Escape is the moment's key while one is on screen: it ends the moment with its short
+    fade and never also closes the overlay underneath (review amendment 8). The feat's toast
+    then plays as usual."""
+    clip = _moment_fixture_bytes()
+    page = logged_in_page(**DESKTOP)
+    page.add_init_script(_WATCH_LAYERS_JS)
+    feat = _harness_feat("keyturn")
+    state = _stub_the_earn(page, feat, earned_now=False)
+    _serve_clip_with_ranges(page, _MOMENT_CLIP_URL, clip)
+    page.goto("/", wait_until="domcontentloaded")
+    page.wait_for_selector(".mgx-navspine")
+    _dismiss_any_achievement_toast(page)
+
+    page.click('nav[aria-label="Destinations"] button:has-text("Health")')
+    page.wait_for_selector('[aria-label="Collection Health"]')
+    state["arm"] = True
+    page.evaluate("() => window.Ach.check()")
+    page.wait_for_selector('[data-moment="keyturn"]', state="attached", timeout=15_000)
+    page.wait_for_function("() => { const v = document.querySelector('[data-moment] video'); "
+                           "return v && !v.paused; }", timeout=20_000)
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector('[data-moment="keyturn"]', state="detached", timeout=3_000)
+    assert page.locator('[aria-label="Collection Health"]').count() == 1, (
+        "Escape closed the overlay UNDER the moment as well -- it must end the moment only")
+    page.wait_for_selector(".ach-m2", timeout=10_000)
+    assert "Harness Moment Feat" in page.locator(".ach-m2").first.inner_text()
+    kinds = [e["kind"] for e in _layers(page)]
+    assert kinds.index("remove:moment") < kinds.index("add:toast")
+
+
+def test_the_key_turn_button_lands_on_the_branding_tab(logged_in_page):
+    """A branding earn -> the key-turn moment -> its button -> the Control Panel, open on the
+    Branding tab, and the feat's standard toast after the moment. The panel's own roster read
+    is DELAYED here, so the panel opens on a cold cache: without the hold, the requested tab
+    would snap back to Maintenance before that read could report the tab unlocked."""
+    clip = _moment_fixture_bytes()
+    page = logged_in_page(**DESKTOP)
+    page.add_init_script(_WATCH_LAYERS_JS)
+    feat = _harness_feat("keyturn")
+    _stub_the_earn(page, feat, unmarked_delay_ms=800)
+    _serve_clip_with_ranges(page, _MOMENT_CLIP_URL, clip)
+    page.goto("/", wait_until="domcontentloaded")
+
+    page.wait_for_selector('[data-moment="keyturn"]', state="attached", timeout=15_000)
+    rail = page.locator('[data-moment] [data-part="rail"]').inner_text()
+    assert "Maintenance" in rail and "Branding" in rail, (
+        "the rail draws the Control Panel's REAL tabs: %r" % rail)
+    button = page.locator('[data-moment] [data-part="button"]')
+    # The button pops in the library, at Inside + .9 on the moment's own clock.
+    page.wait_for_function("() => { const b = document.querySelector('[data-moment] [data-part=\"button\"]'); "
+                           "return b && b.getBoundingClientRect().height > 30; }", timeout=30_000)
+    assert "Harness button" in button.inner_text()
+    assert page.locator(".ach-m2").count() == 0, "the toast waits for the moment"
+    button.click()
+
+    page.wait_for_selector('[data-moment="keyturn"]', state="detached", timeout=3_000)
+    page.wait_for_selector('[aria-label="Control Panel"]', timeout=5_000)
+    page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
+    assert page.locator('[aria-label="Control Panel"] button:has-text("✦ Branding")').count() == 1
+    page.wait_for_selector(".ach-m2", timeout=10_000)
+    assert "Harness Moment Feat" in page.locator(".ach-m2").first.inner_text()
+    kinds = [e["kind"] for e in _layers(page)]
+    assert kinds.index("remove:moment") < kinds.index("add:toast")
+    _dismiss_any_achievement_toast(page)
+    assert page.locator('h3.mgcp-brandh:has-text("Icons, marks")').count() == 1, (
+        "the panel stayed on Branding once its own read landed")
+
+
+def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_branding_tab(
+        logged_in_page):
+    """The Loom has no Control Panel. It still plays the moment (every shell registers the
+    host), and the button carries the request across: a one-shot, then the gallery, which
+    opens its panel on the Branding tab on boot (review amendment 2)."""
+    clip = _moment_fixture_bytes()
+    page = logged_in_page(**DESKTOP)
+    feat = _harness_feat("keyturn")
+    _stub_the_earn(page, feat)
+    _serve_clip_with_ranges(page, _MOMENT_CLIP_URL, clip)
+    page.goto("/loom", wait_until="domcontentloaded")
+    page.wait_for_selector('[data-moment="keyturn"]', state="attached", timeout=20_000)
+    page.wait_for_function("() => { const b = document.querySelector('[data-moment] [data-part=\"button\"]'); "
+                           "return b && b.getBoundingClientRect().height > 30; }", timeout=30_000)
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=10_000):
+        page.locator('[data-moment] [data-part="button"]').click()
+    from urllib.parse import urlparse
+    assert urlparse(page.url).path == "/", "the button must cross to the gallery: %s" % page.url
+    page.wait_for_selector('[aria-label="Control Panel"]', timeout=10_000)
+    page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
+    assert page.evaluate("() => sessionStorage.getItem('mg_panel_tab_request')") is None, (
+        "the one-shot is consumed by the gallery that honoured it")

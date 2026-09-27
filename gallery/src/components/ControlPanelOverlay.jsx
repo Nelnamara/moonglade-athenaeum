@@ -14,6 +14,7 @@ import { PAIRINGS, DEFAULT_PAIRING_ID, pairingById, readPairing, setPairing } fr
 import Icon from "../icons/Icons.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import { takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
+import { panelTabLabel } from "../lib/panelTabs.js";
 
 /* Control Panel -- design spec: Control Panel.dc.html. Ported as a MODAL, per the owner's
    live 2026-08-02 correction ("Control panel is now ALSO modal. no separate pages anymore")
@@ -270,9 +271,14 @@ export function BlurToggleTile({ className = "mgcp-tile mgcp-tile4" }) {
   );
 }
 
-export default function ControlPanelOverlay({ onClose, boot, account }) {
+export default function ControlPanelOverlay({ onClose, boot, account, tabRequest }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
-  const [tab, setTab] = useState("maint");
+  // Opened ON a tab when the shell asks for one (App.jsx's `mg-open-control-panel` claim --
+  // the key-turn moment's button asks for Branding); otherwise Maintenance, as always.
+  const [tab, setTab] = useState(() => (tabRequest && tabRequest.tab) || "maint");
+  // A requested tab is HELD until the panel's own achievements read answers (see the gate
+  // below): the roster it paints from first can be a cache from before the earn.
+  const [tabHeld, setTabHeld] = useState(() => !!(tabRequest && tabRequest.tab));
   const [subOverlay, setSubOverlay] = useState(null); // 'users' | 'trash' | 'account'
 
   // Control Panel.dc.html:240-243 -- the library-folder picker. The design's own
@@ -319,9 +325,9 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
   }, []);
 
   const {
-    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievements,
+    summary, summaryErr, skins, activeSkin, pickSkin, brandingUnlocked, achievementsFresh, achievements,
     panelHistory, schedule, saveSchedule, saveLivingJob, runLiving,
-    fetchSummary, actionSpec,
+    fetchSummary, fetchAchievements, actionSpec,
     running, progress, log, jobError, jobResult, setJobResult, confirmArm, runAction, stopJob,
     dedupDone, organizeRes,
     testPullN, setTestPullN,
@@ -343,13 +349,26 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
     if (j.action && !lastByAction[j.action]) lastByAction[j.action] = j;
   }
 
-  // Belt-and-suspenders against the tab ever reading "brand" while locked --
-  // can't happen today (the only way in is the button below, which doesn't
-  // render unlocked=false), but this is cheap insurance against a future
-  // second entry point reopening the gate the owner just asked to close.
+  // The tab never READS "brand" while locked -- and since the panel can now be opened ON
+  // it (a requested tab, above), "locked" has to mean what the panel's OWN achievements read
+  // says, not the cached roster it paints from first. A cache from before the earn would
+  // snap a just-unlocked Branding tab straight back to Maintenance; so a requested tab is
+  // held, with nothing in its body, until that read has answered, and only a roster that
+  // still says locked then sends it back. (On a fresh mount the read is the hook's own --
+  // fetchAchievements joins the one in flight; on a request to an already-open panel it is
+  // a new one.)
   useEffect(() => {
-    if (tab === "brand" && !brandingUnlocked) setTab("maint");
-  }, [tab, brandingUnlocked]);
+    if (!tabRequest || !tabRequest.tab) return undefined;
+    let live = true;
+    setTab(tabRequest.tab);
+    setTabHeld(true);
+    fetchAchievements().then(() => { if (live) setTabHeld(false); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabRequest]);
+  useEffect(() => {
+    if (tab === "brand" && !brandingUnlocked && !tabHeld && achievementsFresh) setTab("maint");
+  }, [tab, brandingUnlocked, tabHeld, achievementsFresh]);
 
   // Escape closes whatever the TOP layer is -- a sub-overlay first, then the whole Panel --
   // component-local (not part of the shared hook) because it reads THIS component's own
@@ -564,10 +583,10 @@ export default function ControlPanelOverlay({ onClose, boot, account }) {
             <div className="mgcp-main">
               <div className="mgcp-tabs">
                 <button type="button" className={"mgv-x-off"} style={tabStyle(tab === "maint")}
-                  onClick={() => setTab("maint")}>Maintenance</button>
+                  onClick={() => setTab("maint")}>{panelTabLabel("maint")}</button>
                 {brandingUnlocked && (
                   <button type="button" style={tabStyle(tab === "brand")}
-                    onClick={() => setTab("brand")}>✦ Branding</button>
+                    onClick={() => setTab("brand")}>{panelTabLabel("brand")}</button>
                 )}
               </div>
 

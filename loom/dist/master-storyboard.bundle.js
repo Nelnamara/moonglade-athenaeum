@@ -1872,11 +1872,11 @@ ${"=".repeat(48)}
       setTimeout(() => onClose && onClose(), 340);
     }, [onClose]);
     useEffect(() => {
-      const onKey = (e) => {
+      const onKey2 = (e) => {
         if (e.key === "Escape") doClose();
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [doClose]);
     const pick = (m) => {
       if (copyOn && m.prompt) {
@@ -2303,10 +2303,10 @@ ${"=".repeat(48)}
     };
     const isSelected = useCallback((m) => multi ? selected.some((e) => e.model_id === m.model_id) : !!(value && value.model_id === m.model_id), [multi, selected, value]);
     const toggleMulti = (m) => {
-      const cur = selectedRef.current;
-      const at = cur.findIndex((e) => e.model_id === m.model_id);
+      const cur2 = selectedRef.current;
+      const at = cur2.findIndex((e) => e.model_id === m.model_id);
       if (at >= 0) {
-        onToggle && onToggle(cur[at], false);
+        onToggle && onToggle(cur2[at], false);
         return;
       }
       const entry = {
@@ -3083,7 +3083,7 @@ ${"=".repeat(48)}
     buildRef.current = build2;
     skipRef.current = skipKeys;
     enabledRef.current = enabled;
-    const seq2 = useRef(0);
+    const seq3 = useRef(0);
     const timer2 = useRef(0);
     const ctrl = useRef(null);
     const put2 = useCallback((v) => {
@@ -3093,7 +3093,7 @@ ${"=".repeat(48)}
     const stop = useCallback(() => {
       clearTimeout(timer2.current);
       timer2.current = 0;
-      seq2.current++;
+      seq3.current++;
       if (ctrl.current) {
         try {
           ctrl.current.abort();
@@ -3118,11 +3118,11 @@ ${"=".repeat(48)}
         return;
       }
       badge.setChecking();
-      const mine = ++seq2.current;
+      const mine = ++seq3.current;
       const c = typeof AbortController !== "undefined" ? new AbortController() : null;
       ctrl.current = c;
       requestPrice(p, { signal: c ? c.signal : void 0 }).then(({ response: response2, failed }) => {
-        if (mine !== seq2.current || !costRef.current) return;
+        if (mine !== seq3.current || !costRef.current) return;
         ctrl.current = null;
         if (failed) {
           costRef.current.setPrice(null);
@@ -3144,7 +3144,7 @@ ${"=".repeat(48)}
       const badge = costRef.current;
       if (badge && badge.setChecking) badge.setChecking();
       put2(scheduled());
-      seq2.current++;
+      seq3.current++;
       clearTimeout(timer2.current);
       timer2.current = setTimeout(fire, PRICE_DEBOUNCE_MS);
     }, [costRef, fire, put2]);
@@ -3166,7 +3166,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit5, count, onPhase }) {
+  async function submitTask(route, payload, { label, emit: emit6, count, onPhase }) {
     let d;
     try {
       const r = await fetch(route, {
@@ -3176,14 +3176,14 @@ ${"=".repeat(48)}
       });
       d = await r.json();
     } catch {
-      emit5({
+      emit6({
         kind: "err",
         text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
       });
       return null;
     }
     if (d.error || !d.task_id) {
-      emit5({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
+      emit6({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
       return null;
     }
     const adj = adjustedText(d.adjusted);
@@ -3194,9 +3194,9 @@ ${"=".repeat(48)}
         msg: adj
       });
     }
-    emit5({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    emit6({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
     if (!window.Jobs) {
-      emit5({
+      emit6({
         kind: "ok",
         text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
       });
@@ -3206,7 +3206,7 @@ ${"=".repeat(48)}
       const data2 = st || {};
       if (phase === "done") {
         const paid = data2.paid_credit;
-        emit5({
+        emit6({
           kind: "ok",
           // An Unlimited Mode run is free by the entitlement, never by a card
           // (SCOPE_2026-09-26_unlimited-mode §8.7).
@@ -3216,12 +3216,12 @@ ${"=".repeat(48)}
         window.dispatchEvent(new CustomEvent("mg-gen-done"));
         if (window.Ach) window.Ach.check();
       } else if (phase === "failed") {
-        emit5({
+        emit6({
           kind: "err",
           text: friendlyGenErr2(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
-        emit5({
+        emit6({
           kind: "err",
           text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
         });
@@ -3376,7 +3376,7 @@ ${"=".repeat(48)}
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const emit5 = useCallback((name, detail) => {
+    const emit6 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
@@ -3397,7 +3397,7 @@ ${"=".repeat(48)}
     };
     const userSetMode = (m) => {
       setMode(m, true);
-      emit5("mg-mode-commit", { vmode: m });
+      emit6("mg-mode-commit", { vmode: m });
     };
     const applyModelGating2 = (userDriven) => {
       applyModelGating(st.current, userDriven);
@@ -3440,11 +3440,11 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit5("mg-prompt-commit", { text: promptText2() });
+      emit6("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
-      emit5("mg-dirty", {});
+      emit6("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify2(false);
@@ -3494,7 +3494,7 @@ ${"=".repeat(48)}
       previewTimer.current = setTimeout(() => p.classList.remove("open"), 180);
     };
     const requestPick = (bank, i) => {
-      emit5("mg-pick-request", {
+      emit6("mg-pick-request", {
         slot: i,
         bank,
         mode: st.current.mode,
@@ -3608,21 +3608,21 @@ ${"=".repeat(48)}
         const elapsed = Date.now() - startedAt;
         if (phase === "done") {
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-          emit5("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          emit6("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
         } else if (phase === "failed") {
           const msg = friendlyGenErr3(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
-          emit5("mg-error", { error: msg });
+          emit6("mg-error", { error: msg });
         } else if (phase === "stalled") {
           updateLine(id, {
             kind: "plain",
             text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
           });
-          emit5("mg-paused", { task_id: taskId });
+          emit6("mg-paused", { task_id: taskId });
         } else if (phase === "slow" || phase === "stale") {
           tier = phase;
           updateLine(id, tierLine(phase, elapsed));
-          emit5("mg-slow", { tier: phase, elapsed, task_id: taskId });
+          emit6("mg-slow", { tier: phase, elapsed, task_id: taskId });
         } else {
           updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
         }
@@ -3630,16 +3630,16 @@ ${"=".repeat(48)}
       const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
       unlock();
       if (!tid) {
-        emit5("mg-error", { error: lastErr || "submit failed" });
+        emit6("mg-error", { error: lastErr || "submit failed" });
         return;
       }
       taskId = tid;
-      emit5("mg-submit", { task_id: tid, payload: p });
+      emit6("mg-submit", { task_id: tid, payload: p });
       reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
-      emit5("mg-error", { error: msg });
+      emit6("mg-error", { error: msg });
     };
     const setRefs = (refs) => {
       applySetRefs(st.current, refs);
@@ -3667,8 +3667,8 @@ ${"=".repeat(48)}
       rerender();
     };
     const insertText = (t) => {
-      const cur = promptText2();
-      promptSet((cur ? cur.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
+      const cur2 = promptText2();
+      promptSet((cur2 ? cur2.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
     };
     const setReuse = (info) => setReuseChip(info || null);
     useImperativeHandle(ref, () => {
@@ -3698,20 +3698,20 @@ ${"=".repeat(48)}
       return { v, ok, label: SHOT_LABEL[v], title: ok ? SHOT_LABEL[v] : SHOT_LABEL[v] + " needs the V4.0 pair" };
     });
     const removeSlot = (bank, i) => {
-      const cur = st.current;
+      const cur2 = st.current;
       if (bank === "vid") {
-        cur.vidSlots.splice(i, 1);
-        if (!cur.vidSlots.length) cur.vidSlots = [null];
-      } else if (cur.mode === "r2v") {
-        let arr = cur.imgSlots;
+        cur2.vidSlots.splice(i, 1);
+        if (!cur2.vidSlots.length) cur2.vidSlots = [null];
+      } else if (cur2.mode === "r2v") {
+        let arr = cur2.imgSlots;
         arr.splice(i, 1);
         if (!arr.length) arr = [null];
-        cur.imgSlots = arr;
-      } else cur.slots[i] = null;
+        cur2.imgSlots = arr;
+      } else cur2.slots[i] = null;
       rerender();
       reprice();
     };
-    const slotBox = ({ key, item, bank, index, caption, badge, title, off }) => /* @__PURE__ */ react_global_shim_default.createElement(
+    const slotBox = ({ key, item, bank, index, caption: caption2, badge, title, off }) => /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         key,
@@ -3721,7 +3721,7 @@ ${"=".repeat(48)}
         "data-nsfw": item && item.is_nsfw ? "1" : void 0,
         onClick: () => item ? removeSlot(bank, index) : off ? null : requestPick(bank, index)
       },
-      item ? /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, caption),
+      item ? /* @__PURE__ */ react_global_shim_default.createElement("img", { src: item.thumb, alt: "" }) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slotcap" }, caption2),
       item && badge ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgd-slot-tag" }, badge) : null
     );
     const banks = [];
@@ -3917,7 +3917,7 @@ ${"=".repeat(48)}
           st.current.audioGen = e.target.checked;
           rerender();
           reprice();
-          emit5("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
+          emit6("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Generate audio")), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Off by default \u2014 the opposite of image gen" }, /* @__PURE__ */ react_global_shim_default.createElement(
@@ -3942,7 +3942,7 @@ ${"=".repeat(48)}
           st.current.audioLanguage = e.target.value;
           rerender();
           reprice();
-          emit5("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
+          emit6("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
@@ -3963,7 +3963,7 @@ ${"=".repeat(48)}
             st.current.duration = d;
             rerender();
             reprice();
-            emit5("mg-duration-commit", { duration: d });
+            emit6("mg-duration-commit", { duration: d });
           }
         },
         d
@@ -4467,10 +4467,19 @@ ${"=".repeat(48)}
 
   // ../gallery/src/notify/ach.js
   var data = null;
-  var BESPOKE_FEATS = /* @__PURE__ */ new Set(["the-konami-code", "under-the-hood"]);
+  function isBespoke(a) {
+    return !!(a && a.moment);
+  }
   var _bespoke = 0;
   var _pendingDrain = false;
   var _whenClear = [];
+  var _momentHost = null;
+  function registerMomentHost(fn) {
+    _momentHost = typeof fn === "function" ? fn : null;
+    return () => {
+      if (_momentHost === fn) _momentHost = null;
+    };
+  }
   var _live = /* @__PURE__ */ new Set();
   function _mount(el) {
     _live.add(el);
@@ -4489,6 +4498,34 @@ ${"=".repeat(48)}
     if (!_pendingDrain) return;
     _pendingDrain = false;
     _drain();
+  }
+  function beginBespokeMoment() {
+    _bespoke++;
+  }
+  function endBespokeMoment() {
+    if (_bespoke > 0) _bespoke--;
+    _resume();
+  }
+  function whenClear(fn) {
+    if (typeof fn !== "function") return;
+    if (!_cur && !_live.size) {
+      fn();
+      return;
+    }
+    _whenClear.push(fn);
+    _flushClear();
+  }
+  function _toMoment(host2, a) {
+    whenClear(() => {
+      beginBespokeMoment();
+      let ended;
+      try {
+        ended = Promise.resolve(host2(a));
+      } catch {
+        ended = Promise.resolve();
+      }
+      ended.then(() => endBespokeMoment(), () => endBespokeMoment());
+    });
   }
   function _flushClear() {
     if (!_whenClear.length) return;
@@ -4527,23 +4564,35 @@ ${"=".repeat(48)}
   }
   function syncSkin(d) {
     const srv = d.skin || "moonglade";
-    let cur = null;
+    let cur2 = null;
     try {
-      cur = localStorage.getItem("skin");
+      cur2 = localStorage.getItem("skin");
     } catch {
     }
-    if (srv !== cur) applySkin(srv);
+    if (srv !== cur2) applySkin(srv);
   }
+  var _marking = 0;
   function load(mark) {
+    if (mark) _marking++;
+    const done = () => {
+      if (mark && _marking > 0) _marking--;
+    };
     apiGet("/api/achievements" + (mark ? "?mark=1" : "")).then((d) => {
+      done();
       if (d.error) return;
       data = d;
       if (mark) toastNew(d);
       syncSkin(d);
-    });
+    }, done);
   }
   function toastNew(d) {
-    const newly = (d.newly || []).map((id) => (d.achievements || []).filter((a) => a.id === id)[0]).filter(Boolean);
+    let newly = (d.newly || []).map((id) => (d.achievements || []).filter((a) => a.id === id)[0]).filter(Boolean);
+    if (_momentHost) {
+      newly.forEach((a) => {
+        if (isBespoke(a)) _toMoment(_momentHost, a);
+      });
+      newly = newly.filter(isBespoke).concat(newly.filter((a) => !isBespoke(a)));
+    }
     if (newly.length > 3) {
       _floodParade(newly);
       return;
@@ -4581,7 +4630,7 @@ ${"=".repeat(48)}
     } catch {
       return;
     }
-    const seq2 = {
+    const seq3 = {
       common: [523, 660],
       rare: [523, 660, 784],
       epic: [523, 660, 784, 988],
@@ -4589,7 +4638,7 @@ ${"=".repeat(48)}
       feat: [392, 466, 622, 932]
     }[tier] || [660];
     const t = _actx.currentTime + 0.02;
-    seq2.forEach((f, i) => {
+    seq3.forEach((f, i) => {
       const o = _actx.createOscillator(), g = _actx.createGain();
       o.type = "triangle";
       o.frequency.value = f;
@@ -4724,31 +4773,31 @@ ${"=".repeat(48)}
     return { m, tw };
   }
   function _seatMascot(img) {
-    const W = 48, H = 64, c = document.createElement("canvas");
-    c.width = W;
-    c.height = H;
+    const W2 = 48, H2 = 64, c = document.createElement("canvas");
+    c.width = W2;
+    c.height = H2;
     const x = c.getContext("2d");
-    x.drawImage(img, 0, 0, W, H);
-    const d = x.getImageData(0, 0, W, H).data;
+    x.drawImage(img, 0, 0, W2, H2);
+    const d = x.getImageData(0, 0, W2, H2).data;
     let top = -1, bot = -1, r, q;
-    for (r = 0; r < H && top < 0; r++) {
-      for (q = 3; q < W * 4; q += 16) {
-        if (d[r * W * 4 + q] > 24) {
+    for (r = 0; r < H2 && top < 0; r++) {
+      for (q = 3; q < W2 * 4; q += 16) {
+        if (d[r * W2 * 4 + q] > 24) {
           top = r;
           break;
         }
       }
     }
-    for (r = H - 1; r >= 0 && bot < 0; r--) {
-      for (q = 3; q < W * 4; q += 16) {
-        if (d[r * W * 4 + q] > 24) {
+    for (r = H2 - 1; r >= 0 && bot < 0; r--) {
+      for (q = 3; q < W2 * 4; q += 16) {
+        if (d[r * W2 * 4 + q] > 24) {
           bot = r;
           break;
         }
       }
     }
     if (top < 0 || bot <= top) return;
-    const opFrac = (bot - top + 1) / H, topFrac = top / H;
+    const opFrac = (bot - top + 1) / H2, topFrac = top / H2;
     const BAND = 158, TARGET = 150;
     const h = Math.max(140, Math.min(260, TARGET / opFrac));
     img.style.height = h + "px";
@@ -4780,7 +4829,7 @@ ${"=".repeat(48)}
     }
   }
   function _flair(built, a, opts) {
-    if (BESPOKE_FEATS.has(a.id) && !(opts && opts.replay)) return;
+    if (isBespoke(a) && !(opts && opts.replay)) return;
     const tier = a.tier || "common";
     if (tier === "legendary" || tier === "feat") _fanfare(built.m, tier);
   }
@@ -5192,6 +5241,1099 @@ ${"=".repeat(48)}
     );
   }
 
+  // ../gallery/src/moments/momentCore.js
+  var W = 1920;
+  var H = 1080;
+  var LEAD = 0.5;
+  var CLIP_DUR = 15.04;
+  var SCENES = {
+    starfall: [
+      { name: "Code", dur: 3 },
+      { name: "Turn", dur: 3 },
+      { name: "Gather", dur: 4.5 },
+      { name: "Cast", dur: 1.8 },
+      { name: "Starfall", dur: 3.24 },
+      { name: "Hold", dur: 2.5 }
+    ],
+    keyturn: [
+      { name: "Rise", dur: 3.5 },
+      { name: "Key", dur: 3.7 },
+      { name: "Flight", dur: 2.6 },
+      { name: "Door", dur: 3.4 },
+      { name: "Inside", dur: 6 }
+    ]
+  };
+  function cuesFrom(scenes) {
+    const table = {};
+    let at = 0;
+    for (const s of scenes) {
+      if (!Object.prototype.hasOwnProperty.call(table, s.name)) table[s.name] = Math.round(at * 1e3) / 1e3;
+      at += s.dur;
+    }
+    return { cues: table, total: Math.round(at * 1e3) / 1e3 };
+  }
+  var Easing = {
+    linear: (t) => t,
+    easeOutCubic: (t) => --t * t * t + 1,
+    easeInOutCubic: (t) => t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1,
+    easeOutBack: (t) => {
+      const c1 = 1.70158, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+  };
+  var clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  function interpolate(input, output, ease = Easing.linear) {
+    return (t) => {
+      if (t <= input[0]) return output[0];
+      if (t >= input[input.length - 1]) return output[output.length - 1];
+      for (let i = 0; i < input.length - 1; i++) {
+        if (t >= input[i] && t <= input[i + 1]) {
+          const span = input[i + 1] - input[i];
+          const local = span === 0 ? 0 : (t - input[i]) / span;
+          const easeFn = Array.isArray(ease) ? ease[i] || Easing.linear : ease;
+          return output[i] + (output[i + 1] - output[i]) * easeFn(local);
+        }
+      }
+      return output[output.length - 1];
+    };
+  }
+  function animate({ from = 0, to = 1, start: start2 = 0, end = 1, ease = Easing.easeInOutCubic }) {
+    return (t) => {
+      if (t <= start2) return from;
+      if (t >= end) return to;
+      return from + (to - from) * ease((t - start2) / (end - start2));
+    };
+  }
+  var MOTION = {
+    enter: (a) => animate({ ...a, ease: Easing.easeOutCubic }),
+    pop: (a) => animate({ ...a, ease: Easing.easeOutBack }),
+    draw: (a) => animate({ ...a, ease: Easing.easeInOutCubic })
+  };
+  function clipEndOf(duration) {
+    const d = Number(duration);
+    return d > 0 && isFinite(d) ? Math.min(CLIP_DUR, d) : CLIP_DUR;
+  }
+  function clipTime(T, clipEnd = CLIP_DUR) {
+    return clamp(T - LEAD, 0, clipEnd - 0.05);
+  }
+  var SEEK_EPSILON = 0.02;
+  function needsSeek(currentTime, ct) {
+    return Math.abs(Number(currentTime) - ct) > SEEK_EPSILON;
+  }
+  function startClock(now) {
+    return { phase: "lead", t0: now, T: 0, holdBase: 0, holdAt: 0 };
+  }
+  function stepClock(s, { now, videoTime = 0, ended = false, clipEnd = CLIP_DUR, total }) {
+    const out = { ...s, play: false, pause: false, seekTo: null, done: false };
+    if (s.phase === "lead") {
+      const T = (now - s.t0) / 1e3;
+      if (T < LEAD) {
+        out.T = Math.max(0, T);
+        return out;
+      }
+      out.phase = "clip";
+      out.T = LEAD;
+      out.play = true;
+      return out;
+    }
+    if (s.phase === "clip") {
+      out.T = Math.max(s.T, videoTime + LEAD);
+      if (ended || videoTime >= clipEnd - 0.1) {
+        out.phase = "hold";
+        out.holdBase = out.T;
+        out.holdAt = now;
+        out.pause = true;
+        const ct = clipTime(out.T, clipEnd);
+        if (needsSeek(videoTime, ct)) out.seekTo = ct;
+      }
+      return out;
+    }
+    if (s.phase === "hold") {
+      const T = s.holdBase + (now - s.holdAt) / 1e3;
+      out.T = Math.min(T, total);
+      const ct = clipTime(out.T, clipEnd);
+      if (needsSeek(videoTime, ct)) out.seekTo = ct;
+      if (T >= total) {
+        out.phase = "done";
+        out.done = true;
+      }
+      return out;
+    }
+    out.done = s.phase === "done";
+    return out;
+  }
+  function fitStage(vw, vh) {
+    const portrait = vh > vw;
+    const scale = portrait ? Math.min(vw / W, vh / H) : Math.max(vw / W, vh / H);
+    return { scale, x: (vw - W * scale) / 2, y: (vh - H * scale) / 2, mode: portrait ? "contain" : "cover" };
+  }
+  function fitSafe(vw, vh) {
+    const scale = Math.min(vw / W, vh / H);
+    return { scale, x: (vw - W * scale) / 2, y: (vh - H * scale) / 2 };
+  }
+  var MIN_TYPE = { title: 20, line: 13, button: 36 };
+  function minType(su) {
+    const s = su > 0 ? su : 1;
+    return {
+      title: Math.max(42, MIN_TYPE.title / s),
+      line: Math.max(20, MIN_TYPE.line / s),
+      caption: Math.max(30, MIN_TYPE.line / s),
+      button: Math.max(1, MIN_TYPE.button / (46 * s))
+      // a factor on the whole button
+    };
+  }
+  var STILL = {
+    starfall: { still: (c) => c.Cast + 0.5, overlay: (c) => c.Cast + 2.1 },
+    keyturn: { still: () => LEAD + CLIP_DUR - 0.05, overlay: (c) => c.Inside + 1.5 }
+  };
+  var MOMENT_KINDS = Object.keys(SCENES);
+  var LOAD_CEILING_MS = 2e4;
+  var FADE_OUT_MS = 300;
+
+  // ../gallery/src/moments/scenes.js
+  var TOKENS = {
+    lav: "var(--moment-lav)",
+    em: "var(--moment-em)",
+    loom: "var(--moment-loom)",
+    text: "var(--moment-text)",
+    sub: "var(--moment-sub)",
+    sfSub: "var(--moment-sub-sf)",
+    s0: "var(--moment-s0)",
+    s1: "var(--moment-s1)",
+    ov: "var(--moment-ov)",
+    ink: "var(--moment-ink)",
+    white: "var(--moment-white)"
+  };
+  var T_ = TOKENS;
+  var SERIF = "Georgia, serif";
+  var MONO = "ui-monospace, monospace";
+  var FADE_OUT = { starfall: 0.6, keyturn: 0.5 };
+  function pieceFade(T, total, outLen) {
+    const fadeIn = MOTION.enter({ from: 0, to: 1, start: 0, end: LEAD + 0.4 })(T);
+    const fadeOut = MOTION.enter({ from: 1, to: 0, start: total - outLen, end: total })(T);
+    return fadeIn * fadeOut;
+  }
+  function flareAlpha(k) {
+    return k < 0.18 ? k / 0.18 : 1 - (k - 0.18) / 0.82;
+  }
+  function toastBox(vis, border, glow, mt) {
+    return {
+      position: "absolute",
+      left: 960,
+      bottom: 56,
+      transform: `translate(-50%, 0) scale(${0.96 + 0.04 * vis})`,
+      opacity: vis,
+      filter: `blur(${(1 - vis) * 14}px)`,
+      background: "rgba(10,8,24,.84)",
+      backdropFilter: "blur(10px)",
+      WebkitBackdropFilter: "blur(10px)",
+      border: `1px solid ${border}`,
+      borderRadius: 18,
+      padding: "26px 52px 24px",
+      textAlign: "center",
+      boxShadow: glow,
+      minWidth: 620
+    };
+  }
+  function toastTitle(mt) {
+    return { fontFamily: SERIF, fontStyle: "italic", fontSize: mt.title, color: T_.white, lineHeight: 1.1 };
+  }
+  function toastLine(color, mt) {
+    return { fontSize: mt.line, color, marginTop: 10 };
+  }
+  var CASTPT = { x: 960, y: 250 };
+  var CODE = ["\u2191", "\u2191", "\u2193", "\u2193", "\u2190", "\u2192", "\u2190", "\u2192", "B", "A"];
+  var seeded2 = (i, k) => {
+    const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  var STARS = Array.from({ length: 110 }, (_, i) => ({
+    x: seeded2(i, 1) * W,
+    d: seeded2(i, 2) * 5.2,
+    dur: 1.8 + seeded2(i, 3) * 2.4,
+    sz: 12 + seeded2(i, 4) * 30,
+    drift: -60 + seeded2(i, 5) * 120
+  }));
+  function starfallFrame(T, cues, total, opts = {}) {
+    const { still = false, clipT = T, su = 1, greeting: greeting2 = "", line = "" } = opts;
+    const mt = minType(su);
+    const push = interpolate([0, CLIP_DUR + LEAD], [1, 1.07], Easing.linear)(clipT);
+    const f = {
+      fade: pieceFade(T, total, FADE_OUT.starfall),
+      clip: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        width: W,
+        height: H,
+        objectFit: "cover",
+        transform: `scale(${push})`,
+        transformOrigin: "50% 40%"
+      },
+      gradient: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        pointerEvents: "none",
+        background: "linear-gradient(180deg, rgba(5,4,13,.6) 0%, rgba(5,4,13,0) 18%, rgba(5,4,13,0) 74%, rgba(5,4,13,.85) 100%)"
+      },
+      castflare: null,
+      stars: [],
+      keys: null,
+      toast: null
+    };
+    const k = clamp((T - (cues.Cast + 0.9)) / 1.3, 0, 1);
+    if (!still && k > 0 && k < 1) {
+      const a = flareAlpha(k);
+      f.castflare = {
+        wash: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, background: "rgba(226,214,255,1)", opacity: a * 0.3, mixBlendMode: "screen" },
+        bloom: {
+          position: "absolute",
+          left: CASTPT.x - 520,
+          top: CASTPT.y - 520,
+          width: 1040,
+          height: 1040,
+          borderRadius: "50%",
+          opacity: a,
+          mixBlendMode: "screen",
+          background: "radial-gradient(circle, rgba(236,226,255,.95) 0%, rgba(182,146,230,.4) 24%, rgba(0,0,0,0) 60%)"
+        }
+      };
+    }
+    const t0 = cues.Cast + 1.1;
+    if (!still && T >= t0) {
+      STARS.forEach((s, i) => {
+        const kk = (T - t0 - s.d) / s.dur;
+        if (kk <= 0 || kk >= 1) return;
+        const y = -60 + kk * (H + 120), x = s.x + s.drift * kk;
+        const op = kk < 0.1 ? kk / 0.1 : kk > 0.85 ? (1 - kk) / 0.15 : 1;
+        f.stars.push({
+          i,
+          style: {
+            position: "absolute",
+            left: x,
+            top: y,
+            fontSize: s.sz,
+            color: T_.lav,
+            opacity: op,
+            transform: `rotate(${kk * 200}deg)`,
+            textShadow: "0 0 14px rgba(182,146,230,.9), 0 0 30px rgba(182,146,230,.5)"
+          }
+        });
+      });
+    }
+    const out = MOTION.enter({ from: 1, to: 0, start: cues.Turn - 0.1, end: cues.Turn + 0.5 })(T);
+    if (out > 0) {
+      f.keys = {
+        row: { position: "absolute", left: 0, right: 0, top: 120, display: "flex", justifyContent: "center", gap: 12, opacity: out },
+        caps: CODE.map((label, i) => {
+          const at = LEAD + 0.15 + i * 0.2;
+          const p = still ? 1 : MOTION.pop({ from: 0, to: 1, start: at, end: at + 0.35 })(T);
+          const lit = still || T >= at + 0.1;
+          return {
+            label,
+            style: {
+              width: 64,
+              height: 64,
+              borderRadius: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: MONO,
+              fontSize: 28,
+              fontWeight: 600,
+              color: lit ? T_.white : T_.sfSub,
+              background: "rgba(10,8,24,.78)",
+              backdropFilter: "blur(6px)",
+              WebkitBackdropFilter: "blur(6px)",
+              border: `1px solid ${lit ? T_.lav : T_.s1}`,
+              boxShadow: lit ? "0 0 22px rgba(182,146,230,.55)" : "none",
+              opacity: p,
+              transform: `translateY(${(1 - p) * 18}px) scale(${0.7 + 0.3 * p})`
+            }
+          };
+        })
+      };
+    }
+    const vis = MOTION.enter({ from: 0, to: 1, start: cues.Cast + 1.4, end: cues.Cast + 2.1 })(T);
+    f.toast = {
+      box: toastBox(vis, T_.lav, "0 0 80px rgba(182,146,230,.45)", mt),
+      title: toastTitle(mt),
+      line: toastLine(T_.sfSub, mt),
+      titleText: greeting2,
+      lineText: line
+    };
+    return f;
+  }
+  var DOORPT = { x: 960, y: 520 };
+  var RAIL = { right: 56, top: 150, w: 360 };
+  var UTH_BAND = 837;
+  function keyturnFrame(T, cues, total, opts = {}) {
+    const { still = false, clipT = T, su = 1, copy = {} } = opts;
+    const mt = minType(su);
+    const push = interpolate([0, CLIP_DUR + LEAD], [1, 1.09], Easing.linear)(clipT);
+    const f = {
+      fade: pieceFade(T, total, FADE_OUT.keyturn),
+      clip: {
+        position: "absolute",
+        left: 0,
+        top: (H - UTH_BAND) / 2,
+        width: W,
+        height: UTH_BAND,
+        objectFit: "cover",
+        transform: `scale(${push})`,
+        transformOrigin: "50% 50%"
+      },
+      gradient: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        pointerEvents: "none",
+        background: "linear-gradient(180deg, rgba(5,4,13,.85) 0%, rgba(5,4,13,0) 16%, rgba(5,4,13,0) 78%, rgba(5,4,13,.9) 100%)"
+      },
+      doorflare: null,
+      rail: null,
+      toast: null,
+      caption: null
+    };
+    const k = clamp((T - (cues.Door + 1.1)) / 1.4, 0, 1);
+    if (!still && k > 0 && k < 1) {
+      const a = flareAlpha(k);
+      f.doorflare = {
+        wash: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, background: "rgba(255,240,214,1)", opacity: a * 0.35, mixBlendMode: "screen" },
+        bloom: {
+          position: "absolute",
+          left: DOORPT.x - 500,
+          top: DOORPT.y - 500,
+          width: 1e3,
+          height: 1e3,
+          borderRadius: "50%",
+          opacity: a,
+          mixBlendMode: "screen",
+          background: "radial-gradient(circle, rgba(255,220,170,.9) 0%, rgba(255,190,120,.35) 25%, rgba(0,0,0,0) 60%)"
+        }
+      };
+    }
+    const show2 = MOTION.enter({ from: 0, to: 1, start: cues.Door + 0.2, end: cues.Door + 0.9 })(T);
+    const open2 = MOTION.pop({ from: 0, to: 1, start: cues.Door + 2.3, end: cues.Door + 2.75 })(T);
+    const slide = MOTION.enter({ from: 0, to: 1, start: cues.Door + 2.65, end: cues.Door + 3.3 })(T);
+    const glow = 0.5 + 0.5 * Math.sin(T * 3);
+    const tab = (active) => ({
+      row: {
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        height: 54,
+        padding: "0 18px",
+        borderRadius: 12,
+        fontSize: 20,
+        color: active ? T_.text : T_.sub,
+        background: active ? T_.s0 : "transparent",
+        border: `1px solid ${active ? T_.s1 : "transparent"}`
+      },
+      dot: { width: 10, height: 10, borderRadius: "50%", background: active ? T_.lav : T_.ov }
+    });
+    f.rail = {
+      box: {
+        position: "absolute",
+        right: RAIL.right,
+        top: RAIL.top,
+        width: RAIL.w,
+        opacity: show2,
+        transform: `translateX(${(1 - show2) * 30}px)`,
+        background: "rgba(10,8,24,.86)",
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        border: `1px solid ${T_.s1}`,
+        borderRadius: 20,
+        padding: 24,
+        boxSizing: "border-box"
+      },
+      heading: { fontFamily: SERIF, fontStyle: "italic", fontSize: 26, color: T_.text, marginBottom: 6 },
+      sub: { fontSize: 16, color: T_.sub, marginBottom: 16 },
+      list: { display: "flex", flexDirection: "column", gap: 8 },
+      tab,
+      lockRow: { position: "relative", height: 54, display: "flex", alignItems: "center", padding: "0 18px", gap: 12 },
+      lock: { position: "relative", width: 22, height: 26, opacity: 1 - slide, flex: "none", transform: "scale(1.25)" },
+      shackle: {
+        position: "absolute",
+        left: 3,
+        top: 0,
+        width: 16,
+        height: 14,
+        border: `3px solid ${T_.ov}`,
+        borderBottom: "none",
+        borderRadius: "8px 8px 0 0",
+        boxSizing: "border-box",
+        transformOrigin: "100% 100%",
+        transform: `translateY(${-6 * open2}px) rotate(${-28 * open2}deg)`
+      },
+      body: {
+        position: "absolute",
+        left: 0,
+        top: 11,
+        width: 22,
+        height: 15,
+        borderRadius: 4,
+        background: open2 > 0 ? T_.em : T_.ov,
+        boxShadow: `0 0 ${14 * open2}px ${T_.em}`
+      },
+      locked: { fontSize: 19, color: T_.ov, opacity: 1 - slide },
+      branding: {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        right: 0,
+        height: 54,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "0 18px",
+        borderRadius: 12,
+        fontSize: 20,
+        color: T_.loom,
+        background: "rgba(71,203,195,.12)",
+        border: `1px solid ${T_.loom}`,
+        boxShadow: `0 0 ${(14 + 12 * glow) * slide}px rgba(71,203,195,.45)`,
+        opacity: slide,
+        transform: `translateX(${(1 - slide) * 50}px)`,
+        boxSizing: "border-box",
+        whiteSpace: "nowrap"
+      },
+      brandingDot: { width: 10, height: 10, borderRadius: "50%", background: T_.loom },
+      fresh: { marginLeft: "auto", fontSize: 14, letterSpacing: ".08em", textTransform: "uppercase", color: T_.em, opacity: slide }
+    };
+    const rise = MOTION.enter({ from: 0, to: 1, start: cues.Key + 1.9, end: cues.Key + 2.6 })(T);
+    const dip = MOTION.enter({ from: 1, to: 0, start: cues.Flight + 0.1, end: cues.Flight + 0.7 })(T);
+    const back = MOTION.enter({ from: 0, to: 1, start: cues.Inside + 0.3, end: cues.Inside + 0.9 })(T);
+    const offer = MOTION.pop({ from: 0, to: 1, start: cues.Inside + 0.9, end: cues.Inside + 1.5 })(T);
+    const vis = rise * Math.max(dip, back);
+    const inside = back > 0.5;
+    const b = mt.button;
+    f.toast = {
+      box: toastBox(vis, T_.em, "0 0 80px rgba(79,201,154,.35)", mt),
+      title: toastTitle(mt),
+      line: toastLine(T_.sub, mt),
+      titleText: inside ? copy.title2 || "" : copy.title1 || "",
+      lineText: inside ? copy.line2 || "" : copy.line1 || "",
+      offer,
+      offerWrap: { height: (18 + 46 * b) * offer, overflow: "hidden", marginTop: 4 * offer },
+      button: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10 * b,
+        marginTop: 14,
+        height: 46 * b,
+        padding: `0 ${26 * b}px`,
+        borderRadius: 23 * b,
+        background: T_.lav,
+        color: T_.ink,
+        fontSize: 18 * b,
+        fontWeight: 600,
+        transform: `scale(${Math.max(offer, 0.01)})`,
+        boxShadow: "0 6px 24px rgba(182,146,230,.4)"
+      },
+      arrow: { fontSize: 20 * b },
+      buttonText: buttonLabel(copy.button)
+    };
+    f.caption = caption(T, cues.Door + 0.4, cues.Inside, copy.caption || "", mt);
+    return f;
+  }
+  function buttonLabel(s) {
+    return String(s || "").replace(/\s*→\s*$/, "");
+  }
+  var CAPTION_FADE = 0.18;
+  function caption(T, at, until, text, mt = minType(1)) {
+    if (!text || T < at || T >= until) return null;
+    let o = Math.min(1, (T - at) / CAPTION_FADE);
+    o = Math.min(o, (until - T) / CAPTION_FADE);
+    o = Math.max(0, Math.min(1, o));
+    return {
+      text,
+      style: {
+        position: "absolute",
+        left: "8%",
+        right: "8%",
+        bottom: "7%",
+        textAlign: "center",
+        opacity: o,
+        pointerEvents: "none",
+        fontFamily: "Inter, system-ui, sans-serif",
+        fontWeight: 500,
+        fontSize: mt.caption,
+        color: "var(--moment-caption)",
+        textShadow: "0 1px 14px rgba(0,0,0,0.45)"
+      }
+    };
+  }
+
+  // ../gallery/src/moments/momentStore.js
+  var ATTACH_CEILING_MS = 2e4;
+  var cur = null;
+  var seq2 = 0;
+  var subs5 = /* @__PURE__ */ new Set();
+  function emit5() {
+    subs5.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+      }
+    });
+  }
+  function subscribe4(fn) {
+    subs5.add(fn);
+    return () => subs5.delete(fn);
+  }
+  function currentMoment() {
+    return cur;
+  }
+  function isMomentKind(kind) {
+    return MOMENT_KINDS.indexOf(kind) >= 0;
+  }
+  function playMoment(a) {
+    const kind = a && a.moment;
+    if (!isMomentKind(kind)) return Promise.resolve("none");
+    if (cur) {
+      if (cur.kind === kind) return cur.promise;
+      return cur.promise.then(() => playMoment(a));
+    }
+    let resolve;
+    const promise = new Promise((r) => {
+      resolve = r;
+    });
+    const id = ++seq2;
+    cur = {
+      id,
+      kind,
+      a,
+      promise,
+      resolve,
+      visible: false,
+      attached: false,
+      skip: null,
+      attachT: 0,
+      ready: false
+    };
+    afterPageSettles(() => {
+      if (!cur || cur.id !== id) return;
+      cur = { ...cur, ready: true };
+      cur.attachT = setTimeout(() => {
+        if (cur && cur.id === id && !cur.attached) finishMoment(id, "no-host");
+      }, ATTACH_CEILING_MS);
+      emit5();
+    });
+    emit5();
+    return promise;
+  }
+  var PAGE_SETTLE_MS = 2500;
+  function afterPageSettles(fn) {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      fn();
+      return;
+    }
+    let done = false;
+    const go = () => {
+      if (!done) {
+        done = true;
+        fn();
+      }
+    };
+    const idle = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(go, { timeout: PAGE_SETTLE_MS });
+      } else {
+        setTimeout(go, 0);
+      }
+    };
+    setTimeout(go, PAGE_SETTLE_MS * 2);
+    if (document.readyState === "complete") idle();
+    else window.addEventListener("load", idle, { once: true });
+  }
+  function attachMoment(id, skip) {
+    if (!cur || cur.id !== id) return false;
+    cur.attached = true;
+    cur.skip = typeof skip === "function" ? skip : null;
+    clearTimeout(cur.attachT);
+    return true;
+  }
+  function setMomentVisible(id, on) {
+    if (!cur || cur.id !== id || cur.visible === !!on) return;
+    cur.visible = !!on;
+    emit5();
+  }
+  function finishMoment(id, reason) {
+    if (!cur || cur.id !== id) return;
+    const done = cur;
+    cur = null;
+    clearTimeout(done.attachT);
+    emit5();
+    done.resolve(reason || "done");
+  }
+  function isMomentUp() {
+    return !!(cur && cur.visible);
+  }
+  function skipMoment() {
+    if (!cur) return false;
+    if (cur.skip) cur.skip();
+    else finishMoment(cur.id, "skipped");
+    return true;
+  }
+  function onKey(e) {
+    if (e.key !== "Escape" || !isMomentUp()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    skipMoment();
+  }
+  function onDown(e) {
+    if (!isMomentUp()) return;
+    const t = e.target;
+    if (t && t.closest && t.closest("[data-moment]")) {
+      e.stopPropagation();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+  }
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", onDown, true);
+    window.addEventListener("pointerdown", onDown, true);
+  }
+
+  // ../gallery/src/notify/panelRequest.js
+  var OPEN_PANEL_EVENT = "mg-open-control-panel";
+  var CARRY_KEY2 = "mg_panel_tab_request";
+  function session2() {
+    try {
+      return typeof window !== "undefined" && window.sessionStorage || null;
+    } catch {
+      return null;
+    }
+  }
+  function openPanelHere(tab) {
+    if (typeof window === "undefined" || !tab) return false;
+    try {
+      const ev = new CustomEvent(OPEN_PANEL_EVENT, { detail: { tab }, cancelable: true });
+      return !window.dispatchEvent(ev);
+    } catch {
+      return false;
+    }
+  }
+  function carryPanelTab(tab) {
+    if (typeof window === "undefined" || !tab) return "none";
+    let carried = false;
+    const s = session2();
+    if (s) {
+      try {
+        s.setItem(CARRY_KEY2, String(tab));
+        carried = true;
+      } catch {
+      }
+    }
+    const here = window.location && window.location.pathname || "/";
+    if (here === "/") return carried ? "stored" : "none";
+    window.location.assign(carried ? "/" : "/?panel=" + encodeURIComponent(tab));
+    return "navigating";
+  }
+
+  // ../gallery/src/lib/panelTabs.js
+  var PANEL_TABS = [
+    { id: "maint", label: "Maintenance" },
+    { id: "brand", label: "\u2726 Branding", gated: true }
+  ];
+
+  // ../gallery/src/moments/ClipMoment.jsx
+  var FALLBACK_NAME = "Nelnamara";
+  var STARFALL_TRACKS = [
+    { src: "/branding/ee_starfall_cast.ogg", volume: 0.7, loop: false },
+    { src: "/branding/ee_starfall_loop.ogg", volume: 0.35, loop: true }
+  ];
+  function harnessOn() {
+    return typeof window !== "undefined" && window.__MG_MOMENT_HARNESS === true;
+  }
+  function greeting() {
+    const boot = typeof window !== "undefined" && window.MG_BOOT || {};
+    const name = harnessOn() ? FALLBACK_NAME : String(boot.user || "").trim() || FALLBACK_NAME;
+    return "\u273A Elune-adore, " + name + " \u273A";
+  }
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch {
+      return false;
+    }
+  }
+  function viewport() {
+    if (typeof window === "undefined") return { w: 1920, h: 1080 };
+    return { w: window.innerWidth || 1920, h: window.innerHeight || 1080 };
+  }
+  function once(el, type, ms) {
+    return new Promise((resolve) => {
+      let t = 0;
+      const done = () => {
+        clearTimeout(t);
+        el.removeEventListener(type, done);
+        resolve();
+      };
+      el.addEventListener(type, done);
+      t = setTimeout(done, ms || LOAD_CEILING_MS);
+    });
+  }
+  var twoFrames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  var BUTTON_RESET = {
+    border: "none",
+    margin: 0,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    lineHeight: "normal",
+    letterSpacing: "normal",
+    textTransform: "none",
+    WebkitAppearance: "none",
+    appearance: "none",
+    pointerEvents: "auto"
+  };
+  function ClipMoment({ moment }) {
+    const { id, kind, a } = moment;
+    const achievement = a || {};
+    const copy = achievement.moment_copy || {};
+    const clip = String(achievement.moment_clip || "");
+    const [{ cues, total }] = useState(() => cuesFrom(SCENES[kind]));
+    const [reduced] = useState(prefersReducedMotion);
+    const [greet] = useState(greeting);
+    const [mode, setMode] = useState(clip ? "loading" : "fallback");
+    const [shown, setShown] = useState(false);
+    const [leaving, setLeaving] = useState(false);
+    const [T, setT] = useState(0);
+    const [wall, setWall] = useState(0);
+    const [needsSound, setNeedsSound] = useState(false);
+    const [vp, setVp] = useState(viewport);
+    const videoRef = useRef(null);
+    const modeRef = useRef(mode);
+    modeRef.current = mode;
+    const frozenRef = useRef(false);
+    const clockRef = useRef(null);
+    const rafRef = useRef(0);
+    const wallAtRef = useRef(0);
+    const doneRef = useRef(false);
+    const tracksRef = useRef([]);
+    const timersRef = useRef([]);
+    const later = (fn, ms) => {
+      const t = setTimeout(fn, ms);
+      timersRef.current.push(t);
+      return t;
+    };
+    const stopMedia = () => {
+      cancelAnimationFrame(rafRef.current);
+      const v = videoRef.current;
+      if (v) {
+        try {
+          v.pause();
+        } catch {
+        }
+      }
+      tracksRef.current.forEach((au) => {
+        try {
+          au.pause();
+        } catch {
+        }
+      });
+      tracksRef.current = [];
+    };
+    const finish = (reason, after) => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      stopMedia();
+      setLeaving(true);
+      later(() => {
+        finishMoment(id, reason);
+        if (after) after();
+      }, modeRef.current === "loading" ? 0 : FADE_OUT_MS);
+    };
+    const finishRef = useRef(finish);
+    finishRef.current = finish;
+    const playTracks = () => {
+      if (kind !== "starfall" || tracksRef.current.length) return;
+      STARFALL_TRACKS.forEach((t) => {
+        try {
+          const au = new Audio(t.src);
+          au.volume = t.volume;
+          au.loop = t.loop;
+          au.play().catch(() => {
+          });
+          tracksRef.current.push(au);
+        } catch {
+        }
+      });
+    };
+    const settle = (next) => {
+      if (doneRef.current || frozenRef.current) return;
+      wallAtRef.current = performance.now();
+      setMode(next);
+      setShown(true);
+      playTracks();
+    };
+    const fallBack = () => {
+      if (modeRef.current !== "loading" || frozenRef.current) return;
+      settle("fallback");
+    };
+    useEffect(() => {
+      attachMoment(id, () => finishRef.current("skipped"));
+      const onResize = () => setVp(viewport());
+      window.addEventListener("resize", onResize);
+      if (!clip) {
+        wallAtRef.current = performance.now();
+        setShown(true);
+        playTracks();
+      } else later(() => fallBack(), LOAD_CEILING_MS);
+      return () => {
+        window.removeEventListener("resize", onResize);
+        timersRef.current.forEach(clearTimeout);
+        stopMedia();
+      };
+    }, []);
+    useEffect(() => {
+      setMomentVisible(id, shown);
+    }, [id, shown]);
+    useEffect(() => {
+      if (typeof document === "undefined") return void 0;
+      const up = shown && !leaving;
+      document.body.classList.toggle("mg-moment-up", up);
+      return () => document.body.classList.remove("mg-moment-up");
+    }, [shown, leaving]);
+    const onReady = () => {
+      const v = videoRef.current;
+      if (!v || modeRef.current !== "loading" || doneRef.current || frozenRef.current) return;
+      if (reduced) {
+        const ct = clipTime(STILL[kind].still(cues), clipEndOf(v.duration));
+        if (!needsSeek(v.currentTime, ct)) {
+          settle("still");
+          return;
+        }
+        once(v, "seeked").then(() => {
+          if (modeRef.current === "loading") settle("still");
+        });
+        v.currentTime = ct;
+        return;
+      }
+      clockRef.current = startClock(performance.now());
+      setMode("play");
+      setShown(true);
+    };
+    const onVideoError = () => {
+      if (modeRef.current === "loading") fallBack();
+    };
+    useEffect(() => {
+      if (mode !== "play") return void 0;
+      const v = videoRef.current;
+      let lastNow = performance.now();
+      let lastT = -1;
+      let stalled = 0;
+      const tick = () => {
+        if (doneRef.current || frozenRef.current || modeRef.current !== "play") return;
+        const now = performance.now();
+        const s = stepClock(clockRef.current, {
+          now,
+          videoTime: v ? v.currentTime : 0,
+          ended: !!(v && v.ended),
+          clipEnd: clipEndOf(v && v.duration),
+          total
+        });
+        clockRef.current = s;
+        if (v && s.play) {
+          v.muted = false;
+          const p = v.play();
+          if (p && p.catch) {
+            p.catch(() => {
+              if (doneRef.current || frozenRef.current) return;
+              v.muted = true;
+              setNeedsSound(true);
+              v.play().catch(() => {
+                settle("fallback");
+              });
+            });
+          }
+        }
+        if (v && s.pause && !v.paused) v.pause();
+        if (v && s.seekTo != null) v.currentTime = s.seekTo;
+        stalled = s.phase === "clip" && s.T <= lastT ? stalled + Math.min(now - lastNow, 100) : 0;
+        lastNow = now;
+        lastT = s.T;
+        if (stalled > LOAD_CEILING_MS) {
+          settle("fallback");
+          return;
+        }
+        setT(s.T);
+        if (s.done) {
+          finishRef.current("done");
+          return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(rafRef.current);
+    }, [mode, total]);
+    useEffect(() => {
+      if (mode !== "still" && mode !== "fallback") return void 0;
+      const tick = () => {
+        if (doneRef.current || frozenRef.current) return;
+        const w = (performance.now() - wallAtRef.current) / 1e3;
+        setWall(Math.min(w, total));
+        if (w >= total) {
+          finishRef.current("done");
+          return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(rafRef.current);
+    }, [mode, total]);
+    useEffect(() => {
+      if (!harnessOn()) return void 0;
+      const seek = async (at) => {
+        const t = Number(at) || 0;
+        frozenRef.current = true;
+        cancelAnimationFrame(rafRef.current);
+        timersRef.current.forEach(clearTimeout);
+        timersRef.current = [];
+        tracksRef.current.forEach((au) => {
+          try {
+            au.pause();
+          } catch {
+          }
+        });
+        tracksRef.current = [];
+        const v = videoRef.current;
+        if (v) {
+          if (v.readyState < 2) await once(v, "loadeddata");
+          v.pause();
+          const ct = clipTime(t, clipEndOf(v.duration));
+          if (needsSeek(v.currentTime, ct)) {
+            const seeked = once(v, "seeked");
+            v.currentTime = ct;
+            await seeked;
+          }
+        }
+        flushSync(() => {
+          setMode("frozen");
+          setShown(true);
+          setT(t);
+        });
+        await twoFrames();
+      };
+      window.__mgMomentSeek = seek;
+      return () => {
+        if (window.__mgMomentSeek === seek) delete window.__mgMomentSeek;
+      };
+    }, []);
+    const skip = () => finish("skipped");
+    const unmute = (e) => {
+      e.stopPropagation();
+      const v = videoRef.current;
+      if (v) v.muted = false;
+      setNeedsSound(false);
+    };
+    const takeMeThere = (e) => {
+      e.stopPropagation();
+      const opened = openPanelHere("brand");
+      finish("button", opened ? null : () => carryPanelTab("brand"));
+    };
+    const st = fitStage(vp.w, vp.h);
+    const sf = fitSafe(vp.w, vp.h);
+    const settled = mode === "still" || mode === "fallback";
+    const overlayT = settled ? STILL[kind].overlay(cues) : T;
+    const clipT = settled ? STILL[kind].still(cues) : T;
+    const f = kind === "starfall" ? starfallFrame(overlayT, cues, total, { still: settled, clipT, su: sf.scale, greeting: greet, line: copy.line || achievement.desc || "" }) : keyturnFrame(overlayT, cues, total, { still: settled, clipT, su: sf.scale, copy });
+    const fade = settled ? pieceFade(wall, total, FADE_OUT[kind]) : f.fade;
+    const rootOpacity = shown && !leaving ? 1 : 0;
+    const rootMotion = mode === "frozen" ? "none" : "opacity " + FADE_OUT_MS + "ms ease";
+    const flare = f.castflare || f.doorflare;
+    const showVideo = !!clip && mode !== "fallback";
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-moment": kind, className: "mgm-root" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgm-scrim", style: { width: vp.w, height: vp.h, opacity: rootOpacity, transition: rootMotion } }), /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mgm-host",
+        onClick: skip,
+        style: { width: vp.w, height: vp.h, opacity: rootOpacity, transition: rootMotion, pointerEvents: shown ? "auto" : "none" }
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgm-fade", style: { opacity: fade } }, /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          "data-moment-stage": "",
+          className: "mgm-stage",
+          style: { transform: "translate(" + st.x + "px, " + st.y + "px) scale(" + st.scale + ")" }
+        },
+        showVideo ? /* @__PURE__ */ react_global_shim_default.createElement(
+          "video",
+          {
+            ref: videoRef,
+            "data-part": "clip",
+            src: clip,
+            style: f.clip,
+            playsInline: true,
+            preload: "auto",
+            disablePictureInPicture: true,
+            onCanPlayThrough: reduced ? void 0 : onReady,
+            onLoadedData: reduced ? onReady : void 0,
+            onError: onVideoError
+          }
+        ) : null,
+        flare ? /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": kind === "starfall" ? "castflare" : "doorflare", className: "mgm-fill" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.wash }), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: flare.bloom })) : null,
+        /* @__PURE__ */ react_global_shim_default.createElement("div", { style: f.gradient }),
+        (f.stars || []).map((s) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: s.i, "data-part": "star", style: s.style }, "\u2726"))
+      ), /* @__PURE__ */ react_global_shim_default.createElement(
+        "div",
+        {
+          className: "mgm-safe",
+          style: { transform: "translate(" + sf.x + "px, " + sf.y + "px) scale(" + sf.scale + ")" }
+        },
+        f.keys ? /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "keys", style: f.keys.row }, f.keys.caps.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: i, "data-part": "key", style: c.style }, c.label))) : null,
+        f.rail ? /* @__PURE__ */ react_global_shim_default.createElement(Rail, { r: f.rail }) : null,
+        /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "toast", style: f.toast.box }, /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "toast-title", style: f.toast.title }, f.toast.titleText), /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "toast-line", style: f.toast.line }, f.toast.lineText), kind === "keyturn" ? /* @__PURE__ */ react_global_shim_default.createElement("div", { style: f.toast.offerWrap }, /* @__PURE__ */ react_global_shim_default.createElement(
+          "button",
+          {
+            type: "button",
+            "data-part": "button",
+            onClick: takeMeThere,
+            tabIndex: f.toast.offer > 0.5 ? 0 : -1,
+            style: { ...BUTTON_RESET, ...f.toast.button }
+          },
+          f.toast.buttonText,
+          /* @__PURE__ */ react_global_shim_default.createElement("span", { style: f.toast.arrow }, "\u2192")
+        )) : null),
+        f.caption ? /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "caption", style: f.caption.style }, f.caption.text) : null
+      )),
+      needsSound ? /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mgm-sound",
+          "data-moment-sound": "",
+          onClick: unmute,
+          "aria-label": "Play the sound"
+        },
+        "\u{1F50A}"
+      ) : null
+    ));
+  }
+  function Rail({ r }) {
+    const open2 = PANEL_TABS.filter((t) => !t.gated);
+    const gated = PANEL_TABS.find((t) => t.gated) || { label: "" };
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "rail", style: r.box }, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.heading }, "Control Panel"), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.sub }, "Settings for your Athenaeum"), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.list }, open2.map((t, i) => {
+      const s = r.tab(i === 0);
+      return /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, style: s.row }, /* @__PURE__ */ react_global_shim_default.createElement("span", { style: s.dot }), t.label);
+    }), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.lockRow }, /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "lock", style: r.lock }, /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.shackle }), /* @__PURE__ */ react_global_shim_default.createElement("div", { style: r.body })), /* @__PURE__ */ react_global_shim_default.createElement("span", { style: r.locked }, "Locked"), /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-part": "tab-branding", style: r.branding }, /* @__PURE__ */ react_global_shim_default.createElement("span", { style: r.brandingDot }), gated.label, /* @__PURE__ */ react_global_shim_default.createElement("span", { style: r.fresh }, "New")))));
+  }
+
+  // ../gallery/src/moments/MomentHost.jsx
+  function MomentHost() {
+    const cur2 = useSyncExternalStore(subscribe4, currentMoment, currentMoment);
+    if (!cur2 || !cur2.ready || typeof document === "undefined") return null;
+    return createPortal(/* @__PURE__ */ react_global_shim_default.createElement(ClipMoment, { key: cur2.id, moment: cur2 }), document.body);
+  }
+
   // ../gallery/src/notify/index.jsx
   var installed = false;
   function installNotify() {
@@ -5207,6 +6349,7 @@ ${"=".repeat(48)}
       clearFinished
     };
     window.Ach = { check, replay };
+    registerMomentHost(playMoment);
     start();
     check();
     const boot = typeof window !== "undefined" && window.MG_BOOT || {};
@@ -5214,7 +6357,7 @@ ${"=".repeat(48)}
     checkSpikes();
   }
   function NotifyRoot() {
-    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(BannerHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null));
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(BannerHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null), /* @__PURE__ */ react_global_shim_default.createElement(MomentHost, null));
   }
 
   // ../gallery/src/notify/ActivityChip.jsx
@@ -5508,7 +6651,7 @@ ${"=".repeat(48)}
       }
     }, [open2, closing, close]);
     const toggleRow = useCallback((jid) => {
-      setExpandedId((cur) => cur === jid ? null : jid);
+      setExpandedId((cur2) => cur2 === jid ? null : jid);
     }, []);
     return {
       jobs: jobs2,
@@ -6463,11 +7606,11 @@ ${"=".repeat(48)}
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
     useEffect2(() => {
       if (!projMenu) return;
-      const onKey = (ev) => {
+      const onKey2 = (ev) => {
         if (ev.key === "Escape") setProjMenu(false);
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [projMenu, setProjMenu]);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
@@ -6487,11 +7630,11 @@ ${"=".repeat(48)}
     const [open2, setOpen2] = useState2(false);
     useEffect2(() => {
       if (!open2) return;
-      const onKey = (ev) => {
+      const onKey2 = (ev) => {
         if (ev.key === "Escape") setOpen2(false);
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [open2]);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
@@ -6731,19 +7874,19 @@ ${"=".repeat(48)}
     }, []);
     useEffect2(() => {
       if (!deepFocus) return;
-      const onKey = (ev) => {
+      const onKey2 = (ev) => {
         if (ev.key === "Escape") setDeepFocus(null);
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [deepFocus]);
     useEffect2(() => {
       if (!pickerOpen) return;
-      const onKey = (ev) => {
+      const onKey2 = (ev) => {
         if (ev.key === "Escape") setPickerOpen(false);
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [pickerOpen]);
     const [pickerMounted, setPickerMounted] = useState2(false);
     useEffect2(() => {
@@ -6757,14 +7900,14 @@ ${"=".repeat(48)}
       return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
     }, [imgModel]);
     useEffect2(() => {
-      setImgLoras((cur) => {
+      setImgLoras((cur2) => {
         let changed = false;
-        const next = cur.map((l) => {
+        const next = cur2.map((l) => {
           const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
           if (w !== l.weight) changed = true;
           return w === l.weight ? l : { ...l, weight: w };
         });
-        return changed ? next : cur;
+        return changed ? next : cur2;
       });
     }, [loraRange, setImgLoras]);
     const onBasePick = useCallback2((row) => {
@@ -6776,8 +7919,8 @@ ${"=".repeat(48)}
       fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
         if (mySeq !== imgModelSeqRef.current) return;
         const versions = d && d.versions || [], v = versions[0] || {};
-        setImgModel((cur) => cur ? {
-          ...cur,
+        setImgModel((cur2) => cur2 ? {
+          ...cur2,
           version_id: v.version_id || "",
           model_type: v.model_type || "",
           sampling_method: v.sampling_method || "",
@@ -6785,15 +7928,15 @@ ${"=".repeat(48)}
           compatibility: v.compatibility || {},
           restrictions: v.restrictions || {},
           versions
-        } : cur);
+        } : cur2);
         const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
         setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
         if (has) {
-          setImgAdv((cur) => ({
-            ...cur,
-            negative: v.negative_prompt || cur.negative,
-            steps: v.sampling_steps || cur.steps,
-            cfg: v.cfg_scale || cur.cfg
+          setImgAdv((cur2) => ({
+            ...cur2,
+            negative: v.negative_prompt || cur2.negative,
+            steps: v.sampling_steps || cur2.steps,
+            cfg: v.cfg_scale || cur2.cfg
           }));
         }
       }).catch(() => {
@@ -6803,8 +7946,8 @@ ${"=".repeat(48)}
       if (!imgModel || !imgModel.versions) return;
       const v = imgModel.versions.find((x) => x.version_id === vid);
       if (!v) return;
-      setImgModel((cur) => ({
-        ...cur,
+      setImgModel((cur2) => ({
+        ...cur2,
         version_id: v.version_id || "",
         model_type: v.model_type || "",
         sampling_method: v.sampling_method || "",
@@ -6824,11 +7967,11 @@ ${"=".repeat(48)}
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const onLoraPick = useCallback2((model, selected) => {
-      setImgLoras((cur) => {
-        const i = cur.findIndex((l) => l.model_id === model.model_id);
-        if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-        if (i < 0) return [...cur, model];
-        const next = cur.slice();
+      setImgLoras((cur2) => {
+        const i = cur2.findIndex((l) => l.model_id === model.model_id);
+        if (!selected) return i < 0 ? cur2 : cur2.filter((l) => l.model_id !== model.model_id);
+        if (i < 0) return [...cur2, model];
+        const next = cur2.slice();
         next[i] = model;
         return next;
       });
@@ -7515,7 +8658,7 @@ ${"=".repeat(48)}
                   loraRange[0],
                   Math.min(loraRange[1], +ev.target.value || 0)
                 );
-                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
+                setImgLoras((cur2) => cur2.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
               }
             }
           ), /* @__PURE__ */ React.createElement("b", null, (+l.weight).toFixed(1))), /* @__PURE__ */ React.createElement(
@@ -7525,7 +8668,7 @@ ${"=".repeat(48)}
               className: "lv-lrm",
               title: "Remove",
               onClick: () => {
-                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                setImgLoras((cur2) => cur2.filter((x) => x.model_id !== l.model_id));
               }
             },
             "\xD7"
@@ -7539,7 +8682,7 @@ ${"=".repeat(48)}
                 const vid = ev.target.value;
                 const v = l.versions.find((x) => x.version_id === vid);
                 if (!v) return;
-                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? {
+                setImgLoras((cur2) => cur2.map((x) => x.model_id === l.model_id ? {
                   ...x,
                   version_id: v.version_id || "",
                   lora_base_type: v.lora_base_model_type || "",
@@ -8178,7 +9321,7 @@ ${"=".repeat(48)}
             type: "button",
             key: id,
             className: "lv-fc-tile" + (fcActive === id ? " on" : ""),
-            onClick: () => setFcActive((cur) => cur === id ? null : id),
+            onClick: () => setFcActive((cur2) => cur2 === id ? null : id),
             title: (rec.name || id) + " \xB7 free, applied in your browser" + (rec.note ? " \u2014 " + rec.note : "")
           },
           /* @__PURE__ */ React.createElement(
@@ -8947,11 +10090,11 @@ ${"=".repeat(48)}
     }, [pickerOpen]);
     useEffect2(() => {
       if (!pickerOpen) return;
-      const onKey = (ev) => {
+      const onKey2 = (ev) => {
         if (ev.key === "Escape") closePicker();
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      window.addEventListener("keydown", onKey2);
+      return () => window.removeEventListener("keydown", onKey2);
     }, [pickerOpen]);
     const imgModelSeqRef = useRef2(0);
     const loraRange = useMemo2(() => {
@@ -8961,14 +10104,14 @@ ${"=".repeat(48)}
       return L.ranges && L.ranges[t] || L.fallback || [-2, 2];
     }, [imgModel]);
     useEffect2(() => {
-      setImgLoras((cur) => {
+      setImgLoras((cur2) => {
         let changed = false;
-        const next = cur.map((l) => {
+        const next = cur2.map((l) => {
           const w = Math.max(loraRange[0], Math.min(loraRange[1], +l.weight));
           if (w !== l.weight) changed = true;
           return w === l.weight ? l : { ...l, weight: w };
         });
-        return changed ? next : cur;
+        return changed ? next : cur2;
       });
     }, [loraRange, setImgLoras]);
     const onBasePick = useCallback2((row) => {
@@ -8980,8 +10123,8 @@ ${"=".repeat(48)}
       fetch("/api/model-version?model_id=" + encodeURIComponent(m.model_id) + "&all=1").then((r) => r.json()).then((d) => {
         if (mySeq !== imgModelSeqRef.current) return;
         const versions = d && d.versions || [], v = versions[0] || {};
-        setImgModel((cur) => cur ? {
-          ...cur,
+        setImgModel((cur2) => cur2 ? {
+          ...cur2,
           version_id: v.version_id || "",
           model_type: v.model_type || "",
           sampling_method: v.sampling_method || "",
@@ -8989,15 +10132,15 @@ ${"=".repeat(48)}
           compatibility: v.compatibility || {},
           restrictions: v.restrictions || {},
           versions
-        } : cur);
+        } : cur2);
         const has = v.negative_prompt || v.sampling_steps || v.cfg_scale;
         setModelDefaults(has ? { negative_prompt: v.negative_prompt || "", sampling_steps: v.sampling_steps || null, cfg_scale: v.cfg_scale || null } : null);
         if (has) {
-          setImgAdv((cur) => ({
-            ...cur,
-            negative: v.negative_prompt || cur.negative,
-            steps: v.sampling_steps || cur.steps,
-            cfg: v.cfg_scale || cur.cfg
+          setImgAdv((cur2) => ({
+            ...cur2,
+            negative: v.negative_prompt || cur2.negative,
+            steps: v.sampling_steps || cur2.steps,
+            cfg: v.cfg_scale || cur2.cfg
           }));
         }
       }).catch(() => {
@@ -9007,8 +10150,8 @@ ${"=".repeat(48)}
       if (!imgModel || !imgModel.versions) return;
       const v = imgModel.versions.find((x) => x.version_id === vid);
       if (!v) return;
-      setImgModel((cur) => ({
-        ...cur,
+      setImgModel((cur2) => ({
+        ...cur2,
         version_id: v.version_id || "",
         model_type: v.model_type || "",
         sampling_method: v.sampling_method || "",
@@ -9028,11 +10171,11 @@ ${"=".repeat(48)}
       }
     }, [imgModel, setImgModel, setImgAdv, setModelDefaults]);
     const onLoraPick = useCallback2((model, selected) => {
-      setImgLoras((cur) => {
-        const i = cur.findIndex((l) => l.model_id === model.model_id);
-        if (!selected) return i < 0 ? cur : cur.filter((l) => l.model_id !== model.model_id);
-        if (i < 0) return [...cur, model];
-        const next = cur.slice();
+      setImgLoras((cur2) => {
+        const i = cur2.findIndex((l) => l.model_id === model.model_id);
+        if (!selected) return i < 0 ? cur2 : cur2.filter((l) => l.model_id !== model.model_id);
+        if (i < 0) return [...cur2, model];
+        const next = cur2.slice();
         next[i] = model;
         return next;
       });
@@ -9830,7 +10973,7 @@ ${"=".repeat(48)}
               title: "Weight \u2014 " + loraRange[0] + " to " + loraRange[1] + " for this base model",
               onChange: (ev) => {
                 const w = Math.max(loraRange[0], Math.min(loraRange[1], +ev.target.value || 0));
-                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
+                setImgLoras((cur2) => cur2.map((x) => x.model_id === l.model_id ? { ...x, weight: w } : x));
               }
             }
           ), /* @__PURE__ */ React.createElement("b", null, (+l.weight).toFixed(1))), /* @__PURE__ */ React.createElement(
@@ -9840,7 +10983,7 @@ ${"=".repeat(48)}
               className: "lm-lrm",
               title: "Remove",
               onClick: () => {
-                setImgLoras((cur) => cur.filter((x) => x.model_id !== l.model_id));
+                setImgLoras((cur2) => cur2.filter((x) => x.model_id !== l.model_id));
               }
             },
             "\xD7"
@@ -9853,7 +10996,7 @@ ${"=".repeat(48)}
                 const vid = ev.target.value;
                 const v = l.versions.find((x) => x.version_id === vid);
                 if (!v) return;
-                setImgLoras((cur) => cur.map((x) => x.model_id === l.model_id ? {
+                setImgLoras((cur2) => cur2.map((x) => x.model_id === l.model_id ? {
                   ...x,
                   version_id: v.version_id || "",
                   lora_base_type: v.lora_base_model_type || "",
@@ -10427,9 +11570,9 @@ ${"=".repeat(48)}
         setReviewPlaying(true);
       };
       const onReviewTimeUpdate = (e) => {
-        const cur = e.currentTarget.currentTime;
-        setReviewCur(cur);
-        if (reviewPlaying && trimOut > trimIn && cur >= trimOut - 0.02) {
+        const cur2 = e.currentTarget.currentTime;
+        setReviewCur(cur2);
+        if (reviewPlaying && trimOut > trimIn && cur2 >= trimOut - 0.02) {
           e.currentTarget.currentTime = trimIn;
         }
       };
@@ -10528,7 +11671,7 @@ ${"=".repeat(48)}
             type: "button",
             key: id,
             className: "lm-fc-tile" + (fcActive === id ? " on" : ""),
-            onClick: () => setFcActive((cur) => cur === id ? null : id),
+            onClick: () => setFcActive((cur2) => cur2 === id ? null : id),
             title: (rec.name || id) + " \xB7 free, applied in your browser" + (rec.note ? " \u2014 " + rec.note : "")
           },
           /* @__PURE__ */ React.createElement(
@@ -11435,7 +12578,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
   }
   function useExportPipeline(project, thumbs) {
-    const [seq2, setSeq] = useState2(null);
+    const [seq3, setSeq] = useState2(null);
     const [exp, setExp] = useState2(null);
     const exportPoll = useRef2(null);
     const download = (text, name, type) => {
@@ -11522,7 +12665,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     const closeSequence = () => setSeq(null);
     return {
-      seq: seq2,
+      seq: seq3,
       exp,
       playSequence,
       exportCut,
@@ -11719,7 +12862,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setGenFixState(clearDraft);
     }, [activeId]);
     const {
-      seq: seq2,
+      seq: seq3,
       exp,
       playSequence,
       exportCut,
@@ -11901,7 +13044,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         draftAttachedInfo,
         setDraftAttachedInfo
       }
-    )), seq2 && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq2, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
+    )), seq3 && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq3, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) closeBundleMissing();

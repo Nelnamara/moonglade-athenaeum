@@ -170,13 +170,14 @@ def test_hidden_feat_animation_is_gated_exactly_like_its_still(tmp_path, sealed_
     """An unearned hidden feat's animation must be no more fishable by id than its
     still (tests/test_unlock_split.py's badge-thumb gate, re-proved on the .webp rule)."""
     cli = _client(tmp_path)
-    _still("the-konami-code")
-    _anim("the-konami-code")
-    assert cli.get("/badge-thumb/the-konami-code.webp").status_code == 404
-    assert cli.get("/badge-thumb/the-konami-code.png").status_code == 404
+    sf = g._moment_ach()["starfall"]          # the hidden feat the beacon below earns
+    _still(sf)
+    _anim(sf)
+    assert cli.get("/badge-thumb/" + sf + ".webp").status_code == 404
+    assert cli.get("/badge-thumb/" + sf + ".png").status_code == 404
     ach_event(cli, "konami")
-    assert cli.get("/badge-thumb/the-konami-code.webp").status_code == 200
-    assert cli.get("/badge-thumb/the-konami-code.png").status_code == 200
+    assert cli.get("/badge-thumb/" + sf + ".webp").status_code == 200
+    assert cli.get("/badge-thumb/" + sf + ".png").status_code == 200
 
 
 def test_webp_gate_is_case_insensitive(tmp_path, sealed_donor_present):
@@ -184,7 +185,7 @@ def test_webp_gate_is_case_insensitive(tmp_path, sealed_donor_present):
     real sealed master while lowercase id-set membership missed it. Same casefold the
     .png rule takes (2026-08-22), now proved on the .webp one."""
     cli = _client(tmp_path)
-    hid = "under-the-hood" if "under-the-hood" in g._ach_hidden() else sorted(g._ach_hidden())[0]
+    hid = g._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
     _anim(hid)
     assert cli.get("/badge-thumb/" + hid + ".webp").status_code == 404
     assert cli.get("/badge-thumb/" + hid.upper() + ".webp").status_code == 404
@@ -195,11 +196,11 @@ def test_webp_fails_closed_on_unknown_id_and_missing_roster(tmp_path, monkeypatc
     """Unknown id -> 404. Roster unavailable (no/invalid container) -> 404 for
     everything, including an id whose animation is sitting right there."""
     cli = _client(tmp_path)
-    _anim("under-the-hood")
+    _anim("a-hidden-feat")
     _anim("totally-made-up")
     monkeypatch.setattr(g, "_ach_ids", lambda: frozenset())
     monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())
-    assert cli.get("/badge-thumb/under-the-hood.webp").status_code == 404
+    assert cli.get("/badge-thumb/a-hidden-feat.webp").status_code == 404
     assert cli.get("/badge-thumb/totally-made-up.webp").status_code == 404
 
 

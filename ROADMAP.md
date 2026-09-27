@@ -15,9 +15,8 @@ item ships, delete it here and add a CHANGELOG line — never annotate "done" in
 
 ## Now — active
 
-- **Recently shipped is not listed here** — the achievement sealing (definitions + art in the
-  sealed pack, public source holds only opaque ids) landed in 3.5.0; this session's toast polish and
-  video-Remix fix are in `CHANGELOG.md` (the 3.6.0 release), per the rule at the top of this file.
+- Nothing in flight. What shipped is in `CHANGELOG.md` (3.11.0 to 3.14.0 on 2026-09-26), per the
+  rule at the top of this file.
 
 ---
 
@@ -27,29 +26,20 @@ Every branch that is built but not on `master` is listed here with its review sh
 flight is never invisible. On 2026-09-06 six built branches existed that nothing named, which is
 why this section exists.
 
-- **Wave 3.11** *(branch `staging/wave-3.11`)* — three lanes, one review record:
-  - **A hermetic render harness, and a committed pre-merge command.** Each module-scoped server
-    fixture pins its own sealed container and its own asset root, so the harness behaves the same
-    with or without a real pack sitting beside the checkout; a guard fails the run if a test touched
-    the real asset tree. `tools/ci_local.py` is committed as *the* command to run before a merge —
-    the render harness included, never routed around.
-  - **An achievement celebration rebuilt to its committed Design Handoff.** The build had drifted
-    from its design page — a missing glow layer, an inverted stacking order, the toast in the wrong
-    place and the wrong material, a cut instead of a fade. It goes back to the page, point for
-    point; its audio is unchanged.
-  - **Asset-folder rules.** One rule for what the app may change inside its own asset folders and
-    what it must leave alone: outside the few folders it has always managed, it makes no changes on
-    disk — nothing deleted, renamed, re-encoded, moved or registered. The images the app renders for
-    itself move out of that tree into the app cache, beside the badge thumbnails, so each one has
-    exactly one home; an existing render is *moved*, never deleted.
-  - Review record: the wave's boop sheet.
+- Nothing in review.
 
 ## Next — scoped, not started
 
+- **Tsubaki.3 feature controls.** *(2026-09-26)* PixAI's Tsubaki.3 release added controls the
+  app cannot express yet: up to three context images in place of the single reference, style keys
+  and custom styles, colour palettes, the prompt helper's creativity level, Tsubaki.3 in the Edit
+  card, and an advanced LoRA trainer with a runs list. Most need a design session first (the brief
+  is written); the palette Library and the aspect-ratio picker for Tsubaki video Multi-Reference
+  follow PixAI's own pattern and can be built without one.
 - **A first-run guide for a customization surface.** *(2026-09-10)* A design session for the
   guidance a user meets the first time they open a customization surface they have not used before
-  — the orientation, not the controls. Held until the asset-folder rules in review above land, so
-  the guide is designed against the rules that will be in force rather than the ones they replace.
+  — the orientation, not the controls. The asset-folder rules it waited on shipped in 3.12.0, so it
+  can be designed against the rules now in force.
 
 - **The Loom inside the gallery — is a modal on one surface viable, and what would it take?**
   *(owner's scoping order, 2026-09-06, corrected the same evening)* The standing question "does

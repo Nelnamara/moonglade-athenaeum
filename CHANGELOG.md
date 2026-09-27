@@ -16,6 +16,16 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-09-26 — Moving Pictures
+
+- **Two celebrations now play as video.** Two of the hidden celebrations are full video moments, with their ceremony drawn over the clip and matched frame for frame to their design pages. Press Esc or click to skip one; with animations turned off, each shows a still instead. The page underneath pauses its drawing while a moment plays, and a moment waits for the page to finish loading before it starts, so it plays smoothly on a large library. (2026-09-26)
+- **Update the art pack before you miss anything.** A feature unlocked through the new pack stays locked until the pack update has finished downloading. (2026-09-26)
+- **Art pack v5.** The art pack moves to version 5, which adds new video artwork. An existing install fetches the new pack on its own. (2026-09-26)
+
+### Under the hood
+- Art served from the art pack answers HTTP byte-range requests (206, with `416` for a range past the end), so a video in the pack can stream and seek like a loose file. A pack video is read and checksum-verified once, then served from memory. (2026-09-26)
+- Which achievement unlocks a piece of pack art is read from flags in the sealed roster, not from achievement ids in the public source; a pack that carries no such flag keeps that art locked. (2026-09-26)
+
 ## [3.13.0] - 2026-09-26 — The Infinite Lane
 
 - **Tsubaki.3 Unlimited Mode.** While your account holds PixAI's Unlimited Mode for Tsubaki.3, the Generate drawer and the phone Create screen show a "∞ Tsubaki.3 Unlimited Mode" switch under the model, with the days you have left. Switched on, a band over the prompt says so, the cost badge reads "Free ∞", and Mode is held on Pro, the count on 1 and High priority off. A reference picture or a size over 1792 × 1792 can't be used, and the drawer says why instead of letting you press Generate. One Unlimited Mode picture runs at a time. Anything Unlimited Mode doesn't allow is refused before it is sent — never quietly turned into a paid generation — and a free card is never used on one. The app only reads your Unlimited Mode status from PixAI; claiming it stays on PixAI's own site. (2026-09-26)
