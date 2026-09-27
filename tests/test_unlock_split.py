@@ -67,7 +67,7 @@ def _seed(tmp_path, coded_rel, data=b"\x89PNG fake"):
 
 def test_sealed_paths_deny_while_unearned(tmp_path):
     cli = _client(tmp_path)
-    # loremaster needs 25k images; the-konami-code needs the beacon -- neither is
+    # loremaster needs 25k images; the starfall feat needs the beacon -- neither is
     # earned with a 1-image catalog and no flags. Each pair: (public GET rel,
     # coded seed rel) -- the URL vocabulary never changed, only where files live.
     crumb = g._role_rel("breadcrumb", "README.txt")
@@ -179,12 +179,13 @@ def test_badge_thumb_hidden_gate(tmp_path, sealed_donor_present):
     cli = _client(tmp_path)
     bdir = g._role_dir("badges")
     bdir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / "the-konami-code.png")
+    sf = g._moment_ach()["starfall"]          # the hidden feat the beacon below earns
+    Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / (sf + ".png"))
     Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(bdir / "loremaster.png")
-    assert cli.get("/badge-thumb/the-konami-code.png").status_code == 404
+    assert cli.get("/badge-thumb/" + sf + ".png").status_code == 404
     assert cli.get("/badge-thumb/loremaster.png").status_code == 200
     ach_event(cli, "konami")
-    assert cli.get("/badge-thumb/the-konami-code.png").status_code == 200
+    assert cli.get("/badge-thumb/" + sf + ".png").status_code == 200
 
 
 
@@ -196,22 +197,22 @@ def test_badge_thumb_fails_closed_when_roster_unavailable(tmp_path, monkeypatch)
     from PIL import Image
     cli = _client(tmp_path)
     bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "under-the-hood.png")
+    Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "a-hidden-feat.png")
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / "totally-made-up.png")
     monkeypatch.setattr(g, "_ach_ids", lambda: frozenset())      # roster unavailable
     monkeypatch.setattr(g, "_ach_hidden", lambda: frozenset())   # ...so hidden set is empty too
-    assert cli.get("/badge-thumb/under-the-hood.png").status_code == 404   # fail closed
+    assert cli.get("/badge-thumb/a-hidden-feat.png").status_code == 404   # fail closed
     assert cli.get("/badge-thumb/totally-made-up.png").status_code == 404  # unknown id denied
 
 
 def test_badge_thumb_hidden_gate_is_case_insensitive(tmp_path, sealed_donor_present):
     """A case-variant URL must not skip the hidden-feat gate: the resolve is on a
-    case-insensitive FS, so UNDER-THE-HOOD.png would read the real sealed master
+    case-insensitive FS, so an upper-cased <ID>.png would read the real sealed master
     while the lowercase id-set membership missed it (fail-open). Regression for
     the 2026-08-22 badge_thumb casefold (mirrors _seal_rule's own casefold)."""
     from PIL import Image
     cli = _client(tmp_path)
-    hid = "under-the-hood" if "under-the-hood" in g._ach_hidden() else sorted(g._ach_hidden())[0]
+    hid = g._moment_ach()["keyturn"]          # a hidden feat a fresh install has not earned
     bdir = g._role_dir("badges"); bdir.mkdir(parents=True, exist_ok=True)
     Image.new("RGBA", (64, 64), (7, 22, 30, 255)).save(bdir / (hid + ".png"))
     assert cli.get("/badge-thumb/" + hid + ".png").status_code == 404

@@ -79,6 +79,20 @@ def test_round_trip_every_asset_and_payload(tmp_path):
     assert box.get("missing.png") is None and box.payload("nope") is None
 
 
+def test_sha256_is_the_toc_digest_of_the_original_bytes(tmp_path):
+    """Container.sha256 names CONTENT (what the moments' clip cache keys on): the digest of
+    the bytes get() returns, the same under any container that carries them, None when the
+    asset is absent. It reads no blob."""
+    import hashlib
+    raw = b"\x00\x01\x02" * 999
+    one, two = tmp_path / "one.dat", tmp_path / "two.dat"
+    mc.write_container(one, {"a/clip.mp4": raw})
+    mc.write_container(two, {"z/other.bin": b"zz", "a/clip.mp4": raw})
+    b1, b2 = mc.open_container(one), mc.open_container(two)
+    assert b1.sha256("a/clip.mp4") == hashlib.sha256(raw).hexdigest() == b2.sha256("a/clip.mp4")
+    assert b1.sha256("missing.mp4") is None
+
+
 def test_on_disk_bytes_are_opaque(tmp_path):
     """The MPQ bar, measured: neither file CONTENT nor file NAMES are readable
     in the raw container bytes. A plain zip/SQLite fails exactly this."""

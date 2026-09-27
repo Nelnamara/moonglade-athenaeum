@@ -419,7 +419,8 @@ def test_dropped_file_in_a_new_slot_is_adopted_and_earns_the_achievement(tmp_pat
     (g._role_dir("banner_login") / "my_art.png").write_bytes(_png_bytes())
 
     d = cli.get("/api/achievements").get_json()
-    uth = next(a for a in d["achievements"] if a["id"] == "under-the-hood")
+    # found by its roster flag, never by id -- and the flag itself only arrives on the earn
+    uth = next(a for a in d["achievements"] if a.get("unlocks") == "branding_tab")
     assert uth["earned"] is True
 
     slot = cli.get("/api/branding").get_json()["slots"]["banner_login"]
@@ -1126,7 +1127,7 @@ def test_list_marks_masks_an_unearned_hidden_feats_name(tmp_path, sealed_donor_p
     assert m["earned"] is False
     assert name not in (m["unlock_name"] or ""), "hidden feat named to an unearned user"
     assert m["unlock_name"] == ""                       # blank -> JSX shows "an achievement"
-    # the RAW id is masked on the same gate -- it used to leak (e.g. "under-the-hood")
+    # the RAW id is masked on the same gate -- it used to leak
     assert m["unlock"] == "" and aid not in json.dumps(m), "hidden feat id leaked in the payload"
     # earned_ids=None ("earned unknown / not gating") is still silent for a hidden feat
     m = {x["id"]: x for x in g.list_marks(tmp_path)}["mark_h"]
@@ -1165,7 +1166,7 @@ def test_list_marks_fails_closed_when_the_roster_is_unavailable(tmp_path, monkey
                                                                 sealed_donor_present):
     """No/invalid/stale container -> _ach_hidden() is EMPTY, so a hidden-feat test alone
     passes for every mark and _ach_name falls back to the id itself. Proven to publish
-    'the-konami-code' before the _ach_ids() guard (adversarial 2026-09-08; same fail-open
+    a hidden feat's raw id before the _ach_ids() guard (adversarial 2026-09-08; same fail-open
     the badge-thumb route closed on 2026-08-22). The roster must gate it."""
     aid, name = _a_hidden_achievement()
     assert aid

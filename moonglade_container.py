@@ -266,6 +266,16 @@ class Container:
     def has(self, relpath):
         return relpath in self._toc.get("assets", {})
 
+    def sha256(self, relpath):
+        """The TOC's recorded sha256 (hex) of one asset's ORIGINAL bytes, or None when
+        the container does not carry it. Reads no blob. It names content, not a location:
+        two containers carrying the same bytes under this name answer the same digest, so
+        a caller may key a cache of VERIFIED bytes on it (get() is what verifies)."""
+        entry = self._toc.get("assets", {}).get(relpath)
+        if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+            return None
+        return entry[2] if isinstance(entry[2], str) else None
+
     def get(self, relpath):
         return self._read("assets", relpath)
 
