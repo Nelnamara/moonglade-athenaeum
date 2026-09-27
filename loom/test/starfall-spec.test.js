@@ -29,7 +29,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(__dirname, "../../gallery/src");
 const read = (p) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 
-const app = read(path.join(SRC, "App.jsx"));
+// The trigger moved out of App.jsx on 2026-09-26 (moments/starfallTrigger.js), so every shell --
+// the desktop gallery and the phone -- installs the same one; `app` is that module now.
+const app = read(path.join(SRC, "moments/starfallTrigger.js"));
+const appShell = read(path.join(SRC, "App.jsx"));
 const css = read(path.join(SRC, "styles.css"));
 const achSrc = read(path.join(SRC, "notify/ach.js"));
 
@@ -38,7 +41,7 @@ const achSrc = read(path.join(SRC, "notify/ach.js"));
 // very long component.
 const trigger = (() => {
   const i = app.indexOf("const seq = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];");
-  assert.ok(i > 0, "the key sequence is gone from App.jsx -- this whole file is about it");
+  assert.ok(i > 0, "the key sequence is gone from moments/starfallTrigger.js -- this whole file is about it");
   const j = app.indexOf('document.addEventListener("keydown", onKey);', i);
   assert.ok(j > i, "the handler no longer ends by registering its keydown listener");
   return app.slice(i, j);
@@ -87,7 +90,7 @@ describe("the trigger plays the clip moment; the DOM cast is gone", () => {
     assert.match(trigger, /playMoment\(feat \|\| \{ moment: "starfall" \}\)/,
       "and a roster with no flag yet still gets the moment (in its no-video fallback) rather " +
       "than nothing");
-    assert.match(app, /import \{[^}]*playMoment[^}]*\} from "\.\/moments\/momentStore\.js"/,
+    assert.match(app, /import \{[^}]*playMoment[^}]*\} from "\.\/momentStore\.js"/,
       "App.jsx plays the moment through the shared store -- the same one the moment host is");
   });
 
@@ -148,7 +151,7 @@ describe("the trigger plays the clip moment; the DOM cast is gone", () => {
   });
 
   test("the trigger waits for a moment already on screen, and arms inside that wait", () => {
-    assert.match(app, /import \{[^}]*whenClear[^}]*\} from "\.\/notify\/ach\.js"/);
+    assert.match(app, /import \{[^}]*whenClear[^}]*\} from "\.\.\/notify\/ach\.js"/);
     assert.match(trigger, /whenClear\(startCast\);/,
       "the keydown handler must hand the cast to whenClear rather than running it");
     assert.doesNotMatch(trigger, /\n\s*startCast\(\);/,
@@ -164,7 +167,7 @@ describe("the trigger plays the clip moment; the DOM cast is gone", () => {
   });
 
   test("the trigger fires the marking check() itself, from inside the moment", () => {
-    assert.match(app, /import \{[^}]*check as achCheck[^}]*\} from "\.\/notify\/ach\.js"/);
+    assert.match(app, /import \{[^}]*check as achCheck[^}]*\} from "\.\.\/notify\/ach\.js"/);
     assert.ok(at(trigger, "achCheck();") > at(trigger, "playMoment("),
       "it fires once the moment is REQUESTED: the celebration it builds is parked by the hold, " +
       "and the answer's own copy of this feat is handed to the host, which joins the moment " +
@@ -1391,5 +1394,19 @@ describe("the moment host: an earn with its own moment plays it first, alone", (
       await tick();
       assert.equal(urls.length, 0, "a plain earn keeps today's timing: no extra marking read");
     } finally { off(); globalThis.fetch = real; }
+  });
+});
+
+describe("every shell installs the one trigger (2026-09-26)", () => {
+  test("the desktop gallery and the phone both install moments/starfallTrigger.js", () => {
+    assert.match(appShell, /useEffect\(\(\) => installStarfallTrigger\(\), \[\]\);/,
+      "App.jsx no longer installs the starfall trigger");
+    const mob = read(path.join(SRC, "components/AppMobile.jsx"));
+    assert.match(mob, /useEffect\(\(\) => installStarfallTrigger\(\), \[\]\);/,
+      "the phone shell no longer installs it -- the phone has no arrow keys, so its only way " +
+      "to cast is the touch form the trigger reads");
+    assert.match(app, /const offTouch = installTouchCode\(fire\);/,
+      "the trigger stopped reading the code's touch form");
+    assert.match(app, /offTouch\(\);/, "and its teardown must remove the touch listeners");
   });
 });

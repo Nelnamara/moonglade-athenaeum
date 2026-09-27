@@ -36,6 +36,7 @@ import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
+import { installStarfallTrigger } from "../moments/starfallTrigger.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -397,6 +398,11 @@ export default function AppMobile({ boot }) {
     open(takeCarriedPanelTab());
     return () => window.removeEventListener(OPEN_PANEL_EVENT, onRequest);
   }, []);
+
+  /* The starfall, on the phone: the same trigger the desktop gallery installs, which also reads
+     the code's touch form -- eight swipes (up, up, down, down, left, right, left, right), then two
+     taps -- since a phone keyboard has no arrow keys (owner, 2026-09-26). */
+  useEffect(() => installStarfallTrigger(), []);
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);

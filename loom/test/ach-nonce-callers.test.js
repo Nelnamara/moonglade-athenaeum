@@ -94,7 +94,7 @@ describe("one module owns the /api/ach-event beacon", () => {
   test("the two known callers still go through it", () => {
     // Not a completeness claim -- a new caller is fine. This is the regression direction:
     // the konami egg and the narrator poke are the two that HAD their own bare posts.
-    for (const name of ["App.jsx", "hooks/useFolio.js"]) {
+    for (const name of ["moments/starfallTrigger.js", "hooks/useFolio.js"]) {
       const src = codeOnly(fileNamed(name));
       assert.match(src, /\bsendAchEvent\(/,
         name + " stopped using sendAchEvent -- if its beacon moved, move this line with it; "
