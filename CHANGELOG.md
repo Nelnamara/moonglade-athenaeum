@@ -16,6 +16,10 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-09-26 — Moving Pictures
+
+- **Two celebrations now play as video.** Two of the hidden celebrations are full video moments, with their ceremony drawn over the clip and matched frame for frame to their design pages. Press Esc or click to skip one; with animations turned off, each shows a still instead. The page underneath pauses its drawing while a moment plays, and a moment waits for the page to finish loading before it starts, so it plays smoothly on a large library. (2026-09-26)
+- **Update the art pack before you miss anything.** A feature unlocked through the new pack stays locked until the pack update has finished downloading. (2026-09-26)
 - **Art pack v5.** The art pack moves to version 5, which adds new video artwork. An existing install fetches the new pack on its own. (2026-09-26)
 
 ### Under the hood
