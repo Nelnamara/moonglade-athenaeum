@@ -35,6 +35,7 @@ import useClaimModal from "../hooks/useClaimModal.js";
 import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
+import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
 
@@ -376,6 +377,26 @@ export default function AppMobile({ boot }) {
      intent up on mount and pushes its update screen. Same two-part contract App.jsx uses
      for the Panel overlay -- see notify/bannerStore.js. */
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
+  /* OPEN THE CONTROL PANEL ON A TAB, on the phone (notify/panelRequest.js). The phone's
+     panel is its Control tab, and Branding is the drill-in there, so a request for that tab
+     -- the key-turn moment's button, or one carried over from the Loom -- lands on Control
+     and ControlMobile opens Branding once its own achievements read says it is unlocked. */
+  const [brandRequest, setBrandRequest] = useState(0);
+  useEffect(() => {
+    const open = (tab) => {
+      if (tab !== "brand") return;
+      setTab("control");
+      setBrandRequest(Date.now());
+    };
+    const onRequest = (e) => {
+      if (!e.detail || e.detail.tab !== "brand") return;
+      e.preventDefault();                    // claimed: this shell opens it
+      open(e.detail.tab);
+    };
+    window.addEventListener(OPEN_PANEL_EVENT, onRequest);
+    open(takeCarriedPanelTab());
+    return () => window.removeEventListener(OPEN_PANEL_EVENT, onRequest);
+  }, []);
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);
@@ -1022,7 +1043,7 @@ export default function AppMobile({ boot }) {
             cmode={cmode} setCmode={setCmode} edit={edit} {...gen} />
         )}
         {tab === "control" && (
-          <ControlMobile account={account} />
+          <ControlMobile account={account} brandRequest={brandRequest} />
         )}
 
         {/* VideoMode, lifted here (see header comment) so it survives a
