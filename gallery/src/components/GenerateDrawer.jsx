@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Icon from "../icons/Icons.jsx";
 import useGenerate from "../gen/useGenerate.js";
 import {
-  ASPECTS, MODES, SIZES, dims, goGate, loraIncompat, loraRange, loraStep,
-  modeOffered, planLoraRestore, qualityTagTitle, refIsContext,
+  ASPECTS, MODES, SIZES, UNLIMITED_BUSY, UNLIMITED_PRO, dims, goGate, laneBusy,
+  laneRefusesFrame, loraIncompat, loraRange, loraStep, modeOffered, planLoraRestore,
+  qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
 import { apiGet, apiPost } from "../api.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import CostBadge from "./CostBadge.jsx";
+import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import VideoDrawer from "./VideoDrawer.jsx";
 import EditTab, { SourceSlab } from "./EditTab.jsx";
 import FixTab from "./FixTab.jsx";
@@ -153,7 +155,6 @@ function GenerateDrawer({ open, onClose, account, request }) {
   const g = useGenerate({ costRef });
   const { s, set } = g;
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
-  const gate = goGate(s, loraCap);
   const balance = account && account.credits != null ? account.credits : null;
 
   /* ---- THE ONE FOOTER (Frontend Gallery.dc.html 1551-1591): expand · composer ·
@@ -269,6 +270,10 @@ function GenerateDrawer({ open, onClose, account, request }) {
     };
   }, [fetchJobs]);
   const runningCount = jobs.filter(isRunningJob).length;
+  // The Go gate, plus Unlimited Mode's one-at-a-time rule (SCOPE_2026-09-26_unlimited-mode
+  // C3b): while this run list holds a lane task still waiting or running, Generate waits in
+  // Unlimited Mode. The server refuses a second one off its own job log either way (§8.6).
+  const gate = goGate(s, loraCap) || (s.unlimited && laneBusy(jobs) ? UNLIMITED_BUSY : null);
   useEffect(() => {
     if (!open && !runningCount) return;
     const t = setInterval(fetchJobs, open ? 4000 : 8000);
@@ -833,6 +838,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     ))}
                   </select>
                 )}
+                {/* Tsubaki.3 Unlimited Mode's toggle row, under the model card (SCOPE_2026-09-26_
+                    unlimited-mode C2) -- only while the applied version offers the lane. */}
+                <UnlimitedRow s={s} set={set} />
                 {m && m.preset && m.preset.sampler ? (
                   <div className="mgdock-presetnote">
                     {m.title} ships its author's preset — applied on pick · sampler {m.preset.sampler}
@@ -902,11 +910,15 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     const on = !s.customW && !s.customH && Math.abs(s.aspect - r) < 0.001;
                     const gw = r >= 1 ? 19 : Math.max(6, Math.round(19 * r));
                     const gh = r >= 1 ? Math.max(6, Math.round(19 / r)) : 19;
+                    // Unlimited Mode on: a frame the lane would refuse reads disabled, judged on
+                    // the snapped size it would send (§8.5), never on its label.
+                    const laneOff = laneRefusesFrame(s, { aspect: r });
                     return (
                       <button key={label} type="button"
                         className={"mgdock-ratio" + (on ? " on" : "")}
+                        disabled={laneOff}
                         onClick={() => set({ aspect: r, customW: "", customH: "" })}
-                        title={label}>
+                        title={laneOff ? "Too large for Unlimited Mode at this size" : label}>
                         <i style={{ width: gw, height: gh }} />
                         <span>{label}</span>
                       </button>
@@ -915,14 +927,18 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 </div>
                 <div className="mgdock-lbl">SIZE · LONG EDGE</div>
                 <div className="mgdock-stops">
-                  {SIZES.map((n, i) => (
-                    <button key={n} type="button"
-                      className={"mgdock-stop" + (!custom && s.size === n ? " on" : "")}
-                      onClick={() => set({ size: n, customW: "", customH: "" })}
-                      title={n + "px"}>
-                      {["S", "M", "L", "XL"][i] || n}
-                    </button>
-                  ))}
+                  {SIZES.map((n, i) => {
+                    const laneOff = laneRefusesFrame(s, { size: n });
+                    return (
+                      <button key={n} type="button"
+                        className={"mgdock-stop" + (!custom && s.size === n ? " on" : "")}
+                        disabled={laneOff}
+                        onClick={() => set({ size: n, customW: "", customH: "" })}
+                        title={laneOff ? "Too large for Unlimited Mode" : n + "px"}>
+                        {["S", "M", "L", "XL"][i] || n}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="mgdock-customrow">
                   <input className={"mgdock-custom" + (custom ? " on" : "")} placeholder="W" value={s.customW}
@@ -940,6 +956,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
                   {[1, 2, 3, 4].map((n) => (
                     <button key={n} type="button"
                       className={"mgdock-stop" + (s.count === n ? " on" : "")}
+                      disabled={s.unlimited && n !== 1}
+                      title={s.unlimited && n !== 1 ? "Unlimited Mode makes one picture at a time" : undefined}
                       onClick={() => set({ count: n })}>{n}</button>
                   ))}
                 </div>
@@ -954,10 +972,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     unknown profile set (m.profiles null) dims nothing. */}
                 <div className="mgdock-modebars">
                   {MODES.map(([v, l], i) => {
-                    const off = !modeOffered(v, m && m.profiles);
+                    // Unlimited Mode on: the bar is fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3).
+                    const lanePinned = s.unlimited && v !== "pro";
+                    const off = !modeOffered(v, m && m.profiles) || lanePinned;
                     return (
                       <button key={v} type="button"
-                        title={off ? "Not offered for this model" : l}
+                        title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
                         disabled={off}
                         className={"mgdock-modebar" + (i <= MODES.findIndex(([x]) => x === s.mode) ? " on" : "")}
                         onClick={() => set({ mode: v })} />
@@ -1025,8 +1045,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
                     Enhance Details
                   </button>
                 </div>
-                <label className="mgdock-sw" title="Faster queue · costs extra">
-                  <input type="checkbox" checked={s.highPriority}
+                <label className={"mgdock-sw" + (s.unlimited ? " off" : "")}
+                  title={s.unlimited ? "Unlimited Mode runs without High priority" : "Faster queue · costs extra"}>
+                  <input type="checkbox" checked={s.highPriority} disabled={s.unlimited}
                     onChange={(e) => set({ highPriority: e.target.checked })} />
                   <span className="mgdock-swtrack"><i /></span>
                   <span className="mgdock-swlab">High priority</span>
@@ -1135,6 +1156,9 @@ function GenerateDrawer({ open, onClose, account, request }) {
 
           <div ref={composerRef} className={"mgdock-composer" + (promptFocus ? " focus" : "")}
             style={{ "--mg-prompt-max": promptMax }}>
+            {/* the band over the prompt while the lane is on (SCOPE_2026-09-26_unlimited-mode
+                C4), Image tab only */}
+            {tab === "image" && <UnlimitedStrip s={s} set={set} />}
             {/* top row (DC 1557-1565): model pip · frame summary · spacer · ★ Snippets */}
             <div className="mgdock-composer-top">
               {tab === "image" && (
@@ -1261,7 +1285,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || !g.canSubmit ? " off" : "")}
                   disabled={!!gate || g.busy || prefillBusy || !g.canSubmit}
                   title={prefillBusy ? "Restoring the recipe…"
-                    : gate ? "Pick a model and write a prompt first" : "Submit — this spends credits or a card"}
+                    : gate ? (s.unlimited ? gate : "Pick a model and write a prompt first")
+                      : s.unlimited ? "Submit in Unlimited Mode" : "Submit — this spends credits or a card"}
                   onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
                   <span>&#10022; Generate</span>
                 </button>

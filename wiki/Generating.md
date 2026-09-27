@@ -46,6 +46,34 @@ generations in parallel, so you can queue up several in a row (Generate, Edit, E
 Fix, and the Video tab all work this way) and each one tracks and reports its own result
 independently.
 
+### Tsubaki.3 Unlimited Mode
+
+When your account holds PixAI's **Unlimited Mode** for Tsubaki.3 (a time-limited grant you
+claim on PixAI's own site — the app only reads it, it never claims), picking Tsubaki.3 shows a
+**∞ Tsubaki.3 Unlimited Mode** row under the model with the days you have left, in the
+Generate drawer's settings and on the phone Create screen. The **?** beside the name lists the
+rules.
+
+Switch it on and an **"∞ Unlimited Mode is on"** band sits over the prompt, with **Turn off**
+beside it, and the cost badge reads **Free ∞**: the picture costs nothing and no free card is
+used. Unlimited Mode runs on PixAI's own terms, so the drawer holds the rest to match:
+
+- **Mode** is fixed on Pro, the **count** on 1, and **High priority** is off.
+- Sizes over **1792 × 1792** read disabled (checked on the size that is actually sent, after it
+  snaps onto Tsubaki.3's grid). A reference picture can't be used.
+- Switching it on is refused while a reference picture is set or the size is too large; the
+  switch and the line under it say which.
+- **One at a time:** while an Unlimited Mode picture is still being made, Generate waits. One
+  started on PixAI's own site isn't visible to the app — PixAI refuses the second one, and
+  nothing is spent.
+
+Anything Unlimited Mode doesn't allow is **refused before sending**, in one plain sentence on the
+cost badge — never quietly changed, never turned into a paid generation, and never retried as
+an ordinary one. If PixAI itself refuses the task, the result line says so and nothing was
+spent. The switch stays on until you turn it off, even across a model change; on a model
+without Unlimited Mode the badge shows the refusal. When the grant ends the switch is no longer
+offered. `READ_ONLY` still refuses first.
+
 ### The model-vs-version-id gotcha
 `createGenerationTask` needs a model's **version id**, not its model id. A model page
 URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects

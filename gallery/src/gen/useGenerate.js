@@ -47,7 +47,7 @@ export default function useGenerate({ costRef }) {
   useEffect(() => { refreshPrice(); }, [
     s.model, s.loras, s.ref, s.refStrength, s.boosters,
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
-    s.mode, s.steps,
+    s.mode, s.steps, s.unlimited,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- model pick -> version resolve (seq-guarded) ---- */
@@ -75,6 +75,11 @@ export default function useGenerate({ costRef }) {
       // null = the server could not determine them -> the drawer dims nothing, exactly as
       // before. An array (including []) is a real answer.
       profiles: Array.isArray(v.profiles) ? v.profiles : null,
+      // Tsubaki.3 Unlimited Mode status for THIS version (SCOPE_2026-09-26_unlimited-mode S2),
+      // set on every apply like size_rule. It only decides whether the switch is OFFERED: the
+      // switch's own state (s.unlimited) survives a model switch -- only the user turns it off
+      // (§8.1), and the server refuses a lane request this version cannot run.
+      unlimited: v.unlimited || null,
       restrictions: v.restrictions || {},
       preset: {
         negative: v.negative_prompt || "", steps: v.sampling_steps,

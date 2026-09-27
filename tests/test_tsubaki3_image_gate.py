@@ -1038,3 +1038,412 @@ def test_the_conftest_fixture_clears_both_caches_before_and_after_the_test():
     with pytest.raises(StopIteration):
         next(gen)                                    # the teardown half
     assert core._features_cache == {} and core._size_config_cache == {}
+
+
+# =============================================================================
+# Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode, §8 amendments binding)
+# =============================================================================
+# The lane rides the image road: checked on the GATED dict by _unlimited_check, answered free
+# by price() with no card check, sent once by submit(). The entitlement is faked at the same
+# _rest_get seam as every read above; no test here reaches PixAI.
+
+LANE_PATH = re.compile(r"^/generation-model-version/([^/]+)/infinite-mode$")
+REFUSED = "PixAI refused this as an Unlimited Mode task, so nothing was spent"
+
+
+def grant(days=29.5, owned=True):
+    """PixAI's status body, `days` from now (negative = already ended)."""
+    import datetime
+    exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)
+    return {"owned": owned, "expiresAt": exp.isoformat().replace("+00:00", "Z"),
+            "claimable": False, "claimability": "alreadyClaimed", "visibility": "visible"}
+
+
+class LaneRest(FakeRest):
+    """FakeRest plus the Unlimited Mode status route, and nothing else of it -- a path under
+    it other than the status GET fails loudly, the same as any unexpected read."""
+
+    def __init__(self, grants=None, **kw):
+        super().__init__(**kw)
+        self.grants = {T3: grant()} if grants is None else grants
+        self.sessions = []
+
+    def __call__(self, session, path, params=None, **k):
+        m = LANE_PATH.match(path)
+        if m:
+            self.calls.append(path)
+            self.sessions.append(session)
+            body = self.grants.get(m.group(1))
+            if isinstance(body, Exception):
+                raise body
+            if body is None:
+                raise core.PixAIError("404 " + path)
+            return body
+        return super().__call__(session, path, params, **k)
+
+
+@pytest.fixture
+def lane(monkeypatch):
+    fake = LaneRest()
+    monkeypatch.setattr(core, "_rest_get", fake)
+    return fake
+
+
+def lane_road(payload, **kw):
+    return core.build_request(dict(payload, unlimited=True), mode="image",
+                              resolve=core.RequestResolver(
+                                  gate=core.gate_resolver(object()),
+                                  unlimited=core.unlimited_resolver(object())), **kw)
+
+
+# The owner's own site run 2060699017312381800, rebuilt with placeholders: Pro, 768 x 1280,
+# LoRAs and a negative prompt (both allowed in the lane).
+LANE_OK = {"version_id": T3, "prompt": "<prompt>", "negative": "<negative>", "mode": "pro",
+           "width": 768, "height": 1280, "count": 1,
+           "loras": [{"version_id": "L%d" % i, "weight": 0.7} for i in range(4)]}
+
+
+def _no_card(monkeypatch):
+    """A card-check tripwire that counts, for the 'stub asserts zero calls' tests."""
+    calls = []
+
+    def _trip(*a, **k):
+        calls.append(a)
+        raise AssertionError("a lane request reached the card check")
+    monkeypatch.setattr(core, "match_kaisuuken", _trip)
+    return calls
+
+
+def test_a_passing_lane_request_carries_the_lane_and_nothing_a_lane_task_does_not(lane):
+    req = lane_road(LANE_OK)
+    p = req.parameters
+    assert req.unlimited is True and req.no_card is True
+    assert p["lane"] == "infinite" and p["inferenceProfile"] == "pro"
+    assert "priority" not in p, "PixAI stamps its own 300 on a lane task; the app sends none"
+    assert "kaisuukenId" not in p and "mediaId" not in p and "contextImages" not in p
+    assert (p["width"], p["height"]) == (768, 1280) and p["batchSize"] == 1
+    assert len(p["loraParameters"]) == 4 and p["negativePrompts"] == "<negative>"
+
+
+def test_auto_mode_on_tsubaki3_passes_after_the_gates_profile_fill(lane):
+    """The check runs AFTER the one gate and its profile fill (S3): Auto on Tsubaki.3 is the
+    flagged default, pro."""
+    assert lane_road(dict(LANE_OK, mode="auto")).parameters["inferenceProfile"] == "pro"
+
+
+@pytest.mark.parametrize("change,words", [
+    ({"mode": "ultra"}, "Unlimited Mode runs on Pro mode"),
+    ({"count": 2}, "Unlimited Mode makes one picture at a time"),
+    ({"ref_media_id": "M1", "loras": []}, "Unlimited Mode can't use a reference picture"),
+    ({"high_priority": True}, "Unlimited Mode can't use High priority"),
+    ({"width": 2048, "height": 2048}, "this size is too large — up to 1792 × 1792"),
+    # §8.5: 1800 is the area's side, but it is off the 16 px grid -- it goes out as 1808
+    ({"width": 1800, "height": 1800}, "this size is too large — up to 1792 × 1792"),
+    ({"version_id": FLASH}, "Unlimited Mode runs on Tsubaki.3 only"),
+])
+def test_each_eligibility_rule_refuses_with_its_sentence(change, words, lane):
+    with pytest.raises(core.PixAIError) as err:
+        lane_road(dict(LANE_OK, **change))
+    assert words in str(err.value)
+    # §8.11: friendlyGenErr adds "try Auto" to anything matching /profile/
+    assert "profile" not in str(err.value).lower()
+
+
+def test_the_largest_square_on_the_grid_passes(lane):
+    assert lane_road(dict(LANE_OK, width=1792, height=1792)).parameters["lane"] == "infinite"
+    assert lane_road(dict(LANE_OK, width=2496, height=512)).parameters["lane"] == "infinite"
+
+
+@pytest.mark.parametrize("body,words", [
+    (grant(days=-0.5), "Your Unlimited Mode has ended"),
+    ({"owned": False, "expiresAt": None, "claimability": "notOffered"},
+     "Unlimited Mode isn't active on this account"),
+    (core.PixAIError("503"), "Couldn't confirm your Unlimited Mode with PixAI"),
+    ({"claimability": "alreadyClaimed"}, "Couldn't confirm your Unlimited Mode with PixAI"),
+])
+def test_no_live_entitlement_refuses_the_lane(body, words, lane):
+    lane.grants[T3] = body
+    with pytest.raises(core.PixAIError) as err:
+        lane_road(LANE_OK)
+    assert words in str(err.value)
+
+
+def test_the_lane_needs_the_gated_shape_and_a_road_that_can_check_it(lane):
+    """§8.4 / §8.10: no lane request goes out on a shape the gate could not build (an
+    unanswered /size-config leaves it unsnapped), or from a road with no entitlement lookup."""
+    lane.models[T3] = dict(MODELS[T3], **{"size-config": core.PixAIError("503")})
+    with pytest.raises(core.PixAIError) as err:
+        lane_road(LANE_OK)
+    assert "Couldn't read this model's settings" in str(err.value)
+    for rs in (core.RequestResolver(gate=core.gate_resolver(object())),
+               core.RequestResolver(unlimited=core.unlimited_resolver(object())),
+               None):
+        with pytest.raises(core.PixAIError) as err:
+            core.build_request(dict(LANE_OK, unlimited=True), mode="image", resolve=rs)
+        assert "can't be checked on this road" in str(err.value)
+
+
+@pytest.mark.parametrize("payload", [
+    {"mode": "edit", "source": "9", "instruction": "<instruction>"},
+    {"mode": "I2V", "images": ["77"], "prompt": "<prompt>"},
+    {"mode": "enhance", "source": "55", "workflow_id": "1"},
+])
+def test_the_lane_asked_for_on_another_road_is_refused_not_ignored(payload, lane):
+    with pytest.raises(core.PixAIError) as err:
+        core.build_request(dict(payload, unlimited=True))
+    assert "Tsubaki.3 image generation only" in str(err.value)
+
+
+def test_price_answers_a_lane_request_free_with_no_card_check(lane, monkeypatch):
+    calls = _no_card(monkeypatch)
+    req = lane_road(LANE_OK)
+    quoted = core.price(object(), req)
+    assert quoted == {"cost": 0, "free": True, "unlimited": True, "list_cost": 4000}
+    assert calls == []
+    # the list price is the paid equivalent: the lane itself is not a priced field
+    assert "lane" not in lane.priced[-1]
+
+
+def test_submit_sends_the_lane_once_with_no_card_whatever_no_card_says(lane, monkeypatch):
+    calls = _no_card(monkeypatch)
+    sent = []
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(core, "gql_mutate",
+                        lambda s, q, v=None: sent.append(v["parameters"])
+                        or {"createGenerationTask": {"id": "T9"}})
+    req = lane_road(LANE_OK)
+    assert core.submit(object(), req, no_card=False) == {"task_id": "T9"}
+    assert calls == [] and len(sent) == 1
+    assert sent[0]["lane"] == "infinite"
+    assert "kaisuukenId" not in sent[0] and "priority" not in sent[0]
+
+
+@pytest.mark.parametrize("refusal", [
+    'GraphQL error: [{"message": "unknown inferenceProfile \\"pro\\"", '
+    '"extensions": {"code": "INFINITE_MODE_NOT_ELIGIBLE"}}]',
+    'GraphQL error: [{"message": "Only member can use turbo mode", '
+    '"extensions": {"code": "REQUIRE_MEMBERSHIP"}}]',
+])
+def test_a_refused_lane_request_is_never_resubmitted_as_anything_else(refusal, monkeypatch):
+    """§8.2: neither automatic resubmit fires on a lane request -- not the inferenceProfile
+    drop-and-retry and not the Turbo fallback (which would also flip the process-wide
+    _turbo_refused). One mutation; PixAI's refusal in plain words."""
+    sent = []
+
+    def _refuse(s, q, v=None):
+        sent.append(dict(v["parameters"]))
+        raise core.PixAIError(refusal)
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    monkeypatch.setattr(core, "gql_mutate", _refuse)
+    monkeypatch.setitem(core._turbo_refused, "seen", False)
+    # a CLI --params-json shape: lane AND the app's Turbo, which only the web road strips
+    params = {"prompts": "<prompt>", "modelId": T3, "inferenceProfile": "pro",
+              "priority": core.PRIORITY_TURBO, "lane": "infinite"}
+    with pytest.raises(core.PixAIError) as err:
+        core.submit_generation(object(), params)
+    assert str(err.value).startswith(REFUSED)
+    assert len(sent) == 1 and sent[0]["inferenceProfile"] == "pro"
+    assert core._turbo_refused["seen"] is False
+
+
+def test_any_params_carrying_the_lane_never_touch_a_card(monkeypatch, capsys):
+    """§8.3: the spend choke keys on the params' own `lane`, whatever road built them -- a
+    CLI --params-json or a banked --dump-params shape included. A card asked for beside the
+    lane is refused, never dropped."""
+    from types import SimpleNamespace
+    calls = _no_card(monkeypatch)
+    args = SimpleNamespace(kaisuuken_id="", no_card=False)
+    params = {"modelId": T3, "lane": "infinite"}
+    assert core._apply_kaisuuken(object(), params, args) == ""
+    assert "kaisuukenId" not in params and calls == []
+    for bad_params, bad_args in (({"modelId": T3, "lane": "infinite", "kaisuukenId": "c"}, args),
+                                 (params, SimpleNamespace(kaisuuken_id="c", no_card=False))):
+        with pytest.raises(core.PixAIError) as err:
+            core._apply_kaisuuken(object(), dict(bad_params), bad_args)
+        assert "never uses a free card" in str(err.value)
+
+    def _no_mutation(*a, **k):
+        raise AssertionError("a lane request carrying a card reached the mutation")
+    monkeypatch.setattr(core, "gql_mutate", _no_mutation)
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), {"modelId": T3, "lane": "infinite",
+                                          "kaisuukenId": "c"})
+    # ...and the CLI preview quotes it without a card check either
+    core._preview_card_note(SimpleNamespace(no_card=False, kaisuuken_id="", token=None),
+                            params)
+    assert "no free card is checked" in capsys.readouterr().out and calls == []
+
+
+def test_status_is_owned_only_before_its_expiry_checked_on_every_call(lane):
+    import datetime
+    lane.grants[T3] = {"owned": True, "expiresAt": "2026-10-25T00:00:00Z"}
+    at = datetime.datetime(2026, 9, 26, 12, tzinfo=datetime.timezone.utc).timestamp()
+    st = core.infinite_mode_status(object(), T3, now=at)
+    assert st == {"owned": True, "expires_at": "2026-10-25T00:00:00Z", "days_left": 29}
+    # the RAW answer is cached; the verdict is not -- a second look after the expiry needs no
+    # new read and says not owned (§8.8: nothing goes out after the grant ends)
+    late = datetime.datetime(2026, 10, 25, 0, 0, 1, tzinfo=datetime.timezone.utc).timestamp()
+    assert core.infinite_mode_status(object(), T3, now=late)["owned"] is False
+    assert len([c for c in lane.calls if LANE_PATH.match(c)]) == 1
+    # owned without an expiry, or a body with no boolean `owned`, is not a grant
+    core._unlimited_cache.clear()
+    lane.grants[T3] = {"owned": True, "expiresAt": None}
+    assert core.infinite_mode_status(object(), T3)["owned"] is False
+    core._unlimited_cache.clear()
+    lane.grants[T3] = {"owned": "yes"}
+    assert core.infinite_mode_status(object(), T3) is None
+
+
+def test_status_cache_keeps_success_five_minutes_and_a_failure_one(lane):
+    def reads():
+        return len([c for c in lane.calls if LANE_PATH.match(c)])
+    key = (T3, "key")
+    assert core.infinite_mode_status(object(), T3)["owned"] is True
+    at, raw = core._unlimited_cache[key]
+    core._unlimited_cache[key] = (at - 299, raw)
+    core.infinite_mode_status(object(), T3)
+    assert reads() == 1
+    core._unlimited_cache[key] = (at - 301, raw)
+    core.infinite_mode_status(object(), T3)
+    assert reads() == 2
+    lane.grants[T3] = core.PixAIError("503")
+    core._unlimited_cache.clear()
+    assert core.infinite_mode_status(object(), T3) is None
+    at, raw = core._unlimited_cache[key]
+    assert raw is None
+    core._unlimited_cache[key] = (at - 59, None)
+    assert core.infinite_mode_status(object(), T3) is None and reads() == 3
+    core._unlimited_cache[key] = (at - 61, None)
+    core.infinite_mode_status(object(), T3)
+    assert reads() == 4
+
+
+def test_status_is_read_and_cached_under_the_identity_that_creates(lane, monkeypatch):
+    """§8.8: Mirror to PixAI creates on the browser identity, so the status is read on that
+    identity -- off the stored token, never refreshed by a read -- and cached apart from the
+    API key's."""
+    mirror = object()
+    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    monkeypatch.setattr(core, "mirror_enabled", lambda: True)
+    monkeypatch.setattr(core, "load_mirror_state", lambda: {"jwt": "<jwt>"})
+    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: jwt == "<jwt>")
+    monkeypatch.setattr(core, "_mirror_session_from", lambda jwt: mirror)
+    monkeypatch.setattr(core, "make_mirror_session",
+                        lambda *a, **k: pytest.fail("a status read must not refresh the token"))
+    assert core.infinite_mode_status("api-session", T3)["owned"] is True
+    assert lane.sessions == ["api-session", mirror]
+    assert set(core._unlimited_cache) == {(T3, "key"), (T3, "mirror")}
+    # an unusable stored token is a failed read, not an API-key fallback
+    core._unlimited_cache.clear()
+    monkeypatch.setattr(core, "_jwt_usable", lambda jwt: False)
+    assert core.infinite_mode_status("api-session", T3) is None
+    assert len(lane.sessions) == 2
+
+
+def test_the_drawers_version_meta_offers_the_lane_on_tsubaki3_only(lane):
+    meta = core._version_row_to_meta({"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}})
+    core._attach_unlimited(object(), core._attach_features(object(), meta))
+    u = meta["unlimited"]
+    assert u["owned"] is True and u["days_left"] == 30
+    assert u["size"] == {"max_area": 1800 * 1800, "max_side": 1792,
+                         "ranges": [[512, 2496, 512, 2496], [512, 2200, 512, 2200],
+                                    [512, 1800, 512, 1800]]}
+    flash = core._version_row_to_meta({"id": FLASH, "modelType": "MMDIT26B_MODEL",
+                                       "extra": {}})
+    core._attach_unlimited(object(), core._attach_features(object(), flash))
+    assert flash["unlimited"] is None
+    assert [c for c in lane.calls if LANE_PATH.match(c)] == [
+        "/generation-model-version/%s/infinite-mode" % T3]
+    lane.grants[T3] = core.PixAIError("503")
+    core._unlimited_cache.clear()
+    assert core._attach_unlimited(object(), dict(meta))["unlimited"] is None
+    assert core._empty_version_meta()["unlimited"] is None
+
+
+def test_the_drawers_all_versions_read_carries_the_status_on_the_latest_row(lane, monkeypatch,
+                                                                           tmp_path):
+    lane.version_lists["M"] = [{"id": T3, "modelType": "MMDIT26B_MODEL", "extra": {}},
+                               {"id": "V-OLD", "modelType": "MMDIT26B_MODEL", "extra": {}}]
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    d = login_client(tmp_path).get("/api/model-version?model_id=M&all=1").get_json()
+    latest, old = d["versions"]
+    assert latest["unlimited"]["owned"] is True and old["unlimited"] is None
+
+
+# --- /api/generate: READ_ONLY first, one lane task at a time, the lane on the job ------------
+
+def _web_lane(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, "_make_session", lambda *a, **k: object())
+    monkeypatch.setattr(core, "account_info",
+                        lambda *a, **k: (_ for _ in ()).throw(core.PixAIError("offline")))
+    return login_client(tmp_path)
+
+
+def test_api_generate_refuses_a_lane_request_under_read_only_before_any_read(monkeypatch,
+                                                                            tmp_path):
+    """§8.9: READ_ONLY answers before the entitlement read, the account read and the gate's
+    reads -- nothing of PixAI is touched."""
+    cli = _web_lane(monkeypatch, tmp_path)
+
+    def tripwire(name):
+        def _boom(*a, **k):
+            raise AssertionError("PixAI was reached before READ_ONLY: " + name)
+        return _boom
+    for fn in ("_rest_get", "_rest_post", "account_info", "match_kaisuuken", "gql_mutate",
+               "gql_adhoc"):
+        monkeypatch.setattr(core, fn, tripwire(fn))
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
+    assert "READ_ONLY" in d["error"]
+
+
+def test_api_generate_runs_one_lane_task_at_a_time_off_its_own_job_log(monkeypatch, tmp_path):
+    """§8.6: the job log is the source (not a drawer's React state). A waiting or running
+    lane job refuses the next lane request; a finished one does not, and the new task is
+    logged with the lane mark the rule reads."""
+    lane = LaneRest()
+    cli = _web_lane(monkeypatch, tmp_path)
+    monkeypatch.setattr(core, "_rest_get", lane)
+    calls = _no_card(monkeypatch)
+    sent = []
+    monkeypatch.setattr(core, "_session_for_create", lambda s: s)
+    monkeypatch.setattr(core, "gql_mutate",
+                        lambda s, q, v=None: sent.append(v["parameters"])
+                        or {"createGenerationTask": {"id": "4242"}})
+    core.append_job_event(tmp_path, "4141", status="running", type="generate",
+                          lane="infinite")
+    r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
+    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and sent == []
+    # once that task has finished, the next one goes out
+    core.append_job_event(tmp_path, "4141", status="done")
+    d = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True)).get_json()
+    assert d == {"task_id": "4242"}, d
+    assert sent[0]["lane"] == "infinite" and calls == []
+    job = next(j for j in core.read_jobs(tmp_path) if j["job_id"] == "4242")
+    assert job["lane"] == "infinite" and job["status"] == "running"
+    r = cli.post("/api/generate", json=dict(LANE_OK, unlimited=True))
+    assert r.get_json() == {"error": core.UNLIMITED_BUSY} and len(sent) == 1
+
+
+def test_no_code_path_requests_the_claim_route():
+    """The app never claims Unlimited Mode (§1: an account action the owner takes on PixAI's
+    site). Grep over every shipped module and client source: the only road to the entitlement
+    is the status GET, and no path under it -- the claim among them -- is ever built."""
+    shipped = [ROOT / n for n in ("moonglade_backup.py", "moonglade_gallery.py",
+                                  "moonglade_mcp.py", "moonglade_similar.py",
+                                  "moonglade_container.py", "moonglade_assets.py")]
+    for folder, globs in ((ROOT / "gallery" / "src", ("*.js", "*.jsx")),
+                          (ROOT / "loom", ("*.jsx",)), (ROOT / "loom" / "src", ("*.js",))):
+        for g in globs:
+            shipped.extend(folder.rglob(g) if folder.name == "src" else folder.glob(g))
+    route = re.compile(r"infinite-mode/|infiniteMode\.claim", re.I)
+    hits = []
+    for f in shipped:
+        text = f.read_text(encoding="utf-8")
+        hits += ["{}:{}".format(f.name, i) for i, line in enumerate(text.splitlines(), 1)
+                 if route.search(line)]
+    assert hits == [], "a path under the Unlimited Mode route is built: {}".format(hits)
+    src = (ROOT / "moonglade_backup.py").read_text(encoding="utf-8")
+    assert src.count('"/infinite-mode"') == 1, "the status GET is the one read of the route"
+

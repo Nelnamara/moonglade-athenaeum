@@ -391,3 +391,66 @@ def test_price_carries_no_receipt_key_when_nothing_was_changed(road):
     /api/generate's response follows."""
     quoted = core.price(FakeSession(), _build({"version_id": "V1", "prompt": "x"}))
     assert "adjusted" not in quoted
+
+
+# --- (e) Unlimited Mode rides the same road ---------------------------------------
+# SCOPE_2026-09-26_unlimited-mode. The lane check itself (every rule, the entitlement) is
+# driven end to end in tests/test_tsubaki3_image_gate.py; what is pinned HERE is the road's
+# half: the checked dict is the ONE object quoted and sent, a lane quote never reaches the
+# card match, a lane spend never reaches _apply_kaisuuken whatever `no_card` says, and a
+# resolver without the check refuses the lane instead of building a plain paid request.
+
+def _lane_check(params, version_id):
+    out = dict(params, lane="infinite")
+    out.pop("priority", None)
+    return out
+
+
+def _lane_build(payload, **rs):
+    return core.build_request(dict(payload, unlimited=True), mode="image",
+                              resolve=core.RequestResolver(
+                                  gate=lambda p: (p, []), unlimited=_lane_check, **rs))
+
+
+def test_a_lane_request_is_quoted_and_sent_as_one_object_with_no_card_anywhere(road,
+                                                                              monkeypatch):
+    def _no_card_step(*a, **k):
+        raise AssertionError("a lane spend reached the free-card step")
+    monkeypatch.setattr(core, "_apply_kaisuuken", _no_card_step)
+    sess = FakeSession()
+    req = _lane_build(GATED_IMAGE)
+    assert req.unlimited is True and req.parameters["lane"] == "infinite"
+    quoted = core.price(sess, req)
+    assert quoted == {"cost": 0, "free": True, "unlimited": True, "list_cost": 1200}
+    assert road["matched"] == [], "a lane quote reached the card match"
+    core.submit(sess, req, no_card=False)             # no_card cannot put the card back
+    priced, = road["priced"]
+    submitted, = road["submitted"]
+    assert priced is submitted is req.parameters
+    assert "kaisuukenId" not in submitted
+
+
+def test_a_resolver_without_the_lane_check_refuses_a_lane_request(road):
+    """§8.10: a road that cannot read the entitlement never builds a lane request -- and
+    never quietly builds the ordinary paid one in its place."""
+    for rs in (core.RequestResolver(gate=lambda p: (p, [])), core.RequestResolver()):
+        with pytest.raises(core.PixAIError) as err:
+            core.build_request(dict(GATED_IMAGE, unlimited=True), mode="image", resolve=rs)
+        assert "can't be checked on this road" in str(err.value)
+    assert road["priced"] == road["submitted"] == road["matched"] == []
+
+
+def test_a_lane_request_still_refuses_under_read_only_before_any_tripwire(monkeypatch):
+    req = _lane_build(GATED_IMAGE)
+
+    def tripwire(name):
+        def _boom(*a, **k):
+            raise AssertionError("READ_ONLY did not stop the call before " + name)
+        return _boom
+    monkeypatch.setattr(core, "READ_ONLY", True)
+    for fn in ("match_kaisuuken", "_apply_kaisuuken", "price_task",
+               "submit_generation", "_session_for_create", "gql_mutate"):
+        monkeypatch.setattr(core, fn, tripwire(fn))
+    with pytest.raises(core.PixAIError) as err:
+        core.submit(FakeSession(), req)
+    assert "READ_ONLY" in str(err.value)

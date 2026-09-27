@@ -156,6 +156,87 @@ export function adjustedText(list) {
     .join(", ");
 }
 
+/* ---- Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode, §8 amendments binding) ----
+   The server owns the lane: it reads the entitlement live, checks every rule on the gated
+   request and refuses what breaks one (moonglade_backup._unlimited_check). The drawer's half
+   is the switch, the locks and the reasons, read off the applied version's `unlimited` meta:
+   {owned, expires_at, days_left, size: {max_area, max_side, ranges} | null}. */
+
+export const UNLIMITED_BUSY = "An Unlimited Mode picture is still being made";
+export const UNLIMITED_PRO = "Unlimited Mode runs on Pro";
+
+/* Offered only when the applied version's status says owned (never assumed). */
+export function unlimitedOffered(m) {
+  return !!(m && m.unlimited && m.unlimited.owned === true);
+}
+
+/* The lane's size limit for this model, or null when the server sent none. */
+function laneSize(m) {
+  const u = m && m.unlimited;
+  return u && u.size && Number(u.size.max_area) > 0 ? u.size : null;
+}
+
+/* The site's own size rule on the size actually sent (dims() is already snapped onto the
+   model's grid): the area fits the smallest range's max area and the size lies inside a
+   range (§8.5 -- 1800×1800 snaps to 1808×1808 and fails). No limit known -> true; the server
+   still refuses what does not fit. */
+export function laneSizeOk(width, height, size) {
+  if (!size) return true;
+  return width * height <= Number(size.max_area)
+    && (size.ranges || []).some((r) => r[0] <= width && width <= r[1] && r[2] <= height && height <= r[3]);
+}
+
+/* Why switching the lane ON is refused right now, or null (C3): a reference picture, or a
+   size over the lane's limit. The same sentence rides the switch's title, the line under it
+   and -- while the lane is on -- the Generate gate. */
+export function unlimitedBlock(s) {
+  if (s.ref) return "Remove the reference picture to use Unlimited Mode";
+  const size = laneSize(s.model);
+  const d = dims(s);
+  if (!laneSizeOk(d.width, d.height, size)) {
+    return "Pick a smaller size to use Unlimited Mode — up to " + size.max_side + " × " + size.max_side;
+  }
+  return null;
+}
+
+/* Would this frame be refused on the lane? For the size stops and aspect glyphs while the
+   switch is on: each is judged on the snapped dims() it would produce, never on its label. */
+export function laneRefusesFrame(s, patch) {
+  if (!s.unlimited) return false;
+  const size = laneSize(s.model);
+  if (!size) return false;
+  const d = dims({ ...s, ...patch, customW: "", customH: "" });
+  return !laneSizeOk(d.width, d.height, size);
+}
+
+/* Switching the lane ON sets what it runs on, visibly: Pro, one picture, no High priority.
+   OFF touches nothing else -- only the user turns the lane off (§8.1). */
+export function unlimitedPatch(on) {
+  return on ? { unlimited: true, mode: "pro", count: 1, highPriority: false } : { unlimited: false };
+}
+
+/* The help mark's tooltip: the rules in one line. */
+export function unlimitedRules(m) {
+  const size = laneSize(m);
+  return "Free Tsubaki.3 pictures while it lasts: Pro mode, one picture per run, no reference "
+    + "picture" + (size ? ", up to " + size.max_side + " × " + size.max_side : "")
+    + ", and one run at a time.";
+}
+
+/* "N days left", PixAI's own count (whole days, rounded up, from the server). */
+export function unlimitedDaysText(m) {
+  const n = Number(m && m.unlimited && m.unlimited.days_left);
+  if (!(n > 0)) return "";
+  return n === 1 ? "1 day left" : n + " days left";
+}
+
+/* C3b: the dock's own run list holds an Unlimited Mode task still waiting or running. The
+   server stamps `lane` on the job when it submits one (and refuses a second itself). */
+export function laneBusy(jobs) {
+  return (jobs || []).some((j) => j && j.lane === "infinite"
+    && ["done", "failed", "done_with_errors"].indexOf(j.status) === -1);
+}
+
 /* LoRA weight bounds come from the SELECTED BASE model's architecture, not the
    LoRA's own (review: the first cut keyed them to lora_base_type, which handed
    an unresolved LoRA the widest range). Keys are uppercased like the classic. */
@@ -196,6 +277,8 @@ export function goGate(s, loraCap) {
   if (s.loras.some((l) => !l.version_id)) return "A LoRA is still resolving";
   if (s.loras.some((l) => loraIncompat(l, s.model))) return "A LoRA does not match this model's architecture";
   if (loraCap != null && s.loras.length > loraCap) return "Over your LoRA cap (" + loraCap + ")";
+  // Unlimited Mode on: what the server would refuse is refused here first, in its words.
+  if (s.unlimited) return unlimitedBlock(s);
   return null;
 }
 
@@ -241,6 +324,10 @@ export function buildPayload(s) {
     quality_tag: quality ? "Masterpiece" : null,
     loras: s.loras.filter((l) => l.version_id)
       .map((l) => ({ version_id: l.version_id, weight: Number(l.weight) })),
+    // Unlimited Mode: sent whenever the switch is on, offered or not (§8.1) -- the server
+    // refuses what is not eligible; the drawer never drops the flag. Absent when off, so an
+    // ordinary payload is byte-identical to before.
+    ...(s.unlimited ? { unlimited: true } : {}),
   };
 }
 
@@ -305,4 +392,5 @@ export const GEN_DEFAULTS = {
   mode: "auto", highPriority: false, promptHelper: true,  // classic defaults
   ref: null, refStrength: 0.55,
   boosters: { hires: false, quality: false, face: false },
+  unlimited: false,     // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C1)
 };

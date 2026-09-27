@@ -710,6 +710,15 @@ button.mgcp-chip .mgico {
   border-color: var(--red, #f38ba8);
   color: var(--red, #f38ba8);
 }
+.cost-badge[data-lane=unlimited] {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--green) 48%, transparent);
+}
+.cost-badge .mgc-inf {
+  margin-left: .3em;
+  font-weight: 700;
+  color: var(--green);
+}
 .cost-badge.compact {
   display: inline-flex;
   align-items: center;

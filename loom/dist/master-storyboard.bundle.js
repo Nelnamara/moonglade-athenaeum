@@ -2580,9 +2580,16 @@ ${"=".repeat(48)}
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
     let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
+    const lane = state === "free" && d.unlimited === true;
     const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
     const needN = cardCount(d.cards_needed);
-    if (state === "free") {
+    if (lane) {
+      main = "Free";
+      title = "Unlimited Mode \u2014 this generation spends nothing and uses no card.";
+      val = "Free";
+      lab = "Unlimited Mode";
+      tip = title;
+    } else if (state === "free") {
       const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
       const leftN = heldN != null ? fmt2(heldN) + " left" : "";
       const usesN = needN != null && needN > 1 ? "uses " + fmt2(needN) + " of " + (heldN != null ? fmt2(heldN) : "your") + " cards" : "";
@@ -2620,13 +2627,14 @@ ${"=".repeat(48)}
     const adj = adjTxt ? "Adjusted before sending: " + adjTxt : "";
     if (adj) tip = (tip ? tip + " " : "") + adj + ".";
     const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
-    const text = main + (noteLine ? " \xB7 " + noteLine.text : "");
+    const text = main + (lane ? " \u221E" : "") + (noteLine ? " \xB7 " + noteLine.text : "");
     const stack = !!props.stack;
     let line = "";
     if (stack) {
       const parts = [];
       const countN = cardCount(props.count);
-      if (state === "free") {
+      if (lane) {
+      } else if (state === "free") {
         const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
         parts.push(/\bcard\b/i.test(card) ? card : card + " card");
         if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
@@ -2639,7 +2647,7 @@ ${"=".repeat(48)}
       if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
       line = parts.join(" \xB7 ");
     }
-    return { state, warn, compact, stack, short, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
+    return { state, warn, compact, stack, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2649,6 +2657,7 @@ ${"=".repeat(48)}
       cost: d.cost != null && isFinite(Number(d.cost)) ? Number(d.cost) : null,
       free: m.state === "free",
       card_short: !!m.short,
+      unlimited: !!m.lane,
       cards: d.cards != null ? d.cards : null,
       card_name: d.card_name != null ? d.card_name : null,
       card_expires: d.card_expires != null ? d.card_expires : null,
@@ -2722,17 +2731,18 @@ ${"=".repeat(48)}
         "data-state": m.state,
         "data-warn": dataWarn,
         "data-short": dataShort,
+        "data-lane": m.lane ? "unlimited" : void 0,
         role: "status",
         "aria-live": "polite",
         title: nativeTitle,
         style
       },
-      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.stack ? (
+      showChip ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-val" }, m.val, m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-div" }), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-lab" }, m.lab), m.sub ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub" }, m.sub.text) : null, m.dot ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-dot", "aria-hidden": "true" }, "!") : null) : m.stack ? (
         /* the dock's two-line stack: main line (state colour) over the DC costSubLine; the
            card-short note keeps its own amber line beneath -- the honesty content of that
            state is not something a tighter layout gets to hide */
-        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : m.main), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
-      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.noteLine ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.noteLine.title }, m.noteLine.text) : null),
+        /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-main" }, m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : m.main, m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null), m.line ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-line" }, m.line) : null, m.sub && m.short ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.sub.title }, m.sub.text) : null)
+      ) : m.state === "checking" ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-pip" }), "Checking cost\u2026") : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, m.main, m.lane ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-inf" }, "\u221E") : null, m.noteLine ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-sub", title: m.noteLine.title }, m.noteLine.text) : null),
       m.compact && m.tip ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgc-tip", "aria-hidden": "true" }, m.tip) : null
     );
   });
@@ -3198,7 +3208,9 @@ ${"=".repeat(48)}
         const paid = data2.paid_credit;
         emit5({
           kind: "ok",
-          text: paid === 0 ? "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
+          // An Unlimited Mode run is free by the entitlement, never by a card
+          // (SCOPE_2026-09-26_unlimited-mode §8.7).
+          text: paid === 0 ? payload.unlimited ? "free (Unlimited Mode)" : "free (card used)" : paid == null ? "done" : Number(paid).toLocaleString() + " credits",
           media: data2.media_ids || []
         });
         window.dispatchEvent(new CustomEvent("mg-gen-done"));

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES,
-  dims, goGate, loraIncompat, loraRange, loraStep, modeOffered, qualityTagTitle, refIsContext,
+  ASPECTS, SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
+  dims, goGate, laneRefusesFrame, loraIncompat, loraRange, loraStep, modeOffered,
+  qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
 import { EDIT_CAPS, editAspectLabel, editCaps, refTag } from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
@@ -12,6 +13,7 @@ import useLayerHistory from "../hooks/useLayerHistory.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
+import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -472,6 +474,9 @@ export default function CreateMobile({
         {cmode === "image" && (
           <>
             <div className="cm-lbl">Prompt</div>
+            {/* Tsubaki.3 Unlimited Mode's band over the prompt (SCOPE_2026-09-26_unlimited-mode
+                C4), as on the desktop dock */}
+            <UnlimitedStrip s={s} set={set} phone />
             <textarea className="cm-ta" rows={4} value={s.prompt}
               placeholder="Describe the image…"
               onChange={(e) => set({ prompt: e.target.value })} />
@@ -494,6 +499,8 @@ export default function CreateMobile({
                 ))}
               </select>
             )}
+            {/* ...and its toggle row, in the model section (C2) */}
+            <UnlimitedRow s={s} set={set} phone />
 
             {s.loras.length > 0 && (
               <div className="cm-chiprow">
@@ -536,9 +543,13 @@ export default function CreateMobile({
             <div className="cm-chiprow">
               {ASPECTS.map(([label, r]) => {
                 const on = !s.customW && !s.customH && Math.abs(s.aspect - r) < 0.001;
+                // Unlimited Mode on: a frame the lane would refuse reads disabled (C3, §8.5)
+                const laneOff = laneRefusesFrame(s, { aspect: r });
                 return (
                   <button key={label} type="button"
                     className={"glm-metal cm-chip" + (on ? " on" : "")}
+                    disabled={laneOff}
+                    title={laneOff ? "Too large for Unlimited Mode at this size" : undefined}
                     onClick={() => set({ aspect: r, customW: "", customH: "" })}>{label}</button>
                 );
               })}
@@ -599,7 +610,8 @@ export default function CreateMobile({
                 refuses the same way (gen/priceProbeCore.js). */}
             <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
               disabled={!!gate || busy || !priceOk}
-              title={gate || "Submit — this spends credits or a card"}
+              title={gate || (s.unlimited ? "Submit in Unlimited Mode"
+                : "Submit — this spends credits or a card")}
               onClick={() => generate(loraCap)}>
               {busy ? "◌ Queued…" : "✦ Generate"}
             </button>
@@ -677,14 +689,19 @@ function ImageAdvanced({ s, set, setLora, m }) {
       <div className="cm-subhead">Frame</div>
       <div className="cm-lbl">Size</div>
       <div className="cm-chiprow">
-        {SIZES.map((n, i) => (
-          <button key={n} type="button"
-            className={"glm-metal cm-chip" + (!custom && s.size === n ? " on" : "")}
-            onClick={() => set({ size: n, customW: "", customH: "" })}
-            title={n + "px"}>
-            {["S", "M", "L", "XL"][i] || n}
-          </button>
-        ))}
+        {SIZES.map((n, i) => {
+          // Unlimited Mode on: a size the lane would refuse reads disabled (C3, §8.5)
+          const laneOff = laneRefusesFrame(s, { size: n });
+          return (
+            <button key={n} type="button"
+              className={"glm-metal cm-chip" + (!custom && s.size === n ? " on" : "")}
+              disabled={laneOff}
+              onClick={() => set({ size: n, customW: "", customH: "" })}
+              title={laneOff ? "Too large for Unlimited Mode" : n + "px"}>
+              {["S", "M", "L", "XL"][i] || n}
+            </button>
+          );
+        })}
       </div>
       <div className="cm-customrow">
         <input className={"cm-custominput" + (custom ? " on" : "")} placeholder="W" value={s.customW}
@@ -701,6 +718,8 @@ function ImageAdvanced({ s, set, setLora, m }) {
       <div className="cm-chiprow">
         {[1, 2, 3, 4].map((n) => (
           <button key={n} type="button" className={"glm-metal cm-chip" + (s.count === n ? " on" : "")}
+            disabled={s.unlimited && n !== 1}
+            title={s.unlimited && n !== 1 ? "Unlimited Mode makes one picture at a time" : undefined}
             onClick={() => set({ count: n })}>{n}</button>
         ))}
       </div>
@@ -716,10 +735,12 @@ function ImageAdvanced({ s, set, setLora, m }) {
           switch clears a stale pick here too with no second copy of the rule. */}
       <div className="cm-chiprow">
         {GEN_MODES.map(([v, l]) => {
-          const off = !modeOffered(v, m && m.profiles);
+          // Unlimited Mode on: fixed on Pro (SCOPE_2026-09-26_unlimited-mode C3)
+          const lanePinned = s.unlimited && v !== "pro";
+          const off = !modeOffered(v, m && m.profiles) || lanePinned;
           return (
             <button key={v} type="button" disabled={off}
-              title={off ? "Not offered for this model" : l}
+              title={lanePinned ? UNLIMITED_PRO : off ? "Not offered for this model" : l}
               className={"glm-metal cm-chip" + (s.mode === v ? " on" : "")}
               onClick={() => set({ mode: v })}>{l}</button>
           );
@@ -784,7 +805,8 @@ function ImageAdvanced({ s, set, setLora, m }) {
           Prompt helper · {s.promptHelper ? "on" : "off"}
         </button>
         <button type="button" className={"glm-metal cm-chip" + (s.highPriority ? " on" : "")}
-          title="Faster queue · costs extra"
+          disabled={s.unlimited}
+          title={s.unlimited ? "Unlimited Mode runs without High priority" : "Faster queue · costs extra"}
           onClick={() => set({ highPriority: !s.highPriority })}>
           Priority · {s.highPriority ? "high" : "standard"}
         </button>

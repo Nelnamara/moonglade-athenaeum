@@ -78,7 +78,9 @@ export async function submitTask(route, payload, { label, emit, count, onPhase }
       const paid = data.paid_credit;
       emit({
         kind: "ok",
-        text: paid === 0 ? "free (card used)"
+        // An Unlimited Mode run is free by the entitlement, never by a card
+        // (SCOPE_2026-09-26_unlimited-mode §8.7).
+        text: paid === 0 ? (payload.unlimited ? "free (Unlimited Mode)" : "free (card used)")
             : paid == null ? "done"
             : Number(paid).toLocaleString() + " credits",
         media: data.media_ids || [],
