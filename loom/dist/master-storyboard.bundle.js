@@ -536,6 +536,7 @@ var LoomBundle = (() => {
     if (k && k.from === a.take && k.to === to && sameAt(k.at, at)) return { state: "kept", src, from: a.take, to };
     return { state: "stale", src, from: a.take, to, reason: sameTake ? "cut" : "take", at, was: a.at };
   };
+  var anchorState = (card, byId) => anchorInfo(card, byId).state;
   var staleText = (info, codeOf) => {
     if (!info || info.state !== "stale") return "";
     const code = codeOf ? codeOf(info.src.id) : "the source shot";
@@ -1903,6 +1904,344 @@ ${"=".repeat(48)}
     return { project: { ...project, acts: [...project.acts || [], act] }, added: true };
   };
 
+  // src/loom-cast-library.js
+  var CASTLIB_KEY = "storyboard:v2:castlib";
+  var CASTLIB_VERSION = 1;
+  var MEMBER_SYNC_FIELDS = ["mediaId", "thumbId", "source", "lock"];
+  var str2 = (v) => v == null ? "" : String(v);
+  var assetsOf = (project) => project && Array.isArray(project.assets) ? project.assets : [];
+  var emptyLibrary = () => ({ v: CASTLIB_VERSION, members: [] });
+  var parseLibrary = (value) => {
+    if (value == null) return emptyLibrary();
+    let d = value;
+    if (typeof value === "string") {
+      try {
+        d = JSON.parse(value);
+      } catch (e) {
+        return null;
+      }
+    }
+    if (!d || typeof d !== "object" || !Array.isArray(d.members)) return null;
+    return {
+      ...d,
+      v: Number(d.v) || CASTLIB_VERSION,
+      members: d.members.filter((m) => m && typeof m === "object" && str2(m.libId))
+    };
+  };
+  var memberFromAsset = (asset, libId) => {
+    const m = { ...asset || {} };
+    delete m.id;
+    m.libId = str2(libId);
+    return m;
+  };
+  var assetFromMember = (member, id, tag) => ({ ...member || {}, id: str2(id), tag: str2(tag), libId: str2(member && member.libId) });
+  var prefixOf = (kind) => kind === "video" ? "@video" : kind === "audio" ? "@audio" : "@image";
+  var tagOnBoard = (assets, member) => {
+    const own2 = str2(member && member.tag);
+    if (own2 && !(assets || []).some((a) => a && str2(a.tag) === own2)) return own2;
+    return nextTag(assets || [], prefixOf(member && member.kind));
+  };
+  var shotsUsing = (project, assetId) => {
+    if (!project || !Array.isArray(project.acts) || !assetId) return [];
+    return flat(project).filter((e) => (e.c.cast || []).includes(assetId)).map((e) => ({ id: e.c.id, code: e.code }));
+  };
+  var boardLibIds = (project) => assetsOf(project).map((a) => str2(a && a.libId)).filter(Boolean);
+  var usageOf = (others) => {
+    const m = /* @__PURE__ */ new Map();
+    (others || []).forEach((b) => {
+      const seen2 = /* @__PURE__ */ new Set();
+      boardLibIds(b && b.project).forEach((lid) => {
+        if (seen2.has(lid)) return;
+        seen2.add(lid);
+        if (!m.has(lid)) m.set(lid, []);
+        m.get(lid).push({ id: str2(b.id), name: str2(b.project && b.project.name || b.name) });
+      });
+    });
+    return m;
+  };
+  var libraryRows = (lib, project, others) => {
+    const assets = assetsOf(project);
+    const members = lib && Array.isArray(lib.members) ? lib.members : [];
+    const inLib = new Set(members.map((m) => str2(m.libId)));
+    const usage = others ? usageOf(others) : null;
+    const rows = [];
+    const pictureOf = (x) => ({ mediaId: str2(x && x.mediaId), thumbId: str2(x && x.thumbId), source: str2(x && x.source) });
+    members.forEach((m) => {
+      const lid = str2(m.libId);
+      const copy = assets.find((a) => a && str2(a.libId) === lid) || null;
+      const src = copy || m;
+      rows.push({
+        key: "lib:" + lid,
+        libId: lid,
+        boardOnly: false,
+        ticked: !!copy,
+        asset: copy,
+        member: m,
+        name: str2(src.name),
+        kind: str2(src.kind) || "image",
+        lock: !!src.lock,
+        tag: str2(src.tag),
+        picture: pictureOf(src),
+        usedBy: copy ? shotsUsing(project, copy.id) : [],
+        boards: usage ? (usage.get(lid) || []).length + (copy ? 1 : 0) : null
+      });
+    });
+    assets.forEach((a) => {
+      if (!a) return;
+      const lid = str2(a.libId);
+      if (lid && inLib.has(lid)) return;
+      rows.push({
+        key: "board:" + str2(a.id),
+        libId: lid || null,
+        boardOnly: true,
+        ticked: true,
+        asset: a,
+        member: null,
+        name: str2(a.name),
+        kind: str2(a.kind) || "image",
+        lock: !!a.lock,
+        tag: str2(a.tag),
+        picture: pictureOf(a),
+        usedBy: shotsUsing(project, a.id),
+        boards: 1
+      });
+    });
+    return rows;
+  };
+  var rowMeta = (row) => {
+    if (!row) return "";
+    const where = row.boardOnly ? "this storyboard only" : row.boards == null ? "in \u2026 storyboards" : "in " + row.boards + " storyboard" + (row.boards === 1 ? "" : "s");
+    const parts = [row.tag || "(no tag)", where];
+    if (row.usedBy && row.usedBy.length) parts.push(row.usedBy.map((u) => u.code).join(" "));
+    return parts.join(" \xB7 ");
+  };
+  var untickQuestion = (row) => row && row.usedBy && row.usedBy.length ? (row.name || "This member") + " is used by " + row.usedBy.map((u) => u.code).join(", ") + ". Remove from this storyboard anyway?" : "";
+  var tickMember = (project, member, id) => {
+    if (!project || !member || !str2(member.libId) || !id) return project;
+    const assets = assetsOf(project);
+    if (assets.some((a) => a && str2(a.libId) === str2(member.libId))) return project;
+    return { ...project, assets: assets.concat([assetFromMember(member, id, tagOnBoard(assets, member))]) };
+  };
+  var untickAsset = (project, assetId) => {
+    if (!project || !assetId) return project;
+    const assets = assetsOf(project);
+    if (!assets.some((a) => a && a.id === assetId)) return project;
+    return {
+      ...project,
+      assets: assets.filter((a) => !(a && a.id === assetId)),
+      acts: (project.acts || []).map((act) => {
+        if (!(act.cards || []).some((c) => (c.cast || []).includes(assetId))) return act;
+        return { ...act, cards: act.cards.map((c) => (c.cast || []).includes(assetId) ? { ...c, cast: c.cast.filter((x) => x !== assetId) } : c) };
+      })
+    };
+  };
+  var withLibId = (project, assetId, libId) => {
+    if (!project || !assetId || !libId) return project;
+    const assets = assetsOf(project);
+    if (!assets.some((a) => a && a.id === assetId)) return project;
+    return { ...project, assets: assets.map((a) => a && a.id === assetId ? { ...a, libId: str2(libId) } : a) };
+  };
+  var syncPatch = (patch2) => {
+    const out = {};
+    MEMBER_SYNC_FIELDS.forEach((k) => {
+      if (patch2 && Object.prototype.hasOwnProperty.call(patch2, k)) out[k] = patch2[k];
+    });
+    if ("lock" in out) out.lock = !!out.lock;
+    return out;
+  };
+  var addMember = (lib, member) => {
+    const base = lib || emptyLibrary();
+    if (!member || !str2(member.libId)) return base;
+    if ((base.members || []).some((m) => str2(m.libId) === str2(member.libId))) return base;
+    return { ...base, members: (base.members || []).concat([member]) };
+  };
+  var editMember = (lib, libId, patch2) => {
+    const p = syncPatch(patch2);
+    if (!lib || !libId || !Object.keys(p).length) return lib;
+    if (!(lib.members || []).some((m) => str2(m.libId) === str2(libId))) return lib;
+    return { ...lib, members: lib.members.map((m) => str2(m.libId) === str2(libId) ? { ...m, ...p } : m) };
+  };
+  var editCopies = (project, libId, patch2) => {
+    const p = syncPatch(patch2);
+    if (!project || !libId || !Object.keys(p).length) return project;
+    const assets = assetsOf(project);
+    if (!assets.some((a) => a && str2(a.libId) === str2(libId))) return project;
+    return { ...project, assets: assets.map((a) => a && str2(a.libId) === str2(libId) ? { ...a, ...p } : a) };
+  };
+  var ticks = (project, libId) => !!libId && assetsOf(project).some((a) => a && str2(a.libId) === str2(libId));
+  var handoffCast = (ids, assets, idFor, libIdFor) => {
+    const out = [], members = [];
+    const have = (assets || []).slice();
+    (ids || []).forEach((mid) => {
+      const a = {
+        id: str2(idFor()),
+        name: "",
+        kind: "image",
+        tag: nextTag(have, "@image"),
+        thumbId: "",
+        source: "",
+        mediaId: str2(mid),
+        lock: true,
+        libId: str2(libIdFor())
+      };
+      have.push(a);
+      out.push(a);
+      members.push(memberFromAsset(a, a.libId));
+    });
+    return { assets: out, members };
+  };
+  var newMemberAsset = ({ mediaId, isVideo } = {}, assets, id, libId) => ({
+    id: str2(id),
+    name: "",
+    kind: isVideo ? "video" : "image",
+    tag: nextTag(assets || [], isVideo ? "@video" : "@image"),
+    thumbId: "",
+    source: "",
+    mediaId: str2(mediaId),
+    lock: false,
+    libId: str2(libId)
+  });
+
+  // src/loom-find-core.js
+  var FIND_STATUSES = ["todo", "wip", "done", "paused", "error"];
+  var FIND_MODES = ["I2V", "R2V", "FLF", "V2V"];
+  var low = (v) => String(v == null ? "" : v).toLowerCase();
+  var codeForms = (code) => {
+    const c = low(code).trim();
+    if (!c) return [];
+    const parts = c.split("\xB7");
+    if (parts.length !== 2) return [c];
+    const [act, num5] = parts;
+    const bare = /^\d+$/.test(num5) ? String(Number(num5)) : num5;
+    return Array.from(/* @__PURE__ */ new Set([act + "\xB7" + num5, act + num5, act + bare]));
+  };
+  var findFields = (entry, project) => {
+    const c = entry && entry.c || {};
+    const tags = (project && project.assets || []).filter((a) => a && (c.cast || []).includes(a.id)).map((a) => low(a.tag));
+    return [...codeForms(entry && entry.code), low(c.title), low(effectivePrompt(c)), low(c.prompt), ...tags, low(c.notes)];
+  };
+  var emptyFind = () => ({ q: "", warn: false, statuses: [], modes: [], only: null, cur: 0 });
+  var findActive = (f) => !!(f && (String(f.q || "").trim() || f.warn || (f.statuses || []).length || (f.modes || []).length || f.only && f.only.length));
+  var findMatches = (entries, project, query, filters, opts) => {
+    const q = low(query).trim();
+    const f = filters || {};
+    const o = opts || {};
+    const byId = o.byId || new Map((entries || []).map((e) => [e.c.id, e.c]));
+    const statusOf = o.statusOf || ((c) => c.status);
+    const statuses = f.statuses || [], modes = f.modes || [];
+    const only = f.only && f.only.length ? new Set(f.only) : null;
+    return (entries || []).filter((e) => {
+      const c = e.c || {};
+      if (only && !only.has(c.id)) return false;
+      if (q && !findFields(e, project).some((t) => t.includes(q))) return false;
+      if (f.warn && !(anchorState(c, byId) === "stale" || o.warn && o.warn(e))) return false;
+      if (statuses.length && !statuses.includes(statusOf(c))) return false;
+      if (modes.length && !modes.includes(c.mode)) return false;
+      return true;
+    }).map((e) => e.c.id);
+  };
+  var findChips = (entries, opts) => {
+    const statusOf = opts && opts.statusOf || ((c) => c.status);
+    const st = new Set((entries || []).map((e) => statusOf(e.c)));
+    const md = new Set((entries || []).map((e) => e.c.mode));
+    return [{ kind: "warn", key: "warn", label: "\u26A0 only" }].concat(FIND_STATUSES.filter((s) => st.has(s)).map((s) => ({ kind: "status", key: s, label: s }))).concat(FIND_MODES.filter((m) => md.has(m)).map((m) => ({ kind: "mode", key: m, label: m })));
+  };
+  var chipOn = (f, chip) => chip.kind === "warn" ? !!(f && f.warn) : chip.kind === "status" ? (f && f.statuses || []).includes(chip.key) : (f && f.modes || []).includes(chip.key);
+  var toggleChip = (f, chip) => {
+    const base = { ...emptyFind(), ...f || {}, cur: 0 };
+    if (chip.kind === "warn") return { ...base, warn: !base.warn };
+    const k = chip.kind === "status" ? "statuses" : "modes";
+    const has = base[k].includes(chip.key);
+    return { ...base, [k]: has ? base[k].filter((x) => x !== chip.key) : base[k].concat([chip.key]) };
+  };
+  var currentIndex = (cur2, n) => n > 0 ? ((Number(cur2) || 0) % n + n) % n : -1;
+  var stepIndex = (cur2, n, dir) => n > 0 ? currentIndex((Number(cur2) || 0) + (dir < 0 ? -1 : 1), n) : 0;
+  var findCountText = (f, n) => {
+    if (!findActive(f)) return "";
+    if (!n) return "0";
+    return currentIndex(f.cur, n) + 1 + " of " + n;
+  };
+
+  // src/loom-ribbon-core.js
+  var RIBBON_DE_THRESHOLD = 25;
+  var RIBBON_FPS = 24;
+  var RIBBON_GRID = { w: 32, h: 18 };
+  var num4 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var ribbonPairs = (entries, byId) => {
+    const list = entries || [];
+    const map = byId || new Map(list.map((e) => [e.c.id, e.c]));
+    const rendered = list.map((e) => ({ e, v: selectedTakeView(e.c) })).filter((x) => x.v && x.v.mid);
+    const out = [];
+    for (let i = 0; i + 1 < rendered.length; i++) {
+      const A = rendered[i], B = rendered[i + 1];
+      const aAt = A.v.trimOut != null ? A.v.trimOut : A.v.dur != null ? A.v.dur : durOf(A.e.c);
+      out.push({
+        key: A.e.c.id + ">" + B.e.c.id,
+        a: { cardId: A.e.c.id, code: A.e.code, mid: String(A.v.mid), take: A.v.n, at: num4(aAt) || 0 },
+        b: { cardId: B.e.c.id, code: B.e.code, mid: String(B.v.mid), take: B.v.n, at: num4(B.v.trimIn) || 0 },
+        stale: anchorState(B.e.c, map) === "stale"
+      });
+    }
+    return out;
+  };
+  var frameUrl = (mid, at) => "/api/loom/frame?mid=" + encodeURIComponent(String(mid || "")) + "&at=" + (Math.round(Math.max(0, num4(at) || 0) * RIBBON_FPS) / RIBBON_FPS).toFixed(4);
+  var toLinear = (c) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  var D65 = [0.95047, 1, 1.08883];
+  var labF = (t) => t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116;
+  var rgbToLab = (rgb) => {
+    const R = toLinear(rgb[0]), G2 = toLinear(rgb[1]), B = toLinear(rgb[2]);
+    const X = R * 0.4124564 + G2 * 0.3575761 + B * 0.1804375;
+    const Y = R * 0.2126729 + G2 * 0.7151522 + B * 0.072175;
+    const Z = R * 0.0193339 + G2 * 0.119192 + B * 0.9503041;
+    const fx = labF(X / D65[0]), fy = labF(Y / D65[1]), fz = labF(Z / D65[2]);
+    return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+  };
+  var deltaE76 = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  var meanDeltaE = (pixA, pixB) => {
+    if (!pixA || !pixB) return null;
+    const n = Math.min(pixA.length, pixB.length);
+    let sum = 0, count = 0;
+    for (let i = 0; i + 3 < n; i += 4) {
+      if (pixA[i + 3] === 0 || pixB[i + 3] === 0) continue;
+      sum += deltaE76(rgbToLab([pixA[i], pixA[i + 1], pixA[i + 2]]), rgbToLab([pixB[i], pixB[i + 1], pixB[i + 2]]));
+      count += 1;
+    }
+    return count ? sum / count : null;
+  };
+  var colourJump = (mean) => mean != null && mean > RIBBON_DE_THRESHOLD;
+  var pairTitle = (pair, mean, frames) => {
+    if (pair && pair.stale) return pair.b.code + ": anchor changed";
+    if (frames === "missing") return "No frame to compare here (the clip isn't on this machine, or ffmpeg isn't installed)";
+    if (colourJump(mean)) return "Strong colour jump (a heuristic, not a verdict)";
+    if (frames !== "ok") return "Comparing the frames\u2026";
+    return "Matches";
+  };
+  var pairFlagged = (pair, mean) => !!(pair && pair.stale) || colourJump(mean);
+
+  // src/loom-phone-core.js
+  var SWIPE_MIN_PX = 40;
+  var LONG_PRESS_MS = 500;
+  var swipeDir = (dx, dy, min = SWIPE_MIN_PX) => {
+    const x = Number(dx) || 0, y = Number(dy) || 0;
+    if (Math.abs(x) < min || Math.abs(x) <= Math.abs(y) * 1.2) return 0;
+    return x < 0 ? 1 : -1;
+  };
+  var adjacentTakeN = (card, dir) => {
+    const ts = takesOf(card);
+    const sel = selectedTakeOf(card);
+    if (!ts.length || sel == null || !dir) return null;
+    const i = ts.findIndex((t) => t.n === sel);
+    if (i < 0) return null;
+    const j = i + (dir > 0 ? 1 : -1);
+    return j >= 0 && j < ts.length ? ts[j].n : null;
+  };
+
   // src/loom-url.js
   function isBoardId(s) {
     return /^[A-Za-z0-9_-]{1,64}$/.test(String(s == null ? "" : s));
@@ -2508,7 +2847,7 @@ ${"=".repeat(48)}
     function round4(n) {
       return Math.round(n * 1e4) / 1e4;
     }
-    function num4(n) {
+    function num5(n) {
       return String(round4(n));
     }
     function get(id) {
@@ -2580,9 +2919,9 @@ ${"=".repeat(48)}
     function gradientCss(layer, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
       var parts = layer.stops.map(function(s) {
-        return s.color + " " + num4(s.position * 100) + "%";
+        return s.color + " " + num5(s.position * 100) + "%";
       });
-      return "linear-gradient(" + num4(a) + "deg, " + parts.join(", ") + ")";
+      return "linear-gradient(" + num5(a) + "deg, " + parts.join(", ") + ")";
     }
     function gradientEndpoints(w, h, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
@@ -2605,9 +2944,9 @@ ${"=".repeat(48)}
       var p = resolve(idOrRecipe).image_parameters;
       if (!p) return "";
       var out = [];
-      if (p.brightness) out.push("brightness(" + num4(1 + p.brightness) + ")");
-      if (p.contrast) out.push("contrast(" + num4(1 + p.contrast) + ")");
-      if (p.saturation) out.push("saturate(" + num4(1 + p.saturation) + ")");
+      if (p.brightness) out.push("brightness(" + num5(1 + p.brightness) + ")");
+      if (p.contrast) out.push("contrast(" + num5(1 + p.contrast) + ")");
+      if (p.saturation) out.push("saturate(" + num5(1 + p.saturation) + ")");
       return out.join(" ");
     }
     function swatchLayers(idOrRecipe) {
@@ -11030,6 +11369,7 @@ ${"=".repeat(48)}
     "linear-gradient(150deg, #3a2b63 0%, #191338 100%)"
   ];
   var LV_BED_ZONE_H = 92;
+  var LV_RIBBON_ZONE_H = 84;
   var STYLES = `
 :root{
   /* Loom palette now INHERITS the gallery's design tokens (moonglade_gallery.py's
@@ -11102,6 +11442,29 @@ ${"=".repeat(48)}
 .sb-edlfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 .sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
+/* Session P (P9): THE CONTINUITY RIBBON -- the Loom Handoff page's strip, its own sizes and tokens
+   (70x42 frames, a 7px wrap, peach-tinted and dotted when flagged). In the global sheet because
+   both the desktop timeline and the phone's review panel draw it. The page draws the wrap's border
+   in --surface0 on a panel darker than surface0; the Loom's timeline drawer IS --surface0, where
+   that border vanishes, so it is one step up (--surface1) for the same contrast. */
+.lv-ribbon{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+.lv-ribcap{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-ribrow{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 4px 0;}
+.lv-ribpair{position:relative;flex:none;display:flex;gap:2px;padding:3px;border-radius:7px;cursor:pointer;
+  border:1px solid var(--surface1);outline:none;}
+.lv-ribpair.flag{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lv-ribpair:hover,.lv-ribpair:focus-visible{border-color:var(--lavender);}
+.lv-ribframe{position:relative;width:70px;height:42px;border-radius:5px;overflow:hidden;box-sizing:border-box;
+  display:flex;align-items:flex-end;background-size:cover;background-position:center;}
+.lv-ribframe img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.lv-riblab{position:relative;z-index:1;padding:2px 4px;font-size:8.5px;line-height:1.1;white-space:nowrap;
+  color:color-mix(in srgb,var(--text) 85%,transparent);text-shadow:0 1px 2px rgba(0,0,0,.65);}
+.lv-ribdot{position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:var(--peach);
+  box-shadow:0 0 0 2px var(--base);}
+.lv-ribnone{font-size:10px;color:var(--overlay0);}
+.lv-ribbon.compact .lv-ribrow{scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;}
+.lv-ribbon.compact .lv-ribpair{scroll-snap-align:start;}
+.lv-ribbon.compact .lv-ribframe{width:84px;height:50px;}
 .sb-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
   background:#000;cursor:col-resize;max-width:460px}
@@ -11389,6 +11752,7 @@ ${"=".repeat(48)}
   var LOOM_REV_MISSING = "missing";
   var isBoard = (p) => !!(p && typeof p === "object" && Array.isArray(p.acts));
   var newSubmitId2 = () => "s" + Date.now().toString(36) + uid() + uid();
+  var newLibId = () => "L" + Date.now().toString(36) + uid();
   var nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
   function fileToThumb(file, maxDim = 480, q = 0.72) {
     return new Promise((res, rej) => {
@@ -11616,6 +11980,11 @@ ${"=".repeat(48)}
    selection outline still win over it). */
 .lv-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-card:hover{border-color:var(--accent);}
+/* Session P (P8): find -- a card that does not match dims to 35%; the current match wears the
+   page's lavender border (over the selection's accent, which it usually also is). */
+.lv-card{transition:opacity .2s;}
+.lv-card.fdim{opacity:.35;}
+.lv-card.fcur,.lv-card.fcur:hover{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-ctitle{font:600 11px/1.2 system-ui;color:var(--text);margin:4px 0;min-height:26px;}
@@ -11708,6 +12077,27 @@ ${"=".repeat(48)}
    status bar sits on the same bottom 4px, so it steps up above the underline to keep both. */
 .lv-seg.stale{box-shadow:inset 0 -4px 0 var(--peach);}
 .lv-seg.stale .lv-segbar{bottom:4px;}
+/* Session P (P8): find's rings on the reel, the page's -- a match 1px lavender, the current
+   match 2px (over the selection's outline), a non-match at 35%. */
+.lv-seg{transition:opacity .2s;}
+.lv-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 60%,transparent);outline-offset:-1px;z-index:1;}
+.lv-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;z-index:3;}
+.lv-seg.fdim{opacity:.35;}
+/* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
+   the bar's own button chrome does not apply). */
+.lv-find{flex:1 1 180px;max-width:360px;min-width:236px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
+.lv-find.on{border-color:var(--lavender);}
+.lv-findico{font-size:11px;color:var(--overlay0);}
+.lv-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:11.5px/1.2 system-ui,sans-serif;padding:0;}
+.lv-findin::placeholder{color:var(--overlay0);}
+.lv-findcount{font-size:10px;color:var(--subtext);font-family:ui-monospace,monospace;white-space:nowrap;}
+.lv-findstep{font-size:10px;color:var(--subtext);cursor:pointer;padding:0 3px;user-select:none;}
+.lv-findstep:hover{color:var(--lavender);}
+.lv-findchip{font-size:10px;padding:4px 9px;border-radius:999px;cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);
+  white-space:nowrap;user-select:none;}
+.lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
 .lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
@@ -11844,6 +12234,36 @@ ${"=".repeat(48)}
 .lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-simplecard span{display:block;font-size:9px;}
 /* Footage tab: browse-the-whole-library + drop-to-add, both land as a Cast & Assets ref. */
+/* Session P (P7): THE CAST LIBRARY PANEL, the Loom Handoff page's own sizes and tokens (its
+   rgba(9,7,22,.7) well is --mantle; its lavender hover wash is --lavender at 8%). */
+.lv-lib{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:14px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--mantle) 70%,transparent);}
+.lv-libhead{display:flex;align-items:baseline;gap:6px;}
+.lv-libcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-libhint{font-size:9.5px;color:var(--overlay0);}
+.lv-libnote{font-size:9.5px;line-height:1.45;color:var(--overlay0);}
+.lv-libnote.warn{color:var(--peach);}
+.lv-librow{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:7px;cursor:pointer;outline:none;}
+.lv-librow:hover,.lv-librow:focus-visible{background:color-mix(in srgb,var(--lavender) 8%,transparent);}
+.lv-librow.busy{opacity:.55;cursor:progress;}
+.lv-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lv-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lv-libav{width:26px;height:26px;flex:none;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--surface1) center/cover no-repeat;
+  color:var(--subtext);font-size:11px;display:grid;place-items:center;}
+.lv-libav:disabled{cursor:default;}
+.lv-libav:not(:disabled):hover{box-shadow:0 0 0 1.5px var(--lavender);}
+.lv-libtext{flex:1;min-width:0;}
+.lv-libname{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-liblock{border:0;background:transparent;padding:0 0 0 4px;font-size:10px;line-height:1;cursor:pointer;opacity:0;}
+.lv-liblock.on{opacity:1;}
+.lv-librow:hover .lv-liblock:not(.on){opacity:.45;}
+.lv-libmeta{font-size:9.5px;color:var(--overlay0);font-family:ui-monospace,monospace;overflow-wrap:anywhere;}
+.lv-libadd{display:flex;align-items:center;gap:12px;padding:4px 4px 0;}
+.lv-libaddbtn{border:0;background:transparent;padding:0;font:600 10px/1.2 system-ui,sans-serif;color:var(--lavender);cursor:pointer;}
+.lv-libaddbtn:disabled{opacity:.5;cursor:default;}
+label.lv-libaddbtn{font-weight:500;color:var(--overlay0);}
+label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
 .lv-footagehead .lv-castrow-h{margin-bottom:0;}
 .lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
@@ -12228,6 +12648,8 @@ ${"=".repeat(48)}
     // Session P, Stage B1: the EDL panel's opener (P4) and the music bed's board edits (P3).
     openEdl,
     bedApi,
+    // Session P, Stage B2: the cast library (P7) -- its view and its owner actions.
+    castApi,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
     // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -12280,6 +12702,9 @@ ${"=".repeat(48)}
     const [pickerKind, setPickerKind] = useState2("base");
     const [leftTab, setLeftTab] = useState2("cast");
     const [leftCollapsed, setLeftCollapsed] = useState2(false);
+    useEffect2(() => {
+      if (!leftCollapsed && leftTab === "library" && castApi) castApi.openCastLibrary();
+    }, [leftCollapsed, leftTab, projectApi.activeId]);
     const [leftClosing, setLeftClosing] = useState2(false);
     const [density, setDensity] = useState2("detailed");
     const [rightCollapsed, setRightCollapsed] = useState2(false);
@@ -12562,7 +12987,7 @@ ${"=".repeat(48)}
         });
       }
     }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
-    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H };
+    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H + LV_RIBBON_ZONE_H };
     const tlPointerDown = (e) => {
       tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -12898,6 +13323,107 @@ ${"=".repeat(48)}
     const codeById = new Map(entries.map((x) => [x.c.id, x.code]));
     const codeOf = (id) => codeById.get(id) || "the source shot";
     const stopCard = (ev) => ev.stopPropagation();
+    const [find, setFind] = useState2(emptyFind);
+    const findInputRef = useRef2(null);
+    useEffect2(() => {
+      setFind(emptyFind());
+    }, [projectApi.activeId]);
+    const shownStatus = (c) => {
+      const gs = genState[c.id];
+      return gs && gs.phase === "paused" ? "paused" : gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status;
+    };
+    const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+    const findOn = findActive(find);
+    const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: cardById, statusOf: shownStatus, warn: cardWarns }) : [];
+    const findSet = new Set(findIds);
+    const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+    const findChipList = findChips(entries, { statusOf: shownStatus });
+    const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...typeof next === "function" ? next(f) : { ...f, ...next }, cur: 0 }));
+    const stepFind = (dir) => {
+      if (!findIds.length) return;
+      const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+      const id = findIds[n];
+      setFind((f) => ({ ...f, cur: n }));
+      setSelShot(id);
+      scrollToCard(id);
+    };
+    const clearFind = () => {
+      setFind(emptyFind());
+    };
+    const scrollToCard = (id) => {
+      const el = typeof document !== "undefined" ? document.querySelector('.lv-card[data-card-id="' + id + '"]') : null;
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    const openRibbonPair = (pair) => {
+      setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+      setSelShot(pair.b.cardId);
+      scrollToCard(pair.b.cardId);
+    };
+    const tintByCard = new Map(entries.map((x) => [x.c.id, LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length]]));
+    const tintOfCard = (id) => tintByCard.get(id) || LV_TINTS[0];
+    useEffect2(() => {
+      const onKey3 = (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === "f") {
+          const el = findInputRef.current;
+          if (!el || deepFocus) return;
+          ev.preventDefault();
+          el.focus();
+          el.select();
+        } else if (ev.key === "Escape" && !deepFocus && !pickerOpen) {
+          const t = ev.target;
+          if (t && t !== findInputRef.current && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+          setFind((f) => findActive(f) ? emptyFind() : f);
+        }
+      };
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
+    }, [deepFocus, pickerOpen]);
+    const findKeys = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform || "") ? "\u2318F" : "Ctrl F";
+    const findPill = /* @__PURE__ */ React.createElement("div", { className: "lv-find" + (findOn ? " on" : "") }, /* @__PURE__ */ React.createElement("span", { className: "lv-findico", "aria-hidden": "true" }, "\u2315"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ref: findInputRef,
+        className: "lv-findin",
+        value: find.q,
+        "aria-label": "Find in storyboard",
+        placeholder: find.only && !find.q ? find.only.map(codeOf).join(" \u2192 ") + " (continuity pair)" : "find in storyboard  " + findKeys,
+        onChange: (ev) => runFind({ q: ev.target.value, only: null }),
+        onKeyDown: (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            stepFind(ev.shiftKey ? -1 : 1);
+          } else if (ev.key === "ArrowDown") {
+            ev.preventDefault();
+            stepFind(1);
+          } else if (ev.key === "ArrowUp") {
+            ev.preventDefault();
+            stepFind(-1);
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            clearFind();
+          }
+        }
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-findcount" }, findCountText(find, findIds.length)), /* @__PURE__ */ React.createElement("span", { className: "lv-findstep", role: "button", tabIndex: -1, title: "Previous match (\u2191)", onClick: () => stepFind(-1) }, "\u2191"), /* @__PURE__ */ React.createElement("span", { className: "lv-findstep", role: "button", tabIndex: -1, title: "Next match (\u2193 or Enter)", onClick: () => stepFind(1) }, "\u2193"));
+    const findChipsRow = findChipList.map((ch) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: ch.kind + ch.key,
+        className: "lv-findchip" + (chipOn(find, ch) ? " on" : ""),
+        role: "button",
+        tabIndex: 0,
+        "aria-pressed": chipOn(find, ch),
+        title: ch.kind === "warn" ? "Only shots with a \u26A0: a changed anchor, a cast member with no picture or past the reference limit, an imported picture" : ch.kind === "status" ? "Only " + ch.label + " shots" : "Only " + ch.label + " shots",
+        onClick: () => runFind((f) => toggleChip(f, ch)),
+        onKeyDown: (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            runFind((f) => toggleChip(f, ch));
+          }
+        }
+      },
+      ch.label
+    ));
     const boardGrid = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
       const items = entries.filter((e) => e.ai === ai);
       return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
@@ -12921,7 +13447,8 @@ ${"=".repeat(48)}
           "div",
           {
             key: e.c.id,
-            className: "lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : ""),
+            "data-card-id": e.c.id,
+            className: "lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : "") + (findOn ? findSet.has(e.c.id) ? e.c.id === findCur ? " fcur" : "" : " fdim" : ""),
             onClick: () => setSelShot(e.c.id),
             onDoubleClick: () => setDeepFocus(e),
             title: "Double-click to open in Deep Focus"
@@ -13080,7 +13607,7 @@ ${"=".repeat(48)}
         "div",
         {
           key: i,
-          className: "lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : ""),
+          className: "lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : "") + (findOn ? findSet.has(x.c.id) ? x.c.id === findCur ? " fcur" : " fmatch" : " fdim" : ""),
           style: {
             width: `${durOf2(x.c) / scale * 100}%`,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
@@ -13104,7 +13631,7 @@ ${"=".repeat(48)}
         peaks: bedPeaks,
         api: bedApi
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
+    ), showTlPreview && /* @__PURE__ */ React.createElement(RibbonStrip, { pairs: ribbonPairs(entries, cardById), tintOf: tintOfCard, onOpen: openRibbonPair }), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
     const GEN_ICONS = [["Image", "\u2726"], ["Edit", "\u270E"], ["Reference", "\u{1F5BC}"], ["Video", "\u{1F3AC}"]];
     let gen;
     {
@@ -13543,6 +14070,110 @@ ${"=".repeat(48)}
         ))))
       ));
     }
+    const libRows = castApi ? libraryRows(castApi.lib, project, castApi.others) : [];
+    const libRowOf = (as) => {
+      if (!castApi || !as) return null;
+      if (castApi.lib) return libRows.find((r) => !r.boardOnly && r.asset && r.asset.id === as.id) || null;
+      return as.libId ? {
+        key: "lib:" + as.libId,
+        libId: String(as.libId),
+        boardOnly: false,
+        ticked: true,
+        asset: as,
+        member: null,
+        name: as.name || "",
+        kind: as.kind || "image",
+        lock: !!as.lock,
+        tag: as.tag || "",
+        usedBy: [],
+        boards: null
+      } : null;
+    };
+    const editAsset = (as, patch2) => {
+      const row = castApi ? libRowOf(as) : null;
+      if (row) castApi.editLibraryMember(row, patch2);
+      else setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, ...patch2 }));
+    };
+    const libEverywhere = (as) => libRowOf(as) ? " \u2014 a library member: this changes on every storyboard that uses it" : "";
+    const libraryList = castApi ? /* @__PURE__ */ React.createElement("div", { className: "lv-lib" }, /* @__PURE__ */ React.createElement("div", { className: "lv-libhead" }, /* @__PURE__ */ React.createElement("span", { className: "lv-libcap" }, "\u{1F464} CAST LIBRARY"), /* @__PURE__ */ React.createElement("span", { className: "lv-libhint" }, "tick = in this storyboard")), castApi.libNote ? /* @__PURE__ */ React.createElement("div", { className: "lv-libnote" + (castApi.libPhase === "failed" ? " warn" : "") }, castApi.libNote) : null, libRows.map((row) => {
+      const src = frameSrc(row.picture);
+      const busy = castApi.working === row.key;
+      const act2 = () => {
+        if (!castApi.working) castApi.toggleCastTick(row);
+      };
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: row.key,
+          className: "lv-librow" + (busy ? " busy" : ""),
+          role: "checkbox",
+          "aria-checked": row.ticked,
+          tabIndex: 0,
+          title: row.boardOnly ? "This storyboard's own member \u2014 untick it to keep it in the library but not here" : row.ticked ? "In this storyboard \u2014 click to remove it from this storyboard (the library keeps it)" : "Click to use it in this storyboard",
+          onClick: act2,
+          onKeyDown: (ev) => {
+            if (ev.key === " " || ev.key === "Enter") {
+              ev.preventDefault();
+              act2();
+            }
+          }
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "lv-libbox" + (row.ticked ? " on" : "") }, row.ticked ? "\u2713" : ""),
+        /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lv-libav",
+            style: src ? { backgroundImage: `url(${src})` } : void 0,
+            disabled: row.kind === "audio" || !!castApi.working,
+            title: row.kind === "audio" ? row.name || "audio" : "Change this member's picture \u2014 it changes on every storyboard that uses it",
+            onClick: (ev) => {
+              ev.stopPropagation();
+              openPick((mid) => castApi.editLibraryMember(row, { mediaId: String(mid), thumbId: "", source: "" }), row.kind === "video" ? "video" : "image");
+            }
+          },
+          src ? null : row.kind === "audio" ? "\u266A" : row.kind === "video" ? "\u{1F39E}" : ""
+        ),
+        /* @__PURE__ */ React.createElement("div", { className: "lv-libtext" }, /* @__PURE__ */ React.createElement("div", { className: "lv-libname" }, row.name || row.kind, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lv-liblock" + (row.lock ? " on" : ""),
+            disabled: !!castApi.working,
+            title: (row.lock ? "Locked (maintain exact appearance) \u2014 click to unlock" : "Click to lock its appearance") + " \u2014 on every storyboard that uses it",
+            onClick: (ev) => {
+              ev.stopPropagation();
+              castApi.editLibraryMember(row, { lock: !row.lock });
+            }
+          },
+          row.lock ? "\u{1F512}" : "\u{1F513}"
+        )), /* @__PURE__ */ React.createElement("div", { className: "lv-libmeta" }, rowMeta(row)))
+      );
+    }), !libRows.length && /* @__PURE__ */ React.createElement("div", { className: "lv-libnote" }, castApi.libPhase === "reading" ? "Reading your cast library\u2026" : "No cast yet \u2014 + Add one."), /* @__PURE__ */ React.createElement("div", { className: "lv-libadd" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-libaddbtn",
+        disabled: !!castApi.working,
+        title: "Add a picture or video from your gallery to the library, ticked in this storyboard",
+        onClick: () => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)
+      },
+      "+ Add"
+    ), /* @__PURE__ */ React.createElement("label", { className: "lv-libaddbtn", title: "Add an image from this computer to the library, ticked in this storyboard" }, "upload", /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: "image/*",
+        style: { display: "none" },
+        onChange: async (e) => {
+          const f = e.target.files[0];
+          e.target.value = "";
+          if (!f) return;
+          const id = await storeThumb(f);
+          castApi.addLibraryMember({ thumbId: id, source: f.name });
+        }
+      }
+    )))) : null;
     const castList = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-castrow-h" }, "Cast & assets", sel ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, " \u2014 bound to ", sel.code) : null), sel && (() => {
       if (!modeSendsRefs(sel.c.mode)) {
         return /* @__PURE__ */ React.createElement(
@@ -13583,11 +14214,11 @@ ${"=".repeat(48)}
         "button",
         {
           className: "lv-pickico",
-          title: "Pick from your gallery",
-          onClick: () => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")
+          title: "Pick from your gallery" + libEverywhere(as),
+          onClick: () => openPick((mid) => editAsset(as, { thumbId: "", source: "", mediaId: mid }), as.kind === "video" ? "video" : "image")
         },
         "\u{1F5BC}"
-      ), as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "lv-assetprev", title: "Attach image" }, src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : "\uFF0B", /* @__PURE__ */ React.createElement(
+      ), as.kind === "image" ? /* @__PURE__ */ React.createElement("label", { className: "lv-assetprev", title: "Attach image" + libEverywhere(as) }, src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : "\uFF0B", /* @__PURE__ */ React.createElement(
         "input",
         {
           type: "file",
@@ -13597,7 +14228,7 @@ ${"=".repeat(48)}
             const f = e.target.files[0];
             if (!f) return;
             const id = await storeThumb(f);
-            setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" }));
+            editAsset(as, { thumbId: id, source: as.source || f.name, mediaId: "" });
           }
         }
       )) : /* @__PURE__ */ React.createElement("div", { className: "lv-assetprev", title: as.kind === "video" ? "Video asset \u2014 poster from your gallery" : void 0 }, as.kind === "video" && src ? /* @__PURE__ */ React.createElement("img", { src, alt: "" }) : as.kind === "video" ? "\u{1F39E}" : "\u266A"), /* @__PURE__ */ React.createElement(
@@ -13633,7 +14264,19 @@ ${"=".repeat(48)}
         /* @__PURE__ */ React.createElement("option", { value: "image" }, "image"),
         /* @__PURE__ */ React.createElement("option", { value: "video" }, "video"),
         /* @__PURE__ */ React.createElement("option", { value: "audio" }, "audio")
-      ), /* @__PURE__ */ React.createElement("label", { className: "lv-locklab", title: "Write 'maintain exact appearance' in prompts" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!as.lock, onChange: (e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked })) }), "lock"), sel && /* @__PURE__ */ React.createElement("label", { className: "lv-inshot", title: "Include in the selected shot's cast" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!inShot, onChange: toggleInShot }), "in ", sel.code), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs danger", onClick: () => setAssets((a) => a.filter((x) => x.id !== as.id)), title: "Remove" }, "\u2715"));
+      ), /* @__PURE__ */ React.createElement("label", { className: "lv-locklab", title: "Write 'maintain exact appearance' in prompts" + libEverywhere(as) }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!as.lock, onChange: (e) => editAsset(as, { lock: e.target.checked }) }), "lock"), sel && /* @__PURE__ */ React.createElement("label", { className: "lv-inshot", title: "Include in the selected shot's cast" }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: !!inShot, onChange: toggleInShot }), "in ", sel.code), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          className: "lv-ico xs danger",
+          title: libRowOf(as) ? "Remove from this storyboard (the cast library keeps it)" : "Remove",
+          onClick: () => {
+            const row = libRowOf(as);
+            if (row) castApi.toggleCastTick(row);
+            else setAssets((a) => a.filter((x) => x.id !== as.id));
+          }
+        },
+        "\u2715"
+      ));
     }) : /* @__PURE__ */ React.createElement("div", { className: "lv-simplegrid" }, (project.assets || []).map((as) => {
       const inShot = sel && (sel.c.cast || []).includes(as.id);
       const src = frameSrc(as);
@@ -13737,7 +14380,7 @@ ${"=".repeat(48)}
         onClick: () => setBannerOpen(true)
       },
       "\u{1F5BC} Banner"
-    ), act.edge === "left" ? activityControl : null, /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), /* @__PURE__ */ React.createElement(
+    ), act.edge === "left" ? activityControl : null, /* @__PURE__ */ React.createElement(ProjectSwitcher, { api: projectApi }), findPill, findChipsRow, /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lv-draft" + (project.draft ? " on" : ""),
@@ -13847,7 +14490,15 @@ ${"=".repeat(48)}
         }
       },
       "\u{1F3AC}"
-    )), (!leftCollapsed || leftClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (leftClosing ? " closing" : ""), onClick: closeLeftPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage")), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, boardGrid), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "collapse" }, "\u203A"), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
+    )), (!leftCollapsed || leftClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (leftClosing ? " closing" : ""), onClick: closeLeftPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel left" + (leftClosing ? " closing" : "") + (leftTab === "cast" && density === "detailed" ? " wide" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "cast" ? "on" : ""), onClick: () => setLeftTab("cast") }, "Cast & assets"), /* @__PURE__ */ React.createElement("span", { className: "lv-tab " + (leftTab === "footage" ? "on" : ""), onClick: () => setLeftTab("footage") }, "Footage"), castApi && /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        className: "lv-tab " + (leftTab === "library" ? "on" : ""),
+        onClick: () => setLeftTab("library"),
+        title: "The cast library: every member you keep, ticked where this storyboard uses it"
+      },
+      "Library"
+    )), /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeLeftPanel, title: "collapse" }, "\u2039")), /* @__PURE__ */ React.createElement("div", { className: "lv-cast" }, leftTab === "cast" ? castList : leftTab === "library" && libraryList ? libraryList : footageList))), /* @__PURE__ */ React.createElement("div", { className: "lv-boardcol" }, boardGrid), (!rightCollapsed || rightClosing) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lv-backdrop" + (rightClosing ? " closing" : ""), onClick: closeRightPanel }), /* @__PURE__ */ React.createElement("div", { className: "lv-panel right" + (rightClosing ? " closing" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-sidehead" }, /* @__PURE__ */ React.createElement("button", { className: "lv-col", onClick: closeRightPanel, title: "collapse" }, "\u203A"), /* @__PURE__ */ React.createElement("div", { className: "lv-tabs lv-sidetabs" }, ["Image", "Edit", "Reference", "Video"].map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-tab " + (t === tab ? "on" : ""), onClick: () => setTab(t) }, t)))), gen)), /* @__PURE__ */ React.createElement("div", { className: "lv-rail" }, GEN_ICONS.map(([t, ic]) => /* @__PURE__ */ React.createElement(
       "button",
       {
         key: t,
@@ -14216,6 +14867,19 @@ ${"=".repeat(48)}
 .lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
 .lm-castlock{font-size:11px;flex:none;}
 .lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
+/* Session P (P7): the cast sheet's Library tab -- the page's tick box (lavender, \u2713), round
+   avatar and monospace meta line, in the sheet's own row. */
+.lm-libhead{display:flex;align-items:baseline;gap:6px;padding:2px 4px 6px;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lm-libhead span:first-child{flex:1;}
+.lm-libhead span:last-child{font-size:9.5px;font-weight:400;letter-spacing:0;}
+.lm-libnote{font-size:10px;line-height:1.45;color:var(--overlay0);padding:0 4px 6px;}
+.lm-libnote.warn{color:var(--peach);}
+.lm-librow.busy{opacity:.55;}
+.lm-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lm-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lm-libav{border-radius:50%;}
+.lm-libmeta{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--overlay0);overflow-wrap:anywhere;}
 .lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
 .lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
@@ -14481,6 +15145,73 @@ ${"=".repeat(48)}
 .lm-actionrow{display:block;width:100%;text-align:left;padding:12px 4px;font:13px/1.3 system-ui;
   color:var(--text);border:none;border-bottom:1px solid rgba(255,255,255,.06);background:none;cursor:pointer;}
 .lm-actionrow.danger{color:var(--red);border-bottom:none;}
+/* ---- Session P, Stage B2: the phone for P1-P3, P8, P9 (the Handoff page's "Phone:" lines), in this
+   sheet's own language. Loom cyan, lavender for find and the ribbon, peach for a held state;
+   gold stays billing's (the \u2605 outline is the page's own P1 choice). ---- */
+.lm-actionrow:disabled{color:var(--overlay0);cursor:default;}
+.lm-bedbtn{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.lm-bedbtn.on{border-color:var(--loomc,#47cbc3);background:color-mix(in srgb,var(--loomc,#47cbc3) 12%,transparent);}
+.lm-bedbtn.busy{opacity:.6;}
+.lm-bednote{font-size:10.5px;color:var(--peach);margin-top:8px;line-height:1.4;}
+.lm-bedhead{font:600 13px/1.3 system-ui;color:var(--text);margin:2px 0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lm-bedlvl{display:flex;align-items:center;gap:10px;margin:2px 0 8px;}
+.lm-bedlvl input{flex:1;accent-color:var(--loomc,#47cbc3);}
+.lm-bedmono{font:11px/1 ui-monospace,monospace;color:var(--subtext);min-width:52px;text-align:right;}
+.lm-bedfades{font-size:11px;line-height:1.45;color:var(--subtext);margin:2px 0 8px;}
+/* P1: the \u2605 take's still (swipe it), its takes strip and a take's sheet. */
+.lm-takes{margin:8px 0 12px;}
+.lm-takeprev{position:relative;aspect-ratio:16/9;border-radius:11px;background:var(--base) center/cover no-repeat;
+  border:1px solid var(--surface1);touch-action:pan-y;user-select:none;-webkit-user-select:none;overflow:hidden;}
+.lm-takeprevlab{position:absolute;left:8px;bottom:7px;font:700 10px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);
+  border-radius:6px;padding:4px 7px;}
+.lm-takeswipe{position:absolute;right:8px;bottom:7px;font:600 9.5px/1 system-ui;color:rgba(255,255,255,.8);background:rgba(0,0,0,.45);
+  border-radius:6px;padding:4px 7px;}
+.lm-takestrip{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;}
+.lm-take{width:40px;height:30px;border-radius:6px;border:1px solid var(--surface1);display:grid;place-items:center;
+  font:800 11px/1 system-ui;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7);background:var(--surface1) center/cover no-repeat;
+  cursor:pointer;padding:0;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;flex:none;}
+.lm-take.on{outline:2px solid var(--gold);outline-offset:1px;}
+.lm-takemore{font:700 10px/1 system-ui;color:var(--overlay0);padding:0 2px;}
+.lm-takesheethead{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.lm-takesheettitle{font:600 13px/1.3 system-ui;color:var(--text);}
+/* P2: the peach underline on the scrub reel, the peach card edge, and Re-anchor / Keep. */
+.lm-seg.stale{box-shadow:inset 0 -3px 0 var(--peach);}
+.lm-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
+.lm-stale{display:flex;flex-direction:column;gap:8px;padding:10px 11px;border-radius:11px;margin:0 0 12px;
+  border:1px solid color-mix(in srgb,var(--peach) 50%,transparent);background:color-mix(in srgb,var(--peach) 7%,transparent);}
+.lm-staletxt{font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-stalebtns{display:flex;gap:8px;}
+.lm-reanchor{font:700 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:none;background:var(--lavender);color:var(--base);cursor:pointer;}
+.lm-reanchor:disabled{opacity:.55;cursor:default;}
+.lm-keep{font:600 11px/1 system-ui;padding:9px 14px;border-radius:9px;border:1px solid var(--surface1);background:none;color:var(--subtext);cursor:pointer;}
+.lm-staleerr{font-size:10.5px;color:var(--peach);}
+.lm-needtake{font-size:11px;line-height:1.4;color:var(--subtext);margin:0 0 12px;}
+/* P8: the \u2315 in the header, the find field under it, and the reel's rings. */
+.lm-findbtn{font-size:12px;padding:5px 9px;}
+.lm-findbtn.open{border-color:var(--lavender);color:var(--lavender);}
+.lm-findbtn.finding{background:color-mix(in srgb,var(--lavender) 16%,transparent);}
+.lm-find{flex:none;display:flex;flex-direction:column;gap:6px;padding:0 16px 8px;}
+.lm-findpill{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 11px;border-radius:999px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--base) 85%,transparent);}
+.lm-findpill.on{border-color:var(--lavender);}
+.lm-findico{font-size:12px;color:var(--overlay0);}
+.lm-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:13px/1.3 system-ui;padding:6px 0;}
+.lm-findin::placeholder{color:var(--overlay0);}
+.lm-findcount{font:10.5px/1 ui-monospace,monospace;color:var(--subtext);white-space:nowrap;}
+.lm-findstep{width:30px;height:30px;border:none;background:none;color:var(--subtext);font-size:13px;cursor:pointer;border-radius:50%;flex:none;}
+.lm-findchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
+.lm-findchip{flex:none;font:600 10.5px/1 system-ui;padding:6px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--surface1);background:none;color:var(--subtext);}
+.lm-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lm-seg{transition:opacity .2s;}
+.lm-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 70%,transparent);outline-offset:-1px;}
+.lm-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;}
+.lm-seg.fdim{opacity:.35;}
+.lm-cardrow{transition:opacity .2s;}
+.lm-cardrow[data-find="dim"]{opacity:.35;}
+.lm-card.fcur{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
+/* P9: the review panel's pair strip. */
+.lm-review .lv-ribbon{margin-top:18px;}
 `;
   function LoomMobile({
     project,
@@ -14508,6 +15239,21 @@ ${"=".repeat(48)}
     storeThumb,
     openPick,
     copyShot,
+    // Session P, Stage B2 (P7, "Phone: the cast sheet gets a Library tab beside Cast & assets /
+    // Footage"): the same cast library view and owner actions LoomV2's Library tab uses.
+    castApi,
+    // Session P, Stage B2 -- the phone for P1-P3 (the page's "Phone:" lines): the takes strip's ★ /
+    // Reuse / Delete, the stale anchor's Re-anchor / Keep (useTakeActions) and the music bed's
+    // pick / level / remove (useBedActions) -- the same board edits the desktop calls, none of
+    // which can render. activeId: another storyboard starts with no find.
+    selectTakeOnCard,
+    deleteTakeOnCard,
+    reuseTakeSettings,
+    reanchorShot,
+    keepAnchor: keepAnchor2,
+    anchorWork,
+    bedApi,
+    activeId,
     // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
     // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
     // (useShotMutations) -- not a re-derivation of the split logic.
@@ -14604,6 +15350,9 @@ ${"=".repeat(48)}
     const [dfHandoff, setDfHandoff] = useState2("");
     const [castSheetOpen, setCastSheetOpen] = useState2(false);
     const [castSheetTab, setCastSheetTab] = useState2("cast");
+    useEffect2(() => {
+      if (castSheetOpen && castSheetTab === "library" && castApi) castApi.openCastLibrary();
+    }, [castSheetOpen, castSheetTab]);
     const [castSheetClosing, setCastSheetClosing] = useState2(false);
     const castSheetCloseTimer = useRef2(null);
     const closeCastSheet = () => {
@@ -14869,6 +15618,98 @@ ${"=".repeat(48)}
         setActionsOpen(false);
         setActionsClosing(false);
       }, 280);
+    };
+    const phoneById = new Map(entries.map((x) => [x.c.id, x.c]));
+    const phoneCodeById = new Map(entries.map((x) => [x.c.id, x.code]));
+    const phoneCodeOf = (id) => phoneCodeById.get(id) || "the source shot";
+    const [takeSheet, setTakeSheet] = useState2(null);
+    const pressRef = useRef2({ timer: null, fired: false });
+    useEffect2(() => () => clearTimeout(pressRef.current.timer), []);
+    const onTakeChipDown = (cardId, n) => {
+      clearTimeout(pressRef.current.timer);
+      pressRef.current.fired = false;
+      pressRef.current.timer = setTimeout(() => {
+        pressRef.current.fired = true;
+        selectTakeOnCard(cardId, n);
+        try {
+          if (navigator.vibrate) navigator.vibrate(12);
+        } catch (e) {
+        }
+      }, LONG_PRESS_MS);
+    };
+    const onTakeChipUp = () => {
+      clearTimeout(pressRef.current.timer);
+    };
+    const onTakeChipTap = (cardId, n) => {
+      if (pressRef.current.fired) {
+        pressRef.current.fired = false;
+        return;
+      }
+      setTakeSheet({ cardId, n });
+    };
+    const swipeRef = useRef2(null);
+    const onTakeSwipeStart = (ev) => {
+      swipeRef.current = { x: ev.clientX, y: ev.clientY };
+    };
+    const onTakeSwipeEnd = (ev, card) => {
+      const s = swipeRef.current;
+      swipeRef.current = null;
+      if (!s || !card) return;
+      const n = adjacentTakeN(card, swipeDir(ev.clientX - s.x, ev.clientY - s.y));
+      if (n != null) selectTakeOnCard(card.id, n);
+    };
+    const takeSheetLive = takeSheet ? (() => {
+      const c = phoneById.get(takeSheet.cardId);
+      const t = c ? takesOf(c).find((x) => x.n === takeSheet.n) : null;
+      return c && t ? { c, t, selN: selectedTakeOf(c) } : null;
+    })() : null;
+    if (takeSheet && !takeSheetLive) {
+      setTakeSheet(null);
+    }
+    const [bedSheet, setBedSheet] = useState2(false);
+    const openBedSheet = () => setBedSheet(true);
+    const phoneBed = bedOf(project);
+    const [findOpen, setFindOpen] = useState2(false);
+    const [find, setFind] = useState2(emptyFind);
+    useEffect2(() => {
+      setFind(emptyFind());
+    }, [activeId]);
+    const phoneWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0 || unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+    const findOn = findActive(find);
+    const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: phoneById, statusOf, warn: phoneWarns }) : [];
+    const findSet = new Set(findIds);
+    const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+    const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...typeof next === "function" ? next(f) : { ...f, ...next }, cur: 0 }));
+    const scrollToPhoneCard = (id) => {
+      const el = typeof document !== "undefined" ? document.querySelector('.lm-card[data-card-id="' + id + '"]') : null;
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
+    const stepFind = (dir) => {
+      if (!findIds.length) return;
+      const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+      const id = findIds[n];
+      setFind((f) => ({ ...f, cur: n }));
+      setSelShot(id);
+      scrollToPhoneCard(id);
+    };
+    const clearFind = () => {
+      setFind(emptyFind());
+    };
+    const toggleFindBar = () => {
+      if (findOpen) {
+        setFindOpen(false);
+        clearFind();
+      } else setFindOpen(true);
+    };
+    const openRibbonPair = (pair) => {
+      setFind({ ...emptyFind(), only: [pair.a.cardId, pair.b.cardId], cur: 1 });
+      setFindOpen(true);
+      setSelShot(pair.b.cardId);
+      closeReview();
+    };
+    const phoneTintOf = (id) => {
+      const x = entries.find((e) => e.c.id === id);
+      return x ? LV_TINTS[(x.ai * 3 + x.ci) % LV_TINTS.length] : LV_TINTS[0];
     };
     const genTogglePal = (which) => setGenPalFor((p) => p === which ? null : which);
     const genAppendTo = (field, term) => dfPatch((cc) => ({ ...cc, [field]: cc[field] ? cc[field] + ", " + term : term }));
@@ -15145,6 +15986,17 @@ ${"=".repeat(48)}
       };
     }, [fcOpen, fcActive, fcStrength, fcAngle, AF]);
     return /* @__PURE__ */ React.createElement("div", { className: "lm-root" }, /* @__PURE__ */ React.createElement("style", null, LOOM_MOBILE_STYLES), /* @__PURE__ */ React.createElement("div", { className: "lm-top" }, /* @__PURE__ */ React.createElement("a", { className: "lm-back", href: GALLERY_HREF }, "\u2190 Gallery"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lm-title" }, "\u25AA The Loom"), /* @__PURE__ */ React.createElement("span", { className: "lm-fill" }), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lm-chip lm-findbtn" + (findOpen ? " open" : "") + (findOn ? " finding" : ""),
+        "aria-label": "Find in storyboard",
+        "aria-expanded": findOpen,
+        title: "Find in storyboard",
+        onClick: toggleFindBar
+      },
+      "\u2315"
+    ), /* @__PURE__ */ React.createElement(
       "label",
       {
         className: "lm-chip" + (project.draft ? " on" : ""),
@@ -15161,7 +16013,37 @@ ${"=".repeat(48)}
         title: "Switch back to the full desktop-style Loom"
       },
       "\u{1F5A5} Desktop"
-    )), /* @__PURE__ */ React.createElement("div", { className: "lm-reelwrap" }, /* @__PURE__ */ React.createElement(
+    )), findOpen && /* @__PURE__ */ React.createElement("div", { className: "lm-find" }, /* @__PURE__ */ React.createElement("div", { className: "lm-findpill" + (findOn ? " on" : "") }, /* @__PURE__ */ React.createElement("span", { className: "lm-findico", "aria-hidden": "true" }, "\u2315"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        className: "lm-findin",
+        value: find.q,
+        autoFocus: true,
+        "aria-label": "Find in storyboard",
+        enterKeyHint: "search",
+        placeholder: find.only && !find.q ? find.only.map(phoneCodeOf).join(" \u2192 ") + " (continuity pair)" : "find in storyboard",
+        onChange: (ev) => runFind({ q: ev.target.value, only: null }),
+        onKeyDown: (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            stepFind(ev.shiftKey ? -1 : 1);
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            clearFind();
+          }
+        }
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "lm-findcount" }, findCountText(find, findIds.length)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-findstep", "aria-label": "Previous match", onClick: () => stepFind(-1) }, "\u2191"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-findstep", "aria-label": "Next match", onClick: () => stepFind(1) }, "\u2193"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-findstep", "aria-label": "Close find", onClick: toggleFindBar }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-findchips" }, findChips(entries, { statusOf }).map((ch) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        key: ch.kind + ch.key,
+        className: "lm-findchip" + (chipOn(find, ch) ? " on" : ""),
+        "aria-pressed": chipOn(find, ch),
+        onClick: () => runFind((f) => toggleChip(f, ch))
+      },
+      ch.label
+    )))), /* @__PURE__ */ React.createElement("div", { className: "lm-reelwrap" }, /* @__PURE__ */ React.createElement(
       "div",
       {
         className: "lm-reelbar",
@@ -15174,7 +16056,7 @@ ${"=".repeat(48)}
         "div",
         {
           key: x.c.id,
-          className: "lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : ""),
+          className: "lm-seg " + statusOf(x.c) + (x.c.id === selShot ? " sel" : "") + (anchorInfo(x.c, phoneById).state === "stale" ? " stale" : "") + (findOn ? findSet.has(x.c.id) ? x.c.id === findCur ? " fcur" : " fmatch" : " fdim" : ""),
           style: { flex: `${durOf(x.c) || 1} 1 0` }
         }
       ))
@@ -15186,11 +16068,14 @@ ${"=".repeat(48)}
         const miss = castMissingImages(e, project, imgSrc);
         const thumb = cardThumb(e.c);
         const canReview = st === "done" && !!e.c.resultMid;
-        return /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-cardrow" }, /* @__PURE__ */ React.createElement(
+        const stalePhone = anchorInfo(e.c, phoneById).state === "stale";
+        const unsendablePhone = unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+        return /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-cardrow", "data-find": findOn ? findSet.has(e.c.id) ? "match" : "dim" : void 0 }, /* @__PURE__ */ React.createElement(
           "button",
           {
             type: "button",
-            className: "lm-card" + (e.c.id === selShot ? " sel" : ""),
+            "data-card-id": e.c.id,
+            className: "lm-card" + (e.c.id === selShot ? " sel" : "") + (stalePhone ? " stale" : "") + (findOn && e.c.id === findCur ? " fcur" : ""),
             onClick: () => {
               setSelShot(e.c.id);
               setDfOpen(true);
@@ -15198,7 +16083,7 @@ ${"=".repeat(48)}
             title: "Open this shot \u2014 it binds to Generate"
           },
           /* @__PURE__ */ React.createElement("div", { className: "lm-thumb", style: thumb ? { backgroundImage: `url(${thumb})` } : void 0 }, !thumb && e.c.mode),
-          /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`)))
+          /* @__PURE__ */ React.createElement("div", { className: "lm-textcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-titlerow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-code" }, e.code), /* @__PURE__ */ React.createElement("span", { className: "lm-cardtitle" }, e.c.title || "untitled")), /* @__PURE__ */ React.createElement("div", { className: "lm-pillrow" }, /* @__PURE__ */ React.createElement("span", { className: "lm-modepill" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lm-durpill" }, durOf(e.c), "s"), /* @__PURE__ */ React.createElement("span", { className: "lm-stpill " + st }, gs && gs.msg ? gs.msg : st), miss.length > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: `No picture on this shot for ${miss.join(", ")} \u2014 they are cast here but cannot be referenced, so they are left out of the prompt.` }, "\u26A0 ", miss.length === 1 ? `${miss[0]}: no image` : `${miss.length} cast: no image`), stalePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: "Its open frame came from another shot's take, and that shot now uses a different one. Open the shot to Re-anchor or Keep." }, "\u26A0 anchor changed"), unsendablePhone && /* @__PURE__ */ React.createElement("span", { className: "lm-warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent to PixAI yet")))
         ), canReview && /* @__PURE__ */ React.createElement(
           "button",
           {
@@ -15305,7 +16190,59 @@ ${"=".repeat(48)}
         },
         "\u{1F465} ",
         (c.cast || []).length
-      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: () => setDfOpen(false) }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-df-body" }, /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: () => setDfOpen(false) }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lm-df-body" }, (() => {
+        const ts = takesOf(c);
+        const selN = selectedTakeOf(c);
+        const view = selectedTakeView(c);
+        const shown = ts.slice(-6);
+        const older = ts.length - shown.length;
+        const anchor = anchorInfo(c, phoneById);
+        const aw = anchorWork && anchorWork[c.id];
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, view ? /* @__PURE__ */ React.createElement("div", { className: "lm-takes" }, /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            className: "lm-takeprev",
+            style: { backgroundImage: "url(/thumbs/" + view.mid + ".jpg)" },
+            onPointerDown: onTakeSwipeStart,
+            onPointerUp: (ev) => onTakeSwipeEnd(ev, c),
+            onPointerCancel: () => {
+              swipeRef.current = null;
+            },
+            title: "Swipe sideways to use the next or previous take"
+          },
+          /* @__PURE__ */ React.createElement("span", { className: "lm-takeprevlab" }, "\u2605 take ", selN, ts.length > 1 ? " of " + ts.length : ""),
+          ts.length > 1 && /* @__PURE__ */ React.createElement("span", { className: "lm-takeswipe" }, "\u2039 swipe \u203A")
+        ), /* @__PURE__ */ React.createElement("div", { className: "lm-takestrip" }, older > 0 && /* @__PURE__ */ React.createElement("span", { className: "lm-takemore" }, "+", older), shown.map((t) => {
+          const on = t.n === selN;
+          return /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              key: t.id || "t" + t.n,
+              className: "lm-take" + (on ? " on" : ""),
+              style: t.mid ? { backgroundImage: "url(/thumbs/" + t.mid + ".jpg)" } : void 0,
+              "aria-pressed": on,
+              title: on ? "Take " + t.n + " (selected)" : "Take " + t.n + " \xB7 tap for its actions, hold to use it",
+              onPointerDown: () => onTakeChipDown(c.id, t.n),
+              onPointerUp: onTakeChipUp,
+              onPointerLeave: onTakeChipUp,
+              onPointerCancel: onTakeChipUp,
+              onContextMenu: (ev) => ev.preventDefault(),
+              onClick: () => onTakeChipTap(c.id, t.n)
+            },
+            on ? "\u2605" : t.n
+          );
+        })), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, (ts.every((t, i) => t.n === i + 1) ? "Take " + selN + " of " + ts.length : "Take " + selN + " \xB7 " + ts.length + " takes") + " \u2605 used by Play \xB7 Render \xB7 Export")) : null, anchor.state === "stale" && /* @__PURE__ */ React.createElement("div", { className: "lm-stale", role: "status" }, /* @__PURE__ */ React.createElement("div", { className: "lm-staletxt" }, "\u26A0 anchor changed \xB7 ", staleText(anchor, phoneCodeOf)), /* @__PURE__ */ React.createElement("div", { className: "lm-stalebtns" }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-reanchor",
+            disabled: !!(aw && aw.phase === "wip") || !selectedTakeView(anchor.src),
+            onClick: () => reanchorShot(c.id)
+          },
+          aw && aw.phase === "wip" ? "Re-anchoring\u2026" : "Re-anchor"
+        ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-keep", onClick: () => keepAnchor2(c.id) }, "Keep")), aw && aw.phase === "err" && /* @__PURE__ */ React.createElement("div", { className: "lm-staleerr" }, aw.msg)), anchor.state !== "stale" && needsNewTake(c) && /* @__PURE__ */ React.createElement("div", { className: "lm-needtake" }, "Open frame updated. Render a new take to match it."));
+      })(), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Mode"), /* @__PURE__ */ React.createElement("div", { className: "lm-modechips" }, MODES.map((m) => /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -15436,7 +16373,44 @@ ${"=".repeat(48)}
           onClick: () => setCastSheetTab("footage")
         },
         "Footage"
-      )), castSheetTab === "cast" ? /* @__PURE__ */ React.createElement(React.Fragment, null, !modeSendsRefs(c.mode) ? /* @__PURE__ */ React.createElement("div", { className: "lm-i2vnote" }, modeSendsLine(c.mode)) : castBudget ? /* @__PURE__ */ React.createElement("div", { className: "lm-budget" }, /* @__PURE__ */ React.createElement("span", { className: castBudget.used > castBudget.budget ? "lm-budget-over" : void 0 }, castBudget.used, " of ", castBudget.budget, " reference slot", castBudget.budget === 1 ? "" : "s", " used"), castBudget.frames ? /* @__PURE__ */ React.createElement("span", null, " \xB7 ", castBudget.frames, " of 6 held by attached frame", castBudget.frames === 1 ? "" : "s") : null) : null, (project.assets || []).map((as) => {
+      ), castApi && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lm-tabbtn" + (castSheetTab === "library" ? " on" : ""),
+          onClick: () => setCastSheetTab("library")
+        },
+        "Library"
+      )), castSheetTab === "library" && castApi ? (() => {
+        const rows = libraryRows(castApi.lib, project, castApi.others);
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-libhead" }, /* @__PURE__ */ React.createElement("span", null, "\u{1F464} CAST LIBRARY"), /* @__PURE__ */ React.createElement("span", null, "tick = in this storyboard")), castApi.libNote ? /* @__PURE__ */ React.createElement("div", { className: "lm-libnote" + (castApi.libPhase === "failed" ? " warn" : "") }, castApi.libNote) : null, rows.map((row) => {
+          const src = frameSrc(row.picture);
+          return /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              key: row.key,
+              className: "lm-castrow lm-librow" + (castApi.working === row.key ? " busy" : ""),
+              role: "checkbox",
+              "aria-checked": row.ticked,
+              disabled: !!castApi.working,
+              onClick: () => castApi.toggleCastTick(row)
+            },
+            /* @__PURE__ */ React.createElement("span", { className: "lm-libbox" + (row.ticked ? " on" : "") }, row.ticked ? "\u2713" : ""),
+            /* @__PURE__ */ React.createElement("div", { className: "lm-castthumb lm-libav", style: src ? { backgroundImage: `url(${src})` } : void 0 }, !src && (row.kind === "audio" ? "\u266A" : row.kind === "video" ? "\u{1F39E}" : "")),
+            /* @__PURE__ */ React.createElement("div", { className: "lm-castcol" }, /* @__PURE__ */ React.createElement("div", { className: "lm-castname" }, row.name || row.kind, row.lock ? " \u{1F512}" : ""), /* @__PURE__ */ React.createElement("div", { className: "lm-libmeta" }, rowMeta(row)))
+          );
+        }), !rows.length && /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, castApi.libPhase === "reading" ? "Reading your cast library\u2026" : "No cast yet."), /* @__PURE__ */ React.createElement("div", { className: "lm-castaddrow" }, /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-addrefbtn",
+            disabled: !!castApi.working,
+            onClick: () => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)
+          },
+          "+ Add"
+        )));
+      })() : castSheetTab === "cast" ? /* @__PURE__ */ React.createElement(React.Fragment, null, !modeSendsRefs(c.mode) ? /* @__PURE__ */ React.createElement("div", { className: "lm-i2vnote" }, modeSendsLine(c.mode)) : castBudget ? /* @__PURE__ */ React.createElement("div", { className: "lm-budget" }, /* @__PURE__ */ React.createElement("span", { className: castBudget.used > castBudget.budget ? "lm-budget-over" : void 0 }, castBudget.used, " of ", castBudget.budget, " reference slot", castBudget.budget === 1 ? "" : "s", " used"), castBudget.frames ? /* @__PURE__ */ React.createElement("span", null, " \xB7 ", castBudget.frames, " of 6 held by attached frame", castBudget.frames === 1 ? "" : "s") : null) : null, (project.assets || []).map((as) => {
         const inShot = (c.cast || []).includes(as.id);
         const src = frameSrc(as);
         const missing = as.kind === "image" && !resolvedImage(as, imgSrc);
@@ -15476,7 +16450,59 @@ ${"=".repeat(48)}
       ))) : finishedShots.length ? /* @__PURE__ */ React.createElement("div", { className: "lm-footagegrid" }, finishedShots.map((e) => /* @__PURE__ */ React.createElement("div", { key: e.c.id, className: "lm-fclip", onClick: () => {
         dfPickFootage(e.c.resultMid, e.code);
         closeCastSheet();
-      } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lm-fclipmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "no rendered shots yet"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: closeCastSheet }, "Done"))));
+      } }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + e.c.resultMid + ".jpg", alt: "" }), /* @__PURE__ */ React.createElement("div", { className: "lm-fclipmeta" }, /* @__PURE__ */ React.createElement("b", null, e.code), /* @__PURE__ */ React.createElement("span", null, durOf(e.c), "s"))))) : /* @__PURE__ */ React.createElement("div", { className: "lm-empty" }, "no rendered shots yet"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: closeCastSheet }, "Done"))), takeSheetLive && takeSheetLive.c.id === c.id && (() => {
+        const { t, selN } = takeSheetLive;
+        const on = t.n === selN;
+        const tv = on ? selectedTakeView(c) || t : t;
+        const shut = () => setTakeSheet(null);
+        return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", onClick: shut }), /* @__PURE__ */ React.createElement("div", { className: "lm-sheet", role: "dialog", "aria-label": "Take " + t.n + " of " + dfLive.code }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement("div", { className: "lm-takesheethead" }, /* @__PURE__ */ React.createElement(
+          "span",
+          {
+            className: "lm-take" + (on ? " on" : ""),
+            "aria-hidden": "true",
+            style: tv.mid ? { backgroundImage: "url(/thumbs/" + tv.mid + ".jpg)" } : void 0
+          },
+          on ? "\u2605" : t.n
+        ), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "lm-takesheettitle" }, dfLive.code, " \xB7 take ", t.n, on ? " \xB7 \u2605 in use" : ""), /* @__PURE__ */ React.createElement("div", { className: "lm-hint" }, takeWhen(tv), " \xB7 ", takeSummary(tv)))), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-actionrow",
+            disabled: on,
+            onClick: () => {
+              selectTakeOnCard(c.id, t.n);
+              shut();
+            }
+          },
+          "\u2605 ",
+          on ? "In use for Play, Render and Export" : "Use this take"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-actionrow",
+            disabled: !tv.settings,
+            onClick: () => {
+              reuseTakeSettings(c.id, t.n);
+              shut();
+            }
+          },
+          "Reuse settings",
+          tv.settings ? "" : " \u2014 none were recorded for this take"
+        ), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "lm-actionrow danger",
+            disabled: on,
+            onClick: () => {
+              deleteTakeOnCard(c.id, t.n);
+              shut();
+            }
+          },
+          on ? "Delete\u2026 \u2014 select another take first" : "Delete take " + t.n + "\u2026 (its clip stays in your library)"
+        ), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: shut }, "Cancel")));
+      })());
     })(), genOpen && dfLive && (() => {
       const c = dfLive.c;
       const gp = genPrice[c.id] || {};
@@ -16218,7 +17244,63 @@ ${"=".repeat(48)}
         },
         "\u26F6 ",
         reviewCropping ? "Done" : "Crop"
-      ))));
+      ), bedApi && (phoneBed ? /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "lm-addrefbtn lm-bedbtn on",
+          onClick: openBedSheet,
+          title: "Music bed: " + phoneBed.name + " \u2014 level and fades"
+        },
+        "\u266A Bed"
+      ) : /* @__PURE__ */ React.createElement(
+        "label",
+        {
+          className: "lm-addrefbtn lm-bedbtn" + (bedApi.bedWork.phase === "wip" ? " busy" : ""),
+          title: "Add one audio file under the whole cut \u2014 kept on this machine, never uploaded to PixAI"
+        },
+        bedApi.bedWork.phase === "wip" ? "\u266A Adding\u2026" : "\u266A Bed",
+        /* @__PURE__ */ React.createElement(
+          "input",
+          {
+            type: "file",
+            accept: "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac",
+            style: { display: "none" },
+            disabled: bedApi.bedWork.phase === "wip",
+            onChange: (ev) => {
+              const f = ev.target.files && ev.target.files[0];
+              ev.target.value = "";
+              if (f) bedApi.pickBed(f);
+            }
+          }
+        )
+      ))), bedApi && bedApi.bedWork.phase === "err" && /* @__PURE__ */ React.createElement("div", { className: "lm-bednote", role: "status" }, bedApi.bedWork.msg), /* @__PURE__ */ React.createElement(RibbonStrip, { compact: true, pairs: ribbonPairs(entries, phoneById), tintOf: phoneTintOf, onOpen: openRibbonPair })), bedSheet && phoneBed && bedApi && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "lm-scrim", onClick: () => setBedSheet(false) }), /* @__PURE__ */ React.createElement("div", { className: "lm-sheet", role: "dialog", "aria-label": "Music bed" }, /* @__PURE__ */ React.createElement("div", { className: "lm-sheethandle" }), /* @__PURE__ */ React.createElement("div", { className: "lm-bedhead" }, "\u266A ", phoneBed.name, phoneBed.dur ? " \xB7 " + bedClock(phoneBed.dur) : ""), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Level"), /* @__PURE__ */ React.createElement("div", { className: "lm-bedlvl" }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "range",
+          min: BED_DB_MIN,
+          max: BED_DB_MAX,
+          step: 1,
+          value: phoneBed.db,
+          "aria-label": "Music bed level",
+          onChange: (ev) => bedApi.setBedLevel(ev.target.value)
+        }
+      ), /* @__PURE__ */ React.createElement("span", { className: "lm-bedmono" }, dbLabel(phoneBed.db))), /* @__PURE__ */ React.createElement("span", { className: "lm-microlab" }, "Fades"), /* @__PURE__ */ React.createElement("div", { className: "lm-bedfades" }, "2 s in \xB7 3 s out \xB7 ducks \u221212 dB under shots with their own audio. A bed longer than the cut ends with the cut; a shorter one doesn't loop."), /* @__PURE__ */ React.createElement("label", { className: "lm-actionrow" }, "Pick a different file\u2026", /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "file",
+          accept: "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac",
+          style: { display: "none" },
+          onChange: (ev) => {
+            const f = ev.target.files && ev.target.files[0];
+            ev.target.value = "";
+            if (f) bedApi.pickBed(f);
+          }
+        }
+      )), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-actionrow danger", onClick: () => {
+        bedApi.removeBed();
+        setBedSheet(false);
+      } }, "Remove the music bed (its file stays on this machine)"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-sheetclose", onClick: () => setBedSheet(false) }, "Done"))));
     })(), fcOpen && dfLive && (() => {
       const c = dfLive.c;
       const fcSrc = frameSrc(c.openFrame);
@@ -16400,6 +17482,82 @@ ${"=".repeat(48)}
       setActiveId(id);
       setProject(p);
     };
+    const [castLib, setCastLib] = useState2(null);
+    const castLibRef = useRef2(null);
+    const noteCastLib = (v) => {
+      castLibRef.current = v;
+      setCastLib(v);
+    };
+    const readCastLibrary = useCallback2(async () => {
+      if (!hasStore) return { failed: true };
+      const got = await sGetX(CASTLIB_KEY);
+      if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+      const lib = parseLibrary(got.missing ? null : got.value);
+      if (!lib) return { failed: true, unreadable: true };
+      const v = { lib, rev: got.rev };
+      noteCastLib(v);
+      return v;
+    }, []);
+    const writeCastLibrary = useCallback2(async (apply) => {
+      let cur2 = castLibRef.current;
+      if (!cur2) {
+        const r = await readCastLibrary();
+        if (r.failed) return { failed: true, msg: r.unreadable ? "The cast library didn't read, so nothing was written over it." : "The cast library couldn't be read." };
+        cur2 = r;
+      }
+      const next = apply(cur2.lib);
+      if (next === cur2.lib) return { ok: true, lib: cur2.lib };
+      let res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(next), { baseRev: cur2.rev });
+      let wrote = next;
+      if (res.conflict) {
+        const remote = res.rev === "unreadable" ? null : parseLibrary(res.value);
+        if (!remote) return { failed: true, msg: "The cast library changed elsewhere and didn't read, so nothing was written over it." };
+        wrote = apply(remote);
+        if (wrote === remote) {
+          noteCastLib({ lib: remote, rev: res.rev });
+          return { ok: true, lib: remote };
+        }
+        res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(wrote), { baseRev: res.rev });
+        if (res.conflict) return { failed: true, msg: "The cast library changed in another tab again, so nothing more was written. Try once more." };
+      }
+      if (!res.ok) return { failed: true, msg: "The cast library couldn't be saved. Nothing changed." };
+      noteCastLib({ lib: wrote, rev: res.rev });
+      return { ok: true, lib: wrote };
+    }, [readCastLibrary]);
+    const readOtherBoards = useCallback2(async (exceptId) => {
+      if (!hasStore) return { boards: [], unread: [] };
+      const listed = await sListX(PPRE);
+      if (listed.failed) return { boards: [], unread: [], failed: true };
+      const boards = [], unread = [];
+      for (const k of listed.keys) {
+        const id = k.slice(PPRE.length);
+        if (id === exceptId) continue;
+        const r = await readBoard(id);
+        if (r.p) boards.push({ id, name: r.p.name || "Untitled", project: r.p, rev: r.rev });
+        else if (!r.missing) unread.push(id);
+      }
+      return { boards, unread };
+    }, []);
+    const saveOtherBoard = useCallback2(async (id, p, rev, apply) => {
+      const key = PPRE + id;
+      const next = apply(p);
+      if (next === p) return { ok: true, skipped: true };
+      let res = await queueRef.current.save(key, JSON.stringify(next), { baseRev: rev });
+      if (res.conflict) {
+        let remote = null;
+        try {
+          remote = res.value == null ? null : JSON.parse(res.value);
+        } catch (e) {
+          remote = null;
+        }
+        if (!isBoard(remote)) return { failed: true, gone: res.value == null };
+        const again = apply(remote);
+        if (again === remote) return { ok: true, skipped: true };
+        res = await queueRef.current.save(key, JSON.stringify(again), { baseRev: res.rev });
+        if (res.conflict) return { failed: true, conflict: true };
+      }
+      return res.ok ? { ok: true } : { failed: true };
+    }, []);
     const readProjList = useCallback2(async () => {
       if (!hasStore) return [];
       const keys = await sList(PPRE);
@@ -16607,15 +17765,24 @@ ${"=".repeat(48)}
       } catch (e) {
       }
     }, [activeId]);
-    const adoptCastHandoff = (project2) => {
+    const adoptCastHandoff = async (project2) => {
       if (!project2 || castImported.current) return;
       castImported.current = true;
       const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
       if (!ids.length) return;
+      history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
+      const board = activeIdRef.current;
+      const { assets: added, members } = handoffCast(ids, projectRef.current && projectRef.current.assets || [], uid, newLibId);
+      const w = await writeCastLibrary((lib) => members.reduce(addMember, lib));
+      if (activeIdRef.current !== board) return;
+      if (w.ok) {
+        setProject((p) => members.reduce((q, m, i) => tickMember(q, m, added[i].id), p));
+        return;
+      }
       setProject((p) => {
         const existing = p.assets || [];
         let n = maxTagNum(existing, "@image");
-        const added = ids.map((mid) => ({
+        const own2 = ids.map((mid) => ({
           id: uid(),
           name: "",
           kind: "image",
@@ -16625,9 +17792,13 @@ ${"=".repeat(48)}
           mediaId: mid,
           lock: true
         }));
-        return { ...p, assets: [...existing, ...added] };
+        return { ...p, assets: [...existing, ...own2] };
       });
-      history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
+      if (window.Toast) window.Toast.show({
+        kind: "err",
+        title: "Added to this storyboard only",
+        msg: (w.msg || "The cast library couldn't be updated.") + " The pictures are in this storyboard's cast."
+      });
     };
     useEffect2(() => {
       adoptCastHandoff(project);
@@ -16772,7 +17943,9 @@ Your currently-open board is left untouched.`)) return;
       activeIdRef,
       saveBoardNow,
       noteResolved,
-      loadError
+      loadError,
+      // Session P, Stage B2 (P7): the cast library's reads and compare-and-swap writes.
+      castIo: { castLib, readCastLibrary, writeCastLibrary, readOtherBoards, saveOtherBoard }
     };
   }
   function useShotMutations(project, setProject) {
@@ -16959,6 +18132,153 @@ Your currently-open board is left untouched.`)) return;
       });
     };
     return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor: keepAnchor2, anchorWork };
+  }
+  function useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo }) {
+    const [libPhase, setLibPhase] = useState2("idle");
+    const [libNote, setLibNote] = useState2("");
+    const [others, setOthers] = useState2(null);
+    const [working, setWorking] = useState2("");
+    const openSeq = useRef2(0);
+    const workingRef = useRef2("");
+    useEffect2(() => {
+      setOthers(null);
+      setLibPhase("idle");
+      setLibNote("");
+    }, [activeId]);
+    const say = (kind, title, msg) => {
+      if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind, title, msg });
+    };
+    const lean = (b) => ({ id: b.id, name: b.name, project: { name: b.name, assets: b.project && b.project.assets || [] } });
+    const openCastLibrary = async () => {
+      const seq3 = ++openSeq.current;
+      setLibPhase("reading");
+      setLibNote("");
+      const got = await castIo.readCastLibrary();
+      if (seq3 !== openSeq.current) return;
+      if (got.failed) {
+        setLibPhase("failed");
+        setLibNote(got.unreadable ? "The cast library didn't read. Nothing was changed, and nothing will be written over it." : "The cast library couldn't be read. Check the server, then open this tab again.");
+        return;
+      }
+      const o = await castIo.readOtherBoards(activeIdRef.current);
+      if (seq3 !== openSeq.current) return;
+      setOthers(o.boards.map(lean));
+      setLibPhase("ready");
+      if (o.failed) setLibNote("Your other storyboards couldn't be listed, so the counts are this storyboard's only.");
+      else if (o.unread.length) setLibNote(o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read; the counts leave " + (o.unread.length === 1 ? "it" : "them") + " out.");
+    };
+    const begin = (key) => {
+      if (workingRef.current) return false;
+      workingRef.current = key;
+      setWorking(key);
+      return true;
+    };
+    const end = () => {
+      workingRef.current = "";
+      setWorking("");
+    };
+    const toggleCastTick = async (row) => {
+      if (!row) return;
+      const board = activeIdRef.current;
+      const cur2 = projectRef.current;
+      if (!cur2) return;
+      if (!row.ticked) {
+        if (row.member) setProject((p) => p ? tickMember(p, row.member, uid()) : p);
+        return;
+      }
+      const asset = (cur2.assets || []).find((a) => a && a.id === (row.asset && row.asset.id));
+      if (!asset) return;
+      const q = untickQuestion({ ...row, usedBy: shotsUsing(cur2, asset.id) });
+      if (q && !window.confirm(q)) return;
+      if (row.boardOnly) {
+        if (!begin(row.key)) return;
+        const libId = row.libId || newLibId();
+        const w = await castIo.writeCastLibrary((lib) => addMember(lib, memberFromAsset(asset, libId)));
+        end();
+        if (!w.ok) {
+          say("err", "Nothing was removed", w.msg || "The cast library couldn't be updated.");
+          return;
+        }
+        if (activeIdRef.current !== board) return;
+      }
+      setProject((p) => p ? untickAsset(p, asset.id) : p);
+    };
+    const editLibraryMember = async (row, patch2) => {
+      const p = syncPatch(patch2);
+      if (!row || !Object.keys(p).length) return;
+      if (!begin(row.key)) return;
+      try {
+        const board = activeIdRef.current;
+        const base = row.asset || row.member || {};
+        const assetId = row.asset && row.asset.id;
+        const minted = !row.libId;
+        const libId = row.libId || newLibId();
+        const w = await castIo.writeCastLibrary((lib) => editMember(addMember(lib, memberFromAsset({ ...base, ...p }, libId)), libId, p));
+        if (!w.ok) {
+          say("err", "Nothing was changed", w.msg || "The cast library couldn't be updated.");
+          return;
+        }
+        const openNow = activeIdRef.current;
+        setProject((q) => q ? editCopies(assetId && openNow === board ? withLibId(q, assetId, libId) : q, libId, p) : q);
+        if (minted) return;
+        const o = await castIo.readOtherBoards(openNow);
+        const missed = [];
+        let updated = 0;
+        for (const b of o.boards) {
+          if (!ticks(b.project, libId)) continue;
+          const r = await castIo.saveOtherBoard(b.id, b.project, b.rev, (x) => editCopies(x, libId, p));
+          if (r.ok) {
+            if (!r.skipped) updated += 1;
+          } else missed.push("\u201C" + b.name + "\u201D");
+        }
+        if (o.boards.length || o.unread.length) setOthers(o.boards.map((b) => lean({ ...b, project: editCopies(b.project, libId, p) })));
+        const name = row.name || "This member";
+        if (missed.length || o.unread.length || o.failed) {
+          say(
+            "err",
+            name + " wasn't updated everywhere",
+            (missed.length ? "Not updated: " + missed.join(", ") + " (it changed in another tab; open it and edit again). " : "") + (o.unread.length ? o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read. " : "") + (o.failed ? "Your other storyboards couldn't be listed. " : "") + "The library and this storyboard were updated."
+          );
+        } else if (updated) {
+          say("ok", name + " updated", "Also changed in " + updated + " other storyboard" + (updated === 1 ? "" : "s") + ".");
+        }
+      } finally {
+        end();
+      }
+    };
+    const addLibraryMember = async (pick) => {
+      if (!pick || !pick.mediaId && !pick.thumbId) return;
+      if (!begin("add")) return;
+      try {
+        const board = activeIdRef.current;
+        const cur2 = projectRef.current;
+        if (!cur2) return;
+        const asset = {
+          ...newMemberAsset(pick, cur2.assets || [], uid(), newLibId()),
+          ...pick.thumbId ? { thumbId: pick.thumbId, source: pick.source || "", mediaId: "" } : {}
+        };
+        const m = memberFromAsset(asset, asset.libId);
+        const w = await castIo.writeCastLibrary((lib) => addMember(lib, m));
+        if (!w.ok) {
+          say("err", "Nothing was added", w.msg || "The cast library couldn't be updated.");
+          return;
+        }
+        if (activeIdRef.current === board) setProject((p) => p ? tickMember(p, m, asset.id) : p);
+      } finally {
+        end();
+      }
+    };
+    return {
+      libPhase,
+      libNote,
+      others,
+      working,
+      lib: castIo.castLib ? castIo.castLib.lib : null,
+      openCastLibrary,
+      toggleCastTick,
+      editLibraryMember,
+      addLibraryMember
+    };
   }
   var audioDuration = (url) => new Promise((res) => {
     let settled = false;
@@ -18329,8 +19649,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       activeIdRef,
       saveBoardNow,
       noteResolved,
-      loadError
+      loadError,
+      castIo
     } = useProjectStore(setSelShot);
+    const castApi = useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo });
     const draftCardRef = useRef2(draftCard);
     draftCardRef.current = draftCard;
     const {
@@ -18515,6 +19837,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         addRef,
         setRef,
         delRef,
+        castApi,
+        selectTakeOnCard,
+        deleteTakeOnCard,
+        reuseTakeSettings,
+        reanchorShot,
+        keepAnchor: keepAnchor2,
+        anchorWork,
+        bedApi,
+        activeId,
         storeThumb,
         openPick,
         copyShot,
@@ -18563,6 +19894,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         project,
         setCard,
         setAssets,
+        castApi,
         entries,
         durOf,
         scale,
@@ -19068,6 +20400,89 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onChange: (ev) => api.setBedLevel(ev.target.value)
       }
     ), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, dbLabel(bed.db))), /* @__PURE__ */ React.createElement("span", null, "fade 2 s in / 3 s out \xB7 ducks \u221212 dB under shots with their own audio (hatched)")), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, cutStatusLine(entries, segs))), api.bedWork.phase === "err" ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, api.bedWork.msg) : bed && peaks && peaks.failed ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, "The music bed's file couldn't be read on this machine, so Play and \u21E7 Render leave it out.") : u && u.count > 0 ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote" }, u.count, " unused music bed file", u.count === 1 ? "" : "s", " (", u.h, ") \xB7", " ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-bedlink", onClick: () => api.sweepUnusedBeds() }, "Remove\u2026")) : null);
+  }
+  function RibbonFrame({ url, tint, label, onState }) {
+    const [ok, setOk] = useState2(null);
+    useEffect2(() => {
+      setOk(null);
+    }, [url]);
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-ribframe", style: { backgroundImage: tint } }, /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: url,
+        alt: "",
+        draggable: false,
+        style: ok === false ? { display: "none" } : void 0,
+        onLoad: (ev) => {
+          setOk(true);
+          onState(ev.currentTarget);
+        },
+        onError: () => {
+          setOk(false);
+          onState(null);
+        }
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-riblab" }, label));
+  }
+  function RibbonPair({ pair, tintOf, onOpen }) {
+    const ua = frameUrl(pair.a.mid, pair.a.at), ub = frameUrl(pair.b.mid, pair.b.at);
+    const imgs = useRef2({ a: void 0, b: void 0 });
+    const [meas, setMeas] = useState2({ frames: "loading", mean: null });
+    useEffect2(() => {
+      imgs.current = { a: void 0, b: void 0 };
+      setMeas({ frames: "loading", mean: null });
+    }, [ua, ub]);
+    const got = (side) => (el) => {
+      imgs.current[side] = el;
+      const { a, b } = imgs.current;
+      if (a === void 0 || b === void 0) return;
+      if (!a || !b) {
+        setMeas({ frames: "missing", mean: null });
+        return;
+      }
+      let mean = null;
+      try {
+        const cv = document.createElement("canvas");
+        cv.width = RIBBON_GRID.w;
+        cv.height = RIBBON_GRID.h;
+        const cx = cv.getContext("2d", { willReadFrequently: true });
+        cx.drawImage(a, 0, 0, cv.width, cv.height);
+        const da = cx.getImageData(0, 0, cv.width, cv.height).data;
+        cx.clearRect(0, 0, cv.width, cv.height);
+        cx.drawImage(b, 0, 0, cv.width, cv.height);
+        const db = cx.getImageData(0, 0, cv.width, cv.height).data;
+        mean = meanDeltaE(da, db);
+      } catch (e) {
+        mean = null;
+      }
+      setMeas({ frames: mean == null ? "missing" : "ok", mean });
+    };
+    const flag = pairFlagged(pair, meas.frames === "ok" ? meas.mean : null);
+    const title = pairTitle(pair, meas.frames === "ok" ? meas.mean : null, meas.frames) + (meas.frames === "ok" && meas.mean != null ? " \xB7 mean Lab \u0394E " + meas.mean.toFixed(1) : "") + " \u2014 click to open both shots";
+    return /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        className: "lv-ribpair" + (flag ? " flag" : ""),
+        role: "button",
+        tabIndex: 0,
+        title,
+        "data-pair": pair.a.code + ">" + pair.b.code,
+        "data-delta": meas.mean == null ? "" : meas.mean.toFixed(2),
+        onClick: () => onOpen(pair),
+        onKeyDown: (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            onOpen(pair);
+          }
+        }
+      },
+      /* @__PURE__ */ React.createElement(RibbonFrame, { url: ua, tint: tintOf(pair.a.cardId), label: pair.a.code + " out", onState: got("a") }),
+      /* @__PURE__ */ React.createElement(RibbonFrame, { url: ub, tint: tintOf(pair.b.cardId), label: pair.b.code + " in", onState: got("b") }),
+      flag && /* @__PURE__ */ React.createElement("span", { className: "lv-ribdot" })
+    );
+  }
+  function RibbonStrip({ pairs, tintOf, onOpen, compact }) {
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-ribbon" + (compact ? " compact" : "") }, /* @__PURE__ */ React.createElement("div", { className: "lv-ribcap" }, "CONTINUITY RIBBON \xB7 close frame \u2192 next open frame"), pairs.length ? /* @__PURE__ */ React.createElement("div", { className: "lv-ribrow" }, pairs.map((p) => /* @__PURE__ */ React.createElement(RibbonPair, { key: p.key, pair: p, tintOf, onOpen }))) : /* @__PURE__ */ React.createElement("div", { className: "lv-ribnone" }, "Nothing to compare yet: the ribbon pairs each rendered shot with the next rendered one."));
   }
   function EdlPanel({ project, view, setView, onClose, onDownload, busy }) {
     const bed = bedOf(project);
