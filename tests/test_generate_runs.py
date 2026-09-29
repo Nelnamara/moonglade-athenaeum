@@ -696,6 +696,41 @@ def test_a_second_run_while_one_is_sending_is_refused(tmp_path, cli, rig):
     assert len(rig.mutations) == 2
 
 
+def test_the_lock_is_install_wide_a_second_login_is_refused_mid_send(tmp_path, rig):
+    """Review S4 (F10): every gallery login spends the one PixAI wallet, so the one-run lock is
+    install-wide -- login B's run is refused while login A's is held mid-send."""
+    app = create_app(tmp_path)
+    a = login_test_client(app, username="alice")
+    a.csrf = _csrf(a)
+    b = login_test_client(app, username="bobby")
+    b.csrf = _csrf(b)
+    pa = plan(a, prompt="{a|b} x", count=2).get_json()
+    pb = plan(b, prompt="{c|d} y", count=2).get_json()
+    gate, entered = threading.Event(), threading.Event()
+
+    def hold(i, params):
+        entered.set()
+        gate.wait(10)
+    rig.on_mutate = hold
+    out = {}
+
+    def first():
+        out["r"] = run(a, run_id="a1" * 16, ack=ack_of(pa), prompt="{a|b} x", count=2).get_json()
+    t = threading.Thread(target=first)
+    t.start()
+    assert entered.wait(10)
+    try:
+        second = run(b, run_id="b2" * 16, ack=ack_of(pb), prompt="{c|d} y", count=2).get_json()
+        assert "A run is still being sent" in second["error"], second
+        assert b.get("/api/generate/runs/" + "b2" * 16).status_code == 404, "nothing reserved"
+    finally:
+        gate.set()
+        t.join(10)
+    assert out["r"]["status"] == "sent"
+    assert len(rig.mutations) == 2
+    assert all(m["prompts"] in ("a x", "b x") for m in rig.mutations)
+
+
 def test_the_in_flight_mark_is_released_after_an_exception(cli, rig, monkeypatch):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     real = core.send_run
@@ -954,12 +989,79 @@ def test_on_send_sees_a_copy_of_every_attempt_and_cannot_alter_or_block_it(rig):
     assert "inferenceProfile" not in rig.mutations[1]
 
 
-def test_exact_turns_off_both_resubmits(rig):
-    def refuse(i, params):
-        raise core.PixAIError('GraphQL error: [{"message": "bad inferenceProfile"}]')
+@pytest.mark.parametrize("params,error", [
+    ({"prompts": "a", "inferenceProfile": "pro"},
+     'GraphQL error: [{"message": "bad inferenceProfile"}]'),
+    ({"prompts": "a", "priority": core.PRIORITY_TURBO},
+     'GraphQL error: [{"message": "REQUIRE_MEMBERSHIP", "code": 40300047}]'),
+], ids=["profile-drop", "turbo-to-low"])
+def test_exact_turns_off_both_resubmits(rig, monkeypatch, params, error):
+    """Review S5 (F6): BOTH refusal-only resubmits are real paths without exact=True -- the
+    profile drop and the REQUIRE_MEMBERSHIP / priority-500 Turbo -> Low one -- and exact=True
+    turns each off: exactly one mutation."""
+    monkeypatch.setitem(core._turbo_refused, "seen", False)
+
+    def refuse(i, p):
+        raise core.PixAIError(error)
     rig.on_mutate = refuse
     with pytest.raises(core.PixAIError):
-        core.submit_generation(object(), {"prompts": "a", "inferenceProfile": "pro"}, exact=True)
+        core.submit_generation(object(), dict(params))
+    assert len(rig.mutations) == 2, "without exact the resubmit fires (the path is real)"
+    del rig.mutations[:]
+    monkeypatch.setitem(core._turbo_refused, "seen", False)
+    with pytest.raises(core.PixAIError):
+        core.submit_generation(object(), dict(params), exact=True)
+    assert len(rig.mutations) == 1
+    assert rig.mutations[0] == params
+
+
+def test_exact_never_rewrites_the_priority_it_was_quoted_with(rig, monkeypatch):
+    """Review N1: a run job goes out with the priority it was quoted and digested with; the
+    Turbo -> Low downgrade is applied at the run's build, never again at its submit."""
+    monkeypatch.setitem(core._turbo_refused, "seen", True)
+    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO}, exact=True)
+    assert rig.mutations[0]["priority"] == core.PRIORITY_TURBO
+    core.submit_generation(object(), {"prompts": "a", "priority": core.PRIORITY_TURBO})
+    assert rig.mutations[1]["priority"] == core.PRIORITY_LOW, "a single send keeps today's rule"
+
+
+def test_a_known_turbo_refusal_is_quoted_digested_and_sent_as_low(cli, rig, monkeypatch):
+    monkeypatch.setitem(core._turbo_refused, "seen", True)
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    assert {c["request"]["variables"]["parameters"]["priority"] for c in p["cells"]} \
+        == {core.PRIORITY_LOW}
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    assert d["status"] == "sent"
+    assert [m["priority"] for m in rig.mutations] == [core.PRIORITY_LOW] * 2
+
+
+class _NoHooks(object):
+    def sending(self, cell):
+        pass
+
+    def sent(self, cell, task_id, request_, card):
+        pass
+
+    def failed(self, cell, state, error, request_):
+        pass
+
+
+@pytest.mark.parametrize("data,state", [(None, "refused"),
+                                        ({"createGenerationTask": {"id": "77"}}, "may_have_started")],
+                         ids=["refused", "partial-success"])
+def test_a_lane_graphql_error_is_refused_only_when_it_is_definite(rig, data, state):
+    """Review N2: on the lane branch a GraphQL error is marked refused only when
+    definite_refusal() says so; a partial success (the mutation's data came back beside the
+    errors) may have made -- and charged for -- the task, so it reads may_have_started."""
+    def answer(i, params):
+        e = core.PixAIError('GraphQL error: [{"message": "late"}]')
+        e.graphql_data = data
+        raise e
+    rig.on_mutate = answer
+    req = core.GenerationRequest(mode="image", unlimited=True, parameters={
+        "prompts": "a", "modelId": "V", "lane": core.UNLIMITED_LANE})
+    res = core.send_run(object(), [{"cell": 0, "req": req, "no_card": None}], hooks=_NoHooks())
+    assert res["jobs"][0]["state"] == state
     assert len(rig.mutations) == 1
 
 

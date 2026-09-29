@@ -11282,7 +11282,11 @@ def submit_generation(session, params, *, on_send=None, exact=False):
     # (a reference the backstop gate just converted), a lane or an upscale. No network.
     import moonglade_recipes as _recipes
     _recipes.check_params(params)
-    params = priority_for_submit(params)   # already known to be turbo-refused? use Low
+    if not exact:
+        # Already known to be turbo-refused? use Low. A run job (exact) never: the run applied
+        # this at build, so it was quoted and digested, and what is sent must equal what was
+        # quoted (review N1) -- a flag flipped since then would send an unquoted priority.
+        params = priority_for_submit(params)
     # Session H (BUILD-w2-gen §8, review S1): decided BEFORE the mutation, off the gate's own
     # cached profile read -- is the profile asked for one this version LISTS? A listed profile
     # PixAI refuses is an entitlement refusal (a non-member's Ultra), not "unsupported", so the
@@ -11307,11 +11311,14 @@ def submit_generation(session, params, *, on_send=None, exact=False):
             # below can read its words -- a recipe refusal is never retried as anything else.
             raise
         if lane:
-            # Never retried as anything else (§8.2). A GraphQL error is PixAI refusing the
-            # task, so nothing exists and nothing was spent; anything else is passed on as it
-            # came, because it does not prove that.
-            if str(e).startswith("GraphQL error"):
+            # Never retried as anything else (§8.2). A GraphQL error whose data resolved
+            # nothing is PixAI refusing the task, so nothing exists and nothing was spent;
+            # anything else -- a partial success (the mutation's data came back beside the
+            # errors, review N2), a timeout -- is passed on as it came, because it does not
+            # prove that and must read may_have_started, never refused.
+            if definite_refusal(e) and str(e).startswith("GraphQL error"):
                 refused = PixAIError(_UNLIMITED_REFUSED + ": " + _graphql_reason(e))
+                refused.graphql_data = getattr(e, "graphql_data", None)
                 refused.refused = True       # a definite refusal, for a run's job state
                 raise refused
             raise

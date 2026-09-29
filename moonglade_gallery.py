@@ -21826,8 +21826,13 @@ def create_app(out_dir: Path):
                                   "remove {} to continue.".format(
                                       cap, "" if cap == 1 else "s",
                                       len(req.lora_version_ids) - cap))
+            # Review N1: the Turbo -> Low downgrade (priority_for_submit, once PixAI has said
+            # this account can't use Turbo) is applied HERE, at build, so it is quoted and
+            # digested; a run job's submit (exact=True) never applies it again, so what is
+            # sent is what was quoted.
+            req.parameters = core.priority_for_submit(req.parameters)
             built.append({"cell": job["cell"], "job": job, "req": req,
-                          "no_card": True if matrix else None})
+                          "no_card": True if no_card else None})
         if any(b["req"].unlimited for b in built) and len(built) > 1:
             raise _RunRefused("Unlimited Mode makes one picture at a time — switch it "
                               "off to send a run.")
