@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
+import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
 import "../styles/lightbox.css";
 import useScrollLock from "../hooks/useScrollLock.js";
 
@@ -251,6 +252,9 @@ export default function Lightbox({
                 the ✧ this chip used to wear: one glyph for visual similarity, app-wide. */}
             <button className="lbx-chip lbx-similar" title="Lookalikes by eye — the 48 closest"
               onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
+            {/* ⁂ Make a recipe (Recipes Handoff K decision 4): between Similar and Upscale,
+                only for a picture whose model takes recipes; opens the creator's step 2. */}
+            <MakeRecipeChip className="lbx-chip" mediaId={it.media_id} isVideo={!!it.is_video} />
             <button className="lbx-chip" title="Upscale or Hires this picture"
               onClick={() => upEl.current && upEl.current.open(it.media_id)}>⇱ Upscale</button>
             {/* ☁ Publish -- the cross-page hand-off (Lightbox.dc.html:357), REAL since

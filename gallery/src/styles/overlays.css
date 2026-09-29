@@ -17,7 +17,7 @@
    Publish "doing nothing"; Similar and Upscale had the same trap).
    Relations, guarded by tests/test_z_ladder.py — change one number, keep the ORDER:
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .mgss 414/415
-     < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < .mgcp-pwr 430/431
+     < .rcp-scrim/.rcp-host (and the phone's .rcp-m) 416/417 < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < .mgcp-pwr 430/431
      < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441
      < .mgpal-scrim/.mgpal-host 460/461 < .mgpal-gchip 462
      < .mgks-scrim/.mgks-host 470/471 < .mg-gallery-picker 490
@@ -57,6 +57,10 @@
    it renders in the grid's own place under a token in the library bar, so it has no z-index
    to place and nothing to paint behind.
    .mgct-sub (424/425) is the contest picker/confirm, opening over the Contests/My Art slab.
+   .rcp-* (416/417, recipes.css) is the recipe picker, market and creator: the Recipes
+   handoffs drew "z 300", the band's floor before this ladder put the Lightbox at 400, and
+   ⁂ Make a recipe opens the creator FROM the Lightbox, so it takes a rung above it. The
+   creator asks the gallery picker (490) for pictures, which clears it.
    The command palette, its two-stroke G… chip and its cheat-sheet (command-palette.css) sit
    at the top: the palette opens from ANY of the layers above it — that is what a Ctrl/⌘ K
    layer is for — so it clears all of them, and the cheat-sheet clears the palette in turn.

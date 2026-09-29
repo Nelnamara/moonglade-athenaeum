@@ -20,6 +20,7 @@ import TabBarMobile from "./TabBarMobile.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
+import RecipesHost from "../recipes/RecipesHost.jsx";
 import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
 import ImportMobile from "./ImportMobile.jsx";
@@ -1112,6 +1113,7 @@ export default function AppMobile({ boot }) {
 
       <TabBarMobile tab={tab} setTab={setTab} />
       <PickerHost />
+      <RecipesHost />
       {claimModal.open && (
         <ClaimModal credits={claimModal.credits} exiting={claimModal.exiting}
           claiming={claimModal.claiming} error={claimModal.error}

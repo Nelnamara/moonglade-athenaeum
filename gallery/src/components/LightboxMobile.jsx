@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
+import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
 import { apiGet } from "../api.js";
 import "../styles/lightbox-mobile.css";
 
@@ -346,6 +347,7 @@ export default function LightboxMobile({
           <button type="button" className="lbm-chip lbm-similar"
             title="Find what looks like this one"
             onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
+          <MakeRecipeChip className="lbm-chip" mediaId={it.media_id} isVideo={!!it.is_video} phone />
           <button type="button" className={"lbm-chip" + (sheetOpen ? " on" : "")} onClick={toggleUpscale}>⇱ Upscale</button>
           {/* One of the three entry points Contest Mobile Handoff.dc.html keeps -- "the
               lightbox share row". It opens the choose-a-contest sheet, and the entry
