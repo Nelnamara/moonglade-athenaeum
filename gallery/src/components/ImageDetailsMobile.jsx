@@ -1,10 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
 import MobileSheet from "./MobileSheet.jsx";
+import RunInspector from "./RunInspector.jsx";
+import { MatrixGrid } from "./PowerMobile.jsx";
+import useSheet from "../hooks/useSheet.js";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
 import { apiGet } from "../api.js";
+import "../styles/power.css";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
 
@@ -114,6 +118,9 @@ export default function ImageDetailsMobile({
   const [simSheetOpen, setSimSheetOpen] = useState(false);
   const [simClosing, setSimClosing] = useState(false);
   const simTimer = useRef(null);
+  // Session M (NOTES 7 + 8, Phone): the ⋯ chip's sheet -- Inspect the request (Copy JSON only)
+  // and, for a picture that came from a matrix run, that run's results as a grid.
+  const moreSheet = useSheet();
 
   const {
     state, row,
@@ -133,7 +140,7 @@ export default function ImageDetailsMobile({
   // this component's OWN local resets on navigate (mediaOk/the see-all sheet
   // aren't shared with the desktop surface -- see useImageDetails.js for
   // what is).
-  useEffect(() => { setMediaOk(true); setSimSheetOpen(false); }, [mediaId]);
+  useEffect(() => { setMediaOk(true); setSimSheetOpen(false); moreSheet.close(); }, [mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => clearTimeout(simTimer.current), []);
   const closeSimSheet = () => {
@@ -284,6 +291,12 @@ export default function ImageDetailsMobile({
           <button type="button" className="idm-chip idm-chip-danger" disabled={busy} onClick={deleteLocal}>
             Delete locally
           </button>
+          {/* Session M (NOTES 7): ⋯ -> Inspect the request. Only for a picture that has a task
+              PixAI made (a numeric task id); nothing is read until it is opened. */}
+          {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
+            <button type="button" className="idm-chip" aria-haspopup="dialog" aria-label="More"
+              onClick={() => moreSheet.open("more")}>⋯</button>
+          ) : null}
         </div>
 
         <div className="idm-statrow">
@@ -437,6 +450,34 @@ export default function ImageDetailsMobile({
           wide viewport, would overflow a 390px sheet). This one has no
           persistent-DOM requirement, so the shared MobileSheet.jsx chrome is
           reused as-is. */}
+      {moreSheet.sheet === "more" && (
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="MORE">
+          <div className="pm-sheetbody">
+            <button type="button" className="pm-chip" style={{ justifyContent: "flex-start" }}
+              onClick={() => moreSheet.open("inspect")}>{"{ } Inspect the request"}</button>
+            {state.data.run && state.data.run.mode === "matrix" && state.data.run.run_id ? (
+              <button type="button" className="pm-chip" style={{ justifyContent: "flex-start" }}
+                onClick={() => moreSheet.open("grid")}>▦ View this matrix as a grid</button>
+            ) : null}
+          </div>
+        </MobileSheet>
+      )}
+      {moreSheet.sheet === "inspect" && (
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="INSPECT">
+          <div className="pm-sheetbody">
+            <RunInspector source={{ kind: "task", taskId: String(row.task_id) }} onClose={moreSheet.close} phone inline />
+          </div>
+        </MobileSheet>
+      )}
+      {moreSheet.sheet === "grid" && state.data.run && (
+        <MobileSheet open closing={moreSheet.closing} onClose={moreSheet.close} title="MATRIX">
+          <div className="pm-sheetbody">
+            <MatrixGrid runId={state.data.run.run_id}
+              onOpenImage={(mid) => { moreSheet.close(); onNavigate(mid); }} />
+          </div>
+        </MobileSheet>
+      )}
+
       <MobileSheet open={simSheetOpen} closing={simClosing} onClose={closeSimSheet} title="◈ SIMILAR">
         <div className="idm-simgrid">
           {similar.images.map((it) => (
