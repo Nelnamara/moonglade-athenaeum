@@ -129,15 +129,6 @@
 
 /* Inspect inside a sheet or the record page: the surface around it already is the card */
 .mgrun-insp.inline { margin: 0; padding: 0; border: 0; background: transparent; }
-/* the record page's ⋯ menu (Details -> ⋯ -> Inspect the request) */
-.mgrun-more { position: relative; display: inline-block; }
-.mgrun-morepop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; min-width: 220px; padding: 6px;
-  border-radius: 10px; border: 1px solid var(--lavender); background: var(--mantle);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, .6); display: flex; flex-direction: column; gap: 3px; }
-.mgrun-morepop button { font: inherit; font-size: 11.5px; text-align: left; padding: 7px 9px; border: 0;
-  border-radius: 7px; background: transparent; color: var(--text); cursor: pointer; }
-.mgrun-morepop button:hover { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
-
 /* the matrix reel's labels wrap to two lines instead of clipping to "kne…"; a cell's { } shows
    on hover or keyboard focus, not on every tile (page M6: the tiles carry nothing but the picture) */
 .mgrun-axis { white-space: normal; line-height: 1.15; max-height: 2.3em; display: -webkit-box;
@@ -145,7 +136,3 @@
 .mgrun-cellinsp, .mgrun-tileinsp { opacity: 0; transition: opacity .15s; }
 .mgrun-cell:hover .mgrun-cellinsp, .mgrun-cellinsp:focus-visible,
 .mgdock-tile:hover .mgrun-tileinsp, .mgrun-tileinsp:focus-visible { opacity: 1; }
-
-/* the row that holds the open ⋯ menu paints above the rows after it (each .p-actions row is its own
-   stacking context while it fades in) */
-.p-actions:has(.mgrun-morepop) { position: relative; z-index: 6; }
