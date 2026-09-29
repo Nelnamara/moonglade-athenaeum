@@ -17,10 +17,7 @@
   background: color-mix(in srgb, var(--gold) 8%, transparent);
 }
 .mgg-pin:hover, .mgg-pin:focus-visible { background: color-mix(in srgb, var(--gold) 14%, transparent); outline: none; }
-.mgg-pin .mgg-glyph { color: var(--gold); }
-.mgg-pin-t { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-.mgg-pin-t b { font-weight: 600; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
-.mgg-pin-t i { font-style: normal; font-family: ui-monospace, Menlo, monospace; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.mgg-pin-t { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 /* .mgg-pin .mgg-x, not .mgg-x: the Loom's header restyles every <button> inside .lv-top. */
 .mgg-pin .mgg-x {
   font: inherit; font-size: 9px; line-height: 1; color: var(--overlay0); background: transparent; border: 0;
@@ -42,7 +39,7 @@
 }
 .mgg-chips.phone .mgg-pin, .mgg-chips.phone .mgg-vigil { height: 24px; font-size: 10.5px; }
 .mgg-chips.phone .mgg-pin { min-width: 0; padding-right: 10px; }
-.mgg-chips.phone .mgg-pin-t b { max-width: 42vw; }
+.mgg-chips.phone .mgg-pin-t { max-width: 56vw; }
 
 /* ---- The Folio's own pieces: the Vigil block, the switch, the Honors card ---- */
 .mgfo-vigilblock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }

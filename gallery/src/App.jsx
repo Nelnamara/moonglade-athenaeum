@@ -378,23 +378,21 @@ export default function App({ boot }) {
      contract -- the drawer now skips the i2v prefill for a midless request,
      so the deep link lands on the Video tab with clean slots
      in the shared video component — the GenerateDock retab owns fixing that. */
-  /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
-     here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
-  useEffect(() => {
-    const fh = readFolioHash(window.location.hash);
-    if (!fh) return;
-    setFolioRow(fh.row);
-    setOverlay("folio");
-    try {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    } catch { /* hash simply stays; harmless */ }
-  }, []);
+  /* ...and "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it
+     crosses here with the request in the address (folio/folioFocus.js). Opened once, then the
+     same single strip below takes the hash off. */
   useEffect(() => {
     const hash = (window.location.hash || "").replace("#", "");
-    if (hash !== "image" && hash !== "edit" && hash !== "video") return;
-    openDock();
-    if (hash === "edit") setGenRequest({ tab: "edit", mid: "", nonce: Math.random() });
-    else if (hash === "video") setGenRequest({ tab: "video", mid: "", nonce: Math.random() });
+    const fh = readFolioHash(window.location.hash);
+    if (!fh && hash !== "image" && hash !== "edit" && hash !== "video") return;
+    if (fh) {
+      setFolioRow(fh.row);
+      setOverlay("folio");
+    } else {
+      openDock();
+      if (hash === "edit") setGenRequest({ tab: "edit", mid: "", nonce: Math.random() });
+      else if (hash === "video") setGenRequest({ tab: "video", mid: "", nonce: Math.random() });
+    }
     try {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     } catch { /* hash simply stays; harmless */ }

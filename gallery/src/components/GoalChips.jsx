@@ -17,15 +17,6 @@ import "../styles/goal-chips.css";
    band). This file draws and forwards clicks. Hidden while a celebration is on screen; renders
    nothing at all when there is neither chip to show. */
 
-function PinGlyph() {
-  return (
-    <svg className="mgg-glyph" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9.5 1.8l4.7 4.7-2 .6-2.3 2.3.4 3-1 1-3-3-3.6 3.6M6.8 5.7l-.6-1.9 1.6-1.6" />
-    </svg>
-  );
-}
-
 function MoonGlyph() {
   return (
     <svg className="mgg-glyph" width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -44,27 +35,35 @@ export function VigilChip({ vigil, className = "" }) {
 
 export function PinChip({ pin, onOpen, onUnpin, phone = false }) {
   const start = useRef(null);
+  const swiped = useRef(false);
   const onKey = (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); }
     else if (phone && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); onUnpin(); }
   };
   // The phone's chip is swiped away: a drag that ends far enough, and mostly sideways, unpins.
-  const down = (e) => { if (phone) start.current = { x: e.clientX, y: e.clientY }; };
+  const down = (e) => {
+    if (!phone) return;
+    start.current = { x: e.clientX, y: e.clientY };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* the drag still ends on the chip */ }
+  };
   const up = (e) => {
     const s = start.current;
     start.current = null;
     if (!s) return;
-    if (swipedAway(e.clientX - s.x, e.clientY - s.y)) { e.preventDefault(); onUnpin(); }
+    if (swipedAway(e.clientX - s.x, e.clientY - s.y)) {
+      swiped.current = true;      // the click that follows a swipe is not a tap on the chip
+      onUnpin();
+    }
   };
+  const tap = () => { if (swiped.current) { swiped.current = false; return; } onOpen(); };
   return (
     <span className={"mgg-pin" + (phone ? " phone" : "")} role="button" tabIndex={0}
       title={"Open in the Folio" + (phone ? " · swipe to unpin" : "")}
       aria-label={pin.text + ". Open in the Folio" + (phone ? ". Swipe sideways to unpin." : ".")}
-      onClick={onOpen} onKeyDown={onKey}
+      onClick={tap} onKeyDown={onKey}
       onPointerDown={down} onPointerUp={up} onPointerCancel={() => { start.current = null; }}>
-      <PinGlyph />
       <MoonGauge fraction={pin.fraction} size={GAUGE_SIZES.phone} bar={false} label={pin.name} />
-      <span className="mgg-pin-t"><b>{pin.name}</b><i>{pin.toGo}</i></span>
+      <span className="mgg-pin-t">{pin.text}</span>
       {!phone && (
         <button type="button" className="mgg-x" title="Unpin" aria-label={"Unpin " + pin.name}
           onClick={(e) => { e.stopPropagation(); onUnpin(); }}>{"✕"}</button>
