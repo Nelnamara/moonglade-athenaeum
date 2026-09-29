@@ -16,6 +16,8 @@ import {
   collectSpendMids, tallySpend, formatSpend, spendTooltip, spendPillShown, makeLatestOnly,
   cardsToResume,
   shotPayload as buildShotPayload,
+  // Session P, Stage B1: a new shot's default fields (newCard below wraps it with uid()).
+  newCardShape,
 } from "./src/loom-core.js";
 // Pure project-tree mutators + response-shape classifiers (Phase 2, composed-
 // hooks extraction pass, 2026-07-16) -- same discipline as loom-core.js
@@ -64,20 +66,23 @@ import {
   anchorInfo, staleText, needsNewTake, reanchorPatch, keepAnchor as keepAnchorPatch,
 } from "./src/loom-takes-core.js";
 import { makeSaveQueue } from "./src/loom-store-core.js";
-// Session P, Stage B1 (NOTES P3, P4): the music bed's rules and timing and the editor handoff
-// plan -- pure modules, no React, no DOM, no fetch
+// Session P, Stage B1 (NOTES P3, P4, P5): the music bed's rules and timing, the editor handoff
+// plan, and a collection as ordered shots -- pure modules, no React, no DOM, no fetch
 // (loom-no-auto-render.test.js pins that none of them can reach a render).
 import {
   BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
   cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
 } from "./src/loom-bed-core.js";
 import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
+import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELECTION } from "./src/loom-shots-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
 import {
   readBoardId, buildLoomUrl,
   LOOM_VIEW_KEY, readStoredView, resolveLoomView,
+  // Session P, P5: the "as shots, in order" hand-off's meta and ruling 10's one cap.
+  SHOTS_HANDOFF_CAP, readShotsMeta,
 } from "./src/loom-url.js";
 // The crossing's memory, library side: where the library was when it handed over, so
 // "← Gallery" gives it back. Shared module, imported straight out of the library's own
@@ -421,7 +426,6 @@ const fmt = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s
 // Module scope (not a local inside useGenerationPipeline) because both pollShot (inside that
 // hook) and onVideoSlow/onVideoPaused (inside App(), a different function entirely) need it.
 const elapsedLabel = (ms) => ms < 3600000 ? Math.round(ms / 60000) + "m" : (Math.round(ms / 360000) / 10) + "h";
-const emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
 // WHICH SKIN OF THE LOOM TO SHOW -- the "📱 Mobile view" / "🖥 Desktop" pair.
 //
 // A per-browser UI-chrome preference, backed by localStorage -- NOT window.storage (the
@@ -596,26 +600,10 @@ function fileToThumb(file, maxDim = 480, q = 0.72) {
   });
 }
 
+// The default fields live in loom-core.js's newCardShape (Session P, Stage B1), the one shape
+// the pure collection -> shots builder (loom-shots-core.js) also makes; the id stays here.
 function newCard(extra = {}) {
-  return {
-    id: uid(), title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
-    prompt: "", openFrame: emptyFrame(), closeFrame: emptyFrame(),
-    cast: [], refs: [], camera: "", lighting: "", audioCue: "",
-    // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
-    // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
-    // ("ambient room tone") that only ever influences wording, never the real generateAudio/
-    // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
-    // had it reverse-engineered but never wired to a control): the server already accepts
-    // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
-    audioGen: false, audioLanguage: "english",
-    transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null,
-    // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
-    // prompt box, durable across shot reselect/reload. When set, shotText() returns
-    // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
-    // see loom-core.js's shotText() and effectivePrompt().
-    promptOverride: false, promptOverrideText: "",
-    ...extra,
-  };
+  return newCardShape(uid(), extra);
 }
 function seedProject() {
   return {
@@ -2341,7 +2329,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                         return <>
                           {unsendable ? (
                             <span className="lv-st warn" title="This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.">
-                              imported picture — can't be sent yet
+                              imported picture — can't be sent to PixAI yet
                             </span>
                           ) : null}
                           {miss.length ? (
@@ -6445,6 +6433,7 @@ function useProjectStore(setSelShot) {
   const [loadError, setLoadError] = useState("");
   const saveTimer = useRef(null);
   const castImported = useRef(false);
+  const shotsImported = useRef(false);     // the "as shots" hand-off is read once (Session P, P5)
 
   /* THE CURRENT BOARD, READABLE SYNCHRONOUSLY (Session P, BUILD-w5-p §3.3). The render latch
      reads the card it is about to lock from here, never from a render's closure, and the lock
@@ -6817,6 +6806,61 @@ function useProjectStore(setSelShot) {
     history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
   };
   useEffect(() => { adoptCastHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Gallery -> SHOTS (Session P, P5; BUILD-w5-p §5.3; rulings 9 and 10; review N4):
+     /loom?shots=<ids in order>&from=<collection>&n=<nonce>, from "▮ Send to The Loom · as
+     shots, in order". Read ONCE and cleared through the builder like ?cast=. The ids ride the
+     cast hand-off's own sanitiser and grammar; more than SHOTS_HANDOFF_CAP is refused, never
+     cut; a link on another site cannot change a board silently -- ONE confirm names the
+     collection and the count before anything is appended; an act already carrying this nonce
+     (a reload, a second tab) is never added twice. Titles come from a read-only local lookup of
+     those ids' catalog rows. NOTHING is priced or rendered: the new shots are unrendered cards
+     waiting for the owner's own Render. A named function the effect calls, so the
+     never-auto-render test can root it. */
+  const adoptShotsHandoff = async (project) => {
+    if (!project || shotsImported.current) return;
+    if (!/[?&]shots=/.test(location.search)) return;
+    shotsImported.current = true;
+    const ids = Array.from(new Set(parseCastIdsFromSearch(location.search, "shots").filter(isCatalogMediaId)));
+    const { from, nonce } = readShotsMeta(location.search);
+    history.replaceState(null, "", buildLoomUrl({ shots: null, from: null, n: null }, location.search, location.pathname));
+    const say = (title, msg, kind) => { if (window.Toast) window.Toast.show({ kind: kind || "err", title, msg }); };
+    if (!ids.length) { say("Nothing to add", "That link named no pictures this library can use. Nothing was added."); return; }
+    if (ids.length > SHOTS_HANDOFF_CAP) {
+      say("Too many pictures for one send", "That link carries " + ids.length + " pictures; the Loom takes at most "
+        + SHOTS_HANDOFF_CAP + " at once as shots. Nothing was added.");
+      return;
+    }
+    const name = from || FROM_SELECTION;
+    if (nonce && hasShotsAct(projectRef.current, nonce)) return;     // already here: a reload, a second tab
+    // What those pictures are: their prompts (for the titles), and which are videos (a video
+    // never becomes an open frame -- the gallery leaves them out too). A read of the local
+    // catalog only; a failed read just means untitled shots.
+    const facts = {};
+    try {
+      const r = await fetch("/api/loom/prompts?ids=" + encodeURIComponent(ids.join(",")));
+      const d = await r.json();
+      ((d && d.pictures) || []).forEach((x) => { facts[String(x.media_id)] = x; });
+    } catch (e) { /* titles fall back to "Picture N" */ }
+    const pics = ids.filter((id) => !(facts[id] && facts[id].is_video));
+    if (!pics.length) { say("Nothing to add", "Only pictures become shots, and that link named none. Nothing was added."); return; }
+    const open = projectRef.current;
+    const actName = shotsActName(((open && open.acts) || []).length + 1, name);
+    // ONE line (review N4): what is added, from which collection, how many, to which board.
+    if (!window.confirm("Add “" + actName + "” (" + pics.length + " image-to-video shot" + (pics.length === 1 ? "" : "s")
+      + " from “" + name + "”, in order) to “" + ((open && open.name) || "this storyboard") + "”? Nothing is rendered.")) return;
+    let added = false;
+    setProject((p) => {
+      if (!p) return p;
+      const act = shotsFromPictures(pics.map((id) => ({ id, prompt: (facts[id] && facts[id].prompt) || "" })),
+        { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid() });
+      const res = appendShotsAct(p, act);
+      added = res.added;
+      return res.project;
+    });
+    if (added) say("Added " + actName, pics.length + " shot" + (pics.length === 1 ? "" : "s") + ", nothing rendered yet.", "ok");
+  };
+  useEffect(() => { adoptShotsHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* The 600 ms autosave (Session P, BUILD-w5-p §1.2 / §3.5). It writes ONLY when the board
      differs from the text last read or written for it, so opening, switching, duplicating,

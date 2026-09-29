@@ -996,6 +996,13 @@ describe("Filter compare: genuine persistence onto the real shot/card data (no f
     assert.ok(newCardMatch, "expected to find newCard()");
     assert.doesNotMatch(newCardMatch[0], /\bfilter\b|\bfilterStrength\b|\bfilterAngle\b/,
       "filter/filterStrength/filterAngle must stay optional card fields (read with a fallback), not required base-shape fields");
+    // Session P, Stage B1: newCard() wraps loom-core.js's newCardShape, where the default
+    // fields now live -- so the same check runs over them there.
+    const coreSrc = readFileSync(path.join(__dirname, "../src/loom-core.js"), "utf8").replace(/\r\n/g, "\n");
+    const shapeMatch = coreSrc.match(/export const newCardShape = \(id, extra = \{\}\) => \(\{[\s\S]*?\n\}\);/);
+    assert.ok(shapeMatch, "expected to find loom-core.js's newCardShape()");
+    assert.doesNotMatch(shapeMatch[0].replace(/\/\/.*$/gm, ""), /\bfilter\b|\bfilterStrength\b|\bfilterAngle\b/,
+      "filter/filterStrength/filterAngle must stay optional card fields (read with a fallback), not required base-shape fields");
   });
 
   test("Save genuinely writes filter/filterStrength/filterAngle onto the real card via dfPatch (the same setCard mutation every other Shot Detail/Generate field already uses) -- no new endpoint, no network call", () => {

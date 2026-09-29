@@ -118,6 +118,33 @@ export const continuityLinked = (entries, entryId) => {
 // most neutral default) rather than crashing shotText/export/render.
 export const connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
 
+// ---------- a new shot's shape ----------
+
+// Every default field a shot card carries, in ONE place (Session P, Stage B1: moved here from
+// master-storyboard.jsx's newCard(), which now calls this with uid(), so the pure
+// collection -> shots builder (loom-shots-core.js) makes cards of exactly the same shape).
+// The id is an ARGUMENT: generating it is a side effect that stays in the caller.
+export const emptyFrameShape = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+export const newCardShape = (id, extra = {}) => ({
+  id, title: "", status: "todo", mode: "I2V", duration: 8, connect: "cut",
+  prompt: "", openFrame: emptyFrameShape(), closeFrame: emptyFrameShape(),
+  cast: [], refs: [], camera: "", lighting: "", audioCue: "",
+  // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
+  // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
+  // ("ambient room tone") that only ever influences wording, never the real generateAudio/
+  // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
+  // had it reverse-engineered but never wired to a control): the server already accepts
+  // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
+  audioGen: false, audioLanguage: "english",
+  transIn: "", transOut: "", notes: "", discreet: false, trimIn: 0, trimOut: null,
+  // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
+  // prompt box, durable across shot reselect/reload. When set, shotText() returns
+  // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
+  // see shotText() and effectivePrompt() below.
+  promptOverride: false, promptOverrideText: "",
+  ...extra,
+});
+
 // ---------- board flattening + shot-text assembly ----------
 
 export const flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}·${String(ci + 1).padStart(2, "0")}` })));

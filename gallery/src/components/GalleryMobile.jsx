@@ -476,6 +476,7 @@ export default function GalleryMobile({
           <ActionsMenu
             ids={selIds}
             shelf={shelf}
+            collection={shelf}
             isTrueLocal={boot.is_true_local}
             clearSelection={() => { setSelected(new Set()); closeSheet(); }}
             onMutated={refreshCollections}

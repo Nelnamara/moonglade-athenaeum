@@ -374,6 +374,16 @@ describe("parseCastIdsFromSearch", () => {
     assert.deepEqual(parseCastIdsFromSearch(""), []);
     assert.deepEqual(parseCastIdsFromSearch(undefined), []);
   });
+  // Session P, Stage B1: the links the gallery really builds encode the commas.
+  test("an encoded list (%2C, as encodeURIComponent and URLSearchParams send it) reads as the ids, in order", () => {
+    assert.deepEqual(parseCastIdsFromSearch("?cast=" + encodeURIComponent("12,34,local_a1b2c3d4e5f6")),
+      ["12", "34", "local_a1b2c3d4e5f6"]);
+    assert.deepEqual(parseCastIdsFromSearch("?cast=%E0%A4%A,12"), ["12"], "a malformed escape is kept raw: its token is refused, the rest read");
+  });
+  test("the key names which list: ?shots= (P5) through the very same sanitiser", () => {
+    assert.deepEqual(parseCastIdsFromSearch("?cast=1&shots=" + encodeURIComponent("3,2,../x"), "shots"), ["3", "2"]);
+    assert.deepEqual(parseCastIdsFromSearch("?shots=3,2"), [], "the default is still cast");
+  });
 });
 
 /* ---------- friendlyGenErr / classifyTaskStatus ---------- */

@@ -5,12 +5,12 @@ import { dropIndex, orderNote } from "../curation/collectionOrderCore.js";
 import "../styles/curation.css";
 import "../styles/collection-order.css";
 
-/* THE ORDER EDITOR, phone (Session P, P6; the page's Phone line: "on N2's Collections
+/* THE ORDER EDITOR, phone (Session P, P6 + P5; the page's Phone line: "on N2's Collections
    screen, long-press a picture to drag it"). Shown IN the Collections screen, in place of the
    list, for one hand-picked collection -- the screen's own sub-view, back with ‹ Collections.
    LONG-PRESS a row to pick it up, drag it, let go to drop it; the tap twin (▲ ▼, the app's phone
-   is tap-first) does the same one step at a time. Save writes the order once. Local catalog
-   only. */
+   is tap-first) does the same one step at a time. Save writes the order once; the two Loom sends
+   sit under it as on the page's panel. Local catalog only; nothing is rendered. */
 const HOLD_MS = 420;          // how long a press is before it picks the row up
 const SLOP = 8;               // px of movement before the hold that makes it a scroll instead
 
@@ -105,6 +105,12 @@ export default function CollectionOrderMobile({ name, csrf, onBack }) {
         <div className={"mgco-note" + (o.msg.err ? " err" : "")}>{o.msg.text ? "" : note}</div>
         <button type="button" className={"mgcu-btn" + (o.dirty ? " primary" : "")} disabled={!o.dirty || o.busy}
           onClick={o.save}>Save order</button>
+      </div>
+      <div className="mgco-sends">
+        <button type="button" className="mgco-send primary" disabled={o.busy || !list.length} onClick={o.sendShots}>
+          {"▮ Send to The Loom · as shots, in order"}</button>
+        <button type="button" className="mgco-send" disabled={o.busy || !list.length} onClick={o.sendCast}>
+          {"▮ Send to The Loom · as cast"}</button>
       </div>
     </div>
   );

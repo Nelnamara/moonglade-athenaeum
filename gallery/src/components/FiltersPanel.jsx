@@ -430,6 +430,8 @@ export function LibraryBar({
           shelf={curation && curation.smartShelf ? "" : shelf}
           isTrueLocal={boot.is_true_local}
           onSendCast={actions && actions.sendCast}
+          onSendShots={actions && actions.sendShots}
+          collection={shelf}
           onPrintSheet={actions && actions.printSheet}
           onDownloadZip={actions && actions.downloadZip}
           clearSelection={clearSelection}

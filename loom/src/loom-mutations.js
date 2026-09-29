@@ -333,12 +333,23 @@ export const countShots = (project) => (project.acts || []).reduce((n, a) => n +
 // ---------- misc pure parsing ----------
 
 // Gallery -> cast handoff: /loom?cast=id1,id2 query-string parsing, split out
-// of the effect so it's testable without a real `location` object.
-export const parseCastIdsFromSearch = (search) =>
+// of the effect so it's testable without a real `location` object. `key` (Session P, P5)
+// reads the "as shots, in order" hand-off's ?shots= through the very same sanitiser.
+//
+// The VALUE is decoded before it is split: the gallery builds these links with
+// encodeURIComponent / URLSearchParams, which send the separating commas as %2C -- split on
+// the raw text, "12%2C34" was one token that decoded to "12,34" and the sanitiser below then
+// dropped it, so a hand-off of two or more pictures arrived empty. A malformed escape leaves
+// the value as it came (the sanitiser still refuses anything unsafe in it).
+export const parseCastIdsFromSearch = (search, key = "cast") =>
   (search || "").replace(/^\?/, "")
-    .split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast")
-    .flatMap(([, v]) => (v || "").split(","))
-    .map((s) => decodeURIComponent(s).trim())
+    .split("&").map((kv) => kv.split("=")).filter(([k]) => k === key)
+    .flatMap(([, v]) => {
+      let s = v || "";
+      try { s = decodeURIComponent(s); } catch (e) { /* malformed: keep it raw */ }
+      return s.split(",");
+    })
+    .map((s) => s.trim())
     // A SANITISER, not an id-grammar check: reject anything that could escape a URL or a
     // path (slashes, quotes, angle brackets, spaces), and leave "is this a real media_id"
     // to the catalog. The old /^\d+$/ encoded "media_ids are digits", which silently

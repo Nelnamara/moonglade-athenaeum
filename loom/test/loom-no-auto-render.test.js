@@ -380,8 +380,8 @@ const lineOfDef = (m, name) => m.byName.has(name) ? m.byName.get(name).map((d) =
    THE ROOTS -- every code path that must never start a render. Each must be found by name.
    Session P, Stage A2 roots: the takes and re-anchor handlers, and every import / copy /
    open / resume / playback path that exists today.
-   LATER STAGES APPEND THEIRS HERE when they create them (Stage B1/B2): adoptShotsHandoff,
-   runFind, stepFind, clearFind, toggleCastTick, editLibraryMember.
+   LATER STAGES APPEND THEIRS HERE when they create them (Stage B2): runFind, stepFind,
+   clearFind, toggleCastTick, editLibraryMember.
    ====================================================================================== */
 const ROOTS = [
   // P1 / P2 -- the takes strip, the take list and the stale-anchor box
@@ -398,6 +398,8 @@ const ROOTS = [
   "pickBed", "setBedLevel", "removeBed", "sweepUnusedBeds",
   // Stage B1 -- P4, the editor handoff: the EDL panel's plan and its zip download.
   "openEdl", "exportEdl",
+  // Stage B1 -- P5, a collection as ordered shots: the /loom?shots= hand-off.
+  "adoptShotsHandoff",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -634,6 +636,8 @@ describe("the pure modules can reach nothing", () => {
     // Stage B1: the EDL plan reads the ★ take through loom-takes-core.js's selectedTakeView
     // (review F9) and the board through loom-core.js -- exactly those two (BUILD-w5-p §4).
     ["src/loom-edl-core.js", ["./loom-core.js", "./loom-takes-core.js"]],
+    // the collection -> shots builder: loom-core.js's newCardShape only
+    ["src/loom-shots-core.js", ["./loom-core.js"]],
     // the music bed's rules and timing: the ★ take's settings, for "own audio"
     ["src/loom-bed-core.js", ["./loom-takes-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {

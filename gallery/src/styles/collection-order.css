@@ -1,10 +1,12 @@
 /* ============================================================================
-   mgco -- Manual order in a hand-picked collection (Session P, P6, wave 5).
+   mgco -- Manual order in a hand-picked collection, and "Send to The Loom" from it
+   (Session P, P6 + P5, wave 5).
 
    Source of truth: Loom Handoff.dc.html (moonglade-internal/design/handoff-2026-09-04), section
    A's "❖ LOOM STILLS · MANUAL ORDER" panel -- its caption (9px, 700, .1em, --overlay0), its rows
    (index 10px mono --overlay0 in 14px, a 34x24 thumbnail radius 4, the name 10.5px --subtext, the
-   ▲ ▼ outline chips). The page's stand-in hexes are the app's tokens. What the page does not draw (Save, the
+   ▲ ▼ outline chips), and its two sends ("as shots, in order" lavender primary, "as cast"
+   outline). The page's stand-in hexes are the app's tokens. What the page does not draw (Save, the
    status line, the drag's lift) keeps to the curation manager's own pieces (.mgcu-btn, its note).
 
    Z: none of its own. On the desktop the editor rides the collections manager's layer
@@ -38,6 +40,13 @@
 .mgco-foot { display: flex; align-items: center; gap: 8px; padding-top: 2px; }
 .mgco-note { flex: 1; min-width: 0; font-size: 10px; color: var(--overlay0); }
 .mgco-note.err { color: var(--peach); }
+.mgco-sends { display: flex; flex-direction: column; gap: 5px; padding-top: 4px; }
+.mgco-send { font-family: inherit; font-size: 10.5px; padding: 6px 10px; border-radius: 8px; text-align: center; cursor: pointer;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgco-send:hover:not(:disabled) { color: var(--text); border-color: var(--lavender); }
+.mgco-send.primary { font-weight: 700; padding: 7px 10px; background: var(--lavender); border-color: var(--lavender); color: var(--base); }
+.mgco-send.primary:hover:not(:disabled) { color: var(--base); filter: brightness(1.08); }
+.mgco-send:disabled { cursor: not-allowed; opacity: .55; }
 
 /* the manager's row slot: the small "Order" control (hand-picked rows only) */
 .mgco-slotbtn { font-family: inherit; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 6px; cursor: pointer;
@@ -60,7 +69,7 @@
 .mgco-m-row .mgco-thumb { width: 48px; height: 34px; border-radius: 6px; }
 .mgco-m-row .mgco-name { font-size: 12px; }
 .mgco-m-row .mgco-mv { min-width: 40px; min-height: 40px; font-size: 12px; }
-.mgco-m .mgcu-btn { min-height: 44px; font-size: 12px; }
+.mgco-m .mgcu-btn, .mgco-m .mgco-send { min-height: 44px; font-size: 12px; }
 .mgcm-slot .mgco-slotbtn { min-height: 36px; padding: 0 10px; font-size: 11px; }
 
 @media (prefers-reduced-motion: reduce) {

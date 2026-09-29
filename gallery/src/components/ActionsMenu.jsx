@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from
 import { createPortal } from "react-dom";
 import { apiPost, deletePreview, downloadZipForm, resolveVideoIds } from "../api.js";
 import { cloudDeleteCounts } from "../lib/cloudDeleteCounts.js";
+import { planShotsSend } from "../curation/loomSend.js";
 import "../styles/librarybar.css";
 
 /* The bulk Actions menu, refit per the Frontend Gallery DC (drift §10):
@@ -34,9 +35,12 @@ import "../styles/librarybar.css";
 
    Prop contract:
      ids, shelf, isTrueLocal            — as before.
-     onSendCast / onPrintSheet /
-     onDownloadZip                      — optional; local fallbacks exist so the
+     onSendCast / onSendShots /
+     onPrintSheet / onDownloadZip       — optional; local fallbacks exist so the
                                           component also works standalone.
+     collection                         — Session P (P5): the collection the gallery is
+                                          showing (hand-picked OR smart), whose order "as
+                                          shots, in order" follows; "" for none.
      onSendVideo                        — optional; absent = the item shows
                                           disabled (the GenerateDock retab owns
                                           the bulk→video prefill contract).
@@ -228,8 +232,8 @@ function CloudDeleteModal({ data, ids, onCancel, onProceed }) {
 
 export default function ActionsMenu({
   ids, shelf, isTrueLocal,
-  onSendCast, onPrintSheet, onDownloadZip, onSendVideo,
-  onMutated, clearSelection,
+  onSendCast, onSendShots, onPrintSheet, onDownloadZip, onSendVideo,
+  onMutated, clearSelection, collection,
 }) {
   const count = ids.length;
   const [open, setOpen] = useState(false);
@@ -422,6 +426,16 @@ export default function ActionsMenu({
     if (clearSelection) clearSelection(); // the selection is consumed into the cast
     window.location.href = "/loom?cast=" + encodeURIComponent(keep.join(","));
   });
+  /* Session P (P5): "as shots, in order" -- the selection in the order of the collection the
+     gallery is showing (or oldest first), videos left out, refused past the cap with a message
+     naming it. It only navigates; the Loom asks once before it adds the act, and renders
+     nothing. */
+  const sendShots = onSendShots || (async () => {
+    const r = await planShotsSend({ ids, collection: collection || "" });
+    if (!r.ok) { toastErr("Not sent to The Loom", r.error); return; }
+    if (clearSelection) clearSelection();
+    window.location.href = r.href;
+  });
 
   const item = (label, fn, opts = {}) => (
     <button
@@ -474,7 +488,12 @@ export default function ActionsMenu({
               { disabled: !onSendVideo,
                 title: onSendVideo ? "Load the selection into the Video tab"
                   : "Ports with the GenerateDock retab — the shared drawer has no bulk video prefill yet" })}
-            {item("▮ Send to The Loom (cast)", sendCast)}
+            {/* Session P (P5): the two choices -- today's cast hand-off, and a new act of
+                shots in the collection's order. */}
+            {item("▮ Send to The Loom · as cast", sendCast,
+              { title: "Today's hand-off: the pictures join the Loom's cast as @image references" })}
+            {item("▮ Send to The Loom · as shots, in order", sendShots,
+              { title: "A new act of image-to-video shots, one per picture, in order. Nothing is rendered." })}
             {item("⎙ Print sheet", printSheet)}
             {item("⬇ Download ZIP", downloadZip)}
             {item("Find / replace in prompts", replacePrompt)}

@@ -22,6 +22,7 @@ import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import CollectionsManager from "./components/CollectionsManager.jsx";
 import CollectionOrderEditor from "./components/CollectionOrderEditor.jsx";
+import { planShotsSend } from "./curation/loomSend.js";
 import CurationBar from "./components/CurationBar.jsx";
 import CurateToast from "./components/CurateToast.jsx";
 import SmartStrip from "./components/SmartStrip.jsx";
@@ -814,6 +815,15 @@ export default function App({ boot }) {
       if (!keep.length) return;
       setSelected(new Set()); // selection is consumed into the Loom cast
       window.location.href = "/loom?cast=" + encodeURIComponent(keep.join(","));
+    },
+    // Session P (P5): "as shots, in order" -- the selection in the order of the collection in
+    // view (a hand-picked one's manual order; a smart one's matches, oldest first), else oldest
+    // first; videos left out; past the cap, refused with the cap named. Navigation only.
+    sendShots: async () => {
+      const r = await planShotsSend({ ids: selIds, collection: shelf || "" });
+      if (!r.ok) { if (window.Toast) window.Toast.show({ kind: "err", title: "Not sent to The Loom", msg: r.error }); else window.alert(r.error); return; }
+      setSelected(new Set());
+      window.location.href = r.href;
     },
     // Native React overlay + native print (window.print(), scoped by @media
     // print) -- NOT a hand-off to the classic /contact-sheet page. That route

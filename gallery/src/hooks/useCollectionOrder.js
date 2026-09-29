@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchCollectionOrder, fetchPictureFacts, saveCollectionOrder } from "../api.js";
 import { moveBy, moveItem, orderChanged } from "../curation/collectionOrderCore.js";
+import { planCastSend, planShotsSend } from "../curation/loomSend.js";
 
-/* THE ORDER EDITOR'S STATE (Session P, P6) -- shared by the desktop panel
+/* THE ORDER EDITOR'S STATE (Session P, P6 + P5) -- shared by the desktop panel
    (CollectionOrderEditor) and the phone sheet (CollectionOrderMobile). It READS the collection's
    order on open (GET /api/collections/order: nothing is written by opening it), keeps the owner's
-   moves locally, and writes once, on Save (POST, the session's CSRF token). */
+   moves locally, and writes once, on Save (POST, the session's CSRF token). The two Loom sends
+   navigate away with the order as it is on screen; neither prices or renders anything. */
 export default function useCollectionOrder(name, csrf) {
   const [ids, setIds] = useState(null);          // the order on screen
   const [saved, setSaved] = useState([]);        // the order as the server holds it
@@ -38,7 +40,17 @@ export default function useCollectionOrder(name, csrf) {
     setIds(d.media_ids); setSaved(d.media_ids); setManual(!!d.manual);
     setMsg({ text: "Order saved.", err: false });
   };
-  return { ids, facts, manual, dirty, busy, msg, move, nudge, save };
+  const go = async (plan) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await plan();
+    setBusy(false);
+    if (!r.ok) { setMsg({ text: r.error, err: true }); return; }
+    window.location.href = r.href;
+  };
+  const sendShots = () => go(() => planShotsSend({ ids: ids || [], collection: name, ordered: ids || [] }));
+  const sendCast = () => go(() => planCastSend(ids || []));
+  return { ids, facts, manual, dirty, busy, msg, move, nudge, save, sendShots, sendCast };
 }
 
 /** A row's label: the picture's prompt, first line, cut short; else its id. */

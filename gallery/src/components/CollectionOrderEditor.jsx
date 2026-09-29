@@ -5,18 +5,19 @@ import { orderNote } from "../curation/collectionOrderCore.js";
 import "../styles/curation.css";
 import "../styles/collection-order.css";
 
-/* THE ORDER EDITOR, desktop (Session P, P6; Loom Handoff.dc.html section A's
+/* THE ORDER EDITOR, desktop (Session P, P6 + P5; Loom Handoff.dc.html section A's
    "LOOM STILLS · MANUAL ORDER" panel -- its "P6 + P5 ·" label prefix is the page's own
    annotation and is not drawn, and the page's collection mark is the gallery's own collection
    icon here: the glyph ledger keeps that one character for the Folio's skin flag alone). A hand-picked collection's pictures as numbered rows: index,
    thumbnail, name, ▲ ▼. On desktop the rows DRAG (the page's ▲ ▼ "stand in for the drag"); the
    ▲ ▼ buttons stay, and so does the keyboard (a row focused: ↑ ↓ move between rows, Alt+↑ /
-   Alt+↓ move the row). Save writes the order once.
+   Alt+↓ move the row). Save writes the order once. Under it, P5's two sends exactly as the page's
+   panel has them: "as shots, in order" (lavender, primary) and "as cast" (outline).
 
    Opened from the collections manager's row slot (renderRowSlot, "Order") and from the
    collection view's Manual sort. It rides the manager's own layer (.mgcu-scrim / .mgcu-mgr,
    drawn after it, so it sits on top of it) -- no new z-index rung. Local catalog only: nothing
-   here reaches PixAI. */
+   here reaches PixAI, and neither send renders anything. */
 export default function CollectionOrderEditor({ name, csrf, onClose }) {
   const o = useCollectionOrder(name, csrf);
   const [over, setOver] = useState(-1);
@@ -81,6 +82,14 @@ export default function CollectionOrderEditor({ name, csrf, onClose }) {
           <div className={"mgco-note" + (o.msg.err ? " err" : "")} role="status">{note}</div>
           <button type="button" className={"mgcu-btn" + (o.dirty ? " primary" : "")} disabled={!o.dirty || o.busy}
             onClick={o.save}>Save order</button>
+        </div>
+        <div className="mgco-sends">
+          <button type="button" className="mgco-send primary" disabled={o.busy || !list.length} onClick={o.sendShots}
+            title="A new act of image-to-video shots, one per picture, in this order. Nothing is rendered.">
+            {"▮ Send to The Loom · as shots, in order"}</button>
+          <button type="button" className="mgco-send" disabled={o.busy || !list.length} onClick={o.sendCast}
+            title="Today's hand-off: the pictures join the Loom's cast as @image references">
+            {"▮ Send to The Loom · as cast"}</button>
         </div>
       </div>
     </>
