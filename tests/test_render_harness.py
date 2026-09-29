@@ -6298,3 +6298,692 @@ def test_the_dock_reel_draws_a_matrix_run_as_readable_aspect_true_tiles(
         assert page.evaluate("() => getComputedStyle(document.querySelector('.mgrun-cell.done .mgrun-cellinsp')).opacity") == "1"
     finally:
         fx.undo()
+
+
+# ---------------------------------------------------------------------------
+# Session Q, "The phone" (Phone Handoff.dc.html, Q1 / Q2 / Q3 / Q5 / Q6 / Q7): the placard, Remix and
+# Send to Video, the reading feed, "new since", pull to refresh and Data saver, on a real phone-sized
+# page against the real app. PixAI is never reached: every route that could go near it (the model and
+# task reads a remix makes, the price quote a prefill triggers, the Sync now job a pull starts) is
+# answered in the page, and each test that could spend asserts the generation POSTs stayed empty.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def phone_q_server(tmp_path_factory, monkeypatch):
+    """An already-onboarded install with a library the phone's Session Q pieces can be measured on:
+    30 pictures with real thumbnails and files, rows 0-3 one batch of four (task 9001), row 4 alone,
+    row 6 a clip, newest first at 37-minute gaps. Its own server, like paged_library_server (function
+    scope, so conftest's per-test branding isolation is already in force)."""
+    import datetime as _dt
+    import logging
+    from types import SimpleNamespace
+
+    from PIL import Image
+    from werkzeug.serving import make_server
+
+    from tests.conftest import pin_daytime_clock
+
+    wz_log = logging.getLogger("werkzeug")
+    wz_level = wz_log.level
+    wz_log.setLevel(logging.ERROR)
+
+    root = tmp_path_factory.mktemp("render-harness-phone-q")
+    config_path = root / "config.json"
+    monkeypatch.setenv("MOONGLADE_DISABLE_WATCH", "1")
+    monkeypatch.setattr(core, "_config_path", lambda: config_path)
+    monkeypatch.setattr(core, "_cfg", {})
+    pin_daytime_clock(monkeypatch)
+    (root / "gallery" / "thumbs").mkdir(parents=True, exist_ok=True)
+    shapes = [(832, 1216), (1216, 832), (1024, 1024)]
+    base = _dt.datetime(2026, 9, 28, 20, 0, 0)
+    rows = []
+    for i in range(30):
+        w, h = shapes[i % 3]
+        mid = str(500 + i)
+        video = i == 6
+        img = Image.new("RGB", (w, h), (60 + i * 5, 60, 140))
+        img.save(root / ("q_%d.png" % i))
+        th = img.copy()
+        th.thumbnail((768, 768))
+        th.save(root / "gallery" / "thumbs" / (mid + ".jpg"), "JPEG")
+        task = "9001" if i < 4 else "9002" if i == 4 else str(9100 + i)
+        rows.append({f: "" for f in CATALOG_FIELDS} | {
+            "media_id": mid, "filename": ("q_%d.mp4" if video else "q_%d.png") % i,
+            "is_video": "1" if video else "", "task_id": task,
+            "prompt_preview": "moonwell, night market %d" % i,
+            "prompt_full": "moonwell, night market %d, soft rim light, {moonlit}" % i,
+            "negative_prompt": "lowres", "rating": str(3 + (i % 3)),
+            "width": str(w), "height": str(h), "model_id": "4242", "model_name": "Probe Model",
+            "seed": str(1000 + i), "steps": "28", "cfg_scale": "6",
+            "created_at": (base - _dt.timedelta(minutes=37 * i)).strftime("%Y-%m-%dT%H:%M:%S.000Z")})
+    save_catalog(root / "catalog.db", rows)
+    core.add_or_update_web_user(_USERNAME, _PASSWORD)
+    cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
+    cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
+    config_path.write_text(json.dumps(cfg))
+    _seed_guide_seen(root)
+    _telem = load_telemetry(root)
+    _metrics = achievement_metrics(root / "catalog.db")
+    _metrics.update(telemetry_metrics(root))
+    _ach = compute_achievements(_metrics, sets=_telem.get("sets", {}))
+    _today = _dt.date.today().isoformat()
+    _earned = [a["id"] for a in _ach["achievements"] if a["earned"]]
+    save_ach_state(root, {"seen": _earned, "earned_at": {i: _today for i in _earned}})
+
+    server = make_server("127.0.0.1", 0, create_app(root), threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="render-harness-phone-q")
+    thread.start()
+    try:
+        yield SimpleNamespace(base_url="http://127.0.0.1:%d" % server.server_port,
+                              config_path=config_path, root=root, newest_mid="500")
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        wz_log.setLevel(wz_level)
+
+
+# A recorder for localStorage writes, installed BEFORE the app boots so "nothing writes on open" is
+# measured from the first script on. Reads are not recorded (they cannot write).
+_Q_WRITES_JS = """
+window.__qWrites = [];
+const _setItem = Storage.prototype.setItem;
+Storage.prototype.setItem = function (k, v) { try { window.__qWrites.push(String(k)); } catch (e) {} return _setItem.call(this, k, v); };
+"""
+
+
+def _q_json(route, payload, status=200):
+    route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True):
+    """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
+    collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
+    unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
+    monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
+    opts = {"has_touch": True, "is_mobile": True} if touch else {}
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]}, device_scale_factor=1,
+        base_url=server.base_url, timezone_id="UTC", **opts)
+    ctx.set_default_timeout(10_000)
+    ctx.add_init_script(_Q_WRITES_JS)
+    if connection:                        # a dict: this browser reports a connection of that kind
+        ctx.add_init_script("Object.defineProperty(navigator, 'connection', {configurable: true, value: %s});"
+                            % json.dumps(connection))
+    elif connection is False:             # this browser has no Network Information API (iPhone)
+        ctx.add_init_script("Object.defineProperty(navigator, 'connection', {configurable: true, value: undefined});")
+    if init:
+        ctx.add_init_script(init)
+    page = ctx.new_page()
+    seen = []
+    page.on("request", lambda rq: seen.append((rq.method, rq.url)))
+    _login(page)
+    page.route("**/api/model-version*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+    page.route("**/api/task-params/*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+    page.route("**/api/video-task-params/*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+    page.route("**/api/price*", lambda r: _q_json(r, {"error": "the harness has no PixAI"}))
+    return ctx, page, seen
+
+
+def _q_open(page):
+    _visit(page, "/")
+    page.wait_for_selector(".glm-tile")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+
+
+def _q_generation_posts(seen):
+    return [u for (m, u) in seen if m == "POST" and (
+        "/api/generate" in u or "/api/task-status" in u or "/api/jobs" in u or "/api/panel/run" in u)]
+
+
+def _q_touch_drag(page, x, y0, y1, steps=10):
+    """A real touch drag through the browser's own input pipeline (CDP), so the phone's touch listeners
+    -- not a synthetic event -- are what run. Returns (cdp, release)."""
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y0}]})
+    for k in range(1, steps + 1):
+        cdp.send("Input.dispatchTouchEvent", {
+            "type": "touchMove", "touchPoints": [{"x": x, "y": y0 + (y1 - y0) * k / steps}]})
+    return lambda: cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
+
+_Q_PULL_STATE_JS = """() => {
+  // the pushed screen's own pull when one is up (the gallery's stays mounted underneath it)
+  const root = document.querySelector('.glm-screen .ptr') || document.querySelector('.ptr');
+  const body = root.querySelector('.ptr-body');
+  const m = new DOMMatrix(getComputedStyle(body).transform);
+  const g = root.querySelector('.ptr-ind [role=progressbar]');
+  return {px: m.m42, now: g ? Number(g.getAttribute('aria-valuenow')) : null,
+          label: (root.querySelector('.ptr-txt') || {textContent: ''}).textContent,
+          syncing: root.classList.contains('syncing')};
+}"""
+
+
+def test_the_phone_lightbox_wears_the_placard_and_a_sibling_tap_swaps_in_place(
+        phone_q_server, render_browser, monkeypatch):
+    """Q1. Between the picture and the action row: the accession stamp and the batch's sibling strip,
+    the current one ringed; a sibling tap moves the viewer in place; a lone picture says 'single
+    image'. The siblings are ONE batched read, never per picture."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert [u for (m, u) in seen if u.endswith("/api/siblings")] == [], "the grid asks for no siblings"
+        page.click(".glm-tile >> nth=0")
+        page.wait_for_selector(".lbm-placard")
+        page.wait_for_selector(".lbm-sib")
+        _settle(page)
+        geo = page.evaluate("""() => {
+            const q = (s) => document.querySelector(s);
+            const after = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+            const box = q('.lbm-placard').getBoundingClientRect();
+            return {order: after(q('.lbm-stage'), q('.lbm-placard')) && after(q('.lbm-placard'), q('.lbm-foot')),
+                    stamp: q('.lbm-placard-stamp').textContent, line: q('.lbm-placard-line').textContent,
+                    sibs: document.querySelectorAll('.lbm-sib').length, on: document.querySelectorAll('.lbm-sib.on').length,
+                    onAt: [...document.querySelectorAll('.lbm-sib')].findIndex((e) => e.classList.contains('on')),
+                    index: q('.lbm-index').textContent, inView: box.left >= 0 && box.right <= innerWidth};
+        }""")
+        assert geo["order"], "the placard sits between the picture and the action row: %r" % geo
+        assert re.fullmatch(r"ACC\. 2026·0928·\w{4} · 28 SEP", geo["stamp"]), geo["stamp"]
+        assert geo["line"] == "siblings · batch of 4"
+        assert (geo["sibs"], geo["on"], geo["onAt"], geo["index"]) == (4, 1, 0, "1"), geo
+        assert geo["inView"], geo
+        page.locator(".lbm-sib").nth(2).click()
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '3'")
+        assert page.evaluate("() => [...document.querySelectorAll('.lbm-sib')].findIndex((e) => e.classList.contains('on'))") == 2
+        assert page.locator(".lbm-root").count() == 1, "the viewer stayed open: the swap is in place"
+        # a picture alone in its task
+        page.locator(".lbm-thumb").nth(4).click()
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '5'")
+        assert page.locator(".lbm-placard-line").inner_text() == "single image"
+        assert page.locator(".lbm-sib").count() == 0
+        assert len([u for (m, u) in seen if m == "POST" and u.endswith("/api/siblings")]) == 1, \
+            "one batched read for the page, not one per picture"
+    finally:
+        ctx.close()
+
+
+def test_the_phone_feed_is_one_edge_to_edge_picture_per_row_and_is_remembered(
+        phone_q_server, render_browser, monkeypatch):
+    """Q3. Grid | Feed in the gallery header; the feed is one picture per row at its true aspect,
+    edge to edge, with the prompt and stars over the foot; tapping opens the Lightbox; the choice is
+    saved per device -- and opening the phone writes none of the phone's saved values."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert [k for k in page.evaluate("window.__qWrites") if k.startswith("mg_phone_")] == [], \
+            "nothing writes on open"
+        assert page.locator(".glm-layout button.on").inner_text().endswith("Grid")
+        page.click(".glm-layout button:has-text('Feed')")
+        page.wait_for_selector(".glm-feed .glm-tile-feed")
+        _settle(page)
+        geo = page.evaluate("""() => {
+            const body = document.querySelector('.glm-body');
+            const tiles = [...document.querySelectorAll('.glm-feed .glm-tile')].slice(0, 3);
+            const cap = tiles[0].querySelector('.glm-tile-cap');
+            return {bodyW: body.clientWidth, tiles: tiles.map((t) => { const r = t.getBoundingClientRect();
+                      return {l: r.left, w: r.width, h: r.height}; }),
+                    radius: getComputedStyle(tiles[0]).borderTopLeftRadius,
+                    cap: cap.textContent, capBottom: cap.getBoundingClientRect().bottom - tiles[0].getBoundingClientRect().bottom,
+                    stars: cap.querySelector('.glm-tile-stars') && cap.querySelector('.glm-tile-stars').textContent};
+        }""")
+        for t in geo["tiles"]:
+            assert abs(t["l"]) < 1 and abs(t["w"] - geo["bodyW"]) < 1.5, "edge to edge: %r" % geo
+        shapes = [(832, 1216), (1216, 832), (1024, 1024)]
+        for t, (w, h) in zip(geo["tiles"], shapes):
+            assert abs(t["w"] / t["h"] - w / h) < 0.02, "the picture's own aspect: %r" % geo
+        assert geo["radius"] == "0px"
+        assert "moonwell, night market 0" in geo["cap"] and geo["stars"] == "★★★", geo
+        assert abs(geo["capBottom"]) <= 1, "the prompt and stars ride the bottom edge"
+        # a tap opens the Lightbox, as the grid's does
+        page.locator(".glm-feed .glm-tile").nth(1).click()
+        page.wait_for_selector(".lbm-root")
+        assert page.locator(".lbm-index").inner_text() == "2"
+        page.click(".lbm-close")
+        page.wait_for_selector(".lbm-root", state="detached")
+        # remembered per device
+        assert page.evaluate("localStorage.getItem('mg_phone_layout')") == "feed"
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".glm-feed .glm-tile-feed")
+        assert page.locator(".glm-layout button.on").inner_text().endswith("Feed")
+        page.click(".glm-layout button:has-text('Grid')")
+        page.wait_for_selector(".glm-feed", state="detached")
+        assert page.evaluate("localStorage.getItem('mg_phone_layout')") == "grid"
+    finally:
+        ctx.close()
+
+
+_Q_MARKER_JS = """
+if (sessionStorage.getItem('__qSeedNext') === '1') {
+  sessionStorage.removeItem('__qSeedNext');
+  localStorage.setItem('mg_phone_seen', JSON.stringify({id: '504', ts: %d, at: %d}));
+}
+"""
+
+
+def _q_marker_init():
+    import datetime as _dt
+    at = int(_dt.datetime(2026, 9, 28, 21, 40, tzinfo=_dt.timezone.utc).timestamp() * 1000)
+    ts = int(_dt.datetime(2026, 9, 28, 17, 32, tzinfo=_dt.timezone.utc).timestamp() * 1000)
+    return _Q_MARKER_JS % (ts, at)
+
+
+def _q_seed_marker(page):
+    """Arm the marker for the NEXT document. The login already landed on the gallery, and leaving that
+    document (this test's own navigation) rightly writes a fresh marker, so the seed has to be applied
+    at the start of the document the test then measures, after that write."""
+    page.evaluate("sessionStorage.setItem('__qSeedNext', '1')")
+
+
+def test_new_since_draws_a_rule_where_the_new_ones_end_and_newest_jumps_to_the_top(
+        phone_q_server, render_browser, monkeypatch):
+    """Q5. The saved 'last seen' marker names a picture four places down: 'N new since HH:MM' sits after
+    the fourth tile in both layouts, there is no rule with nothing new, '↑ Newest' appears after one
+    screen of scrolling and returns to the top, and the marker is written when the gallery is LEFT
+    (never on open)."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, init=_q_marker_init())
+    try:
+        _q_seed_marker(page)
+        _q_open(page)
+        page.evaluate("window.__qWrites.length = 0")
+        rule = page.locator(".glm-newrule")
+        assert rule.count() == 1
+        assert rule.inner_text().strip() == "4 new since 21:40"
+        assert page.evaluate("""() => [...document.querySelectorAll('.glm-tile, .glm-newrule')]
+            .findIndex((e) => e.classList.contains('glm-newrule'))""") == 4, "the rule follows the fourth tile"
+        lav = page.evaluate("() => getComputedStyle(document.querySelector('.glm-newrule span')).color")
+        acc = page.evaluate("() => { const s = document.createElement('i'); s.style.color = 'var(--lavender)'; "
+                            "document.body.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c; }")
+        assert lav == acc, "the rule wears the lavender token"
+        # both layouts
+        page.click(".glm-layout button:has-text('Feed')")
+        page.wait_for_selector(".glm-feed")
+        assert page.evaluate("""() => [...document.querySelectorAll('.glm-feed .glm-tile, .glm-feed .glm-newrule')]
+            .findIndex((e) => e.classList.contains('glm-newrule'))""") == 4
+        page.click(".glm-layout button:has-text('Grid')")
+        # ↑ Newest: not at the top, not within one screen, then after one
+        assert page.locator(".glm-newest").count() == 0
+        vh = page.evaluate("document.querySelector('.glm-body').clientHeight")
+        page.evaluate("(y) => { document.querySelector('.glm-body').scrollTop = y; }", vh - 20)
+        _settle(page)
+        assert page.locator(".glm-newest").count() == 0, "less than one screen down: no jump"
+        page.evaluate("(y) => { document.querySelector('.glm-body').scrollTop = y; }", vh + 200)
+        page.wait_for_selector(".glm-newest")
+        assert page.locator(".glm-newest").inner_text() == "↑ Newest · 4 new"
+        box = page.evaluate("""() => { const b = document.querySelector('.glm-newest').getBoundingClientRect();
+            const n = document.querySelector('.glm-nav').getBoundingClientRect();
+            return {h: b.height, bottom: b.bottom, navTop: n.top, cx: b.left + b.width / 2, vw: innerWidth}; }""")
+        assert box["h"] >= 44 and box["bottom"] <= box["navTop"], box
+        assert abs(box["cx"] - box["vw"] / 2) < 3, "centred"
+        page.click(".glm-newest")
+        page.wait_for_function("() => document.querySelector('.glm-body').scrollTop === 0")
+        # nothing was written by any of that; leaving the gallery writes the marker, once
+        assert [k for k in page.evaluate("window.__qWrites") if k == "mg_phone_seen"] == [], \
+            "looking, scrolling and jumping write no marker"
+        page.click(".glm-navitem >> nth=1")
+        page.wait_for_function("() => window.__qWrites.indexOf('mg_phone_seen') >= 0")
+        m = json.loads(page.evaluate("localStorage.getItem('mg_phone_seen')"))
+        assert m["id"] == phone_q_server.newest_mid and m["at"] > 0, m
+        page.click(".glm-navitem >> nth=0")
+        page.wait_for_selector(".glm-tile")
+        assert page.locator(".glm-newrule").count() == 0, "with nothing new since you left, there is no rule"
+    finally:
+        ctx.close()
+
+
+def test_a_first_visit_has_no_rule_and_a_filtered_look_never_moves_the_marker(
+        phone_q_server, render_browser, monkeypatch):
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert page.locator(".glm-newrule").count() == 0
+        # a filtered view (Videos) is not the front page: leaving it writes nothing
+        page.click(".glm-bar2 .glm-metal:has-text('Videos')")
+        page.wait_for_function("() => document.querySelectorAll('.glm-tile').length === 1")
+        page.evaluate("window.__qWrites.length = 0")
+        page.click(".glm-navitem >> nth=1")
+        _settle(page)
+        assert "mg_phone_seen" not in page.evaluate("window.__qWrites")
+    finally:
+        ctx.close()
+
+
+def test_pull_to_refresh_fills_a_true_fraction_syncs_past_72_and_never_starts_off_the_top(
+        phone_q_server, render_browser, monkeypatch):
+    """Q6, by a real touch drag. At scroll top only; the moon's phase is the pull over the 72 px line
+    (a true fraction); letting go short of the line does nothing; past it the SAME Sync now job starts
+    once, the moon spins, and the page is re-read; it works under Data saver; no pull writes the
+    marker. The Sync job itself is answered in the page -- PixAI is never reached."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, init=_q_marker_init())
+    runs, libs = [], []
+    try:
+        _q_seed_marker(page)
+        _q_open(page)
+        page.route("**/api/panel/run", lambda r: (runs.append(r.request.post_data), _q_json(r, {"ok": True, "action": "sync"}))[1])
+        page.route("**/api/panel/status", lambda r: _q_json(r, {"status": "done", "lines": []}))
+        page.route("**/api/next/library*", lambda r: (libs.append(r.request.url), r.continue_())[1])
+        page.evaluate("window.__qWrites.length = 0")
+
+        # not at the top: the pull does not start
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 400")
+        _settle(page)
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        assert page.evaluate(_Q_PULL_STATE_JS)["px"] == 0
+        release()
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 0")
+        _settle(page)
+
+        # short of the line: the moon follows the finger as a true fraction, release does nothing
+        release = _q_touch_drag(page, 195, 300, 400)                 # 100 px of finger -> 60 px of page
+        _settle(page)
+        st = page.evaluate(_Q_PULL_STATE_JS)
+        assert abs(st["px"] - 60) < 1, st
+        assert st["now"] == round(st["px"] / 72 * 100), "the moon is a true fraction of the pull: %r" % st
+        assert st["label"] == "pull to refresh" and not st["syncing"], st
+        release()
+        _settle(page)
+        assert page.evaluate(_Q_PULL_STATE_JS)["px"] == 0
+        assert runs == [] and libs == [], "letting go short of 72 px starts nothing"
+
+        # past the line: armed, then a sync
+        release = _q_touch_drag(page, 195, 300, 450)                 # 150 px of finger -> 90 px (the cap)
+        _settle(page)
+        st = page.evaluate(_Q_PULL_STATE_JS)
+        assert st["label"] == "release to sync" and st["now"] == 100, st
+        release()
+        page.wait_for_function("() => !!document.querySelector('.ptr.syncing')")
+        assert page.evaluate(_Q_PULL_STATE_JS)["now"] == 100, "the moon is full while it spins"
+        page.wait_for_function("() => !document.querySelector('.ptr.syncing')", timeout=15_000)
+        _settle(page)
+        assert runs == ['{"action":"sync"}'], runs
+        assert len(libs) == 1 and "page=1" in libs[0], "the page in view is re-read once: %r" % libs
+        assert "mg_phone_seen" not in page.evaluate("window.__qWrites"), "a pull leaves the marker where it was"
+        assert page.locator(".glm-newrule").inner_text().strip() == "4 new since 21:40"
+        assert [u for (m, u) in seen if m == "POST" and "/api/generate" in u] == []
+
+        # a drag inside a bottom sheet (it sits in the tab's scroller in the DOM) pulls nothing
+        page.click(".glm-bar2 .glm-metal:has-text('Sort')")
+        page.wait_for_selector(".glm-sheet")
+        _settle(page)
+        release = _q_touch_drag(page, 195, 640, 780)
+        _settle(page)
+        assert page.evaluate(_Q_PULL_STATE_JS)["px"] == 0, "the sheet is not the thing being refreshed"
+        release()
+        _settle(page)
+        assert len(runs) == 1, runs
+        page.click(".glm-scrim")
+        page.wait_for_selector(".glm-sheet", state="detached")
+
+        # a pull is an explicit request: it works under Data saver too
+        page.evaluate("localStorage.setItem('mg_phone_saver', 'always'); window.dispatchEvent(new CustomEvent('mg-phone-prefs'))")
+        page.wait_for_selector(".glm-saverchip")
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        release()
+        page.wait_for_function("() => !document.querySelector('.ptr.syncing')", timeout=15_000)
+        assert len(runs) == 2, "a pull still syncs with the saver on: %r" % runs
+    finally:
+        ctx.close()
+
+
+def test_a_finished_generation_waits_for_a_pull_while_the_saver_acts(
+        phone_q_server, render_browser, monkeypatch):
+    """Q7, 'background sync on Wi-Fi only': the phone's own page-1 refresh after a completion is a
+    background read; it happens as it always did with the saver off and is held while it acts."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    libs = []
+    try:
+        _q_open(page)
+        page.route("**/api/next/library*", lambda r: (libs.append(1), r.continue_())[1])
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        _settle(page)
+        for _ in range(20):
+            if libs:
+                break
+            page.wait_for_timeout(100)
+        assert len(libs) == 1, "saver off: the completion refreshes page 1 as before"
+        page.evaluate("localStorage.setItem('mg_phone_saver', 'always'); window.dispatchEvent(new CustomEvent('mg-phone-prefs'))")
+        page.wait_for_selector(".glm-saverchip")
+        page.evaluate("() => window.dispatchEvent(new CustomEvent('mg-gen-done'))")
+        page.wait_for_timeout(800)
+        assert len(libs) == 1, "saver on: the background refresh is held"
+    finally:
+        ctx.close()
+
+
+def test_data_saver_draws_256px_thumbs_holds_full_size_for_a_tap_and_stops_autoplay(
+        phone_q_server, render_browser, monkeypatch):
+    """Q7. With the saver on: the header chip, 256 px thumbnails (really 256 on the wire) and the tile
+    tag; a picture opens as its thumbnail behind 'Tap to load full size · size' and the full file is not
+    fetched until the tap; a clip neither autoplays nor preloads. With the saver off none of it."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              init="localStorage.setItem('mg_phone_saver', 'always');")
+    try:
+        _q_open(page)
+        page.wait_for_selector(".glm-saverchip")
+        assert page.locator(".glm-saverchip").inner_text() == "◐ Saver"
+        page.wait_for_function("""() => [...document.querySelectorAll('.glm-tile-img')].slice(0, 6)
+            .every((i) => i.complete && i.naturalWidth > 0)""")
+        thumbs = page.evaluate("""() => [...document.querySelectorAll('.glm-tile-img')].slice(0, 6).map((i) =>
+            ({src: i.getAttribute('src'), w: i.naturalWidth, h: i.naturalHeight}))""")
+        for t in thumbs:
+            assert t["src"].endswith("?s=256") and max(t["w"], t["h"]) <= 256, t
+        assert page.locator(".glm-tile-tag").first.inner_text() == "256 px"
+        assert page.locator(".glm-tile-tag:has-text('paused')").count() == 1, "the clip's tile says it is paused"
+        page.click(".glm-tile >> nth=0")
+        page.wait_for_selector(".lbm-tapfull")
+        page.wait_for_function("() => /KB|MB|\\bB\\b/.test(document.querySelector('.lbm-tapfull').textContent)")
+        assert re.fullmatch(r"◐ Tap to load full size · \d+(\.\d)? (B|KB|MB)", page.locator(".lbm-tapfull").inner_text())
+        assert [u for (m, u) in seen if m == "GET" and "/full/" in u] == [], "no full-size GET before the tap"
+        assert any(m == "HEAD" and "/full/500" in u for (m, u) in seen), "the size came from a HEAD"
+        page.click(".lbm-tapfull")
+        page.wait_for_selector(".lbm-tapfull", state="detached")
+        page.wait_for_function("() => document.querySelector('.lbm-hero img').getAttribute('src').indexOf('/full/500') === 0")
+        # a clip
+        page.locator(".lbm-thumb").nth(6).click()
+        page.wait_for_selector(".lbm-hero video")
+        vid = page.evaluate("""() => { const v = document.querySelector('.lbm-hero video');
+            return {autoplay: v.autoplay, preload: v.getAttribute('preload'), poster: v.getAttribute('poster')}; }""")
+        assert vid["autoplay"] is False and vid["preload"] == "none" and vid["poster"].endswith("?s=256"), vid
+        assert page.locator(".lbm-tapfull").count() == 0, "a clip has no full-size gate"
+    finally:
+        ctx.close()
+    # the same phone with the saver OFF: byte-identical to the phone as built
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch,
+                              init="localStorage.setItem('mg_phone_saver', 'off');")
+    try:
+        _q_open(page)
+        assert page.locator(".glm-saverchip").count() == 0 and page.locator(".glm-tile-tag").count() == 0
+        assert not any("s=256" in u for (m, u) in seen if "/thumbs/" in u)
+        page.click(".glm-tile >> nth=0")
+        page.wait_for_selector(".lbm-hero img")
+        assert page.locator(".lbm-tapfull").count() == 0
+        assert page.evaluate("document.querySelector('.lbm-hero img').getAttribute('src')").startswith("/full/500")
+        page.locator(".lbm-thumb").nth(6).click()
+        page.wait_for_selector(".lbm-hero video")
+        assert page.evaluate("document.querySelector('.lbm-hero video').autoplay") is True
+    finally:
+        ctx.close()
+
+
+@pytest.mark.parametrize("connection,expect_on,sub", [
+    ({"type": "cellular", "saveData": False}, True, "metered connection"),
+    ({"type": "wifi", "saveData": False}, False, "on Wi-Fi"),
+    ({"saveData": True}, True, "asking to save data"),
+    (None, False, "can’t tell"),
+])
+def test_data_saver_auto_follows_the_connection_and_says_so_where_it_cannot_tell(
+        phone_q_server, render_browser, monkeypatch, connection, expect_on, sub):
+    """Q7's Auto (the default). Where the Network Information API reports the type (Chrome on Android)
+    Auto follows it; where it does not exist (iPhone browsers) Auto stays off and the Control row says
+    so and points at Always."""
+    conn = connection if connection is not None else False
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch, connection=conn)
+    try:
+        _q_open(page)
+        assert (page.locator(".glm-saverchip").count() == 1) is expect_on
+        assert [k for k in page.evaluate("window.__qWrites") if k == "mg_phone_saver"] == []
+        page.click(".glm-navitem >> nth=2")
+        page.wait_for_selector(".ctm-saver")
+        assert sub in page.locator(".ctm-saver-title span").inner_text()
+        assert page.locator(".ctm-saver-modes button.on").inner_text() == "Auto on metered"
+        if connection is None:
+            assert "Always" in page.locator(".ctm-saver-title span").inner_text()
+    finally:
+        ctx.close()
+
+
+def test_the_control_row_sets_the_saver_mode_and_a_tap_is_the_only_write(
+        phone_q_server, render_browser, monkeypatch):
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.click(".glm-navitem >> nth=2")
+        page.wait_for_selector(".ctm-saver")
+        page.locator(".ctm-saver").scroll_into_view_if_needed()
+        # (tapping the tab bar LEAVES the gallery, which is when the marker is written; Control itself
+        # writes neither of the two values it shows)
+        assert [k for k in page.evaluate("window.__qWrites") if k in ("mg_phone_saver", "mg_phone_layout")] == [], \
+            "opening Control writes nothing"
+        labels = page.locator(".ctm-saver-modes button").all_inner_texts()
+        assert labels == ["Off", "Auto on metered", "Always"]
+        page.click(".ctm-saver-modes button:has-text('Always')")
+        assert page.evaluate("localStorage.getItem('mg_phone_saver')") == "always"
+        assert page.locator(".glm-saverchip").inner_text() == "◐ Saver", "the header chip follows at once"
+        assert page.locator(".ctm-saver-switch").get_attribute("aria-checked") == "true"
+        page.click(".ctm-saver-switch")
+        assert page.evaluate("localStorage.getItem('mg_phone_saver')") == "off"
+        assert page.locator(".glm-saverchip").count() == 0
+        page.click(".ctm-saver-modes button:has-text('Auto on metered')")
+        assert page.evaluate("localStorage.getItem('mg_phone_saver')") == "auto"
+        assert set(k for k in page.evaluate("window.__qWrites") if k in ("mg_phone_saver", "mg_phone_layout")) == {"mg_phone_saver"}
+        box = page.locator(".ctm-saver").bounding_box()
+        assert 0 <= box["x"] and box["x"] + box["width"] <= PHONE["width"], box
+    finally:
+        ctx.close()
+
+
+def _q_tile(page, i):
+    """The grid tile of the i-th newest picture. The grid is two columns (odd / even by index), so DOM
+    order is not data order; the tile is found by its own thumbnail."""
+    return page.locator('.glm-tile:has(img[src*="/thumbs/%d.jpg"])' % (500 + i))
+
+
+def _q_open_details(page, nth):
+    _q_tile(page, nth).click()
+    page.wait_for_selector(".lbm-root")
+    page.click(".lbm-chip:has-text('Details')")
+    page.wait_for_selector(".idm-remixrow")
+    _settle(page)
+
+
+def test_the_records_foot_is_reachable_and_send_to_video_opens_the_video_form_without_sending(
+        phone_q_server, render_browser, monkeypatch):
+    """Q2 + drift 122. Remix and Send to Video are two 44 px+ buttons in the pinned foot, inside the
+    visible viewport and hit-testable; Send to Video lands on Create -> Video with this picture as the
+    start frame and the 'nothing is generated' line; nothing was submitted."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_open_details(page, 1)
+        geo = page.evaluate("""() => {
+            const out = {};
+            for (const k of ['remix', 'video']) {
+                const b = document.querySelector('.idm-remixbtn.' + k); const r = b.getBoundingClientRect();
+                const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                out[k] = {h: r.height, bottom: r.bottom, hit: !!(at && (at === b || b.contains(at)))};
+            }
+            out.vh = innerHeight;
+            return out;
+        }""")
+        for k in ("remix", "video"):
+            assert geo[k]["h"] >= 44 and geo[k]["bottom"] <= geo["vh"] and geo[k]["hit"], geo
+        assert page.locator(".idm-remixbtn.remix").inner_text().endswith("Remix")
+        assert page.locator(".idm-remixbtn.video").inner_text().endswith("Send to Video")
+        page.click(".idm-remixbtn.video")
+        page.wait_for_selector(".idm-root", state="detached")
+        page.wait_for_selector(".cm-handoffnote")
+        assert "Nothing is generated until you press Generate" in page.locator(".cm-handoffnote").inner_text()
+        assert page.locator(".cm-seg3 .cm-segbtn.on").first.inner_text() == "Video"
+        page.wait_for_function("""() => { const f = document.querySelector('.cm-videohost img[src*="/thumbs/501.jpg"]');
+            return !!f; }""")
+        assert _q_generation_posts(seen) == [], "Send to Video only opens the form: %r" % _q_generation_posts(seen)
+        # the Lightbox's To Video takes the same route
+        page.click(".glm-navitem >> nth=0")
+        _q_tile(page, 2).click()
+        page.wait_for_selector(".lbm-root")
+        page.click(".lbm-chip:has-text('To Video')")
+        page.wait_for_selector(".lbm-root", state="detached")
+        page.wait_for_function("() => !!document.querySelector('.cm-videohost img[src*=\"/thumbs/502.jpg\"]')")
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_remix_fills_the_image_form_with_the_recorded_prompt_or_a_runs_template_and_sends_nothing(
+        phone_q_server, render_browser, monkeypatch):
+    """Q2. A remix of an ordinary picture puts its RECORDED prompt (braces escaped, so it re-sends byte for
+    byte) in the Create tab's Image form; a picture that came from a Generate power tools run restores that
+    run's TEMPLATE instead. Either way the form says nothing is sent and no generation was submitted."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_open_details(page, 1)
+        page.click(".idm-remixbtn.remix")
+        page.wait_for_selector(".idm-root", state="detached")
+        page.wait_for_selector("textarea.cm-ta")
+        page.wait_for_function("() => document.querySelector('textarea.cm-ta').value.indexOf('night market 1') >= 0")
+        assert page.input_value("textarea.cm-ta") == "moonwell, night market 1, soft rim light, \\{moonlit\\}"
+        assert "Nothing is sent" in page.locator(".mgpow-note").first.inner_text()
+        assert _q_generation_posts(seen) == []
+        # a picture from a power-tools run: its details route carries a run block
+        def _with_run(route):
+            resp = route.fetch()
+            body = resp.json()
+            body["run"] = {"template": "a {red|blue} door", "var_mode": "random", "count": 3,
+                           "run_seed": 42, "dock_seed": "", "cell": 0, "vars": []}
+            route.fulfill(response=resp, json=body)
+        page.route("**/api/next/detail/502", _with_run)
+        page.click(".glm-navitem >> nth=0")
+        _q_open_details(page, 2)
+        page.click(".idm-remixbtn.remix")
+        page.wait_for_selector(".idm-root", state="detached")
+        page.wait_for_function("() => document.querySelector('textarea.cm-ta').value === 'a {red|blue} door'")
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+
+
+def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
+        phone_q_server, render_browser, monkeypatch):
+    """Q6, 'also on My Art': a pull at the top of the My Art screen re-reads the list (and the totals);
+    it starts no Panel job -- the published-art sync reads a view of every work and is the Control tab's."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    items, runs = [], []
+    try:
+        _q_open(page)
+        page.route("**/api/myart/items", lambda r: (items.append(1), r.continue_())[1])
+        page.route("**/api/panel/run", lambda r: (runs.append(1), _q_json(r, {"ok": True}))[1])
+        page.click("button[title=More]")
+        page.click(".glm-menu-item:has-text('My Art')")
+        page.wait_for_selector(".myam-tabrow")
+        for _ in range(30):
+            if items:
+                break
+            page.wait_for_timeout(100)
+        first = len(items)
+        assert first >= 1
+        _settle(page)
+        release = _q_touch_drag(page, 195, 300, 450)
+        _settle(page)
+        assert page.evaluate(_Q_PULL_STATE_JS)["label"] == "release to refresh"
+        release()
+        for _ in range(40):
+            if len(items) > first:
+                break
+            page.wait_for_timeout(100)
+        assert len(items) == first + 1, "the list was re-read once"
+        page.wait_for_function("() => !document.querySelector('.ptr.syncing')")
+        assert runs == [], "My Art's pull calls no sync"
+    finally:
+        ctx.close()
