@@ -542,9 +542,17 @@ def catalog(db_path):
     # mg_loom_render(media_id) -> 1|0: is this picture a render the Loom made? Only the
     # `type:loom` search operator (and its Storage-bar segment) calls it; nothing runs it
     # unless asked, and it reads the Loom's boards from disk, never the network.
+    # The set is read ONCE per connection, on the first row that asks: a search calls this for
+    # every row it looks at, and a directory listing per row would cost more than the search.
     _loom_root = Path(db_path).parent
-    con.create_function("mg_loom_render", 1,
-                        lambda mid: 1 if str(mid or "") in loom_render_ids(_loom_root) else 0)
+    _loom_seen = {}
+
+    def _is_loom_render(mid):
+        ids = _loom_seen.get("ids")
+        if ids is None:
+            ids = _loom_seen["ids"] = loom_render_ids(_loom_root)
+        return 1 if str(mid or "") in ids else 0
+    con.create_function("mg_loom_render", 1, _is_loom_render)
     try:
         yield con
     finally:

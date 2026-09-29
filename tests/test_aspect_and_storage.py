@@ -247,6 +247,15 @@ def test_type_partitions_the_library(lib):
     assert _ids(db, "type:banana") == []                  # malformed: searched as text
 
 
+def test_a_search_reads_the_looms_boards_once_not_once_per_row(lib, monkeypatch):
+    out, db = lib
+    calls = []
+    real = g.loom_render_ids
+    monkeypatch.setattr(g, "loom_render_ids", lambda d: (calls.append(1), real(d))[1])
+    assert _ids(db, "type:image")                       # a handful of rows, each asking
+    assert len(calls) == 1
+
+
 def test_the_type_operator_needs_no_loom_folder(tmp_path):
     db = tmp_path / "catalog.db"
     save_catalog(db, [_row(media_id="1", filename="1.png"),
