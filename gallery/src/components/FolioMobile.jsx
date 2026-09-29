@@ -53,7 +53,7 @@ import "../styles/folio-mobile.css";
       replayToast(), the identical call desktop's AchCard makes -- verified
       live, see build notes) in addition to opening the mock's own static
       detail sheet; the header avatar AND the Nel-strip quote both call the
-      REAL, server-persisted pokeNarrator() (POST /api/ach-event -- the SAME
+      REAL, server-counted pokeNarrator() (POST /api/narrator/poke -- the SAME
       function desktop's header avatar uses, not the mock's decorative tap);
       and a small "Unleash the AI" pill (real, once `triggered`) sits under
       the hero stat line -- the one place in this layout with room for it.
@@ -288,10 +288,9 @@ export default function FolioMobile({ onClose }) {
         <div className="fm-fill" />
         {/* The guide's "?" (Session I decision 2): Help on the Folio's page. */}
         <HelpButton surface="folio" className="fm-help" />
-        {/* Poke until it snaps -- 5 real, server-persisted pokes (the SAME
-            /api/ach-event narrator_pokes counter the classic Trophy Hall's
-            Ach.poke() and desktop's own header avatar use) earns "Triggered"
-            and reveals the Unleash pill below, permanently, for good. */}
+        {/* The server counts the pokes (the SAME route desktop's header avatar
+            uses) and answers with a line; the Unleash pill below appears once
+            the feat behind it is earned, and stays. */}
         <button type="button" className="fm-avatar" title="…" onClick={pokeNarrator} aria-label="Poke the narrator">
           <span className="fm-avatar-dot" />
         </button>

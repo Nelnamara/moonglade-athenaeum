@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet } from "../api.js";
-import { sendAchEvent } from "../notify/achNonce.js";
+import { apiGet, apiPost } from "../api.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { peek, put } from "./swrCache.js";
-import useAccountPrefs from "./useAccountPrefs.js";
+import useAccountPrefs, { accountPrefs, accountCsrf } from "./useAccountPrefs.js";
 import { takeFolioFocus } from "../folio/folioFocus.js";
+import { pokeView, choiceValue } from "../folio/pokeCore.js";
+import { UNLEASH_KEY, isUnleashed } from "../folio/unleashPref.js";
 import {
   SEEN_KEY, REVEAL, orderFeats, unseenFeatIds, nextSeen, veilState, revealFrame,
 } from "../folio/maskedFeatsCore.js";
@@ -71,31 +72,9 @@ export const RARITY_ORDER = ["common", "rare", "epic", "legendary"];
 // constant) -- FolioMobile.jsx uses this full array rather than hand-copying
 // the mock's shorter one, one narrator voice, one source of truth, matching
 // this file's own established rule for shared product copy.
-// Byte-for-byte from static/mg-notify.js's own `poke()` (~line 1061) -- the
-// REAL escalating warning toast every poke already shows in the classic
-// Trophy Hall. The React port was posting to /api/ach-event silently with no
-// per-click feedback at all, which is what made 5 real pokes feel trivial/
-// unearned compared to classic's actual build-up -- not a missing time-gate,
-// just this missing feedback loop.
-// The "no cooldown anywhere, client or server" this comment used to record was
-// true until 2026-09-07 and is not any more: /api/ach-event now debounces the
-// same (session, event) inside 150ms and refuses past 30 beacon calls a minute
-// (see its handler, and notify/achNonce.js). The debounce is a wall-clock gap
-// and can tell nothing else apart, so the width is the whole claim: 150ms is
-// under a hand and over a double-fired DOM event. It shipped at 400ms earlier
-// the SAME DAY, and this comment said then that it "separates a double-fired
-// click from a second click" -- it did not: at a phone's ordinary ~3 taps/sec
-// every second real poke was thrown away, so Triggered wanted about ten taps.
-// Narrowed to 150ms, 5 real, separate clicks is again the only real gate there
-// is. A swallowed tap says nothing at all (pokeNarrator returns on
-// res.debounced) rather than rewinding the escalating toast to its first line.
-export const POKES = [
-  "The narrator ignores you.",
-  "The narrator raises an eyebrow. Do you mind?",
-  "The narrator is DESCRIBING things. Hands off.",
-  "The narrator’s eye twitches. Last warning.",
-  "FINE. You want the REAL commentary? Unleashed. Happy now?",
-];
+// (The narrator's poke lines are NOT here: the server keeps the count and chooses each line
+// from the sealed pack, and the page only shows what it is told -- see pokeNarrator below and
+// folio/pokeCore.js.)
 
 export const NARRATOR_LINES = [
   "Keep going. The Void will not archive itself.",
@@ -271,7 +250,10 @@ export default function useFolio() {
   // exists. `reveal`/`activeToast` are the shared per-id source of truth
   // driving both a card's inline description and the replay toast. ----
   const [triggered, setTriggered] = useState(false);
-  const [unleashed, setUnleashed] = useState(false);
+  // The account's own switch (folio/unleashPref.js): the same person sees the same narrator
+  // on every device. The server still decides whether the spicier line is released at all.
+  const prefs = useAccountPrefs();
+  const unleashed = isUnleashed(prefs.prefs);
   const [reveal, setReveal] = useState({});
   const [activeToast, setActiveToast] = useState(null);
   // Per-id interval/timeout handles -- plain instance maps (ref, not state):
@@ -286,7 +268,6 @@ export default function useFolio() {
   // in THIS visit (they keep their ribbon until the Folio closes, then are on the record);
   // `clock` is how many milliseconds of the Feats section the reader has actually had on
   // screen -- the reveal's own timeline, paused while they are on another tab. ----
-  const prefs = useAccountPrefs();
   const seenRaw = prefs.get(SEEN_KEY, undefined);
   const [focusId] = useState(() => takeFolioFocus());
   const [freshIds, setFreshIds] = useState(() => new Set());
@@ -303,6 +284,10 @@ export default function useFolio() {
   // scramble's setInterval tick can write into it directly without a
   // re-render, and so close/unmount can dismiss it if one is still showing.
   const replayHandleRef = useRef(null);
+  // The celebration currently up, as replayToast() recorded it: a callback that outlives one
+  // render (the choice toast's buttons) reads this, not the `activeToast` it closed over.
+  const activeToastRef = useRef(null);
+  const pokingRef = useRef(false);      // a poke is on its way to the server
 
   useEffect(() => {
     let dead = false;
@@ -457,6 +442,7 @@ export default function useFolio() {
     clearScr(a.id);
     if (replayHandleRef.current && replayHandleRef.current.dismiss) replayHandleRef.current.dismiss();
     const at = { id: a.id, name: a.name, tier: a.tier || "feat", sfw, nsfw };
+    activeToastRef.current = at;
     setActiveToast(at);
     const h = window.Ach && window.Ach.replay ? window.Ach.replay(a, { line: sfw }) : null;
     replayHandleRef.current = h ? { id: a.id, ...h } : null;
@@ -468,51 +454,67 @@ export default function useFolio() {
   // reverse-animation) -- the moment itself stays open, only its text reacts.
   function toggleUnleash() {
     const next = !unleashed;
-    setUnleashed(next);
+    prefs.set(UNLEASH_KEY, next);
     setReveal({});
     clearAllScr();
     rerunToast(activeToast, next);
   }
-  // Real onClick on the narrator avatar: POSTs to the SAME /api/ach-event
-  // endpoint mg-notify.js's own Ach.poke() uses (narrator_pokes, persisted,
-  // cross-session/cross-surface -- poking here counts toward the identical
-  // "Triggered" feat poking in the classic Trophy Hall does). On snap,
-  // refetch /api/achievements so the newly-unblanked roast_nsfw text is
-  // actually there to scramble to (mirrors mg-notify.js's poke()->load(true)).
-  // Through sendAchEvent since 2026-09-07: it carries this page's nonce and adopts
-  // the next one, so five pokes in a row are five accepted events (a bare post would
-  // spend the boot nonce and have the other four refused). A refusal -- a stale page
-  // it could not refresh, or the rate limit -- comes back as {error} and is dropped
-  // below, exactly as before.
+  // Real onClick on the narrator avatar (and the rail portrait, and the phone's quote).
+  // POST /api/narrator/poke: the SERVER keeps the count and the clocks for this account,
+  // decides whether the poke counts and chooses the line; the reply is a line and nothing
+  // else, and a poke that did not count is shown exactly like one that did. A refusal (an
+  // expired page, a busy store) is a quiet no-op, as every beacon has always been.
+  // One request at a time: a click that fires twice is one poke, not a spam line.
   function pokeNarrator() {
-    sendAchEvent("narrator")
+    if (pokingRef.current) return;
+    pokingRef.current = true;
+    accountPrefs().ensureLoaded()
+      .then(() => apiPost("/api/narrator/poke", { csrf: accountCsrf() }))
       .then((res) => {
+        pokingRef.current = false;
         if (!mountedRef.current) return;
-        if (res.error) return;
-        // A debounced reply means the server read this tap as the second half of
-        // one gesture and counted nothing -- so hold the line you are on: no toast
-        // at all, silence rather than a rewind (2026-09-07, refining the same day's
-        // debounce ruling). Before this the reply's missing `pokes` fell through to
-        // the `|| 1` below and re-showed POKES[0], so a fast second tap visibly
-        // un-escalated the toast. It carries the real count now, but ONE gesture
-        // gets ONE toast, so this returns before showing anything.
-        if (res.debounced) return;
-        // Same escalating warning toast the classic poke() shows on every
-        // single click, byte-for-byte (POKES above) -- the real feedback
-        // loop that makes 5 pokes feel earned, not the count alone.
-        if (window.Toast && res) {
-          const n = Math.max(1, Math.min(res.pokes || 1, POKES.length));
-          window.Toast.show({ title: POKES[n - 1], kind: n >= POKES.length ? "err" : "", icon: "👆" });
-        }
-        if (res && (res.snapped || (res.pokes || 0) >= 5)) {
-          setTriggered(true);
-          apiGet("/api/achievements")
-            .then((d) => {
-              put("/api/achievements", d);
-              if (mountedRef.current && !d.error) setData(d);
-            });
-        }
-      });
+        const v = pokeView(res);
+        if (!v.show) return;
+        if (v.final) { endOfLadder(v); return; }
+        if (window.Toast) window.Toast.show({ title: v.line, icon: "👆" });
+      })
+      .catch(() => { pokingRef.current = false; });
+  }
+  // The poke that ended the ladder (and earned the feat behind the pill): read the roster
+  // once more -- marking it seen, so the ordinary earn toast does not follow -- and put the
+  // feat's own celebration on screen with its clean line, then ask which narrator the
+  // account wants from now on. "Unleash" turns the switch on and plays the glitch reveal on
+  // the celebration already up; "Keep" writes the switch off, so it is an answer, not a blank.
+  function endOfLadder(v) {
+    setTriggered(true);
+    apiGet("/api/achievements?mark=1").then((d) => {
+      if (!d || d.error) return;
+      put("/api/achievements", d);
+      if (!mountedRef.current) return;
+      setData(d);
+      const card = (d.achievements || []).find((a) => a.id === v.card);
+      if (card) replayToast(card);
+      offerChoice(v.choice);
+    });
+  }
+  function chooseUnleash(pick) {
+    const on = choiceValue(pick);
+    prefs.set(UNLEASH_KEY, on);
+    if (!on || !mountedRef.current) return;
+    setReveal({});
+    clearAllScr();
+    rerunToast(activeToastRef.current, true);
+  }
+  function offerChoice(copy) {
+    if (!window.Toast) return;
+    window.Toast.show({
+      kind: "choice", icon: "👆", sticky: true,
+      title: copy.title, foot: copy.foot,
+      actions: [
+        { label: copy.keep, run: () => chooseUnleash("keep") },
+        { label: copy.unleash, tone: "ruby", run: () => chooseUnleash("unleash") },
+      ],
+    });
   }
   // Cleanup only -- clears every in-flight scramble, resets reveal/toast,
   // dismisses any still-open celebration. Deliberately does NOT navigate:
@@ -523,6 +525,7 @@ export default function useFolio() {
     clearAllScr();
     setReveal({});
     setActiveToast(null);
+    activeToastRef.current = null;
     if (replayHandleRef.current && replayHandleRef.current.dismiss) replayHandleRef.current.dismiss();
     replayHandleRef.current = null;
   }

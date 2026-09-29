@@ -4,6 +4,8 @@ import * as jobs from "./jobs.js";
 import * as jobsStore from "./jobsStore.js";
 import * as ach from "./ach.js";
 import { claimReceipt } from "./updateStore.js";
+import { accountPrefs } from "../hooks/useAccountPrefs.js";
+import { isUnleashed, syncLegacyUnleash, UNLEASH_KEY } from "../folio/unleashPref.js";
 import { checkSpikes } from "./spikeStore.js";
 import ToastHost from "./ToastHost.jsx";
 import BannerHost from "./BannerHost.jsx";
@@ -59,6 +61,18 @@ export function installNotify() {
      carries its own moment is played by whichever shell sees it, and <MomentHost/> in the
      root below is what puts it on screen. */
   ach.registerMomentHost(playMoment);
+
+  /* THE UNLEASH SWITCH is the account's (Session L, decision 1): the celebration engine asks
+     the per-account store, and a browser that still holds the old per-browser value carries
+     it over once, here, where every shell passes through. See folio/unleashPref.js. */
+  {
+    const prefs = accountPrefs();
+    ach.registerUnleashSource(() => isUnleashed({ [UNLEASH_KEY]: prefs.get(UNLEASH_KEY, undefined) }));
+    let storage = null;
+    try { storage = window.localStorage; } catch { storage = null; }
+    prefs.ensureLoaded();      // the answer the engine asks for has to have arrived
+    syncLegacyUnleash(prefs, storage);
+  }
 
   jobsStore.start();
   ach.check();

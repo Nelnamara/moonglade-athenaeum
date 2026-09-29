@@ -36,6 +36,13 @@ function _bootCsrf() {
   }
 }
 
+/** The session's CSRF token, as this store knows it: the one its own GET handed out, else
+    the boot's. For another account-scoped POST that has no token of its own -- await
+    accountPrefs().ensureLoaded() first so the store's GET has answered. */
+export function accountCsrf() {
+  return _csrf || _bootCsrf();
+}
+
 /** The page's one preferences store, for code outside a component. */
 export function accountPrefs() {
   if (!_store) {

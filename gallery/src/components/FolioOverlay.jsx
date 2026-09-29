@@ -34,11 +34,11 @@ import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
    Read-only surface (three tabs, the right rail, local search, the 4-bucket
    category filter) plus the full narrator-poke / Unleash / glitch-reveal
    interaction from folio-glitch-spec.md: poking the header avatar
-   (mgfo-nar-avatar) posts to the SAME /api/ach-event endpoint the classic
-   Trophy Hall's Ach.poke() uses, so it counts toward the real, persisted
-   "Triggered" feat -- the pill (`triggered`) shows once that's earned,
-   whether that happened just now, in a past session, or via the classic UI.
-   "Unleash the AI" is a free client-side toggle once the pill exists;
+   (mgfo-nar-avatar) posts to /api/narrator/poke, where the server keeps the
+   account's count and clocks and chooses the line -- the pill (`triggered`)
+   shows once the feat behind it is earned, whether that happened just now or
+   in a past session. "Unleash the AI" is the account's own switch (an
+   account preference, folio/unleashPref.js) once the pill exists;
    clicking any EARNED card (or the toast it opens) glitch-scrambles its
    description from the clean roast to the NSFW one via `reveal[id]`, the
    shared per-achievement state that drives both surfaces off one source
@@ -229,9 +229,8 @@ export default function FolioOverlay({ onClose }) {
             <div className="mgfo-crumb" onClick={handleClose} title="Back to the library — Esc closes the overlay">← Library</div>
             <div className="mgfo-div" />
             <div className="mgfo-label">🏆 The Folio of Honors</div>
-            {/* Poke until it snaps -- 5 real, server-persisted pokes (shared
-                with the classic Trophy Hall's own Ach.poke()) earns "Triggered"
-                and reveals the pill below, permanently, for good. */}
+            {/* The server counts the pokes and answers with a line; the pill below
+                appears once the feat behind it is earned, and stays. */}
             <div className="mgfo-nar-avatar" title="…" onClick={pokeNarrator} />
             {triggered && (
               <div className="mgfo-unleash" title="Toggle the narrator's unfiltered commentary"

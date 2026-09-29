@@ -71,8 +71,8 @@ describe("one module owns the /api/ach-event beacon", () => {
     assert.match(mod, /apiPost\(\s*"\/api\/ach-event"\s*,\s*\{[^}]*\bnonce\b/,
       "the POST body must carry `nonce` -- without it every event is a 403 stale page");
     assert.match(mod, /\bnext_nonce\b/,
-      "an accepted event returns next_nonce; a poster that drops it earns exactly one feat "
-      + "event per page render, which is one poke out of the five Triggered needs");
+      "an accepted event returns next_nonce; a poster that drops it gets exactly one feat "
+      + "event accepted per page render");
     assert.match(mod, /"\/api\/ach-nonce"/,
       "a page idle past the 60s window needs the top-up route to recover, or an open tab "
       + "loses the beacon for good");
@@ -95,9 +95,10 @@ describe("one module owns the /api/ach-event beacon", () => {
 
   test("the known callers still go through it", () => {
     // Not a completeness claim -- a new caller is fine. This is the regression direction:
-    // the konami egg and the narrator poke HAD their own bare posts, and the docs beacon had
-    // a hand-rolled one in the Loom shell until the guide took it over (Session I).
-    for (const name of ["moments/starfallTrigger.js", "hooks/useFolio.js", "help/helpStore.js"]) {
+    // the konami egg HAD its own bare post, and the docs beacon had a hand-rolled one in the
+    // Loom shell until the guide took it over (Session I). (The narrator's poke left this
+    // beacon for its own route, whose ladder the server keeps: loom/test/poke-ladder-client.test.js.)
+    for (const name of ["moments/starfallTrigger.js", "help/helpStore.js"]) {
       const src = codeOnly(fileNamed(name));
       assert.match(src, /\bsendAchEvent\(/,
         name + " stopped using sendAchEvent -- if its beacon moved, move this line with it; "

@@ -197,8 +197,17 @@ function _flushClear() {
   _resume();
 }
 
+/* Does the ACCOUNT want the spicier line? The answer lives in the per-account preferences
+   (folio/unleashPref.js), not here: this module has no store of its own and stays free of
+   React, so the installer (notify/index.jsx) hands it a source to ask. Until one is
+   registered -- and whenever it cannot answer -- the answer is no, and the celebration
+   prints the clean line. The server still decides whether the spicier one is released at all. */
+let _unleashSource = () => false;
+export function registerUnleashSource(fn) {
+  if (typeof fn === "function") _unleashSource = fn;
+}
 function unleashed() {
-  try { return localStorage.getItem("unleash") === "1"; } catch { return false; }
+  try { return !!_unleashSource(); } catch { return false; }
 }
 function skinName(d, id) {
   const s = ((d || {}).skins || []).filter((x) => x.id === id)[0];
