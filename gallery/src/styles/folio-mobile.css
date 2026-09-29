@@ -23,7 +23,7 @@
 @keyframes fmPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(79,201,154,.5); } 50% { box-shadow: 0 0 0 6px rgba(79,201,154,0); } }
 @keyframes fmGlint { 0% { transform: translateX(-60px); opacity: 0; } 12% { opacity: 1; } 45% { transform: translateX(220px); opacity: 0; } 100% { transform: translateX(220px); opacity: 0; } }
 
-.fm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+.fm-root { position: fixed; inset: 0; z-index: 315; display: flex; flex-direction: column;
   background: var(--mantle); color: var(--text);
   animation: fmIn .22s cubic-bezier(.2,.9,.24,1) both; }
 .fm-root.closing { animation: fmOut .18s ease both; }
@@ -49,8 +49,10 @@
    tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
    contest detail took on 2026-09-05; this surface and the picture screen were the two the
    sweep missed. */
+/* Drift 122: the Folio's scroller ends at the bottom of the screen, so it carries the
+   drift's bottom pad -- 16px plus the home indicator -- and its last row clears the bar. */
 .fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain; }
+  overscroll-behavior: contain; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 .fm-loading { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
 
 /* ---- hero header ---- */

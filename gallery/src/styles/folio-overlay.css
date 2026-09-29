@@ -18,8 +18,8 @@
    regions instead of one big scrolling slab. ---- */
 .mgfo-slab {
   width: min(1460px, calc(100vw - 48px));
-  height: min(94vh, 940px);
-  max-height: 94vh;
+  height: min(94vh, 940px); height: min(94dvh, 940px);
+  max-height: 94vh; max-height: 94dvh;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -293,7 +293,7 @@
 .mgfo-relic-sw { display: flex; gap: 3px; flex: none; }
 .mgfo-relic-sw span { width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, .14); }
 .mgfo-relic-tip {
-  display: none; position: absolute; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 50;
+  display: none; position: absolute; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 315;
   pointer-events: none; width: 210px; filter: drop-shadow(0 6px 16px rgba(0, 0, 0, .65));
   border-radius: 10px; padding: 10px 13px; background: rgba(9, 7, 22, .97);
   border: 1px solid var(--surface1); border-top: 2px solid var(--accent);
@@ -611,7 +611,7 @@
 
 /* ---- Mobile stacking, matching the DC's own <860px collapse ---- */
 @media (max-width: 860px) {
-  .mgfo-slab { width: 100vw; height: 100vh; max-height: none; border-radius: 0; }
+  .mgfo-slab { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
   .mgfo-body { flex-direction: column; }
   .mgfo-rail { width: auto; border-left: none; border-top: 1px solid rgba(255, 255, 255, .06); }
   .mgfo-grid2, .mgfo-grid2.even { grid-template-columns: 1fr; }

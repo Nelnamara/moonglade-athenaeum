@@ -13,7 +13,7 @@
       normal line height, the page's sans stack rather than the Branding tab's picked face.
       Elements the pages size as border-box say so inline.
    3. STACKING: the scrim at 515 and the stage at 516 -- the celebration band's slots, under
-      the achievement moment (.ach-m2, 520). ach.js's hold keeps the two off the screen
+      the achievement moment (.ach-m2, 519). ach.js's hold keeps the two off the screen
       together anyway; the numbers make the order right if they ever meet. */
 .mgm-root {
   --moment-ground: #05040d;

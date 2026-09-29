@@ -12,8 +12,8 @@
    the dock-only keyframes (mgEclipse/mgPop/mgSettle/mgSlab/mgFade/mgSharpen/
    mgNelHalo/mgShimmer) live here.
 
-   Z: component band only — dock 7, expanded scrim 6, model flyout / filters
-   panel keep their existing 305/306 (the 300-band the overlays already own).
+   Z: component band only — dock 7, expanded scrim 6; the model flyout / Darkroom
+   are 335/336 and the run tooltip 330, in the overlays band (overlays.css's ladder).
    ========================================================================== */
 
 @keyframes mgEclipse { 0% { transform: translateX(-118%); } 50% { transform: translateX(0); } 100% { transform: translateX(118%); } }
@@ -233,10 +233,10 @@ html.mg-noblur .mgdock-scrim {
 .mgdock-older:disabled { cursor: default; border-color: var(--surface1); }
 
 /* the run TOOLTIP (DC runTipStyle 3530 + 1594-1605): fixed, anchored at the tile's
-   top-centre and popped UP by its own height + 8px, opaque #0a0818, lavender rim, z 300.
+   top-centre and popped UP by its own height + 8px, opaque #0a0818, lavender rim, z 330.
    Rendered as a SIBLING of the .mgdock aside (the dock's transform would otherwise be
    the containing block for position: fixed) -- see GenerateDrawer.jsx. */
-.mgdock-runtip { position: fixed; z-index: 300;
+.mgdock-runtip { position: fixed; z-index: 330;
   transform: translate(-50%, calc(-100% - 8px)); display: flex; flex-direction: column;
   gap: 3px; padding: 8px 10px; border-radius: 8px;
   background: #0a0818; border: 1px solid rgba(182, 146, 230, .4);
@@ -912,9 +912,10 @@ button.mgdock-snipdel:hover { color: var(--red, #f38ba8); }
    then (a min(1100px) panel centred in a scrim, DC 591-658) and the drawer strip that
    opened it. Values are the comp's own inline styles; every colour is a token, and the
    room's ground is the comp's radial expressed through the app's surface ladder.
-   z stays at 306 -- the rung the compare panel held in the dock's overlay band; toasts
+   z 336 -- the rung the compare panel held in the dock's overlay band (306 until the
+   2026-09-28 band normalization moved it up past the renumbered layers under it); toasts
    and the celebration layer (510+) still paint above it. */
-.mgdk { position: fixed; inset: 0; z-index: 306; display: flex; flex-direction: column;
+.mgdk { position: fixed; inset: 0; z-index: 336; display: flex; flex-direction: column;
   background: radial-gradient(130% 90% at 20% -10%,
     color-mix(in oklab, var(--surface0) 42%, var(--mantle)) 0%,
     var(--mantle) 55%, rgba(5, 4, 13, 1) 100%);

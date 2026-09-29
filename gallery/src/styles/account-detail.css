@@ -2,7 +2,7 @@
    Values translated 1:1 from the DC's own style generators (grp/row/monoDim/dimChip/
    statusPill/onHandCard/kick/split/amt/pct). Rides the shared mgcp-sub-* slab chrome. */
 
-.mgcp-sub-slab.acct-slab { width: min(880px, calc(100vw - 60px)); max-height: 84vh;
+.mgcp-sub-slab.acct-slab { width: min(880px, calc(100vw - 60px)); max-height: 84vh; max-height: 84dvh;
   display: flex; flex-direction: column; }
 .acct-readonly { font-size: 11.5px; color: var(--overlay0); }
 

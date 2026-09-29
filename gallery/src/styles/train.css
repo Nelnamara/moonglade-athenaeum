@@ -3,7 +3,7 @@
    copy of the same controls; these are the parts unique to training. */
 
 .mgtr-slab { pointer-events: auto; box-sizing: border-box;
-  width: min(1100px, calc(100vw - 40px)); max-height: 90vh; display: flex;
+  width: min(1100px, calc(100vw - 40px)); max-height: 90vh; max-height: 90dvh; display: flex;
   flex-direction: column; border-radius: 18px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 34px 100px rgba(0,0,0,.78);

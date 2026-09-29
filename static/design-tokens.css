@@ -7,9 +7,12 @@
 
   /* Z BANDS (decided 2026-08-01, gallery-era redesign): exactly three, nothing between --
      components 0-7 · overlays/modals 300-500 · ambient/celebration 510-520 (the layer that
-     must paint over any modal: achievement moment 520, its confetti sheet 517 behind it).
-     The legacy 200s cluster and the stray 99 live only in classic surfaces, which retire
-     with the React conversion -- do not add new values outside the three bands. */
+     must paint over any modal). Normalized 2026-09-28: the legacy 200s cluster and the
+     stray 99 went with the classic surfaces, and every other value that sat outside a band
+     was renumbered into one in its old order. The achievement moment is 519, not the
+     design's 520: its parade's skip control must paint in front of it and 520 is the
+     ceiling. The ladder is gallery/src/styles/overlays.css's -- do not add values outside
+     the three bands. */
   :root {
     /* Palette sampled from two reference images:
        731004762264180451.webp — teal "magic glow", green gems, rare gold trim.

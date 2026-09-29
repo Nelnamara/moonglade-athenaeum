@@ -419,7 +419,7 @@ const moments = () => body.children.filter((c) => c.classList.contains("ach-m2")
 const front = () => moments().filter((c) => c.classList.contains("trail") === false);
 const trail = () => moments().filter((c) => c.classList.contains("trail"));
 /* EVERYTHING this module paints, which is what the cast's layer has to be clear of. A trail
-   card is not a moment, but it still carries .ach-m2 (z-index 520) and the parade's two chips
+   card is not a moment, but it still carries .ach-m2 (z-index 519) and the parade's two chips
    sit at 519/521 -- all three above a moment's 515/516, so all three are "on top of the cast". */
 const painted = () => body.children.filter((c) => c.classList.contains("ach-m2")
   || c.classList.contains("ach-trailchip"));
@@ -496,7 +496,7 @@ describe("a bespoke moment owns the screen while it plays", () => {
     await tick();
     assert.equal(moments().length, 0,
       "the standard toast must not be BUILT while the bespoke moment is up. This is the " +
-      "construction the ruling asks for: .ach-m2 (z-index 520) would otherwise paint straight " +
+      "construction the ruling asks for: .ach-m2 (z-index 519) would otherwise paint straight " +
       "over the starfall layer on a first earn, and no amount of timer tuning makes that safe.");
 
     ach.endBespokeMoment();            // the cast has faded and been removed
@@ -565,7 +565,7 @@ describe("a bespoke moment owns the screen while it plays", () => {
     // finishes, check() queues two earns, the first is on screen, and the owner casts the code
     // while it plays. The queue re-enters itself through _play's `after` -- never through
     // celebrate() -- so without a hold at that re-entry the SECOND moment builds .ach-m2
-    // (z-index 520) straight over the starfall moment (515/516) the instant the first ends.
+    // (z-index 519) straight over the starfall moment (515/516) the instant the first ends.
     nextPayload = payload([
       { id: "q1", name: "One", tier: "common", desc: "x" },
       { id: "q2", name: "Two", tier: "common", desc: "x" },
@@ -846,7 +846,7 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
   });
 
   test("it waits for the parade's TRAIL too, and the trail does not outlive the wait", async () => {
-    // A receded card is presented history, but it is still .ach-m2 at z-index 520 over the
+    // A receded card is presented history, but it is still .ach-m2 at z-index 519 over the
     // moment's 515/516: firing while four of them are stacked down-screen puts the starfall under
     // them for its whole life. Waiting for the whole parade instead would cost the cast every
     // earn still queued, so the wait takes the history DOWN rather than sitting behind it.
@@ -894,7 +894,7 @@ describe("whenClear: a cast never paints under a moment already on screen", () =
     ach.whenClear(() => { atFire = painted().length; });
     assert.equal(atFire, null,
       "the cast must not start here. .ach-m2.trail drops the scrim (notify.css:35) but keeps " +
-      "z-index 520, so those cards sit on top of the starfall's 515/516 for as long as they last");
+      "z-index 519, so those cards sit on top of the starfall's 515/516 for as long as they last");
 
     await wait(700);
     assert.equal(atFire, 0, "the wait takes the history down and fires on an empty screen");
@@ -1201,7 +1201,7 @@ describe("a bespoke feat's EARN never gets the generic fanfare", () => {
      over the layer, moment or no moment" -- it asserted that a replay BUILDS while a bespoke
      moment owns the screen, and only its fanfare was suppressed. That pinned the exemption
      the dequeue's gate carried for replay entries, and the exemption is the overlap: .ach-m2
-     is z-index 520 and the cast's layer is 449, .ee-layer takes no pointer events, so an open
+     is z-index 519 and the cast's layer is 449, .ee-layer takes no pointer events, so an open
      Folio stays clickable for the whole 6000ms hold and one click put a toast over the
      starfall. Owner ruling 2026-09-10 says impossible by construction in BOTH directions, and
      a gate with one caller written out of it is not a construction. The click is not refused

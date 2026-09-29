@@ -6710,7 +6710,7 @@ ${"=".repeat(48)}
 .sb-projwrap{position:relative;display:inline-flex}
 .sb-projbtn{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--ink3);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px;margin-left:2px}
 .sb-projbtn:hover{color:var(--ink);border-color:var(--line2)}
-.sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
+.sb-projpop{position:absolute;top:calc(100% + 6px);left:0;z-index:318;min-width:240px;max-width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:8px;display:flex;flex-direction:column;gap:6px}
 .sb-projpoph{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);padding:2px 4px}
 .sb-projlist{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow:auto}
 .sb-projitem{display:flex;align-items:stretch;gap:4px;border-radius:7px}
@@ -6723,7 +6723,7 @@ ${"=".repeat(48)}
 .sb-projx{background:transparent;border:none;color:var(--ink3);cursor:pointer;padding:0 8px;font-size:11px;border-radius:7px}
 .sb-projx:hover{color:var(--coral);background:rgba(255,80,80,.12)}
 .sb-projacts{display:flex;gap:6px;border-top:1px solid var(--line);padding-top:6px}
-.sb-projveil{position:fixed;inset:0;z-index:59}
+.sb-projveil{position:fixed;inset:0;z-index:317}
 /* Export \u25BE menu reuses .sb-projwrap/.sb-projveil/.sb-projpop's POPOVER chrome as-is --
    same popover language as the storyboard switcher it sits beside. The TRIGGERS diverged in
    the 2026-08-13 styleset pass: the switcher wears the DC's compact .lv-caret square, and
@@ -6765,7 +6765,7 @@ ${"=".repeat(48)}
 .sb-trim-read b{color:var(--amber)}
 .sb-trim-reset{margin-left:9px;background:none;border:1px solid var(--line);color:var(--ink2);border-radius:5px;font-size:10px;padding:1px 8px;cursor:pointer}
 .sb-trim-reset:hover{border-color:var(--amber);color:var(--amber)}
-.sb-seq{position:fixed;inset:0;z-index:500;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
+.sb-seq{position:fixed;inset:0;z-index:490;background:rgba(4,3,10,.92);display:flex;align-items:center;justify-content:center;padding:22px}
 .sb-seq-box{max-width:1120px;width:100%;display:flex;flex-direction:column;gap:11px}
 .sb-seq video{width:100%;max-height:78vh;background:#000;border-radius:11px;display:block;cursor:pointer}
 .sb-seq-bar{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px}
@@ -6781,7 +6781,7 @@ ${"=".repeat(48)}
 /* 500, not 400: ImportCollection opens ON TOP of the V2 shell, and .lv-overlay is also 400 --
    at a tie it only stayed above because it happens to render later in App's child order.
    500 clears both that and Deep Focus's .lv-df-veil (450) outright. */
-.sb-pick-ov{position:fixed;inset:0;z-index:500;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
+.sb-pick-ov{position:fixed;inset:0;z-index:490;background:rgba(6,4,16,.76);display:flex;align-items:center;justify-content:center;padding:20px}
 .sb-pick-box{width:920px;max-width:94vw;height:82vh;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px}
 .sb-pick-head{display:flex;align-items:center;gap:9px}
 .sb-pick-t{font-size:15px;font-weight:700;white-space:nowrap}
@@ -7204,10 +7204,10 @@ ${"=".repeat(48)}
   box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 34px rgba(182,146,230,.14);}
 .lv-boardcol{flex:1;min-width:0;overflow:auto;background:var(--base);}
 
-.lv-backdrop{position:absolute;inset:0;z-index:40;background:rgba(5,4,13,.62);
+.lv-backdrop{position:absolute;inset:0;z-index:310;background:rgba(5,4,13,.62);
   backdrop-filter:blur(7px);animation:lvFadeIn .32s ease both;}
 .lv-backdrop.closing{animation:lvFadeOut .34s ease both;}
-.lv-panel{position:absolute;top:20px;bottom:20px;z-index:41;box-sizing:border-box;
+.lv-panel{position:absolute;top:20px;bottom:20px;z-index:311;box-sizing:border-box;
   display:flex;flex-direction:column;min-height:0;border-radius:16px;
   border:1px solid rgba(182,146,230,.32);
   background:linear-gradient(120deg,rgba(24,18,54,.92) 0%,rgba(14,11,32,.95) 100%);
@@ -7554,8 +7554,8 @@ ${"=".repeat(48)}
 .lv-openfilters:hover{border-color:var(--accent);}
 /* Filter compare modal -- The Loom.dc.html's own filterCompareOpen, literal values (fixed
    veil + centered card, 920px cap, 3-column grid: preview/preview/filters+sliders). */
-.lv-fc-veil{position:fixed;inset:0;z-index:47;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
-.lv-fc-host{position:fixed;inset:0;z-index:48;display:grid;place-items:center;pointer-events:none;padding:20px;}
+.lv-fc-veil{position:fixed;inset:0;z-index:312;background:rgba(5,4,13,.72);backdrop-filter:blur(7px);}
+.lv-fc-host{position:fixed;inset:0;z-index:313;display:grid;place-items:center;pointer-events:none;padding:20px;}
 .lv-fc-card{pointer-events:auto;box-sizing:border-box;width:min(920px,calc(100vw - 40px));
   max-height:92vh;overflow-y:auto;border-radius:16px;border:1px solid var(--surface1);
   background:var(--surface0);box-shadow:0 34px 80px -18px rgba(0,0,0,.75);padding:16px 20px 20px;}
@@ -9476,7 +9476,12 @@ ${"=".repeat(48)}
     })());
   }
   var LOOM_MOBILE_STYLES = `
-.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+/* Drift 122 (design handoff 2026-09-04, owner device pass 2026-09-28): the phone Loom is sized
+   by the VISIBLE viewport (dvh), like the gallery's phone shells (gallery-mobile.css). inset:0 is
+   the fallback for a browser without dvh; the update strip's height comes off the top because
+   notify.css moves this shell down by it. Its three scroll bodies and two sheets pad their foot
+   by the home indicator, so the last control in each clears it. */
+.lm-root{position:fixed;inset:0;height:calc(100dvh - var(--mg-updbanner-h, 0px));z-index:400;background:var(--mantle);color:var(--text);
   display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 .lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
@@ -9513,7 +9518,7 @@ ${"=".repeat(48)}
   box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none;}
 .lm-scrubline{position:absolute;top:6px;bottom:12px;width:2px;background:var(--accent);
   box-shadow:0 0 6px color-mix(in srgb,var(--accent) 70%,transparent);pointer-events:none;}
-.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:10;display:flex;align-items:center;
+.lm-preview{position:absolute;top:100%;margin-top:8px;z-index:301;display:flex;align-items:center;
   gap:8px;padding:7px 10px;border-radius:10px;background:var(--surface0);border:1px solid var(--surface1);
   box-shadow:0 10px 26px -8px rgba(0,0,0,.6);pointer-events:none;width:172px;box-sizing:border-box;}
 .lm-prevthumb{width:34px;height:34px;border-radius:7px;flex:none;background-size:cover;
@@ -9522,7 +9527,7 @@ ${"=".repeat(48)}
 .lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
 .lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-prevmeta{font-size:9px;color:var(--subtext);}
-.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
@@ -9566,7 +9571,7 @@ ${"=".repeat(48)}
 @keyframes lmSheetDown{from{transform:translateY(0);}to{transform:translateY(100%);}}
 @keyframes lmFadeIn{from{opacity:0;}to{opacity:1;}}
 @keyframes lmFadeOut{from{opacity:1;}to{opacity:0;}}
-.lm-df{position:absolute;inset:0;z-index:20;background:var(--mantle);display:flex;flex-direction:column;
+.lm-df{position:absolute;inset:0;z-index:302;background:var(--mantle);display:flex;flex-direction:column;
   animation:lmRise .22s ease both;}
 .lm-df-top{flex:none;display:flex;align-items:center;gap:8px;
   padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
@@ -9580,7 +9585,7 @@ ${"=".repeat(48)}
 .lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
   border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
   font-size:13px;padding:0;}
-.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
   margin:10px 0 5px;}
 .lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
@@ -9625,12 +9630,12 @@ ${"=".repeat(48)}
   border:1px solid var(--surface1);background:var(--surface1);color:var(--text);}
 
 /* ---- Cast & assets sheet (bottom sheet, opened from Shot Detail's \u{1F465} button) ---- */
-.lm-scrim{position:absolute;inset:0;z-index:30;background:rgba(3,2,8,.6);
+.lm-scrim{position:absolute;inset:0;z-index:306;background:rgba(3,2,8,.6);
   animation:lmFadeIn .24s ease both;}
 .lm-scrim.closing{animation:lmFadeOut .28s ease both;}
-.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
+.lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:307;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
+  padding:12px 18px calc(16px + env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
@@ -9669,7 +9674,7 @@ ${"=".repeat(48)}
 
 /* ---- Generate (third increment, 2026-08-03) -- opened from Shot Detail's own
    "Select in Generate \u2192" button, matching the locked design's genOpen full-screen page. ---- */
-.lm-gen{position:absolute;inset:0;z-index:25;background:var(--mantle);display:flex;flex-direction:column;
+.lm-gen{position:absolute;inset:0;z-index:304;background:var(--mantle);display:flex;flex-direction:column;
   animation:lmRise .22s ease both;}
 .lm-gen-top{flex:none;display:flex;align-items:center;gap:8px;
   padding:max(14px,env(safe-area-inset-top)) 16px 10px;}
@@ -9678,7 +9683,7 @@ ${"=".repeat(48)}
 .lm-gen-back:hover{color:var(--text);}
 .lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;
   border:1px solid rgba(255,255,255,.3);
   color:color-mix(in oklab,var(--accent) 26%,#08040f);
@@ -9804,9 +9809,9 @@ ${"=".repeat(48)}
 /* Model/LoRA picker sheet -- a near-full-screen mobile sheet (unlike the half-height Cast
    sheet: <ModelPicker>'s search+grid genuinely needs the room), wrapping the SAME real
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
-.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
+.lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:308;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  padding:12px 16px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-pick-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -9822,7 +9827,7 @@ ${"=".repeat(48)}
 .lm-reviewbadge{position:absolute;top:8px;left:10px;width:48px;height:48px;z-index:2;
   display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
   background:rgba(0,0,0,.28);border:none;border-radius:9px;cursor:pointer;padding:0;}
-.lm-review{position:absolute;inset:0;z-index:22;background:var(--mantle);display:flex;
+.lm-review{position:absolute;inset:0;z-index:303;background:var(--mantle);display:flex;
   flex-direction:column;animation:lmRise .22s ease both;}
 .lm-review-previewwrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;
   overflow:hidden;background:var(--base);margin-top:4px;}
@@ -9871,7 +9876,7 @@ ${"=".repeat(48)}
 .lm-openfiltersbtn{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px;
   border-radius:9px;font:700 12px/1 system-ui;cursor:pointer;border:1px solid var(--surface1);
   background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);margin-top:8px;}
-.lm-fc{position:absolute;inset:0;z-index:26;background:var(--mantle);display:flex;
+.lm-fc{position:absolute;inset:0;z-index:305;background:var(--mantle);display:flex;
   flex-direction:column;animation:lmRise .22s ease both;}
 .lm-fc-previewrow{display:flex;gap:8px;margin:4px 0 16px;}
 .lm-fc-previewcol{flex:1;min-width:0;}

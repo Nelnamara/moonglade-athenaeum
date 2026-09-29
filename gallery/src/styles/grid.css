@@ -326,7 +326,8 @@
 .mgg-timeline { display: flex; gap: 14px; align-items: flex-start; padding: 0 12px; }
 .mgg-tl-cols {
   flex: 1 1 auto; min-width: 0; position: relative;
-  max-height: calc(100vh - var(--mgx-chrome-h, 150px)); overflow-y: auto; overflow-x: hidden;
+  max-height: calc(100vh - var(--mgx-chrome-h, 150px)); max-height: calc(100dvh - var(--mgx-chrome-h, 150px));
+  overflow-y: auto; overflow-x: hidden;
 }
 .mgg-tl-band { margin-bottom: 16px; }
 .mgg-tl-band:last-child { margin-bottom: 0; }

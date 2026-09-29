@@ -16,15 +16,20 @@
    surface that changes type per host was the original bug (owner spotted it comparing
    screenshots, 2026-07-21).
 
-   z-index contract (raised to clear the Loom's own full-screen overlays): celebrations
-   .ach-m2=520, toasts #mg-toasts=510. The parade's two chips bracket the celebration: the
-   counter .ach-trailchip=519 sits behind it (it is never clicked), the skip control
-   .ach-skipchip=521 in front of it (it must be). The Activity panel (.at-panel, z-index:60)
+   z-index contract: the AMBIENT/CELEBRATION band, 510-520 (drift §3; every value in the app
+   sits in one of the three bands since the 2026-09-28 normalization -- overlays.css has the
+   whole account). In order: the update strip .mg-updbanner=510, toasts #mg-toasts=511, the
+   clip moments 515/516 (moments.css), then the parade: its counter .ach-trailchip=518
+   behind the celebration (it is never clicked), the celebration .ach-m2=519, and the skip
+   control .ach-skipchip=520 in front of it (it must be -- at or under the moment's rung the
+   click would land on the moment's own full-screen layer and merely advance it). The skip
+   control is why the moment sits at 519 rather than the design's 520: the band's ceiling is
+   520 and the control has to clear the moment. The Activity panel (.at-panel, z-index 318)
    only ever needs to clear its own host's local header content now, not the Loom's bands --
    it lives inside the header, not body-level. */
 
 /* ---- achievement celebration (the locked 335ef4e7 toast-v2 moment) ---- */
-.ach-m2{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:var(--font-system,system-ui,sans-serif);}
+.ach-m2{position:fixed;inset:0;z-index:519;display:flex;align-items:center;justify-content:center;background:rgba(8,6,16,.78);opacity:0;transition:opacity .35s;padding:20px;font-family:var(--font-system,system-ui,sans-serif);}
 .ach-m2.go{opacity:1;}
 .ach-m2.out{opacity:0;transition:opacity .5s;}
 /* ---- the flood TRAIL (owner ruling 2026-09-03): a receded moment keeps its card on screen,
@@ -38,7 +43,7 @@
 .ach-m2.trail-2 .tw{transform:translateY(235px) scale(.8);filter:brightness(.54);}
 .ach-m2.trail-3 .tw{transform:translateY(300px) scale(.71);filter:brightness(.4);}
 .ach-m2.trail-4 .tw{transform:translateY(348px) scale(.64);filter:brightness(.28);opacity:.6;}
-.ach-trailchip{position:fixed;left:50%;transform:translateX(-50%);bottom:5vh;z-index:519;
+.ach-trailchip{position:fixed;left:50%;transform:translateX(-50%);bottom:5vh;z-index:518;
   font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--gold);
   background:rgba(10,8,24,.85);border:1px solid rgba(212,175,55,.4);border-radius:999px;
   padding:3px 11px;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1;transition:opacity .5s;}
@@ -47,10 +52,10 @@
    the counter chip's twin, one line above it, borrowing .ach-trailchip whole so this stays one
    pill family rather than two that drift. Only what a <button> genuinely needs is added here --
    the UA appearance reset, the pointer events the counter deliberately refuses, and a z-index
-   ABOVE .ach-m2's 520: at the counter's 519 the click would land on the moment's own
+   ABOVE .ach-m2's 519: at the counter's 518 the click would land on the moment's own
    full-screen layer in front of it and merely advance to the next one. Hover/focus move colour
    only, never transform, so the reduced-motion block below has nothing here to switch off. */
-.ach-skipchip{bottom:calc(5vh + 27px);z-index:521;pointer-events:auto;cursor:pointer;
+.ach-skipchip{bottom:calc(5vh + 27px);z-index:520;pointer-events:auto;cursor:pointer;
   -webkit-appearance:none;appearance:none;margin:0;line-height:1.5;}
 .ach-skipchip:hover,.ach-skipchip:focus-visible{border-color:rgba(212,175,55,.75);background:rgba(10,8,24,.95);}
 .ach-skipchip:focus-visible{outline:2px solid rgba(212,175,55,.75);outline-offset:2px;}
@@ -173,7 +178,7 @@
 .at-overflow{width:18px;height:18px;border-radius:50%;background:var(--surface1);margin-left:-8px;box-shadow:0 0 0 2px rgba(12,10,28,.92);display:grid;place-items:center;font-size:8px;color:var(--overlay0);z-index:1;}
 @media (prefers-reduced-motion: reduce){ .at-ministack.indet,.at-dot{animation:none;} }
 
-.at-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:380px;max-width:calc(100vw - 28px);max-height:min(64vh,560px);box-sizing:border-box;display:flex;flex-direction:column;padding:14px;border-radius:14px;border:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),var(--mantle) 60%);box-shadow:0 24px 60px rgba(0,0,0,.6);font-family:var(--font-system,system-ui,sans-serif);animation:atSlideIn .22s cubic-bezier(.2,.9,.24,1) both;}
+.at-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:318;width:380px;max-width:calc(100vw - 28px);max-height:min(64vh,560px);box-sizing:border-box;display:flex;flex-direction:column;padding:14px;border-radius:14px;border:1px solid var(--surface1);background:linear-gradient(180deg,var(--surface0),var(--mantle) 60%);box-shadow:0 24px 60px rgba(0,0,0,.6);font-family:var(--font-system,system-ui,sans-serif);animation:atSlideIn .22s cubic-bezier(.2,.9,.24,1) both;}
 /* Docked left instead: the trigger itself moves to the header's left side (see
    SeparatorBar.jsx/the Loom toolbar), so the panel anchors off its own LEFT edge
    here too -- always flush against whichever edge the trigger actually lives near,
@@ -257,7 +262,7 @@
 .at-copy.copied{color:var(--emerald);}
 
 /* ---- Toasts: small, corner-stacked, reusable ---- */
-#mg-toasts{position:fixed;right:16px;top:64px;z-index:510;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
+#mg-toasts{position:fixed;right:16px;top:64px;z-index:511;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;font-family:var(--font-system,system-ui,sans-serif);}
 .mg-toast{pointer-events:auto;min-width:214px;max-width:340px;display:flex;align-items:flex-start;gap:10px;background:var(--mantle);border:1px solid var(--surface1);border-left:3px solid var(--lavender);border-radius:10px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);animation:mg-toast-in .4s cubic-bezier(.2,.9,.24,1);}
 .mg-toast.out{animation:mg-toast-out .34s cubic-bezier(.4,0,.2,1) forwards;}
 .mg-toast.ok{border-left-color:var(--emerald);} .mg-toast.err{border-left-color:var(--red);} .mg-toast.unlock{border-left-color:var(--gold);}
@@ -287,7 +292,7 @@
    again below) and publishes --mg-updbanner-h on <html>; each shell's top chrome moves by
    exactly that. z-index sits just under the toasts, which stack from 64px down the right and
    never meet it. */
-.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:509;box-sizing:border-box;
+.mg-updbanner{position:fixed;top:0;left:0;right:0;z-index:510;box-sizing:border-box;
   display:flex;align-items:center;gap:10px;
   padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
   background:var(--surface0);border-bottom:1px solid var(--accent);
@@ -334,7 +339,7 @@ html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(-
    same day, refining the block above -- which moved only the shells that sit in normal flow).
    A `position:fixed; inset:0` root is pinned to the VIEWPORT: no padding on any ancestor can
    push it down, so `.sb-root`'s padding-top left the Loom's real shells (.lv-overlay on the
-   desktop, .lm-root on the phone) starting at y=0 with the z-509 strip painting over their top
+   desktop, .lm-root on the phone) starting at y=0 with the strip (then z-509, now 510) painting over their top
    bar -- the phone Loom's only "< Gallery" link among them -- and the full-screen viewer (.lbx)
    was covered the same way. The rule is therefore stated for the whole class: every fixed
    inset:0 layer that ranks BELOW the strip starts where the strip ends. Its `bottom:0` stays,
@@ -343,7 +348,7 @@ html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(-
    The two deliberate exceptions, both above or beneath the argument rather than in it:
      .mgx-veil   -- z-index 2, pointer-events:none, a decorative bottom gradient that must
                     reach the viewport edge; it covers nothing and eats no click.
-     .ach-m2     -- z-index 520, ABOVE the strip on purpose: an earned achievement owns the
+     .ach-m2     -- z-index 519, ABOVE the strip on purpose: an earned achievement owns the
                     whole screen for its few seconds, strip included.
    loom/test/mg-updbanner-layers.test.js re-derives this list from the stylesheets and fails on
    any new fixed inset:0 root that is neither offset here nor named in its exemption list. */

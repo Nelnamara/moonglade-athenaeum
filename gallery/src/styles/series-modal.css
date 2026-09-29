@@ -36,7 +36,7 @@ html.mg-noblur .mgss-scrim {
 
 .mgss { position: fixed; top: 50%; left: 50%; z-index: 415;
   transform: translate(-50%, -50%);
-  width: min(760px, calc(100vw - 48px)); max-height: min(84vh, 720px);
+  width: min(760px, calc(100vw - 48px)); max-height: min(84vh, 720px); max-height: min(84dvh, 720px);
   display: flex; flex-direction: column; overflow: hidden; outline: none;
   border-radius: 16px;
   border: 1px solid color-mix(in oklab, var(--lavender) 30%, transparent);

@@ -82,7 +82,7 @@
    (PowerModal's .mgcp-pwr-* is control-specific, mascot artwork included) --
    built fresh here, reusing .mgdr-autoconfirm-head/-body/-actions verbatim for
    the inner copy/actions styling, same as the per-group sheet above. ---- */
-.mgdrm-automodal-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(4,3,10,.66);
+.mgdrm-automodal-scrim { position: fixed; inset: 0; z-index: 318; background: rgba(4,3,10,.66);
   display: flex; align-items: center; justify-content: center; padding: 20px;
   animation: mgdrmFadeIn .2s ease; }
 .mgdrm-automodal-card { width: 100%; max-width: 320px; border-radius: 14px;

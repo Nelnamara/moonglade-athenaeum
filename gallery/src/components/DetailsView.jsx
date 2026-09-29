@@ -172,8 +172,8 @@ function groupSeriesSteps(steps, currentTaskId) {
    follow the design's layout. There should be NO page scrolling. The image stays static
    and the details pane scrolls if needed."). The structure is the DC's, line for line:
 
-     shell (DC:36)       fixed inset-0, 100vh, overflow hidden, flex column -- the document
-                         NEVER scrolls
+     shell (DC:36)       fixed inset-0, the visible viewport (100dvh; drift 122), overflow
+                         hidden, flex column -- the document NEVER scrolls
      top bar (DC:38-46)  Back · divider · ⛶ Lightbox · spacer · N of M · Prev · Next (+ the
                          app's Focus toggle last, a shipped owner feature)
      body (DC:345)       grid, two EQUAL columns always (minmax(0,1fr) x2); F collapses the

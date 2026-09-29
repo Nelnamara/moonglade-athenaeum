@@ -1563,8 +1563,9 @@ export default function App({ boot }) {
           pipelines); Import is still `soon`-dimmed in NavSpine until its own
           backend route exists (My
           Art and Contests already had real, working routes sitting unused --
-          see docs/DECISIONS.md 2026-08-02). Scrim z 300, slab 301 (band per
-          drift §3); Esc-first is handled by the capture listener above. The
+          see docs/DECISIONS.md 2026-08-02). Scrim z 410, slab 411 (the overlay
+          band, drift §3; the ladder is overlays.css's); Esc-first is handled by the
+          capture listener above. The
           model/tag/LoRA click-throughs close the overlay and apply the filter
           through the same applyAdvanced path every filter control uses. */}
       {overlay === "health" && (

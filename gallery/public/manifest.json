@@ -4,6 +4,7 @@
   "description": "a library against the Void -- local PixAI browsing, curation, and generation.",
   "start_url": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#0a0818",
   "theme_color": "#0a0818",
   "icons": [
