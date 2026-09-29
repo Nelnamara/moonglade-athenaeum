@@ -997,6 +997,149 @@ def loom_render_ids(out_dir):
     return frozen
 
 
+# ---------------------------------------------------------------------------
+# THE LOOM'S MUSIC BED (Session P, Stage B1: NOTES P3; BUILD-w5-p §5.5; rulings 8 and 15;
+# review F18/F19). Pure helpers here; the routes are in create_app.
+#
+# A bed is one local audio file per storyboard, stored content-addressed at
+# out_dir/loom/_beds/<account key>/<sha1>.<ext> -- never uploaded, never sent to PixAI, and
+# never deleted automatically (an explicit, confirmed sweep of beds no board of the account
+# references is offered instead). Its name is the sha1 of its bytes, so a duplicated board
+# shares it and an imported bundle's bed is RE-HASHED on arrival, never trusted by name.
+# ---------------------------------------------------------------------------
+
+LOOM_BED_MAX_BYTES = 50 * 1024 * 1024
+# The multipart envelope around the file (boundaries, headers, the csrf and board fields). A
+# request whose declared length is over the cap plus this is refused before a byte is read.
+LOOM_BED_FORM_SLACK = 64 * 1024
+LOOM_BED_FILE_RE = re.compile(r"^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$")
+LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "aac": "audio/aac",
+                  "ogg": "audio/ogg", "flac": "audio/flac"}
+# A bed added in the last few minutes may belong to a board whose save has not landed yet, so
+# the unused list never offers it (the sweep re-checks the same rule).
+LOOM_BED_UNUSED_GRACE_S = 10 * 60
+
+# The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
+LOOM_BED_FADE_IN = 2.0
+LOOM_BED_FADE_OUT = 3.0
+LOOM_BED_DUCK_DB = -12
+
+
+def sniff_audio_ext(head):
+    """The audio type of a file from its first bytes -- the magic, never the file name.
+    mp3 (an ID3 tag or an MPEG layer I-III frame sync), wav (RIFF/WAVE), m4a (an ISO-BMFF
+    ftyp box of an audio brand), aac (ADTS), ogg (OggS), flac (fLaC). None for anything else,
+    a video mp4 included."""
+    b = bytes(head or b"")
+    if len(b) < 4:
+        return None
+    if b[:4] == b"fLaC":
+        return "flac"
+    if b[:4] == b"OggS":
+        return "ogg"
+    if b[:4] == b"RIFF" and b[8:12] == b"WAVE":
+        return "wav"
+    if b[:3] == b"ID3":
+        return "mp3"
+    if len(b) >= 12 and b[4:8] == b"ftyp":
+        try:
+            size = int.from_bytes(b[:4], "big")
+        except ValueError:
+            size = 0
+        box = b[8:min(len(b), max(16, size))]
+        brands = {box[i:i + 4] for i in range(0, len(box) - 3, 4)}
+        if brands & {b"M4A ", b"M4B ", b"M4P ", b"F4A ", b"F4B "}:
+            return "m4a"
+        return None
+    if b[0] == 0xFF and (b[1] & 0xF0) == 0xF0 and ((b[1] >> 1) & 3) == 0:
+        return "aac"                        # ADTS: 12-bit sync, layer 00
+    if b[0] == 0xFF and (b[1] & 0xE0) == 0xE0 and ((b[1] >> 1) & 3) in (1, 2, 3):
+        return "mp3"                        # MPEG audio frame sync, layer I-III
+    return None
+
+
+def _unlink_quiet(path):
+    """Remove a file if it is there; a missing file or a held handle is not an error (the
+    export sweep collects what a Windows handle kept)."""
+    try:
+        os.unlink(str(path))
+    except OSError:
+        pass
+
+
+def loom_board_beds(projects):
+    """The bed files a list of parsed boards references (project.bed.file), valid names only."""
+    out = set()
+    for p in projects or []:
+        bed = p.get("bed") if isinstance(p, dict) else None
+        f = str((bed or {}).get("file") or "") if isinstance(bed, dict) else ""
+        if LOOM_BED_FILE_RE.match(f):
+            out.add(f)
+    return out
+
+
+def loom_bed_windows(spans, own_audio, bed_len=None):
+    """Where the bed ducks: [(start, end)] in cut seconds, one per run of consecutive shots
+    with their own audio, clipped to the bed's length. `spans` and `own_audio` are per
+    segment, in cut order (the twin of loom-bed-core.js's bedPlan windows)."""
+    out, at = [], 0.0
+    for span, own in zip(spans or [], own_audio or []):
+        a, b = at, at + max(0.0, float(span or 0))
+        at = b
+        if not own:
+            continue
+        if bed_len is not None:
+            b = min(b, float(bed_len))
+        if b <= a:
+            continue
+        if out and abs(out[-1][1] - a) < 1e-9:
+            out[-1] = (out[-1][0], b)
+        else:
+            out.append((a, b))
+    return out
+
+
+def loom_bed_audio_graph(bed_idx, db, cut_len, bed_dur=None, windows=(), cut_label="acut",
+                         out_label="aout"):
+    """The ffmpeg filter text that mixes a music bed under the Loom's local cut (⇧ Render),
+    by the page's rules -- the server's twin of loom-bed-core.js, which Play uses:
+      level `db` (−24…0), −12 dB more inside each duck window, a 2 s in-fade and a 3 s
+      out-fade, the bed cut to the cut (atrim) and ending with its out-fade there; a shorter
+      bed ends where it ends, with its own out-fade, and never loops.
+    `bed_idx` is the bed's ffmpeg input index. With `cut_label` (the concatenated shots'
+    audio) the two are summed by amix without normalising, so the shots keep their level;
+    with cut_label=None the bed IS the cut's audio track. Returns filter chains joined by ';'.
+    Pure: tests/test_loom_p_routes.py pins the text."""
+    cut_len = max(0.0, float(cut_len or 0))
+    try:
+        bd = float(bed_dur) if bed_dur not in (None, "") else None
+    except (TypeError, ValueError):
+        bd = None
+    bed_len = min(bd, cut_len) if bd and bd > 0 else cut_len
+    try:
+        level = int(round(float(db)))
+    except (TypeError, ValueError):
+        level = -8
+    level = max(-24, min(0, level))
+    fin = min(LOOM_BED_FADE_IN, bed_len / 2.0)
+    fout = min(LOOM_BED_FADE_OUT, bed_len / 2.0)
+    chain = ["atrim=end=%.3f" % bed_len, "asetpts=PTS-STARTPTS",
+             "aformat=sample_rates=48000:channel_layouts=stereo", "volume=%ddB" % level]
+    wins = [(a, min(b, bed_len)) for (a, b) in (windows or ()) if min(b, bed_len) > a]
+    if wins:
+        chain.append("volume=%ddB:enable='%s'" % (
+            LOOM_BED_DUCK_DB, "+".join("between(t,%.3f,%.3f)" % (a, b) for (a, b) in wins)))
+    chain.append("afade=t=in:st=0:d=%.3f" % fin)
+    chain.append("afade=t=out:st=%.3f:d=%.3f" % (max(0.0, bed_len - fout), fout))
+    if cut_label is None:
+        return "[%d:a]%s[%s]" % (bed_idx, ",".join(chain), out_label)
+    return ";".join([
+        "[%d:a]%s[bed]" % (bed_idx, ",".join(chain)),
+        "[%s]aformat=sample_rates=48000:channel_layouts=stereo[acutf]" % cut_label,
+        "[acutf][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[%s]" % out_label,
+    ])
+
+
 def _operator_clause(key, value):
     """Compile one key:value search token into (sql_clause, params), or None when
     the token isn't a valid operator and should be searched as plain prompt text
@@ -23223,6 +23366,92 @@ def create_app(out_dir: Path):
             return e
         return None
 
+    # ---- The music bed's store (Session P, P3; rulings 8 and 15; review F18/F19) -------------
+    # out_dir/loom/_beds/<account key>/<sha1>.<ext>. Every read and write resolves a name that
+    # has already matched LOOM_BED_FILE_RE and then checks _is_under the CALLER's own folder, so
+    # neither a crafted name nor another account's bed can be reached.
+    def _loom_beds_dir(user):
+        return out_dir / "loom" / "_beds" / _account_key(user)
+
+    def _loom_bed_path(user, name):
+        """The caller's bed file for `name`, or None (bad name, outside the folder, absent)."""
+        name = str(name or "")
+        if not LOOM_BED_FILE_RE.match(name):
+            return None
+        d = _loom_beds_dir(user)
+        p = d / name
+        try:
+            if not _is_under(p.resolve(), d.resolve()) or not p.is_file():
+                return None
+        except OSError:
+            return None
+        return p
+
+    def _loom_store_bed(user, src_path, ext):
+        """Move a finished temp file into the caller's bed folder under the sha1 of its bytes.
+        An identical bed already there is not rewritten (the temp file is dropped). -> name."""
+        h = hashlib.sha1()
+        with open(src_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+        name = h.hexdigest() + "." + ext
+        d = _loom_beds_dir(user)
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / name
+        if dest.is_file():
+            try:
+                os.unlink(src_path)
+            except OSError:
+                pass
+        else:
+            os.replace(src_path, dest)
+        return name
+
+    def _loom_account_projects(user):
+        """Every board this account can open (its own keys and the legacy keys it has not
+        buried -- loom_list's set), parsed. Read-only; an unreadable board is skipped."""
+        from urllib.parse import unquote
+        with _loom_lock:
+            own = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.json")}
+            legacy = {unquote(f.stem) for f in _legacy_loom_kv_dir().glob("*.json")}
+            buried = {unquote(f.stem) for f in _loom_kv_dir(user).glob("*.deleted")}
+            keys = sorted((own | legacy) - buried)
+            out = []
+            for k in keys:
+                if not (k.startswith("storyboard:v2:proj:") or k == "storyboard:v2:project"):
+                    continue
+                v = _loom_kv_read(user, k)
+                if isinstance(v, str):
+                    try:
+                        v = json.loads(v)
+                    except ValueError:
+                        continue
+                if isinstance(v, dict):
+                    out.append(v)
+        return out
+
+    def _loom_unused_beds(user):
+        """[(name, bytes)] of the caller's beds no board of the account references, oldest
+        first, leaving out any bed added in the last LOOM_BED_UNUSED_GRACE_S (its board's save
+        may not have landed). Read-only."""
+        d = _loom_beds_dir(user)
+        if not d.is_dir():
+            return []
+        used = loom_board_beds(_loom_account_projects(user))
+        now = time.time()
+        out = []
+        for f in d.iterdir():
+            if not LOOM_BED_FILE_RE.match(f.name) or f.name in used:
+                continue
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if now - st.st_mtime < LOOM_BED_UNUSED_GRACE_S:
+                continue
+            out.append((st.st_mtime, f.name, st.st_size))
+        return [(n, b) for (_m, n, b) in sorted(out)]
+
     def _loom_journal_finish_task(task_id):
         """/api/task-status reported a journalled task done or failed: mark it finished, so
         its shot may render again at once. A dict lookup; nothing for other tasks."""
@@ -24621,6 +24850,142 @@ __DESIGN_TOKENS__
             with _export_lock:
                 _export_job.update(status="failed", error=_redact_host_paths(str(e))[:200], proc=None)
 
+    # ==== THE MUSIC BED (Session P, P3) ======================================================
+    # One local audio file per storyboard, never uploaded and never sent to PixAI. These routes
+    # store, stream and (only on the owner's confirmed ask) sweep bed files; putting a bed on a
+    # board, levelling it and removing it are board edits the Loom saves through /api/loom/set.
+    # None of them can reach a render: tests/test_loom_p_routes.py runs every one with the
+    # spend functions booby-trapped and walks their source for the names.
+    @app.route("/api/loom/bed", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_bed_upload():
+        """multipart {csrf, board, file} -> {file, name, dur, bytes}. The 50 MB cap is enforced
+        BEFORE the body is read (the declared length) and while it is read (a hard stream
+        limit); the type is sniffed from the bytes, never the file name; the file is stored
+        under the sha1 of its bytes, atomically, and an identical bed is not rewritten."""
+        import tempfile
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        cap_msg = "A music bed can be up to %d MB." % (LOOM_BED_MAX_BYTES // (1024 * 1024))
+        length = request.content_length
+        if length is None:
+            return jsonify({"error": "The upload did not say how big it is."}), 411
+        if length > LOOM_BED_MAX_BYTES + LOOM_BED_FORM_SLACK:
+            return jsonify({"error": cap_msg}), 413
+        # A hard limit on what the form parser may read, whatever the declared length claims.
+        request.max_content_length = LOOM_BED_MAX_BYTES + LOOM_BED_FORM_SLACK
+        try:
+            form, files = request.form, request.files
+        except Exception:                                   # RequestEntityTooLarge, a torn body
+            return jsonify({"error": cap_msg}), 413
+        if not _check_csrf(form):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        board = str(form.get("board") or "")
+        if board and not _LOOM_ID_RE.match(board):
+            return jsonify({"error": "bad board id"}), 400
+        f = files.get("file")
+        if f is None:
+            return jsonify({"error": "no file"}), 400
+        tmp_dir = _loom_beds_dir(user)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".upload-", suffix=".part", dir=str(tmp_dir))
+        total, head = 0, b""
+        try:
+            with os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = f.stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > LOOM_BED_MAX_BYTES:
+                        raise ValueError("too big")
+                    if len(head) < 64:
+                        head = (head + chunk)[:64]
+                    out.write(chunk)
+            ext = sniff_audio_ext(head)
+            if total == 0 or ext is None:
+                raise TypeError("not audio")
+            name = _loom_store_bed(user, tmp, ext)
+        except ValueError:
+            _unlink_quiet(tmp)
+            return jsonify({"error": cap_msg}), 413
+        except TypeError:
+            _unlink_quiet(tmp)
+            return jsonify({"error": "That isn't an audio file the Loom can use (mp3, wav, m4a, aac, ogg or flac)."}), 415
+        except OSError as e:
+            _unlink_quiet(tmp)
+            return jsonify({"error": _redact_host_paths(str(e))[:120]}), 500
+        dur = None
+        try:
+            import moonglade_backup as core
+            d = core.duration(str(_loom_beds_dir(user) / name))
+            dur = round(d, 3) if d else None
+        except Exception:
+            dur = None
+        display = re.sub(r"[\x00-\x1f\x7f]", "", os.path.basename(str(f.filename or "")))[:120] or "music bed"
+        return jsonify({"file": name, "name": display, "dur": dur, "bytes": total})
+
+    @app.route("/api/loom/bed", methods=["GET"])
+    @tier(LOGIN)
+    def api_loom_bed_get():
+        """?file=<sha1>.<ext> -> the caller's own bed, streamed (HTTP Range for seeking).
+        The name must match the pattern AND resolve inside the caller's own bed folder."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        name = request.args.get("file") or ""
+        p = _loom_bed_path(user, name)
+        if p is None:
+            return jsonify({"error": "no such music bed"}), 404
+        return send_file(str(p), mimetype=LOOM_BED_MIMES.get(p.suffix.lstrip("."), "application/octet-stream"),
+                         conditional=True, max_age=3600)
+
+    @app.route("/api/loom/beds/unused")
+    @tier(LOGIN)
+    def api_loom_beds_unused():
+        """The caller's bed files no board of the account references (ruling 15: they are
+        never deleted automatically; this is what the owner's explicit sweep offers).
+        {files: [{file, bytes}], count, bytes, h}. Read-only."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        rows = _loom_unused_beds(user)
+        total = sum(b for (_n, b) in rows)
+        return jsonify({"files": [{"file": n, "bytes": b} for (n, b) in rows],
+                        "count": len(rows), "bytes": total, "h": _fmt_size(total)})
+
+    @app.route("/api/loom/beds/sweep", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_beds_sweep():
+        """{csrf, files: [...]} -> deletes ONLY the named beds that are still unused when it
+        looks again (a board saved in between keeps its bed). {removed, kept}."""
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        want = body.get("files")
+        if not isinstance(want, list) or len(want) > 500:
+            return jsonify({"error": "files must be a list"}), 400
+        want = [str(x) for x in want]
+        if any(not LOOM_BED_FILE_RE.match(x) for x in want):
+            return jsonify({"error": "bad bed file name"}), 400
+        unused = {n for (n, _b) in _loom_unused_beds(user)}
+        removed, kept = [], []
+        for n in want:
+            p = _loom_bed_path(user, n)
+            if p is None or n not in unused:
+                kept.append(n)
+                continue
+            try:
+                p.unlink()
+                removed.append(n)
+            except OSError:
+                kept.append(n)
+        return jsonify({"ok": True, "removed": removed, "kept": kept})
+
     @app.route("/api/loom/export", methods=["POST"])
     @tier(LOGIN)
     def api_loom_export():
@@ -24662,6 +25027,10 @@ __DESIGN_TOKENS__
         except (TypeError, ValueError):
             total_sec = 1.0
         segs = []
+        # Session P (P3): per segment, whether the shot has its own audio (the Loom's one
+        # definition, loom-bed-core.js hasOwnAudio -- the bed ducks under it) and the span the
+        # Loom computed for it (the bed's timing falls back to it when a length can't be read).
+        seg_meta = []
         for c in (body.get("clips") or []):
             mid = str(c.get("mid") or "")
             if not mid:
@@ -24700,8 +25069,20 @@ __DESIGN_TOKENS__
             # mid rides along purely so a per-segment failure below can name the shot the
             # owner has to go fix -- the on-disk path is a host path we don't hand back.
             segs.append((path, ci, co, probe_has_audio(path), crop, mid))
+            try:
+                cspan = float(c.get("span")) if c.get("span") not in (None, "") else None
+            except (TypeError, ValueError):
+                cspan = None
+            seg_meta.append((bool(c.get("own_audio")), cspan))
         if not segs:
             return jsonify({"error": "no finished shot videos found on disk to export"}), 400
+        # THE MUSIC BED (Session P, P3): mixed under the cut by the page's rules, from the
+        # caller's own bed folder (never a path the client names). A bed that is not there is
+        # left out and the owner is told, rather than failing the whole cut.
+        bed_req = body.get("bed") if isinstance(body.get("bed"), dict) else None
+        bed_path = _loom_bed_path(str(session.get("user") or ""), bed_req.get("file")) if bed_req else None
+        bed_warning = ("The music bed's file isn't in your beds folder, so the cut was rendered "
+                       "without it.") if (bed_req and bed_req.get("file") and bed_path is None) else ""
         _export_dir.mkdir(parents=True, exist_ok=True)
         out_path = _export_dir / "loom_cut.mp4"
         W, H = 1280, 720
@@ -24786,6 +25167,7 @@ __DESIGN_TOKENS__
                 pass
         need_silence = audio_track and any(not ha for (_p, _ci, _co, ha, _cr, _m) in segs)
         silence_idx = len(segs)   # the synthetic-silence input, appended after all real -i's
+        bed_idx = len(segs) + (1 if need_silence else 0)   # the bed's input, after the silence
         for i, (path, ci, co, has_audio, crop, _mid) in enumerate(segs):
             tr = "trim=start=%.3f" % ci + ((":end=%.3f" % co) if co is not None else "")
             # A per-shot crop happens in SOURCE pixels (iw/ih), before the scale-to-canvas, so
@@ -24807,8 +25189,36 @@ __DESIGN_TOKENS__
             # the pad order doesn't match n*(v+a) in that exact per-segment sequence.
             labels += ("[v%d][a%d]" % (i, i)) if audio_track else ("[v%d]" % i)
         fc = ";".join(parts) + ";" + labels + (
-            "concat=n=%d:v=1:a=1[vout][aout]" if audio_track else "concat=n=%d:v=1:a=0[vout]"
-        ) % len(segs)
+            "concat=n=%d:v=1:a=1[vout][%s]" % (len(segs), "acut" if bed_path is not None else "aout")
+            if audio_track else "concat=n=%d:v=1:a=0[vout]" % len(segs))
+        if bed_path is not None:
+            # Each segment's length in the cut: the trim's own out point, else the measured
+            # file, else the span the Loom computed -- the same order the silence pass uses.
+            bed_spans = []
+            for i, (path, ci, co, _ha, _cr, _m) in enumerate(segs):
+                if co is not None:
+                    sp = co - ci
+                else:
+                    d = spans.get(i)
+                    if d is None:
+                        pd = probe_duration(path)
+                        d = (pd - ci) if pd is not None else seg_meta[i][1]
+                    sp = d
+                bed_spans.append(max(0.1, float(sp if sp is not None else 0.1)))
+            cut_len = sum(bed_spans)
+            try:
+                bed_dur = float(bed_req.get("dur")) if bed_req.get("dur") not in (None, "") else None
+            except (TypeError, ValueError):
+                bed_dur = None
+            measured = probe_duration(str(bed_path))
+            if measured:
+                bed_dur = measured
+            bed_len = min(bed_dur, cut_len) if bed_dur else cut_len
+            fc += ";" + loom_bed_audio_graph(
+                bed_idx, bed_req.get("db", -8), cut_len, bed_dur,
+                loom_bed_windows(bed_spans, [m[0] for m in seg_meta], bed_len),
+                cut_label="acut" if audio_track else None, out_label="aout")
+            audio_track = True           # the bed alone is an audio track when the shots had none
         # The binary comes from media_tools, not a bare name on PATH -- the one
         # resolution, shared with every other ffmpeg call in the app.
         cmd = [core.ffmpeg_path(), "-y"]
@@ -24816,6 +25226,8 @@ __DESIGN_TOKENS__
             cmd += ["-i", path]
         if need_silence:
             cmd += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        if bed_path is not None:
+            cmd += ["-i", str(bed_path)]
         cmd += ["-filter_complex", fc, "-map", "[vout]"]
         if audio_track:
             cmd += ["-map", "[aout]"]
@@ -24823,6 +25235,7 @@ __DESIGN_TOKENS__
         if audio_track:
             cmd += ["-c:a", "aac", "-b:a", "192k"]
         cmd += [str(out_path)]
+        export_warning = " ".join(x for x in (export_warning, bed_warning) if x)
         with _export_lock:
             _export_job.update(status="running", progress=0, elapsed=0.0, out="",
                                error="", warning=export_warning, proc=None, cancelled=False)
@@ -25020,12 +25433,23 @@ __DESIGN_TOKENS__
                 resolved.append((mid, p))
             else:
                 missing.append({"media_id": mid, "referenced_by": mids[mid]})
+        # Session P (P3, ruling 8): the board's music bed travels as beds/<sha1>.<ext>, read
+        # from the caller's own bed folder only (a name that does not resolve there is simply
+        # reported missing -- never a path the client chose).
+        bed = project.get("bed") if isinstance(project.get("bed"), dict) else None
+        bed_path = None
+        if bed and bed.get("file"):
+            bed_path = _loom_bed_path(str(session.get("user") or ""), bed.get("file"))
+            if bed_path is None:
+                missing.append({"media_id": str(bed.get("file"))[:64], "referenced_by": ["music bed"]})
         mem = io.BytesIO()
         with zipfile.ZipFile(mem, "w", zipfile.ZIP_STORED) as z:
             z.writestr("project.json", json.dumps({"project": project, "thumbs": thumbs,
                                                    "missing_media": missing}))
             for mid, p in resolved:
                 z.write(p, arcname="media/{}{}".format(mid, p.suffix.lower()))
+            if bed_path is not None:
+                z.write(str(bed_path), arcname="beds/" + bed_path.name)
         mem.seek(0)
         name = "{}_bundle.zip".format((project.get("name") or "loom_project").replace(" ", "_"))
         resp = send_file(mem, mimetype="application/zip", as_attachment=True, download_name=name)
@@ -25091,6 +25515,46 @@ __DESIGN_TOKENS__
             Path(n).stem for n in z.namelist()
             if n.startswith("media/") and not n.endswith("/")])
         rows = []
+        # Session P (P3, review F19): a bundle's music bed is RE-HASHED on arrival and stored
+        # under the name its own bytes give it, in the caller's bed folder -- never under the
+        # name inside the zip, which could point anywhere or claim another bed's hash. The
+        # board is then pointed at the computed name. Not audio, or over the cap: skipped.
+        import tempfile
+        user = str(session.get("user") or "")
+        bed_names = {}
+        for name in z.namelist():
+            if not name.startswith("beds/") or name.endswith("/"):
+                continue
+            try:
+                info = z.getinfo(name)
+                if info.file_size > LOOM_BED_MAX_BYTES or not user:
+                    continue
+                d = _loom_beds_dir(user)
+                d.mkdir(parents=True, exist_ok=True)
+                fd, tmp = tempfile.mkstemp(prefix=".import-", suffix=".part", dir=str(d))
+                total, head = 0, b""
+                with os.fdopen(fd, "wb") as out, z.open(info) as src:
+                    for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                        total += len(chunk)
+                        if total > LOOM_BED_MAX_BYTES:
+                            break
+                        if len(head) < 64:
+                            head = (head + chunk)[:64]
+                        out.write(chunk)
+                ext = sniff_audio_ext(head)
+                if total == 0 or total > LOOM_BED_MAX_BYTES or ext is None:
+                    _unlink_quiet(tmp)
+                    continue
+                bed_names[name[len("beds/"):]] = _loom_store_bed(user, tmp, ext)
+            except (OSError, KeyError, zipfile.BadZipFile, RuntimeError):
+                continue
+        pbed = project.get("bed") if isinstance(project, dict) else None
+        if isinstance(pbed, dict):
+            got = bed_names.get(str(pbed.get("file") or ""))
+            if got:
+                project["bed"] = dict(pbed, file=got)
+            elif not LOOM_BED_FILE_RE.match(str(pbed.get("file") or "")):
+                project.pop("bed", None)          # a bed naming no storable file is no bed
         for name in z.namelist():
             if not name.startswith("media/") or name.endswith("/"):
                 continue

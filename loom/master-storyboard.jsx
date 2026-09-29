@@ -64,6 +64,12 @@ import {
   anchorInfo, staleText, needsNewTake, reanchorPatch, keepAnchor as keepAnchorPatch,
 } from "./src/loom-takes-core.js";
 import { makeSaveQueue } from "./src/loom-store-core.js";
+// Session P, Stage B1 (NOTES P3): the music bed's rules and timing -- a pure module, no React,
+// no DOM, no fetch (loom-no-auto-render.test.js pins that it cannot reach a render).
+import {
+  BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
+  cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
+} from "./src/loom-bed-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -117,6 +123,10 @@ const LOOM_RUN_DEPS = {
   post: apiPost, run: submitRun, confirm: (text) => window.confirm(text),
   csrf: async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); },
 };
+// The session's CSRF token for the Loom's own local POSTs (Session P, Stage B1: the music bed
+// and its sweep). The account store's GET hands it out, as it does to every
+// wave-5 surface.
+const loomCsrf = async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); };
 
 // The shared notify system (toasts · Activity tray · achievement celebrations · the Jobs
 // poller) -- the SAME modules the gallery bundle carries, so window.Toast/Jobs/JobsCard keep
@@ -162,6 +172,10 @@ const LV_TINTS = [
   "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
   "linear-gradient(150deg, #3a2b63 0%, #191338 100%)",
 ];
+
+// Session P (P3): how much taller the timeline's full view is for the music bed's row (36 px,
+// the page's), its controls line and the one-line note under them.
+const LV_BED_ZONE_H = 92;
 
 /* =========================================================================
    THE EDIT BAY v2 — reusable Seedance 2.0 storyboard with continuity chaining
@@ -873,6 +887,32 @@ const V2_STYLES = `
 .lv-segbar.error{background:var(--coral,#f38ba8);}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
+/* Session P (P3): THE MUSIC BED under the reel -- the page's section A bed row (36 px, 6 px
+   radius, thin bars, a dashed "No bed" row), its button (surface1 outline, Loom-cyan when a bed is
+   on), the level slider with the cyan accent, the fades line and the status. Loom-cyan (--loomc),
+   never gold; refusals peach. */
+.lv-bedzone{display:flex;flex-direction:column;gap:4px;margin:4px 0 6px;}
+.lv-bedrow{position:relative;display:flex;height:36px;border-radius:6px;overflow:hidden;}
+.lv-bedrow.none{border:1px dashed var(--surface1);box-sizing:border-box;}
+.lv-bedwave{position:absolute;inset:0;width:100%;height:100%;display:block;color:var(--loomc);}
+.lv-bedtitles{position:absolute;inset:0;display:flex;}
+.lv-bedtitles>div{flex:none;height:100%;}
+.lv-bedctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;color:var(--subtext);}
+.lv-bedbtn{display:inline-flex;align-items:center;gap:6px;font:600 10.5px/1.2 system-ui,sans-serif;padding:5px 10px;border-radius:8px;
+  cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:transparent;max-width:360px;box-sizing:border-box;}
+.lv-bedbtn:hover{border-color:var(--loomc);}
+.lv-bedbtn.on{border-color:var(--loomc);color:var(--text);background:color-mix(in srgb,var(--loomc) 10%,transparent);cursor:default;}
+.lv-bedbtn.busy{opacity:.6;cursor:default;}
+.lv-bedpick{display:inline-flex;align-items:center;gap:4px;min-width:0;cursor:pointer;}
+.lv-bedname{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-bedx{border:0;background:transparent;color:inherit;font:inherit;padding:0 0 0 2px;cursor:pointer;}
+.lv-bedx:hover{color:var(--loomc);}
+.lv-bedlvl{display:inline-flex;align-items:center;gap:6px;}
+.lv-bedlvl input[type=range]{width:110px;accent-color:var(--loomc);margin:0;}
+.lv-bedmono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.lv-bednote{font-size:10px;color:var(--subtext);}
+.lv-bednote.err{color:var(--peach);}
+.lv-bedlink{border:0;background:transparent;color:var(--loomc);font:inherit;padding:0;cursor:pointer;text-decoration:underline;}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
 .lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
@@ -1258,6 +1298,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // generateShot -- its ONLY use in this component, pinned by loom-no-auto-render.test.js -- and
   // the takes strip, the take list and the stale-anchor box call useTakeActions' board edits.
   generateShot, selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork,
+  // Session P, Stage B1: the music bed's board edits (P3).
+  bedApi,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -1754,8 +1796,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
 
   // Fixed Timeline drawer: hidden(0) / slim(default, scrubber only) / full(preview above
   // scrubber, real 16:9). The handle drags freely between 0 and TL_HEIGHTS.full, snapping
-  // to the nearest named state on release.
-  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
+  // to the nearest named state on release. Session P (P3): the full view also carries the
+  // music bed's row and controls under the reel (LV_BED_ZONE_H), so it is that much taller;
+  // slim is unchanged.
+  const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H };
   const tlPointerDown = (e) => { tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] }; e.currentTarget.setPointerCapture(e.pointerId); };
   const tlPointerMove = (e) => {
     if (!tlDrag.current.dragging) return;
@@ -2397,6 +2441,15 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the collapse/expand animation.
   const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
   const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+  // Session P (P3): the board's music bed, the cut it plays under, and its waveform -- views
+  // and a GET of the local file; nothing here writes the board or renders anything.
+  const bed = bedOf(project);
+  const bedSegs = cutSegments(entries, project);
+  const bedPlanNow = bedPlan(bedSegs, bed);
+  const bedPeaks = useBedPeaks(showTlPreview && bed ? bed.file : "");
+  useEffect(() => {
+    if (showTlPreview && bedApi) bedApi.refreshUnusedBeds();
+  }, [showTlPreview]);   // eslint-disable-line react-hooks/exhaustive-deps
   const timelineDrawer = (
     <div className="lv-tldrawer">
       <div className="lv-tlcontent" style={{ height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" }}>
@@ -2454,6 +2507,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             })}
             <div className="lv-target" style={{ left: `${(project.target / scale) * 100}%` }} />
           </div>
+          {/* Session P (P3, the page's section A): the music bed row under the reel, its button,
+              level, the fades/ducking line and the cut's status -- in the full view. */}
+          {showTlPreview && bedApi && (
+            <BedRow entries={entries} scale={scale} bed={bed} segs={bedSegs} plan={bedPlanNow}
+              peaks={bedPeaks} api={bedApi} />
+          )}
           <div className="lv-tlinfo">{sel
             ? <span><b>{sel.code}</b> &middot; {sel.c.title || "untitled"} &middot; {sel.c.mode} &middot; {durOf(sel.c)}s</span>
             : <span className="lv-dim">click a shot to select it — the whole workspace binds to it</span>}</div>
@@ -6992,6 +7051,134 @@ function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
   return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork };
 }
 
+/* ---- 2c. THE MUSIC BED (Session P, P3; the page's bed row under the reel) --------------------
+   One local audio file per storyboard: project.bed = {file, name, dur, db, fadeIn, fadeOut}
+   (loom-bed-core.js). Picking uploads the file to THIS machine's bed folder (never PixAI) and
+   puts it on the board; the level and Remove are board edits. Remove deletes no file -- beds
+   are never deleted automatically (ruling 15); the unused ones are offered to an explicit,
+   confirmed sweep. None of these can reach a render: pickBed, setBedLevel, removeBed and
+   sweepUnusedBeds are roots of loom-no-auto-render.test.js. */
+// A file's length from its metadata (the server answers null when ffprobe is not installed).
+const audioDuration = (url) => new Promise((res) => {
+  let settled = false;
+  const done = (v) => { if (settled) return; settled = true; res(v); };
+  try {
+    const a = new Audio();
+    a.preload = "metadata";
+    a.onloadedmetadata = () => done(Number.isFinite(a.duration) && a.duration > 0 ? a.duration : null);
+    a.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    a.src = url;
+  } catch (e) { done(null); }
+});
+const bedUrl = (file) => "/api/loom/bed?file=" + encodeURIComponent(file || "");
+
+function useBedActions({ setProject, activeIdRef }) {
+  const [bedWork, setBedWork] = useState({ phase: "", msg: "" });
+  const [unusedBeds, setUnusedBeds] = useState(null);     // {files, count, bytes, h} | null
+  const refreshUnusedBeds = useCallback(async () => {
+    try {
+      const r = await fetch("/api/loom/beds/unused");
+      const d = await r.json();
+      setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+    } catch (e) { setUnusedBeds(null); }
+  }, []);
+  const pickBed = async (file) => {
+    if (!file) return;
+    if (file.size > BED_MAX_BYTES) {
+      setBedWork({ phase: "err", msg: "A music bed can be up to " + Math.round(BED_MAX_BYTES / 1048576) + " MB; that file is "
+        + (file.size / 1048576).toFixed(1) + " MB. Nothing was added." });
+      return;
+    }
+    const boardId = activeIdRef.current;
+    setBedWork({ phase: "wip", msg: "" });
+    try {
+      const fd = new FormData();
+      fd.append("csrf", await loomCsrf());
+      fd.append("board", boardId || "");
+      fd.append("file", file, file.name);
+      const r = await fetch("/api/loom/bed", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d || d.error || !d.file) {
+        setBedWork({ phase: "err", msg: (d && d.error) || ("The music bed didn't upload (" + r.status + ").") });
+        return;
+      }
+      let dur = d.dur;
+      if (!(dur > 0)) dur = await audioDuration(bedUrl(d.file));
+      if (activeIdRef.current !== boardId) {
+        setBedWork({ phase: "err", msg: "You switched storyboards while it uploaded, so the bed wasn't added. Add it again here." });
+        return;
+      }
+      setProject((p) => (p ? { ...p, bed: makeBed({ file: d.file, name: d.name || file.name, dur }, p.bed ? p.bed.db : undefined) } : p));
+      setBedWork({ phase: "", msg: "" });
+      refreshUnusedBeds();
+    } catch (e) {
+      setBedWork({ phase: "err", msg: "The music bed didn't upload — network error. Nothing was added." });
+    }
+  };
+  const setBedLevel = (v) => setProject((p) => (p && p.bed ? { ...p, bed: { ...p.bed, db: clampBedDb(v) } } : p));
+  const removeBed = () => {
+    setProject((p) => {
+      if (!p || !p.bed) return p;
+      const next = { ...p };
+      delete next.bed;
+      return next;
+    });
+    setBedWork({ phase: "", msg: "" });
+  };
+  const sweepUnusedBeds = async () => {
+    const u = unusedBeds;
+    if (!u || !u.count) return;
+    if (!window.confirm("Remove " + u.count + " music bed file" + (u.count === 1 ? "" : "s") + " (" + u.h
+      + ") that no storyboard uses?\n\n" + (u.count === 1 ? "It is" : "They are")
+      + " deleted from this machine's music bed folder. No storyboard changes.")) return;
+    try {
+      const r = await fetch("/api/loom/beds/sweep", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf: await loomCsrf(), files: u.files.map((f) => f.file) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) setBedWork({ phase: "err", msg: d.error || "The unused beds weren't removed." });
+      else if (window.Toast) window.Toast.show({ kind: "ok", title: "Unused music beds removed",
+        msg: d.removed.length + " removed" + (d.kept.length ? ", " + d.kept.length + " kept (a storyboard uses them now)" : "") + "." });
+    } catch (e) { setBedWork({ phase: "err", msg: "The unused beds weren't removed — network error." }); }
+    refreshUnusedBeds();
+  };
+  return { bedWork, unusedBeds, refreshUnusedBeds, pickBed, setBedLevel, removeBed, sweepUnusedBeds };
+}
+
+// The decoded bed's waveform, once per file (a GET of the local file; WebAudio decodes it
+// offline -- no sound, no gesture needed). {peaks, dur} | {failed} | null while it loads.
+const BED_PEAKS = new Map();
+function useBedPeaks(file) {
+  const [st, setSt] = useState(() => (file && BED_PEAKS.get(file)) || null);
+  useEffect(() => {
+    if (!file) { setSt(null); return undefined; }
+    const hit = BED_PEAKS.get(file);
+    if (hit) { setSt(hit); return undefined; }
+    let dead = false;
+    setSt(null);
+    (async () => {
+      try {
+        const r = await fetch(bedUrl(file));
+        if (!r.ok) throw new Error(String(r.status));
+        const buf = await r.arrayBuffer();
+        const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const ctx = new Ctx(1, 1, 44100);
+        const audio = await new Promise((res, rej) => {
+          const pr = ctx.decodeAudioData(buf, res, rej);
+          if (pr && pr.then) pr.then(res, rej);
+        });
+        const v = { peaks: peaksToBuckets(audio.getChannelData(0), 1600), dur: audio.duration };
+        BED_PEAKS.set(file, v);
+        if (!dead) setSt(v);
+      } catch (e) {
+        if (!dead) setSt({ peaks: [], dur: 0, failed: true });
+      }
+    })();
+    return () => { dead = true; };
+  }, [file]);
+  return st;
+}
+
 // ---- 3. useGenerationPipeline: generate/poll/route across all four modes ----
 // mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
 // dependency on the resume effect below -- see that effect's own comment for why the
@@ -8240,6 +8427,8 @@ function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, s
 // ---- 4. useExportPipeline: shot-list/backup export, play-sequence, ffmpeg cut ----
 function useExportPipeline(project, thumbs) {
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
+  // Session P (P3): the music bed Play mixes under that sequence -- {bed, plan, segs} or null.
+  const [seqMix, setSeqMix] = useState(null);
   const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
   const exportPoll = useRef(null);
 
@@ -8289,17 +8478,30 @@ function useExportPipeline(project, thumbs) {
   };
   // Play-sequence: every finished shot (persisted resultMid), in order, with its
   // in/out trim -- a rough cut played back-to-back, nothing rendered.
+  // Session P (P3): the board's music bed plays under the cut at its level, fading 2 s in and
+  // 3 s out, ducking −12 dB under shots with their own audio -- loom-bed-core.js's plan,
+  // scheduled by SequencePlayer. A GET of the local bed file; nothing is rendered.
   const playSequence = (entries) => {
     const clips = buildPlaySequence(entries);
-    if (clips.length) setSeq(clips); else alert("No finished shots yet — generate one first.");
+    if (!clips.length) { alert("No finished shots yet — generate one first."); return; }
+    const bed = bedOf(project);
+    const segs = cutSegments(entries, project);
+    setSeqMix(bed ? { bed, segs, plan: bedPlan(segs, bed) } : null);
+    setSeq(clips);
   };
-  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side).
+  // Export: trim each finished shot + concat into one mp4 (ffmpeg, server-side). Session P
+  // (P3): the bed rides along by name; the server mixes it by the same rules (ownAudio decides
+  // the ducking, from the one definition), from the caller's own bed folder.
   const exportCut = (entries) => {
     const { clips, total } = buildExportClips(entries);
     if (!clips.length) { alert("No finished shots to export yet — generate one first."); return; }
+    const bed = bedOf(project);
+    const segs = cutSegments(entries, project);
     setExp({ status: "running", progress: 0, elapsed: 0 });
     fetch("/api/loom/export", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop })), total_seconds: total }) })
+      body: JSON.stringify({ clips: clips.map((c, i) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop,
+        span: c.span, own_audio: !!(segs[i] && segs[i].ownAudio) })), total_seconds: total,
+        ...(bed ? { bed: { file: bed.file, db: bed.db, dur: bed.dur } } : {}) }) })
       .then((r) => r.json()).then((d) => {
         if (d.error) { setExp({ status: "failed", error: d.error }); return; }
         const tick = () => fetch("/api/loom/export-status").then((r) => r.json()).then((s) => {
@@ -8316,9 +8518,9 @@ function useExportPipeline(project, thumbs) {
   // exposed by this hook (only seq was) -- every close/next-past-the-end click threw
   // ReferenceError: setSeq is not defined, silently (only visible in the console), which
   // is exactly why it looked like the buttons just didn't respond.
-  const closeSequence = () => setSeq(null);
+  const closeSequence = () => { setSeq(null); setSeqMix(null); };
 
-  return { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+  return { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
     bundleMissing, closeBundleMissing: () => setBundleMissing(null) };
 }
@@ -8366,6 +8568,8 @@ export default function App() {
   // only -- none of them can reach a render (loom/test/loom-no-auto-render.test.js).
   const { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork }
     = useTakeActions({ projectRef, activeIdRef, setProject, activeId });
+  // Session P, Stage B1 (P3): the music bed's board edits -- none can reach a render.
+  const bedApi = useBedActions({ setProject, activeIdRef });
 
   const [pickCb, setPickCb] = useState(null);     // gallery picker: cb(mid, thumb, isVideo) or null
   const [pickKind, setPickKind] = useState("image");  // preferred default type for the picker
@@ -8422,7 +8626,7 @@ export default function App() {
     setGenState(clearDraft); setGenImgState(clearDraft); setGenEditState(clearDraft); setGenRefState(clearDraft); setGenFixState(clearDraft);
   }, [activeId]);
 
-  const { seq, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
+  const { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
     bundleMissing, closeBundleMissing } = useExportPipeline(project, thumbs);
 
@@ -8518,6 +8722,7 @@ export default function App() {
           batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
           addRef={addRef} setRef={setRef} delRef={delRef}
           exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
+          bedApi={bedApi}
           importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
@@ -8532,7 +8737,7 @@ export default function App() {
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
       )}
-      {seq && <SequencePlayer clips={seq} onClose={closeSequence} />}
+      {seq && <SequencePlayer clips={seq} mix={seqMix} onClose={closeSequence} />}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
           <div className="sb-export-box">
@@ -8817,10 +9022,143 @@ function ShotPreview({ mid, trimIn, trimOut, onTrim, onSplit, crop, onCrop }) {
   );
 }
 
+/* THE MUSIC BED ROW (Session P, P3; Loom Handoff.dc.html section A, under the reel). The bed's
+   real waveform (decoded from the file) as the page's thin bars, laid out under the reel's own
+   segments -- a rendered shot's slice of the cut under that shot, nothing under an unrendered
+   one -- hatched and pulled in where the bed ducks under a shot with its own audio, faded in
+   and out as the page's masks fade it. A dashed "No bed" row when there is none. Loom-cyan
+   (--loomc), never gold. Then the page's controls: the bed button, the level slider and its dB,
+   the fades/ducking line, and the cut's status. Every control is a board edit or an upload of
+   the owner's own file to this machine -- none renders. */
+function drawBedWave(cv, { entries, scale, segs, plan, peaks, db }) {
+  if (!cv || !cv.getContext) return;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (!plan) return;
+  const col = getComputedStyle(cv).color;             // .lv-bedwave's color is var(--loomc)
+  const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+  const strength = 0.35 + ((clampBedDb(db) + 24) / 24) * 0.5;     // the page's level -> bar strength
+  const fileDur = peaks && peaks.dur > 0 ? peaks.dur : plan.bedLen;
+  let x = 0;
+  entries.forEach((e) => {
+    const x0 = x, x1 = x + (durOf(e.c) / scale) * W;
+    x = x1;
+    const sg = bySeg.get(e.c.id);
+    if (!sg || sg.start >= plan.bedLen) return;
+    const ducked = sg.ownAudio;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, 0, x1 - x0, H); ctx.clip();
+    ctx.fillStyle = col;
+    ctx.strokeStyle = col;
+    if (ducked) {                                        // the page's 135° hatch where it ducks
+      ctx.globalAlpha = 0.18; ctx.lineWidth = 2.8;
+      for (let k = -H; k < (x1 - x0) + H; k += 8) {
+        ctx.beginPath(); ctx.moveTo(x0 + k, H); ctx.lineTo(x0 + k + H, 0); ctx.stroke();
+      }
+    }
+    for (let bx = Math.ceil(x0 / 4) * 4; bx < x1 - 1; bx += 4) {
+      const t = sg.start + ((bx - x0) / Math.max(1, x1 - x0)) * sg.span;
+      if (t >= plan.bedLen) break;
+      const pk = peaks && peaks.peaks && peaks.peaks.length ? peakAt(peaks.peaks, fileDur, t) : 0.35;
+      const fade = Math.max(0, Math.min(1, plan.fadeIn > 0 ? t / plan.fadeIn : 1,
+        plan.fadeOut > 0 ? (plan.bedLen - t) / plan.fadeOut : 1));
+      const band = ducked ? 0.4 : 1;                     // a ducked bed sits in the middle 40%
+      const h = Math.max(1.5, pk * H * 0.92 * band);
+      ctx.globalAlpha = (ducked ? 0.3 : strength) * fade;
+      ctx.fillRect(bx, (H - h) / 2, 2, h);
+    }
+    ctx.restore();
+  });
+}
+function BedWave({ entries, scale, segs, plan, peaks, db }) {
+  const ref = useRef(null);
+  const [, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const upd = () => setW(el.clientWidth);
+    upd();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => { drawBedWave(ref.current, { entries, scale, segs, plan, peaks, db }); });
+  return <canvas ref={ref} className="lv-bedwave" aria-hidden="true" />;
+}
+function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
+  const busy = api.bedWork.phase === "wip";
+  const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+  const u = api.unusedBeds;
+  const dur = bed ? (bed.dur || (peaks && peaks.dur) || null) : null;
+  const picker = (label, cls, title) => (
+    <label className={cls + (busy ? " busy" : "")} title={title}>{label}
+      <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" style={{ display: "none" }} disabled={busy}
+        onChange={(ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ""; if (f) api.pickBed(f); }} />
+    </label>
+  );
+  return (
+    <div className="lv-bedzone">
+      {bed ? (
+        <div className="lv-bedrow" aria-label={"Music bed: " + bed.name}>
+          <BedWave entries={entries} scale={scale} segs={segs} plan={plan} peaks={peaks} db={bed.db} />
+          <div className="lv-bedtitles">
+            {entries.map((x) => {
+              const sg = bySeg.get(x.c.id);
+              return <div key={x.c.id} style={{ width: `${(durOf(x.c) / scale) * 100}%` }}
+                title={!sg ? x.code + " · not rendered"
+                  : sg.ownAudio ? x.code + " · bed ducks −12 dB under its own audio" : x.code + " · bed at " + dbLabel(bed.db)} />;
+            })}
+          </div>
+        </div>
+      ) : <div className="lv-bedrow none" title="No bed" />}
+      <div className="lv-bedctl">
+        {bed ? (
+          <span className="lv-bedbtn on">
+            {picker(<>&#9834; <span className="lv-bedname">{bed.name}</span>{dur ? " · " + bedClock(dur) : ""}</>,
+              "lv-bedpick", "Pick a different music bed for this storyboard")}
+            <button type="button" className="lv-bedx" aria-label="Remove the music bed"
+              title="Remove the music bed from this storyboard. Its file stays on this machine."
+              onClick={() => api.removeBed()}>&#10005;</button>
+          </span>
+        ) : picker(busy ? "♪ Adding…" : "♪ Add a music bed", "lv-bedbtn",
+          "One audio file under the whole cut — kept on this machine, never uploaded to PixAI")}
+        {bed && (
+          <>
+            <span className="lv-bedlvl">level
+              <input type="range" min={BED_DB_MIN} max={BED_DB_MAX} step={1} value={bed.db} aria-label="Music bed level"
+                onChange={(ev) => api.setBedLevel(ev.target.value)} />
+              <span className="lv-bedmono">{dbLabel(bed.db)}</span></span>
+            <span>fade 2 s in / 3 s out · ducks &minus;12 dB under shots with their own audio (hatched)</span>
+          </>
+        )}
+        <span className="lv-fill" />
+        <span className="lv-bedmono">{cutStatusLine(entries, segs)}</span>
+      </div>
+      {api.bedWork.phase === "err" ? <div className="lv-bednote err" role="status">{api.bedWork.msg}</div>
+        : bed && peaks && peaks.failed ? <div className="lv-bednote err" role="status">The music bed's file couldn't be read on this machine, so Play and &#8679; Render leave it out.</div>
+        : u && u.count > 0 ? (
+          <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
+            <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>
+        ) : null}
+    </div>
+  );
+}
+
 /* Play-sequence overlay: plays finished shots back-to-back, each from its in
    point to its out point, then advances. A rough cut with zero rendering --
-   the browser just seeks a single <video> through /video-file/<id> per clip. */
-function SequencePlayer({ clips, onClose }) {
+   the browser just seeks a single <video> through /video-file/<id> per clip.
+   Session P (P3): `mix` = {bed, plan, segs} plays the board's music bed under the cut -- an
+   <audio> of the local file through a WebAudio gain whose automation is loom-bed-core.js's
+   (level, 2 s / 3 s fades, the −12 dB ducks), re-synced to the cut's clock at every play,
+   pause, wait and shot change, and following the same mute toggle as the clips. */
+function SequencePlayer({ clips, onClose, mix }) {
   const vRef = useRef(null);
   const [i, setI] = useState(0);
   // Starts muted so autoplay is never blocked (browsers refuse autoplay WITH sound without
@@ -8866,6 +9204,75 @@ function SequencePlayer({ clips, onClose }) {
     const esc = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc);
   }, []);
+  // ---- the music bed (Session P, P3) ----
+  const mixRef = useRef(null);                  // {audio, ctx, gain} while a bed plays under the cut
+  const [bedNow, setBedNow] = useState(null);   // the bed's dB at the playhead, for the bar
+  useEffect(() => {
+    if (!mix || !mix.bed || !mix.plan) return undefined;
+    let audio = null, ctx = null;
+    try {
+      audio = new Audio(bedUrl(mix.bed.file));
+      audio.preload = "auto";
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      ctx = new Ctx();
+      const src = ctx.createMediaElementSource(audio);
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(gain); gain.connect(ctx.destination);
+      mixRef.current = { audio, ctx, gain };
+    } catch (e) { mixRef.current = null; }
+    return () => {
+      try { if (audio) audio.pause(); } catch (e) { /* gone */ }
+      try { if (ctx) ctx.close(); } catch (e) { /* gone */ }
+      mixRef.current = null;
+    };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Where the playhead is in the CUT: this shot's start in the cut plus how far into its kept
+  // range the video is (mix.segs lines up with clips: both are the rendered shots, in order).
+  const cutTime = () => {
+    const v = vRef.current, sg = mix && mix.segs && mix.segs[i];
+    return v && sg ? sg.start + Math.max(0, v.currentTime - (clip.in || 0)) : null;
+  };
+  const bedStop = () => {
+    const m = mixRef.current;
+    if (!m) return;
+    try { m.audio.pause(); } catch (e) { /* gone */ }
+    const now = m.ctx.currentTime;
+    m.gain.gain.cancelScheduledValues(now);
+    m.gain.gain.setValueAtTime(0, now);
+  };
+  const bedGo = () => {
+    const m = mixRef.current, v = vRef.current;
+    if (!m || !v || v.paused || muted) { bedStop(); return; }
+    const T = cutTime();
+    if (T == null || T >= mix.plan.bedLen) { bedStop(); return; }
+    if (Math.abs(m.audio.currentTime - T) > 0.2) { try { m.audio.currentTime = T; } catch (e) { /* not seekable yet */ } }
+    if (m.ctx.state === "suspended") m.ctx.resume().catch(() => {});
+    m.audio.play().catch(() => {});
+    const g = m.gain.gain, now = m.ctx.currentTime;
+    g.cancelScheduledValues(now);
+    bedAutomation(mix.plan, T).forEach((pt, k) => {
+      const at = now + Math.max(0, pt.t - T);
+      if (k === 0 || pt.step) g.setValueAtTime(pt.v, at); else g.linearRampToValueAtTime(pt.v, at);
+    });
+  };
+  useEffect(() => {
+    const v = vRef.current;
+    if (!v || !mix || !mixRef.current) return undefined;
+    const onPlay = () => bedGo();
+    const onStop = () => bedStop();
+    const onTime = () => {
+      const T = cutTime();
+      if (T != null) setBedNow(bedDbAt(mix.plan, T));
+      const m = mixRef.current;
+      // A stall the video recovered from without a "waiting": pull the bed back into step.
+      if (m && !v.paused && !muted && T != null && T < mix.plan.bedLen && Math.abs(m.audio.currentTime - T) > 0.35) bedGo();
+    };
+    const evs = [["playing", onPlay], ["pause", onStop], ["waiting", onStop], ["seeking", onStop], ["timeupdate", onTime]];
+    evs.forEach(([n, f]) => v.addEventListener(n, f));
+    if (!v.paused && v.readyState >= 3) bedGo(); else bedStop();
+    return () => { evs.forEach(([n, f]) => v.removeEventListener(n, f)); bedStop(); };
+  }, [i, muted]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!clip) return null;
   return (
     <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -8873,7 +9280,9 @@ function SequencePlayer({ clips, onClose }) {
         <video ref={vRef} key={clip.mid} src={"/video-file/" + clip.mid} autoPlay muted playsInline
           onClick={(e) => { const v = e.currentTarget; v.paused ? v.play() : v.pause(); }} />
         <div className="sb-seq-bar">
-          <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}</span>
+          <span>Shot {i + 1}/{clips.length}{clip.code ? " · " + clip.code : ""}{clip.title ? " — " + clip.title : ""}
+            {mix && mix.plan ? (muted ? " · bed muted" : bedNow == null ? " · bed ended"
+              : " · bed " + (bedNow < mix.plan.db ? "ducked " : "") + (bedNow < 0 ? "\u2212" + Math.abs(bedNow) : String(bedNow)) + " dB") : ""}</span>
           <button className="sb-btn ghost sm" onClick={() => setMuted(!muted)}
             title={muted ? "Unmute — the rendered mp4 has audio" : "Mute"}
             aria-pressed={!muted}>{muted ? "\u{1F507} muted" : "\u{1F50A} sound"}</button>

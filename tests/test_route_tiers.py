@@ -193,6 +193,11 @@ TIER_SNAPSHOT = [
     "/api/lineage/<media_id> [GET] LOGIN",
     "/api/login [POST] PUBLIC",
     "/api/logout [POST] PUBLIC",
+    # wave 5, Session P (P3): the music bed's local store -- never PixAI
+    "/api/loom/bed [GET] LOGIN",
+    "/api/loom/bed [POST] LOGIN",
+    "/api/loom/beds/sweep [POST] LOGIN",
+    "/api/loom/beds/unused [GET] LOGIN",
     "/api/loom/delete [POST] LOGIN",
     "/api/loom/export [POST] LOGIN",
     "/api/loom/export-bundle [POST] LOGIN",
@@ -988,7 +993,9 @@ _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs
                   # wave 5, Session N: bulk curation and the collections manager
                   "/api/curate", "/api/collections/manage",
                   # wave 5, Session P: the Loom's new local routes
-                  "/api/loom/submit-abandon")
+                  "/api/loom/submit-abandon",
+                  # Session P, Stage B1: the music bed
+                  "/api/loom/bed", "/api/loom/beds")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -1007,3 +1014,4 @@ def test_every_lane_post_checks_csrf(app):
     assert "/api/account/prefs" in checked, checked
     assert "/api/narrator/poke" in checked, checked
     assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
+    assert {"/api/loom/bed", "/api/loom/beds/sweep"} <= set(checked), checked

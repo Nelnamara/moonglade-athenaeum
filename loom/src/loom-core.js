@@ -958,6 +958,10 @@ export const mediaRefIndex = (project) => {
   ((project || {}).assets || []).forEach((a) => {
     if (a.mediaId) note(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
   });
+  // Session P (P3): the music bed travels too (beds/<file> in the zip); the server names a
+  // missing one "music bed", and so does this.
+  const bed = (project || {}).bed;
+  if (bed && bed.file) note(bed.file, "music bed");
   return ids;
 };
 

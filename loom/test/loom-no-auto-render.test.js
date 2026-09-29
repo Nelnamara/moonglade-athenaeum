@@ -381,8 +381,7 @@ const lineOfDef = (m, name) => m.byName.has(name) ? m.byName.get(name).map((d) =
    Session P, Stage A2 roots: the takes and re-anchor handlers, and every import / copy /
    open / resume / playback path that exists today.
    LATER STAGES APPEND THEIRS HERE when they create them (Stage B1/B2): adoptShotsHandoff,
-   runFind, stepFind, clearFind, toggleCastTick, editLibraryMember, pickBed, setBedLevel,
-   removeBed, exportEdl.
+   runFind, stepFind, clearFind, toggleCastTick, editLibraryMember, exportEdl.
    ====================================================================================== */
 const ROOTS = [
   // P1 / P2 -- the takes strip, the take list and the stale-anchor box
@@ -394,6 +393,9 @@ const ROOTS = [
   "dupCard", "duplicateProject", "openProject", "newProject", "loadBoards", "resumeInterrupted",
   // playback and the local cut (ffmpeg only)
   "playSequence", "exportCut",
+  // Stage B1 -- P3, the music bed: pick (an upload of the owner's file to THIS machine), level,
+  // remove, and the confirmed sweep of unused bed files. Play's mixing rides playSequence.
+  "pickBed", "setBedLevel", "removeBed", "sweepUnusedBeds",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -626,7 +628,9 @@ describe("placement pins", () => {
 });
 
 describe("the pure modules can reach nothing", () => {
-  for (const [file, allowedImports] of [["src/loom-takes-core.js", ["./loom-core.js"]], ["src/loom-store-core.js", []]]) {
+  for (const [file, allowedImports] of [["src/loom-takes-core.js", ["./loom-core.js"]], ["src/loom-store-core.js", []],
+    // the music bed's rules and timing: the ★ take's settings, for "own audio"
+    ["src/loom-bed-core.js", ["./loom-takes-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {
