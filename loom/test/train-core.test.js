@@ -49,3 +49,148 @@ describe("the confirm's accept_credit_cost", () => {
       { accept_credit_cost: false });
   });
 });
+
+/* Session J (Training Handoff, 2026-09-28): the rules the desktop overlay and the phone screen
+   share. The server re-checks everything that touches money; these decide what is drawn and
+   enabled. */
+import {
+  GOALS, MAX_IMAGES, addTag, archTabs, basicFooterCost, captionCounts, captionState,
+  datasetFits, defaultBase, etaLeftText, etaText, imageProblem, mergeImages, publishTicks,
+  removeTag, replaceIn, reuseCandidate, roomLeft, runMatches, runStatus, triggerCheck,
+} from "../../gallery/src/gen/trainCore.js";
+
+const img = (id, source) => ({ media_id: String(id), source });
+
+describe("the one grid", () => {
+  test("de-duplicated by id, first source kept, never past 100", () => {
+    const a = mergeImages([], [img(1), img(2), img(1)], "history");
+    assert.equal(a.items.length, 2);
+    assert.equal(a.dup, 1);
+    const b = mergeImages(a.items, [img(2), img(3)], "upload");
+    assert.deepEqual(b.items.map((x) => x.source), ["history", "history", "upload"]);
+    const many = Array.from({ length: 120 }, (_, i) => img(i));
+    const c = mergeImages([], many, "dataset");
+    assert.equal(c.items.length, MAX_IMAGES);
+    assert.equal(c.full, 20);
+    assert.equal(roomLeft(c.items), 0);
+  });
+  test("a set that won't fit what's left is dimmed", () => {
+    const items = Array.from({ length: 70 }, (_, i) => img(i, "history"));
+    assert.equal(datasetFits({ media_ids: Array.from({ length: 30 }, (_, i) => String(100 + i)) }, items), true);
+    assert.equal(datasetFits({ media_ids: Array.from({ length: 31 }, (_, i) => String(100 + i)) }, items), false);
+    // images already in the grid don't need room
+    assert.equal(datasetFits({ media_ids: Array.from({ length: 40 }, (_, i) => String(i + 40)) }, items), true);
+  });
+  test("a reuse is exactly one whole earlier set", () => {
+    const ds = [{ task_id: 501, media_ids: ["1", "2", "3"] }];
+    assert.equal(reuseCandidate([img(3, "dataset"), img(1, "dataset"), img(2, "dataset")], ds), "501");
+    assert.equal(reuseCandidate([img(1, "dataset"), img(2, "dataset")], ds), "");               // one removed
+    assert.equal(reuseCandidate([img(1, "dataset"), img(2, "dataset"), img(3, "history")], ds), ""); // not all from it
+    assert.equal(reuseCandidate([img(1, "dataset"), img(2, "dataset"), img(3, "dataset"), img(4, "dataset")], ds), "");
+    assert.equal(reuseCandidate([], ds), "");
+  });
+  test("PixAI's image rule on an upload's own size", () => {
+    assert.equal(imageProblem(1024, 1024), null);
+    assert.equal(imageProblem(511, 1024), "smaller than 512×512");
+    assert.equal(imageProblem(1600, 512), "longer than 3:1");
+    assert.equal(imageProblem(1536, 512), null);                        // exactly 3:1 passes
+    assert.equal(imageProblem(0, 0), "its size couldn't be read");
+  });
+});
+
+describe("trigger words and time", () => {
+  test("counted tidied, 30 on DiT.2 / DiT.3, 256 at most", () => {
+    assert.equal(triggerCheck("nelna druid", true).problem, "needs at least 30 characters on this base");
+    assert.equal(triggerCheck("nelna druid", false).ok, true);
+    assert.equal(triggerCheck("  ", false).problem, "required");
+    assert.equal(triggerCheck("x".repeat(257), false).problem, "too long: 256 characters at most");
+    assert.equal(triggerCheck(" a  b", false).spacing, true);
+    assert.equal(triggerCheck("a b", false).spacing, false);
+  });
+  test("PixAI's own estimate reads as minutes; time left rounds", () => {
+    assert.equal(etaText({ min: 27, max: 35 }), "about 27–35 minutes");
+    assert.equal(etaLeftText(12 * 60000 + 20000), "~12 min");
+    assert.equal(etaLeftText(0), "");
+  });
+});
+
+describe("runs: one pill and one action per row", () => {
+  test("the handoff's grammar", () => {
+    assert.deepEqual(runStatus({ status: "draft", step: "descriptions" }),
+      { label: "Draft · descriptions", tone: "peach", action: "continue", actionLabel: "Continue" });
+    assert.equal(runStatus({ status: "waiting" }).label, "Queued");
+    assert.equal(runStatus({ status: "running", progress: 62.9 }).label, "Training · 62%");
+    assert.equal(runStatus({ status: "failed", mode: "advanced" }).action, "retry");
+    assert.equal(runStatus({ status: "failed", mode: "basic" }).action, null);   // no retry route
+    assert.equal(runStatus({ status: "done" }).action, "publish");
+    const pub = runStatus({ status: "done", model_id: "9", visibility: "public", rebate: true });
+    assert.deepEqual([pub.label, pub.action], ["Public · rebates", "use"]);
+  });
+  test("a retried failure offers no second retry", () => {
+    const r = runStatus({ status: "failed", mode: "advanced", retry: { state: "done", new_id: "9" } });
+    assert.equal(r.action, null);
+    assert.equal(r.label, "Failed · retried");
+    const u = runStatus({ status: "failed", mode: "advanced", retry: { state: "ambiguous" } });
+    assert.equal(u.action, null);
+  });
+  test("filters", () => {
+    assert.ok(runMatches({ status: "captionReady" }, "draft"));
+    assert.ok(!runMatches({ status: "running" }, "draft"));
+    assert.ok(runMatches({ status: "done" }, "done"));
+    assert.ok(runMatches({ status: "failed" }, "all"));
+  });
+});
+
+describe("publish ticks", () => {
+  test("private one line, public two, the keys the server wants", () => {
+    assert.deepEqual(publishTicks("private").map((t) => t.key), ["no_delete"]);
+    assert.deepEqual(publishTicks("public").map((t) => t.key), ["no_delete", "no_private"]);
+  });
+});
+
+describe("descriptions", () => {
+  const caps = {
+    a: { source: "machine", text: "night elf", machine_text: "night elf" },
+    b: { source: "user", text: "my words", machine_text: "machine words" },
+    c: { source: "user", text: "same", machine_text: "same" },
+  };
+  test("PixAI's filters: auto, edited, not described yet", () => {
+    assert.equal(captionState("a", caps), "auto");
+    assert.equal(captionState("b", caps), "edited");
+    assert.equal(captionState("c", caps), "auto");                 // restored = automatic again
+    assert.equal(captionState("z", caps), "none");
+    assert.deepEqual(captionCounts(["a", "b", "c", "z"], caps), { all: 4, auto: 2, edited: 1, none: 1 });
+  });
+  test("find / replace and the tag tools stay inside 1,000 characters", () => {
+    assert.equal(replaceIn("night elf, night sky", "night", "moon"), "moon elf, moon sky");
+    assert.equal(replaceIn("abc", "z", "y"), null);
+    assert.equal(replaceIn("x".repeat(600), "x", "yy"), null);        // would pass 1,000
+    assert.equal(addTag("a, b", "c"), "a, b, c");
+    assert.equal(addTag("a, b", "B"), null);                          // already there
+    assert.equal(addTag("x".repeat(999), "yy"), null);
+    assert.equal(removeTag("a, b, c", "b"), "a, c");
+    assert.equal(removeTag("a", "a"), null);                          // never empties it
+  });
+});
+
+describe("the base picker and the footer", () => {
+  const groups = [
+    { arch: "SDXL_MODEL", label: "SDXL", models: [{ version_id: "s1" }], price: 25000, reuse: 12500 },
+    { arch: "MMDIT26B_MODEL", label: "DiT.3", recommended: true, models: [{ version_id: "t3" }], price: 100000, reuse: 70000 },
+  ];
+  test("Recommended first, and the server's default selected", () => {
+    assert.deepEqual(archTabs(groups).map((t) => t.arch), ["MMDIT26B_MODEL", "SDXL_MODEL"]);
+    assert.deepEqual(defaultBase(groups, "t3"), { tab: 0, base: "t3" });
+    assert.deepEqual(defaultBase(groups, "s1"), { tab: 1, base: "s1" });
+  });
+  test("free trainings strike the price; a reuse names itself; a card is never promised", () => {
+    const t3 = archTabs(groups)[0];
+    assert.deepEqual(basicFooterCost({ quota: 10, tab: t3, reuse: false }),
+      { free: true, price: 0, struck: 100000, badge: "10 times free", reason: "" });
+    assert.deepEqual(basicFooterCost({ quota: 0, tab: t3, reuse: true }),
+      { free: false, price: 70000, struck: null, badge: "", reason: "reusing a dataset" });
+  });
+  test("the four goals are PixAI's values", () => {
+    assert.deepEqual(GOALS.map((g) => g.value), ["character", "style", "clothing", "other"]);
+  });
+});
