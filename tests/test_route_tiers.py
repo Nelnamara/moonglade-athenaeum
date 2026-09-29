@@ -151,6 +151,7 @@ TIER_SNAPSHOT = [
     "/api/contact-sheet [GET] LOGIN",
     "/api/contest/<slug>/artworks [GET] LOGIN",
     "/api/contest/<slug>/winners [GET] LOGIN",
+    "/api/contest/check [POST] LOGIN",
     "/api/contest/enter [POST] LOGIN",
     "/api/contest/mine [GET] LOGIN",
     "/api/contest/sync [POST] LOGIN",
