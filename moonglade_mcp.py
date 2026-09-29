@@ -190,7 +190,10 @@ def add_to_collection(media_ids: list[str], collection: str) -> dict:
     name = (collection or "").strip()
     if not name:
         return {"ok": False, "error": "collection name required"}
-    n = g.add_to_collection(DB, [str(m) for m in media_ids], name)
+    try:
+        n = g.add_to_collection(DB, [str(m) for m in media_ids], name)
+    except g.CurationError as e:      # a smart collection is a saved search, not a list
+        return {"ok": False, "error": str(e)}
     return {"ok": True, "collection": name, "added": n}
 
 

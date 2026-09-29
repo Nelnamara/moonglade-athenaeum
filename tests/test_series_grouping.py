@@ -269,6 +269,9 @@ def test_without_group_the_payload_is_unchanged(tmp_path):
         # Session H T3a: the Lightbox edit bar's flag -- every still, whatever model made it
         # (owner ruling, 2026-09-28)
         "tsubaki_edit": True,
+        # Session N3: the owner's own layer (a keeper|reject mark, tags) -- empty for a picture
+        # nobody has curated, and local to the catalog
+        "mark": "", "tags": [],
     }
 
 

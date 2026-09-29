@@ -3,7 +3,12 @@ import Icon from "../icons/Icons.jsx";
 import Flyout from "./Flyout.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import LayoutStrip from "./LayoutStrip.jsx";
+import CollectionsPanel from "./CollectionsPanel.jsx";
+import {
+  OPERATOR_CHIPS, aspectError, aspectSuggestions, applySuggestion, hasToken, toggleToken,
+} from "../curation/aspectCore.js";
 import "../styles/librarybar.css";
+import "../styles/curation.css";
 
 /* ============================================================================
    The LibraryBar (the Library Bar workstream's deliverable, DC drift §10):
@@ -62,11 +67,17 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, group, setGroup }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, models, commit, group, setGroup,
+    collectionNames, onManageCollections, query }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
-  const shelfOpts = [""].concat(collections || []);
   const stars = adv.ratingMin || 0;
+  /* The Collection chip opens the collections list (Session N, N1/N2) -- every hand-picked
+     and smart collection with its count, and Manage -- where it used to cycle through the
+     names one press at a time. Same reasoning as the Model chip below: a library with dozens
+     of collections cannot be cycled. */
+  const [colOpen, setColOpen] = useState(false);
+  const colBtn = useRef(null);
   /* Model chip (DC filterChips lead with it). The DC cycles a 3-entry
      placeholder list; the real library has dozens of models, so cycling is
      unusable -- the chip opens an anchored list of the library's real models
@@ -139,12 +150,33 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
       <Chip label={"★ " + (stars >= 5 ? "5" : stars + "+")} active={stars > 0}
         title="Minimum rating"
         onClick={() => commit({ ratingMin: (stars + 1) % 6 })} />
-      <Chip label={"Collection · " + (shelf || "any")} active={!!shelf}
-        title="Cycle through your collections"
-        onClick={() => commit({ shelf: cycleNext(shelfOpts, shelf || "") })} />
+      <span ref={colBtn}>
+        <Chip label={"Collection · " + (shelf || "any")} active={!!shelf}
+          title="Browse and manage your collections"
+          onClick={() => setColOpen((v) => !v)} />
+      </span>
+      {colOpen && (
+        <CollectionsPanel anchor={colBtn} active={shelf} names={collectionNames}
+          onPick={(name) => { setColOpen(false); commit({ shelf: name }); }}
+          onManage={() => { setColOpen(false); if (onManageCollections) onManageCollections(); }}
+          onClose={() => setColOpen(false)} />
+      )}
       <Chip label={"Page · " + perPage} active={perPage !== 100}
         title="Results per page"
         onClick={() => commit({ perPage: cycleNext(PER_CYCLE, perPage) })} />
+      {/* OPERATOR CHIPS (Session N7, the page's row under the search field): one tap adds an
+          operator to the search text, a second takes it out. They ride the tray rather than a row
+          of their own under the bar, because the shipped bar has no spare row and the library
+          stands still -- nine chips on every visit would push the grid down for everyone. */}
+      {query !== undefined ? (
+        <div className="mgcu-opchips" role="group" aria-label="Search operators">
+          <span className="mgcu-opchips-cap">Operators</span>
+          {OPERATOR_CHIPS.map((t) => (
+            <button key={t} type="button" className={"mgcu-opchip" + (hasToken(query, t) ? " on" : "")}
+              aria-pressed={hasToken(query, t)} onClick={() => commit({ q: toggleToken(query, t) })}>{t}</button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -154,8 +186,9 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
    INTERFACE. Sixteen of its props were one object taken apart: it is a view of the LIBRARY --
    filters, query, selection, the flyout -- so it takes `lib`, the useLibrary() return, whole.
    The rest is what the library does not own: `boot` (models, is_true_local), `actions` (App's
-   verb table, which the Flyout and the actions menu both read), `collections`, and the two
-   optional post-mutation hooks a mount may supply.
+   verb table, which the Flyout and the actions menu both read), `curation` (Session N: the
+   collections list and Manage), and the two optional post-mutation
+   hooks a mount may supply.
 
    B1 (2026-09-04) took the `layout`/`setLayout` pair back out again: the layout picker moved
    to the separator bar's SIZE group, so this bar no longer touches it.
@@ -173,7 +206,12 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
 
    Strip's Import stub is dropped: the NavSpine carries Import (gated on boot.is_true_local). */
 export function LibraryBar({
-  lib, boot, actions, collections,
+  lib, boot, actions,
+  /* Session N: what curation hands the bar -- {names, smartShelf, onManage, onClear}. names is
+     every collection ({name, kind}) for the tray's list;
+     smartShelf says the open collection is a saved search, so the Actions menu does not offer
+     "Remove from" on it (pictures leave one by no longer matching). */
+  curation,
   onSendVideo, onMutated,
   group, setGroup,
   layout, setLayout,
@@ -181,7 +219,7 @@ export function LibraryBar({
 }) {
   const {
     media, perPage, shelf,
-    query, setQuery, submitQuery, resetAll,
+    query, applied, setQuery, submitQuery, resetAll,
     selectMode, setSelectMode, selected, setSelected,
     adv, advCount, flyOpen, setFlyOpen, applyAdvanced,
   } = lib;
@@ -194,6 +232,15 @@ export function LibraryBar({
   const [trayClosing, setTrayClosing] = useState(false);
   const trayTimer = useRef(null);
   const searchRef = useRef(null);
+  /* THE OPERATOR AUTOCOMPLETE (Session N7): while an `ar:` is being typed the field offers the
+     values that continue it. Tab or Enter takes the highlighted one (Enter with none highlighted
+     is still a search), the arrows move, a click takes one, Escape closes the list. */
+  const [focused, setFocused] = useState(false);
+  const [acIdx, setAcIdx] = useState(-1);
+  const [acOff, setAcOff] = useState(false);
+  const sugg = focused && !acOff && !similar ? aspectSuggestions(query) : [];
+  const arErr = aspectError(query, { ignoreLast: focused && query.trim() !== (applied || "").trim() });
+  const takeSuggestion = (token) => { setQuery(applySuggestion(query, token)); setAcIdx(-1); };
 
   /* the pill's active-count badge: tray-visible filters (media/shelf) plus
      everything advCount already tracks (source/sort/rating/model/…). perPage
@@ -238,6 +285,7 @@ export function LibraryBar({
     resetAll();
     clearSelection();
     setSelectMode(false);
+    if (curation && curation.onClear) curation.onClear();
   };
 
   const trayShown = trayOpen || trayClosing;
@@ -248,7 +296,9 @@ export function LibraryBar({
         <FilterTray
           closing={trayClosing}
           media={media} shelf={shelf} perPage={perPage} adv={adv}
-          collections={collections}
+          collectionNames={curation ? curation.names : undefined}
+          onManageCollections={curation ? curation.onManage : undefined}
+          query={query}
           models={boot.models || []}
           commit={applyAdvanced}
           group={group} setGroup={setGroup}
@@ -275,8 +325,20 @@ export function LibraryBar({
           <input
             value={query}
             placeholder="search the library — night*, an id, model:tsubaki…"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submitQuery()}
+            onChange={(e) => { setQuery(e.target.value); setAcIdx(-1); setAcOff(false); }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            role="combobox" aria-expanded={sugg.length > 0} aria-autocomplete="list"
+            onKeyDown={(e) => {
+              if (sugg.length) {
+                if (e.key === "ArrowDown") { e.preventDefault(); setAcIdx((i) => (i + 1) % sugg.length); return; }
+                if (e.key === "ArrowUp") { e.preventDefault(); setAcIdx((i) => (i <= 0 ? sugg.length - 1 : i - 1)); return; }
+                if (e.key === "Tab") { e.preventDefault(); takeSuggestion(sugg[Math.max(0, acIdx)].token); return; }
+                if (e.key === "Enter" && acIdx >= 0) { e.preventDefault(); takeSuggestion(sugg[acIdx].token); return; }
+                if (e.key === "Escape") { e.stopPropagation(); setAcOff(true); return; }
+              }
+              if (e.key === "Enter") submitQuery();
+            }}
           />
           <button
             type="button"
@@ -287,10 +349,23 @@ export function LibraryBar({
           >
             ▾
           </button>
+          {sugg.length > 0 && !flyOpen ? (
+            <div className="mgcu-ac" role="listbox" aria-label="Aspect values">
+              {sugg.map((sg, i) => (
+                <button key={sg.token} type="button" role="option" aria-selected={i === acIdx}
+                  className={"mgcu-ac-row" + (i === acIdx ? " on" : "")}
+                  onMouseDown={(e) => { e.preventDefault(); takeSuggestion(sg.token); }}>
+                  <code>{sg.token}</code><span>{sg.hint}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {arErr && !flyOpen ? <div className="mgcu-arerr" role="alert">{arErr}</div> : null}
           {flyOpen && (
             <Flyout
               boot={boot}
               current={adv}
+              queryText={query}
               onApply={applyAdvanced}
               onClose={() => setFlyOpen(false)}
               onPrintCollection={actions && actions.printCollection}
@@ -339,7 +414,7 @@ export function LibraryBar({
 
         <ActionsMenu
           ids={selectedIds}
-          shelf={shelf}
+          shelf={curation && curation.smartShelf ? "" : shelf}
           isTrueLocal={boot.is_true_local}
           onSendCast={actions && actions.sendCast}
           onPrintSheet={actions && actions.printSheet}

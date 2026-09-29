@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
+import YourLayer from "./YourLayer.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
@@ -7,6 +8,8 @@ import UpscalePanel from "./UpscalePanel.jsx";
 import { apiGet } from "../api.js";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
+import "../styles/curation.css";
+import "../styles/curation-mobile.css";
 
 /* Image Details Mobile -- design spec: "Image Details Mobile.dc.html"
    (design_handoff_moonglade_suite/), the mobile port of DetailsView.jsx ("the
@@ -105,7 +108,7 @@ import "../styles/image-details-mobile.css";
 /* useSimilar (the /api/similar data path) now lives in hooks/useSimilar.js, shared with
    the desktop DetailsView's inline strip -- same fetch, same seq guard, byte-for-byte. */
 export default function ImageDetailsMobile({
-  mediaId, onClose, onNavigate, onRate, onDeleted,
+  mediaId, onClose, onNavigate, onRate, onCurate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
   onOpenLightbox, onPublish, onEnterContest, onTsubakiEdit,
 }) {
@@ -126,6 +129,7 @@ export default function ImageDetailsMobile({
     busy, deleteLocal,
     upscaleOpen, upEl, toggleUpscale,
     handleRate,
+    personal,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   const similar = useSimilar(row ? row.media_id : null);
@@ -304,6 +308,14 @@ export default function ImageDetailsMobile({
             {tagList.map((t) => <span key={"t" + t} className="idm-tag">{t}</span>)}
             {collectionList.map((c) => <span key={"c" + c} className="idm-tag idm-tag-shelf">{c}</span>)}
           </div>
+        ) : null}
+
+        {/* YOUR LAYER (Session N3, phone): keeper / reject, tags and a note under the picture's
+            words -- the owner's own, in the local catalog, never sent to PixAI. The same card
+            the desktop record shows; a change made anywhere else reaches it through the curation
+            bus, so it never shows stale values. */}
+        {onCurate && personal ? (
+          <YourLayer mediaId={row.media_id} personal={personal} onCurate={onCurate} />
         ) : null}
 
         <div className="idm-ledger">

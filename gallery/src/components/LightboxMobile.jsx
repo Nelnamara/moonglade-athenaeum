@@ -5,6 +5,7 @@ import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
 import { apiGet } from "../api.js";
 import "../styles/lightbox-mobile.css";
+import "../styles/curation-mobile.css";
 
 /* Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
    moonglade_suite/). The mobile pass of the desktop Lightbox.jsx -- Details'
@@ -104,7 +105,7 @@ function toast(title, msg) {
 }
 
 export default function LightboxMobile({
-  items, index, setIndex, onClose, onRate, page, pages, loadPage, onOpenDetails, onSimilar,
+  items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
   onEnterContest, member,
 }) {
   const it = items[index];
@@ -305,6 +306,18 @@ export default function LightboxMobile({
           {it.model ? <b className="lbm-model">{it.model}</b> : null}
           {it.date ? <span>{it.date}</span> : null}
           {hasAR ? <span>{W}×{H}</span> : null}
+          {/* Session N3: the owner's mark, at 44 px. One tap sets it, the same tap lets it go;
+              choosing one clears the other. Local catalog only -- never sent to PixAI. */}
+          {onCurate ? (
+            <span className="lbm-verdicts" role="group" aria-label="Your mark">
+              <button type="button" className={"lbm-verdict keeper" + (it.mark === "keeper" ? " on" : "")}
+                aria-pressed={it.mark === "keeper"} aria-label="Keeper" title="Keeper"
+                onClick={() => onCurate([it.media_id], { mark: it.mark === "keeper" ? "" : "keeper" })}>{"\u2713"}</button>
+              <button type="button" className={"lbm-verdict reject" + (it.mark === "reject" ? " on" : "")}
+                aria-pressed={it.mark === "reject"} aria-label="Reject" title="Reject"
+                onClick={() => onCurate([it.media_id], { mark: it.mark === "reject" ? "" : "reject" })}>{"\u2715"}</button>
+            </span>
+          ) : null}
         </div>
 
         <div className={"lbm-promptbox" + (promptOpen ? " open" : "")}

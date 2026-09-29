@@ -303,6 +303,26 @@ export async function rateImage(mediaId, rating) {
   return d;
 }
 
+/* CURATION (Session N). Local catalog only -- none of these reaches PixAI. Every write carries
+   the session's CSRF token (boot.csrf) in its body, the house rule for the wave 5 routes.
+   `curate` answers {changed, prev, after, skipped, refused}: what REALLY changed, and each
+   changed picture's previous state, which is exactly what `curateRestore` takes back. */
+export function curate(csrf, mediaIds, op) {
+  return apiPost("/api/curate", { csrf, media_ids: mediaIds, op });
+}
+export function curateRestore(csrf, prev) {
+  return apiPost("/api/curate/restore", { csrf, prev });
+}
+/* Every collection with its count and cover, hand-picked and smart. */
+export async function fetchCollectionDetail() {
+  const d = await apiGet("/api/collections/detail");
+  return d && d.collections ? d.collections : null;
+}
+/* rename {name,new_name} - merge {names} - delete {name} - smart {query,name?,replace?} */
+export function manageCollections(csrf, body) {
+  return apiPost("/api/collections/manage", { ...body, csrf });
+}
+
 /* Saved views are server-side and account-scoped; each stores the CLASSIC
    gallery's query string, which the flyout parses back into pilot state --
    one store, both surfaces. */

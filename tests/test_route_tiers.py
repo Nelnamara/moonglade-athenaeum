@@ -146,6 +146,8 @@ TIER_SNAPSHOT = [
     "/api/claim [POST] LOGIN",
     "/api/collection [POST] LOGIN",
     "/api/collections [GET] LOGIN",
+    "/api/collections/detail [GET] LOGIN",
+    "/api/collections/manage [POST] LOGIN",
     "/api/contact-sheet [GET] LOGIN",
     "/api/contest/<slug>/artworks [GET] LOGIN",
     "/api/contest/<slug>/winners [GET] LOGIN",
@@ -153,6 +155,8 @@ TIER_SNAPSHOT = [
     "/api/contest/mine [GET] LOGIN",
     "/api/contest/sync [POST] LOGIN",
     "/api/contests [GET] LOGIN",
+    "/api/curate [POST] LOGIN",
+    "/api/curate/restore [POST] LOGIN",
     "/api/delete-image [POST] LOCALHOST",
     "/api/delete-local [POST] LOGIN",
     "/api/delete-preview [POST] LOCALHOST",
@@ -973,7 +977,9 @@ def test_the_pilot_codename_has_no_page_route(app):
 # Older POSTs predate the rule and are not listed here; a NEW route under one of these
 # prefixes that forgets the check fails by name.
 _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs",
-                  "/api/narrator")
+                  "/api/narrator",
+                  # wave 5, Session N: bulk curation and the collections manager
+                  "/api/curate", "/api/collections/manage")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -991,3 +997,4 @@ def test_every_lane_post_checks_csrf(app):
     assert any(r.startswith("/api/recipes") for r in checked), checked
     assert "/api/account/prefs" in checked, checked
     assert "/api/narrator/poke" in checked, checked
+    assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked

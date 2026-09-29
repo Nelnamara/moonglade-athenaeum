@@ -424,6 +424,27 @@ _MIGRATIONS = [
     # VIDEO ROW REPAIR (2026-09-26) -- a data statement, not DDL; see _VIDEO_ROW_REPAIR_SQL.
     # Last, so every column it reads (is_video, video_model) already exists.
     _VIDEO_ROW_REPAIR_SQL,
+    # CURATION (Session N, 2026-09-29) -- two NEW tables, no catalog column and no rewrite of
+    # any existing row, so an existing library upgrades in place with everything it holds
+    # untouched. They are tables of their own, and not columns on `catalog`, for the same
+    # reason `catalog_repairs` is: every re-pull and --update rewrites catalog rows through
+    # _UPSERT, and a personal tag or a saved query living on that row would be at the mercy of
+    # a writer that does not know it exists. Nothing here is ever sent to PixAI.
+    #
+    # personal_meta: the owner's own layer over a picture -- tags (comma-joined, lowercase,
+    # hyphenated), a keeper|reject mark, a note. Keyed by media_id and NOT a foreign key: a
+    # trash purge deletes the catalog row and a restore puts it back, and the layer must be
+    # waiting when it does. A row whose three fields are all empty is deleted, never stored.
+    "CREATE TABLE IF NOT EXISTS personal_meta ("
+    "media_id TEXT PRIMARY KEY, tags TEXT NOT NULL DEFAULT '', "
+    "mark TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', "
+    "updated_at TEXT NOT NULL DEFAULT '')",
+    # smart_collections: a saved SEARCH, never a membership list (N1). The picture set is
+    # computed from `query` every time the collection is opened, so a rating, tag or mark
+    # moves a picture in or out live and there is nothing here to go stale.
+    "CREATE TABLE IF NOT EXISTS smart_collections ("
+    "name TEXT PRIMARY KEY, query TEXT NOT NULL DEFAULT '', "
+    "created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
 ]
 
 # ---------------------------------------------------------------------------
@@ -520,6 +541,20 @@ def catalog(db_path):
     migrate(db_path)
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
+    # mg_loom_render(media_id) -> 1|0: is this picture a render the Loom made? Only the
+    # `type:loom` search operator (and its Storage-bar segment) calls it; nothing runs it
+    # unless asked, and it reads the Loom's boards from disk, never the network.
+    # The set is read ONCE per connection, on the first row that asks: a search calls this for
+    # every row it looks at, and a directory listing per row would cost more than the search.
+    _loom_root = Path(db_path).parent
+    _loom_seen = {}
+
+    def _is_loom_render(mid):
+        ids = _loom_seen.get("ids")
+        if ids is None:
+            ids = _loom_seen["ids"] = loom_render_ids(_loom_root)
+        return 1 if str(mid or "") in ids else 0
+    con.create_function("mg_loom_render", 1, _is_loom_render)
     try:
         yield con
     finally:
@@ -688,8 +723,13 @@ def _like_escape(s):
 #   date       created_at prefix (2026 / 2026-07 / 2026-07-04) or a </>/<=/>=
 #              prefix-compare (created:<2026-07 = strictly before July)
 #   collection exact-token match in the comma-joined list, same as the dropdown
+#   tag        the art_tags substring OR a whole personal tag (Session N3)
+#   note       substring of the personal note (Session N3)
 #   source     the dropdown's semantics (online = blank-or-online, deleted =
 #              deleted_remote flag), else substring on the source column
+#   aspect     width/height: W:H (within 3 percent), square, portrait, landscape, tall,
+#              wide, >N, <N (Session N7)
+#   type       image | video | loom, a partition of the library (Session N6)
 #
 # Deliberately NOT operators (one line each):
 #   url             expiring PixAI CDN link -- nothing sane to filter on
@@ -709,8 +749,13 @@ _SEARCH_OPS = {
     "negative": ("text", "negative_prompt"), "negative_prompt": ("text", "negative_prompt"),
     "model":    ("text", "model_name"),      "model_name": ("text", "model_name"),
     "lora":     ("text", "loras"),           "loras": ("text", "loras"),
-    "tag":      ("text", "art_tags"),        "tags": ("text", "art_tags"),
+    # tag: reads BOTH tag stores (Session N3): PixAI's published art tags, substring as it
+    # always did, and the owner's own personal tags, whole-tag. `art_tags:` keeps the
+    # PixAI-only reading for anyone who needs it. See _operator_clause's "tag" kind.
+    "tag":      ("tag", "art_tags"),         "tags": ("tag", "art_tags"),
     "art_tags": ("text", "art_tags"),
+    # note: reads the owner's personal note (Session N3), substring, case-insensitive.
+    "note":     ("note", None),              "notes": ("note", None),
     "title":    ("text", "title"),
     "sampler":  ("text", "sampler"),
     "filename": ("text", "filename"),
@@ -740,6 +785,14 @@ _SEARCH_OPS = {
     "collection": ("collection", "collections"),
     "collections": ("collection", "collections"),
     "source":   ("source", "source"),
+    # ar: the picture's shape, read from the width and height already on every row (Session
+    # N7). Evaluated HERE, in SQL, because the grid is paginated: a client-side filter would
+    # only ever see the page it holds. See _aspect_clause for the accepted values.
+    "ar":       ("aspect", None),            "aspect": ("aspect", None),
+    # type: which kind of picture -- image, video or loom (Session N6). The three PARTITION the
+    # library (a Loom render is a loom, whether it is a clip or a still), which is what lets
+    # the Storage bars' segments add up to the total and each segment's click land on exactly it.
+    "type":     ("type", None),
 }
 
 # Tokens: quoted runs group (model:"Ether Real" / "night elf" are ONE token each);
@@ -759,6 +812,190 @@ def _unquote(s):
     return s
 
 
+def _personal_tag_pattern(value):
+    r"""LIKE pattern matching ONE whole personal tag inside personal_meta's `,a,b,` list.
+    The value is folded the way tags are stored (lowercase, whitespace and underscores to
+    hyphens) so `tag:"Pose Study"` finds pose-study; `*` and `?` keep their wildcard meaning."""
+    t = re.sub(r"[\s_]+", "-", str(value).strip().lower())
+    t = t.replace("\\", "\\\\").replace("%", "\\%")
+    return "%," + t.replace("*", "%").replace("?", "_") + ",%"
+
+
+# A leading `-` negates a search token (Session N3: `-reject`, `-tag:x`, `-blurry`). A `-` in
+# front of a bare number stays what it always was, literal text -- "-5" is a prompt fragment.
+_SEARCH_NEG_NUMBER_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
+_SEARCH_STAR_RE = re.compile("^★([0-5])\\+?$")
+
+
+def _personal_mark_clause(mark):
+    return ("EXISTS (SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+            "AND pm.mark = ?)", [mark])
+
+
+def _search_token_clause(tok):
+    """One whitespace-delimited search token -> (sql, params). The token is already stripped
+    of any leading `-` negation by the caller."""
+    # the bare marks are operators on their own (an UNQUOTED word: "reject" in quotes is a
+    # phrase and stays a prompt search)
+    if tok.lower() in ("keeper", "reject"):
+        return _personal_mark_clause(tok.lower())
+    m = _SEARCH_STAR_RE.match(tok)
+    if m:
+        # star-N-plus (and star-N): that many stars or more, unrated counting as 0 -- the
+        # Min-rating dropdown's own semantics
+        return ("CAST(COALESCE(NULLIF(rating,''),'0') AS INTEGER) >= ?", [int(m.group(1))])
+    if ":" in tok and not tok.startswith(":"):
+        key, _, raw = tok.partition(":")
+        if _SEARCH_KEY_RE.fullmatch(key):
+            hit = _operator_clause(key, _unquote(raw))
+            if hit:
+                return hit
+    term = _unquote(tok)
+    if term.isdigit() and len(term) >= 8:
+        return ("(task_id = ? OR media_id = ?)", [term, term])
+    like = _like_pattern(term)
+    return ("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
+            "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')", [like, like])
+
+
+# ---- ar: the aspect operator (Session N7) -------------------------------------------------
+# The picture's shape as width / height. The width and height columns are TEXT and blank on
+# old imports, so the ratio is NULL for those rows; every comparison below is wrapped in
+# COALESCE(.., 0) so an unmeasured picture matches no ar: filter and, because NOT of a false
+# is true, still shows up under `-ar:tall` (the unknown is not "tall").
+#
+#   ar:W:H        within 3 percent of W/H       ar:3:2  ar:9:16  ar:1.91:1
+#   ar:square     0.97 to 1.03
+#   ar:portrait   below 1                        ar:landscape   above 1
+#   ar:tall       9:16 or taller                 ar:wide        16:9 or wider
+#   ar:>N ar:<N   the ratio itself               ar:>2  ar:<0.5
+#
+# The bounds are the design page's own (Curation Handoff, N7): "tall" is 9/16 with 0.005 to
+# spare and "wide" 16/9 with 0.01 to spare, so an exact 576x1024 and an exact 1920x1080
+# count without a rounding argument. Values are bound parameters; only the fixed expression is interpolated.
+_AR_EXPR = ("(CAST(COALESCE(NULLIF(width,''),'0') AS REAL) / "
+            "NULLIF(CAST(COALESCE(NULLIF(height,''),'0') AS REAL), 0))")
+AR_SQUARE = (0.97, 1.03)
+AR_TALL_MAX = 9 / 16 + 0.005
+AR_WIDE_MIN = 16 / 9 - 0.01
+AR_TOLERANCE = 0.03
+_AR_WH_RE = re.compile(r"^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$")
+_AR_CMP_RE = re.compile(r"^([<>])(\d*\.?\d+)$")
+
+
+def _aspect_clause(value):
+    """`ar:` value -> (sql, params), or None when the value is not one of the accepted forms
+    (the token then degrades to a plain prompt search, like any malformed operator)."""
+    v = str(value).strip().lower()
+    e = _AR_EXPR
+    if v == "square":
+        return ("COALESCE({0} >= ? AND {0} <= ?, 0)".format(e), [AR_SQUARE[0], AR_SQUARE[1]])
+    if v == "portrait":
+        return ("COALESCE({} < 1, 0)".format(e), [])
+    if v == "landscape":
+        return ("COALESCE({} > 1, 0)".format(e), [])
+    if v == "tall":
+        return ("COALESCE({} <= ?, 0)".format(e), [AR_TALL_MAX])
+    if v == "wide":
+        return ("COALESCE({} >= ?, 0)".format(e), [AR_WIDE_MIN])
+    m = _AR_CMP_RE.match(v)
+    if m:
+        return ("COALESCE({} {} ?, 0)".format(e, m.group(1)), [float(m.group(2))])
+    m = _AR_WH_RE.match(v)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if w <= 0 or h <= 0:
+            return None
+        n = w / h
+        # within 3 percent of n, either side; the epsilon keeps an exact 3 percent in
+        return ("COALESCE(ABS({} - ?) <= ?, 0)".format(e), [n, n * AR_TOLERANCE + 1e-9])
+    return None
+
+
+# ---- type: image | video | loom (Session N6) -----------------------------------------------
+def _type_clause(value):
+    v = str(value).strip().lower()
+    if v == "loom":
+        return ("mg_loom_render(media_id) = 1", [])
+    if v == "video":
+        return ("(is_video = '1' AND mg_loom_render(media_id) = 0)", [])
+    if v == "image":
+        return ("(COALESCE(is_video,'') != '1' AND mg_loom_render(media_id) = 0)", [])
+    return None
+
+
+_LOOM_IDS_CACHE = {}          # str(out_dir) -> (signature, frozenset of media ids)
+
+
+def _loom_board_files(out_dir):
+    """Every saved Loom board on disk: this install's per-account folders and the legacy shared
+    layer, both under loom/kv, keyed `storyboard:v2:proj:<id>` (the Loom's own PPRE) or the
+    legacy single-project key. Read-only; a missing folder is simply no boards."""
+    from urllib.parse import unquote
+    kv = Path(out_dir) / "loom" / "kv"
+    out = []
+    try:
+        entries = list(kv.iterdir())
+    except OSError:
+        return out
+    for p in entries:
+        try:
+            files = list(p.iterdir()) if p.is_dir() else [p]
+        except OSError:
+            continue
+        for f in files:
+            if f.suffix != ".json":
+                continue
+            key = unquote(f.stem)
+            if key.startswith("storyboard:v2:proj:") or key == "storyboard:v2:project":
+                out.append(f)
+    return out
+
+
+def loom_render_ids(out_dir):
+    """The media ids the Loom rendered: every board's shot result and every re-roll attempt it
+    kept, minus footage the owner imported into a shot (that is theirs, not a render). This is
+    what "Loom renders" means in the Storage bars and `type:loom`.
+
+    It reads the boards straight off disk -- nothing is written and no network is touched -- and
+    remembers the answer until a board's file moves (path, mtime and size are the key), so a
+    search that runs it per row costs one directory listing, not a re-parse."""
+    files = _loom_board_files(out_dir)
+    sig = []
+    for f in files:
+        try:
+            st = f.stat()
+            sig.append((str(f), st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    sig = tuple(sorted(sig))
+    hit = _LOOM_IDS_CACHE.get(str(out_dir))
+    if hit and hit[0] == sig:
+        return hit[1]
+    ids = set()
+    for f in files:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(data, str):            # the Loom stores a project as a JSON string
+                data = json.loads(data)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for act in data.get("acts") or []:
+            for card in (act or {}).get("cards") or []:
+                if not isinstance(card, dict) or card.get("imported"):
+                    continue
+                if card.get("resultMid"):
+                    ids.add(str(card["resultMid"]))
+                for a in card.get("attempts") or []:
+                    if isinstance(a, dict) and a.get("media_id"):
+                        ids.add(str(a["media_id"]))
+    frozen = frozenset(ids)
+    _LOOM_IDS_CACHE[str(out_dir)] = (sig, frozen)
+    return frozen
+
+
 def _operator_clause(key, value):
     """Compile one key:value search token into (sql_clause, params), or None when
     the token isn't a valid operator and should be searched as plain prompt text
@@ -768,6 +1005,19 @@ def _operator_clause(key, value):
     if not spec or value == "":
         return None
     kind, col = spec
+    if kind == "aspect":
+        return _aspect_clause(value)
+    if kind == "type":
+        return _type_clause(value)
+    if kind == "tag":
+        # Session N3: the published art tags (substring, as before) OR a whole personal tag.
+        return ("(LOWER(COALESCE(art_tags,'')) LIKE ? ESCAPE '\\' OR EXISTS ("
+                "SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+                "AND (',' || pm.tags || ',') LIKE ? ESCAPE '\\'))",
+                [_like_pattern(value), _personal_tag_pattern(value)])
+    if kind == "note":
+        return ("EXISTS (SELECT 1 FROM personal_meta pm WHERE pm.media_id = catalog.media_id "
+                "AND LOWER(pm.note) LIKE ? ESCAPE '\\')", [_like_pattern(value)])
     if kind == "text":
         return ("LOWER(COALESCE({},'')) LIKE ? ESCAPE '\\'".format(col),
                 [_like_pattern(value)])
@@ -869,25 +1119,14 @@ def _build_where(q, model, date_from, date_to, batch="", rating_min=0,
         # Short numeric terms stay prompt-only: a substring match on ids made a
         # term like "88" match ~14% of the whole catalog by id chance alone,
         # swamping any real prompt hits (found 2026-07-16).
+        #
+        # A leading `-` negates the token (Session N3): -reject, -tag:x, -"night elf". The
+        # clause is wrapped, never rewritten, so a token without one builds the same SQL.
         for tok in _SEARCH_TOKEN_RE.findall(q):
-            op_clause = None
-            if ":" in tok and not tok.startswith(":"):
-                key, _, raw = tok.partition(":")
-                if _SEARCH_KEY_RE.fullmatch(key):
-                    op_clause = _operator_clause(key, _unquote(raw))
-            if op_clause:
-                clauses.append(op_clause[0])
-                params += op_clause[1]
-                continue
-            term = _unquote(tok)
-            if term.isdigit() and len(term) >= 8:
-                clauses.append("(task_id = ? OR media_id = ?)")
-                params += [term, term]
-            else:
-                clauses.append("(LOWER(COALESCE(prompt_full,'')) LIKE ? ESCAPE '\\' "
-                               "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')")
-                like = _like_pattern(term)
-                params += [like, like]
+            neg = len(tok) > 1 and tok[0] == "-" and not _SEARCH_NEG_NUMBER_RE.match(tok)
+            clause, cparams = _search_token_clause(tok[1:] if neg else tok)
+            clauses.append("NOT " + clause if neg else clause)
+            params += cparams
     if model:
         clauses.append("model_name = ?")
         params.append(model)
@@ -950,10 +1189,17 @@ _COLLECTIONS_LOCK = threading.Lock()
 
 def add_to_collection(db_path, media_ids, name):
     """Add a collection label to each media_id (no-op if already in it). Names may
-    contain spaces but not commas. Returns the number of rows changed."""
+    contain spaces but not commas. Returns the number of rows changed.
+
+    Raises CurationError for a SMART collection's name (Session N1): a smart collection
+    is a saved search, not a list, so nothing can be added to it by hand."""
     name = (name or "").strip().replace(",", " ").strip()
     if not name or not media_ids:
         return 0
+    if _is_smart_name(db_path, name):
+        raise CurationError(
+            "“{}” is a smart collection, a saved search. Pictures join it by matching "
+            "the search, not by being added.".format(name))
     changed = 0
     with catalog(db_path) as con:
         with _COLLECTIONS_LOCK:
@@ -992,6 +1238,506 @@ def remove_from_collection(db_path, media_ids, name):
     return changed
 
 
+# ---------------------------------------------------------------------------
+# CURATION (Session N, 2026-09-29): smart collections, the collections manager, and the
+# personal layer (tags, a keeper|reject mark, a note).
+#
+# WHERE THINGS LIVE, and the fact the whole session hangs on: the app's "collections" are
+# LOCAL. A collection is nothing but a label in the comma-joined `catalog.collections`
+# column (moonglade_gallery.add_to_collection above); PixAI has no part in it and nothing in
+# this block reaches the network. Hand-picked membership stays there, unchanged. Two new
+# tables (see _MIGRATIONS) hold the rest:
+#   smart_collections  a saved SEARCH -- the query is stored, the membership never is; it is
+#                      computed from the query every time the collection is opened
+#   personal_meta      the owner's tags / mark / note, keyed by media_id
+# Both are additive: an existing library gains two empty tables and keeps every row.
+#
+# NOTHING HERE DELETES A PICTURE. Deleting or merging a collection rewrites LABELS on rows;
+# it never removes a row, a file or a thumbnail (tests/test_curation.py counts them).
+# ---------------------------------------------------------------------------
+
+class CurationError(ValueError):
+    """A curation request refused for a reason the owner can read (a taken name, a smart
+    collection used as a hand-picked one, an over-long tag). The routes answer it as a 400
+    carrying str(e)."""
+
+
+PERSONAL_MARKS = ("keeper", "reject")
+PERSONAL_TAG_MAX_LEN = 32      # characters in one tag
+PERSONAL_TAGS_MAX = 32         # tags on one picture (the handoff page's own cap, N3)
+PERSONAL_NOTE_MAX = 500        # characters in a note
+CURATE_MAX_IDS = 5000          # pictures one bulk request may touch
+
+_TAG_SPACE_RE = re.compile(r"[\s_]+")
+_TAG_STRIP_RE = re.compile(r"[^\w-]", re.UNICODE)
+_TAG_DASHES_RE = re.compile(r"-{2,}")
+
+
+def normalize_tag(raw):
+    """A personal tag in its stored form: lowercase, hyphenated, letters/digits/hyphens only
+    (any script). "Pose Study!" -> "pose-study". Returns "" when nothing is left. The length
+    cap is the caller's to enforce (it wants to say so, not silently truncate)."""
+    t = _TAG_SPACE_RE.sub("-", str(raw or "").strip().lower())
+    t = _TAG_STRIP_RE.sub("", t)
+    return _TAG_DASHES_RE.sub("-", t).strip("-")
+
+
+def _split_tags(s):
+    return [t for t in (s or "").split(",") if t]
+
+
+_CURATION_LOCK = threading.Lock()
+
+
+def _now_stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _clean_collection_name(name):
+    """A collection name as stored: commas become spaces (the column is comma-joined), runs of
+    whitespace collapse, ends are trimmed."""
+    return re.sub(r"\s+", " ", str(name or "").replace(",", " ")).strip()
+
+
+def _all_collection_names(con):
+    """(hand_picked, smart) name lists, from one open connection."""
+    hand = set()
+    for (s,) in con.execute("SELECT collections FROM catalog WHERE COALESCE(collections,'') != ''"):
+        hand.update(_split_collections(s))
+    smart = [r[0] for r in con.execute("SELECT name FROM smart_collections")]
+    return sorted(hand, key=str.lower), sorted(smart, key=str.lower)
+
+
+def _is_smart_name(db_path, name):
+    """Does `name` belong to a smart collection (compared without regard to case, since
+    names are unique that way)? A hand-picked label may not take a smart collection's name."""
+    low = str(name or "").strip().lower()
+    if not low:
+        return False
+    with catalog(db_path) as con:
+        return any(r[0].lower() == low for r in con.execute("SELECT name FROM smart_collections"))
+
+
+def list_smart_collections(db_path):
+    """[{name, query}] for every smart collection, A-Z without regard to case."""
+    with catalog(db_path) as con:
+        rows = con.execute("SELECT name, query FROM smart_collections").fetchall()
+    return sorted(({"name": r["name"], "query": r["query"]} for r in rows),
+                  key=lambda d: d["name"].lower())
+
+
+def smart_collection_query(db_path, name):
+    """The saved query of the smart collection called exactly `name`, or None."""
+    if not name:
+        return None
+    with catalog(db_path) as con:
+        r = con.execute("SELECT query FROM smart_collections WHERE name=?", (str(name),)).fetchone()
+    return r["query"] if r else None
+
+
+def _expand_smart(db_path, q, collection):
+    """(q, collection) with a smart collection folded into the search. Opening a smart
+    collection IS running its saved query, ANDed with whatever the search field holds: its
+    tokens are prepended to `q` and the collection filter drops away. A hand-picked name (or
+    none) passes through untouched, so this costs one indexed lookup and only when a
+    collection is named."""
+    if not collection:
+        return q, collection
+    saved = smart_collection_query(db_path, collection)
+    if saved is None:
+        return q, collection
+    return ((saved + " " + q).strip() if q else saved), ""
+
+
+def _auto_smart_name(query):
+    """The name a smart collection gets when the owner did not type one: the query with its
+    operator punctuation softened, 28 characters at most (the handoff page's own rule)."""
+    n = re.sub(r"\s+", " ", re.sub("[★:\"]", " ", str(query or ""))).strip()[:28].strip()
+    return n or "Smart collection"
+
+
+def save_smart_collection(db_path, query, name="", replace=""):
+    """Create a smart collection from a search, or (with `replace`) save a new query over an
+    existing one. Only the QUERY is stored. Returns {name, query, created}.
+
+    A typed `name` that is taken raises CurationError; an unnamed one takes the query's own
+    words and, when that is taken too, the next free "… 2", "… 3"."""
+    q = " ".join(str(query or "").split())
+    if not q:
+        raise CurationError("Type a search first, then save it.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            if replace:
+                if not con.execute("SELECT 1 FROM smart_collections WHERE name=?",
+                                   (replace,)).fetchone():
+                    raise CurationError("There is no smart collection called “{}”.".format(replace))
+                con.execute("UPDATE smart_collections SET query=?, updated_at=? WHERE name=?",
+                            (q, _now_stamp(), replace))
+                con.commit()
+                return {"name": replace, "query": q, "created": False}
+            hand, smart = _all_collection_names(con)
+            taken = {n.lower() for n in hand + smart}
+            typed = _clean_collection_name(name)
+            base = typed or _auto_smart_name(q)
+            if typed and base.lower() in taken:
+                raise CurationError("A collection called “{}” already exists.".format(base))
+            final, n = base, 2
+            while final.lower() in taken:
+                final = "{} {}".format(base, n)
+                n += 1
+            now = _now_stamp()
+            con.execute("INSERT INTO smart_collections (name, query, created_at, updated_at) "
+                        "VALUES (?,?,?,?)", (final, q, now, now))
+            con.commit()
+            return {"name": final, "query": q, "created": True}
+
+
+def _rows_with_label(con, name):
+    """(media_id, collections) of every catalog row carrying exactly the label `name`."""
+    return con.execute(
+        "SELECT media_id, collections FROM catalog WHERE (',' || COALESCE(collections,'') || ',') "
+        "LIKE ? ESCAPE '\\'", ("%," + _like_escape(name) + ",%",)).fetchall()
+
+
+def rename_collection(db_path, old, new):
+    """Rename a collection, hand-picked or smart. The new name is trimmed and must be unique
+    (case-insensitively) among ALL collections; renaming only the case of its own name is
+    allowed. Every picture keeps its membership: a hand-picked rename rewrites the label on
+    the rows that carry it, a smart rename changes one row of smart_collections."""
+    old = str(old or "").strip()
+    new = _clean_collection_name(new)
+    if not old:
+        raise CurationError("Say which collection to rename.")
+    if not new:
+        raise CurationError("A collection needs a name.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            if old not in smart and old not in hand:
+                raise CurationError("There is no collection called “{}”.".format(old))
+            if new.lower() in {n.lower() for n in hand + smart if n != old}:
+                raise CurationError("A collection called “{}” already exists.".format(new))
+            if new == old:
+                return {"name": new, "kind": "smart" if old in smart else "hand", "changed": 0}
+            if old in smart:
+                con.execute("UPDATE smart_collections SET name=?, updated_at=? WHERE name=?",
+                            (new, _now_stamp(), old))
+                con.commit()
+                return {"name": new, "kind": "smart", "changed": 1}
+            changed = 0
+            for r in _rows_with_label(con, old):
+                cols = [new if c == old else c for c in _split_collections(r["collections"])]
+                seen, out = set(), []
+                for c in cols:            # a row can never end up holding the label twice
+                    if c not in seen:
+                        seen.add(c)
+                        out.append(c)
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(out), r["media_id"]))
+                changed += 1
+            con.commit()
+            return {"name": new, "kind": "hand", "changed": changed}
+
+
+def merge_collections(db_path, names):
+    """Merge two or more HAND-PICKED collections into the first name given: every picture in
+    any of them ends up in the first (once, however many it was in), and the others cease to
+    exist. A smart collection cannot merge (it holds no pictures to move). Returns
+    {target, merged, pictures, changed}. No picture is removed from the library."""
+    order = []
+    for n in names or []:
+        n = str(n or "").strip()
+        if n and n not in order:
+            order.append(n)
+    if len(order) < 2:
+        raise CurationError("Pick two or more hand-picked collections to merge.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            for n in order:
+                if n in smart:
+                    raise CurationError("“{}” is a smart collection and can’t merge. "
+                                        "Edit its query instead.".format(n))
+                if n not in hand:
+                    raise CurationError("There is no hand-picked collection called “{}”.".format(n))
+            target, others = order[0], set(order[1:])
+            changed = 0
+            for r in con.execute("SELECT media_id, collections FROM catalog "
+                                 "WHERE COALESCE(collections,'') != ''").fetchall():
+                cols = _split_collections(r["collections"])
+                if not any(c in others for c in cols):
+                    continue
+                out = []
+                for c in cols:
+                    c = target if c in others else c
+                    if c not in out:
+                        out.append(c)
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(out), r["media_id"]))
+                changed += 1
+            con.commit()
+            pictures = len(_rows_with_label(con, target))
+    return {"target": target, "merged": order[1:], "pictures": pictures, "changed": changed}
+
+
+def delete_collection(db_path, name):
+    """Delete a collection: a hand-picked one loses its label from every picture, a smart one
+    loses its saved query. THE PICTURES STAY, always; `kept` says how many were in it (for a
+    smart collection, how many matched a moment ago). Returns {name, kind, kept}."""
+    name = str(name or "").strip()
+    if not name:
+        raise CurationError("Say which collection to delete.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            hand, smart = _all_collection_names(con)
+            if name in smart:
+                kind = "smart"
+            elif name in hand:
+                kind = "hand"
+            else:
+                raise CurationError("There is no collection called “{}”.".format(name))
+    if kind == "smart":
+        _, kept = query_catalog(db_path, collection=name, page=1, page_size=1)
+        with catalog(db_path) as con:
+            with _CURATION_LOCK:
+                con.execute("DELETE FROM smart_collections WHERE name=?", (name,))
+                con.commit()
+        return {"name": name, "kind": "smart", "kept": kept}
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            kept = 0
+            for r in _rows_with_label(con, name):
+                con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
+                            (",".join(c for c in _split_collections(r["collections"]) if c != name),
+                             r["media_id"]))
+                kept += 1
+            con.commit()
+    return {"name": name, "kind": "hand", "kept": kept}
+
+
+def collection_summaries(db_path):
+    """Every collection with what the manager and the list show: {name, kind, count, cover,
+    query?}. Hand-picked counts are pictures that still have a file (the count a search
+    would give); a smart collection's count is its query run right now. `cover` is the
+    newest member's media_id. A-Z without regard to case, hand-picked and smart together.
+    Read-only."""
+    hand = {}
+    with catalog(db_path) as con:
+        for r in con.execute(
+                "SELECT media_id, filename, collections FROM catalog "
+                "WHERE COALESCE(collections,'') != '' ORDER BY created_at DESC"):
+            for n in _split_collections(r["collections"]):
+                h = hand.setdefault(n, {"count": 0, "cover": ""})
+                if (r["filename"] or "") != "":
+                    h["count"] += 1
+                    if not h["cover"]:
+                        h["cover"] = str(r["media_id"])
+    out = [{"name": n, "kind": "hand", "count": h["count"], "cover": h["cover"]}
+           for n, h in hand.items()]
+    for s in list_smart_collections(db_path):
+        rows, total = query_catalog(db_path, collection=s["name"], page=1, page_size=1)
+        out.append({"name": s["name"], "kind": "smart", "count": total, "query": s["query"],
+                    "cover": str(rows[0]["media_id"]) if rows else ""})
+    return sorted(out, key=lambda d: d["name"].lower())
+
+
+# ---- the personal layer -----------------------------------------------------
+
+def personal_get(db_path, media_ids):
+    """{media_id: {tags: [...], mark, note}} for the given pictures. Only pictures that have
+    something are present -- a picture with no personal layer is simply absent, and the
+    caller treats it as tags [] / mark "" / note ""."""
+    ids = [str(m) for m in (media_ids or []) if str(m)]
+    out = {}
+    if not ids:
+        return out
+    with catalog(db_path) as con:
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for r in con.execute(
+                    "SELECT media_id, tags, mark, note FROM personal_meta WHERE media_id IN ({})"
+                    .format(",".join("?" * len(chunk))), chunk):
+                out[r["media_id"]] = {"tags": _split_tags(r["tags"]),
+                                      "mark": r["mark"] or "", "note": r["note"] or ""}
+    return out
+
+
+def _curation_state(con, mid):
+    """One picture's curation state -- {rating, mark, tags, note} -- or None when it is not in
+    the catalog. `rating` is the ordinary catalog rating (the stars on every card); the rest
+    is the personal layer."""
+    row = con.execute("SELECT rating FROM catalog WHERE media_id=?", (mid,)).fetchone()
+    if row is None:
+        return None
+    rs = str(row[0] or "")
+    p = con.execute("SELECT tags, mark, note FROM personal_meta WHERE media_id=?", (mid,)).fetchone()
+    return {"rating": min(5, int(rs)) if rs.isdigit() else 0,
+            "mark": (p["mark"] if p else "") or "",
+            "tags": _split_tags(p["tags"]) if p else [],
+            "note": (p["note"] if p else "") or ""}
+
+
+def _write_curation_state(con, mid, new, old):
+    """Write `new` where it differs from `old`. The personal row is created, updated, or -- when
+    all three fields are empty -- deleted, so the table only ever holds pictures that have
+    something to say."""
+    if new["rating"] != old["rating"]:
+        con.execute("UPDATE catalog SET rating=? WHERE media_id=?",
+                    (str(new["rating"]) if new["rating"] else "", mid))
+    if (new["mark"], new["tags"], new["note"]) != (old["mark"], old["tags"], old["note"]):
+        if not (new["mark"] or new["tags"] or new["note"]):
+            con.execute("DELETE FROM personal_meta WHERE media_id=?", (mid,))
+        else:
+            con.execute("INSERT OR REPLACE INTO personal_meta (media_id, tags, mark, note, updated_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (mid, ",".join(new["tags"]), new["mark"], new["note"], _now_stamp()))
+
+
+def _clean_tag(raw):
+    t = normalize_tag(raw)
+    if not t:
+        raise CurationError("A tag needs a letter or a number in it.")
+    if len(t) > PERSONAL_TAG_MAX_LEN:
+        raise CurationError("A tag is up to {} characters.".format(PERSONAL_TAG_MAX_LEN))
+    return t
+
+
+def _clean_note(raw):
+    note = str(raw if raw is not None else "").strip()
+    if len(note) > PERSONAL_NOTE_MAX:
+        raise CurationError("A note is up to {} characters.".format(PERSONAL_NOTE_MAX))
+    return note
+
+
+def _clean_mark(raw):
+    m = str(raw if raw is not None else "").strip().lower()
+    if m in ("", "none", "null"):
+        return ""
+    if m not in PERSONAL_MARKS:
+        raise CurationError("A mark is keeper, reject or none.")
+    return m
+
+
+def _clean_rating(raw):
+    if isinstance(raw, bool):
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    if not 0 <= n <= 5:
+        raise CurationError("A rating is a whole number from 0 to 5.")
+    return n
+
+
+def _clean_ids(media_ids):
+    if not isinstance(media_ids, (list, tuple)):
+        raise CurationError("No pictures given.")
+    seen, out = set(), []
+    for m in media_ids:
+        m = str(m).strip()
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    if not out:
+        raise CurationError("No pictures given.")
+    if len(out) > CURATE_MAX_IDS:
+        raise CurationError("That is more than {} pictures at once.".format(CURATE_MAX_IDS))
+    return out
+
+
+def curate_apply(db_path, media_ids, op):
+    """Apply one change -- rating, mark, add_tag, remove_tag or note -- to every given picture.
+
+    Returns {changed, prev, after, skipped, refused}. `prev` and `after` hold the full
+    {rating, mark, tags, note} state of exactly the pictures that CHANGED, so the caller can
+    put each picture back the way IT was (curate_restore) rather than resetting them all to
+    one value, and so the count it shows is what really changed: setting a rating a picture
+    already has is a no-op, not a change. `skipped` counts ids not in the catalog; `refused`
+    counts pictures already at the tag cap. Local catalog only -- nothing here is sent to PixAI."""
+    if not isinstance(op, dict) or not op:
+        raise CurationError("Nothing to change.")
+    clean = {}
+    if "rating" in op:
+        clean["rating"] = _clean_rating(op["rating"])
+    if "mark" in op:
+        clean["mark"] = _clean_mark(op["mark"])
+    if "add_tag" in op:
+        clean["add_tag"] = _clean_tag(op["add_tag"])
+    if "remove_tag" in op:
+        clean["remove_tag"] = normalize_tag(op["remove_tag"])
+    if "note" in op:
+        clean["note"] = _clean_note(op["note"])
+    if not clean:
+        raise CurationError("Nothing to change.")
+    ids = _clean_ids(media_ids)
+    prev, after, skipped, refused = {}, {}, 0, 0
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            for mid in ids:
+                cur = _curation_state(con, mid)
+                if cur is None:
+                    skipped += 1
+                    continue
+                new = {"rating": cur["rating"], "mark": cur["mark"],
+                       "tags": list(cur["tags"]), "note": cur["note"]}
+                if "rating" in clean:
+                    new["rating"] = clean["rating"]
+                if "mark" in clean:
+                    new["mark"] = clean["mark"]
+                if "add_tag" in clean and clean["add_tag"] not in new["tags"]:
+                    if len(new["tags"]) >= PERSONAL_TAGS_MAX:
+                        refused += 1
+                    else:
+                        new["tags"].append(clean["add_tag"])
+                if "remove_tag" in clean:
+                    new["tags"] = [t for t in new["tags"] if t != clean["remove_tag"]]
+                if "note" in clean:
+                    new["note"] = clean["note"]
+                if new == cur:
+                    continue
+                _write_curation_state(con, mid, new, cur)
+                prev[mid], after[mid] = cur, new
+            con.commit()
+    return {"changed": len(after), "prev": prev, "after": after,
+            "skipped": skipped, "refused": refused}
+
+
+def curate_restore(db_path, prev):
+    """Undo for curate_apply: put each picture back to the state `prev` holds for it. Every
+    entry is validated before anything is written, so a bad request changes nothing. Returns
+    {restored, after}."""
+    if not isinstance(prev, dict) or not prev:
+        raise CurationError("Nothing to restore.")
+    if len(prev) > CURATE_MAX_IDS:
+        raise CurationError("That is more than {} pictures at once.".format(CURATE_MAX_IDS))
+    wanted = {}
+    for mid, st in prev.items():
+        if not isinstance(st, dict):
+            raise CurationError("A saved state is missing its values.")
+        tags = []
+        for t in st.get("tags") or []:
+            t = _clean_tag(t)
+            if t not in tags:
+                tags.append(t)
+        if len(tags) > PERSONAL_TAGS_MAX:
+            raise CurationError("A picture holds at most {} tags.".format(PERSONAL_TAGS_MAX))
+        wanted[str(mid)] = {"rating": _clean_rating(st.get("rating", 0)),
+                            "mark": _clean_mark(st.get("mark")), "tags": tags,
+                            "note": _clean_note(st.get("note"))}
+    after = {}
+    with catalog(db_path) as con:
+        with _CURATION_LOCK:
+            for mid, new in wanted.items():
+                cur = _curation_state(con, mid)
+                if cur is None or new == cur:
+                    continue
+                _write_curation_state(con, mid, new, cur)
+                after[mid] = new
+            con.commit()
+    return {"restored": len(after), "after": after}
+
+
 def query_catalog(db_path, q="", model="", date_from="", date_to="",
                   sort="newest", page=1, page_size=100, batch="", rating_min=0,
                   published_only=False, art_tag="", lora="", media_type="", source="",
@@ -1017,6 +1763,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
     silently shipped the OLD match count out of the new, larger match set, with nothing in
     the downloaded file admitting it was short. One statement has nothing to disagree with.
     """
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
@@ -6962,6 +7709,7 @@ def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newe
                    batch="", rating_min=0, published_only=False, art_tag="", lora="",
                    media_type="", source="", collection=""):
     """Return ordered list of media_ids matching the filter (no row data)."""
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
@@ -6989,6 +7737,7 @@ def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="new
     Bounded work -- ids-only over the catalog (~36k rows max); measured in
     tests/test_series_grouping.py. No `series=` param here on purpose: grouping is
     the alternative to a single-series view, never combined with it."""
+    q, collection = _expand_smart(db_path, q, collection)
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
@@ -7103,8 +7852,12 @@ def collection_health(out_dir, db_path):
     # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
     # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
     # anything if it watches exactly the roots this walk descends into.
+    size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
-        on_disk_rels.add(str(e.rel).replace("\\", "/"))
+        _rel = str(e.rel).replace("\\", "/")
+        on_disk_rels.add(_rel)
+        if e.size is not None:
+            size_by_rel[_rel] = e.size
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
         if e.size is None:
@@ -7168,6 +7921,10 @@ def collection_health(out_dir, db_path):
         # health count and what --import-local/Import would actually do stay in sync
         catalog_ids = {mid for (mid,) in con.execute(
             "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
+        # what the Storage bars group by (Session N6): one small row per picture that has a file
+        storage_rows = con.execute(
+            "SELECT media_id, filename, is_video, model_name, collections FROM catalog "
+            "WHERE filename != ''").fetchall()
 
     tag_counter = Counter()
     for (tags,) in tag_rows:
@@ -7228,6 +7985,78 @@ def collection_health(out_dir, db_path):
         "top_tags": top_tags,
         "top_loras": top_loras,
         "top_words": top_words,
+        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# STORAGE BREAKDOWN (Session N6). Collection Health's one "Storage used" number became three
+# stacked bars: by TYPE (images, videos, Loom renders), by MODEL, and by COLLECTION. Sizes are
+# the bytes each catalogued picture's file takes on disk (the health walk already stats every
+# file; it just kept only the images' before). A picture whose file is not where the catalog
+# says is left out -- it takes no space we can measure -- so the bars total what is really
+# there, catalogued pictures only, which can be less than the folder (an uncataloged file
+# counts in the folder and in no bar).
+#
+#   type        an exclusive split: a Loom render (a board's shot result or a kept re-roll) is
+#               "loom" whether it is a clip or a still, else "video", else "image". It is the
+#               same partition `type:` searches by, so a segment's click lands on exactly it.
+#   model       the model name on the row; the top four by bytes, the rest (and any picture
+#               with no model recorded) folded into "Other", which is not a filter.
+#   collection  hand-picked collections only (a smart one is a search, it owns no bytes). A
+#               picture in two collections counts in both, so this bar can overlap and says
+#               so; its segments are shares of their own sum, not of the library. Top four by
+#               bytes plus "Other" for the rest.
+STORAGE_TOP = 4
+_STORAGE_TYPES = (("image", "Images"), ("video", "Videos"), ("loom", "Loom renders"))
+
+
+def storage_breakdown(rows, size_by_rel, loom_ids):
+    """Pure: catalog rows (media_id, filename, is_video, model_name, collections), the walk's
+    {relative path: bytes} and the Loom's render ids -> the payload's `storage` block."""
+    by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
+    by_model, by_coll = {}, {}                                 # name -> [bytes, count]
+    total, files = 0, 0
+    for r in rows:
+        fn = str(r["filename"] or "").replace("\\", "/")
+        size = size_by_rel.get(fn)
+        if size is None:
+            continue
+        total += size
+        files += 1
+        mid = str(r["media_id"] or "")
+        kind = "loom" if mid in loom_ids else ("video" if str(r["is_video"] or "") == "1" else "image")
+        by_type[kind][0] += size
+        by_type[kind][1] += 1
+        name = str(r["model_name"] or "").strip()
+        m = by_model.setdefault(name, [0, 0])
+        m[0] += size
+        m[1] += 1
+        for c in _split_collections(r["collections"]):
+            cc = by_coll.setdefault(c, [0, 0])
+            cc[0] += size
+            cc[1] += 1
+
+    def seg(name, b, n, **extra):
+        return dict({"name": name, "bytes": b, "h": _fmt_size(b), "count": n}, **extra)
+
+    def top_plus_other(table, skip_blank):
+        named = sorted(((k, v) for k, v in table.items() if not (skip_blank and not k)),
+                       key=lambda kv: (-kv[1][0], kv[0].lower()))
+        segs = [seg(k, v[0], v[1], other=False) for k, v in named[:STORAGE_TOP]]
+        rest = named[STORAGE_TOP:]
+        rb = sum(v[0] for _, v in rest) + (table.get("", [0, 0])[0] if skip_blank else 0)
+        rn = sum(v[1] for _, v in rest) + (table.get("", [0, 0])[1] if skip_blank else 0)
+        if rb:
+            segs.append(seg("Other", rb, rn, other=True))
+        return segs
+
+    coll_segs = top_plus_other(by_coll, False)
+    return {
+        "total_bytes": total, "total_h": _fmt_size(total), "files": files,
+        "by_type": [seg(label, by_type[k][0], by_type[k][1], key=k) for k, label in _STORAGE_TYPES],
+        "by_model": top_plus_other(by_model, True),
+        "by_collection": {"sum_bytes": sum(sg["bytes"] for sg in coll_segs), "segments": coll_segs},
     }
 
 
@@ -14995,8 +15824,95 @@ def create_app(out_dir: Path):
         media_ids = [str(m) for m in (body.get("media_ids") or []) if str(m).strip()]
         if not media_ids:
             return jsonify({"error": "no media_ids given"}), 400
+        if action == "remove" and _is_smart_name(db_path, name):
+            return jsonify({"error": "“{}” is a smart collection, a saved search. Pictures "
+                                     "leave it by no longer matching.".format(name)}), 400
         fn = add_to_collection if action == "add" else remove_from_collection
-        return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
+        try:
+            return jsonify({"ok": True, "count": fn(db_path, media_ids, name)})
+        except CurationError as e:        # adding to a smart collection (N1)
+            return jsonify({"error": str(e)}), 400
+
+    # ------------------------------------------------------------------------------------
+    # CURATION (Session N). Local catalog only: none of these routes touches PixAI, and none
+    # can delete a picture or a file. Every POST checks the session's CSRF token (the token
+    # rides in the body, as for the Panel's account routes).
+    # ------------------------------------------------------------------------------------
+    @app.route("/api/collections/detail")
+    @tier(LOGIN)
+    def api_collections_detail():
+        """Every collection, hand-picked and smart, with its count and cover -- what the
+        collections list and the manager draw. Read-only; a smart collection's count is its
+        saved query run now."""
+        return jsonify({"collections": collection_summaries(db_path)})
+
+    @app.route("/api/collections/manage", methods=["POST"])
+    @tier(LOGIN)
+    def api_collections_manage():
+        """The collections manager's writes and Save-as-smart, one route, `action` picks:
+        rename {name, new_name} · merge {names: [target, ...others]} · delete {name} ·
+        smart {query, name?, replace?}. Labels and saved queries only -- a delete or a merge
+        never removes a picture. A refusal is a 400 with the reason in words."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        action = str(body.get("action") or "").strip()
+        try:
+            if action == "rename":
+                res = rename_collection(db_path, body.get("name"), body.get("new_name"))
+            elif action == "merge":
+                names = body.get("names")
+                res = merge_collections(db_path, names if isinstance(names, list) else [])
+            elif action == "delete":
+                res = delete_collection(db_path, body.get("name"))
+            elif action == "smart":
+                res = save_smart_collection(db_path, body.get("query"),
+                                            name=body.get("name") or "",
+                                            replace=str(body.get("replace") or "").strip())
+            else:
+                return jsonify({"error": "action must be rename, merge, delete or smart"}), 400
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
+
+    @app.route("/api/curate", methods=["POST"])
+    @tier(LOGIN)
+    def api_curate():
+        """Bulk (or single) curation: {media_ids, op} with op one of {rating: 0-5} ·
+        {mark: keeper|reject|""} · {add_tag} · {remove_tag} · {note}. Answers what really
+        changed -- `changed` counts pictures whose values differ afterwards, `prev` / `after`
+        carry each changed picture's full state -- so the client can show an honest count and
+        an Undo that restores each picture's OWN previous values (POST /api/curate/restore).
+        Tags, marks and notes live in the local catalog and are never sent to PixAI."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        try:
+            res = curate_apply(db_path, body.get("media_ids"), body.get("op"))
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        if res["changed"] and isinstance(body.get("op"), dict) and "rating" in body["op"]:
+            # Rating is curation whichever door it came through (see /api/rate).
+            try:
+                telem_mark_day(out_dir=out_dir, keys=("curation_days", "active_days"))
+            except Exception:
+                pass
+        return jsonify(dict(res, ok=True))
+
+    @app.route("/api/curate/restore", methods=["POST"])
+    @tier(LOGIN)
+    def api_curate_restore():
+        """Undo for /api/curate: {prev: {media_id: {rating, mark, tags, note}}} -- exactly
+        the `prev` map that call returned. Puts each picture back to its own previous
+        values; a request with any invalid entry changes nothing."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        try:
+            res = curate_restore(db_path, body.get("prev"))
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
 
     @app.route("/api/replace-prompts", methods=["POST"])
     @tier(LOGIN)
@@ -20053,6 +20969,10 @@ def create_app(out_dir: Path):
         if not files:
             return jsonify({"error": "no files"}), 400
         collection = (request.form.get("collection") or "").strip()
+        if collection and _is_smart_name(db_path, collection.replace(",", " ").strip()):
+            # a smart collection is a saved search: refuse BEFORE any file is imported (N1)
+            return jsonify({"error": "“{}” is a smart collection, a saved search; "
+                                     "pictures can't be imported into it.".format(collection)}), 400
         tmp = tempfile.mkdtemp(prefix="mg_import_")
         try:
             saved = 0
@@ -21273,6 +22193,8 @@ __DESIGN_TOKENS__
             "needs_assets": needs_assets,
             "catalog_empty": catalog_empty,
             "collections": unique_collections(db_path),
+            # Smart collections (N1): saved searches, listed beside the hand-picked ones.
+            "smart_collections": list_smart_collections(db_path),
             "user": session.get("user") or "",
             "is_local": True,
             "is_true_local": _is_local_request(),
@@ -21374,13 +22296,20 @@ __DESIGN_TOKENS__
             batch=(request.args.get("batch") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
 
+        _pers = {}     # media_id -> personal layer, filled once per page (Session N3)
+
         def _card(r):
             """One grid card dict for a catalog row -- the SINGLE definition both the
             plain row listing and a grouped unit's cover build, so a series cover is
             byte-identical to that same media as an ordinary card (only the extra
             `series` key ever differs)."""
             mid = r.get("media_id")
+            pl = _pers.get(str(mid)) or {}
             return {
+                # The owner's own layer (N3): the keeper|reject mark the card wears, and the
+                # tags. Local catalog only.
+                "mark": pl.get("mark", ""),
+                "tags": pl.get("tags", []),
                 "media_id": str(mid),
                 "thumb": "/thumbs/{}.jpg".format(mid),
                 "is_video": str(r.get("is_video") or "") == "1",
@@ -21425,6 +22354,7 @@ __DESIGN_TOKENS__
                          for k in page_keys]
             full = {str(r.get("media_id")): r
                     for r in rows_for_media_ids(db_path, cover_ids)}
+            _pers.update(personal_get(db_path, cover_ids))
             items = []
             for k, mid in zip(page_keys, cover_ids):
                 r = full.get(mid)
@@ -21456,6 +22386,7 @@ __DESIGN_TOKENS__
         else:
             rows, total = query_catalog(
                 db_path, page=page, page_size=page_size, series=series, **filters)
+            _pers.update(personal_get(db_path, [r.get("media_id") for r in rows]))
             items = [_card(r) for r in rows if r.get("media_id")]
         pages = max(1, (total + page_size - 1) // page_size)
         return jsonify({"items": items, "total": total, "page": page, "pages": pages})
@@ -21500,8 +22431,12 @@ __DESIGN_TOKENS__
             idx = -1
         prev_id = nav_ids[idx - 1] if idx > 0 else None
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
+        pl = personal_get(db_path, [media_id]).get(str(media_id)) or {}
         return jsonify({
             "row": row,
+            # The owner's own layer over this picture (N3): tags, keeper|reject, a note.
+            "personal": {"tags": pl.get("tags", []), "mark": pl.get("mark", ""),
+                         "note": pl.get("note", "")},
             "prev_id": prev_id, "next_id": next_id,
             # Same value the gallery's own "Delete from PixAI" is gated on. A LAN
             # session can browse and spend, but not destroy on the owner's real

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import { detailsHeadline } from "../gen/headline.js";
+import { onCurated } from "../curation/curationBus.js";
 
 /* useImageDetails -- DetailsView.jsx's fetch/state/derivation/action logic,
    mechanically lifted out (2026-08-03) into its own hook so a new mobile
@@ -73,6 +74,22 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
   useEffect(() => () => { if (upEl.current) upEl.current.close(); }, []);
 
   const row = state.data && state.data.row;
+  // The owner's own layer over this picture (Session N3): tags, keeper|reject, a note. It
+  // rides the detail read; a change made anywhere else -- a rating key, a bulk keeper mark,
+  // an Undo -- reaches this record through the curation bus, so it never shows stale values.
+  const personal = state.data && state.data.personal ? state.data.personal : null;
+  useEffect(() => onCurated((after) => {
+    const a = after[mediaId];
+    if (!a) return;
+    setState((old) => (old.data ? {
+      ...old,
+      data: {
+        ...old.data,
+        row: { ...old.data.row, rating: a.rating },
+        personal: { tags: a.tags || [], mark: a.mark || "", note: a.note || "" },
+      },
+    } : old));
+  }), [mediaId]);
 
   /* Stars' visual state and the "N / 5" label both read row.rating, which
      lives in THIS hook's own fetched copy -- onRate (App.jsx's/AppMobile.jsx's
@@ -209,5 +226,6 @@ export default function useImageDetails({ mediaId, advParams, onRate, onDeleted 
     busy, deleteLocal, deleteCloud,
     upscaleOpen, upEl, toggleUpscale,
     handleRate,
+    personal,
   };
 }

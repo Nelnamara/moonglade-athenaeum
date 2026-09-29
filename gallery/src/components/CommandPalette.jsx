@@ -176,7 +176,13 @@ const SHEET_COLS = [
     ],
   },
   { title: "Create", items: [["N", "", "", "New generation"]] },
-  { title: "Image", items: [["R", "", "", "↻ Again — re-roll the focused image"]] },
+  {
+    title: "Image",
+    items: [
+      ["R", "", "", "↻ Again — re-roll the focused image"],
+      ["1–5", "", "", "★ Rate the picture · 0 clears"],
+    ],
+  },
   {
     title: "General",
     items: [

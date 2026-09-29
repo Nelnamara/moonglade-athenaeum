@@ -1,0 +1,245 @@
+/* ============================================================================
+   mgcu -- Curation (Session N, wave 5): the collections list and manager, smart collections,
+   the personal layer (keeper / reject marks, tags, a note), bulk curation, the undo toast and
+   the rating flash.
+
+   Source of truth: Curation Handoff.dc.html (moonglade-internal/design/handoff-2026-09-04),
+   sections A and B. The page's stand-in hexes are the app's tokens here (--mantle for its
+   #0a0818, --lavender / --emerald / --gold / --peach / --red, the surface and overlay greys),
+   so a skin retints all of it. Refusals and held states are peach, never ruby; ruby is only
+   Delete (DECISIONS 2026-09-28).
+
+   Z: the manager rides the overlay band's free rung 418/419 (between the recipe picker and
+   the upscale panel, overlays.css's ladder, guarded by tests/test_z_ladder.py); the undo toast
+   is 427, above the contest picker so a rating pressed inside any layer can still be undone.
+   ========================================================================== */
+
+@keyframes mgcuFlash {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+  30% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes mgcuToast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes mgcuSlab { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+@keyframes mgcuFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- the gold flash that confirms a rating (N5) ---------------------------------------- */
+.mgcu-flash { position: absolute; left: 50%; top: 50%; z-index: 6; font-size: 20px; white-space: nowrap;
+  color: var(--gold); text-shadow: 0 0 12px color-mix(in srgb, var(--gold) 80%, transparent);
+  animation: mgcuFlash .7s ease-out both; pointer-events: none; }
+
+/* ---- a card's mark: keeper (emerald check) or reject (dim cross), always on ------------- */
+.mgg-verdict { position: absolute; top: 7px; left: 7px; z-index: 3; height: 16px; padding: 0 5px;
+  display: grid; place-items: center; border-radius: 5px; font-size: 9.5px; font-weight: 800;
+  pointer-events: none; }
+.mgg-verdict.keeper { background: var(--emerald); color: var(--base); }
+.mgg-verdict.reject { background: rgba(0, 0, 0, .55); color: rgba(236, 232, 248, .75); }
+/* the mark keeps the corner; the checkbox and source pill that fade in on hover step aside */
+.mgg-card.has-verdict .mgg-top { left: 32px; }
+.mgg-card.rej { opacity: .55; }
+
+/* ---- the strip above the grid while a smart collection is open (N1) --------------------- */
+.mgcu-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 12px 0;
+  padding: 7px 12px; border-radius: 12px; font-size: 11px;
+  border: 1px solid color-mix(in srgb, var(--lavender) 45%, transparent);
+  background: color-mix(in srgb, var(--lavender) 8%, transparent); color: var(--subtext); }
+.mgcu-strip-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); }
+.mgcu-strip-q { flex: 1 1 200px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px; color: var(--overlay0); overflow-wrap: anywhere; }
+.mgcu-btn { font-family: inherit; font-size: 10.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px;
+  cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext);
+  transition: border-color .15s, color .15s, background .15s; }
+.mgcu-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 60%, transparent); }
+.mgcu-btn.primary { background: var(--lavender); color: var(--base); border-color: var(--lavender); font-weight: 700; }
+.mgcu-btn.primary:hover { color: var(--base); filter: brightness(1.08); }
+.mgcu-btn:disabled { cursor: not-allowed; background: var(--surface0); color: var(--overlay0); border-color: var(--surface0); }
+.mgcu-btn.keeper { color: var(--emerald); border-color: color-mix(in srgb, var(--emerald) 50%, transparent); }
+
+/* ---- the collections list: a popover from the Collection chip, the page's rail rows ----- */
+.mgcu-panel { width: 260px; min-width: 0; padding: 12px; gap: 4px; }
+.mgcu-panel-hd { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
+.mgcu-panel-cap { flex: 1; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcu-panel-manage { font-family: inherit; font-size: 10px; font-weight: 700; color: var(--lavender);
+  background: none; border: 0; cursor: pointer; padding: 0; }
+.mgcu-panel-manage:hover { color: var(--mauve); text-decoration: underline; }
+.mgcu-row { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box;
+  font-family: inherit; font-size: 11.5px; padding: 6px 8px; border-radius: 8px; cursor: pointer;
+  text-align: left; border: 0; background: none; color: var(--subtext); }
+.mgcu-row:hover { color: var(--text); background: color-mix(in srgb, var(--lavender) 9%, transparent); }
+.mgcu-row.on { background: color-mix(in srgb, var(--lavender) 16%, transparent); color: var(--text); }
+.mgcu-row-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mgcu-row-n { font-size: 9.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.mgcu-panel-scroll { display: flex; flex-direction: column; gap: 2px; max-height: min(50vh, 420px); overflow-y: auto; }
+
+/* ---- the collections manager (N2) ------------------------------------------------------- */
+.mgcu-scrim { position: fixed; inset: 0; z-index: 418; background: rgba(5, 4, 13, .7);
+  animation: mgcuFade .25s ease both; }
+.mgcu-mgr { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 419;
+  box-sizing: border-box; width: min(560px, calc(100vw - 32px)); max-height: 80vh; max-height: 80dvh;
+  overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 16px;
+  background: var(--mantle); border: 1px solid var(--lavender); box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+  animation: mgcuSlab .28s cubic-bezier(.2, .9, .24, 1) both; }
+.mgcu-mgr-hd { display: flex; align-items: baseline; gap: 8px; }
+.mgcu-mgr-title { flex: 1; font-family: Georgia, serif; font-style: italic; font-size: 18px; }
+.mgcu-x { font-family: inherit; font-size: 11px; color: var(--overlay0); cursor: pointer; background: none; border: 0; padding: 0 2px; }
+.mgcu-x:hover { color: var(--text); }
+.mgcu-mrow { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 9px;
+  border: 1px solid var(--surface0); }
+.mgcu-box { width: 18px; height: 18px; flex: none; padding: 0; border-radius: 5px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 800; font-family: inherit; cursor: pointer; background: none;
+  border: 1.5px solid var(--surface1); color: var(--base); }
+.mgcu-box.on { background: var(--lavender); border-color: var(--lavender); }
+.mgcu-box.smart { border-style: dashed; cursor: not-allowed; }
+.mgcu-cover { width: 30px; height: 30px; flex: none; border-radius: 6px; background: var(--surface0) center / cover; }
+.mgcu-mname { flex: 1; min-width: 0; font-family: inherit; font-size: 12px; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid transparent; background: transparent; color: var(--text); outline: none; }
+.mgcu-mname:focus { border-color: var(--lavender); }
+.mgcu-mmeta { font-size: 10px; color: var(--overlay0); white-space: nowrap; }
+/* Reserved for Session P (the Loom, P6): a hand-picked collection's manual-order control lives
+   here. Empty until P builds it; it takes no room while it is. */
+.mgcu-mslot:empty { display: none; }
+.mgcu-mdel { font-family: inherit; font-size: 10.5px; color: var(--red); cursor: pointer; padding: 2px 5px;
+  background: none; border: 0; }
+.mgcu-mdel:hover { text-decoration: underline; }
+.mgcu-mgr-ft { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 6px; }
+.mgcu-mgr-note { flex: 1; font-size: 10px; color: var(--overlay0); }
+.mgcu-mgr-note.err { color: var(--peach); }
+.mgcu-confirm { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+  background: color-mix(in srgb, var(--red) 6%, transparent); }
+.mgcu-confirm-t { font-size: 12px; font-weight: 700; }
+.mgcu-confirm-b { font-size: 10.5px; color: var(--subtext); }
+.mgcu-confirm-go { display: flex; gap: 6px; }
+.mgcu-btn.danger { background: var(--red); border-color: var(--red); color: var(--base); font-weight: 700; padding: 6px 12px; font-size: 11px; }
+.mgcu-empty { padding: 18px; text-align: center; font-size: 11px; color: var(--overlay0);
+  border: 1px dashed var(--surface1); border-radius: 12px; }
+
+/* ---- the bulk bar (N4) ------------------------------------------------------------------ */
+.mgcu-bulk { position: sticky; top: calc(var(--mgx-chrome-h, 0px) + 6px); z-index: 5; display: flex; align-items: center;
+  flex-wrap: wrap; gap: 6px; margin: 10px 12px 0; padding: 8px 10px; border-radius: 12px;
+  border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 8%, var(--mantle)); }
+.mgcu-bulk-n { font-size: 11.5px; font-weight: 700; margin-right: 4px; }
+.mgcu-bulk-stars { display: flex; gap: 1px; }
+.mgcu-bulk-star { font-family: inherit; font-size: 15px; color: var(--gold); cursor: pointer; padding: 0 1px;
+  background: none; border: 0; line-height: 1; }
+.mgcu-bulk-star:hover { filter: brightness(1.3); }
+.mgcu-bulk-tag { width: 90px; font-family: inherit; font-size: 10.5px; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--surface1); background: var(--base); color: var(--text); outline: none; }
+.mgcu-bulk-tag:focus { border-color: var(--lavender); }
+.mgcu-sp { flex: 1; }
+.mgcu-addwrap { position: relative; }
+.mgcu-addmenu { position: absolute; top: 32px; left: 0; z-index: 8; width: 200px; display: flex; flex-direction: column;
+  gap: 2px; padding: 5px; border-radius: 9px; border: 1px solid var(--lavender); background: var(--mantle);
+  max-height: 260px; overflow-y: auto; }
+.mgcu-addrow { display: flex; align-items: center; gap: 6px; font-family: inherit; font-size: 11px; padding: 6px 8px;
+  border-radius: 6px; cursor: pointer; text-align: left; border: 0; background: none; color: var(--text); }
+.mgcu-addrow:hover { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+.mgcu-addnone { font-size: 10.5px; line-height: 1.45; padding: 6px 8px; color: var(--overlay0); }
+
+/* ---- the undo toast (N4) ---------------------------------------------------------------- */
+.mgcu-toast { position: fixed; left: 50%; bottom: 26px; z-index: 427; display: flex; align-items: center; gap: 12px;
+  max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 12px; background: var(--mantle);
+  border: 1px solid var(--lavender); box-shadow: 0 14px 34px rgba(0, 0, 0, .6);
+  transform: translate(-50%, 0); animation: mgcuToast .25s ease both; }
+.mgcu-toast.peach { border-color: var(--peach); }
+.mgcu-toast-t { font-size: 11.5px; }
+.mgcu-toast.peach .mgcu-toast-t { color: var(--peach); }
+.mgcu-toast-undo { font-family: inherit; font-size: 11px; font-weight: 700; color: var(--lavender); cursor: pointer;
+  background: none; border: 0; padding: 0; white-space: nowrap; }
+.mgcu-toast-undo:hover { color: var(--mauve); }
+.mgcu-toast-x { font-family: inherit; font-size: 10px; color: var(--overlay0); cursor: pointer; background: none; border: 0; padding: 0; }
+.mgcu-toast-x:hover { color: var(--text); }
+
+/* ---- Details: your layer (N3) ------------------------------------------------------------ */
+.mgcu-layer { display: flex; flex-direction: column; gap: 9px; margin: 14px 0 4px; padding: 12px; border-radius: 14px;
+  border: 1px solid var(--surface1); background: color-mix(in srgb, var(--mantle) 60%, transparent); }
+.mgcu-layer-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcu-verdicts { display: flex; gap: 5px; }
+.mgcu-verdict { flex: 1; text-align: center; font-family: inherit; font-size: 10.5px; font-weight: 700; padding: 7px 0;
+  border-radius: 8px; cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcu-verdict:hover { color: var(--text); }
+.mgcu-verdict.on.keeper { border-color: var(--emerald); background: color-mix(in srgb, var(--emerald) 14%, transparent); color: var(--text); }
+.mgcu-verdict.on.reject { border-color: var(--overlay0); background: rgba(255, 255, 255, .05); color: var(--text); }
+.mgcu-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.mgcu-tag { font-family: inherit; font-size: 10px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcu-tag:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 60%, transparent); }
+.mgcu-field { font-family: inherit; font-size: 10.5px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--surface1);
+  background: var(--base); color: var(--text); outline: none; }
+.mgcu-field:focus { border-color: var(--lavender); }
+.mgcu-field-err { font-size: 10px; color: var(--peach); }
+.mgcu-privacy { font-size: 9.5px; line-height: 1.45; color: var(--overlay0); }
+.mgcu-sub { display: flex; flex-direction: column; gap: 5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* the flash still appears -- it just does not move (N5) */
+  .mgcu-flash { animation: none; opacity: 1; transform: translate(-50%, -50%); }
+  .mgcu-scrim, .mgcu-mgr, .mgcu-toast { animation: none; }
+  .mgcu-btn, .mgcu-mname { transition: none; }
+}
+
+/* ---- N7: the ar: operator's screens ------------------------------------------------------ */
+/* a card's own shape, in the caption row (hover), mono like the page's */
+.mgg-ar { font: 8.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(236, 232, 248, .8);
+  white-space: nowrap; }
+/* the Aspect field in the Advanced flyout: a select, and a small field when the shape is typed */
+.flyaspect { display: flex; gap: 6px; min-width: 0; }
+.flyaspect select { flex: 1 1 auto; min-width: 0; }
+.flyaspect input { flex: 0 0 92px; width: 92px; }
+.flyrow input[aria-invalid="true"] { border-color: var(--peach); }
+.flyaspect-err { font-size: 10px; color: var(--peach); }
+.fly .flyft .apply:disabled { cursor: not-allowed; opacity: .5; }
+/* the operator chips in the Filters tray */
+.mgcu-opchips { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--surface0); }
+.mgcu-opchips-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); margin-right: 3px; }
+.mgcu-opchip { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 3px 9px; border-radius: 999px;
+  cursor: pointer; border: 1px solid var(--surface1); background: none; color: var(--subtext);
+  transition: border-color .15s, color .15s, background .15s; }
+.mgcu-opchip:hover { color: var(--text); border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+.mgcu-opchip.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, transparent); color: var(--text); }
+/* the search field's value suggestions, and its one-line note for a shape nobody understands */
+.mgcu-ac { position: absolute; left: 0; top: calc(100% + 6px); z-index: 318; min-width: 240px; max-width: 100%;
+  display: flex; flex-direction: column; gap: 1px; padding: 5px; border-radius: 10px;
+  background: var(--mantle); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .6); }
+.mgcu-ac-row { display: flex; align-items: baseline; gap: 10px; width: 100%; box-sizing: border-box;
+  font-family: inherit; padding: 5px 8px; border-radius: 6px; cursor: pointer; text-align: left;
+  border: 0; background: none; color: var(--text); }
+.mgcu-ac-row code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+.mgcu-ac-row span { font-size: 10px; color: var(--overlay0); }
+.mgcu-ac-row:hover, .mgcu-ac-row.on { background: color-mix(in srgb, var(--lavender) 14%, transparent); }
+.mgcu-arerr { position: absolute; left: 12px; top: calc(100% + 4px); z-index: 4; font-size: 10.5px;
+  color: var(--peach); white-space: nowrap; pointer-events: none; }
+
+/* ---- N6: Collection Health's storage bars ------------------------------------------------- */
+.mgcu-stor { display: flex; flex-direction: column; gap: 10px; padding: 16px; margin: 4px 0 14px;
+  border-radius: 16px; border: 1px solid var(--surface1);
+  background: color-mix(in srgb, var(--base) 60%, transparent); }
+.mgcu-stor-hd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.mgcu-stor-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcu-stor-total { font: 15px Georgia, serif; color: var(--text); }
+.mgcu-stor-hint { font-size: 10px; color: var(--overlay0); }
+.mgcu-stor-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; }
+.mgcu-stor-lbl { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--subtext); }
+.mgcu-stor-note { font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--overlay0); }
+.mgcu-stor-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mgcu-stor-track { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface0); }
+.mgcu-stor-seg { flex: 0 1 auto; min-width: 2px; height: 100%; padding: 0; margin: 0; border: 0;
+  border-right: 1px solid var(--base); cursor: pointer; transition: filter .15s; }
+.mgcu-stor-seg:last-child { border-right: 0; }
+.mgcu-stor-seg:hover:not(:disabled), .mgcu-stor-seg:focus-visible { filter: brightness(1.25); }
+.mgcu-stor-seg:disabled { cursor: default; }
+.mgcu-stor-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.mgcu-stor-key { display: inline-flex; align-items: center; gap: 5px; font-family: inherit; font-size: 10px;
+  padding: 0; border: 0; background: none; color: var(--subtext); cursor: pointer; text-align: left; }
+.mgcu-stor-key:hover:not(:disabled) { color: var(--text); }
+.mgcu-stor-key:disabled { cursor: default; }
+.mgcu-stor-dot { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.mgcu-stor.compact { padding: 12px; gap: 12px; }
+.mgcu-stor.compact .mgcu-stor-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+.mgcu-stor.compact .mgcu-stor-lbl { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; text-align: left; }
+@media (prefers-reduced-motion: reduce) {
+  .mgcu-opchip, .mgcu-stor-seg { transition: none; }
+}

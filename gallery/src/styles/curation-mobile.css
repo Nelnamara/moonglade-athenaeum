@@ -1,0 +1,126 @@
+/* ============================================================================
+   mgcm / mgcs / lbm-verdict -- Curation on the phone (Session N, wave 5).
+
+   Source of truth: Curation Handoff.dc.html (moonglade-internal/design/handoff-2026-09-04),
+   "Phone" lines under N1-N7. The page draws the desktop; the phone half is prose, so these are
+   the phone's own idioms (the glm-* sheets and screens, 44 px targets, the app's tokens) and not
+   a restyle of anything shipped.
+
+   Prefixes: mgcm-  the Collections screen (N2), and the Advanced Search additions (N1, N7)
+             mgcs-  the bulk curation block at the top of the Actions sheet (N4)
+             lbm-verdict  the Lightbox's keeper / reject (N3)
+   The shared curation classes (mgcu-*, curation.css) carry the manager's confirm, the strip
+   over the grid, Details' "your layer" card and the undo toast; this file only re-sizes them
+   for a thumb.
+   ========================================================================== */
+
+/* ---- the undo toast rides above the tab bar ------------------------------------------- */
+.glm-stage .mgcu-toast { bottom: calc(76px + env(safe-area-inset-bottom)); max-width: calc(100vw - 24px); }
+
+/* ---- the strip over the grid while a smart collection is open (N1) ---------------------- */
+.glm-tab .mgcu-strip { margin: 8px 0 0; }
+
+/* ---- Advanced Search: Aspect chips (N7) and Save as smart collection (N1) --------------- */
+.glm-field-wide { grid-column: 1 / -1; }
+.mgcm-aspect { display: flex; flex-wrap: wrap; gap: 6px; }
+.mgcm-chip { font-family: inherit; font-size: 11.5px; font-weight: 600; min-height: 44px; padding: 0 14px;
+  border-radius: 12px; cursor: pointer; border: 1px solid var(--surface1); background: var(--base);
+  color: var(--subtext); }
+.mgcm-chip.on { border-color: var(--lavender); background: color-mix(in srgb, var(--lavender) 16%, transparent);
+  color: var(--text); }
+.mgcm-arerr { margin: 8px 0 0; font-size: 11px; color: var(--peach); }
+.mgcm-savesmart { display: block; width: 100%; box-sizing: border-box; margin-top: 10px; min-height: 44px;
+  font-family: inherit; font-size: 12px; font-weight: 700; border-radius: 12px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--lavender) 55%, transparent); background: none; color: var(--lavender); }
+.mgcm-savesmart:disabled { cursor: not-allowed; border-color: var(--surface1); color: var(--overlay0); }
+
+/* ---- the Collections screen (N2) -------------------------------------------------------- */
+.mgcm { display: flex; flex-direction: column; gap: 8px; padding-bottom: 72px; }
+.mgcm-bar { display: flex; align-items: center; gap: 8px; }
+.mgcm-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcm-fill { flex: 1; }
+.mgcm-modebtn { font-family: inherit; font-size: 12px; font-weight: 700; min-height: 44px; padding: 0 12px;
+  background: none; border: 0; cursor: pointer; color: var(--lavender); }
+.mgcm-modebtn.on { color: var(--text); }
+.mgcm-msg { font-size: 11px; line-height: 1.45; color: var(--overlay0); }
+.mgcm-msg.err { color: var(--peach); }
+.mgcm-list { display: flex; flex-direction: column; gap: 6px; }
+.mgcm-row { position: relative; overflow: hidden; border-radius: 12px; border: 1px solid var(--surface0);
+  background: var(--mantle); }
+.mgcm-row.ticked { border-color: var(--lavender); }
+/* the two actions live BEHIND the row; swiping the face left uncovers them */
+.mgcm-acts { position: absolute; top: 0; right: 0; bottom: 0; width: 132px; display: flex; }
+.mgcm-act { flex: 1; font-family: inherit; font-size: 11.5px; font-weight: 700; border: 0; cursor: pointer;
+  background: color-mix(in srgb, var(--lavender) 22%, var(--mantle)); color: var(--text); }
+.mgcm-act.danger { background: var(--red); color: var(--base); }
+.mgcm-face { position: relative; display: flex; align-items: center; gap: 10px; min-height: 60px;
+  padding: 8px 6px 8px 10px; background: var(--mantle); touch-action: pan-y;
+  transition: transform .2s cubic-bezier(.2,.9,.24,1); }
+.mgcm-face.drag { transition: none; }
+.mgcm-cover { flex: none; width: 40px; height: 40px; border-radius: 8px; background: var(--surface0) center / cover no-repeat; }
+.mgcm-main { flex: 1; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center;
+  gap: 2px; text-align: left; font-family: inherit; background: none; border: 0; padding: 0; cursor: pointer; color: var(--text); }
+.mgcm-title { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mgcm-meta { font-size: 10.5px; color: var(--overlay0); font-variant-numeric: tabular-nums; }
+.mgcm-name { flex: 1; min-width: 0; min-height: 44px; box-sizing: border-box; font-family: inherit; font-size: 13px;
+  padding: 0 10px; border-radius: 9px; border: 1px solid var(--lavender); background: var(--base); color: var(--text); outline: none; }
+.mgcm-more { flex: none; width: 44px; height: 44px; font-family: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+  background: none; border: 0; color: var(--overlay0); }
+.mgcm-slot:empty { display: none; }
+.mgcm-box { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; cursor: pointer;
+  font-family: inherit; font-size: 14px; font-weight: 800; padding: 0; background: none; border: 1.5px solid var(--surface1); color: var(--base); }
+.mgcm-box.on { background: var(--lavender); border-color: var(--lavender); }
+.mgcm-box.smart { border-style: dashed; cursor: not-allowed; }
+/* The delete question is pinned to the foot of the screen, like the merge bar: the row that asked
+   it can be anywhere in a long list, and a question below the fold is a question not asked. */
+.mgcm .mgcm-confirm { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 3; margin-top: 4px;
+  background: color-mix(in srgb, var(--red) 6%, var(--mantle)); box-shadow: 0 -12px 26px rgba(0, 0, 0, .55); }
+.mgcm-confirm .mgcu-btn { min-height: 44px; }
+.mgcm-mergebar { position: sticky; bottom: 0; z-index: 2; display: flex; margin: 4px -13px 0; padding: 10px 13px calc(12px + env(safe-area-inset-bottom));
+  background: var(--base); border-top: 1px solid var(--surface1); }
+.mgcm-mergebar .mgcu-btn { flex: 1; min-height: 44px; font-size: 12px; border-radius: 12px; }
+
+/* ---- the Actions sheet's bulk curation block (N4) ---------------------------------------- */
+.mgcs-sheet { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--surface1); }
+.mgcs-cap { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
+.mgcs-stars { display: flex; gap: 4px; }
+.mgcs-star { flex: 1; min-height: 44px; font-family: inherit; font-size: 22px; line-height: 1; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--surface1); background: var(--base); color: var(--gold); }
+.mgcs-clear { flex: 1.3; min-height: 44px; font-family: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcs-marks { display: flex; gap: 6px; }
+.mgcs-mark { flex: 1; min-height: 44px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcs-mark.keeper { color: var(--emerald); border-color: color-mix(in srgb, var(--emerald) 50%, transparent); }
+.mgcs-tagrow { display: flex; gap: 6px; }
+.mgcs-tag { flex: 1; min-width: 0; min-height: 44px; box-sizing: border-box; font-family: inherit; font-size: 13px;
+  padding: 0 12px; border-radius: 12px; border: 1px solid var(--surface1); background: var(--base); color: var(--text); outline: none; }
+.mgcs-tag:focus { border-color: var(--lavender); }
+.mgcs-addtag { flex: none; min-height: 44px; padding: 0 16px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--surface1); background: none; color: var(--subtext); }
+.mgcs-addtag:not(:disabled) { color: var(--text); border-color: var(--lavender); }
+.mgcs-addtag:disabled { cursor: not-allowed; opacity: .55; }
+
+/* ---- the Lightbox: keeper / reject at 44 px (N3), a star row you can hit (N5) ------------ */
+.lbm-root .lbm-metarow { align-items: center; }
+.lbm-verdicts { margin-left: auto; display: inline-flex; gap: 6px; flex: none; }
+.lbm-verdict { flex: none; width: 44px; height: 44px; display: grid; place-items: center; font-family: inherit; font-size: 17px;
+  font-weight: 800; cursor: pointer; border-radius: 12px; padding: 0; background: none;
+  border: 1px solid var(--surface1); color: var(--subtext); }
+.lbm-verdict.keeper.on { border-color: var(--emerald); background: color-mix(in srgb, var(--emerald) 16%, transparent); color: var(--emerald); }
+.lbm-verdict.reject.on { border-color: var(--overlay0); background: rgba(255, 255, 255, .06); color: var(--text); }
+/* The stars were 13 px glyphs with no padding: seven of ten taps missed. The hit area grows
+   (padding) without the bar growing (the negative margin gives the height back). */
+.lbm-root .lbm-starswrap .stars .st { font-size: 18px; padding: 14px 5px; margin: -14px 0; cursor: pointer; }
+
+/* ---- Details: your layer, sized for a thumb --------------------------------------------- */
+.idm-root .mgcu-layer { margin: 4px 0 14px; }
+.idm-root .mgcu-verdict { min-height: 44px; font-size: 12px; }
+.idm-root .mgcu-tag { min-height: 32px; padding: 0 12px; font-size: 11px; }
+.idm-root .mgcu-field { min-height: 44px; box-sizing: border-box; font-size: 13px; }
+.idm-root .mgcu-layer-cap { font-size: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mgcm-face { transition: none; }
+}

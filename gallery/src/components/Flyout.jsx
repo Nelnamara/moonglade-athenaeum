@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchPresets } from "../api.js";
+import { ASPECT_CHOICES, aspectIn, withAspect, parseAspect } from "../curation/aspectCore.js";
 
 /* The Advanced flyout -- ANCHORED to the search slab (rendered inside .mgl-search,
    never placed: the locked behavior from the design pass. Drafts locally,
@@ -60,9 +61,22 @@ function MonthPicker({ value, onChange, years, label }) {
   );
 }
 
-export default function Flyout({ boot, current, onApply, onClose, onPrintCollection,
+export default function Flyout({ boot, current, queryText = "", onApply, onClose, onPrintCollection,
     onSaveView, onDeleteView, buildViewQuery }) {
   const [d, setD] = useState(current);          // draft
+  /* The Aspect field (Session N7) is not a filter of its own: it is the search text's `ar:`
+     token, read out of the field when the flyout opens and written back on Apply, so what the
+     field shows and what the grid filters by cannot disagree. `aspect0` is what it held when
+     opened -- the text is only rewritten when the choice actually changed, so Apply never
+     re-submits a half-typed search for nothing. */
+  const aspect0 = aspectIn(queryText);
+  const [aspect, setAspect] = useState(aspect0);
+  const [customAsp, setCustomAsp] = useState(!!aspect0 && !ASPECT_CHOICES.some((c) => c.value === aspect0));
+  const aspectOk = !aspect || parseAspect(aspect).ok;
+  const apply = () => {
+    if (!aspectOk) return;
+    onApply(aspect === aspect0 ? d : { ...d, q: withAspect(queryText, aspect) });
+  };
   const [presets, setPresets] = useState([]);
   const [saveName, setSaveName] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
@@ -101,6 +115,19 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
           <code>night*</code> <span>wildcard</span> · <code>model:tsubaki</code>{" "}
           <span>by model</span> · <code>2038314167804392533</code> <span>a task or media id</span>
         </div>
+        {/* Session N3: the personal layer's operators. A leading - negates any of them. */}
+        <div>
+          <code>keeper</code> · <code>reject</code> <span>your mark</span> ·{" "}
+          <code>tag:pose-study</code> <span>your tag</span> · <code>note:&quot;hands&quot;</code>{" "}
+          <span>your note</span> · <code>★4+</code> <span>stars</span> · <code>-reject</code>{" "}
+          <span>leave one out</span>
+        </div>
+        {/* Session N6/N7: the shape and kind operators. */}
+        <div>
+          <code>ar:tall</code> · <code>ar:wide</code> · <code>ar:square</code> <span>shape</span> ·{" "}
+          <code>ar:3:2</code> <span>a ratio, within 3%</span> · <code>ar:&gt;2</code>{" "}
+          <span>wider than 2:1</span> · <code>type:loom</code> <span>image, video or loom</span>
+        </div>
       </div>
       <div className="flygrid">
         <div className="flyrow"><label>Sort</label>
@@ -115,6 +142,26 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
               <option key={r} value={r}>{"★".repeat(r)}+</option>
             ))}
           </select>
+        </div>
+        <div className="flyrow"><label>Aspect</label>
+          <span className="flyaspect">
+            <select value={customAsp ? "__custom" : aspect} aria-label="Aspect"
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__custom") { setCustomAsp(true); if (ASPECT_CHOICES.some((c) => c.value === aspect)) setAspect(""); }
+                else { setCustomAsp(false); setAspect(v); }
+              }}>
+              <option value="">Any shape</option>
+              {ASPECT_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label} ({c.hint})</option>)}
+              <option value="__custom">A ratio or a bound…</option>
+            </select>
+            {customAsp && (
+              <input value={aspect} onChange={(e) => setAspect(e.target.value.replace(/\s+/g, ""))}
+                placeholder="3:2, >2, <0.5" aria-label="A ratio (W:H) or a bound (>N, <N)"
+                aria-invalid={!aspectOk} />
+            )}
+          </span>
+          {!aspectOk && <div className="flyaspect-err" role="alert">ar: takes W:H, &gt;N or &lt;N here.</div>}
         </div>
         <div className="flyrow"><label>Model</label>
           <input value={d.model} onChange={set("model")} list="fly-models"
@@ -176,7 +223,8 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
           className="card"
           onClick={() =>
             onApply({ sort: "newest", ratingMin: 0, model: "", lora: "",
-              dateFrom: "", dateTo: "", source: "", tag: "", publishedOnly: false })
+              dateFrom: "", dateTo: "", source: "", tag: "", publishedOnly: false,
+              ...(aspect0 ? { q: withAspect(queryText, "") } : {}) })
           }
         >
           Clear
@@ -194,7 +242,7 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
           </a>
         )}
         <span className="sp" />
-        <button className="card apply" onClick={() => onApply(d)}>Apply</button>
+        <button className="card apply" disabled={!aspectOk} onClick={apply}>Apply</button>
         <button className="card" onClick={onClose} title="Esc">✕</button>
       </div>
     </div>
