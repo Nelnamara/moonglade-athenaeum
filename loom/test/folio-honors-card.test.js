@@ -23,7 +23,7 @@ function fakeCtx() {
     measureText: (t) => ({ width: String(t).length * 8 }),
     createLinearGradient: () => ({ addColorStop: rec("stop") }),
   };
-  for (const n of ["fillRect", "strokeRect", "fillText", "drawImage", "beginPath", "arc", "fill"]) ctx[n] = rec(n);
+  for (const n of ["fillRect", "strokeRect", "fillText", "drawImage", "beginPath", "arc", "fill", "moveTo", "quadraticCurveTo", "closePath"]) ctx[n] = rec(n);
   return ctx;
 }
 const ASSETS = (over = {}) => ({
@@ -105,6 +105,7 @@ describe("what the card says", () => {
   test("the lines", () => {
     const m = honorsCardModel({ achievements: list, vigil: { day: 3, best: 7 } });
     assert.equal(standingLine(m), "66% complete  ·  2 feats found");
+    assert.equal(standingLine(honorsCardModel({ achievements: [H("a"), FEAT("f1")] })), "100% complete  ·  1 feat found");
     assert.equal(vigilLine(m), "Vigil  ·  day 3  ·  best 7");
     assert.equal(vigilLine(honorsCardModel({ achievements: [] })), "");
     assert.equal(standingLine(honorsCardModel({ achievements: [H("a")] })), "100% complete");
@@ -143,7 +144,7 @@ describe("drawing", () => {
     const ctx = fakeCtx();
     drawHonorsCard(ctx, model, ASSETS());
     const t = texts(ctx).join("|");
-    for (const s of ["Wren", "900 points", "100% complete", "1 feats found", "Vigil", "day 2", "best 5", "Gold One", "Purple Two", "Blue Three"]) {
+    for (const s of ["Wren", "900 points", "100% complete", "1 feat found", "Vigil", "day 2", "best 5", "Gold One", "Purple Two", "Blue Three"]) {
       assert.ok(t.includes(s), s);
     }
     assert.ok(!t.includes("Grey Four"), "the fourth-rarest is not drawn");

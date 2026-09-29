@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import "../styles/overlays.css";
 import "../styles/folio-overlay.css";
@@ -8,6 +8,7 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
+import { VigilChip } from "./GoalChips.jsx";
 import { VeilCard, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
 import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
 import MoonGauge from "./MoonGauge.jsx";
@@ -16,6 +17,8 @@ import {
   SORTS, sortNote, progressOf, jumpOf, toGoText, meterLine,
 } from "../folio/completionistCore.js";
 import { requestPanelTab } from "../notify/panelRequest.js";
+import { canPin } from "../folio/goalCore.js";
+import HonorsCardPanel from "../folio/HonorsCardPanel.jsx";
 import "../styles/folio-completionist.css";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
@@ -64,6 +67,10 @@ const SKIN_SW = {
   verdant: ["#0a1410", "#5fd39a", "#4fc99a", "#c8e6a8"],
 };
 
+/* The pinned goal (O4), handed down to every card without threading it through each grid: the
+   pinned honor's id, the click that pins / unpins, and the row the header chip asked to see. */
+const GoalCtx = React.createContext({ pin: "", onPin: null, ringId: null });
+
 function Bar({ pct, variant, tier }) {
   return (
     <div className={"mgfo-bar" + (variant ? " " + variant : "") + (tier ? " mgfo-t-" + tier : "")}>
@@ -106,13 +113,17 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame, onJu
   // never for a feat -- progressOf answers null for both, so nothing below can draw for one.
   const prog = progressOf(a);
   const jump = jumpOf(a);
+  const goal = useContext(GoalCtx);
+  const pinned = goal.pin === a.id;
 
   return (
     // Click replays this card's earn celebration (Ach/mg-notify.js precedent:
     // earned-only -- onReplay/replayToast no-ops on a locked card).
     <div className={"mgfo-card " + tierClass + (a.earned ? " earned" : " locked")
-      + (isFeat ? " mgfo-card-feat" : "") + (frame ? " fresh" + (frame.glow ? "" : " pre") : "")}
+      + (isFeat ? " mgfo-card-feat" : "") + (frame ? " fresh" + (frame.glow ? "" : " pre") : "")
+      + (!isFeat && goal.ringId === a.id ? " ringed" : "")}
       data-feat-id={isFeat && a.earned ? a.id : undefined}
+      data-honor-id={!isFeat && prog ? a.id : undefined}
       onClick={() => onReplay && onReplay(a)}>
       <span className="mgfo-card-gem" aria-hidden="true" />
       <div className="mgfo-card-ico">
@@ -146,6 +157,17 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame, onJu
               {jump && onJump && (
                 <button type="button" className="mgfo-goto-jump" title={"Open " + jump.label}
                   onClick={(e) => { e.stopPropagation(); onJump(jump.to); }}>→ {jump.label}</button>
+              )}
+              {goal.onPin && canPin(a) && (
+                <button type="button" className={"mgfo-pinbtn" + (pinned ? " on" : "")} aria-pressed={pinned}
+                  title={pinned ? "Unpin" : "Pin to the app header (replaces the current pin)"}
+                  aria-label={(pinned ? "Unpin " : "Pin ") + a.name}
+                  onClick={(e) => { e.stopPropagation(); goal.onPin(a); }}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+                    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9.5 1.8l4.7 4.7-2 .6-2.3 2.3.4 3-1 1-3-3-3.6 3.6M6.8 5.7l-.6-1.9 1.6-1.6" />
+                  </svg>
+                </button>
               )}
             </div>
           </div>
@@ -230,6 +252,7 @@ export default function FolioOverlay({ onClose, onJump }) {
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
     meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
+    vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
     // filteredActiveTiers is deliberately NOT destructured here any more: the ALL tab
     // stopped rendering the active ladder's own grid (handoff C4). It stays on the hook
     // for FolioMobile, whose ladder screen IS that per-ladder detail view.
@@ -251,6 +274,7 @@ export default function FolioOverlay({ onClose, onJump }) {
   // Local UI-only position state, matching FolioMobile.jsx's own tierIdx
   // precedent (not shared data, so it doesn't belong in useFolio.js).
   const [tierIdx, setTierIdx] = useState(0);
+  const [cardOpen, setCardOpen] = useState(false);   // the Honors card (O6), drawn only once asked for
   const ladderTiers = activeLadder ? activeLadder.tiers : [];
   const tiersLen = ladderTiers.length;
   const tierIdxSafe = tiersLen ? ((tierIdx % tiersLen) + tiersLen) % tiersLen : 0;
@@ -282,7 +306,7 @@ export default function FolioOverlay({ onClose, onJump }) {
   const coverageStats = healthStats.filter((s) => COVERAGE_LABELS.includes(s.label));
 
   return (
-    <>
+    <GoalCtx.Provider value={{ pin, onPin: pinToggle, ringId }}>
       <div className="mgv-scrim" onClick={handleClose} />
       <div className="mgv-host">
         <div className="mgv-slab mgfo-slab" role="dialog" aria-label="The Folio of Honors">
@@ -336,6 +360,22 @@ export default function FolioOverlay({ onClose, onJump }) {
                       <div className="mgfo-meter-line">{meterLine(meter)}</div>
                     </div>
                   )}
+                  {/* O5: the Vigil, always here (with the best run), and the switch that also shows
+                      it in the app header. O6: the Honors card. A missed day is a smaller number
+                      and nothing else -- no message, no toast. */}
+                  {vigil && (
+                    <div className="mgfo-vigilblock">
+                      <div className="mgfo-vigilrow">
+                        <VigilChip vigil={vigil} />
+                        <span className="mgfo-best">{vigil.bestText}</span>
+                      </div>
+                      <button type="button" className="mgfo-switch" role="switch" aria-checked={vigilOn}
+                        onClick={() => setVigilOn(!vigilOn)}>
+                        Show in the app header
+                        <span className="mgfo-switch-track"><i /></span>
+                      </button>
+                    </div>
+                  )}
                   <div className="mgfo-stats-trio">
                     <div className="mgfo-stat">
                       <div className="mgfo-stat-lab">Points</div>
@@ -353,7 +393,17 @@ export default function FolioOverlay({ onClose, onJump }) {
                       <div className="mgfo-stat-sub">{data.feats_revealed ? "found" : "cloaked"}</div>
                     </div>
                   </div>
+                  {cardModel && (
+                    <button type="button" className="mgfo-cardbtn" onClick={() => setCardOpen((o) => !o)}
+                      aria-expanded={cardOpen}>{"⇩"} Honors card</button>
+                  )}
                 </div>
+
+                {cardOpen && cardModel && (
+                  <HonorsCardPanel model={cardModel}
+                    markUrl={(window.MG_BOOT && window.MG_BOOT.mark_url) || "/branding/logo.png"}
+                    onClose={() => setCardOpen(false)} />
+                )}
 
                 <div className="mgfo-tabs">
                   <button type="button" className={"mgfo-tab" + (tab === "summary" ? " on" : "")} onClick={() => setTab("summary")}>Summary</button>
@@ -809,6 +859,6 @@ export default function FolioOverlay({ onClose, onJump }) {
             document.body, outside this overlay's tree entirely -- the same
             place any other achievement unlock in this app shows up. */}
       </div>
-    </>
+    </GoalCtx.Provider>
   );
 }

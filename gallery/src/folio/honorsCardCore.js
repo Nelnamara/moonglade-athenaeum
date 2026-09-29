@@ -64,7 +64,8 @@ export function honorsCardModel({ user, achievements, earnedPoints, earnedAt, vi
 /* The line under the meter. Feats appear as "N found" and only once one has been found. */
 export function standingLine(model) {
   const base = model.pct + "% complete";
-  return model.found > 0 ? base + "  ·  " + model.found.toLocaleString() + " feats found" : base;
+  return model.found > 0
+    ? base + "  ·  " + model.found.toLocaleString() + (model.found === 1 ? " feat found" : " feats found") : base;
 }
 
 export function vigilLine(model) {
@@ -157,14 +158,13 @@ export function drawHonorsCard(ctx, model, assets) {
 
   const vig = vigilLine(model);
   if (vig) {
-    // a small drawn moon in place of an emoji, so the card looks the same on every device
+    // a small drawn crescent in place of an emoji, so the card looks the same on every device
     ctx.fillStyle = p.lavender;
     ctx.beginPath();
-    ctx.arc(92, 438, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = p.mantle;
-    ctx.beginPath();
-    ctx.arc(97, 434, 9, 0, Math.PI * 2);
+    ctx.moveTo(92, 428);
+    ctx.arc(92, 438, 10, -Math.PI / 2, Math.PI / 2, true);
+    ctx.quadraticCurveTo(87, 438, 92, 428);
+    ctx.closePath();
     ctx.fill();
     ctx.fillStyle = p.subtext;
     ctx.font = "26px " + SANS;

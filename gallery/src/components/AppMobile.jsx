@@ -17,6 +17,7 @@ import CreateMobile, { MODES } from "./CreateMobile.jsx";
 import VideoMode from "./VideoMode.jsx";
 import ControlMobile from "./ControlMobile.jsx";
 import TabBarMobile from "./TabBarMobile.jsx";
+import GoalChips from "./GoalChips.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import MobileScreen from "./MobileScreen.jsx";
 import PickerHost from "./PickerHost.jsx";
@@ -37,6 +38,7 @@ import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
 import { registerFolioOpener } from "../notify/ach.js";
+import { readFolioHash, setFolioRow } from "../folio/folioFocus.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
 import HelpButton from "../help/HelpButton.jsx";
@@ -385,6 +387,17 @@ export default function AppMobile({ boot }) {
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
   /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. */
   useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
+  /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
+     here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
+  useEffect(() => {
+    const fh = readFolioHash(window.location.hash);
+    if (!fh) return;
+    setFolioRow(fh.row);
+    setFolioOpen(true);
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch { /* hash simply stays; harmless */ }
+  }, []);
   /* "Show me ›" (the what's-new sheet, Session I 3c), on the phone: the surface's own tab,
      or the Folio. The Loom is a page of its own -- not claimed, so helpStore navigates. */
   useEffect(() => {
@@ -528,6 +541,16 @@ export default function AppMobile({ boot }) {
   const [folioOpen, setFolioOpen] = useState(false);
   const openFolio = () => setFolioOpen(true);
   const closeFolio = () => setFolioOpen(false);
+  /* The Folio's "→" (Session O, O1), on the phone: each honor with a count points at the surface
+     that advances it -- Generate (the Create tab), The Loom (a page of its own), Contests or
+     Publish (screens this shell pushes). The Folio closes first; nothing is written by the jump. */
+  const jumpFromFolio = (to) => {
+    setFolioOpen(false);
+    if (to === "loom") { window.location.href = "/loom"; return; }
+    if (to === "contests") { openScreenKey("contests"); return; }
+    if (to === "publish") { openPublish(""); return; }
+    setTab("create");
+  };
 
   // Contact Sheet Mobile (2026-08-03) -- lifted HERE for the identical reason
   // detailsFor/lbIndex/folioOpen are: reachable from the Gallery tab's
@@ -1159,6 +1182,9 @@ export default function AppMobile({ boot }) {
         </MobileScreen>
       </div>
 
+      {/* The pinned goal and (optionally) the Vigil, one 32 px row above the tab bar (Session O,
+          O4/O5). Swipe the pin sideways to unpin. Draws nothing unless one is on. */}
+      <GoalChips phone />
       <TabBarMobile tab={tab} setTab={setTab} />
       {/* The first-run guide (Session I decision 1) for the tab in view, while nothing this
           shell pushes covers it. Control's lives in ControlMobile, beside its Branding
@@ -1214,7 +1240,7 @@ export default function AppMobile({ boot }) {
       {/* Folio Mobile -- a fixed, full-viewport overlay above the hero/tab
           bar, same level as ImageDetailsMobile/LightboxMobile (see header
           comment for why it's not nested in MobileScreen). */}
-      {folioOpen && <FolioMobile onClose={closeFolio} />}
+      {folioOpen && <FolioMobile onClose={closeFolio} onJump={jumpFromFolio} />}
 
       {/* Contact Sheet Mobile -- a fixed, full-viewport overlay above the
           hero/tab bar, same level as ImageDetailsMobile/LightboxMobile/

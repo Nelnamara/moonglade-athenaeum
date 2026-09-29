@@ -3,7 +3,9 @@ import { apiGet, apiPost } from "../api.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { peek, put } from "./swrCache.js";
 import useAccountPrefs, { accountPrefs, accountCsrf } from "./useAccountPrefs.js";
-import { takeFolioFocus } from "../folio/folioFocus.js";
+import { takeFolioFocus, takeFolioRow } from "../folio/folioFocus.js";
+import { vigilView, togglePin, canPin, PIN_KEY, VIGIL_HEADER_KEY, pinnedId, vigilInHeader } from "../folio/goalCore.js";
+import { honorsCardModel } from "../folio/honorsCardCore.js";
 import { pokeView, choiceValue } from "../folio/pokeCore.js";
 import { UNLEASH_KEY, isUnleashed } from "../folio/unleashPref.js";
 import {
@@ -238,6 +240,13 @@ export function buildViewModel(data) {
   };
 }
 
+// Today's date on THIS device, YYYY-MM-DD (the card's foot line).
+function localDate() {
+  const d = new Date();
+  const z = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate());
+}
+
 // localStorage, or null when the browser refuses even to hand it over (private windows,
 // blocked site data): the sort then simply does not persist.
 function safeStorage() {
@@ -287,6 +296,12 @@ export default function useFolio() {
   // screen -- the reveal's own timeline, paused while they are on another tab. ----
   const seenRaw = prefs.get(SEEN_KEY, undefined);
   const [focusId] = useState(() => takeFolioFocus());
+  // The honor the header's pinned-goal chip asked to see (folio/folioFocus.js setFolioRow): the
+  // Folio opens on the All tab with that row scrolled to and ringed. `ringId` stays until the
+  // Folio closes. An id that is not a listed honor with a count is simply ignored.
+  const [rowFocus] = useState(() => takeFolioRow());
+  const [ringId, setRingId] = useState(null);
+
   const [freshIds, setFreshIds] = useState(() => new Set());
   const [clock, setClock] = useState(0);
   const [scrollTarget, setScrollTarget] = useState(null);
@@ -569,6 +584,29 @@ export default function useFolio() {
     saveSort(safeStorage(), key);
   }
 
+  // ---- The Vigil (O5) and the pinned goal (O4). The Vigil's numbers come from the payload; the
+  // "show it in the app header" switch and the pin are the ACCOUNT's own preferences, written
+  // only by a click (setVigilOn / pinToggle) -- never on open.
+  const vigil = useMemo(() => vigilView(data && data.vigil), [data]);
+  const pin = pinnedId(prefs.prefs);
+  const vigilOn = vigilInHeader(prefs.prefs);
+  function setVigilOn(on) {
+    return on ? prefs.set(VIGIL_HEADER_KEY, true) : prefs.unset(VIGIL_HEADER_KEY);
+  }
+  // One pin: pinning another honor replaces it, pinning the pinned one lets go, and an honor
+  // with no count (a feat, an unmeasured metric, one already earned) changes nothing.
+  function pinToggle(a) {
+    const next = togglePin(pin, a);
+    if (next === null) return null;
+    return next ? prefs.set(PIN_KEY, next) : prefs.unset(PIN_KEY);
+  }
+  // The Honors card's model (O6): drawn on this device, from what the Folio already holds.
+  const cardModel = useMemo(() => (data ? honorsCardModel({
+    user: (typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.user) || "",
+    achievements: data.achievements, earnedPoints: data.earned_points,
+    earnedAt: data.earned_at, vigil: data.vigil, date: localDate(),
+  }) : null), [data]);
+
   // Default ladder: "archive" (The Archive), matching the DC script's own
   // state default -- falls back to whichever ladder actually exists first if
   // that track is somehow absent from this install's roster.
@@ -667,6 +705,32 @@ export default function useFolio() {
     }
   }, [data, prefs.ready, seenRaw, focusId]);
 
+  // The pinned-goal chip's row: once the roster is here, go to the All tab, pick that honor's
+  // ladder, ring its row and scroll it into view. Once per open, and never for an id that is not
+  // a listed honor with a count (a feat, an earned honor, an unmeasured metric, or nothing).
+  const [rowScroll, setRowScroll] = useState(null);
+  const rowDoneRef = useRef(false);
+  useEffect(() => {
+    if (!rowFocus || !vm || rowDoneRef.current) return;
+    rowDoneRef.current = true;
+    const a = vm.achievements.find((x) => x.id === rowFocus);
+    if (!a || !canPin(a)) return;
+    setTab("all");
+    setBucketFilter(null);
+    if (a.bucket === "ladder" && a.track) setActiveLadderId(a.track);
+    setRingId(a.id);
+    setRowScroll(a.id);
+  }, [rowFocus, vm]);
+  useEffect(() => {
+    if (!rowScroll || tab !== "all") return undefined;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-honor-id="' + String(rowScroll).replace(/["\\]/g, "") + '"]');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "auto" });
+      setRowScroll(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [rowScroll, tab, vm]);
+
   // Scroll the aimed-at card into view once it is on the page.
   useEffect(() => {
     if (!scrollTarget || !featsOnScreen) return;
@@ -722,6 +786,7 @@ export default function useFolio() {
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
     meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
+    vigil, vigilOn, setVigilOn, pin, pinToggle, ringId, cardModel,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
     filteredLadderGroups, showGroups, groupedTierCount,
   };
