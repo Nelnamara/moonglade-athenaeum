@@ -47,6 +47,10 @@ SPEND_PATHS = ("submit_generation", "run_generate", "run_generate_video",
                # LoRA training: spends real credits once the free-training quota is
                # gone, and a re-POST would start a SECOND training (2026-08-06).
                "submit_training",
+               # Session J's two GraphQL writers (waves 2+3 review, F5): the advanced
+               # draft (createTrainingTask -- a re-POST would make a second draft) and
+               # making a LoRA public (upsertGenerationModel -- irreversible).
+               "create_advanced_training_draft", "make_model_public",
                # Artwork mutations: no credits, but they change the public account and
                # a retry would publish twice / delete something already gone.
                "publish_artwork_from_task", "update_artwork", "delete_artwork")

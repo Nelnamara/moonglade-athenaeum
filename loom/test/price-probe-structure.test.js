@@ -35,6 +35,8 @@ const HOSTS = [
   "components/FixTab.jsx",
   "components/UpscalePanel.jsx",
   "components/VideoDrawer.jsx",
+  // The Tsubaki.3 edit bar in the Lightbox (w2-gen, 2026-09-28): a paid Enter-to-send host.
+  "components/TsubakiEditBar.jsx",
 ];
 
 function walk(dir, out = []) {
@@ -293,5 +295,53 @@ describe("the Loom asks for a price in exactly one place", () => {
       "the batch's fresh pricing pass must run BEFORE its confirm, not after");
     assert.doesNotMatch(loomCode, /priceCache\[[^\]]*\][\s\S]{0,120}tallyPricesDetailed/,
       "the batch must never tally the pill's cached prices");
+  });
+});
+
+/* ---- the Tsubaki.3 edit bar's spend latch (w2-gen blocker B1; waves 2+3 review, F3) --------
+   The bar sends a PAID edit on Enter, from a text field where a held key auto-repeats and an
+   IME commits with Enter. Its latch is four source-level facts -- no React harness here, so
+   they are pinned the established way. Behaviour is not changed by this test; it only keeps a
+   later edit from quietly dropping one of them. */
+describe("TsubakiEditBar's spend latch", () => {
+  const src = read(path.join(SRC, "components/TsubakiEditBar.jsx"));
+  const sendAt = src.indexOf("const send = useCallback(async () => {");
+  const sendEnd = src.indexOf("}, [words, ready, state, probe]);", sendAt);
+  const send = sendAt >= 0 && sendEnd > sendAt ? src.slice(sendAt, sendEnd) : "";
+  const keyAt = src.indexOf("const onKeyDown = (e) => {");
+  const keyEnd = src.indexOf("\n  };", keyAt);
+  const onKey = keyAt >= 0 && keyEnd > keyAt ? src.slice(keyAt, keyEnd) : "";
+
+  test("send() and onKeyDown are where this test reads them", () => {
+    assert.ok(send, "TsubakiEditBar.jsx: send() is no longer `const send = useCallback(async () => {` "
+      + "... `}, [words, ready, state, probe]);` -- re-point this test, never drop it");
+    assert.ok(onKey, "TsubakiEditBar.jsx: onKeyDown is no longer `const onKeyDown = (e) => {`");
+  });
+  test("the latch is checked and SET before send()'s first await", () => {
+    const firstAwait = send.indexOf("await ");
+    const check = send.indexOf("if (busyRef.current) return;");
+    const set = send.indexOf("busyRef.current = true;");
+    assert.ok(firstAwait > 0, "send() must await its submit");
+    assert.ok(check >= 0 && check < firstAwait, "the busyRef check must come before any await");
+    assert.ok(set >= 0 && set < firstAwait,
+      "busyRef.current = true must be set synchronously, before the first await -- a second "
+      + "Enter in the same tick must find it set");
+  });
+  test("send() checks the probe's verdict itself, before anything is sent", () => {
+    const gate = send.indexOf("if (!probe.canSubmit)");
+    assert.ok(gate >= 0 && gate < send.indexOf("await "),
+      "send() must refuse on !probe.canSubmit inside the handler, not only via the button");
+  });
+  test("send() ends with a FORCED re-price", () => {
+    const forced = send.lastIndexOf("probe.refresh({ force: true });");
+    assert.ok(forced > send.indexOf("await "),
+      "after the send, the quote must be re-primed with force -- an un-forced refresh "
+      + "short-circuits on an unchanged payload and leaves a stale verdict live");
+  });
+  test("Enter ignores an auto-repeat and an IME commit before it can call send()", () => {
+    const guard = onKey.indexOf("if (e.repeat || (e.nativeEvent && e.nativeEvent.isComposing)) return;");
+    const call = onKey.indexOf("send()");
+    assert.ok(guard >= 0, "onKeyDown must return on e.repeat or isComposing");
+    assert.ok(call > guard, "the repeat/IME guard must come before send() is called");
   });
 });
