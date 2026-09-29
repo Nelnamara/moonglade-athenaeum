@@ -11,7 +11,7 @@ import path from "node:path";
    the phone stage, `.sb-root`, the wizard. `.sb-root` was the Loom's whole answer -- and it
    is a padding on an ordinary in-flow div, while the Loom's REAL shells (`.lv-overlay` on the
    desktop, `.lm-root` on the phone) are `position:fixed; inset:0` layers pinned to the
-   viewport. No ancestor's padding can move a fixed layer, so the z-509 strip painted over
+   viewport. No ancestor's padding can move a fixed layer, so the strip (z 509 then, 510 now) painted over
    the Loom's top bar and the phone Loom's only "< Gallery" link, and took their clicks with
    it (the expanded strip is not pointer-events:none). The full-screen viewer `.lbx` was
    covered the same way.
@@ -35,7 +35,7 @@ const EXEMPT = new Map([
     "z-index 2, pointer-events:none -- a decorative bottom gradient that must reach the " +
     "viewport edge. It covers no control and can eat no click."],
   [".ach-m2",
-    "z-index 520, ABOVE the strip on purpose -- an earned achievement owns the whole screen " +
+    "z-index 519, ABOVE the strip on purpose -- an earned achievement owns the whole screen " +
     "for its few seconds, the strip included."],
 ]);
 
@@ -129,7 +129,7 @@ const STRIP_Z = (() => {
 
 describe("the update strip and the app's fixed full-screen layers", () => {
   test("the strip's own rung is where the rest of this test reasons from", () => {
-    assert.equal(STRIP_Z, 509, "the strip sits at 509; a move here changes every verdict below");
+    assert.equal(STRIP_Z, 510, "the strip sits at 510 (the ambient band's floor, under the toasts' 511); a move here changes every verdict below");
   });
 
   test("every fixed inset:0 layer under the strip is pushed down by it", () => {
@@ -161,7 +161,7 @@ describe("the update strip and the app's fixed full-screen layers", () => {
       assert.ok(roots.has(sel), `${sel} is exempted but is no longer a fixed inset:0 layer`);
       assert.ok(why.length > 40, `${sel}'s exemption must say why, not just name it`);
     }
-    assert.ok(EXEMPT.get(".ach-m2").includes("520"),
+    assert.ok(EXEMPT.get(".ach-m2").includes("519"),
       "the achievement modal is exempt because it deliberately outranks the strip");
   });
 

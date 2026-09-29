@@ -280,7 +280,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
 .glm-pager-info { font-size: 10px; color: var(--overlay0); text-align: center; }
 
 /* ---- sheets (DC sheetScrimStyle/sheetBoxStyle, lines 285-331 & 1088-1102) ---- */
-.glm-scrim { position: fixed; inset: 0; z-index: 30; background: rgba(4,3,10,.66);
+.glm-scrim { position: fixed; inset: 0; z-index: 306; background: rgba(4,3,10,.66);
   animation: glmFade .24s ease both; }
 .glm-scrim.closing { animation: glmFadeOut .28s ease both; }
 /* DRIFT 122 on the shared sheet (every MobileSheet caller gets it from here). The DC draws
@@ -290,7 +290,7 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
    address bar). The drift's own cap, calc(100dvh - 24px), is folded in with min() so
    neither can be exceeded; the 82vh line is only for a browser without dvh. The bottom pad
    is the drift's formula: 16px of breathing room plus whatever the home indicator claims. */
-.glm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
+.glm-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 307;
   max-height: 82vh; max-height: min(82dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
@@ -414,11 +414,11 @@ button.glm-hero-claim .glm-claimribbon { display: inline-block; width: 13px; hei
    mobile.css) -- covering the Create tab's own content area, not the DC's
    literal whole-844px-frame assumption (the hero/credits chip and the bottom
    tab bar stay visible/reachable underneath, matching this file's own "real
-   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 32 sits
-   above .glm-sheet/.glm-scrim (30/31) and below .cm-modelwrap .mfly (331, so
+   viewport, not the DC's iOS-frame sim" rule stated up top). z-index 308 sits
+   above .glm-sheet/.glm-scrim (306/307) and below .cm-modelwrap .mfly (345, so
    the model/LoRA flyout -- reachable from the main composer, not duplicated
    inside Advanced -- still layers correctly if opened while a screen is up). */
-.glm-screen { position: absolute; inset: 0; z-index: 32; background: var(--base);
+.glm-screen { position: absolute; inset: 0; z-index: 308; background: var(--base);
   display: flex; flex-direction: column;
   animation: glmScreenIn .22s ease both; }
 .glm-screen.closing { animation: glmScreenOut .22s ease both; }

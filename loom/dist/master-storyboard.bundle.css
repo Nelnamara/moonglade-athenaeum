@@ -2,7 +2,7 @@
 .mg-gallery-picker {
   position: fixed;
   inset: 0;
-  z-index: 500;
+  z-index: 490;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -599,7 +599,7 @@ button.mgcp-chip .mgico {
 }
 .model-picker .mg-preview {
   position: fixed;
-  z-index: 600;
+  z-index: 500;
   width: 300px;
   background:
     linear-gradient(
@@ -1546,7 +1546,7 @@ button.mgcp-chip .mgico {
 }
 .mgd-preview {
   position: fixed;
-  z-index: 600;
+  z-index: 500;
   width: 300px;
   background: var(--mantle,#131024);
   border: 1px solid var(--surface1,#3a3460);
@@ -1746,7 +1746,7 @@ body.mg-moment-up > #root {
 .ach-m2 {
   position: fixed;
   inset: 0;
-  z-index: 520;
+  z-index: 519;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1796,7 +1796,7 @@ body.mg-moment-up > #root {
   left: 50%;
   transform: translateX(-50%);
   bottom: 5vh;
-  z-index: 519;
+  z-index: 518;
   font-family:
     ui-monospace,
     Menlo,
@@ -1818,7 +1818,7 @@ body.mg-moment-up > #root {
 }
 .ach-skipchip {
   bottom: calc(5vh + 27px);
-  z-index: 521;
+  z-index: 520;
   pointer-events: auto;
   cursor: pointer;
   -webkit-appearance: none;
@@ -2719,7 +2719,7 @@ body.mg-moment-up > #root {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  z-index: 60;
+  z-index: 318;
   width: 380px;
   max-width: calc(100vw - 28px);
   max-height: min(64vh, 560px);
@@ -3141,7 +3141,7 @@ body.mg-moment-up > #root {
   position: fixed;
   right: 16px;
   top: 64px;
-  z-index: 510;
+  z-index: 511;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -3255,7 +3255,7 @@ body.mg-moment-up > #root {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 509;
+  z-index: 510;
   box-sizing: border-box;
   display: flex;
   align-items: center;

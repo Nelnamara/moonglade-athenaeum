@@ -23,7 +23,7 @@
 @keyframes lbmMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 @keyframes lbmSlide { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-.lbm-root { position: fixed; inset: 0; z-index: 55; display: flex; flex-direction: column;
+.lbm-root { position: fixed; inset: 0; z-index: 316; display: flex; flex-direction: column;
   background: #05040d; color: var(--text); font-family: var(--font-system);
   animation: lbmIn .28s cubic-bezier(.2,.9,.24,1) both; }
 .lbm-root.closing { animation: lbmOut .22s ease both; pointer-events: none; }
@@ -185,12 +185,12 @@
    own idm-sheet-scrim/idm-sheet-slab exactly (the shared React <UpscalePanel>
    stays rendered across opens/closes, its .open class driving visibility -- see
    that file's own header comment / useImageDetails.js's correction 1). ---- */
-.lbm-sheet-scrim { position: fixed; inset: 0; z-index: 65; background: rgba(4,3,10,.66);
+.lbm-sheet-scrim { position: fixed; inset: 0; z-index: 320; background: rgba(4,3,10,.66);
   opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .lbm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
 /* Drift 122's sheet contract -- see .idm-sheet-slab (image-details-mobile.css), which this
    mirrors line for line. */
-.lbm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 66;
+.lbm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 321;
   max-height: 84vh; max-height: min(84dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);

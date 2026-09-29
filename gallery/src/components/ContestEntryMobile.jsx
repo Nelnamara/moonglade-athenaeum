@@ -7,8 +7,8 @@ import { show as toast } from "../notify/toastStore.js";
 import "../styles/contest-mobile.css";
 
 /* THE ENTRY SCREEN — pixel source `Contest Mobile Handoff.dc.html` frame D3 ("ENTRY —
-   full-screen picker"), Session D pick 1f. A fixed, full-viewport surface (z 70, above
-   LightboxMobile's own sheet at 66), because all three entry points the handoff keeps can
+   full-screen picker"), Session D pick 1f. A fixed, full-viewport surface (z 324, above
+   LightboxMobile's own sheet at 321), because all three entry points the handoff keeps can
    reach it: the board's Enter bar, the lightbox's action row, and Image Details' chip.
 
    ALWAYS-A-CONFIRM, unchanged (owner ruling F4, 2026-08-31). Nothing enters on one tap:

@@ -22,7 +22,7 @@
 @keyframes csmOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(10px); } }
 @keyframes csmCardIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-.csm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+.csm-root { position: fixed; inset: 0; z-index: 315; display: flex; flex-direction: column;
   background: var(--mantle); color: var(--text);
   animation: csmIn .22s cubic-bezier(.2,.9,.24,1) both; }
 .csm-root.closing { animation: csmOut .18s ease both; }

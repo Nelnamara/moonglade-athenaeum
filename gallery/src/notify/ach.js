@@ -38,7 +38,7 @@ let data = null;                 // last /api/achievements payload (skinName for
         the only function that builds one; hold _drain and nothing reaches the screen.
         NO CALLER IS EXEMPT. A Folio replay used to be, on the grounds that a click has to
         hand its driver handle back synchronously and a parked entry could only return a
-        dead one -- so a replay clicked during a cast opened .ach-m2 (z-index 520) straight
+        dead one -- so a replay clicked during a cast opened .ach-m2 (z-index 519) straight
         over it. An exemption is a door left ajar, and one door ajar is the whole invariant;
         the handle waits WITH the entry instead and drives the moment the dequeue eventually
         builds (see replay() and _driver below).
@@ -85,7 +85,7 @@ export function registerMomentHost(fn) {
 }
 
 /* THE LAYER LEDGER. Everything this module paints is body-level and sits ABOVE a bespoke
-   moment -- a moment .ach-m2 at z-index 520, the parade's two chips at 519/521, against a
+   moment -- a moment .ach-m2 at z-index 519, the parade's two chips at 518/520, against a
    clip moment's 515/516 -- so "the celebration layer is clear" has to mean the DOM is empty
    of all of it. A receded trail card is not a moment, but it is still four dimmed cards
    painted over a starfall. Every append goes through _mount and every removal through
@@ -128,7 +128,7 @@ export function endBespokeMoment() {
    catches the next queued moment rather than racing it.
 
    "Empty" is the DOM, not the queue. Treating a parade's receded trail as clear was the
-   reverse direction left half-open: those cards keep .ach-m2's z-index 520 over a moment's
+   reverse direction left half-open: those cards keep .ach-m2's z-index 519 over a moment's
    515/516, and while a hold was armed they could not even time out. Waiting for the whole parade
    instead would delay a cast by every earn still in it, so a waiting cast does not wait for
    presented history -- _flushClear takes it down (_hush). What a cast waits for is the
@@ -667,7 +667,7 @@ function _mkSkipChip() {
    on window, which puts it ahead of every Escape handler the React tree mounts afterwards
    (App.jsx's overlay closer, useCommandPalette's one global listener, the drawer/picker/panel
    ladders -- every one of them registers from an effect, and main.jsx calls installNotify()
-   before createRoot().render()). That ordering is the point: the parade layer is z-index 520,
+   before createRoot().render()). That ordering is the point: the parade layer is z-index 519,
    above everything, so while it plays Escape is its key and is consumed here.
 
    With no parade up the handler returns without touching the event at all -- the app's Escape
@@ -863,7 +863,7 @@ function _bind(e, built) {
    Held is not the same as immediate. While a bespoke moment owns the screen -- or while a
    cast waits for the screen -- the entry waits with everything else and plays when the gate
    lifts, driven the whole time by the handle above; the exemption this used to carry put a
-   .ach-m2 at z-index 520 over a moment at 515/516, which is the overlap owner ruling 2026-09-10
+   .ach-m2 at z-index 519 over a moment at 515/516, which is the overlap owner ruling 2026-09-10
    rules out in BOTH directions.
    opts.line forces the initial roast text (the Folio's ruby-scramble reveal starts from the
    CLEAN line on its own timing). Returns the driver handle useFolio.js consumes; {} only when

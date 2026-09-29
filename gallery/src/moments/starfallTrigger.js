@@ -21,8 +21,8 @@ import { installTouchCode } from "./touchCode.js";
    on a first earn the celebration is not merely delayed, it has not been built yet.
 
    And the other direction, which arming alone cannot cover: anything ALREADY on screen when
-   the code is entered is a layer the moment would paint UNDER (.ach-m2 is z-index 520 and
-   the parade's chips 519/521, against the moment's 515/516). So the cast does not start on
+   the code is entered is a layer the moment would paint UNDER (.ach-m2 is z-index 519 and
+   the parade's chips 518/520, against the moment's 515/516). So the cast does not start on
    the keypress -- it starts from ach.js's whenClear() hook, which runs it at once when that
    layer is EMPTY and otherwise the instant the last thing on it has left the DOM. The arm
    happens inside that callback, so the cast is never the thing waiting and nothing is ever

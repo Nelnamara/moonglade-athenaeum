@@ -1,6 +1,6 @@
 /* Grid right-click context menu (the five classic actions, React port). */
 .mgctx {
-  position: fixed; z-index: 60; min-width: 168px; padding: 5px;
+  position: fixed; z-index: 318; min-width: 168px; padding: 5px;
   border-radius: 10px; background: #0c0a1a; border: 1px solid var(--surface1);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .62); display: flex; flex-direction: column; gap: 1px;
   animation: mgctxIn .12s cubic-bezier(.2, .9, .24, 1) both;

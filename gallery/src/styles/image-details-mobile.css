@@ -20,7 +20,7 @@
 @keyframes idmInscribe { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes idmRule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-.idm-root { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+.idm-root { position: fixed; inset: 0; z-index: 315; display: flex; flex-direction: column;
   background: radial-gradient(120% 70% at 30% -10%, color-mix(in oklab, var(--accent) 20%, #17123a) 0%,
     var(--base) 46%, #05040d 100%);
   color: var(--text); animation: idmIn .22s cubic-bezier(.2,.9,.24,1) both; }
@@ -182,7 +182,7 @@
    The "see all similar" sheet below has no such constraint (plain React
    content, nothing persistent to protect) and uses the real, shared
    MobileSheet.jsx component instead -- see ImageDetailsMobile.jsx. */
-.idm-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(4,3,10,.66);
+.idm-sheet-scrim { position: fixed; inset: 0; z-index: 318; background: rgba(4,3,10,.66);
   opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .idm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
 /* Drift 122's sheet contract, the same one .glm-sheet carries (gallery-mobile.css): capped
@@ -191,7 +191,7 @@
    upscaler options add rows) never parks it below the fold. `bottom: 0` pins it at the
    slab's content edge -- a sticky box is held inside its scroller's padding -- which is
    exactly where it rests at the end of the scroll, one bottom pad above the slab's foot. */
-.idm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61;
+.idm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 319;
   max-height: 84vh; max-height: min(84dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);

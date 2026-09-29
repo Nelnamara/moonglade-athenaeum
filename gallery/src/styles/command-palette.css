@@ -18,7 +18,8 @@
                 same symmetric pair as mgvSlab/mgvFade in overlays.css and the notify
                 toasts' own 340ms exit -- deliberately not a second motion vocabulary.
      Z          palette scrim/panel 460/461, cheat-sheet 470/471, G-chip 462. Above the
-                claim modal's 440/441 and below the model preview's 600; the ORDER is
+                claim modal's 440/441 and below the picker's 490 and the hover previews'
+                500; the ORDER is
                 what matters and tests/test_z_ladder.py is the referee. The canonical
                 ladder comment lives in overlays.css. */
 

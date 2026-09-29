@@ -257,7 +257,7 @@ describe("the dock wires History (source guards -- the parts that are not pure)"
     const asideClose = dock.indexOf("</aside>", asideOpen);
     const tip = dock.indexOf("<RunTip tip={runTip} />");
     assert.ok(asideOpen > 0 && asideClose > asideOpen && tip > asideClose, "RunTip after </aside>");
-    assert.match(css, /\.mgdock-runtip \{ position: fixed; z-index: 300;/);
+    assert.match(css, /\.mgdock-runtip \{ position: fixed; z-index: 330;/);
     assert.match(css, /transform: translate\(-50%, calc\(-100% - 8px\)\)/);
     assert.match(css, /background: #0a0818; border: 1px solid rgba\(182, 146, 230, \.4\)/);
   });

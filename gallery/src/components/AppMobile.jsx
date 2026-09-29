@@ -1169,7 +1169,7 @@ export default function AppMobile({ boot }) {
       )}
 
       {/* Contest entry (Contest Mobile Handoff.dc.html D3) -- a fixed, full-viewport
-          surface at z 70, above LightboxMobile's own sheet (66), because the lightbox is
+          surface at z 324, above LightboxMobile's own sheet (321), because the lightbox is
           one of the three places it opens from. See its own header comment for the
           always-a-confirm contract and the disclosed "/N max". */}
       {contestEntry && (
@@ -1184,8 +1184,8 @@ export default function AppMobile({ boot }) {
           entry points. The board's own Enter bar skips it: the contest is already known.
           `cmb-choosersheet` is the ONLY sheet on this screen that carries a class, and it
           is carrying a z-index: this one mounts while a viewer is up, so MobileSheet's
-          shared 30/31 put its scrim and slab BEHIND the opaque .lbm-root/.idm-root that
-          opened it and the chip read as dead. contest-mobile.css's rung (67/68) states the
+          shared 306/307 put its scrim and slab BEHIND the opaque .lbm-root/.idm-root that
+          opened it and the chip read as dead. contest-mobile.css's rung (322/323) states the
           whole phone ladder; the other three sheets here open over the app shell only and
           stay on the shared rung. */}
       <MobileSheet open={sheet === "contest"} closing={closing} onClose={closeSheet}
