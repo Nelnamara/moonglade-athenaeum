@@ -87,7 +87,11 @@ The names for the things you see in Moonglade Athenaeum, so a report can say *wh
   taking off, a job's result.
 - **the Trash** — the Control Panel tile listing everything you have deleted locally, with
   **Restore selected**. See [Deleting & Sync](Deleting).
-- **the viewer** — the phone's picture screen: the big image with its button row underneath.
+- **the viewer** — the phone's picture screen: the big image with its **placard** (catalog number,
+  date and the batch's other pictures) and its button row underneath.
+- **Data saver** — the phone's **Control** switch (Off / Auto on metered / Always) that makes it draw
+  small thumbnails and wait for a tap before loading a full-size picture. See
+  [Control Panel](Control-Panel).
 
 ## Reporting something with these words
 
