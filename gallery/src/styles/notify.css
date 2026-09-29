@@ -284,6 +284,13 @@
 .mg-toast .mt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;}
 .mg-toast .mt-act{flex:none;align-self:center;font:700 10.5px/1 var(--font-system,system-ui,sans-serif);padding:5px 10px;border-radius:8px;border:1px solid var(--lavender);background:none;color:var(--text);cursor:pointer;white-space:nowrap;}
 .mg-toast .mt-act:hover{background:color-mix(in srgb,var(--lavender) 14%,transparent);}
+/* A toast that asks (the narrator's choice): its buttons sit in a row under the text, not
+   beside it, and a small foot line closes it. The ruby one is the switch's own red. */
+.mg-toast .mt-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.mg-toast .mt-acts .mt-act{align-self:auto;}
+.mg-toast .mt-act.ruby{border-color:var(--red);color:var(--red);}
+.mg-toast .mt-act.ruby:hover{background:color-mix(in srgb,var(--red) 14%,transparent);}
+.mg-toast .mt-foot{font-size:9.5px;line-height:1.45;color:var(--overlay0);margin-top:7px;}
 .mg-toast.whatsnew{align-items:center;background:var(--base);border:1px solid var(--surface1);border-radius:12px;padding:10px 12px;}
 .mg-toast.whatsnew .mt-title{font-size:12px;font-weight:400;}
 .mg-toast.whatsnew .mt-msg{font-size:10.5px;}

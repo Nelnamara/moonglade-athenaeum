@@ -25,6 +25,17 @@ export default function ToastHost() {
           <div className="mt-main">
             <div className="mt-title">{t.title}{t.code ? <> <b className="mt-code">{t.code}</b></> : null}</div>
             {t.msg ? <div className="mt-msg">{t.msg}</div> : null}
+            {t.actions && t.actions.length ? (
+              <div className="mt-acts">
+                {t.actions.map((a, i) => (
+                  <button key={i} type="button" className={"mt-act" + (a.tone ? " " + a.tone : "")}
+                    onClick={() => { dismiss(t.id); try { a.run(); } catch { /* its own */ } }}>
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {t.foot ? <div className="mt-foot">{t.foot}</div> : null}
           </div>
           {t.thumb ? (
             <span className="mt-thumb" style={{ backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" }} />
