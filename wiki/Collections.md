@@ -80,6 +80,18 @@ the screen says what changed — and it counts **only the pictures that really c
 rating a picture that already has that rating is not counted. For ten seconds it carries **Undo**,
 which puts *each picture back to the values it had*, not one value for all.
 
+## On a phone
+
+**☰ Menu → Collections** is the phone's version of Manage. **Tap** a collection to open it in the
+Gallery. **Swipe a row to the left** for **Rename** and **Delete** (or tap the **⋯** at the end of the
+row, for the same two buttons). **Merge…** turns on tick boxes: tick two or more hand-picked
+collections and the button at the bottom says what it will do; the first one you ticked keeps the
+pictures. Smart collections can't merge, and **Delete** always asks first and says how many pictures
+stay. **Advanced** search has **Save as smart collection ⟳**, and smart collections are in its
+**Collection** list with a ⟳. Long-press a picture to select, then **Actions** starts with the stars,
+a tag box, **Keeper** and **Reject**; a note says what really changed and carries **Undo** for ten
+seconds. Nothing here deletes a picture or reaches PixAI.
+
 ## Rating keys
 
 With the pointer over a picture, press **1–5** to rate it and **0** to clear the rating. The keys

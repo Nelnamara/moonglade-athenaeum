@@ -158,11 +158,34 @@ tag:pose-study                   your own tag; tag: also still reads PixAI's pub
 note:"good hands"                words in your own note
 ★4+                              four stars or more (★4 means the same)
 keeper -reject  -tag:draft       a leading - leaves matches out, for any of the above
+ar:tall  ar:wide  ar:square      by shape: tall is 9:16 or taller, wide is 16:9 or wider
+ar:portrait  ar:landscape        taller than wide / wider than tall
+ar:3:2  ar:9:16  ar:1.91:1       a shape, within 3% of that ratio
+ar:>2  ar:<0.5                   wider than 2:1 / narrower than 1:2 (width divided by height)
+type:image  type:video  type:loom   which kind: the Loom's own renders are their own kind
 ```
 
 `tag:` reads two stores: PixAI's published art tags (a substring, as it always did) and your own
 personal tags (a whole tag). `art_tags:` keeps the PixAI-only reading. Your marks, tags and notes
 live in your local catalog and are never sent to PixAI.
+
+**Searching by shape.** `ar:` reads each picture's width and height, so it finds *every* matching
+picture in the library, not just the ones on the page you are looking at. A picture with no size
+on record (some old imports) matches no shape, and turns up under `-ar:tall` since it is not
+known to be tall. Type `ar:` in the search field and it suggests the values; the ▾ **Advanced**
+panel has an **Aspect** field that does the same without typing, and each card names its own
+shape (`3:2`) in the row that appears when you hover it. A value the search doesn't understand
+(`ar:banana`) is said out loud under the field instead of quietly finding nothing.
+
+**Operator chips.** Open **⚲ Filters** and the last row of the tray is a set of one-tap chips
+(`ar:tall`, `ar:wide`, `ar:square`, `★4+`, `keeper`, `-reject`, `type:video`, `type:loom`): tap one
+to add it to the search, tap again to take it out. A shape chip replaces any other shape chip, since
+a picture only has one shape.
+
+**`type:`** splits the library three ways with no overlap: `type:image`, `type:video`, and
+`type:loom` for pictures and clips [The Loom](The-Loom) made (a shot's result, or a re-roll it
+kept; footage you imported into a shot is not the Loom's). This is what the storage bars in
+[Collection Health](Health) open when you click a segment.
 
 Text operators match substrings, case-insensitively, and take the same `*` / `?`
 wildcards as free text (`model:eth*mix`). An unrecognized key (or a malformed value
@@ -249,6 +272,15 @@ so you can bookmark one, and the browser's Back button closes it.
 
 Scroll position and your selections are preserved when you open an image and come
 back (even via the browser Back button).
+
+**On a phone, the curation tools are there too.** **Advanced** has an **Aspect** row of chips (Square,
+Portrait, Landscape, Tall, Wide) after Min rating, its **Collection** list marks smart collections
+with ⟳, and **Save as smart collection ⟳** saves what the sheet shows. Long-press a picture to start
+selecting; **Actions** then opens with the stars, a tag box and **Keeper** / **Reject** on top, with
+the same honest count and 10-second **Undo** as the desktop. In the full-screen viewer a **✓** and a
+**✕** sit at the right of the model line, and the stars are big enough to hit: tap the star you have
+to take the rating off. **Details** carries the same **Your layer** card as the desktop. See
+[Collections](Collections).
 
 **On a phone, three more things about where you are.** Each of the three tabs —
 **Gallery**, **Create**, **Control** — keeps its own scroll position, so reading deep into
