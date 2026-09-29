@@ -323,14 +323,16 @@ export function loraIncompat(lora, model) {
 /* What the recipe row's fit check reads off the dock (lane w2-recipes, H decision 10 / T2b):
    the model, the prompt's length, and PixAI's own refusal on the dock's last price answer
    (`recipe_error`, keyed by the recipe ids it names). The row paints the same verdict. */
-export function recipeFitCtx(s, priceAnswer) {
+export function recipeFitCtx(s, priceAnswer, promptLen) {
   const refusals = {};
   const re = priceAnswer && priceAnswer.recipe_error;
   if (re) for (const id of re.recipe_ids || []) refusals[String(id)] = re;
   return {
     modelType: (s.model && s.model.model_type) || "",
     modelTitle: (s.model && s.model.title) || "",
-    promptLen: typeof s.prompt === "string" ? s.prompt.length : null,
+    // Session M (review F7): a run's LONGEST resolved prompt when the dock passes one, since
+    // a value drawn into one cell can take that cell over the recipes' budget.
+    promptLen: promptLen != null ? promptLen : typeof s.prompt === "string" ? s.prompt.length : null,
     refusals,
   };
 }
@@ -338,8 +340,8 @@ export function recipeFitCtx(s, priceAnswer) {
 /* The Go gate, classic chain: resolved version + prompt + no unresolved/failed
    LoRA + no architecture mismatch + count within the account cap + no recipe that doesn't
    fit. `priceAnswer` (optional) is the dock's last /api/price answer, for PixAI's own recipe
-   refusal. */
-export function goGate(s, loraCap, priceAnswer) {
+   refusal; `promptLen` (optional) the longest resolved prompt of a run (Session M). */
+export function goGate(s, loraCap, priceAnswer, promptLen) {
   if (!s.model || !s.model.version_id) return "Pick a model first";
   if (!s.prompt.trim()) return "Write a prompt";
   // The LoRA checks judge what is SENT: on the Context side the LoRAs are held, not sent.
@@ -351,7 +353,7 @@ export function goGate(s, loraCap, priceAnswer) {
     // Recipes, like the LoRAs, are judged only where they are SENT (the LoRA side); a recipe
     // that doesn't fit refuses in the row's own words (recipesCore.recipeGate, H T2b: "later
     // changes turn the chip peach and Generate refuses").
-    const rg = recipeGate(s.recipes, recipeFitCtx(s, priceAnswer));
+    const rg = recipeGate(s.recipes, recipeFitCtx(s, priceAnswer, promptLen));
     if (rg) return rg;
   }
   // Session H decision 1: the Context side sends its images and holds the rest. With no image
@@ -411,7 +413,8 @@ export function buildPayload(s) {
     mode: s.mode || "auto",
     steps: eff,
     cfg: s.cfg === "" ? null : Number(s.cfg),
-    count: Math.max(1, Math.min(4, Number(s.count) || 1)),
+    // Session M: a Matrix sends one image per cell (the page hides the count there).
+    count: s.varMode === "matrix" ? 1 : Math.max(1, Math.min(4, Number(s.count) || 1)),
     seed: s.seed === "" ? null : s.seed,
     high_priority: !!s.highPriority,
     // Decision 5: on a creativity model the three stops replace the on/off helper; the
@@ -614,4 +617,7 @@ export const GEN_DEFAULTS = {
   recipes: [],          // lane w2-recipes' row: [{id, title, cover}]
   member: null,         // PixAI membership (true / false / null = unknown), from /api/account
   palette: null,        // the applied colour palette {name, palette, source, id, from} (Session H 4)
+  // ---- Session M (Generate power tools) ----
+  varMode: "random",    // Random (one value per image) | Matrix (every combination, cap 24)
+  roll: 0,              // the run seed when the seed field is blank (useGenerate draws one)
 };

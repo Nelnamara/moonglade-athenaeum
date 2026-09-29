@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet } from "../api.js";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { apiGet, apiPost } from "../api.js";
 import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply, toLoraSide, versionPatch } from "./genCore.js";
 import {
   SEED_PROMPT, TSUBAKI3, contextMax, profileLocked, profileRows, renumberAfterRemove,
 } from "./tsubakiCore.js";
 import { GEN_PREFS_KEY, prefsFromState, stateFromPrefs } from "./genPrefs.js";
-import { accountPrefs } from "../hooks/useAccountPrefs.js";
+import { accountCsrf, accountPrefs } from "../hooks/useAccountPrefs.js";
 import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
 import { publishDockPrice, publishDockRequest } from "../recipes/recipesStore.js";
+import {
+  LISTS_KEY, listsFromPrefs, newRoll, parse, planJobs, runSeedOf, sendRoute,
+} from "./templateCore.js";
+import useRuns from "./useRuns.js";
 
 /* The image-generation hook. Mirrors the classic Gen IIFE's timing contracts:
    - price: the shared price probe (gen/usePriceProbe.js) owns the 250ms debounce,
@@ -25,7 +29,9 @@ import { publishDockPrice, publishDockRequest } from "../recipes/recipesStore.js
      submissions each own a result line, and there is NO retry anywhere. */
 
 export default function useGenerate({ costRef, isMember }) {
-  const [s, setS] = useState(GEN_DEFAULTS);
+  // Session M: a fresh roll per dock (the page's `roll`), the Random run seed while the seed
+  // field is blank.
+  const [s, setS] = useState(() => ({ ...GEN_DEFAULTS, roll: newRoll() }));
   const [busy, setBusy] = useState(false);
   const [results, openLine] = useResultLines();
   const verSeq = useRef(0);
@@ -109,6 +115,9 @@ export default function useGenerate({ costRef, isMember }) {
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
     s.mode, s.steps, s.unlimited, s.palette,
     s.inputs, s.ctx, s.auto, s.landscape, s.tier, s.creativity, s.recipes, s.member,
+    // Session M: Matrix sends one image per cell, so switching the mode moves the payload's
+    // count -- a structural input like the count itself.
+    s.varMode,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- model pick -> version resolve (seq-guarded) ---- */
@@ -303,15 +312,52 @@ export default function useGenerate({ costRef, isMember }) {
     }));
   }, []);
 
+  /* ---- Session M: the template, its lists, the run road ----
+     The account's saved lists (gen.lists) come from the shared account store; the dock
+     expands the prompt only to DRAW it (the tint, the preview, "Send N"). The server
+     re-expands everything itself. */
+  const prefStore = accountPrefs();
+  const prefSnap = useSyncExternalStore(prefStore.subscribe, prefStore.getSnapshot, prefStore.getSnapshot);
+  const lists = useMemo(() => listsFromPrefs(prefSnap.prefs), [prefSnap]);
+  const saveLists = useCallback((next) => prefStore.set(LISTS_KEY, next), [prefStore]);
+  const parsed = useMemo(() => parse(s.prompt, lists), [s.prompt, lists]);
+  const runSeed = runSeedOf(s.seed, s.roll);
+  const plan = useMemo(() => planJobs(s.prompt, lists, s.varMode || "random",
+    s.varMode === "matrix" ? 1 : Math.max(1, Math.min(4, Number(s.count) || 1)),
+    runSeed == null ? 0 : runSeed), [s.prompt, lists, s.varMode, s.count, runSeed]);
+  const route = sendRoute(plan, parsed.syntax);
+  // A Random run needs a seed in range; the server refuses the same.
+  const seedGate = plan && plan.mode === "random" && runSeed == null
+    ? "A Random run's seed must be between 0 and 2,147,483,646 — or leave the seed blank" : null;
+  const templateGate = parsed.error || (plan && plan.error) || seedGate || null;
+  const longest = plan && !plan.error && parsed.vars.length
+    ? Math.max(...plan.jobs.map((j) => j.prompt.length)) : null;
+  const runs = useRuns({ openLine, onSettled: () => refreshPrice({ force: true }) });
+  const runBody = useCallback(() => ({
+    ...buildPayload(s), var_mode: s.varMode || "random",
+    ...(runSeed != null ? { run_seed: runSeed } : {}),
+  }), [s, runSeed]);
+  // An open confirm describes the body it was quoted for; a change to the dock closes it
+  // (the page closes it on any change), so Go can never send settings nobody looked at.
+  const bodyKey = JSON.stringify(runBody());
+  const cancelRun = runs.cancel;
+  useEffect(() => { cancelRun(); }, [bodyKey, cancelRun]);
+
   /* ---- submit: NO retries, body-keyed errors, adjusted always recorded ---- */
   const generate = useCallback(async (loraCap) => {
-    if (busyRef.current) return;              // latch, independent of render timing
-    if (goGate(s, loraCap, priceAnswer)) return;
+    if (busyRef.current || runs.busyRef.current) return;   // latch, independent of render timing
+    if (goGate(s, loraCap, priceAnswer, longest)) return;
+    if (templateGate || route === "blocked") return;
     // PAYLOAD IDENTITY gate. The Generate buttons are already disabled on
     // g.canSubmit; this is the click that slips through a stale render (a keyboard
     // Enter needs no repaint to fire). The quote on the badge must have been priced
     // off THIS payload -- never a silent drop: re-price and let the button come back.
     if (!priceOk) { refreshPrice(); return; }
+    // Session M (NOTES 2): more than one generation opens THE ONE confirm (the server's own
+    // quote); one generation whose prompt uses the syntax goes to the run route, which
+    // expands it and records its template. A plain single send is today's, unchanged.
+    if (route === "confirm") { runs.openConfirm(runBody()); return; }
+    if (route === "run") { runs.sendSingle(runBody()); return; }
     busyRef.current = true;
     setBusy(true);
     const emit = openLine("Submitting…");
@@ -326,7 +372,7 @@ export default function useGenerate({ costRef, isMember }) {
     // change caused by our own submit. FORCED, or the short-circuit would swallow it
     // as "nothing changed" -- but the balance did.
     refreshPrice({ force: true });
-  }, [s, openLine, priceOk, priceAnswer, refreshPrice]);
+  }, [s, openLine, priceOk, priceAnswer, refreshPrice, runs, route, templateGate, longest, runBody]);
 
   /* ---- the context slots (Session H decision 1) ----
      addContext appends (a picture already in a slot is not added twice, and the live max is
@@ -383,10 +429,17 @@ export default function useGenerate({ costRef, isMember }) {
     return addLora(row);
   }, [addLora]);
 
-  return { s, set, busy, results, applyModelRow, pickVersion,
+  return { s, set, busy: busy || runs.busy, results, applyModelRow, pickVersion,
            addLora, takeLora, removeLora, setLora, generate, refreshPrice,
            addContext, removeContext, sizeContext, tsubakiEdit,
-           canSubmit: priceOk, priceAnswer };
+           canSubmit: priceOk, priceAnswer,
+           // Session M: the template and the run road, for the dock and the phone
+           run: { parsed, plan, route, templateGate, longest, lists, saveLists,
+                  confirm: runs.confirm, go: runs.go, cancel: runs.cancel, busy: runs.busy,
+                  last: runs.last, images: plan && !plan.error ? plan.images : 0,
+                  // The Inspector's "preview · not sent yet" for a dock with no open
+                  // confirm: /plan is read-only and writes nothing.
+                  preview: () => apiPost("/api/generate/plan", { ...runBody(), csrf: accountCsrf() }) } };
 }
 
 /* T1a: a members-only profile row is never picked for an account PixAI reports as non-member,

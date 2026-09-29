@@ -9,6 +9,7 @@ import { GEN_PREFS_KEY } from "../../gallery/src/gen/genPrefs.js";
 import { MINE_KEY } from "../../gallery/src/gen/colorPaletteCore.js";
 import { DRAFT_PREFIX, draftId } from "../../gallery/src/recipes/recipesCore.js";
 import { GUIDE_SURFACES, NOTES_HIDDEN_KEY, guideKey } from "../../gallery/src/help/guideCore.js";
+import { LISTS_KEY } from "../../gallery/src/gen/templateCore.js";
 
 /* The account store (/api/account/prefs, one document per account) is shared by three lanes
    that never saw each other: wave 2's dock settings (gen.image), palettes (palette.mine) and
@@ -30,7 +31,8 @@ const SEEN_KEY = literal("help/whatsNew.js", "SEEN_KEY");
 const PICKER_SIZE = (src("recipes/RecipesOverlay.jsx").match(/prefs\.get\("(recipes\.[a-z.-]+)"/) || [])[1];
 
 const OWNERS = {
-  "wave 2 dock": [GEN_PREFS_KEY],
+  // the dock's own segment: its settings, and (wave 5, Session M) the saved lists __name__ reads
+  "wave 2 dock": [GEN_PREFS_KEY, LISTS_KEY],
   "wave 2 palette": [MINE_KEY],
   "wave 2 recipes": [DRAFT_PREFIX + draftId(1759000000000, "abc123"), PICKER_SIZE],
   "wave 3 help": GUIDE_SURFACES.map(guideKey).concat([NOTES_HIDDEN_KEY, SEEN_KEY]),

@@ -106,7 +106,8 @@ describe("both surfaces mount the real row", () => {
       const s = src(file);
       assert.match(s, /import RecipeRow from "\.\.\/recipes\/RecipeRow\.jsx";/);
       assert.match(s, /<RecipeRow recipes=\{s\.recipes\} onChange=\{\(recipes\) => set\(\{ recipes \}\)\}\s+held=\{ctxOn\} loraCount=\{s\.loras\.length\} modelType=\{m \? m\.model_type : ""\} \/>/);
-      assert.match(s, /goGate\(s, loraCap, (g\.)?priceAnswer\)/);
+      // Session M adds a fourth argument: a run's longest resolved prompt (review F7)
+      assert.match(s, /goGate\(s, loraCap, (g\.)?priceAnswer(, (g\.run\.longest|run \? run\.longest : null))?\)/);
     });
   }
 
@@ -121,6 +122,6 @@ describe("both surfaces mount the real row", () => {
     const hook = src("gen/useGenerate.js");
     assert.match(hook, /publishDockRequest\(buildPayload\(s\)/);
     assert.match(hook, /publishDockPrice\(priceAnswer\)/);
-    assert.match(hook, /goGate\(s, loraCap, priceAnswer\)/);
+    assert.match(hook, /goGate\(s, loraCap, priceAnswer(, longest)?\)/);
   });
 });

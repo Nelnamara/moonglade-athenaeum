@@ -36,6 +36,12 @@ function _bootCsrf() {
   }
 }
 
+/** The session's CSRF token for a body field: the one this store's GET handed out, else the
+    page's own (MG_BOOT). The Generate dock's run routes read it here (Session M). */
+export function accountCsrf() {
+  return _csrf || _bootCsrf();
+}
+
 /** The page's one preferences store, for code outside a component. */
 export function accountPrefs() {
   if (!_store) {

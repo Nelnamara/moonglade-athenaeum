@@ -36,6 +36,9 @@ import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
 import HelpButton from "../help/HelpButton.jsx";
+import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./RunControls.jsx";
+import RunInspector from "./RunInspector.jsx";
+import { escapeLiteral, newRoll } from "../gen/templateCore.js";
 import "../styles/dock.css";
 
 /* The Generate DOCK — the designed bottom-center glass reshell of the pilot's
@@ -288,7 +291,24 @@ function GenerateDrawer({ open, onClose, account, request }) {
   // The Go gate, plus Unlimited Mode's one-at-a-time rule (SCOPE_2026-09-26_unlimited-mode
   // C3b): while this run list holds a lane task still waiting or running, Generate waits in
   // Unlimited Mode. The server refuses a second one off its own job log either way (§8.6).
-  const gate = goGate(s, loraCap, g.priceAnswer) || (s.unlimited && laneBusy(jobs) ? UNLIMITED_BUSY : null);
+  // Session M: a template refusal (a bad brace, an unknown list, over the 24-cell cap) blocks
+  // Send in its own words, peach on the dock (page M1/M6); a run's longest resolved prompt is
+  // what the recipes' prompt budget is judged on (review F7).
+  const gate = goGate(s, loraCap, g.priceAnswer, g.run.longest)
+    || (s.unlimited && laneBusy(jobs) ? UNLIMITED_BUSY : null) || g.run.templateGate;
+  const [inspect, setInspect] = useState(null);      // the Inspector's source, or null
+  const [listsOpen, setListsOpen] = useState(false);
+  const openInspect = useCallback(async () => {
+    if (inspect) { setInspect(null); return; }
+    const c = g.run.confirm;
+    if (c && c.plan) { setInspect({ kind: "plan", plan: c.plan }); return; }
+    const sent = g.run.last && Array.isArray(g.run.last.jobs)
+      ? g.run.last.jobs.find((j) => j.task_id) : null;
+    if (sent) { setInspect({ kind: "task", taskId: sent.task_id }); return; }
+    const d = await g.run.preview();
+    setInspect(d && !d.error ? { kind: "plan", plan: d }
+      : { kind: "plan", plan: { cells: [], error: (d && d.error) || "" } });
+  }, [inspect, g.run]);
   useEffect(() => {
     if (!open && !runningCount) return;
     const t = setInterval(fetchJobs, open ? 4000 : 8000);
@@ -329,9 +349,23 @@ function GenerateDrawer({ open, onClose, account, request }) {
 
   // The arithmetic itself is gen/dockLayout.js (DC measureDock / fitReel / promptRows,
   // one pure function) so the tests run exactly what renders here.
+  // Session M: the composer's run pieces are measured, so the dock makes room for them (the
+  // reel yields first) instead of clipping the confirm -- gen/dockLayout.js's `extraPx`.
+  const [runPx, setRunPx] = useState(0);
+  const tokBoxRef = useRef(null);
+  const runBoxRef = useRef(null);
+  useEffect(() => {
+    const els = [tokBoxRef.current, runBoxRef.current].filter(Boolean);
+    if (!els.length || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => setRunPx(els.reduce((a, e) => a + Math.round(e.getBoundingClientRect().height), 0));
+    const ro = new ResizeObserver(measure);
+    els.forEach((e) => ro.observe(e));
+    measure();
+    return () => ro.disconnect();
+  }, [tab]);
   const { capH, reelH, reelVisible, promptMax, promptRows } = dockLayout({
     vh: metrics.vh, sepBottom: metrics.sepBottom, expanded, historyOpen,
-    promptLen: (s.prompt || "").length, promptFocus,
+    promptLen: (s.prompt || "").length, promptFocus, extraPx: tab === "image" ? runPx : 0,
   });
 
   /* Prime the cost chip on each Image-tab entry. The image <CostBadge> sits in the
@@ -535,8 +569,21 @@ function GenerateDrawer({ open, onClose, account, request }) {
         }
       }
       if (!modelOk) notes.push("model could not be restored — pick it manually");
+      // Session M (NOTES 3): a run sent through the dock restores its TEMPLATE -- Random or
+      // Matrix, the count, the seed field as it was and the run seed as the roll -- so Send
+      // reproduces the run (and opens the confirm again when it is more than one). A run
+      // with no record (older runs, PixAI-site runs, a single send) fills the resolved
+      // prompt with its braces escaped, so it re-sends byte-identical instead of being read
+      // as variables (open call 3). Reuse never sends.
+      const run = d.run;
+      const fromRun = !!(run && (run.var_mode === "random" || run.var_mode === "matrix"));
+      const runPatch = fromRun ? {
+        varMode: run.var_mode,
+        ...(run.var_mode === "random" && run.count ? { count: Number(run.count) || 1 } : {}),
+        roll: opts && opts.newSeed ? newRoll() : (run.run_seed != null ? Number(run.run_seed) : s.roll),
+      } : {};
       g.set({
-        prompt: row.prompt_full || row.prompt_preview || "",
+        prompt: fromRun ? (run.template || "") : escapeLiteral(row.prompt_full || row.prompt_preview || ""),
         negative: row.negative_prompt || "",
         customW: row.width ? String(row.width) : "",
         customH: row.height ? String(row.height) : "",
@@ -548,8 +595,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
         // show nothing where the recipe's own seed had been, and the owner could not read
         // back -- or keep -- the draw he is about to pay for. Range is the 32-bit space
         // every backend in this road accepts; the field itself takes any digit string.
-        seed: opts && opts.newSeed ? String(Math.floor(Math.random() * 2147483647)) : (row.seed || ""),
+        // A run's seed field is restored as it was (blank = the run seed drove it).
+        seed: fromRun ? (opts && opts.newSeed ? "" : (run.dock_seed || ""))
+          : opts && opts.newSeed ? String(Math.floor(Math.random() * 2147483647)) : (row.seed || ""),
         loras: [],          // the recipe REPLACES composer LoRA state on every path below
+        ...runPatch,
       });
       const hadLoras = !!(row.loras || "").trim();   // catalog display string: "did the task use any?"
       if (!row.task_id) {
@@ -872,7 +922,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
         <div className="mgdock-body">
           {historyOpen
             ? <HistoryStrip onPrefill={prefillRun} onTip={setRunTip} />
-            : (reelVisible && <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillRun} onTip={setRunTip} />)}
+            : (reelVisible && <RunsReel jobs={jobs} reelH={reelH} onPrefill={prefillRun} onTip={setRunTip}
+                onInspect={(taskId) => { setTab("image"); setInspect({ kind: "task", taskId }); }} />)}
 
           {tab === "image" && expanded && (
             <div className="mgdock-slabs">
@@ -1164,7 +1215,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
             <div className="gd-results mgdock-results">
               {g.results.map((r) => (
                 <div key={r.id} className={"gd-res " + r.kind}>
-                  {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
+                  {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
                   {r.media && r.media.map((mid) => (
                     <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                       <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -1174,7 +1225,6 @@ function GenerateDrawer({ open, onClose, account, request }) {
               ))}
             </div>
           )}
-
           {/* ---- THE EDIT TAB (DC 1444-1541): the SAME expanded 3-slab grid as the
                image tab (DC 1209-1210 -> .mgdock-slabs), behind ▲ -- SOURCE · EDIT MODEL /
                REGION / ART FILTERS · QUALITY -- plus the shared footer below. Gated on
@@ -1289,6 +1339,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 </>
               )}
               <span className="sp" />
+              {/* Session M (NOTES 7): { } Inspect -- the exact request per job, after the
+                  variables are filled in; the preview before a send, the last send after. */}
+              {tab === "image" && (
+                <button type="button" className={"mgrun-inspect-toggle" + (inspect ? " on" : "")}
+                  title="Inspect the exact request (secrets stripped)" onClick={openInspect}>{"{ }"}</button>
+              )}
               {/* DC 1564 -- the ★ Snippets toggle, right-aligned at the end of the row.
                   Only where there is a prompt to insert into (Fixer/Enhance have none). */}
               {snippetsAvail && (
@@ -1312,6 +1368,8 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 onAddImage={addContextPick} className="mgdock-prompt-at"
                 placeholder="Use @ to reference your images, e.g. @image1 holding flowers" />
             )}
+            {/* Session M (page M1): the prompt's variables, tinted -- lavender, refusals peach */}
+            {tab === "image" && <div ref={tokBoxRef}><TokenLine parsed={g.run.parsed} /></div>}
             <div ref={setVideoPromptEl} className="mgdock-slot" style={{ display: tab === "video" ? "" : "none" }} />
             <div ref={setEditPromptEl} className="mgdock-slot" style={{ display: tab === "edit" && sub !== "enhance" ? "" : "none" }} />
             {tab === "edit" && sub === "enhance" && (
@@ -1371,6 +1429,20 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 <div ref={setVideoNegEl} className="mgdock-slot" style={{ display: tab === "video" ? "contents" : "none" }} />
               </div>
             )}
+            {/* Session M (page A): Random | Matrix with its count and ⚄ Reroll, the preview, the
+                Lists sheet, and THE ONE confirm for any send of more than one generation. */}
+            {tab === "image" && (
+              <div ref={runBoxRef}>
+                <RunModeRow s={s} set={set} parsed={g.run.parsed} plan={g.run.plan}
+                  onLists={() => setListsOpen((v) => !v)} listsOpen={listsOpen} />
+                {listsOpen && (
+                  <ListsSheet lists={g.run.lists} onSave={g.run.saveLists} onClose={() => setListsOpen(false)} />
+                )}
+                <RunConfirm confirm={g.run.confirm} busy={g.run.busy}
+                  onGo={() => { setReuseFrom(null); g.run.go(); }} onCancel={g.run.cancel} />
+                <RunPreview s={s} parsed={g.run.parsed} plan={g.run.plan} />
+              </div>
+            )}
           </div>
 
           {/* right column (DC 1582-1590): the cost stack over the Generate button.
@@ -1383,7 +1455,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 {/* idle here == no model (useGenerate clears the badge only when there is
                     no version_id to price), so the DC's nomodel sentence (3674) is the
                     idle hint -- via the badge's own hint API, never hand-written text */}
-                <CostBadge ref={costRef} stack count={s.count} balance={balance}
+                <CostBadge ref={costRef} stack count={s.varMode === "matrix" ? 1 : s.count} balance={balance}
                   laneHeld={ctxOn && unlimitedOffered(m)}
                   hint="Pick a model to see the cost." />
                 {/* Gated on the price probe's verdict IN ADDITION to goGate/busy/prefill: the
@@ -1393,10 +1465,12 @@ function GenerateDrawer({ open, onClose, account, request }) {
                 <button type="button" className={"mgdock-gen" + (gate || g.busy || prefillBusy || !g.canSubmit ? " off" : "")}
                   disabled={!!gate || g.busy || prefillBusy || !g.canSubmit}
                   title={prefillBusy ? "Restoring the recipe…"
-                    : gate ? (s.unlimited ? gate : "Pick a model and write a prompt first")
-                      : s.unlimited ? "Submit in Unlimited Mode" : "Submit — this spends credits or a card"}
-                  onClick={() => { setReuseFrom(null); g.generate(loraCap); }}>
-                  <span>&#10022; Generate</span>
+                    : gate ? (s.unlimited || g.run.templateGate ? gate : "Pick a model and write a prompt first")
+                      : s.unlimited ? "Submit in Unlimited Mode"
+                        : g.run.images > 1 ? "Send " + g.run.images + " — a confirm shows the total first"
+                          : "Submit — this spends credits or a card"}
+                  onClick={() => { if (g.run.route !== "confirm") setReuseFrom(null); g.generate(loraCap); }}>
+                  <span>&#10022; Generate{g.run.images > 1 ? " " + g.run.images : ""}</span>
                 </button>
               </>
             )}
@@ -1435,6 +1509,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
           it the containing block for position: fixed and re-anchor viewport coords into
           dock-local space. Same fragment as the flyout / compare overlay above. */}
       {open && <RunTip tip={runTip} />}
+      {/* Session M (NOTES 7): the Inspector floats beside the dock like the page's own card
+          (outside the aside for the same containing-block reason as the tooltip above). */}
+      {open && tab === "image" && inspect && (
+        <RunInspector source={inspect} onClose={() => setInspect(null)} floating />
+      )}
     </>
   );
 }

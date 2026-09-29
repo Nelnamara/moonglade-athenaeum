@@ -29,6 +29,7 @@ import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import { PaletteRow } from "./ColorPalette.jsx";
+import { RunConfirm } from "./RunControls.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -260,7 +261,7 @@ export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
   addContext, removeContext, sizeContext,
-  canSubmit: priceOk, priceAnswer,
+  canSubmit: priceOk, priceAnswer, run,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   // The model/LoRA sheet and its scrim are PORTALED out of the scrolling body (owner's 5059
@@ -296,7 +297,10 @@ export default function CreateMobile({
   const modelSheet = useSheet();
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
-  const gate = goGate(s, loraCap, priceAnswer);
+  // Session M: the dock's template gate on the phone too (a prompt typed with the syntax is
+  // expanded the same way; setting up a Matrix is desktop-only -- Stage B's phone work).
+  const gate = goGate(s, loraCap, priceAnswer, run ? run.longest : null)
+    || (run ? run.templateGate : null);
   const m = s.model;
 
   /* Prime the Image cost chip when Image mode is (re)entered. <CostBadge>'s ref
@@ -683,7 +687,7 @@ export default function CreateMobile({
               <div className="gd-results cm-results">
                 {results.map((r) => (
                   <div key={r.id} className={"gd-res " + r.kind}>
-                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
+                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
                     {r.media && r.media.map((mid) => (
                       <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                         <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -694,15 +698,20 @@ export default function CreateMobile({
               </div>
             )}
 
+            {/* Session M (NOTES 2): THE ONE confirm for a send of more than one generation, the
+                same component as the dock's -- the server's own count, total and cards. */}
+            {run && <RunConfirm confirm={run.confirm} busy={run.busy} onGo={run.go} onCancel={run.cancel} />}
+
             {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
                 badge must have been priced off the payload this click submits. generate()
                 refuses the same way (gen/priceProbeCore.js). */}
             <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
               disabled={!!gate || busy || !priceOk}
               title={gate || (s.unlimited ? "Submit in Unlimited Mode"
-                : "Submit — this spends credits or a card")}
+                : run && run.images > 1 ? "Send " + run.images + " — a confirm shows the total first"
+                  : "Submit — this spends credits or a card")}
               onClick={() => generate(loraCap)}>
-              {busy ? "◌ Queued…" : "✦ Generate"}
+              {busy ? "◌ Queued…" : "✦ Generate" + (run && run.images > 1 ? " " + run.images : "")}
             </button>
           </>
         )}

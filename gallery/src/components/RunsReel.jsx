@@ -1,7 +1,84 @@
 import React, { useEffect, useState } from "react";
+import { apiGet } from "../api.js";
 import { costColor, costText } from "../gen/historyCore.js";
 import { WAIT_MIN_TILE, queueWaitText } from "../gen/queueWait.js";
+import { matrixGrid } from "../gen/templateCore.js";
 import { RunningFace, ClusterFace, tipEnter } from "./HistoryStrip.jsx";
+import "../styles/runs.css";
+
+/* Session M (NOTES 8, page M6): a MATRIX run's cells are grouped into one grid -- the last
+   axis across, the rest down, labelled from the run's own axes -- and each cell is a normal
+   run (a done cell's click reuses it, its { } inspects it). A cell that was refused, not
+   sent or may have started is a peach tile (DECISIONS: refusals are peach, never ruby). The
+   run's axes and cell states come from GET /api/generate/runs/<id>, read once per run and
+   kept for the page's life (a finished run does not change). */
+const runCache = new Map();
+
+function useRunRecord(runId, refreshKey) {
+  const [rec, setRec] = useState(() => runCache.get(runId) || null);
+  useEffect(() => {
+    let live = true;
+    const cached = runCache.get(runId);
+    if (cached && ["sent", "stopped", "refused"].includes(cached.status)) { setRec(cached); return undefined; }
+    apiGet("/api/generate/runs/" + runId).then((d) => {
+      if (!live || !d || d.error) return;
+      runCache.set(runId, d);
+      setRec(d);
+    });
+    return () => { live = false; };
+  }, [runId, refreshKey]);
+  return rec;
+}
+
+function MatrixBlock({ runId, jobs, th, onPrefill, onInspect }) {
+  const rec = useRunRecord(runId, jobs.map((j) => j.status).join(","));
+  const axes = rec && rec.axes;
+  const byTask = {};
+  for (const j of jobs) byTask[j.job_id] = j;
+  const cells = rec ? (rec.jobs || []).map((c) => ({ ...c, job: c.task_id ? byTask[c.task_id] : null }))
+    : jobs.map((j) => ({ cell: Number(j.cell), task_id: j.job_id, state: "sent", job: j }));
+  const grid = matrixGrid(axes, cells);
+  if (!grid) return null;
+  const rows = grid.rows.length;
+  const cellH = Math.max(22, Math.floor((th - 16 - 5 * rows) / Math.max(1, rows)));
+  const cellW = Math.max(16, Math.round(cellH * (832 / 1216)));
+  return (
+    <div className="mgrun-grid" title={"matrix · " + cells.length + " cells"}
+      style={{ gridTemplateColumns: "64px repeat(" + grid.across.length + ", " + cellW + "px)" }}>
+      <span />
+      {grid.across.map((a, i) => <span key={"a" + i} className="mgrun-axis" title={a}>{a}</span>)}
+      {grid.rows.map((row, r) => (
+        <React.Fragment key={"r" + r}>
+          <span className="mgrun-rowlbl" title={row.label}>{row.label}</span>
+          {row.cells.map((c, k) => {
+            const j = c && c.job;
+            const done = j && j.status === "done" && (j.media_ids || []).length;
+            const running = j && !["done", "failed", "done_with_errors", "stale"].includes(j.status || "running");
+            const held = !c || (!j && c.state !== "sent") || (j && j.status === "failed");
+            const why = !c ? "not sent" : c.state === "may_have_started"
+              ? "may have started on PixAI — check the Activity tray" : c.state === "refused"
+                ? "refused by PixAI" + (c.error ? ": " + c.error : "") : c.state === "not_sent" ? "not sent" : "";
+            return (
+              <div key={"c" + r + ":" + k}
+                className={"mgrun-cell" + (done ? " done" : "") + (held ? " held" : "")}
+                style={{ width: cellW, height: cellH }}
+                title={(c && c.prompt) ? c.prompt + (why ? " — " + why : "") : why}
+                onClick={done ? () => onPrefill(j.job_id, j.media_ids[0]) : undefined}>
+                {done ? <img src={"/thumbs/" + encodeURIComponent(j.media_ids[0]) + ".jpg"} alt="" /> : null}
+                {running && !done ? <span className="mgrun-axis">…</span> : null}
+                {held && !done ? "⚠" : null}
+                {c && c.task_id && onInspect ? (
+                  <button type="button" className="mgrun-cellinsp" title="Inspect the request"
+                    onClick={(e) => { e.stopPropagation(); onInspect(c.task_id); }}>{"{ }"}</button>
+                ) : null}
+              </div>
+            );
+          })}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
 
 /* The dock's RUNS REEL (design spec C3a, Frontend Gallery.dc.html ~1845-2060),
    rebuilt against the real click/prefill/batch behavior spec (2026-08-02) --
@@ -111,7 +188,7 @@ function tipRow(j, c) {
   };
 }
 
-export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
+export default function RunsReel({ jobs, reelH, onPrefill, onTip, onInspect }) {
   const [hover, setHover] = useState(null);
 
   // the DC's single unlabeled 'today' bucket (groupDefs 2681 `[['', 'today']]`)
@@ -144,7 +221,10 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
       )}
       {!empty && (
         <div className="mgdock-reelgrp">
-          {today.flatMap(cellsFor).map((c) => {
+          {groupMatrix(today).map((item) => item.matrix ? (
+            <MatrixBlock key={"m:" + item.run} runId={item.run} jobs={item.jobs} th={th}
+              onPrefill={onPrefill} onInspect={onInspect} />
+          ) : cellsFor(item.job).map((c) => {
             const j = c.job;
             const running = c.kind === "running";
             const cluster = running && c.count > 1;
@@ -188,6 +268,11 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
                     <span>Use these settings →</span>
                   </div>
                 )}
+                {/* Session M (NOTES 7): { } Inspect the request this task was sent with */}
+                {done && onInspect && c.idx === 0 && /^\d+$/.test(String(j.job_id)) ? (
+                  <button type="button" className="mgrun-tileinsp" title="Inspect the request"
+                    onClick={(e) => { e.stopPropagation(); if (onTip) onTip(null); onInspect(j.job_id); }}>{"{ }"}</button>
+                ) : null}
               </div>
             );
             // Cost is TASK-level (one job, possibly N images) -- shown once per
@@ -207,9 +292,27 @@ export default function RunsReel({ jobs, reelH, onPrefill, onTip }) {
                 </div>
               </div>
             );
-          })}
+          }))}
         </div>
       )}
     </div>
   );
+}
+
+/* The reel's items in order: an ordinary job, or ONE matrix block standing where its
+   newest cell stands (the jobs arrive newest first). */
+function groupMatrix(jobs) {
+  const out = [];
+  const seen = {};
+  for (const j of jobs) {
+    if (j.run_mode === "matrix" && j.run) {
+      if (seen[j.run]) { seen[j.run].jobs.push(j); continue; }
+      const item = { matrix: true, run: j.run, jobs: [j] };
+      seen[j.run] = item;
+      out.push(item);
+    } else {
+      out.push({ job: j });
+    }
+  }
+  return out;
 }
