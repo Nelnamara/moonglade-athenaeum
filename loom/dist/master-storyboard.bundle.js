@@ -716,6 +716,44 @@ var LoomBundle = (() => {
     return frameLinked(entries[idx - 1].c.closeFrame, entries[idx].c.openFrame);
   };
   var connectMeta = (connect) => CONNECT[connect] || CONNECT.new;
+  var emptyFrameShape = () => ({ thumbId: "", source: "", desc: "", tag: "" });
+  var newCardShape = (id, extra = {}) => ({
+    id,
+    title: "",
+    status: "todo",
+    mode: "I2V",
+    duration: 8,
+    connect: "cut",
+    prompt: "",
+    openFrame: emptyFrameShape(),
+    closeFrame: emptyFrameShape(),
+    cast: [],
+    refs: [],
+    camera: "",
+    lighting: "",
+    audioCue: "",
+    // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
+    // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
+    // ("ambient room tone") that only ever influences wording, never the real generateAudio/
+    // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
+    // had it reverse-engineered but never wired to a control): the server already accepts
+    // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
+    audioGen: false,
+    audioLanguage: "english",
+    transIn: "",
+    transOut: "",
+    notes: "",
+    discreet: false,
+    trimIn: 0,
+    trimOut: null,
+    // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
+    // prompt box, durable across shot reselect/reload. When set, shotText() returns
+    // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
+    // see shotText() and effectivePrompt() below.
+    promptOverride: false,
+    promptOverrideText: "",
+    ...extra
+  });
   var flat = (p) => p.acts.flatMap((a, ai) => a.cards.map((c, ci) => ({ c, a, ai, ci, code: `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}` })));
   var effectivePrompt = (c) => c.promptOverride ? c.promptOverrideText || "" : c.prompt || "";
   var resolvedImage = (x, resolve) => x && (x.mediaId || resolve(x.thumbId, x.source)) || null;
@@ -1092,6 +1130,8 @@ var LoomBundle = (() => {
     ((project || {}).assets || []).forEach((a) => {
       if (a.mediaId) note3(a.mediaId, `cast/asset ${a.name || a.tag || a.id || "?"}`);
     });
+    const bed = (project || {}).bed;
+    if (bed && bed.file) note3(bed.file, "music bed");
     return ids;
   };
   var bundleMissingReport = (project, countHeader, listHeader) => {
@@ -1282,7 +1322,14 @@ var LoomBundle = (() => {
   var patchRef = (project, actId, cardId, refId, patch2) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch2 }) }));
   var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
   var countShots = (project) => (project.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
-  var parseCastIdsFromSearch = (search) => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === "cast").flatMap(([, v]) => (v || "").split(",")).map((s) => decodeURIComponent(s).trim()).filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
+  var parseCastIdsFromSearch = (search, key = "cast") => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === key).flatMap(([, v]) => {
+    let s = v || "";
+    try {
+      s = decodeURIComponent(s);
+    } catch (e) {
+    }
+    return s.split(",");
+  }).map((s) => s.trim()).filter((s) => /^[A-Za-z0-9_-]{1,64}$/.test(s));
   function friendlyGenErr(raw) {
     const s = String(raw || "");
     if (!s) return "generation failed";
@@ -1502,6 +1549,360 @@ ${"=".repeat(48)}
     };
   };
 
+  // src/loom-bed-core.js
+  var BED_DB_DEFAULT = -8;
+  var BED_DB_MIN = -24;
+  var BED_DB_MAX = 0;
+  var BED_FADE_IN = 2;
+  var BED_FADE_OUT = 3;
+  var BED_DUCK_DB = -12;
+  var BED_MAX_BYTES = 50 * 1024 * 1024;
+  var BED_FILE_RE = /^[0-9a-f]{40}\.(mp3|wav|m4a|aac|ogg|flac)$/;
+  var num2 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var clampBedDb = (v) => {
+    const n = v == null || v === "" ? null : num2(v);
+    if (n == null) return BED_DB_DEFAULT;
+    return Math.max(BED_DB_MIN, Math.min(BED_DB_MAX, Math.round(n)));
+  };
+  var makeBed = ({ file, name, dur } = {}, keepDb) => ({
+    file: String(file || ""),
+    name: String(name || "").slice(0, 120) || "music bed",
+    dur: num2(dur) != null && num2(dur) > 0 ? num2(dur) : null,
+    db: keepDb != null ? clampBedDb(keepDb) : BED_DB_DEFAULT,
+    fadeIn: BED_FADE_IN,
+    fadeOut: BED_FADE_OUT
+  });
+  var bedOf = (project) => {
+    const b = project && project.bed;
+    if (!b || typeof b !== "object" || !BED_FILE_RE.test(String(b.file || ""))) return null;
+    return {
+      file: String(b.file),
+      name: String(b.name || "music bed"),
+      dur: num2(b.dur) > 0 ? num2(b.dur) : null,
+      db: clampBedDb(b.db == null ? BED_DB_DEFAULT : b.db),
+      fadeIn: BED_FADE_IN,
+      fadeOut: BED_FADE_OUT
+    };
+  };
+  var bedClock = (sec) => {
+    const n = num2(sec);
+    if (n == null || n <= 0) return "";
+    const s = Math.round(n);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  };
+  var dbLabel = (db) => {
+    const d = clampBedDb(db);
+    return (d < 0 ? "\u2212" + Math.abs(d) : String(d)) + " dB";
+  };
+  var hasOwnAudio = (card, project) => {
+    if (!card) return false;
+    const v = selectedTakeView(card);
+    const s = v && v.settings || null;
+    const mode = String(s && s.mode || card.mode || "");
+    const audioGen = s ? !!s.audioGen : !!card.audioGen;
+    if (audioGen) return true;
+    if (mode === "V2V") return true;
+    if (mode !== "R2V") return false;
+    const refs = (s ? s.refs : card.refs) || [];
+    if (refs.some((r) => r && r.kind === "audio")) return true;
+    const cast = (s ? s.cast : card.cast) || [];
+    const assets = project && project.assets || [];
+    return assets.some((a) => a && a.kind === "audio" && cast.includes(a.id));
+  };
+  var cutSegments = (entries, project) => {
+    let at = 0;
+    const out = [];
+    (entries || []).forEach((e) => {
+      const c = e && e.c;
+      if (!c || !c.resultMid) return;
+      const dur = num2(c.actualDur) || num2(c.duration) || 8;
+      const cin = num2(c.trimIn) || 0;
+      const cout = c.trimOut != null && num2(c.trimOut) != null ? num2(c.trimOut) : dur;
+      const span = Math.max(0.1, cout - cin);
+      out.push({ id: c.id, code: e.code, start: at, end: at + span, span, ownAudio: hasOwnAudio(c, project) });
+      at += span;
+    });
+    return out;
+  };
+  var bedPlan = (segments, bed) => {
+    if (!bed) return null;
+    const segs = segments || [];
+    const cutLen = segs.length ? segs[segs.length - 1].end : 0;
+    if (!(cutLen > 0)) return null;
+    const bd = num2(bed.dur);
+    const bedLen = bd != null && bd > 0 ? Math.min(bd, cutLen) : cutLen;
+    const fadeIn = Math.min(BED_FADE_IN, bedLen / 2);
+    const fadeOut = Math.min(BED_FADE_OUT, bedLen / 2);
+    const windows = [];
+    segs.forEach((s) => {
+      if (!s.ownAudio) return;
+      const a = s.start, b = Math.min(s.end, bedLen);
+      if (b <= a) return;
+      const last2 = windows[windows.length - 1];
+      if (last2 && Math.abs(last2.end - a) < 1e-9) last2.end = b;
+      else windows.push({ start: a, end: b });
+    });
+    return { cutLen, bedLen, db: clampBedDb(bed.db), duckDb: BED_DUCK_DB, fadeIn, fadeOut, windows };
+  };
+  var dbToGain = (db) => Math.pow(10, db / 20);
+  var ducked = (plan, t) => plan.windows.some((w) => t >= w.start && t < w.end);
+  var fadeAt = (plan, t) => {
+    if (t < 0 || t >= plan.bedLen) return 0;
+    const fin = plan.fadeIn > 0 ? Math.min(1, t / plan.fadeIn) : 1;
+    const fout = plan.fadeOut > 0 ? Math.min(1, (plan.bedLen - t) / plan.fadeOut) : 1;
+    return Math.max(0, Math.min(fin, fout));
+  };
+  var bedDbAt = (plan, t) => {
+    if (!plan || t < 0 || t >= plan.bedLen) return null;
+    return plan.db + (ducked(plan, t) ? plan.duckDb : 0);
+  };
+  var bedGainAt = (plan, t) => {
+    const db = bedDbAt(plan, t);
+    if (db == null) return 0;
+    return dbToGain(db) * fadeAt(plan, t);
+  };
+  var bedAutomation = (plan, startAt = 0) => {
+    if (!plan) return [];
+    const t0 = Math.max(0, num2(startAt) || 0);
+    if (t0 >= plan.bedLen) return [{ t: t0, v: 0, step: true }];
+    const marks = /* @__PURE__ */ new Set([t0, plan.fadeIn, plan.bedLen - plan.fadeOut, plan.bedLen]);
+    plan.windows.forEach((w) => {
+      marks.add(w.start);
+      marks.add(w.end);
+    });
+    const times = Array.from(marks).filter((t) => t >= t0 && t <= plan.bedLen).sort((a, b) => a - b);
+    const eps = 1e-6;
+    const out = [{ t: t0, v: bedGainAt(plan, t0), step: true }];
+    for (let i = 1; i < times.length; i++) {
+      const t = times[i];
+      const left = t >= plan.bedLen ? 0 : dbToGain(plan.db + (ducked(plan, t - eps) ? plan.duckDb : 0)) * fadeAt(plan, t);
+      out.push({ t, v: left });
+      const right = bedGainAt(plan, t);
+      if (Math.abs(right - left) > 1e-9) out.push({ t, v: right, step: true });
+    }
+    return out;
+  };
+  var peaksToBuckets = (samples, buckets) => {
+    const n = Math.max(1, Math.floor(buckets) || 1);
+    const len = samples ? samples.length : 0;
+    const out = new Array(n).fill(0);
+    if (!len) return out;
+    const per = len / n;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * per), b = Math.min(len, Math.max(a + 1, Math.floor((i + 1) * per)));
+      let m = 0;
+      for (let k = a; k < b; k++) {
+        const v = Math.abs(samples[k]);
+        if (v > m) m = v;
+      }
+      out[i] = m;
+    }
+    const top = out.reduce((m, v) => Math.max(m, v), 0);
+    return top > 0 ? out.map((v) => v / top) : out;
+  };
+  var peakAt = (peaks, bedDur, t) => {
+    if (!peaks || !peaks.length || !(bedDur > 0) || t < 0 || t >= bedDur) return 0;
+    return peaks[Math.min(peaks.length - 1, Math.floor(t / bedDur * peaks.length))] || 0;
+  };
+  var cutStatusLine = (entries, segments) => {
+    const all = (entries || []).length;
+    const segs = segments || [];
+    if (!segs.length) return "nothing rendered yet";
+    const len = segs[segs.length - 1].end;
+    const skipped = all - segs.length;
+    return "cut length " + len.toFixed(1) + " s" + (skipped > 0 ? " \xB7 " + skipped + " unrendered skipped" : "");
+  };
+
+  // src/loom-edl-core.js
+  var EDL_FPS = 24;
+  var EDL_RECORD_START = 3600;
+  var EDL_BED_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$/;
+  var CSV_HEADER = "order,code,title,take,file,in,out,duration,mode,prompt";
+  var EOL = "\r\n";
+  var num3 = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var codeAscii = (code) => String(code || "").replace(/[^A-Za-z0-9]/g, "");
+  var asciiText = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim();
+  var boardSlug = (name) => {
+    const s = asciiText(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "");
+    return s || "storyboard";
+  };
+  var framesOf = (sec, fps = EDL_FPS) => Math.max(0, Math.round((num3(sec) || 0) * fps));
+  var timecode = (frames, fps = EDL_FPS) => {
+    const f = Math.max(0, Math.round(num3(frames) || 0));
+    const hh = Math.floor(f / (fps * 3600));
+    const mm = Math.floor(f / (fps * 60)) % 60;
+    const ss = Math.floor(f / fps) % 60;
+    const ff = f % fps;
+    return [hh, mm, ss, ff].map((n) => String(n).padStart(2, "0")).join(":");
+  };
+  var secs = (frames, fps) => (frames / fps).toFixed(3);
+  var assignReels = (items) => {
+    const want = (items || []).map((it) => codeAscii(it.ascii || it.code) + "_T" + it.n);
+    const count = {};
+    want.forEach((w) => {
+      count[w] = (count[w] || 0) + 1;
+    });
+    const used = new Set(want.filter((w) => w.length <= 8 && count[w] === 1));
+    let k = 0;
+    const next = () => {
+      let r;
+      do {
+        k += 1;
+        r = "R" + String(k).padStart(3, "0");
+      } while (used.has(r));
+      used.add(r);
+      return r;
+    };
+    return want.map((w) => w.length <= 8 && count[w] === 1 ? w : next());
+  };
+  var csvField = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  var bedZipName = (bed) => {
+    if (!bed || !bed.file) return "";
+    const ext = String(bed.file).split(".").pop();
+    const stem = asciiText(String(bed.name || "").replace(/\.[A-Za-z0-9]{1,5}$/, "")).replace(/\s+/g, "_").replace(/[^A-Za-z0-9_.-]/g, "").replace(/^[^A-Za-z0-9]+/, "").slice(0, 48);
+    const name = (stem || "music_bed") + "." + ext;
+    return EDL_BED_NAME_RE.test(name) ? name : "music_bed." + ext;
+  };
+  var edlPlan = (project, opts = {}) => {
+    const fps = EDL_FPS;
+    const entries = project && Array.isArray(project.acts) ? flat(project) : [];
+    const title = asciiText(opts && opts.name || project && project.name || "Storyboard").toUpperCase().slice(0, 70) || "STORYBOARD";
+    const slug = boardSlug(opts && opts.name || project && project.name);
+    const skipped = [];
+    const rows = [];
+    entries.forEach((e) => {
+      const v = selectedTakeView(e.c);
+      if (!v || !v.mid) {
+        skipped.push(e.code);
+        return;
+      }
+      const dur = num3(v.dur) || num3(e.c.actualDur) || num3(e.c.duration) || 8;
+      const tin = num3(v.trimIn) || 0;
+      const tout = v.trimOut != null && num3(v.trimOut) != null ? num3(v.trimOut) : dur;
+      const inF = framesOf(tin, fps);
+      const outF = Math.max(inF + 1, framesOf(tout, fps));
+      const s = v.settings || null;
+      rows.push({
+        e,
+        v,
+        ascii: codeAscii(e.code),
+        n: v.n,
+        inF,
+        outF,
+        lenF: outF - inF,
+        mode: String(s && s.mode || e.c.mode || ""),
+        prompt: String(s && s.sentPrompt || effectivePrompt(e.c) || "")
+      });
+    });
+    const reels = assignReels(rows.map((r) => ({ ascii: r.ascii, n: r.n })));
+    const lines = ["TITLE: " + title, "FCM: NON-DROP FRAME", ""];
+    const csv = [CSV_HEADER];
+    const clips = [];
+    let rec = EDL_RECORD_START * fps;
+    rows.forEach((r, i) => {
+      const reel = reels[i];
+      const file = (r.ascii.length >= 1 && r.ascii.length <= 8 ? r.ascii : reel) + "_t" + r.n + ".mp4";
+      const recIn = rec, recOut = rec + r.lenF;
+      rec = recOut;
+      lines.push(String(i + 1).padStart(3, "0") + "  " + reel.padEnd(8) + " V     C        " + timecode(r.inF, fps) + " " + timecode(r.outF, fps) + " " + timecode(recIn, fps) + " " + timecode(recOut, fps));
+      lines.push("* FROM CLIP NAME: " + file);
+      const t = asciiText(r.e.c.title).toUpperCase();
+      if (t) lines.push("* COMMENT: " + t);
+      csv.push([
+        i + 1,
+        r.e.code,
+        r.e.c.title || "",
+        r.n,
+        file,
+        secs(r.inF, fps),
+        secs(r.outF, fps),
+        secs(r.lenF, fps),
+        r.mode,
+        r.prompt
+      ].map(csvField).join(","));
+      clips.push({ mid: String(r.v.mid), file });
+    });
+    const cutFrames = rec - EDL_RECORD_START * fps;
+    if (skipped.length) lines.push("* SKIPPED (no render): " + skipped.join(" "));
+    const bed = opts && opts.bed && opts.bed.file ? opts.bed : null;
+    const bedName = bed ? bedZipName(bed) : "";
+    if (bed && cutFrames > 0) {
+      const bd = num3(bed.dur);
+      const bedF = bd != null && bd > 0 ? Math.min(framesOf(bd, fps), cutFrames) : cutFrames;
+      const recIn = EDL_RECORD_START * fps;
+      lines.push(String(rows.length + 1).padStart(3, "0") + "  " + "BED".padEnd(8) + " A     C        " + timecode(0, fps) + " " + timecode(bedF, fps) + " " + timecode(recIn, fps) + " " + timecode(recIn + bedF, fps));
+      lines.push("* FROM CLIP NAME: " + bedName);
+      lines.push("* LEVEL " + (Number(bed.db) || 0) + " DB");
+      lines.push("* COMMENT: MUSIC BED, FADE 2 S IN AND 3 S OUT, DUCKS -12 DB UNDER SHOTS WITH THEIR OWN AUDIO");
+    }
+    return {
+      edl: lines.join(EOL) + EOL,
+      csv: csv.join(EOL) + EOL,
+      clips,
+      skipped,
+      events: rows.length,
+      slug,
+      bedName: bed && cutFrames > 0 ? bedName : "",
+      cutFrames,
+      fps
+    };
+  };
+
+  // src/loom-shots-core.js
+  var SHOT_TITLE_MAX = 60;
+  var SHOT_SECONDS = 5;
+  var FROM_SELECTION = "your selection";
+  var TRAILING = /[\s.,;:!?…\-–—·|/\\]+$/u;
+  var trimTitle = (prompt, n) => {
+    const first = String(prompt == null ? "" : prompt).split(/\r?\n/).map((l) => l.trim()).find((l) => l) || "";
+    let t = first.replace(/\s+/g, " ").trim();
+    if (t.length > SHOT_TITLE_MAX) {
+      const cut = t.slice(0, SHOT_TITLE_MAX + 1);
+      const sp = cut.lastIndexOf(" ");
+      t = sp > 0 ? cut.slice(0, sp) : t.slice(0, SHOT_TITLE_MAX);
+    }
+    t = t.replace(TRAILING, "").trim();
+    return t || "Picture " + (Number(n) > 0 ? Number(n) : 1);
+  };
+  var actNonce = (act) => act && act.source && act.source.kind === "collection" ? String(act.source.nonce || "") : "";
+  var hasShotsAct = (project, nonce) => !!nonce && (project && project.acts || []).some((a) => actNonce(a) === String(nonce));
+  var shotsActName = (actNumber, name) => {
+    const label = String(name || "").trim() || FROM_SELECTION;
+    return "Act " + actNumber + " \u2014 from " + (label === FROM_SELECTION ? label : "\u2756 " + label);
+  };
+  var shotsFromPictures = (pictures, opts = {}) => {
+    const { actNumber = 1, name = "", nonce = "", idFor } = opts;
+    const mk = typeof idFor === "function" ? idFor : (kind, i) => kind + "-" + i;
+    const cards = (pictures || []).map((p, i) => newCardShape(mk("card", i), {
+      mode: "I2V",
+      duration: SHOT_SECONDS,
+      status: "todo",
+      title: trimTitle(p && p.prompt, i + 1),
+      openFrame: { mediaId: String(p && p.id || ""), thumbId: "", source: "", desc: "", tag: "" }
+    }));
+    return {
+      id: mk("act", 0),
+      name: shotsActName(actNumber, name),
+      collapsed: false,
+      cards,
+      source: { kind: "collection", name: String(name || "").trim() || FROM_SELECTION, nonce: String(nonce || "") }
+    };
+  };
+  var appendShotsAct = (project, act) => {
+    if (!project || !act) return { project, added: false };
+    if (hasShotsAct(project, actNonce(act))) return { project, added: false };
+    return { project: { ...project, acts: [...project.acts || [], act] }, added: true };
+  };
+
   // src/loom-url.js
   function isBoardId(s) {
     return /^[A-Za-z0-9_-]{1,64}$/.test(String(s == null ? "" : s));
@@ -1531,8 +1932,25 @@ ${"=".repeat(48)}
       if (patchObj.cast) p.set("cast", String(patchObj.cast));
       else p.delete("cast");
     }
+    ["shots", "from", "n"].forEach((k) => {
+      if (!(k in patchObj)) return;
+      if (patchObj[k]) p.set(k, String(patchObj[k]));
+      else p.delete(k);
+    });
     const qs = p.toString();
     return (pathname || "/loom") + (qs ? "?" + qs : "");
+  }
+  var SHOTS_HANDOFF_CAP = 60;
+  function readShotsMeta(search) {
+    let p;
+    try {
+      p = new URLSearchParams(search || "");
+    } catch (e) {
+      return { from: "", nonce: "" };
+    }
+    const from = String(p.get("from") || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 64);
+    const n = String(p.get("n") || "");
+    return { from, nonce: /^[A-Za-z0-9_-]{1,32}$/.test(n) ? n : "" };
   }
   var LOOM_VIEW_KEY = "mg_loom_view";
   var LEGACY_MOBILE_UI_KEY = "mg_loom_mobile_ui";
@@ -2090,7 +2508,7 @@ ${"=".repeat(48)}
     function round4(n) {
       return Math.round(n * 1e4) / 1e4;
     }
-    function num2(n) {
+    function num4(n) {
       return String(round4(n));
     }
     function get(id) {
@@ -2162,9 +2580,9 @@ ${"=".repeat(48)}
     function gradientCss(layer, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
       var parts = layer.stops.map(function(s) {
-        return s.color + " " + num2(s.position * 100) + "%";
+        return s.color + " " + num4(s.position * 100) + "%";
       });
-      return "linear-gradient(" + num2(a) + "deg, " + parts.join(", ") + ")";
+      return "linear-gradient(" + num4(a) + "deg, " + parts.join(", ") + ")";
     }
     function gradientEndpoints(w, h, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
@@ -2187,9 +2605,9 @@ ${"=".repeat(48)}
       var p = resolve(idOrRecipe).image_parameters;
       if (!p) return "";
       var out = [];
-      if (p.brightness) out.push("brightness(" + num2(1 + p.brightness) + ")");
-      if (p.contrast) out.push("contrast(" + num2(1 + p.contrast) + ")");
-      if (p.saturation) out.push("saturate(" + num2(1 + p.saturation) + ")");
+      if (p.brightness) out.push("brightness(" + num4(1 + p.brightness) + ")");
+      if (p.contrast) out.push("contrast(" + num4(1 + p.contrast) + ")");
+      if (p.saturation) out.push("saturate(" + num4(1 + p.saturation) + ")");
       return out.join(" ");
     }
     function swatchLayers(idOrRecipe) {
@@ -10594,6 +11012,10 @@ ${"=".repeat(48)}
       return accountCsrf();
     }
   };
+  var loomCsrf = async () => {
+    await accountPrefs().ensureLoaded();
+    return accountCsrf();
+  };
   installNotify();
   var priceBody = async (body) => {
     const { response, failed } = await requestPrice(body);
@@ -10607,6 +11029,7 @@ ${"=".repeat(48)}
     "linear-gradient(150deg, #4a3a6e 0%, #1f1a36 100%)",
     "linear-gradient(150deg, #3a2b63 0%, #191338 100%)"
   ];
+  var LV_BED_ZONE_H = 92;
   var STYLES = `
 :root{
   /* Loom palette now INHERITS the gallery's design tokens (moonglade_gallery.py's
@@ -10656,6 +11079,28 @@ ${"=".repeat(48)}
 .sb-exportitem:hover{background:rgba(255,255,255,.05)}
 .sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
 .sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
+/* Session P (P4): the Export \u25BE row the Loom Handoff page highlights -- the editor handoff. */
+.sb-exportitem.sb-exportedl{background:color-mix(in srgb,var(--lavender) 14%,transparent)}
+.sb-exportitem.sb-exportedl:hover{background:color-mix(in srgb,var(--lavender) 22%,transparent)}
+/* Session P (P4): THE EDIT DECISION LIST PANEL, the page's own sizes and tokens (its #0a0818 is
+   --mantle; its darker preview well is --mantle pulled toward black). Shown over the board. */
+.sb-edlveil{background:rgba(4,3,10,.72)}
+.sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
+  border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
+.sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sb-edlcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0)}
+.sb-edltab{font:600 10px/1.2 system-ui,sans-serif;padding:3px 9px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--surface1);background:transparent;color:var(--subtext)}
+.sb-edltab.on{background:var(--lavender);color:var(--base)}
+.sb-edlx{font-size:10px;color:var(--overlay0);cursor:pointer;padding:0 4px;border:0;background:transparent}
+.sb-edlx:hover{color:var(--text)}
+.sb-edlpre{font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:10px 12px;border-radius:9px;
+  background:color-mix(in srgb,var(--mantle) 70%,black);border:1px solid var(--surface0);color:var(--subtext);
+  white-space:pre;overflow:auto;max-height:260px}
+.sb-edlnote{font-size:9.5px;color:var(--overlay0)}
+.sb-edlnote code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;color:var(--mauve)}
+.sb-edlfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
 .sb-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
@@ -10856,7 +11301,6 @@ ${"=".repeat(48)}
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
   var elapsedLabel = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
-  var emptyFrame = () => ({ thumbId: "", source: "", desc: "", tag: "" });
   function useLoomView(isPhone) {
     const [mobileUI, setView] = useState2(() => {
       let stored = null;
@@ -10971,43 +11415,7 @@ ${"=".repeat(48)}
     });
   }
   function newCard(extra = {}) {
-    return {
-      id: uid(),
-      title: "",
-      status: "todo",
-      mode: "I2V",
-      duration: 8,
-      connect: "cut",
-      prompt: "",
-      openFrame: emptyFrame(),
-      closeFrame: emptyFrame(),
-      cast: [],
-      refs: [],
-      camera: "",
-      lighting: "",
-      audioCue: "",
-      // audioGen/audioLanguage are the actual generation request (does PixAI render sound at
-      // all, and in what language) -- distinct from audioCue above, which is prompt TEXT
-      // ("ambient room tone") that only ever influences wording, never the real generateAudio/
-      // audioLanguage params. Neither surface exposed this until now (private/GENERATOR_SURFACE.md
-      // had it reverse-engineered but never wired to a control): the server already accepts
-      // generate_audio/audio_language on /api/loom/generate, this was purely a missing control.
-      audioGen: false,
-      audioLanguage: "english",
-      transIn: "",
-      transOut: "",
-      notes: "",
-      discreet: false,
-      trimIn: 0,
-      trimOut: null,
-      // promptOverride/promptOverrideText: a hand-edit made directly in the drawer's composed-
-      // prompt box, durable across shot reselect/reload. When set, shotText() returns
-      // promptOverrideText verbatim instead of composing from camera/lighting/cast/etc --
-      // see loom-core.js's shotText() and effectivePrompt().
-      promptOverride: false,
-      promptOverrideText: "",
-      ...extra
-    };
+    return newCardShape(uid(), extra);
   }
   function seedProject() {
     return {
@@ -11309,6 +11717,32 @@ ${"=".repeat(48)}
 .lv-segbar.error{background:var(--coral,#f38ba8);}
 .lv-target{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);opacity:.7;}
 .lv-tlinfo{font-size:11px;color:var(--text);}
+/* Session P (P3): THE MUSIC BED under the reel -- the page's section A bed row (36 px, 6 px
+   radius, thin bars, a dashed "No bed" row), its button (surface1 outline, Loom-cyan when a bed is
+   on), the level slider with the cyan accent, the fades line and the status. Loom-cyan (--loomc),
+   never gold; refusals peach. */
+.lv-bedzone{display:flex;flex-direction:column;gap:4px;margin:4px 0 6px;}
+.lv-bedrow{position:relative;display:flex;height:36px;border-radius:6px;overflow:hidden;}
+.lv-bedrow.none{border:1px dashed var(--surface1);box-sizing:border-box;}
+.lv-bedwave{position:absolute;inset:0;width:100%;height:100%;display:block;color:var(--loomc);}
+.lv-bedtitles{position:absolute;inset:0;display:flex;}
+.lv-bedtitles>div{flex:none;height:100%;}
+.lv-bedctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;color:var(--subtext);}
+.lv-bedbtn{display:inline-flex;align-items:center;gap:6px;font:600 10.5px/1.2 system-ui,sans-serif;padding:5px 10px;border-radius:8px;
+  cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);background:transparent;max-width:360px;box-sizing:border-box;}
+.lv-bedbtn:hover{border-color:var(--loomc);}
+.lv-bedbtn.on{border-color:var(--loomc);color:var(--text);background:color-mix(in srgb,var(--loomc) 10%,transparent);cursor:default;}
+.lv-bedbtn.busy{opacity:.6;cursor:default;}
+.lv-bedpick{display:inline-flex;align-items:center;gap:4px;min-width:0;cursor:pointer;}
+.lv-bedname{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lv-bedx{border:0;background:transparent;color:inherit;font:inherit;padding:0 0 0 2px;cursor:pointer;}
+.lv-bedx:hover{color:var(--loomc);}
+.lv-bedlvl{display:inline-flex;align-items:center;gap:6px;}
+.lv-bedlvl input[type=range]{width:110px;accent-color:var(--loomc);margin:0;}
+.lv-bedmono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.lv-bednote{font-size:10px;color:var(--subtext);}
+.lv-bednote.err{color:var(--peach);}
+.lv-bedlink{border:0;background:transparent;color:var(--loomc);font:inherit;padding:0;cursor:pointer;text-decoration:underline;}
 .lv-dim{color:var(--subtext);font-style:italic;}
 .lv-gen{flex:1;min-height:0;overflow-y:auto;padding:10px;}
 .lv-genhead{font:700 13px/1.2 system-ui;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:8px;}
@@ -11622,7 +12056,7 @@ ${"=".repeat(48)}
       "\u25BE"
     ), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projveil", onClick: () => setProjMenu(false) }), projMenu && /* @__PURE__ */ React.createElement("div", { className: "sb-projpop" }, /* @__PURE__ */ React.createElement("div", { className: "sb-projpoph" }, "Storyboards"), /* @__PURE__ */ React.createElement("div", { className: "sb-projlist" }, projList.map((pr) => /* @__PURE__ */ React.createElement("div", { key: pr.id, className: "sb-projitem" + (pr.id === activeId ? " on" : "") }, /* @__PURE__ */ React.createElement("button", { className: "sb-projopen", onClick: () => openProject(pr.id), title: "Open this storyboard" }, /* @__PURE__ */ React.createElement("b", null, pr.name || "Untitled"), /* @__PURE__ */ React.createElement("span", null, pr.shots, " shot", pr.shots === 1 ? "" : "s")), /* @__PURE__ */ React.createElement("button", { className: "sb-projx", title: "Delete", onClick: () => deleteProject(pr.id) }, "\u2715")))), /* @__PURE__ */ React.createElement("div", { className: "sb-projacts" }, /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm", onClick: newProject }, "+ New"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn sm ghost", onClick: duplicateProject }, "\u29C9 Duplicate"))));
   }
-  function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
+  function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling, openEdl }) {
     const [open2, setOpen2] = useState2(false);
     useEffect2(() => {
       if (!open2) return;
@@ -11667,6 +12101,18 @@ ${"=".repeat(48)}
         title: "Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog"
       },
       bundling ? "Building bundle\u2026" : /* @__PURE__ */ React.createElement(React.Fragment, null, "Full bundle ", /* @__PURE__ */ React.createElement("small", null, ".zip"))
+    ), openEdl && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        className: "sb-exportitem sb-exportedl",
+        onClick: () => {
+          openEdl();
+          setOpen2(false);
+        },
+        title: "A CMX3600 edit decision list and a CSV for a desktop editor, with each shot's selected take \u2014 previewed first"
+      },
+      "Edit decision list ",
+      /* @__PURE__ */ React.createElement("small", null, ".edl + .csv")
     ), /* @__PURE__ */ React.createElement("div", { className: "sb-exportdiv" }), /* @__PURE__ */ React.createElement(
       "label",
       {
@@ -11779,6 +12225,9 @@ ${"=".repeat(48)}
     reanchorShot,
     keepAnchor: keepAnchor2,
     anchorWork,
+    // Session P, Stage B1: the EDL panel's opener (P4) and the music bed's board edits (P3).
+    openEdl,
+    bedApi,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
     // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -12113,7 +12562,7 @@ ${"=".repeat(48)}
         });
       }
     }, [openPick, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused]);
-    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 };
+    const TL_HEIGHTS = { hidden: 0, slim: 64, full: 442 + LV_BED_ZONE_H };
     const tlPointerDown = (e) => {
       tlDrag.current = { dragging: true, startY: e.clientY, startH: TL_HEIGHTS[tlState], lastH: TL_HEIGHTS[tlState] };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -12487,7 +12936,7 @@ ${"=".repeat(48)}
             const miss = castMissingImages(e, project, imgSrc);
             const over = castPastBudget(e, project, imgSrc);
             const unsendable = unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, unsendable ? /* @__PURE__ */ React.createElement("span", { className: "lv-st warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent yet") : null, miss.length ? /* @__PURE__ */ React.createElement(
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, unsendable ? /* @__PURE__ */ React.createElement("span", { className: "lv-st warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent to PixAI yet") : null, miss.length ? /* @__PURE__ */ React.createElement(
               "span",
               {
                 className: "lv-st warn",
@@ -12596,6 +13045,13 @@ ${"=".repeat(48)}
     }), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: addAct }, "+ New act"), !project.acts.length && /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "No acts yet \u2014 add one below."));
     const tlHeight = tlDragH != null ? tlDragH : TL_HEIGHTS[tlState];
     const showTlPreview = tlHeight > (TL_HEIGHTS.slim + TL_HEIGHTS.full) / 2;
+    const bed = bedOf(project);
+    const bedSegs = cutSegments(entries, project);
+    const bedPlanNow = bedPlan(bedSegs, bed);
+    const bedPeaks = useBedPeaks(showTlPreview && bed ? bed.file : "");
+    useEffect2(() => {
+      if (showTlPreview && bedApi) bedApi.refreshUnusedBeds();
+    }, [showTlPreview]);
     const timelineDrawer = /* @__PURE__ */ React.createElement("div", { className: "lv-tldrawer" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlcontent", style: { height: tlHeight, transition: tlDragH != null ? "none" : "height .28s cubic-bezier(.2,.8,.2,1)" } }, showTlPreview && /* @__PURE__ */ React.createElement("div", { className: "lv-tlpreviewzone" }, sel && sel.c.resultMid ? /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevrow" }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlprevmain" }, /* @__PURE__ */ React.createElement(
       ShotPreview,
       {
@@ -12637,7 +13093,18 @@ ${"=".repeat(48)}
         /* @__PURE__ */ React.createElement("span", { className: "lv-segcode" }, x.code, " \xB7 ", durOf2(x.c), "s"),
         /* @__PURE__ */ React.createElement("span", { className: "lv-segbar " + x.c.status })
       );
-    }), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
+    }), /* @__PURE__ */ React.createElement("div", { className: "lv-target", style: { left: `${project.target / scale * 100}%` } })), showTlPreview && bedApi && /* @__PURE__ */ React.createElement(
+      BedRow,
+      {
+        entries,
+        scale,
+        bed,
+        segs: bedSegs,
+        plan: bedPlanNow,
+        peaks: bedPeaks,
+        api: bedApi
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "lv-tlinfo" }, sel ? /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, sel.code), " \xB7 ", sel.c.title || "untitled", " \xB7 ", sel.c.mode, " \xB7 ", durOf2(sel.c), "s") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "click a shot to select it \u2014 the whole workspace binds to it")))), /* @__PURE__ */ React.createElement("div", { className: "lv-tlhandle", onPointerDown: tlPointerDown, onPointerMove: tlPointerMove, onPointerUp: tlPointerUp, onPointerCancel: tlPointerUp }, /* @__PURE__ */ React.createElement("div", { className: "lv-tlgrip" })));
     const GEN_ICONS = [["Image", "\u2726"], ["Edit", "\u270E"], ["Reference", "\u{1F5BC}"], ["Video", "\u{1F3AC}"]];
     let gen;
     {
@@ -13349,7 +13816,8 @@ ${"=".repeat(48)}
         exportJSON,
         exportBundle,
         bundling,
-        importBackup
+        importBackup,
+        openEdl
       }
     ), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement(GoalChips, null), act.edge === "left" ? null : activityControl, /* @__PURE__ */ React.createElement("a", { className: "lv-close", href: GALLERY_HREF, style: { textDecoration: "none" } }, "\u2190 Gallery")), batchTally && (() => {
       const outs = Object.values(batchTally.outcomes);
@@ -15817,6 +16285,7 @@ ${"=".repeat(48)}
     const [loadError, setLoadError] = useState2("");
     const saveTimer = useRef2(null);
     const castImported = useRef2(false);
+    const shotsImported = useRef2(false);
     const projectRef = useRef2(null);
     const setProject = useCallback2((next) => {
       const v = typeof next === "function" ? next(projectRef.current) : next;
@@ -16163,6 +16632,59 @@ ${"=".repeat(48)}
     useEffect2(() => {
       adoptCastHandoff(project);
     }, [project]);
+    const adoptShotsHandoff = async (project2) => {
+      if (!project2 || shotsImported.current) return;
+      if (!/[?&]shots=/.test(location.search)) return;
+      shotsImported.current = true;
+      const ids = Array.from(new Set(parseCastIdsFromSearch(location.search, "shots").filter(isCatalogMediaId)));
+      const { from, nonce } = readShotsMeta(location.search);
+      history.replaceState(null, "", buildLoomUrl({ shots: null, from: null, n: null }, location.search, location.pathname));
+      const say = (title, msg, kind) => {
+        if (window.Toast) window.Toast.show({ kind: kind || "err", title, msg });
+      };
+      if (!ids.length) {
+        say("Nothing to add", "That link named no pictures this library can use. Nothing was added.");
+        return;
+      }
+      if (ids.length > SHOTS_HANDOFF_CAP) {
+        say("Too many pictures for one send", "That link carries " + ids.length + " pictures; the Loom takes at most " + SHOTS_HANDOFF_CAP + " at once as shots. Nothing was added.");
+        return;
+      }
+      const name = from || FROM_SELECTION;
+      if (nonce && hasShotsAct(projectRef.current, nonce)) return;
+      const facts = {};
+      try {
+        const r = await fetch("/api/loom/prompts?ids=" + encodeURIComponent(ids.join(",")));
+        const d = await r.json();
+        (d && d.pictures || []).forEach((x) => {
+          facts[String(x.media_id)] = x;
+        });
+      } catch (e) {
+      }
+      const pics = ids.filter((id) => !(facts[id] && facts[id].is_video));
+      if (!pics.length) {
+        say("Nothing to add", "Only pictures become shots, and that link named none. Nothing was added.");
+        return;
+      }
+      const open2 = projectRef.current;
+      const actName = shotsActName((open2 && open2.acts || []).length + 1, name);
+      if (!window.confirm("Add \u201C" + actName + "\u201D (" + pics.length + " image-to-video shot" + (pics.length === 1 ? "" : "s") + " from \u201C" + name + "\u201D, in order) to \u201C" + (open2 && open2.name || "this storyboard") + "\u201D? Nothing is rendered.")) return;
+      let added = false;
+      setProject((p) => {
+        if (!p) return p;
+        const act = shotsFromPictures(
+          pics.map((id) => ({ id, prompt: facts[id] && facts[id].prompt || "" })),
+          { actNumber: p.acts.length + 1, name, nonce: nonce || uid(), idFor: () => uid() }
+        );
+        const res = appendShotsAct(p, act);
+        added = res.added;
+        return res.project;
+      });
+      if (added) say("Added " + actName, pics.length + " shot" + (pics.length === 1 ? "" : "s") + ", nothing rendered yet.", "ok");
+    };
+    useEffect2(() => {
+      adoptShotsHandoff(project);
+    }, [project]);
     useEffect2(() => {
       if (!project || !hasStore || !activeId) return void 0;
       if (!shouldSave(JSON.stringify(project), lastSavedRef.current[PPRE + activeId])) {
@@ -16437,6 +16959,142 @@ Your currently-open board is left untouched.`)) return;
       });
     };
     return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor: keepAnchor2, anchorWork };
+  }
+  var audioDuration = (url) => new Promise((res) => {
+    let settled = false;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      res(v);
+    };
+    try {
+      const a = new Audio();
+      a.preload = "metadata";
+      a.onloadedmetadata = () => done(Number.isFinite(a.duration) && a.duration > 0 ? a.duration : null);
+      a.onerror = () => done(null);
+      setTimeout(() => done(null), 8e3);
+      a.src = url;
+    } catch (e) {
+      done(null);
+    }
+  });
+  var bedUrl = (file) => "/api/loom/bed?file=" + encodeURIComponent(file || "");
+  function useBedActions({ setProject, activeIdRef }) {
+    const [bedWork, setBedWork] = useState2({ phase: "", msg: "" });
+    const [unusedBeds, setUnusedBeds] = useState2(null);
+    const refreshUnusedBeds = useCallback2(async () => {
+      try {
+        const r = await fetch("/api/loom/beds/unused");
+        const d = await r.json();
+        setUnusedBeds(r.ok && d && Array.isArray(d.files) ? d : null);
+      } catch (e) {
+        setUnusedBeds(null);
+      }
+    }, []);
+    const pickBed = async (file) => {
+      if (!file) return;
+      if (file.size > BED_MAX_BYTES) {
+        setBedWork({ phase: "err", msg: "A music bed can be up to " + Math.round(BED_MAX_BYTES / 1048576) + " MB; that file is " + (file.size / 1048576).toFixed(1) + " MB. Nothing was added." });
+        return;
+      }
+      const boardId = activeIdRef.current;
+      setBedWork({ phase: "wip", msg: "" });
+      try {
+        const fd = new FormData();
+        fd.append("csrf", await loomCsrf());
+        fd.append("board", boardId || "");
+        fd.append("file", file, file.name);
+        const r = await fetch("/api/loom/bed", { method: "POST", body: fd });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d || d.error || !d.file) {
+          setBedWork({ phase: "err", msg: d && d.error || "The music bed didn't upload (" + r.status + ")." });
+          return;
+        }
+        let dur = d.dur;
+        if (!(dur > 0)) dur = await audioDuration(bedUrl(d.file));
+        if (activeIdRef.current !== boardId) {
+          setBedWork({ phase: "err", msg: "You switched storyboards while it uploaded, so the bed wasn't added. Add it again here." });
+          return;
+        }
+        setProject((p) => p ? { ...p, bed: makeBed({ file: d.file, name: d.name || file.name, dur }, p.bed ? p.bed.db : void 0) } : p);
+        setBedWork({ phase: "", msg: "" });
+        refreshUnusedBeds();
+      } catch (e) {
+        setBedWork({ phase: "err", msg: "The music bed didn't upload \u2014 network error. Nothing was added." });
+      }
+    };
+    const setBedLevel = (v) => setProject((p) => p && p.bed ? { ...p, bed: { ...p.bed, db: clampBedDb(v) } } : p);
+    const removeBed = () => {
+      setProject((p) => {
+        if (!p || !p.bed) return p;
+        const next = { ...p };
+        delete next.bed;
+        return next;
+      });
+      setBedWork({ phase: "", msg: "" });
+    };
+    const sweepUnusedBeds = async () => {
+      const u = unusedBeds;
+      if (!u || !u.count) return;
+      if (!window.confirm("Remove " + u.count + " music bed file" + (u.count === 1 ? "" : "s") + " (" + u.h + ") that no storyboard uses?\n\n" + (u.count === 1 ? "It is" : "They are") + " deleted from this machine's music bed folder. No storyboard changes.")) return;
+      try {
+        const r = await fetch("/api/loom/beds/sweep", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csrf: await loomCsrf(), files: u.files.map((f) => f.file) })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.error) setBedWork({ phase: "err", msg: d.error || "The unused beds weren't removed." });
+        else if (window.Toast) window.Toast.show({
+          kind: "ok",
+          title: "Unused music beds removed",
+          msg: d.removed.length + " removed" + (d.kept.length ? ", " + d.kept.length + " kept (a storyboard uses them now)" : "") + "."
+        });
+      } catch (e) {
+        setBedWork({ phase: "err", msg: "The unused beds weren't removed \u2014 network error." });
+      }
+      refreshUnusedBeds();
+    };
+    return { bedWork, unusedBeds, refreshUnusedBeds, pickBed, setBedLevel, removeBed, sweepUnusedBeds };
+  }
+  var BED_PEAKS = /* @__PURE__ */ new Map();
+  function useBedPeaks(file) {
+    const [st, setSt] = useState2(() => file && BED_PEAKS.get(file) || null);
+    useEffect2(() => {
+      if (!file) {
+        setSt(null);
+        return void 0;
+      }
+      const hit = BED_PEAKS.get(file);
+      if (hit) {
+        setSt(hit);
+        return void 0;
+      }
+      let dead = false;
+      setSt(null);
+      (async () => {
+        try {
+          const r = await fetch(bedUrl(file));
+          if (!r.ok) throw new Error(String(r.status));
+          const buf = await r.arrayBuffer();
+          const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+          const ctx = new Ctx(1, 1, 44100);
+          const audio = await new Promise((res, rej) => {
+            const pr = ctx.decodeAudioData(buf, res, rej);
+            if (pr && pr.then) pr.then(res, rej);
+          });
+          const v = { peaks: peaksToBuckets(audio.getChannelData(0), 1600), dur: audio.duration };
+          BED_PEAKS.set(file, v);
+          if (!dead) setSt(v);
+        } catch (e) {
+          if (!dead) setSt({ peaks: [], dur: 0, failed: true });
+        }
+      })();
+      return () => {
+        dead = true;
+      };
+    }, [file]);
+    return st;
   }
   function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState2({});
@@ -17445,6 +18103,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function useExportPipeline(project, thumbs) {
     const [seq3, setSeq] = useState2(null);
+    const [seqMix, setSeqMix] = useState2(null);
+    const [edlView, setEdlView] = useState2(null);
+    const [edlBusy, setEdlBusy] = useState2(false);
     const [exp, setExp] = useState2(null);
     const exportPoll = useRef2(null);
     const download = (text, name, type) => {
@@ -17493,8 +18154,14 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     };
     const playSequence = (entries) => {
       const clips = buildPlaySequence(entries);
-      if (clips.length) setSeq(clips);
-      else alert("No finished shots yet \u2014 generate one first.");
+      if (!clips.length) {
+        alert("No finished shots yet \u2014 generate one first.");
+        return;
+      }
+      const bed = bedOf(project);
+      const segs = cutSegments(entries, project);
+      setSeqMix(bed ? { bed, segs, plan: bedPlan(segs, bed) } : null);
+      setSeq(clips);
     };
     const exportCut = (entries) => {
       const { clips, total } = buildExportClips(entries);
@@ -17502,11 +18169,24 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         alert("No finished shots to export yet \u2014 generate one first.");
         return;
       }
+      const bed = bedOf(project);
+      const segs = cutSegments(entries, project);
       setExp({ status: "running", progress: 0, elapsed: 0 });
       fetch("/api/loom/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clips: clips.map((c) => ({ mid: c.mid, in: c.in, out: c.out, crop: c.crop })), total_seconds: total })
+        body: JSON.stringify({
+          clips: clips.map((c, i) => ({
+            mid: c.mid,
+            in: c.in,
+            out: c.out,
+            crop: c.crop,
+            span: c.span,
+            own_audio: !!(segs[i] && segs[i].ownAudio)
+          })),
+          total_seconds: total,
+          ...bed ? { bed: { file: bed.file, db: bed.db, dur: bed.dur } } : {}
+        })
       }).then((r) => r.json()).then((d) => {
         if (d.error) {
           setExp({ status: "failed", error: d.error });
@@ -17529,9 +18209,60 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       if (exportPoll.current) clearTimeout(exportPoll.current);
       setExp(null);
     };
-    const closeSequence = () => setSeq(null);
+    const closeSequence = () => {
+      setSeq(null);
+      setSeqMix(null);
+    };
+    const openEdl = () => setEdlView({ tab: "edl" });
+    const closeEdl = () => setEdlView(null);
+    const exportEdl = async () => {
+      const bed = bedOf(project);
+      const plan = edlPlan(project, { bed });
+      if (!plan.clips.length) {
+        alert("No rendered shots to hand off yet \u2014 render one first.");
+        return;
+      }
+      setEdlBusy(true);
+      try {
+        const r = await fetch("/api/loom/export-edl", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            csrf: await loomCsrf(),
+            name: plan.slug,
+            edl: plan.edl,
+            csv: plan.csv,
+            clips: plan.clips,
+            ...bed && plan.bedName ? { bed_file: bed.file, bed_name: plan.bedName } : {}
+          })
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          alert("The edit decision list didn't export: " + (d.error || r.status));
+          return;
+        }
+        const missing = Number(r.headers.get("X-Edl-Missing-Count") || 0);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = plan.slug + ".zip";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1e3);
+        if (missing && window.Toast) window.Toast.show({
+          kind: "err",
+          title: "Exported, " + missing + " clip(s) left out",
+          msg: "Their files aren't complete in your library. The zip's MISSING.txt names them."
+        });
+      } catch (e) {
+        alert("The edit decision list didn't export \u2014 network error.");
+      } finally {
+        setEdlBusy(false);
+      }
+    };
     return {
       seq: seq3,
+      seqMix,
       exp,
       playSequence,
       exportCut,
@@ -17543,7 +18274,13 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportBundle,
       bundling,
       bundleMissing,
-      closeBundleMissing: () => setBundleMissing(null)
+      closeBundleMissing: () => setBundleMissing(null),
+      edlView,
+      setEdlView,
+      openEdl,
+      closeEdl,
+      exportEdl,
+      edlBusy
     };
   }
   function App() {
@@ -17618,6 +18355,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       splitShot
     } = useShotMutations(project, setProject);
     const { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor: keepAnchor2, anchorWork } = useTakeActions({ projectRef, activeIdRef, setProject, activeId });
+    const bedApi = useBedActions({ setProject, activeIdRef });
     const [pickCb, setPickCb] = useState2(null);
     const [pickKind, setPickKind] = useState2("image");
     const [pickAllowType, setPickAllowType] = useState2(false);
@@ -17711,6 +18449,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     }, [activeId]);
     const {
       seq: seq3,
+      seqMix,
       exp,
       playSequence,
       exportCut,
@@ -17722,7 +18461,13 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       exportBundle,
       bundling,
       bundleMissing,
-      closeBundleMissing
+      closeBundleMissing,
+      edlView,
+      setEdlView,
+      openEdl,
+      closeEdl,
+      exportEdl,
+      edlBusy
     } = useExportPipeline(project, thumbs);
     const importCollection = (items, cname) => {
       setImportOpen(false);
@@ -17872,6 +18617,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         exportJSON,
         exportBundle,
         bundling,
+        openEdl,
+        bedApi,
         importBackup,
         setImportOpen,
         copyShot,
@@ -17908,7 +18655,17 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         draftAttachedInfo,
         setDraftAttachedInfo
       }
-    )), seq3 && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq3, onClose: closeSequence }), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
+    )), seq3 && /* @__PURE__ */ React.createElement(SequencePlayer, { clips: seq3, mix: seqMix, onClose: closeSequence }), edlView && !mobileUI && /* @__PURE__ */ React.createElement(
+      EdlPanel,
+      {
+        project,
+        view: edlView,
+        setView: setEdlView,
+        onClose: closeEdl,
+        onDownload: exportEdl,
+        busy: edlBusy
+      }
+    ), exp && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget && exp.status !== "running") closeExport();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-export-box" }, /* @__PURE__ */ React.createElement("div", { className: "sb-pick-head" }, /* @__PURE__ */ React.createElement("span", { className: "sb-pick-t" }, "Export the cut"), exp.status !== "running" && /* @__PURE__ */ React.createElement("button", { className: "sb-pick-x", onClick: closeExport }, "\xD7")), exp.status === "running" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-bar" }, /* @__PURE__ */ React.createElement("i", { style: { width: (exp.progress || 0) + "%" } })), /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt" }, "Rendering\u2026 ", exp.progress || 0, "% \xB7 ", Math.round(exp.elapsed || 0), "s of cut"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: cancelExport }, "\u25A0 Stop")), exp.status === "done" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--green)" } }, "\u2713 Cut rendered."), exp.warning && /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: "var(--amber)" } }, "\u26A0 ", exp.warning), /* @__PURE__ */ React.createElement("a", { className: "sb-btn amber", href: "/api/loom/export-file", style: { alignSelf: "center", textDecoration: "none" } }, "\u21E9 Download mp4"), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")), (exp.status === "failed" || exp.status === "cancelled") && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sb-exp-txt", style: { color: exp.status === "failed" ? "var(--coral)" : "var(--ink2)" } }, exp.status === "failed" ? "\u26A0 " + (exp.error || "export failed") : "\u25A0 Export stopped."), /* @__PURE__ */ React.createElement("button", { className: "sb-btn ghost sm", style: { alignSelf: "center" }, onClick: closeExport }, "Close")))), bundleMissing && /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) closeBundleMissing();
@@ -18178,7 +18935,166 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       /* @__PURE__ */ React.createElement("div", { className: "sb-trim-h", style: { left: pct(effOut) + "%" }, onPointerDown: startDrag("out"), title: "Trim out" })
     ), /* @__PURE__ */ React.createElement("div", { className: "sb-trim-read" }, fT(range2.in), " \u2192 ", fT(effOut), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, fT(Math.max(0, effOut - range2.in))), " kept", trimmed && /* @__PURE__ */ React.createElement("button", { className: "sb-trim-reset", onClick: () => onTrim(0, null) }, "reset"))));
   }
-  function SequencePlayer({ clips, onClose }) {
+  function drawBedWave(cv, { entries, scale, segs, plan, peaks, db }) {
+    if (!cv || !cv.getContext) return;
+    const W2 = cv.clientWidth, H2 = cv.clientHeight;
+    if (!W2 || !H2) return;
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio || 1;
+    cv.width = Math.round(W2 * dpr);
+    cv.height = Math.round(H2 * dpr);
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W2, H2);
+    if (!plan) return;
+    const col = getComputedStyle(cv).color;
+    const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+    const strength = 0.35 + (clampBedDb(db) + 24) / 24 * 0.5;
+    const fileDur = peaks && peaks.dur > 0 ? peaks.dur : plan.bedLen;
+    let x = 0;
+    entries.forEach((e) => {
+      const x0 = x, x1 = x + durOf(e.c) / scale * W2;
+      x = x1;
+      const sg = bySeg.get(e.c.id);
+      if (!sg || sg.start >= plan.bedLen) return;
+      const ducked2 = sg.ownAudio;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0, 0, x1 - x0, H2);
+      ctx.clip();
+      ctx.fillStyle = col;
+      ctx.strokeStyle = col;
+      if (ducked2) {
+        ctx.globalAlpha = 0.18;
+        ctx.lineWidth = 2.8;
+        for (let k = -H2; k < x1 - x0 + H2; k += 8) {
+          ctx.beginPath();
+          ctx.moveTo(x0 + k, H2);
+          ctx.lineTo(x0 + k + H2, 0);
+          ctx.stroke();
+        }
+      }
+      for (let bx = Math.ceil(x0 / 4) * 4; bx < x1 - 1; bx += 4) {
+        const t = sg.start + (bx - x0) / Math.max(1, x1 - x0) * sg.span;
+        if (t >= plan.bedLen) break;
+        const pk = peaks && peaks.peaks && peaks.peaks.length ? peakAt(peaks.peaks, fileDur, t) : 0.35;
+        const fade = Math.max(0, Math.min(
+          1,
+          plan.fadeIn > 0 ? t / plan.fadeIn : 1,
+          plan.fadeOut > 0 ? (plan.bedLen - t) / plan.fadeOut : 1
+        ));
+        const band = ducked2 ? 0.4 : 1;
+        const h = Math.max(1.5, pk * H2 * 0.92 * band);
+        ctx.globalAlpha = (ducked2 ? 0.3 : strength) * fade;
+        ctx.fillRect(bx, (H2 - h) / 2, 2, h);
+      }
+      ctx.restore();
+    });
+  }
+  function BedWave({ entries, scale, segs, plan, peaks, db }) {
+    const ref = useRef2(null);
+    const [, setW] = useState2(0);
+    useEffect2(() => {
+      const el = ref.current;
+      if (!el) return void 0;
+      const upd = () => setW(el.clientWidth);
+      upd();
+      if (typeof ResizeObserver === "undefined") return void 0;
+      const ro = new ResizeObserver(upd);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, []);
+    useEffect2(() => {
+      drawBedWave(ref.current, { entries, scale, segs, plan, peaks, db });
+    });
+    return /* @__PURE__ */ React.createElement("canvas", { ref, className: "lv-bedwave", "aria-hidden": "true" });
+  }
+  function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
+    const busy = api.bedWork.phase === "wip";
+    const bySeg = new Map(segs.map((sg) => [sg.id, sg]));
+    const u = api.unusedBeds;
+    const dur = bed ? bed.dur || peaks && peaks.dur || null : null;
+    const picker = (label, cls, title) => /* @__PURE__ */ React.createElement("label", { className: cls + (busy ? " busy" : ""), title }, label, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "file",
+        accept: "audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac",
+        style: { display: "none" },
+        disabled: busy,
+        onChange: (ev) => {
+          const f = ev.target.files && ev.target.files[0];
+          ev.target.value = "";
+          if (f) api.pickBed(f);
+        }
+      }
+    ));
+    return /* @__PURE__ */ React.createElement("div", { className: "lv-bedzone" }, bed ? /* @__PURE__ */ React.createElement("div", { className: "lv-bedrow", "aria-label": "Music bed: " + bed.name }, /* @__PURE__ */ React.createElement(BedWave, { entries, scale, segs, plan, peaks, db: bed.db }), /* @__PURE__ */ React.createElement("div", { className: "lv-bedtitles" }, entries.map((x) => {
+      const sg = bySeg.get(x.c.id);
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: x.c.id,
+          style: { width: `${durOf(x.c) / scale * 100}%` },
+          title: !sg ? x.code + " \xB7 not rendered" : sg.ownAudio ? x.code + " \xB7 bed ducks \u221212 dB under its own audio" : x.code + " \xB7 bed at " + dbLabel(bed.db)
+        }
+      );
+    }))) : /* @__PURE__ */ React.createElement("div", { className: "lv-bedrow none", title: "No bed" }), /* @__PURE__ */ React.createElement("div", { className: "lv-bedctl" }, bed ? /* @__PURE__ */ React.createElement("span", { className: "lv-bedbtn on" }, picker(
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "\u266A ", /* @__PURE__ */ React.createElement("span", { className: "lv-bedname" }, bed.name), dur ? " \xB7 " + bedClock(dur) : ""),
+      "lv-bedpick",
+      "Pick a different music bed for this storyboard"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "lv-bedx",
+        "aria-label": "Remove the music bed",
+        title: "Remove the music bed from this storyboard. Its file stays on this machine.",
+        onClick: () => api.removeBed()
+      },
+      "\u2715"
+    )) : picker(
+      busy ? "\u266A Adding\u2026" : "\u266A Add a music bed",
+      "lv-bedbtn",
+      "One audio file under the whole cut \u2014 kept on this machine, never uploaded to PixAI"
+    ), bed && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "lv-bedlvl" }, "level", /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "range",
+        min: BED_DB_MIN,
+        max: BED_DB_MAX,
+        step: 1,
+        value: bed.db,
+        "aria-label": "Music bed level",
+        onChange: (ev) => api.setBedLevel(ev.target.value)
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, dbLabel(bed.db))), /* @__PURE__ */ React.createElement("span", null, "fade 2 s in / 3 s out \xB7 ducks \u221212 dB under shots with their own audio (hatched)")), /* @__PURE__ */ React.createElement("span", { className: "lv-fill" }), /* @__PURE__ */ React.createElement("span", { className: "lv-bedmono" }, cutStatusLine(entries, segs))), api.bedWork.phase === "err" ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, api.bedWork.msg) : bed && peaks && peaks.failed ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote err", role: "status" }, "The music bed's file couldn't be read on this machine, so Play and \u21E7 Render leave it out.") : u && u.count > 0 ? /* @__PURE__ */ React.createElement("div", { className: "lv-bednote" }, u.count, " unused music bed file", u.count === 1 ? "" : "s", " (", u.h, ") \xB7", " ", /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-bedlink", onClick: () => api.sweepUnusedBeds() }, "Remove\u2026")) : null);
+  }
+  function EdlPanel({ project, view, setView, onClose, onDownload, busy }) {
+    const bed = bedOf(project);
+    const plan = edlPlan(project, { bed });
+    const text = view.tab === "csv" ? plan.csv : plan.edl;
+    useEffect2(() => {
+      const esc2 = (e) => {
+        if (e.key === "Escape") onClose();
+      };
+      window.addEventListener("keydown", esc2);
+      return () => window.removeEventListener("keydown", esc2);
+    }, []);
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-seq sb-edlveil", onClick: (e) => {
+      if (e.target === e.currentTarget) onClose();
+    } }, /* @__PURE__ */ React.createElement("div", { className: "sb-edl", role: "dialog", "aria-label": "Edit decision list" }, /* @__PURE__ */ React.createElement("div", { className: "sb-edlhead" }, /* @__PURE__ */ React.createElement("div", { className: "sb-edlcap" }, "EDIT DECISION LIST \xB7 ", plan.slug, " \xB7 24 fps \xB7 selected takes and trims"), [["edl", ".edl"], ["csv", ".csv"]].map(([k, l]) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: k,
+        type: "button",
+        className: "sb-edltab" + (view.tab === k ? " on" : ""),
+        "aria-pressed": view.tab === k,
+        onClick: () => setView({ tab: k })
+      },
+      l
+    )), /* @__PURE__ */ React.createElement("button", { type: "button", className: "sb-edlx", onClick: onClose, "aria-label": "Close" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "sb-edlpre", tabIndex: 0 }, text.replace(/\r\n/g, "\n")), /* @__PURE__ */ React.createElement("div", { className: "sb-edlnote" }, "The download is a .zip holding the .edl, the .csv and each selected take's rendered clip, named ", /* @__PURE__ */ React.createElement("code", null, "{code}_t{take}.mp4"), " to match the reel names.", bed && plan.bedName ? " The music bed rides along as " + plan.bedName + "." : ""), /* @__PURE__ */ React.createElement("div", { className: "sb-edlfoot" }, /* @__PURE__ */ React.createElement("span", { className: "sb-edlcount" }, plan.events, " shot", plan.events === 1 ? "" : "s", plan.skipped.length ? " \xB7 " + plan.skipped.length + " unrendered skipped" : ""), /* @__PURE__ */ React.createElement("button", { type: "button", className: "sb-btn amber sm", disabled: busy || !plan.clips.length, onClick: onDownload }, busy ? "Building the zip\u2026" : "\u21E9 Download (.zip)"))));
+  }
+  function SequencePlayer({ clips, onClose, mix }) {
     const vRef = useRef2(null);
     const [i, setI] = useState2(0);
     const [muted, setMuted] = useState2(true);
@@ -18223,6 +19139,101 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       window.addEventListener("keydown", esc2);
       return () => window.removeEventListener("keydown", esc2);
     }, []);
+    const mixRef = useRef2(null);
+    const [bedNow, setBedNow] = useState2(null);
+    useEffect2(() => {
+      if (!mix || !mix.bed || !mix.plan) return void 0;
+      let audio = null, ctx = null;
+      try {
+        audio = new Audio(bedUrl(mix.bed.file));
+        audio.preload = "auto";
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        ctx = new Ctx();
+        const src = ctx.createMediaElementSource(audio);
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        src.connect(gain);
+        gain.connect(ctx.destination);
+        mixRef.current = { audio, ctx, gain };
+      } catch (e) {
+        mixRef.current = null;
+      }
+      return () => {
+        try {
+          if (audio) audio.pause();
+        } catch (e) {
+        }
+        try {
+          if (ctx) ctx.close();
+        } catch (e) {
+        }
+        mixRef.current = null;
+      };
+    }, []);
+    const cutTime = () => {
+      const v = vRef.current, sg = mix && mix.segs && mix.segs[i];
+      return v && sg ? sg.start + Math.max(0, v.currentTime - (clip2.in || 0)) : null;
+    };
+    const bedStop = () => {
+      const m = mixRef.current;
+      if (!m) return;
+      try {
+        m.audio.pause();
+      } catch (e) {
+      }
+      const now2 = m.ctx.currentTime;
+      m.gain.gain.cancelScheduledValues(now2);
+      m.gain.gain.setValueAtTime(0, now2);
+    };
+    const bedGo = () => {
+      const m = mixRef.current, v = vRef.current;
+      if (!m || !v || v.paused || muted) {
+        bedStop();
+        return;
+      }
+      const T = cutTime();
+      if (T == null || T >= mix.plan.bedLen) {
+        bedStop();
+        return;
+      }
+      if (Math.abs(m.audio.currentTime - T) > 0.2) {
+        try {
+          m.audio.currentTime = T;
+        } catch (e) {
+        }
+      }
+      if (m.ctx.state === "suspended") m.ctx.resume().catch(() => {
+      });
+      m.audio.play().catch(() => {
+      });
+      const g = m.gain.gain, now2 = m.ctx.currentTime;
+      g.cancelScheduledValues(now2);
+      bedAutomation(mix.plan, T).forEach((pt, k) => {
+        const at = now2 + Math.max(0, pt.t - T);
+        if (k === 0 || pt.step) g.setValueAtTime(pt.v, at);
+        else g.linearRampToValueAtTime(pt.v, at);
+      });
+    };
+    useEffect2(() => {
+      const v = vRef.current;
+      if (!v || !mix || !mixRef.current) return void 0;
+      const onPlay = () => bedGo();
+      const onStop = () => bedStop();
+      const onTime = () => {
+        const T = cutTime();
+        if (T != null) setBedNow(bedDbAt(mix.plan, T));
+        const m = mixRef.current;
+        if (m && !v.paused && !muted && T != null && T < mix.plan.bedLen && Math.abs(m.audio.currentTime - T) > 0.35) bedGo();
+      };
+      const evs = [["playing", onPlay], ["pause", onStop], ["waiting", onStop], ["seeking", onStop], ["timeupdate", onTime]];
+      evs.forEach(([n, f]) => v.addEventListener(n, f));
+      if (!v.paused && v.readyState >= 3) bedGo();
+      else bedStop();
+      return () => {
+        evs.forEach(([n, f]) => v.removeEventListener(n, f));
+        bedStop();
+      };
+    }, [i, muted]);
     if (!clip2) return null;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) onClose();
@@ -18240,7 +19251,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           v.paused ? v.play() : v.pause();
         }
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip2.code ? " \xB7 " + clip2.code : "", clip2.title ? " \u2014 " + clip2.title : ""), /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip2.code ? " \xB7 " + clip2.code : "", clip2.title ? " \u2014 " + clip2.title : "", mix && mix.plan ? muted ? " \xB7 bed muted" : bedNow == null ? " \xB7 bed ended" : " \xB7 bed " + (bedNow < mix.plan.db ? "ducked " : "") + (bedNow < 0 ? "\u2212" + Math.abs(bedNow) : String(bedNow)) + " dB" : ""), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "sb-btn ghost sm",
