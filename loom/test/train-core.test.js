@@ -194,3 +194,54 @@ describe("the base picker and the footer", () => {
     assert.deepEqual(GOALS.map((g) => g.value), ["character", "style", "clothing", "other"]);
   });
 });
+
+/* Stage A of the desktop build: rejected tiles, the chooser's Runs row, Use, the one confirm. */
+import {
+  countedItems, loraForDock, markRejected, runsSummary, startLabel,
+} from "../../gallery/src/gen/trainCore.js";
+
+describe("a rejected tile stays, peach, and isn't counted", () => {
+  test("marked by the server's list, left out of the count, the room and a reuse", () => {
+    const items = [img(1, "dataset"), img(2, "dataset"), img(3, "dataset")];
+    const marked = markRejected(items, [{ media_id: "2", why: "smaller than 512x512" }]);
+    assert.equal(marked.length, 3);
+    assert.equal(marked[1].reject, "smaller than 512x512");
+    assert.deepEqual(countedItems(marked).map((x) => x.media_id), ["1", "3"]);
+    assert.equal(roomLeft(marked), MAX_IMAGES - 2);
+    // the whole earlier set is no longer the grid's counted images, so it is not a reuse
+    assert.equal(reuseCandidate(marked, [{ task_id: 9, media_ids: ["1", "2", "3"] }]), "");
+    assert.equal(markRejected(items, []), items);
+  });
+  test("a rejected tile does not take one of the 100 places", () => {
+    const full = Array.from({ length: 100 }, (_, i) => img(i, "history"));
+    const marked = markRejected(full, [{ media_id: "5", why: "longer than 3:1" }]);
+    const res = mergeImages(marked, [img(500)], "upload");
+    assert.equal(res.added, 1);
+    assert.equal(countedItems(res.items).length, MAX_IMAGES);
+    assert.equal(mergeImages(res.items, [img(501)], "upload").full, 1);
+  });
+});
+
+describe("the chooser, Use and the confirm button", () => {
+  test("the Runs row counts what is live and what waits, and leaves out zeros", () => {
+    assert.equal(runsSummary([]), "");
+    assert.equal(runsSummary([
+      { status: "running", progress: 40 }, { status: "waiting" }, { status: "draft", step: "images" },
+      { status: "done", mode: "advanced" }, { status: "failed", mode: "advanced" },
+      { status: "done", mode: "basic", published: true, model_id: "m", visibility: "private" },
+    ]), "2 training · 1 draft · 1 to publish · 1 failed");
+  });
+  test("Use hands the dock a LoRA only when there is one", () => {
+    assert.equal(loraForDock({ status: "done" }), null);
+    const l = loraForDock({ model_id: 9, version_id: "v9", title: "Tania v2", cover: "/c.jpg",
+      trigger_words: "tania_mg", base_version_id: "t3" }, (v) => (v === "t3" ? "MMDIT26B_MODEL" : ""));
+    assert.deepEqual(l, { model_id: "9", version_id: "v9", title: "Tania v2", preview_url: "/c.jpg",
+      weight: 0.7, trigger_words: "tania_mg", lora_base_model_type: "MMDIT26B_MODEL" });
+  });
+  test("the confirm button names the quoted amount, never a config number", () => {
+    assert.equal(startLabel({ is_free: false, price: 70000 }), "Start training · 70,000");
+    assert.equal(startLabel({ is_free: true, price: 100000 }), "Start training · free");
+    assert.equal(startLabel({ is_free: false, price: null }), "Start training");
+    assert.equal(startLabel({ is_free: false, price: 100000 }, "Retry"), "Retry · 100,000");
+  });
+});

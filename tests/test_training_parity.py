@@ -145,13 +145,25 @@ def test_with_no_dit3_row_the_default_falls_back_to_sdxl_then_the_first(monkeypa
     assert core.default_training_base() == "600"                 # the first offered row
 
 
+# Session J moved the desktop panel's state and calls out of TrainOverlay.jsx into
+# components/train/useTraining.js (the hook both new screens share); the phone keeps its own.
+_DESKTOP_TRAIN = ("train", "useTraining.js")
+
+
+def _panel_src(name):
+    parts = name if isinstance(name, tuple) else (name,)
+    return (ROOT / "gallery" / "src" / "components").joinpath(*parts).read_text(encoding="utf-8")
+
+
 def test_the_train_panels_take_the_servers_default_base():
-    """Source guard: TrainOverlay and TrainMobile pre-select the server's
+    """Source guard: the desktop Basic wizard and TrainMobile pre-select the server's
     default_version_id and no longer the first group's first model -- with Tsubaki.3 sorting
     first, that rule would pre-select the 100,000-credit base."""
-    for name in ("TrainOverlay.jsx", "TrainMobile.jsx"):
-        src = (ROOT / "gallery" / "src" / "components" / name).read_text(encoding="utf-8")
-        assert "defaultBase(gs, d.default_version_id" in src, name
+    desk = _panel_src(_DESKTOP_TRAIN)
+    assert "defaultBase(setup.cfg.groups || [], setup.cfg.default_version_id" in desk
+    phone = _panel_src("TrainMobile.jsx")
+    assert "defaultBase(gs, d.default_version_id" in phone
+    for name, src in (("desktop", desk), ("TrainMobile.jsx", phone)):
         assert "setBaseModel(gs[0].models[0].version_id)" not in src, name
         assert "CANNOT quote" not in src and "check the price on PixAI" not in src, name
 
@@ -498,14 +510,15 @@ def test_the_acknowledged_amount_must_be_this_runs_price(tmp_path, monkeypatch):
 def test_the_panels_send_the_amount_and_drop_a_stale_quote():
     """Source guard: both panels send acceptCostField (the amount), and the desktop panel --
     whose base chips stay live under the confirm -- clears the quote on any form change."""
-    for name in ("TrainOverlay.jsx", "TrainMobile.jsx"):
-        src = (ROOT / "gallery" / "src" / "components" / name).read_text(encoding="utf-8")
-        assert "...acceptCostField(ask, acceptCost)" in src, name
-        assert "accept_credit_cost: acceptCost" not in src, name
-    overlay = (ROOT / "gallery" / "src" / "components" / "TrainOverlay.jsx").read_text(
-        encoding="utf-8")
-    assert re.search(r"useEffect\(\(\) => \{ setAsk\(null\); setAcceptCost\(false\); \},\s*"
-                     r"\[baseModel, archIdx, picked, trigger, name, category\]\);", overlay)
+    phone = _panel_src("TrainMobile.jsx")
+    assert "...acceptCostField(ask, acceptCost)" in phone
+    assert "accept_credit_cost: acceptCost" not in phone
+    desk = _panel_src(_DESKTOP_TRAIN)
+    assert "...acceptCostField(ask, accepted)" in desk
+    # never the tick itself as the acknowledgement (the retry sends `accepted ? price : false`)
+    assert not re.search(r"accept_credit_cost: accepted\b(?!\s*\?)", desk)
+    assert re.search(r"useEffect\(\(\) => \{ setAsk\(null\); setAccepted\(false\); \},\s*"
+                     r"\[base, tab, items, trigger, name, goal\]\);", desk)
 
 
 def test_a_card_of_unknown_balance_is_not_free(tmp_path, monkeypatch):

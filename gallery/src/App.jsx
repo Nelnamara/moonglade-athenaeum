@@ -876,6 +876,14 @@ export default function App({ boot }) {
     openDock();
     setGenRequest({ tab: "scene", scene, nonce: Math.random() });
   };
+  /* Train a LoRA's "Use" (Training Handoff 5c): a trained LoRA into the dock -- close the
+     overlay, open the dock on the Image tab and add the LoRA there, the same one-shot genRequest
+     shape. Adding a LoRA is a pick, never a submit. */
+  const requestLora = (lora) => {
+    setOverlay(null);
+    openDock();
+    setGenRequest({ tab: "lora", lora, nonce: Math.random() });
+  };
 
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
   const [ctxMenu, setCtxMenu] = useState(null);     // {mid, thumb, x, y} | null
@@ -1599,7 +1607,7 @@ export default function App({ boot }) {
           onOpenPublish={() => { setPublishFor(""); setOverlay("publish"); }} />
       )}
       {overlay === "train" && (
-        <TrainOverlay onClose={() => setOverlay(null)} />
+        <TrainOverlay onClose={() => setOverlay(null)} onUseLora={requestLora} />
       )}
       {overlay === "publish" && (
         <PublishOverlay

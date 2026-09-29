@@ -4795,37 +4795,222 @@ def test_phone_lora_sheet_head_and_search_box_are_on_screen_and_tappable(logged_
     assert _sheet_geometry(page)["insideScroller"] is True, "the scroller probe cannot see a sheet that IS inside .glm-body -- it proves nothing"
 
 
-def test_the_train_dataset_pool_pages_past_its_first_60(
-        paged_library_server, render_browser, monkeypatch):
-    """Owner, 2026-09-26, on the Tsubaki.3 boop walk: the Train a LoRA image picker "does not
-    continuous scroll and is capped like old image picker bugs". TrainOverlay read ONE page of 60
-    from /api/next/library and never asked for another, so a dataset could only come from the 60
-    newest pictures. The pool now pages on scroll through a sentinel observed from its scrolling
-    pane (.mgtr-left), the ModelPicker mechanism. On the 120-row library that is two pages: all
-    120 must arrive, each once."""
+# ---------------------------------------------------------------------------
+# Train a LoRA, desktop (Session J, Training Handoff 2026-09-28)
+# ---------------------------------------------------------------------------
+# PixAI is the suite's transport fake (tests/fake_pixai.py) for every one of these: the runs
+# lists, the account's LoRAs and each run's detail are registered answers, /config is blocked
+# by conftest (the training config falls back to its snapshot), and the base covers' CDN proxy
+# is refused here, so nothing leaves the machine.
+_TRAIN_T3 = "2024383379556065549"
+
+
+def _fake_training(pixai, monkeypatch, quota=0):
+    """A runs list with one of everything the Runs screen draws, no free trainings, no card,
+    and a Basic start PixAI accepts. Returns the fake."""
+    import requests as _requests
+
+    def _no_cdn(*a, **k):
+        raise core.PixAIError("the CDN is not reachable from the render harness")
+    monkeypatch.setattr(_requests, "get", _no_cdn)
+    monkeypatch.setattr(core, "training_free_quota", lambda s: quota)
+    monkeypatch.setattr(core, "match_training_kaisuuken", lambda *a, **k: None)
+
+    def task(tid, status, progress=None):
+        return {"trainingTask": {
+            "id": tid, "status": status, "trainingMode": "advanced", "type": "LORA",
+            "parameters": {"title": "run " + tid, "mediaIds": ["1000", "1001"],
+                           "category": "character", "baseModelId": _TRAIN_T3,
+                           "triggerWords": "a moonlit night elf druid in the grove"},
+            "extra": {"progress": progress,
+                      "estimatedTotalTime": 1800000 if progress is not None else None},
+            "outputs": {"message": "out of memory" if status == "failed" else ""}}}
+    pixai.on("/training-task/in-progress", {"tasks": [
+        {"id": "701", "status": "draft", "title": "Priestess set", "baseModelId": _TRAIN_T3,
+         "mediaCount": 24, "updatedAt": "2026-09-28T02:00:00Z"},
+        {"id": "702", "status": "running", "title": "Nelnamara v3", "baseModelId": _TRAIN_T3,
+         "mediaCount": 38, "updatedAt": "2026-09-28T03:00:00Z"},
+        {"id": "704", "status": "waiting", "title": "Moonwell style", "baseModelId": _TRAIN_T3,
+         "mediaCount": 40, "updatedAt": "2026-09-28T03:30:00Z"},
+        {"id": "703", "status": "failed", "title": "Old druid", "baseModelId": _TRAIN_T3,
+         "mediaCount": 50, "updatedAt": "2026-09-27T01:00:00Z"}]})
+    pixai.on("/training-task/completed", {"tasks": [
+        {"id": "705", "title": "Tania v2", "baseModelId": _TRAIN_T3, "mediaCount": 30,
+         "modelId": None, "completedAt": "2026-09-26T01:00:00Z"}]})
+    pixai.on("generationModels", {"generationModels": {
+        "pageInfo": {"hasPreviousPage": False, "startCursor": None}, "edges": []}})
+    pixai.on("trainingTask", lambda call: task(
+        call.variables["id"], "running" if call.variables["id"] == "702" else "failed",
+        progress=62 if call.variables["id"] == "702" else None))
+    pixai.on("createTrainingTask", {"createTrainingTask": {"id": "trn1", "refId": "m7"}})
+    return pixai
+
+
+def _train_page(paged_library_server, render_browser, monkeypatch):
     monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
     ctx = render_browser.new_context(
         viewport={"width": DESKTOP["width"], "height": DESKTOP["height"]},
         device_scale_factor=1, base_url=paged_library_server.base_url)
     ctx.set_default_timeout(10_000)
+    page = ctx.new_page()
+    posts = []
+    page.on("request", lambda r: posts.append((r.url, r.post_data or ""))
+            if r.method == "POST" and "/api/train/" in r.url else None)
+    _login(page)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.locator("button.mgx-nav", has_text="Train").first.click()
+    page.wait_for_selector(".mgtr-mode")
+    return ctx, page, posts
+
+
+def _basic_to_review(page, n=12):
+    """Chooser -> Basic -> a goal -> From history (All) -> n pictures -> step 3, named."""
+    page.click(".mgtr-mode:has-text('Basic training')")
+    page.click(".mgtr-goal:has-text('Character')")
+    page.click(".mgtr-src:has-text('From history')")
+    page.click(".mgtr-segbtn:has-text('All')")
+    page.wait_for_function(
+        "n => document.querySelectorAll('.mgtr-pool-tile').length >= n", arg=n)
+    tiles = page.locator(".mgtr-pool-tile")
+    for i in range(n):
+        tiles.nth(i).click()
+    page.click(".mgtr-pool-tray .mgtr-go")
+    page.click("text=Continue to review")
+    page.fill("#mgtr-name", "Tania v2")
+    page.fill("#mgtr-trig", "a moonlit night elf druid in the grove")
+
+
+def test_the_train_dataset_pool_pages_past_its_first_60(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Owner, 2026-09-26, on the Tsubaki.3 boop walk: the Train a LoRA image picker "does not
+    continuous scroll and is capped like old image picker bugs" -- it read ONE page of 60 from
+    /api/next/library and never asked for another. Session J moved the pool into Basic's step 2
+    ("From history"), where it pages on scroll through a sentinel observed from its own scrolling
+    grid (.mgtr-pool-grid), the ModelPicker mechanism. In All on the 120-row library that is two
+    pages: all 120 must arrive, each once."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, _ = _train_page(paged_library_server, render_browser, monkeypatch)
     try:
-        page = ctx.new_page()
-        _login(page)
-        _visit(page, "/")
-        _dismiss_any_achievement_toast(page)
-        _settle(page)
-        page.locator("button.mgx-nav", has_text="Train").first.click()
-        page.wait_for_selector(".mgtr-tile")
-        page.wait_for_function("() => document.querySelectorAll('.mgtr-tile').length >= 60")
-        page.evaluate("() => { const L = document.querySelector('.mgtr-left'); "
-                      "L.scrollTop = L.scrollHeight; }")
+        page.click(".mgtr-mode:has-text('Basic training')")
+        page.click(".mgtr-goal:has-text('Character')")
+        page.click(".mgtr-src:has-text('From history')")
+        page.click(".mgtr-segbtn:has-text('All')")
+        page.wait_for_function("() => document.querySelectorAll('.mgtr-pool-tile').length >= 60")
+        page.evaluate("() => { const g = document.querySelector('.mgtr-pool-grid'); "
+                      "g.scrollTop = g.scrollHeight; }")
         page.wait_for_function(
-            "() => document.querySelectorAll('.mgtr-tile').length >= 120", timeout=8000)
+            "() => document.querySelectorAll('.mgtr-pool-tile').length >= 120", timeout=8000)
         srcs = page.evaluate(
-            "() => [...document.querySelectorAll('.mgtr-tile img')].map(i => i.getAttribute('src'))")
+            "() => [...document.querySelectorAll('.mgtr-pool-tile img')].map(i => i.getAttribute('src'))")
         assert len(srcs) == 120 and len(set(srcs)) == 120, (
             "the pool must hold both pages, each picture once: {} tiles, {} distinct".format(
                 len(srcs), len(set(srcs))))
+    finally:
+        ctx.close()
+
+
+def test_the_train_overlay_opens_on_a_chooser_reads_only_and_draws_the_moon_where_pixai_counts(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Session J decisions 1a and 5c, L4: the overlay opens on the chooser -- two cards, the Runs
+    row, and the pinned strip for the newest running job with "+1 more" -- and Runs lists one
+    row per run with one action each. The moon gauge is drawn ONLY where PixAI reports a
+    percentage (18 px on the strip, 16 px on a row); the queued run has its pill and no gauge.
+    Opening the chooser and Runs sends no training POST at all (nothing writes on open)."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, posts = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        assert page.locator(".mgtr-mode").count() == 2
+        page.wait_for_selector(".mgtr-strip .mgm")
+        strip = page.locator(".mgtr-strip")
+        assert "Nelnamara v3" in strip.inner_text() and "+1 more" in strip.inner_text()
+        g = page.locator(".mgtr-strip .mgm")
+        assert g.get_attribute("aria-valuenow") == "62"
+        assert "--mgm-s: 18px" in (g.get_attribute("style") or "")
+        assert "1 draft" in page.locator(".mgtr-runsrow").inner_text()
+
+        page.click(".mgtr-runsrow")
+        page.wait_for_selector(".mgtr-run")
+        rows = {r.locator(".mgtr-run-name").inner_text(): r
+                for r in page.locator(".mgtr-run").all()}
+        assert set(rows) == {"Nelnamara v3", "Moonwell style", "Priestess set", "Old druid",
+                             "Tania v2"}
+        running = rows["Nelnamara v3"]
+        assert "--mgm-s: 16px" in (running.locator(".mgm").get_attribute("style") or "")
+        assert rows["Moonwell style"].locator(".mgm").count() == 0, "a queued run has no gauge"
+        assert rows["Moonwell style"].locator(".mgtr-pill").inner_text() == "Queued"
+        for name, act in (("Priestess set", "Continue"), ("Old druid", "Retry"),
+                          ("Tania v2", "Publish"), ("Nelnamara v3", "View")):
+            assert rows[name].locator(".mgtr-run-act").inner_text() == act, name
+        assert posts == [], "opening the chooser and Runs sent a training POST: %r" % posts
+        assert pixai.mutations() == 0
+
+        # The publish sheet: Publish stays off until every consequence is ticked, and switching
+        # to Public clears the ticks and adds the second one.
+        rows["Tania v2"].locator(".mgtr-run-act").click()
+        go = page.locator(".mgtr-pub-foot .mgtr-go")
+        assert go.is_disabled()
+        page.click(".mgtr-pub-tick >> nth=0")
+        assert go.is_enabled()
+        page.click(".mgtr-pub-opt:has-text('Public')")
+        assert page.locator(".mgtr-pub-tick").count() == 2 and go.is_disabled()
+        page.click(".mgtr-pub-foot .mgtr-ghost")
+        assert posts == [], "the publish sheet sent something before Publish"
+    finally:
+        ctx.close()
+
+
+def test_train_basic_start_shows_the_quoted_price_and_sends_it_once(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """Decision 2a + BUILD 7: the price is on the footer before Start; Start asks PixAI's quote
+    (a preview, no spend), and the ONE confirm names that quoted amount on its button and sends
+    exactly it as accept_credit_cost -- one createTrainingTask."""
+    _fake_training(pixai, monkeypatch)
+    ctx, page, posts = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        _basic_to_review(page)
+        assert "100,000" in page.locator(".mgtr-foot-price").inner_text()
+        assert "Tsubaki.3" in page.locator(".mgtr-base.on").inner_text(), \
+            "Tsubaki.3 is the pre-selected base (6a)"
+        page.click(".mgtr-foot .mgtr-go")
+        page.wait_for_selector(".mgtr-confirm")
+        assert len(posts) == 1 and '"confirm"' not in posts[0][1]
+        go = page.locator(".mgtr-confirm .mgtr-go")
+        assert go.inner_text() == "Start training · 100,000"
+        assert go.is_disabled(), "a paid run needs its amount ticked"
+        assert pixai.mutations() == 0
+        page.click(".mgtr-accept input")
+        go.click()
+        page.wait_for_selector(".mgtr-ok")
+        assert len(posts) == 2
+        sent = json.loads(posts[1][1])
+        assert sent["confirm"] is True and sent["accept_credit_cost"] == 100000
+        assert pixai.mutations("createTrainingTask") == 1
+    finally:
+        ctx.close()
+
+
+def test_train_an_unclear_basic_start_says_it_may_have_started(
+        paged_library_server, render_browser, monkeypatch, pixai):
+    """BUILD 7.1: a timeout after the start went out may have created and charged the run, so
+    the panel says it "may have started; check Runs before starting again" -- and the confirm is
+    gone, so the same press cannot be made twice from here."""
+    import requests as _requests
+    _fake_training(pixai, monkeypatch)
+    pixai.fail("createTrainingTask", _requests.exceptions.ReadTimeout("read timed out"))
+    ctx, page, posts = _train_page(paged_library_server, render_browser, monkeypatch)
+    try:
+        _basic_to_review(page)
+        page.click(".mgtr-foot .mgtr-go")
+        page.wait_for_selector(".mgtr-confirm")
+        page.click(".mgtr-accept input")
+        page.click(".mgtr-confirm .mgtr-go")
+        page.wait_for_selector(".mgtr-warnnote:has-text('may have started')")
+        note = page.locator(".mgtr-warnnote:has-text('may have started')").inner_text()
+        assert "check Runs before starting again" in note
+        assert page.locator(".mgtr-confirm").count() == 0
+        assert len(pixai.calls_for("createTrainingTask")) == 1
     finally:
         ctx.close()
 
@@ -4852,9 +5037,17 @@ def test_the_phone_train_grid_pages_by_task_past_the_first_18(
         _dismiss_any_achievement_toast(page)
         _settle(page)
         page.click('button[title="More"]')
-        page.click('.glm-menu-item:has-text("Train a LoRA")')
+        # The first page is read off the wire, not off a tile count: the grid's sentinel has a
+        # 600 px head start (TrainMobile.jsx), so on a tall enough screen page 2 is already on
+        # its way as page 1's tiles land, and counting tiles at that instant raced it (36 == 18
+        # on a warm run, 2026-09-29).
+        with page.expect_response(lambda r: "/api/train/recent-tasks" in r.url) as first:
+            page.click('.glm-menu-item:has-text("Train a LoRA")')
+        page1 = first.value.json()
+        assert "before_at" not in first.value.url, "the first read is the newest page"
+        assert len(page1["tasks"]) == 18 and page1["next_before"], (
+            "the first page is the 18 newest tasks, with a cursor for the next")
         page.wait_for_selector(".trm-tile")
-        assert page.locator(".trm-tile").count() == 18, "the first page is the 18 newest tasks"
         for _ in range(12):
             page.evaluate("() => { const b = document.querySelector('.glm-screen-body'); "
                           "b.scrollTop = b.scrollHeight; }")

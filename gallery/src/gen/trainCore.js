@@ -51,21 +51,38 @@ export const SOURCE_MARK = Object.freeze({ upload: "⬆", history: "▦", datase
 export function mergeImages(current, incoming, source) {
   const out = (current || []).slice();
   const seen = new Set(out.map((x) => x.media_id));
+  let counted = countedItems(out).length;
   let added = 0, dup = 0, full = 0;
   for (const it of incoming || []) {
     const id = it && String(it.media_id || "");
     if (!id) continue;
     if (seen.has(id)) { dup += 1; continue; }
-    if (out.length >= MAX_IMAGES) { full += 1; continue; }
+    if (counted >= MAX_IMAGES) { full += 1; continue; }
     seen.add(id);
     out.push({ media_id: id, source: it.source || source, thumb: it.thumb || "" });
+    counted += 1;
     added += 1;
   }
   return { items: out, added, dup, full };
 }
 
+/* The images that count (handoff 2a: "Rejected files show with a peach reason and aren't
+   counted"). A tile PixAI's image rule refused carries `reject` (the server's reason) and stays
+   in the grid, peach, until it is taken out; it is never sent and never counts toward 10-100. */
+export function countedItems(items) {
+  return (items || []).filter((x) => !x.reject);
+}
+
+/* Mark the tiles the server's image rule refused (the Basic preview's `rejected_images`,
+   [{media_id, why}]). Returns a new list; a tile not named keeps its state. */
+export function markRejected(items, rejected) {
+  const why = new Map((rejected || []).map((r) => [String(r.media_id), String(r.why || "refused")]));
+  if (!why.size) return items || [];
+  return (items || []).map((x) => (why.has(x.media_id) ? { ...x, reject: why.get(x.media_id) } : x));
+}
+
 export function roomLeft(items) {
-  return Math.max(0, MAX_IMAGES - (items || []).length);
+  return Math.max(0, MAX_IMAGES - countedItems(items).length);
 }
 
 /* An earlier set that won't fit what's left of 100 is dimmed (handoff 2a). Counts only the
@@ -80,7 +97,7 @@ export function datasetFits(dataset, items) {
    grid came from that set and the grid holds all of it, nothing added or removed -- the
    site's own check. Returns that set's task id, or "". The server checks it again. */
 export function reuseCandidate(items, datasets) {
-  const list = items || [];
+  const list = countedItems(items);
   if (!list.length || list.some((x) => x.source !== "dataset")) return "";
   const ids = new Set(list.map((x) => x.media_id));
   for (const d of datasets || []) {
@@ -182,6 +199,43 @@ export function runMatches(row, key) {
   if (!key || key === "all") return true;
   if (key === "draft") return ["draft", "captioning", "captionReady"].includes(row.status);
   return row.status === key;
+}
+
+/* The chooser's Runs row (handoff 1a: "… · 1 training · 1 draft"): what is live and what waits
+   for the owner, counted off the runs list. Zero counts are left out; "" when nothing is. */
+export function runsSummary(runs) {
+  const rows = runs || [];
+  const n = (pred) => rows.filter(pred).length;
+  const parts = [];
+  const training = n((r) => r.status === "running" || r.status === "waiting");
+  const drafts = n((r) => runMatches(r, "draft"));
+  const publish = n((r) => runStatus(r).action === "publish");
+  const failed = n((r) => r.status === "failed");
+  if (training) parts.push(training + " training");
+  if (drafts) parts.push(drafts + (drafts === 1 ? " draft" : " drafts"));
+  if (publish) parts.push(publish + " to publish");
+  if (failed) parts.push(failed + " failed");
+  return parts.join(" · ");
+}
+
+/* "Use" (handoff 5c): a trained LoRA as the Generate dock's addLora takes it. null when the
+   row has no LoRA yet. `archOf(versionId)` names the base's architecture. */
+export function loraForDock(row, archOf) {
+  if (!row || !row.model_id) return null;
+  return {
+    model_id: String(row.model_id), version_id: String(row.version_id || ""),
+    title: row.title || "", preview_url: row.cover || "", weight: 0.7,
+    trigger_words: row.trigger_words || "",
+    lora_base_model_type: (archOf && archOf(row.base_version_id)) || "",
+  };
+}
+
+/* The one confirm's button (handoff 2a; BUILD 7): it names the QUOTED amount the confirm will
+   send -- the preview's own `price`, never the config's -- or says the run is free. */
+export function startLabel(ask, verb = "Start training") {
+  if (!ask) return verb;
+  if (ask.is_free) return verb + " · free";
+  return typeof ask.price === "number" ? verb + " · " + credits(ask.price) : verb;
 }
 
 /* The publish sheet's consequence ticks (handoff 4a): private has one, public adds the second.
