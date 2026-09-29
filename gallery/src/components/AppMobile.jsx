@@ -1,13 +1,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import useLibrary, { pruneSelected } from "../hooks/useLibrary.js";
+import { ADV_DEFAULTS } from "../hooks/useLibrary.js";
+import { storageFilterPatch } from "../curation/storageCore.js";
 import useSheet from "../hooks/useSheet.js";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import useSimilar from "../hooks/useSimilar.js";
 import useFlavour from "../hooks/useFlavour.js";
 import useGenerate from "../gen/useGenerate.js";
 import useEditGenerate from "../gen/useEditGenerate.js";
-import { apiPost, fetchAccount, fetchCollections, rateImage } from "../api.js";
+import { apiPost, fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections, rateImage } from "../api.js";
+import useCurate from "../hooks/useCurate.js";
+import { composeSmartQuery } from "../curation/curationCore.js";
 import { buildUrl, readPage, readImage } from "../gen/urlState.js";
 import { cameFromLoom, readLibraryReturn, setLibraryPlace } from "../lib/loomCrossing.js";
 import GalleryMobile from "./GalleryMobile.jsx";
@@ -23,6 +27,9 @@ import PickerHost from "./PickerHost.jsx";
 import RecipesHost from "../recipes/RecipesHost.jsx";
 import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
+import CollectionsMobile from "./CollectionsMobile.jsx";
+import CurateToast from "./CurateToast.jsx";
+import SmartStrip from "./SmartStrip.jsx";
 import ImportMobile from "./ImportMobile.jsx";
 import ContestsMobile from "./ContestsMobile.jsx";
 import ContestChooserMobile from "./ContestChooserMobile.jsx";
@@ -348,6 +355,9 @@ import "../styles/create-mobile.css";
 
 const MENU_ITEMS = [
   { icon: "📈", label: "My Art", screen: "myart" },
+  // Session N2: the collections screen. The books mark, not the page's ❖ -- the Glyph Ledger
+  // (2026-09-05) gave that character to the Folio's skin flag alone.
+  { icon: <Icon name="collection" />, label: "Collections", screen: "collections" },
   // ☁ since the 2026-09-05 post-audit rulings: Publish wears the cloud on every OTHER
   // surface that offers it (the desktop record, the Lightbox, this phone's own picture
   // screen, the grid's right-click menu) and this row alone said ✎ -- the app's mark for
@@ -366,6 +376,7 @@ const MENU_ITEMS = [
 // component below -- every Menu destination is now live, matching desktop.
 const SCREEN_TITLES = {
   myart: "My Art",
+  collections: "Collections",
   publish: "Publish",
   train: "Train a LoRA",
   import: "Import",
@@ -422,6 +433,11 @@ export default function AppMobile({ boot }) {
   const [account, setAccount] = useState(null);
   const claimModal = useClaimModal(account, () => fetchAccount().then(setAccount));
   const [collections, setCollections] = useState(boot.collections || []);
+  /* SMART COLLECTIONS (Session N1): saved searches, listed beside the hand-picked ones.
+     `collections` stays the HAND-PICKED names (Import, "Add to" and the Actions sheet all mean
+     exactly that); a smart collection is browsed, never added to. */
+  const [smart, setSmart] = useState(boot.smart_collections || []);
+  const [editingSmart, setEditingSmart] = useState("");   // the smart collection whose query is being edited
   // 'loom' | 'menu' | null -- shared timer-safe state machine (hooks/useSheet.js,
   // 2026-08-07 review fix: the hand-rolled pair let a reopen inside the 280ms exit
   // window inherit a stale unmount timer and vanish).
@@ -458,6 +474,11 @@ export default function AppMobile({ boot }) {
   const [loomReturn] = useState(() =>
     cameFromLoom(document.referrer, window.location.origin));
   const lib = useLibrary({ initialPage: loomReturn ? readPage(window.location.search) : 1 });
+  /* CURATION (Session N, wave 5): the bulk verbs and the undo toast, the same hook the desktop
+     shell uses. It patches the loaded page in place from the server's answer and says how many
+     pictures REALLY changed; Undo puts each one back to its own previous values. Local catalog
+     only -- nothing here reaches PixAI. */
+  const curate = useCurate({ csrf: boot.csrf || "", setItems: lib.setItems });
   const costRef = useRef(null);
   const gen = useGenerate({ costRef, isMember: account ? account.is_member : null });
   const editCostRef = useRef(null); // Edit mode's OWN cost-badge handle -- never shared with Image's costRef
@@ -916,9 +937,64 @@ export default function AppMobile({ boot }) {
     return () => document.removeEventListener("mg-open-details", onOpenDetails);
   }, []);
 
+  // Hand-picked names and smart collections in one read (the counts and covers ride along, the
+  // Collections screen reads them itself); the plain names list is the fallback for an old server.
   const refreshCollections = async () => {
+    const rows = await fetchCollectionDetail();
+    if (rows) {
+      setCollections(rows.filter((c) => c.kind === "hand").map((c) => c.name));
+      setSmart(rows.filter((c) => c.kind === "smart").map((c) => ({ name: c.name, query: c.query })));
+      return rows;
+    }
     const c = await fetchCollections();
     if (c) setCollections(c);
+    return null;
+  };
+  const isSmartShelf = !!lib.shelf && smart.some((c) => c.name === lib.shelf);
+  const smartOpen = isSmartShelf ? smart.find((c) => c.name === lib.shelf) : null;
+  useEffect(() => { if (lib.shelf && editingSmart) setEditingSmart(""); }, [lib.shelf]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* WHAT "SAVE" SAVES: the whole view as a search (curationCore.composeSmartQuery) -- the field's
+     text plus the media pill and every Advanced Search filter that has an operator -- so the
+     smart collection matches what the sheet showed, not just what was typed. A smart collection
+     open as the shelf is its own query, so it contributes no collection: term. */
+  const composeView = (text, over) => composeSmartQuery({
+    q: text, media: lib.media,
+    shelf: isSmartShelf ? "" : (over && over.shelf !== undefined ? over.shelf : lib.shelf),
+    adv: (over && over.adv) || lib.adv,
+  });
+  const saveSmart = async (query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query });
+    if (d.error) { curate.say(d.error, null, "peach"); return false; }
+    await refreshCollections();
+    setEditingSmart("");
+    lib.applyAdvanced({ shelf: d.name, q: "" });
+    curate.say("Saved “" + d.name + "” ⟳. It updates as you make and mark pictures.");
+    return true;
+  };
+  const saveSmartOver = async (name, query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query, replace: name });
+    if (d.error) { curate.say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    lib.applyAdvanced({ shelf: d.name, q: "" });
+    curate.say("Updated “" + d.name + "” ⟳ with the new search.");
+  };
+  // opening a smart collection IS running its query; this runs it again
+  const refreshSmart = () => { lib.load(1, true); refreshCollections(); };
+  /* The Collections screen tells the shell what moved. The open collection follows its own
+     rename, falls back to the target when it was merged away and to the whole library when it
+     was deleted; a merge INTO the open collection reloads it so the newcomers show. */
+  const onCollectionsChanged = async (chg) => {
+    await refreshCollections();
+    if (chg.renamed && lib.shelf === chg.renamed.from) lib.applyAdvanced({ shelf: chg.renamed.to });
+    else if (chg.merged && chg.merged.others.indexOf(lib.shelf) >= 0) lib.applyAdvanced({ shelf: chg.merged.target });
+    else if (chg.merged && chg.merged.target === lib.shelf) lib.load(1, true);
+    else if (chg.deleted && lib.shelf === chg.deleted) lib.applyAdvanced({ shelf: "" });
+  };
+  const openCollection = (name) => {
+    lib.applyAdvanced({ shelf: name });
+    setTab("gallery");
+    closeScreen();
   };
 
   // Menu row -> pushed screen. Both state changes fire in the SAME click,
@@ -1088,7 +1164,20 @@ export default function AppMobile({ boot }) {
             load={userLoad}
             onOpenDetails={openDetails} onOpenLightbox={openLightboxFromGrid} onOpenContactSheet={openContactSheet}
             similar={similarToken} similarState={similar} similarSource={similarSource}
-            onSimilar={showSimilar} onClearSimilar={clearSimilar} />
+            onSimilar={showSimilar} onClearSimilar={clearSimilar}
+            curation={{
+              smart, curate, saveSmart, composeView,
+              strip: (smartOpen || editingSmart) ? (
+                <SmartStrip
+                  name={smartOpen ? smartOpen.name : ""} query={smartOpen ? smartOpen.query : ""}
+                  editing={editingSmart} draft="" canSave={!!composeView(lib.query)}
+                  onRefresh={refreshSmart}
+                  onEdit={() => { setEditingSmart(smartOpen.name); lib.applyAdvanced({ shelf: "", q: smartOpen.query }); }}
+                  onSaveOver={() => saveSmartOver(editingSmart, composeView(lib.query))}
+                  onSaveNew={() => saveSmart(composeView(lib.query))}
+                  onCancel={() => { const back = editingSmart; setEditingSmart(""); lib.applyAdvanced({ shelf: back, q: "" }); }} />
+              ) : null,
+            }} />
         )}
         {tab === "create" && (
           <CreateMobile account={account} costRef={costRef} editCostRef={editCostRef}
@@ -1132,11 +1221,16 @@ export default function AppMobile({ boot }) {
           {screen === "myart" && (
             <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => openScreenKey("train")} />
           )}
+          {screen === "collections" && (
+            <CollectionsMobile csrf={boot.csrf || ""} onOpenCollection={openCollection}
+              onChanged={onCollectionsChanged} />
+          )}
           {screen === "health" && (
             <HealthMobile
               onModelFilter={(m) => filterFromHealth({ model: m })}
               onTagFilter={(t) => filterFromHealth({ tag: t })}
               onLoraFilter={(l) => filterFromHealth({ lora: l })}
+              onStoragePick={(f) => filterFromHealth({ ...ADV_DEFAULTS, ...storageFilterPatch(f) })}
               onOpenImport={() => openScreenKey("import")}
               boot={boot}
               onDuplicatesResolved={afterDuplicatesResolved}
@@ -1179,7 +1273,7 @@ export default function AppMobile({ boot }) {
       {detailsFor && (
         <ImageDetailsMobile
           mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-          onRate={rate}
+          onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
           onDeleted={() => { closeDetails(); lib.load(1, true); }}
           onFilterByModel={filterByModelFromDetails} onFilterByBatch={filterByBatchFromDetails}
           advParams={detailsAdvParams} items={lib.items}
@@ -1200,6 +1294,7 @@ export default function AppMobile({ boot }) {
         <LightboxMobile
           items={lib.items} index={lbIndex} setIndex={setLbIndex}
           onClose={closeLightbox} onRate={rate}
+          onCurate={(ids, op) => curate.apply(ids, op, false)}
           page={lib.page} pages={lib.pages} loadPage={userLoad}
           onOpenDetails={openDetailsFromLightbox}
           onSimilar={showSimilar}
@@ -1280,6 +1375,9 @@ export default function AppMobile({ boot }) {
           </div>
         )}
       </MobileSheet>
+
+      {/* the toast a bulk change leaves behind: what happened and, for ten seconds, Undo */}
+      <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
         {/* THE ROTATE LINE WAS TRUE UNTIL 2026-09-06 and is not any more: the Loom now
