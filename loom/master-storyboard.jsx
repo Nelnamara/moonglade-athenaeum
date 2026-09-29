@@ -75,6 +75,12 @@ import {
 } from "./src/loom-bed-core.js";
 import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
 import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELECTION } from "./src/loom-shots-core.js";
+// Session P, Stage B2 (NOTES P7): the cast library -- one account-side value, each storyboard's
+// ticks, and the tick / untick / edit patches. Pure, like the modules above.
+import {
+  CASTLIB_KEY, parseLibrary, libraryRows, rowMeta, untickQuestion, shotsUsing, memberFromAsset, tickMember,
+  untickAsset, withLibId, syncPatch, addMember, editMember, editCopies, ticks, handoffCast, newMemberAsset,
+} from "./src/loom-cast-library.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -582,6 +588,9 @@ const isBoard = (p) => !!(p && typeof p === "object" && Array.isArray(p.acts));
 // A submit id for one render: [A-Za-z0-9_-]{1,64}, unique per click (the server journal keys
 // every Loom render by it, so a replay can never send twice).
 const newSubmitId = () => "s" + Date.now().toString(36) + uid() + uid();
+// A cast library member's stable id (Session P, P7): the same member on every storyboard that
+// ticks it, whatever each board calls its own copy.
+const newLibId = () => "L" + Date.now().toString(36) + uid();
 const nowIso = () => new Date().toISOString();
 
 function fileToThumb(file, maxDim = 480, q = 0.72) {
@@ -1026,6 +1035,36 @@ const V2_STYLES = `
 .lv-simplecard b{display:block;font-size:10.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lv-simplecard span{display:block;font-size:9px;}
 /* Footage tab: browse-the-whole-library + drop-to-add, both land as a Cast & Assets ref. */
+/* Session P (P7): THE CAST LIBRARY PANEL, the Loom Handoff page's own sizes and tokens (its
+   rgba(9,7,22,.7) well is --mantle; its lavender hover wash is --lavender at 8%). */
+.lv-lib{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:14px;border:1px solid var(--surface1);
+  background:color-mix(in srgb,var(--mantle) 70%,transparent);}
+.lv-libhead{display:flex;align-items:baseline;gap:6px;}
+.lv-libcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lv-libhint{font-size:9.5px;color:var(--overlay0);}
+.lv-libnote{font-size:9.5px;line-height:1.45;color:var(--overlay0);}
+.lv-libnote.warn{color:var(--peach);}
+.lv-librow{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:7px;cursor:pointer;outline:none;}
+.lv-librow:hover,.lv-librow:focus-visible{background:color-mix(in srgb,var(--lavender) 8%,transparent);}
+.lv-librow.busy{opacity:.55;cursor:progress;}
+.lv-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lv-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lv-libav{width:26px;height:26px;flex:none;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--surface1) center/cover no-repeat;
+  color:var(--subtext);font-size:11px;display:grid;place-items:center;}
+.lv-libav:disabled{cursor:default;}
+.lv-libav:not(:disabled):hover{box-shadow:0 0 0 1.5px var(--lavender);}
+.lv-libtext{flex:1;min-width:0;}
+.lv-libname{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-liblock{border:0;background:transparent;padding:0 0 0 4px;font-size:10px;line-height:1;cursor:pointer;opacity:0;}
+.lv-liblock.on{opacity:1;}
+.lv-librow:hover .lv-liblock:not(.on){opacity:.45;}
+.lv-libmeta{font-size:9.5px;color:var(--overlay0);font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-libadd{display:flex;align-items:center;gap:12px;padding:4px 4px 0;}
+.lv-libaddbtn{border:0;background:transparent;padding:0;font:600 10px/1.2 system-ui,sans-serif;color:var(--lavender);cursor:pointer;}
+.lv-libaddbtn:disabled{opacity:.5;cursor:default;}
+label.lv-libaddbtn{font-weight:500;color:var(--overlay0);}
+label.lv-libaddbtn:hover{color:var(--lavender);}
 .lv-footagehead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
 .lv-footagehead .lv-castrow-h{margin-bottom:0;}
 .lv-browsebtn{font:600 10px/1 system-ui;background:var(--base);border:1px solid var(--surface1);color:var(--accent);
@@ -1319,6 +1358,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   generateShot, selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork,
   // Session P, Stage B1: the EDL panel's opener (P4) and the music bed's board edits (P3).
   openEdl, bedApi,
+  // Session P, Stage B2: the cast library (P7) -- its view and its owner actions.
+  castApi,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -1377,8 +1418,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the Model row's trigger (kind="base") or "+ add LoRA" (kind="lora").
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerKind, setPickerKind] = useState("base");
-  const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage'
+  const [leftTab, setLeftTab] = useState("cast");        // 'cast' | 'footage' | 'library' (Session P, P7)
   const [leftCollapsed, setLeftCollapsed] = useState(false);
+  // Session P (P7): showing the Library tab READS the cast library and the other storyboards'
+  // ticks for "in N storyboards" -- again for another board. A read only; nothing is written.
+  useEffect(() => {
+    if (!leftCollapsed && leftTab === "library" && castApi) castApi.openCastLibrary();
+  }, [leftCollapsed, leftTab, projectApi.activeId]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [leftClosing, setLeftClosing] = useState(false);  // true for 340ms while the panel plays its slide-out, matching The Loom.dc.html's own leftClosing/lvSlideOutL
   const [density, setDensity] = useState("detailed");    // 'simple' | 'detailed' -- Cast tab only
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -3155,6 +3201,69 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
       </div>
     );
   }
+  // Session P (P7): the cast library's rows for this storyboard (a view; writes nothing). A
+  // ticked library member's picture and 🔒 change everywhere it's used -- in the Library tab and
+  // in the rows below alike; this storyboard's own (not yet library) members edit here only.
+  const libRows = castApi ? libraryRows(castApi.lib, project, castApi.others) : [];
+  // A copy carrying a libId counts as a library member even before the Library tab has read the
+  // library (the edit then reads it first).
+  const libRowOf = (as) => {
+    if (!castApi || !as) return null;
+    if (castApi.lib) return libRows.find((r) => !r.boardOnly && r.asset && r.asset.id === as.id) || null;
+    return as.libId ? { key: "lib:" + as.libId, libId: String(as.libId), boardOnly: false, ticked: true, asset: as, member: null,
+      name: as.name || "", kind: as.kind || "image", lock: !!as.lock, tag: as.tag || "", usedBy: [], boards: null } : null;
+  };
+  const editAsset = (as, patch) => {
+    const row = castApi ? libRowOf(as) : null;
+    if (row) castApi.editLibraryMember(row, patch);
+    else setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, ...patch }));
+  };
+  const libEverywhere = (as) => (libRowOf(as) ? " — a library member: this changes on every storyboard that uses it" : "");
+  // THE PAGE'S CAST LIBRARY PANEL (Loom Handoff.dc.html section A, "👤 CAST LIBRARY · tick = in
+  // this storyboard"): tick box, round avatar, name + 🔒, and the "@tag · in N storyboards ·
+  // A·02 A·03" line. A row click ticks / unticks; the avatar changes the member's picture and
+  // the 🔒 its lock, everywhere it's used.
+  const libraryList = castApi ? (
+    <div className="lv-lib">
+      <div className="lv-libhead"><span className="lv-libcap">&#128100; CAST LIBRARY</span><span className="lv-libhint">tick = in this storyboard</span></div>
+      {castApi.libNote ? <div className={"lv-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
+      {libRows.map((row) => {
+        const src = frameSrc(row.picture);
+        const busy = castApi.working === row.key;
+        const act = () => { if (!castApi.working) castApi.toggleCastTick(row); };
+        return (
+          <div key={row.key} className={"lv-librow" + (busy ? " busy" : "")} role="checkbox" aria-checked={row.ticked} tabIndex={0}
+            title={row.boardOnly ? "This storyboard's own member — untick it to keep it in the library but not here"
+              : row.ticked ? "In this storyboard — click to remove it from this storyboard (the library keeps it)" : "Click to use it in this storyboard"}
+            onClick={act} onKeyDown={(ev) => { if (ev.key === " " || ev.key === "Enter") { ev.preventDefault(); act(); } }}>
+            <span className={"lv-libbox" + (row.ticked ? " on" : "")}>{row.ticked ? "✓" : ""}</span>
+            <button type="button" className="lv-libav" style={src ? { backgroundImage: `url(${src})` } : undefined}
+              disabled={row.kind === "audio" || !!castApi.working}
+              title={row.kind === "audio" ? (row.name || "audio") : "Change this member's picture — it changes on every storyboard that uses it"}
+              onClick={(ev) => { ev.stopPropagation(); openPick((mid) => castApi.editLibraryMember(row, { mediaId: String(mid), thumbId: "", source: "" }), row.kind === "video" ? "video" : "image"); }}>
+              {src ? null : (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}</button>
+            <div className="lv-libtext">
+              <div className="lv-libname">{row.name || row.kind}
+                <button type="button" className={"lv-liblock" + (row.lock ? " on" : "")} disabled={!!castApi.working}
+                  title={(row.lock ? "Locked (maintain exact appearance) — click to unlock" : "Click to lock its appearance") + " — on every storyboard that uses it"}
+                  onClick={(ev) => { ev.stopPropagation(); castApi.editLibraryMember(row, { lock: !row.lock }); }}>{row.lock ? "🔒" : "🔓"}</button>
+              </div>
+              <div className="lv-libmeta">{rowMeta(row)}</div>
+            </div>
+          </div>
+        );
+      })}
+      {!libRows.length && <div className="lv-libnote">{castApi.libPhase === "reading" ? "Reading your cast library…" : "No cast yet — + Add one."}</div>}
+      <div className="lv-libadd">
+        <button type="button" className="lv-libaddbtn" disabled={!!castApi.working}
+          title="Add a picture or video from your gallery to the library, ticked in this storyboard"
+          onClick={() => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)}>+ Add</button>
+        <label className="lv-libaddbtn" title="Add an image from this computer to the library, ticked in this storyboard">upload
+          <input type="file" accept="image/*" style={{ display: "none" }}
+            onChange={async (e) => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; const id = await storeThumb(f); castApi.addLibraryMember({ thumbId: id, source: f.name }); }} /></label>
+      </div>
+    </div>
+  ) : null;
   const castList = (
     <>
       <div className="lv-castrow-h">Cast &amp; assets{sel ? <span className="lv-dim"> — bound to {sel.code}</span> : null}</div>
@@ -3222,14 +3331,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         const pastBudget = sel && inShot && as.kind === "image" && !liveTag && !!resolvedImage(as, imgSrc);
         return (
           <div key={as.id} className={"lv-assetrow" + (pastBudget ? " oob" : "")}>
-            {as.kind !== "audio" && <button className="lv-pickico" title="Pick from your gallery"
-              onClick={() => openPick((mid) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: "", source: "", mediaId: mid })), as.kind === "video" ? "video" : "image")}>🖼</button>}
+            {as.kind !== "audio" && <button className="lv-pickico" title={"Pick from your gallery" + libEverywhere(as)}
+              onClick={() => openPick((mid) => editAsset(as, { thumbId: "", source: "", mediaId: mid }), as.kind === "video" ? "video" : "image")}>🖼</button>}
             {as.kind === "image" ? (
-              <label className="lv-assetprev" title="Attach image">
+              <label className="lv-assetprev" title={"Attach image" + libEverywhere(as)}>
                 {src ? <img src={src} alt="" /> : "＋"}
                 <input type="file" accept="image/*" style={{ display: "none" }}
                   onChange={async (e) => { const f = e.target.files[0]; if (!f) return; const id = await storeThumb(f);
-                    setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, thumbId: id, source: x.source || f.name, mediaId: "" })); }} />
+                    editAsset(as, { thumbId: id, source: as.source || f.name, mediaId: "" }); }} />
               </label>
             ) : <div className="lv-assetprev" title={as.kind === "video" ? "Video asset — poster from your gallery" : undefined}>
               {/* A gallery-picked video resolves its /thumbs/<mid>.jpg poster through
@@ -3256,11 +3365,14 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, kind: e.target.value }))}>
               <option value="image">image</option><option value="video">video</option><option value="audio">audio</option>
             </select>
-            <label className="lv-locklab" title="Write 'maintain exact appearance' in prompts">
-              <input type="checkbox" checked={!!as.lock} onChange={(e) => setAssets((a) => a.map((x) => x.id !== as.id ? x : { ...x, lock: e.target.checked }))} />lock</label>
+            <label className="lv-locklab" title={"Write 'maintain exact appearance' in prompts" + libEverywhere(as)}>
+              <input type="checkbox" checked={!!as.lock} onChange={(e) => editAsset(as, { lock: e.target.checked })} />lock</label>
             {sel && <label className="lv-inshot" title="Include in the selected shot's cast">
               <input type="checkbox" checked={!!inShot} onChange={toggleInShot} />in {sel.code}</label>}
-            <button className="lv-ico xs danger" onClick={() => setAssets((a) => a.filter((x) => x.id !== as.id))} title="Remove">&#10005;</button>
+            {/* A library member is UNTICKED (asks first when shots use it, and drops it from their
+                cast; the library keeps it); this storyboard's own member is removed as before. */}
+            <button className="lv-ico xs danger" title={libRowOf(as) ? "Remove from this storyboard (the cast library keeps it)" : "Remove"}
+              onClick={() => { const row = libRowOf(as); if (row) castApi.toggleCastTick(row); else setAssets((a) => a.filter((x) => x.id !== as.id)); }}>&#10005;</button>
           </div>
         );
       }) : (
@@ -3538,10 +3650,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 <div className="lv-tabs lv-sidetabs">
                   <span className={"lv-tab " + (leftTab === "cast" ? "on" : "")} onClick={() => setLeftTab("cast")}>Cast &amp; assets</span>
                   <span className={"lv-tab " + (leftTab === "footage" ? "on" : "")} onClick={() => setLeftTab("footage")}>Footage</span>
+                  {castApi && <span className={"lv-tab " + (leftTab === "library" ? "on" : "")} onClick={() => setLeftTab("library")}
+                    title="The cast library: every member you keep, ticked where this storyboard uses it">Library</span>}
                 </div>
                 <button className="lv-col" onClick={closeLeftPanel} title="collapse">&#8249;</button>
               </div>
-              <div className="lv-cast">{leftTab === "cast" ? castList : footageList}</div>
+              <div className="lv-cast">{leftTab === "cast" ? castList : leftTab === "library" && libraryList ? libraryList : footageList}</div>
             </div>
           </>
         )}
@@ -4010,6 +4124,19 @@ const LOOM_MOBILE_STYLES = `
 .lm-castlive.oob{color:var(--peach);border-color:var(--peach);font-size:9px;}
 .lm-castlock{font-size:11px;flex:none;}
 .lm-castaddrow{display:flex;gap:8px;margin-top:10px;}
+/* Session P (P7): the cast sheet's Library tab -- the page's tick box (lavender, ✓), round
+   avatar and monospace meta line, in the sheet's own row. */
+.lm-libhead{display:flex;align-items:baseline;gap:6px;padding:2px 4px 6px;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
+.lm-libhead span:first-child{flex:1;}
+.lm-libhead span:last-child{font-size:9.5px;font-weight:400;letter-spacing:0;}
+.lm-libnote{font-size:10px;line-height:1.45;color:var(--overlay0);padding:0 4px 6px;}
+.lm-libnote.warn{color:var(--peach);}
+.lm-librow.busy{opacity:.55;}
+.lm-libbox{width:16px;height:16px;flex:none;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:800;
+  box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
+.lm-libbox.on{background:var(--lavender);border-color:var(--lavender);}
+.lm-libav{border-radius:50%;}
+.lm-libmeta{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--overlay0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
 .lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
@@ -4286,6 +4413,9 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // functions LoomV2 already uses for its own Deep Focus/Cast&Assets/FrameSlot; threaded
   // straight through, nothing new invented.
   setCard, setAssets, addRef, setRef, delRef, storeThumb, openPick, copyShot,
+  // Session P, Stage B2 (P7, "Phone: the cast sheet gets a Library tab beside Cast & assets /
+  // Footage"): the same cast library view and owner actions LoomV2's Library tab uses.
+  castApi,
   // Fifth increment (2026-08-03): Review & trim's own "✂ Split at playhead" needs the exact
   // same real splitCardAt-backed mutator LoomV2's own ShotPreview.onSplit already calls
   // (useShotMutations) -- not a re-derivation of the split logic.
@@ -4384,7 +4514,12 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // '' | 'wip' | 'err'.
   const [dfHandoff, setDfHandoff] = useState("");
   const [castSheetOpen, setCastSheetOpen] = useState(false);
-  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage'
+  const [castSheetTab, setCastSheetTab] = useState("cast");   // 'cast' | 'footage' | 'library' (Session P, P7)
+  // Session P (P7): the Library tab READS the cast library and the other storyboards' ticks when
+  // it shows (and again for another board). A read only; nothing is written.
+  useEffect(() => {
+    if (castSheetOpen && castSheetTab === "library" && castApi) castApi.openCastLibrary();
+  }, [castSheetOpen, castSheetTab]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Sheet-close choreography -- Loom Mobile.dc.html's own *Closing states (lmSheetDown
   // .28s + lmFadeOut on the scrim), absent until 2026-08-06: every close was an instant
   // unmount. Same closing-state + ref-held-timer pattern LoomV2's closeLeftPanel/
@@ -5373,8 +5508,43 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                       onClick={() => setCastSheetTab("cast")}>Cast &amp; assets</button>
                     <button type="button" className={"lm-tabbtn" + (castSheetTab === "footage" ? " on" : "")}
                       onClick={() => setCastSheetTab("footage")}>Footage</button>
+                    {castApi && <button type="button" className={"lm-tabbtn" + (castSheetTab === "library" ? " on" : "")}
+                      onClick={() => setCastSheetTab("library")}>Library</button>}
                   </div>
-                  {castSheetTab === "cast" ? (
+                  {castSheetTab === "library" && castApi ? (() => {
+                    // Session P (P7): the page's cast library rows, in the sheet's own language. A
+                    // tap ticks / unticks (the same confirm, naming the shots, as desktop).
+                    const rows = libraryRows(castApi.lib, project, castApi.others);
+                    return (
+                      <>
+                        <div className="lm-libhead"><span>&#128100; CAST LIBRARY</span><span>tick = in this storyboard</span></div>
+                        {castApi.libNote ? <div className={"lm-libnote" + (castApi.libPhase === "failed" ? " warn" : "")}>{castApi.libNote}</div> : null}
+                        {rows.map((row) => {
+                          const src = frameSrc(row.picture);
+                          return (
+                            <button type="button" key={row.key} className={"lm-castrow lm-librow" + (castApi.working === row.key ? " busy" : "")}
+                              role="checkbox" aria-checked={row.ticked} disabled={!!castApi.working}
+                              onClick={() => castApi.toggleCastTick(row)}>
+                              <span className={"lm-libbox" + (row.ticked ? " on" : "")}>{row.ticked ? "✓" : ""}</span>
+                              <div className="lm-castthumb lm-libav" style={src ? { backgroundImage: `url(${src})` } : undefined}>
+                                {!src && (row.kind === "audio" ? "♪" : row.kind === "video" ? "🎞" : "")}
+                              </div>
+                              <div className="lm-castcol">
+                                <div className="lm-castname">{row.name || row.kind}{row.lock ? " 🔒" : ""}</div>
+                                <div className="lm-libmeta">{rowMeta(row)}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {!rows.length && <div className="lm-empty">{castApi.libPhase === "reading" ? "Reading your cast library…" : "No cast yet."}</div>}
+                        <div className="lm-castaddrow">
+                          <button type="button" className="lm-addrefbtn" disabled={!!castApi.working}
+                            onClick={() => openPick((mid, thumb, isVideo) => castApi.addLibraryMember({ mediaId: String(mid), isVideo: !!isVideo }), "all", true)}>
+                            + Add</button>
+                        </div>
+                      </>
+                    );
+                  })() : castSheetTab === "cast" ? (
                     <>
                       {!modeSendsRefs(c.mode) ? (
                         <div className="lm-i2vnote">{modeSendsLine(c.mode)}</div>
@@ -6563,6 +6733,87 @@ function useProjectStore(setSelShot) {
     setActiveId(id); setProject(p);
   };
 
+  /* THE CAST LIBRARY'S STORAGE (Session P, NOTES P7). One account-side value, CASTLIB_KEY,
+     read when the Library view opens and written ONLY by an owner action (a tick that brings a
+     storyboard-only member into the library, an edit, + Add, the gallery's cast hand-off) --
+     always a compare-and-swap through the SAME queue as the boards, so one write is in flight
+     per key and window.storage.set keeps its one CAS caller (writeBoard). A 409 re-applies the
+     ONE edit being made to the value the conflict handed back and writes once more; a second
+     conflict writes nothing and says so. A library that will not read is never written over.
+     Reading it writes nothing. */
+  const [castLib, setCastLib] = useState(null);      // {lib, rev} as last read or written
+  const castLibRef = useRef(null);
+  const noteCastLib = (v) => { castLibRef.current = v; setCastLib(v); };
+  const readCastLibrary = useCallback(async () => {
+    if (!hasStore) return { failed: true };
+    const got = await sGetX(CASTLIB_KEY);
+    if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+    const lib = parseLibrary(got.missing ? null : got.value);
+    if (!lib) return { failed: true, unreadable: true };
+    const v = { lib, rev: got.rev };
+    noteCastLib(v);
+    return v;
+  }, []);
+  const writeCastLibrary = useCallback(async (apply) => {
+    let cur = castLibRef.current;
+    if (!cur) {
+      const r = await readCastLibrary();
+      if (r.failed) return { failed: true, msg: r.unreadable ? "The cast library didn't read, so nothing was written over it." : "The cast library couldn't be read." };
+      cur = r;
+    }
+    const next = apply(cur.lib);
+    if (next === cur.lib) return { ok: true, lib: cur.lib };
+    let res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(next), { baseRev: cur.rev });
+    let wrote = next;
+    if (res.conflict) {
+      // Another tab wrote the library first: re-apply this one edit to what it wrote, once.
+      const remote = res.rev === "unreadable" ? null : parseLibrary(res.value);
+      if (!remote) return { failed: true, msg: "The cast library changed elsewhere and didn't read, so nothing was written over it." };
+      wrote = apply(remote);
+      if (wrote === remote) { noteCastLib({ lib: remote, rev: res.rev }); return { ok: true, lib: remote }; }
+      res = await queueRef.current.save(CASTLIB_KEY, JSON.stringify(wrote), { baseRev: res.rev });
+      if (res.conflict) return { failed: true, msg: "The cast library changed in another tab again, so nothing more was written. Try once more." };
+    }
+    if (!res.ok) return { failed: true, msg: "The cast library couldn't be saved. Nothing changed." };
+    noteCastLib({ lib: wrote, rev: res.rev });
+    return { ok: true, lib: wrote };
+  }, [readCastLibrary]);
+  /** Every OTHER storyboard as read now: {boards:[{id, name, project, rev}], unread:[id]}.
+   *  A read only -- "in N storyboards" and an edit's other copies come from here. */
+  const readOtherBoards = useCallback(async (exceptId) => {
+    if (!hasStore) return { boards: [], unread: [] };
+    const listed = await sListX(PPRE);
+    if (listed.failed) return { boards: [], unread: [], failed: true };
+    const boards = [], unread = [];
+    for (const k of listed.keys) {
+      const id = k.slice(PPRE.length);
+      if (id === exceptId) continue;
+      const r = await readBoard(id);
+      if (r.p) boards.push({ id, name: r.p.name || "Untitled", project: r.p, rev: r.rev });
+      else if (!r.missing) unread.push(id);
+    }
+    return { boards, unread };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** Write `apply(board)` to a storyboard that is NOT open here, compare-and-swap on the rev it
+   *  was read at; a conflict re-applies to the board the conflict handed back, once.
+   *  -> {ok, skipped?} | {failed, conflict?, gone?} */
+  const saveOtherBoard = useCallback(async (id, p, rev, apply) => {
+    const key = PPRE + id;
+    const next = apply(p);
+    if (next === p) return { ok: true, skipped: true };
+    let res = await queueRef.current.save(key, JSON.stringify(next), { baseRev: rev });
+    if (res.conflict) {
+      let remote = null;
+      try { remote = res.value == null ? null : JSON.parse(res.value); } catch (e) { remote = null; }
+      if (!isBoard(remote)) return { failed: true, gone: res.value == null };
+      const again = apply(remote);
+      if (again === remote) return { ok: true, skipped: true };
+      res = await queueRef.current.save(key, JSON.stringify(again), { baseRev: res.rev });
+      if (res.conflict) return { failed: true, conflict: true };
+    }
+    return res.ok ? { ok: true } : { failed: true };
+  }, []);
+
   // ---- Multi-project store: each storyboard lives at PPRE+id; ACTIVE_KEY names the open one.
   //      The legacy single project (PKEY) is migrated in as the first storyboard on first load. ----
   const readProjList = useCallback(async () => {
@@ -6782,7 +7033,12 @@ function useProjectStore(setSelShot) {
   // action) adds those images as reusable @image cast members, once, then clears the URL.
   // A NAMED function the effect calls (Session P, BUILD-w5-p §4): the never-auto-render test
   // roots it by name, which it cannot do for an anonymous effect body.
-  const adoptCastHandoff = (project) => {
+  // Session P (NOTES P7): the hand-off adds the pictures to the CAST LIBRARY and ticks them on
+  // this storyboard, as one action -- the owner's own click in the gallery. It is still read
+  // once and cleared at once (before anything is awaited, so a reload mid-write cannot import
+  // twice). The library write is a compare-and-swap; if it fails the pictures still land here,
+  // as this storyboard's own cast, and the owner is told the library wasn't updated.
+  const adoptCastHandoff = async (project) => {
     if (!project || castImported.current) return;
     castImported.current = true;
     // Two filters, deliberately: parseCastIdsFromSearch is the URL *sanitiser* (safe
@@ -6792,18 +7048,28 @@ function useProjectStore(setSelShot) {
     // dropped rather than becoming a cast member with no picture.
     const ids = parseCastIdsFromSearch(location.search).filter(isCatalogMediaId);
     if (!ids.length) return;
-    setProject((p) => {
-      const existing = p.assets || [];
-      let n = maxTagNum(existing, "@image");
-      const added = ids.map((mid) => ({ id: uid(), name: "", kind: "image",
-        tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
-      return { ...p, assets: [...existing, ...added] };
-    });
     // Clearing ?cast= now goes through the one builder instead of writing a bare
     // location.pathname (2026-09-06). The hand-off's behaviour is unchanged -- read once,
     // then gone -- but a bare pathname would also erase ?board=, which is precisely the
     // "one write throws another's away" bug gen/urlState.js was written to end.
     history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
+    const board = activeIdRef.current;
+    const { assets: added, members } = handoffCast(ids, (projectRef.current && projectRef.current.assets) || [], uid, newLibId);
+    const w = await writeCastLibrary((lib) => members.reduce(addMember, lib));
+    if (activeIdRef.current !== board) return;
+    if (w.ok) {
+      setProject((p) => members.reduce((q, m, i) => tickMember(q, m, added[i].id), p));
+      return;
+    }
+    setProject((p) => {
+      const existing = p.assets || [];
+      let n = maxTagNum(existing, "@image");
+      const own = ids.map((mid) => ({ id: uid(), name: "", kind: "image",
+        tag: "@image" + (++n), thumbId: "", source: "", mediaId: mid, lock: true }));
+      return { ...p, assets: [...existing, ...own] };
+    });
+    if (window.Toast) window.Toast.show({ kind: "err", title: "Added to this storyboard only",
+      msg: (w.msg || "The cast library couldn't be updated.") + " The pictures are in this storyboard's cast." });
   };
   useEffect(() => { adoptCastHandoff(project); }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -6925,7 +7191,9 @@ function useProjectStore(setSelShot) {
     projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId,
     // Session P: what the render lifecycle needs from the store -- the synchronous board and
     // board id, the lock flush, the merge's resolved-submit record, and the boot's failure.
-    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError };
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError,
+    // Session P, Stage B2 (P7): the cast library's reads and compare-and-swap writes.
+    castIo: { castLib, readCastLibrary, writeCastLibrary, readOtherBoards, saveOtherBoard } };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -7124,6 +7392,147 @@ function useTakeActions({ projectRef, activeIdRef, setProject, activeId }) {
   };
 
   return { selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork };
+}
+
+/* ---- 2b'. THE CAST LIBRARY (Session P, NOTES P7; the page's "👤 CAST LIBRARY · tick = in this
+   storyboard" panel and the phone cast sheet's Library tab) ---------------------------------------
+   The library is one account-side value (useProjectStore's castIo); a storyboard's ticks are its
+   assets that carry a libId (loom/src/loom-cast-library.js). Opening the Library view only READS:
+   the library, and every other storyboard for "in N storyboards" (cached for this opening, never
+   written). Every write below is an owner action:
+     toggleCastTick      tick copies a member in (a board edit); untick asks first when shots use
+                         it, naming them, then removes it and drops it from those shots' cast; a
+                         storyboard-only member joins the library before it is unticked, so the
+                         library keeps it
+     editLibraryMember   its picture or its 🔒, in the library, on this board, and on every other
+                         storyboard that ticks it -- each one read and written compare-and-swap,
+                         a conflict re-applied once, anything not updated named. The one
+                         multi-board write in the Loom; it touches nothing but that member's copy.
+     addLibraryMember    "+ Add": a picked picture into the library, ticked here
+   None of these can price, render or upload (roots of loom/test/loom-no-auto-render.test.js). */
+function useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo }) {
+  const [libPhase, setLibPhase] = useState("idle");     // idle | reading | ready | failed
+  const [libNote, setLibNote] = useState("");
+  const [others, setOthers] = useState(null);           // the other storyboards as read, or null
+  const [working, setWorking] = useState("");           // the row key being written
+  const openSeq = useRef(0);
+  const workingRef = useRef("");
+  useEffect(() => { setOthers(null); setLibPhase("idle"); setLibNote(""); }, [activeId]);
+  const say = (kind, title, msg) => { if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind, title, msg }); };
+  const lean = (b) => ({ id: b.id, name: b.name, project: { name: b.name, assets: (b.project && b.project.assets) || [] } });
+
+  // Opening the Library view: reads the library and the other storyboards. Writes nothing.
+  const openCastLibrary = async () => {
+    const seq = ++openSeq.current;
+    setLibPhase("reading"); setLibNote("");
+    const got = await castIo.readCastLibrary();
+    if (seq !== openSeq.current) return;
+    if (got.failed) {
+      setLibPhase("failed");
+      setLibNote(got.unreadable ? "The cast library didn't read. Nothing was changed, and nothing will be written over it."
+        : "The cast library couldn't be read. Check the server, then open this tab again.");
+      return;
+    }
+    const o = await castIo.readOtherBoards(activeIdRef.current);
+    if (seq !== openSeq.current) return;
+    setOthers(o.boards.map(lean));
+    setLibPhase("ready");
+    if (o.failed) setLibNote("Your other storyboards couldn't be listed, so the counts are this storyboard's only.");
+    else if (o.unread.length) setLibNote(o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read; the counts leave "
+      + (o.unread.length === 1 ? "it" : "them") + " out.");
+  };
+  const begin = (key) => { if (workingRef.current) return false; workingRef.current = key; setWorking(key); return true; };
+  const end = () => { workingRef.current = ""; setWorking(""); };
+
+  // Tick / untick one row of the Library view.
+  const toggleCastTick = async (row) => {
+    if (!row) return;
+    const board = activeIdRef.current;
+    const cur = projectRef.current;
+    if (!cur) return;
+    if (!row.ticked) {
+      if (row.member) setProject((p) => (p ? tickMember(p, row.member, uid()) : p));
+      return;
+    }
+    const asset = (cur.assets || []).find((a) => a && a.id === (row.asset && row.asset.id));
+    if (!asset) return;
+    const q = untickQuestion({ ...row, usedBy: shotsUsing(cur, asset.id) });
+    if (q && !window.confirm(q)) return;
+    if (row.boardOnly) {
+      // This storyboard's own member joins the library first, so unticking it here keeps it.
+      if (!begin(row.key)) return;
+      const libId = row.libId || newLibId();
+      const w = await castIo.writeCastLibrary((lib) => addMember(lib, memberFromAsset(asset, libId)));
+      end();
+      if (!w.ok) { say("err", "Nothing was removed", w.msg || "The cast library couldn't be updated."); return; }
+      if (activeIdRef.current !== board) return;
+    }
+    setProject((p) => (p ? untickAsset(p, asset.id) : p));
+  };
+
+  // Edit a member's picture or 🔒, everywhere it's used.
+  const editLibraryMember = async (row, patch) => {
+    const p = syncPatch(patch);
+    if (!row || !Object.keys(p).length) return;
+    if (!begin(row.key)) return;
+    try {
+      const board = activeIdRef.current;
+      const base = row.asset || row.member || {};
+      const assetId = row.asset && row.asset.id;
+      const minted = !row.libId;
+      const libId = row.libId || newLibId();
+      // The library first. A member it does not hold yet (this storyboard's own member, or a
+      // copy whose library entry is gone) is added, then edited -- joining the library is the
+      // edit's doing, never an open's.
+      const w = await castIo.writeCastLibrary((lib) => editMember(addMember(lib, memberFromAsset({ ...base, ...p }, libId)), libId, p));
+      if (!w.ok) { say("err", "Nothing was changed", w.msg || "The cast library couldn't be updated."); return; }
+      // Then the open storyboard's copy (editCopies touches only this member's copies)...
+      const openNow = activeIdRef.current;
+      setProject((q) => (q ? editCopies(assetId && openNow === board ? withLibId(q, assetId, libId) : q, libId, p) : q));
+      if (minted) return;       // a brand-new member is on no other storyboard
+      // ...then every other storyboard that ticks it, each compare-and-swap.
+      const o = await castIo.readOtherBoards(openNow);
+      const missed = [];
+      let updated = 0;
+      for (const b of o.boards) {
+        if (!ticks(b.project, libId)) continue;
+        const r = await castIo.saveOtherBoard(b.id, b.project, b.rev, (x) => editCopies(x, libId, p));
+        if (r.ok) { if (!r.skipped) updated += 1; } else missed.push("“" + b.name + "”");
+      }
+      if (o.boards.length || o.unread.length) setOthers(o.boards.map((b) => lean({ ...b, project: editCopies(b.project, libId, p) })));
+      const name = row.name || "This member";
+      if (missed.length || o.unread.length || o.failed) {
+        say("err", name + " wasn't updated everywhere",
+          (missed.length ? "Not updated: " + missed.join(", ") + " (it changed in another tab; open it and edit again). " : "")
+          + (o.unread.length ? o.unread.length + " storyboard" + (o.unread.length === 1 ? "" : "s") + " couldn't be read. " : "")
+          + (o.failed ? "Your other storyboards couldn't be listed. " : "")
+          + "The library and this storyboard were updated.");
+      } else if (updated) {
+        say("ok", name + " updated", "Also changed in " + updated + " other storyboard" + (updated === 1 ? "" : "s") + ".");
+      }
+    } finally { end(); }
+  };
+
+  // "+ Add": a picture (or video) from the gallery -- the Cast & assets panel's own picker
+  // road -- or an uploaded image (its local thumbnail store), into the library, ticked here.
+  const addLibraryMember = async (pick) => {
+    if (!pick || (!pick.mediaId && !pick.thumbId)) return;
+    if (!begin("add")) return;
+    try {
+      const board = activeIdRef.current;
+      const cur = projectRef.current;
+      if (!cur) return;
+      const asset = { ...newMemberAsset(pick, cur.assets || [], uid(), newLibId()),
+        ...(pick.thumbId ? { thumbId: pick.thumbId, source: pick.source || "", mediaId: "" } : {}) };
+      const m = memberFromAsset(asset, asset.libId);
+      const w = await castIo.writeCastLibrary((lib) => addMember(lib, m));
+      if (!w.ok) { say("err", "Nothing was added", w.msg || "The cast library couldn't be updated."); return; }
+      if (activeIdRef.current === board) setProject((p) => (p ? tickMember(p, m, asset.id) : p));
+    } finally { end(); }
+  };
+
+  return { libPhase, libNote, others, working, lib: castIo.castLib ? castIo.castLib.lib : null,
+    openCastLibrary, toggleCastTick, editLibraryMember, addLibraryMember };
 }
 
 /* ---- 2c. THE MUSIC BED (Session P, P3; the page's bed row under the reel) --------------------
@@ -8662,7 +9071,9 @@ export default function App() {
   const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const { project, setProject, thumbs, storeThumb, busy,
     projList, projMenu, setProjMenu, projectApi, importBackup, activeId,
-    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError } = useProjectStore(setSelShot);
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError, castIo } = useProjectStore(setSelShot);
+  // Session P, Stage B2 (P7): the cast library's view and its owner actions (none can render).
+  const castApi = useCastLibrary({ projectRef, activeIdRef, setProject, activeId, castIo });
   // The draft card as it is now, for the drawer host's settings snapshot of a draft render.
   const draftCardRef = useRef(draftCard);
   draftCardRef.current = draftCard;
@@ -8799,6 +9210,7 @@ export default function App() {
           project={project} entries={entries} thumbs={thumbs} genState={genState}
           selShot={selShot} setSelShot={setSelShot} addCard={addCard} addAct={addAct} setDraft={setDraft}
           setCard={setCard} setAssets={setAssets} addRef={addRef} setRef={setRef} delRef={delRef}
+          castApi={castApi}
           storeThumb={storeThumb} openPick={openPick} copyShot={copyShot} splitShot={splitShot}
           moveCard={moveCard} dupCard={dupCard} delCard={delCard}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
@@ -8814,7 +9226,7 @@ export default function App() {
           genFixState={genFixState} setGenFixState={setGenFixState} genFix={genFix} /></V2Boundary>
       ) : (
         <V2Boundary><LoomV2
-          project={project} setCard={setCard} setAssets={setAssets} entries={entries} durOf={durOf} scale={scale}
+          project={project} setCard={setCard} setAssets={setAssets} castApi={castApi} entries={entries} durOf={durOf} scale={scale}
           selShot={selShot} setSelShot={setSelShot} useExistingVideo={useExistingVideo} genState={genState}
           thumbs={thumbs} openPick={openPick} storeThumb={storeThumb}
           setAct={setAct} addCard={addCard} importFootage={importFootage} dupCard={dupCard} delCard={delCard} moveCard={moveCard}

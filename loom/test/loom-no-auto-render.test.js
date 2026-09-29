@@ -400,6 +400,9 @@ const ROOTS = [
   "openEdl", "exportEdl",
   // Stage B1 -- P5, a collection as ordered shots: the /loom?shots= hand-off.
   "adoptShotsHandoff",
+  // Stage B2 -- P7, the cast library: opening the Library view (a read), tick / untick, an edit
+  // of a member everywhere it's used (the one multi-board write), and "+ Add".
+  "openCastLibrary", "toggleCastTick", "editLibraryMember", "addLibraryMember",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -639,7 +642,9 @@ describe("the pure modules can reach nothing", () => {
     // the collection -> shots builder: loom-core.js's newCardShape only
     ["src/loom-shots-core.js", ["./loom-core.js"]],
     // the music bed's rules and timing: the ★ take's settings, for "own audio"
-    ["src/loom-bed-core.js", ["./loom-takes-core.js"]]]) {
+    ["src/loom-bed-core.js", ["./loom-takes-core.js"]],
+    // Stage B2 -- the cast library's views and patches (P7): the board walk and tag rule only
+    ["src/loom-cast-library.js", ["./loom-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {
@@ -657,6 +662,54 @@ describe("the pure modules can reach nothing", () => {
       }
     });
   }
+});
+
+/* ======================================================================================
+   NOTHING WRITES ON OPEN, FOR THE CAST LIBRARY TOO (Session P, Stage B2 -- NOTES P7,
+   BUILD-w5-p §1.2). Opening the Library view reads the library and every other storyboard
+   (for "in N storyboards"); the same walker, with the KV WRITERS as its sinks, proves no
+   write of any kind -- a board, the library, the pointer, a thumbnail -- is reachable from it.
+   The boot / open paths are A1's (loom-render-lifecycle-wiring.test.js); here they are pinned
+   not to name the library's writers at all.
+   ====================================================================================== */
+const KV_WRITERS = ["sSet", "sDel", "writeBoard", "writeCastLibrary", "saveOtherBoard", "persistBoard", "saveBoardNow",
+  "createBoard", "setProject", "storeThumb", "flushSave"];
+describe("opening the cast library writes nothing (P7)", () => {
+  test("openCastLibrary reaches no KV write, no board edit and no render", () => {
+    assert.equal(reach(M, "openCastLibrary", KV_WRITERS), null);
+    for (const r of ["readCastLibrary", "readOtherBoards"]) {
+      assert.ok(M.byName.has(r), r + " is the library's read -- renamed?");
+      assert.equal(reach(M, r, KV_WRITERS), null, r + " must only read");
+    }
+  });
+  test("the walk is not vacuous: the owner's library actions DO reach their writes", () => {
+    assert.match(reach(M, "toggleCastTick", ["writeCastLibrary"]) || "", /^toggleCastTick → writeCastLibrary$/);
+    assert.match(reach(M, "editLibraryMember", ["saveOtherBoard"]) || "", /^editLibraryMember → saveOtherBoard$/);
+    assert.match(reach(M, "addLibraryMember", ["setProject"]) || "", /^addLibraryMember → setProject$/);
+  });
+  test("the Library tab and the phone's Library tab call only the read when they show", () => {
+    const effects = [...SRC.matchAll(/useEffect\(\(\) => \{\n?\s*if \(([^)]*)\) castApi\.openCastLibrary\(\);\n?\s*\}, \[([^\]]*)\]\);/g)];
+    assert.deepEqual(effects.map((m) => m[1]), [
+      '!leftCollapsed && leftTab === "library" && castApi',
+      'castSheetOpen && castSheetTab === "library" && castApi',
+    ], "exactly the two tab effects, each calling only openCastLibrary");
+    assert.equal((M.code.match(/(?<![\w$])openCastLibrary(?![\w$])/g) || []).length, 4,
+      "its definition, the hook's return and the two tab effects -- nothing else opens it");
+  });
+  test("the boot, open, new and duplicate paths do not name the library's writers", () => {
+    for (const name of ["loadBoards", "openProject", "showBoard", "newProject", "duplicateProject", "readProjList"]) {
+      for (const d of M.byName.get(name) || []) {
+        const body = M.code.slice(d.start, d.end);
+        assert.doesNotMatch(body, /(?<![\w$])(writeCastLibrary|saveOtherBoard|CASTLIB_KEY|castLibRef)(?![\w$])/, name);
+      }
+    }
+    const hook = (M.byName.get("useCastLibrary") || [])[0];
+    assert.ok(hook, "useCastLibrary -- renamed?");
+    const body = SRC.slice(hook.start, hook.end);
+    assert.match(body, /useEffect\(\(\) => \{ setOthers\(null\); setLibPhase\("idle"\); setLibNote\(""\); \}, \[activeId\]\);/,
+      "switching boards only forgets the last read");
+    assert.equal((body.match(/useEffect\(/g) || []).length, 1, "the hook has no other effect");
+  });
 });
 
 describe("the drawer's host API cannot reach a submit (VideoDrawer.jsx, same walker)", () => {
