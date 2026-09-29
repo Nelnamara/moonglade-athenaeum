@@ -235,6 +235,14 @@ function Editor({ ed, setEd, lib, ctx, phone, onBack, onClose, onSave, saveNote 
   const [extractNote, setExtractNote] = useState("");
   const [bandSheet, setBandSheet] = useState(false);
   const fileRef = useRef(null);
+  const libRef = useRef(null);
+  // The desktop Library menu closes on a press anywhere outside it (the phone's is inline).
+  useEffect(() => {
+    if (!libOpen || phone) return undefined;
+    const down = (e) => { if (libRef.current && !libRef.current.contains(e.target)) setLibOpen(false); };
+    document.addEventListener("pointerdown", down, true);
+    return () => document.removeEventListener("pointerdown", down, true);
+  }, [libOpen, phone]);
   const problems = validate(ed);
   const pal = toPalette(ed);
   const pv = previewOf(pal);
@@ -393,7 +401,7 @@ function Editor({ ed, setEd, lib, ctx, phone, onBack, onClose, onSave, saveNote 
         <button type="button" className="cpal-x" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="cpal-edbtns">
-        <div className="cpal-libwrap">
+        <div className="cpal-libwrap" ref={libRef}>
           <button type="button" className={"cpal-btn" + (libOpen ? " on" : "")} aria-haspopup="menu"
             onClick={() => { setLibOpen(!libOpen); }}>Replace colours from the Library ▾</button>
           {libMenu}
