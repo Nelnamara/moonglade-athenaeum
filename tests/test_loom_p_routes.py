@@ -1,4 +1,5 @@
-"""Session P, Stage B1: the Loom's new LOCAL routes -- the music bed (P3).
+"""Session P, Stage B1: the Loom's new LOCAL routes -- the music bed (P3) and the editor handoff
+export (P4).
 
 What these pin (BUILD-w5-p §4 and §5.1/§5.5; rulings 6-8, 15; review F17, F18, F19, N2):
 
@@ -12,6 +13,9 @@ What these pin (BUILD-w5-p §4 and §5.1/§5.5; rulings 6-8, 15; review F17, F18
     no other account's bed), never deleted automatically -- an explicit sweep deletes only
     what is still unused when it looks again. The full bundle carries it and an import
     RE-HASHES it (F19).
+  * THE EDL ZIP: every name validated, a half-written clip never read (MISSING.txt instead),
+    the bed only from the caller's folder, the name sanitised, the zip deleted on close and a
+    stale one swept at start (F18).
   * ⇧ Render (the local ffmpeg cut) mixes the bed by the page's rules: the pure filter-graph
     text is pinned (ffmpeg is not installed here, so the real mix cannot run -- the command's
     shape is what is asserted).
@@ -311,20 +315,23 @@ def test_every_new_post_refuses_without_the_csrf_token(rig):
     assert _upload(cli, FLAC, csrf="nope").status_code == 403
     assert not _beds_dir(rig["tmp"]).exists() or not [f for f in _beds_dir(rig["tmp"]).iterdir() if not f.name.startswith(".")]
     assert cli.post("/api/loom/beds/sweep", json={"csrf": "nope", "files": []}).status_code == 403
+    assert cli.post("/api/loom/export-edl", json={"csrf": "nope", "name": "x", "edl": "TITLE: X", "csv": "",
+                                                   "clips": []}).status_code == 403
     assert cli.post("/api/loom/beds/sweep", json={"files": []}).status_code == 403
 
 
 def test_every_new_route_is_login_tier(tmp_path):
     anon = create_app(tmp_path).test_client()
     for method, path in (("POST", "/api/loom/bed"), ("GET", "/api/loom/bed?file=x"),
-                         ("GET", "/api/loom/beds/unused"), ("POST", "/api/loom/beds/sweep")):
+                         ("GET", "/api/loom/beds/unused"), ("POST", "/api/loom/beds/sweep"),
+                         ("POST", "/api/loom/export-edl")):
         r = anon.open(path, method=method, json={} if method == "POST" else None)
         assert r.status_code == 401, (method, path, r.status_code)
 
 
 _NEW_FUNCS = ("api_loom_bed_upload", "api_loom_bed_get", "api_loom_beds_unused", "api_loom_beds_sweep",
-              "_loom_bed_path", "_loom_store_bed", "_loom_account_projects", "_loom_unused_beds",
-              "_loom_beds_dir")
+              "api_loom_export_edl", "_loom_bed_path", "_loom_store_bed",
+              "_loom_account_projects", "_loom_unused_beds", "_loom_complete_clip", "_loom_beds_dir")
 _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "_gen_session",
           "_make_session", "upload_media", "submit_fixer"}
 
@@ -343,6 +350,157 @@ def test_no_new_route_function_names_a_render_or_pixai():
     assert set(found) == set(_NEW_FUNCS), "a function was renamed: " + repr(set(_NEW_FUNCS) - set(found))
     for name, called in found.items():
         assert not (called & _SPEND), name + " calls " + repr(called & _SPEND)
+
+
+# ---- the EDL export (P4) ----------------------------------------------------------------------
+
+@pytest.fixture
+def clips(rig):
+    """Three catalogued videos: two complete, one zero-byte (a download that did not finish),
+    and a .part file in the library that must never be read."""
+    tmp = rig["tmp"]
+    (tmp / "videos").mkdir()
+    (tmp / "videos" / "shot_7001.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42clip-one")
+    (tmp / "videos" / "shot_7002.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42clip-two")
+    (tmp / "videos" / "shot_7003.mp4").write_bytes(b"")
+    (tmp / "videos" / "shot_7004.mp4.part").write_bytes(b"half")
+    save_catalog(tmp / "catalog.db", [
+        _row(media_id="7001", filename="videos/shot_7001.mp4", is_video="1"),
+        _row(media_id="7002", filename="videos/shot_7002.mp4", is_video="1"),
+        _row(media_id="7003", filename="videos/shot_7003.mp4", is_video="1"),
+        _row(media_id="7004", filename="videos/shot_7004.mp4.part", is_video="1"),
+    ])
+    return rig
+
+
+def _edl_body(cli, **kw):
+    b = {"csrf": cli.csrf, "name": "moonwell-ep1", "edl": "TITLE: MOONWELL\r\nFCM: NON-DROP FRAME\r\n",
+         "csv": "order,code,title,take,file,in,out,duration,mode,prompt\r\n",
+         "clips": [{"mid": "7001", "file": "A01_t2.mp4"}, {"mid": "7001", "file": "A02_t2.mp4"},
+                   {"mid": "7002", "file": "A03_t1.mp4"}]}
+    b.update(kw)
+    return b
+
+
+def test_the_zip_holds_the_edl_the_csv_and_each_clip_under_its_name(clips):
+    cli = clips["cli"]
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli))
+    assert r.status_code == 200 and r.mimetype == "application/zip"
+    assert r.headers["Content-Disposition"] == 'attachment; filename="moonwell-ep1.zip"'
+    z = zipfile.ZipFile(io.BytesIO(r.data))
+    assert sorted(z.namelist()) == ["A01_t2.mp4", "A02_t2.mp4", "A03_t1.mp4", "moonwell-ep1.csv", "moonwell-ep1.edl"]
+    assert z.read("A02_t2.mp4") == z.read("A01_t2.mp4"), "a split's halves are two files of one clip"
+    assert all(i.compress_type == zipfile.ZIP_STORED for i in z.infolist())
+    assert r.headers["X-Edl-Missing-Count"] == "0"
+    assert clips["traps"] == []
+
+
+def test_a_half_written_or_unknown_clip_is_listed_never_read(clips):
+    cli = clips["cli"]
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli, clips=[
+        {"mid": "7001", "file": "A01_t1.mp4"}, {"mid": "7003", "file": "A02_t1.mp4"},
+        {"mid": "7004", "file": "A03_t1.mp4"}, {"mid": "9999", "file": "A04_t1.mp4"}]))
+    z = zipfile.ZipFile(io.BytesIO(r.data))
+    assert "A01_t1.mp4" in z.namelist()
+    for missing in ("A02_t1.mp4", "A03_t1.mp4", "A04_t1.mp4"):
+        assert missing not in z.namelist()
+        assert missing in z.read("MISSING.txt").decode()
+    assert r.headers["X-Edl-Missing-Count"] == "3"
+
+
+def test_the_bed_rides_along_from_the_callers_folder_only(clips):
+    cli = clips["cli"]
+    bed = _upload(cli, FLAC).get_json()["file"]
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli, bed_file=bed, bed_name="elune-theme.flac"))
+    z = zipfile.ZipFile(io.BytesIO(r.data))
+    assert z.read("elune-theme.flac") == FLAC
+    # a bed name that is not the planner's shape falls back; never a path
+    r2 = cli.post("/api/loom/export-edl", json=_edl_body(cli, bed_file=bed, bed_name="../../evil.flac"))
+    assert "music_bed.flac" in zipfile.ZipFile(io.BytesIO(r2.data)).namelist()
+
+
+@pytest.mark.parametrize("bad", ["../../catalog.db", "..\\config.json", "../../../secret.json", "/etc/passwd",
+                                 "0" * 40 + ".mp3"])
+def test_bed_file_traversal_is_refused_f19(clips, bad):
+    cli = clips["cli"]
+    (clips["tmp"] / "secret.json").write_text('{"PIXAI_API_KEY": "sk-secret"}')
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli, bed_file=bad))
+    assert r.status_code == 400
+    assert b"sk-secret" not in r.data
+
+
+def test_another_accounts_bed_cannot_ride_in_your_zip(clips):
+    other = _other(clips["app"])
+    theirs = _upload(other, OGG).get_json()["file"]
+    cli = clips["cli"]
+    assert cli.post("/api/loom/export-edl", json=_edl_body(cli, bed_file=theirs)).status_code == 400
+
+
+@pytest.mark.parametrize("clip", [{"mid": "7001", "file": "../A01_t1.mp4"}, {"mid": "7001", "file": "A01_t1.mp4/x"},
+                                  {"mid": "7001", "file": "A01_t1.exe"}, {"mid": "7001", "file": "A012345678_t1.mp4"},
+                                  {"mid": "../7001", "file": "A01_t1.mp4"}, {"mid": "local_XYZ", "file": "A01_t1.mp4"},
+                                  "not-a-dict"])
+def test_every_clip_name_and_id_is_validated(clips, clip):
+    cli = clips["cli"]
+    assert cli.post("/api/loom/export-edl", json=_edl_body(cli, clips=[clip])).status_code == 400
+
+
+def test_two_clips_may_not_share_a_name(clips):
+    cli = clips["cli"]
+    body = _edl_body(cli, clips=[{"mid": "7001", "file": "A01_t1.mp4"}, {"mid": "7002", "file": "a01_t1.mp4"}])
+    assert cli.post("/api/loom/export-edl", json=body).status_code == 400
+
+
+@pytest.mark.parametrize("name,stem", [("Moonwell · ep 1", "Moonwell  ep 1"), ('x"\r\nSet-Cookie: a=b', "xSet-Cookie ab"),
+                                       ("../../etc/passwd", "etcpasswd"), ("☾☾", "storyboard"), ("", "storyboard"),
+                                       ("a" * 200, "a" * 64)])
+def test_the_name_is_sanitised(clips, name, stem):
+    cli = clips["cli"]
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli, name=name))
+    assert r.status_code == 200
+    assert g.loom_edl_zip_stem(name) == stem
+    assert stem + ".edl" in zipfile.ZipFile(io.BytesIO(r.data)).namelist()
+    assert "\n" not in r.headers["Content-Disposition"]
+
+
+def test_edl_and_csv_are_capped(clips, monkeypatch):
+    cli = clips["cli"]
+    monkeypatch.setattr(g, "LOOM_EDL_MAX_EDL_CHARS", 10)
+    assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="x" * 11)).status_code == 413
+    monkeypatch.setattr(g, "LOOM_EDL_MAX_CSV_CHARS", 10)
+    assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="ok", csv="y" * 11)).status_code == 413
+    assert cli.post("/api/loom/export-edl", json=_edl_body(cli, edl="")).status_code == 400
+
+
+def test_the_zip_is_deleted_once_the_download_closes(clips):
+    cli = clips["cli"]
+    r = cli.post("/api/loom/export-edl", json=_edl_body(cli), buffered=True)
+    assert r.status_code == 200
+    r.close()
+    d = clips["tmp"] / "loom" / "_exports"
+    assert d.is_dir() and not list(d.glob("*.zip"))
+
+
+def test_a_stale_export_is_swept_at_start_and_a_fresh_one_kept(tmp_path):
+    d = tmp_path / "loom" / "_exports"
+    d.mkdir(parents=True)
+    old, new = d / "old.zip", d / "new.zip"
+    old.write_bytes(b"x")
+    new.write_bytes(b"y")
+    _age(old, g.LOOM_EXPORT_SWEEP_AGE_S + 60)
+    create_app(tmp_path)
+    assert not old.exists() and new.exists()
+
+
+def test_the_name_patterns_are_the_planners_own():
+    js = (REPO / "loom" / "src" / "loom-edl-core.js").read_text(encoding="utf-8")
+    clip = re.search(r"export const EDL_CLIP_FILE_RE = /(.+)/;", js).group(1)
+    bed = re.search(r"export const EDL_BED_NAME_RE = /(.+)/;", js).group(1)
+    assert clip == g.LOOM_EDL_CLIP_RE.pattern
+    assert bed == g.LOOM_EDL_BED_NAME_RE.pattern
+    bedjs = (REPO / "loom" / "src" / "loom-bed-core.js").read_text(encoding="utf-8")
+    assert re.search(r"export const BED_FILE_RE = /(.+)/;", bedjs).group(1) == g.LOOM_BED_FILE_RE.pattern
+    assert "export const BED_MAX_BYTES = 50 * 1024 * 1024;" in bedjs and g.LOOM_BED_MAX_BYTES == 50 * 1024 * 1024
 
 
 # ---- the full bundle carries the bed; an import re-hashes it (F19) -------------------------
@@ -423,6 +581,62 @@ def test_duck_windows_are_runs_of_own_audio_shots():
     assert g.loom_bed_windows([5, 3, 6], [True, True, False]) == [(0.0, 8.0)]
     assert g.loom_bed_windows([5, 3, 6], [False, True, True], bed_len=10) == [(5.0, 10.0)]
     assert g.loom_bed_windows([5, 3], [False, False]) == []
+
+
+def test_render_passes_the_bed_as_an_input_with_the_graph(rig, monkeypatch, clips):
+    cli = rig["cli"]
+    bed = _upload(cli, FLAC).get_json()["file"]
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg-fake")
+    monkeypatch.setattr(core, "ffprobe_path", lambda: "ffprobe-fake")
+    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: p.endswith("7002.mp4"))
+    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 60.0 if p.endswith(".flac") else 5.0)
+    started = []
+
+    class _Thread:
+        def __init__(self, target=None, args=(), daemon=None, **k):
+            started.append(args)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(g.threading, "Thread", _Thread)
+    r = cli.post("/api/loom/export", json={
+        "clips": [{"mid": "7001", "in": 0, "out": 4, "own_audio": False, "span": 4},
+                  {"mid": "7002", "in": 0, "out": None, "own_audio": True, "span": 5}],
+        "total_seconds": 9, "bed": {"file": bed, "db": -6, "dur": 60}})
+    assert r.get_json().get("ok") is True, r.get_json()
+    cmd = started[0][0]
+    bi = cmd.index(str(_beds_dir(rig["tmp"]) / bed))
+    assert cmd[bi - 1] == "-i", "the bed is an ffmpeg input, read from the caller's own folder"
+    assert bi < cmd.index("-filter_complex")
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "[2:a]atrim" in fc, "the bed's input index follows the two clips (no silence input here)"
+    assert "concat=n=2:v=1:a=1[vout][acut]" in fc
+    assert "volume=-6dB" in fc and "between(t,4.000,9.000)" in fc and "atrim=end=9.000" in fc
+    assert fc.endswith("normalize=0[aout]")
+    assert cmd[cmd.index("-map", cmd.index("[vout]")) + 1] == "[aout]"
+    assert rig["traps"] == []
+
+
+def test_render_without_the_bed_file_says_so_and_renders_the_cut(rig, monkeypatch, clips):
+    cli = rig["cli"]
+    monkeypatch.setattr(core, "ffmpeg_path", lambda: "ffmpeg-fake")
+    monkeypatch.setattr(g, "probe_has_audio", lambda p, timeout=None: True)
+    monkeypatch.setattr(g, "probe_duration", lambda p, timeout=None: 5.0)
+    started = []
+
+    class _Thread:
+        def __init__(self, target=None, args=(), daemon=None, **k):
+            started.append(args)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(g.threading, "Thread", _Thread)
+    r = cli.post("/api/loom/export", json={"clips": [{"mid": "7001", "in": 0, "out": 4}], "total_seconds": 4,
+                                            "bed": {"file": "1" * 40 + ".mp3", "db": -8}})
+    assert r.get_json()["ok"] is True
+    fc = started[0][0][started[0][0].index("-filter_complex") + 1]
+    assert "amix" not in fc and fc.endswith("[vout][aout]")
+    assert "music bed" in cli.get("/api/loom/export-status").get_json()["warning"]
 
 
 # ---- the sniffer, directly -------------------------------------------------------------------------

@@ -64,12 +64,14 @@ import {
   anchorInfo, staleText, needsNewTake, reanchorPatch, keepAnchor as keepAnchorPatch,
 } from "./src/loom-takes-core.js";
 import { makeSaveQueue } from "./src/loom-store-core.js";
-// Session P, Stage B1 (NOTES P3): the music bed's rules and timing -- a pure module, no React,
-// no DOM, no fetch (loom-no-auto-render.test.js pins that it cannot reach a render).
+// Session P, Stage B1 (NOTES P3, P4): the music bed's rules and timing and the editor handoff
+// plan -- pure modules, no React, no DOM, no fetch
+// (loom-no-auto-render.test.js pins that none of them can reach a render).
 import {
   BED_MAX_BYTES, BED_DB_MIN, BED_DB_MAX, BED_DUCK_DB, bedOf, makeBed, clampBedDb, bedClock, dbLabel,
   cutSegments, bedPlan, bedAutomation, bedDbAt, peaksToBuckets, peakAt, cutStatusLine,
 } from "./src/loom-bed-core.js";
+import { edlPlan, bedZipName } from "./src/loom-edl-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -123,8 +125,8 @@ const LOOM_RUN_DEPS = {
   post: apiPost, run: submitRun, confirm: (text) => window.confirm(text),
   csrf: async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); },
 };
-// The session's CSRF token for the Loom's own local POSTs (Session P, Stage B1: the music bed
-// and its sweep). The account store's GET hands it out, as it does to every
+// The session's CSRF token for the Loom's own local POSTs (Session P, Stage B1: the music bed,
+// its sweep, the EDL export). The account store's GET hands it out, as it does to every
 // wave-5 surface.
 const loomCsrf = async () => { await accountPrefs().ensureLoaded(); return accountCsrf(); };
 
@@ -233,6 +235,28 @@ const STYLES = `
 .sb-exportitem:hover{background:rgba(255,255,255,.05)}
 .sb-exportitem:disabled{color:var(--ink3);cursor:default;background:transparent}
 .sb-exportitem small{color:var(--ink3);font-size:10px;margin-left:auto;white-space:nowrap}
+/* Session P (P4): the Export ▾ row the Loom Handoff page highlights -- the editor handoff. */
+.sb-exportitem.sb-exportedl{background:color-mix(in srgb,var(--lavender) 14%,transparent)}
+.sb-exportitem.sb-exportedl:hover{background:color-mix(in srgb,var(--lavender) 22%,transparent)}
+/* Session P (P4): THE EDIT DECISION LIST PANEL, the page's own sizes and tokens (its #0a0818 is
+   --mantle; its darker preview well is --mantle pulled toward black). Shown over the board. */
+.sb-edlveil{background:rgba(4,3,10,.72)}
+.sb-edl{width:920px;max-width:94vw;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:14px;
+  border:1px solid var(--lavender);background:var(--mantle);box-sizing:border-box}
+.sb-edlhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sb-edlcap{flex:1;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0)}
+.sb-edltab{font:600 10px/1.2 system-ui,sans-serif;padding:3px 9px;border-radius:6px;cursor:pointer;
+  border:1px solid var(--surface1);background:transparent;color:var(--subtext)}
+.sb-edltab.on{background:var(--lavender);color:var(--base)}
+.sb-edlx{font-size:10px;color:var(--overlay0);cursor:pointer;padding:0 4px;border:0;background:transparent}
+.sb-edlx:hover{color:var(--text)}
+.sb-edlpre{font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:10px 12px;border-radius:9px;
+  background:color-mix(in srgb,var(--mantle) 70%,black);border:1px solid var(--surface0);color:var(--subtext);
+  white-space:pre;overflow:auto;max-height:260px}
+.sb-edlnote{font-size:9.5px;color:var(--overlay0)}
+.sb-edlnote code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;color:var(--mauve)}
+.sb-edlfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end}
+.sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
 .sb-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .sb-shotprev{position:relative;margin-top:8px;border-radius:8px;overflow:hidden;
@@ -1252,7 +1276,7 @@ function ProjectSwitcher({ api }) {
 // existing exportJSON), and Full bundle (.zip -- the same JSON plus the actual referenced
 // media files, for sharing with someone who doesn't share your catalog). Restore accepts
 // either file back; importBackup sniffs which one it got.
-function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling }) {
+function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundling, openEdl }) {
   const [open, setOpen] = useState(false);
   // Escape closes it -- same reason as ProjectSwitcher above: this menu reuses .sb-projveil.
   useEffect(() => {
@@ -1278,6 +1302,13 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
             onClick={() => { exportBundle(); setOpen(false); }}
             title="Everything in the lightweight backup, plus the actual media files -- for sharing with someone who doesn't share your catalog">
             {bundling ? "Building bundle…" : <>Full bundle <small>.zip</small></>}</button>
+          {/* Session P (P4): the editor handoff -- the page's highlighted row. It opens the EDL
+              panel (a plan, previewed); the panel's Download builds the zip. */}
+          {openEdl && (
+            <button className="sb-exportitem sb-exportedl" onClick={() => { openEdl(); setOpen(false); }}
+              title="A CMX3600 edit decision list and a CSV for a desktop editor, with each shot's selected take — previewed first">
+              Edit decision list <small>.edl + .csv</small></button>
+          )}
           <div className="sb-exportdiv" />
           <label className="sb-exportitem" style={{ cursor: "pointer" }}
             title="Restore either a lightweight backup or a full bundle -- always opens as a new storyboard">
@@ -1298,8 +1329,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // generateShot -- its ONLY use in this component, pinned by loom-no-auto-render.test.js -- and
   // the takes strip, the take list and the stale-anchor box call useTakeActions' board edits.
   generateShot, selectTakeOnCard, deleteTakeOnCard, reuseTakeSettings, reanchorShot, keepAnchor, anchorWork,
-  // Session P, Stage B1: the music bed's board edits (P3).
-  bedApi,
+  // Session P, Stage B1: the EDL panel's opener (P4) and the music bed's board edits (P3).
+  openEdl, bedApi,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -3462,7 +3493,7 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
         <button disabled={!entries.some((e) => e.c.resultMid)} onClick={() => exportCut(entries)}
           title="Trim + stitch every finished shot into one mp4 (ffmpeg)">&#8679; Render</button>
         <ExportMenu exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle}
-          bundling={bundling} importBackup={importBackup} />
+          bundling={bundling} importBackup={importBackup} openEdl={openEdl} />
         <span className="lv-fill" />
         {/* Activity FIRST again in the flush-right pair (2026-08-10, see .lv-top-act-wrap's
             own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
@@ -8429,6 +8460,10 @@ function useExportPipeline(project, thumbs) {
   const [seq, setSeq] = useState(null);           // Play-sequence: [clip,...] or null
   // Session P (P3): the music bed Play mixes under that sequence -- {bed, plan, segs} or null.
   const [seqMix, setSeqMix] = useState(null);
+  // Session P (P4): the EDL panel -- {tab: "edl"|"csv"} while it is open, else null. The plan
+  // itself is recomputed from the board on every render, so it always shows the board as it is.
+  const [edlView, setEdlView] = useState(null);
+  const [edlBusy, setEdlBusy] = useState(false);
   const [exp, setExp] = useState(null);           // export overlay: {status,progress,...} or null
   const exportPoll = useRef(null);
 
@@ -8520,9 +8555,36 @@ function useExportPipeline(project, thumbs) {
   // is exactly why it looked like the buttons just didn't respond.
   const closeSequence = () => { setSeq(null); setSeqMix(null); };
 
+  /* THE EDITOR HANDOFF EXPORT (Session P, P4). Opening the panel only plans (pure,
+     loom-edl-core.js); the Download posts that plan to the local zip route. Neither touches
+     PixAI or renders anything -- exportEdl is a root of loom-no-auto-render.test.js. */
+  const openEdl = () => setEdlView({ tab: "edl" });
+  const closeEdl = () => setEdlView(null);
+  const exportEdl = async () => {
+    const bed = bedOf(project);
+    const plan = edlPlan(project, { bed });
+    if (!plan.clips.length) { alert("No rendered shots to hand off yet — render one first."); return; }
+    setEdlBusy(true);
+    try {
+      const r = await fetch("/api/loom/export-edl", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf: await loomCsrf(), name: plan.slug, edl: plan.edl, csv: plan.csv, clips: plan.clips,
+          ...(bed && plan.bedName ? { bed_file: bed.file, bed_name: plan.bedName } : {}) }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert("The edit decision list didn't export: " + (d.error || r.status)); return; }
+      const missing = Number(r.headers.get("X-Edl-Missing-Count") || 0);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = plan.slug + ".zip"; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (missing && window.Toast) window.Toast.show({ kind: "err", title: "Exported, " + missing + " clip(s) left out",
+        msg: "Their files aren't complete in your library. The zip's MISSING.txt names them." });
+    } catch (e) { alert("The edit decision list didn't export — network error."); }
+    finally { setEdlBusy(false); }
+  };
+
   return { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
-    bundleMissing, closeBundleMissing: () => setBundleMissing(null) };
+    bundleMissing, closeBundleMissing: () => setBundleMissing(null),
+    edlView, setEdlView, openEdl, closeEdl, exportEdl, edlBusy };
 }
 
 export default function App() {
@@ -8628,7 +8690,8 @@ export default function App() {
 
   const { seq, seqMix, exp, playSequence, exportCut, cancelExport, closeExport, closeSequence,
     exportAll, exportJSON, exportBundle, bundling,
-    bundleMissing, closeBundleMissing } = useExportPipeline(project, thumbs);
+    bundleMissing, closeBundleMissing,
+    edlView, setEdlView, openEdl, closeEdl, exportEdl, edlBusy } = useExportPipeline(project, thumbs);
 
   // Import a whole gallery collection as reusable @image references (media_id kept
   // -> free reference at generate time). Tags continue from the current max @imageN.
@@ -8722,7 +8785,7 @@ export default function App() {
           batching={batching} batchGenerate={batchGenerate} batchTally={batchTally}
           addRef={addRef} setRef={setRef} delRef={delRef}
           exportAll={exportAll} exportJSON={exportJSON} exportBundle={exportBundle} bundling={bundling}
-          bedApi={bedApi}
+          openEdl={openEdl} bedApi={bedApi}
           importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
@@ -8738,6 +8801,11 @@ export default function App() {
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo} /></V2Boundary>
       )}
       {seq && <SequencePlayer clips={seq} mix={seqMix} onClose={closeSequence} />}
+      {/* Session P (P4): the EDIT DECISION LIST panel (desktop only -- "Phone: not offered"). */}
+      {edlView && !mobileUI && (
+        <EdlPanel project={project} view={edlView} setView={setEdlView} onClose={closeEdl}
+          onDownload={exportEdl} busy={edlBusy} />
+      )}
       {exp && (
         <div className="sb-seq" onClick={(e) => { if (e.target === e.currentTarget && exp.status !== "running") closeExport(); }}>
           <div className="sb-export-box">
@@ -9147,6 +9215,43 @@ function BedRow({ entries, scale, bed, segs, plan, peaks, api }) {
           <div className="lv-bednote">{u.count} unused music bed file{u.count === 1 ? "" : "s"} ({u.h}) &middot;{" "}
             <button type="button" className="lv-bedlink" onClick={() => api.sweepUnusedBeds()}>Remove&hellip;</button></div>
         ) : null}
+    </div>
+  );
+}
+
+/* THE EDIT DECISION LIST PANEL (Session P, P4; Loom Handoff.dc.html's EDL panel). The plan is
+   pure (loom-edl-core.js) and recomputed from the board as it is now; .edl / .csv tabs show the
+   files exactly as they will be written; Download posts them to the local zip route. The page's
+   "P4 ·" label prefix is its own annotation and is not drawn. Desktop only. */
+function EdlPanel({ project, view, setView, onClose, onDownload, busy }) {
+  const bed = bedOf(project);
+  const plan = edlPlan(project, { bed });
+  const text = view.tab === "csv" ? plan.csv : plan.edl;
+  useEffect(() => {
+    const esc = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="sb-seq sb-edlveil" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sb-edl" role="dialog" aria-label="Edit decision list">
+        <div className="sb-edlhead">
+          <div className="sb-edlcap">EDIT DECISION LIST &middot; {plan.slug} &middot; 24 fps &middot; selected takes and trims</div>
+          {[["edl", ".edl"], ["csv", ".csv"]].map(([k, l]) => (
+            <button key={k} type="button" className={"sb-edltab" + (view.tab === k ? " on" : "")} aria-pressed={view.tab === k}
+              onClick={() => setView({ tab: k })}>{l}</button>
+          ))}
+          <button type="button" className="sb-edlx" onClick={onClose} aria-label="Close">&#10005;</button>
+        </div>
+        <div className="sb-edlpre" tabIndex={0}>{text.replace(/\r\n/g, "\n")}</div>
+        <div className="sb-edlnote">The download is a .zip holding the .edl, the .csv and each selected take's rendered clip,
+          named <code>{"{code}_t{take}.mp4"}</code> to match the reel names.{bed && plan.bedName ? " The music bed rides along as " + plan.bedName + "." : ""}</div>
+        <div className="sb-edlfoot">
+          <span className="sb-edlcount">{plan.events} shot{plan.events === 1 ? "" : "s"}{plan.skipped.length ? " · " + plan.skipped.length + " unrendered skipped" : ""}</span>
+          <button type="button" className="sb-btn amber sm" disabled={busy || !plan.clips.length} onClick={onDownload}>
+            {busy ? "Building the zip…" : "⇩ Download (.zip)"}</button>
+        </div>
+      </div>
     </div>
   );
 }

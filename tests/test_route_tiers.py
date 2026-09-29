@@ -202,6 +202,7 @@ TIER_SNAPSHOT = [
     "/api/loom/export [POST] LOGIN",
     "/api/loom/export-bundle [POST] LOGIN",
     "/api/loom/export-cancel [POST] LOGIN",
+    "/api/loom/export-edl [POST] LOGIN",     # Session P (P4): the editor handoff zip
     "/api/loom/export-file [GET] LOGIN",
     "/api/loom/export-status [GET] LOGIN",
     "/api/loom/generate [POST] LOGIN",
@@ -994,8 +995,8 @@ _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs
                   "/api/curate", "/api/collections/manage",
                   # wave 5, Session P: the Loom's new local routes
                   "/api/loom/submit-abandon",
-                  # Session P, Stage B1: the music bed
-                  "/api/loom/bed", "/api/loom/beds")
+                  # Session P, Stage B1: the music bed and the EDL export
+                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -1014,4 +1015,4 @@ def test_every_lane_post_checks_csrf(app):
     assert "/api/account/prefs" in checked, checked
     assert "/api/narrator/poke" in checked, checked
     assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
-    assert {"/api/loom/bed", "/api/loom/beds/sweep"} <= set(checked), checked
+    assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl"} <= set(checked), checked

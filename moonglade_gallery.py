@@ -998,8 +998,8 @@ def loom_render_ids(out_dir):
 
 
 # ---------------------------------------------------------------------------
-# THE LOOM'S MUSIC BED (Session P, Stage B1: NOTES P3; BUILD-w5-p §5.5; rulings 8 and 15;
-# review F18/F19). Pure helpers here; the routes are in create_app.
+# THE LOOM'S MUSIC BED AND EDL EXPORT (Session P, Stage B1: NOTES P3/P4; BUILD-w5-p §5.1/§5.5;
+# rulings 6-8 and 15; review F18/F19/N2). Pure helpers here; the routes are in create_app.
 #
 # A bed is one local audio file per storyboard, stored content-addressed at
 # out_dir/loom/_beds/<account key>/<sha1>.<ext> -- never uploaded, never sent to PixAI, and
@@ -1018,6 +1018,15 @@ LOOM_BED_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "
 # A bed added in the last few minutes may belong to a board whose save has not landed yet, so
 # the unused list never offers it (the sweep re-checks the same rule).
 LOOM_BED_UNUSED_GRACE_S = 10 * 60
+# THE EDL ZIP'S NAMES -- the same patterns as loom/src/loom-edl-core.js's EDL_CLIP_FILE_RE and
+# EDL_BED_NAME_RE (tests/test_loom_p_routes.py compares the two sources).
+LOOM_EDL_CLIP_RE = re.compile(r"^[A-Za-z0-9]{1,8}_t\d{1,4}\.mp4$")
+LOOM_EDL_BED_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(mp3|wav|m4a|aac|ogg|flac)$")
+LOOM_MEDIA_ID_RE = re.compile(r"^(\d+|local_[0-9a-f]{12})$")
+LOOM_EDL_MAX_EDL_CHARS = 1024 * 1024
+LOOM_EDL_MAX_CSV_CHARS = 4 * 1024 * 1024
+LOOM_EDL_MAX_CLIPS = 2000
+LOOM_EXPORT_SWEEP_AGE_S = 3600
 
 # The page's bed rules (loom/src/loom-bed-core.js holds the same numbers for Play).
 LOOM_BED_FADE_IN = 2.0
@@ -1065,6 +1074,14 @@ def _unlink_quiet(path):
         os.unlink(str(path))
     except OSError:
         pass
+
+
+def loom_edl_zip_stem(name):
+    """The export's file stem: the board's name kept to [A-Za-z0-9 _.-], 64 characters at
+    most, never empty and never starting with a dot (review F19: it goes into
+    Content-Disposition and the zip's entry names)."""
+    s = re.sub(r"[^A-Za-z0-9 _.-]", "", str(name or ""))[:64].strip().lstrip(".").strip()
+    return s or "storyboard"
 
 
 def loom_board_beds(projects):
@@ -24985,6 +25002,121 @@ __DESIGN_TOKENS__
             except OSError:
                 kept.append(n)
         return jsonify({"ok": True, "removed": removed, "kept": kept})
+
+    # ==== THE EDITOR HANDOFF EXPORT (Session P, P4) ============================================
+    # One zip: the .edl and .csv the Loom planned (loom/src/loom-edl-core.js), every selected
+    # take's clip under its {code}_t{take}.mp4 name, the bed when there is one (ruling 8), and
+    # MISSING.txt for any clip that is not a complete file here. Local files only; never PixAI.
+    _loom_exports_dir = out_dir / "loom" / "_exports"
+    # A leftover from an export whose download never closed (a client abort, a Windows file
+    # handle) is swept on the next start once it is an hour old (review F18).
+    try:
+        for _old in (_loom_exports_dir.glob("*.zip") if _loom_exports_dir.is_dir() else []):
+            try:
+                if time.time() - _old.stat().st_mtime > LOOM_EXPORT_SWEEP_AGE_S:
+                    _old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    def _loom_complete_clip(mid):
+        """The library file for a clip id, only when it is a COMPLETE file (Invariant 3: a
+        .part download and a zero-byte file are not there) inside the library. Or None."""
+        p = _find_local_video_file(mid)
+        if p is None:
+            return None
+        try:
+            if (p.name.endswith(".part") or not p.is_file() or p.stat().st_size <= 0
+                    or not _is_under(p.resolve(), out_dir.resolve())):
+                return None
+        except OSError:
+            return None
+        return p
+
+    @app.route("/api/loom/export-edl", methods=["POST"])
+    @tier(LOGIN)
+    def api_loom_export_edl():
+        """{csrf, name, edl, csv, clips: [{mid, file}], bed_file?, bed_name?} -> a zip download.
+        Every name is validated against the pattern the planner uses, every mid against the
+        media-id grammar, the bed against the caller's own folder (F19); the zip is written to
+        out_dir/loom/_exports/<uuid>.zip, streamed, and deleted when the response closes."""
+        import uuid
+        import zipfile
+        user = str(session.get("user") or "")
+        if not user:
+            return jsonify({"error": "not logged in"}), 401
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        edl, csv_text = body.get("edl"), body.get("csv")
+        if not isinstance(edl, str) or not isinstance(csv_text, str) or not edl.strip():
+            return jsonify({"error": "edl and csv are required"}), 400
+        if len(edl) > LOOM_EDL_MAX_EDL_CHARS or len(csv_text) > LOOM_EDL_MAX_CSV_CHARS:
+            return jsonify({"error": "That edit decision list is too large."}), 413
+        clips = body.get("clips")
+        if not isinstance(clips, list) or len(clips) > LOOM_EDL_MAX_CLIPS:
+            return jsonify({"error": "clips must be a list"}), 400
+        seen, plan = set(), []
+        for c in clips:
+            if not isinstance(c, dict):
+                return jsonify({"error": "bad clip"}), 400
+            mid, fname = str(c.get("mid") or ""), str(c.get("file") or "")
+            if not LOOM_MEDIA_ID_RE.match(mid) or not LOOM_EDL_CLIP_RE.match(fname):
+                return jsonify({"error": "bad clip name or id: %s" % re.sub(r"[^A-Za-z0-9_.-]", "", fname)[:40]}), 400
+            if fname.lower() in seen:
+                return jsonify({"error": "two clips share the name %s" % fname}), 400
+            seen.add(fname.lower())
+            plan.append((mid, fname))
+        stem = loom_edl_zip_stem(body.get("name"))
+        bed_path, bed_name = None, ""
+        if body.get("bed_file"):
+            bed_path = _loom_bed_path(user, body.get("bed_file"))
+            if bed_path is None:
+                return jsonify({"error": "That music bed isn't in your beds folder."}), 400
+            bed_name = str(body.get("bed_name") or "")
+            ext = bed_path.suffix.lstrip(".")
+            if not LOOM_EDL_BED_NAME_RE.match(bed_name) or not bed_name.endswith("." + ext):
+                bed_name = "music_bed." + ext
+        _loom_exports_dir.mkdir(parents=True, exist_ok=True)
+        zpath = _loom_exports_dir / (uuid.uuid4().hex + ".zip")
+        missing = []
+        try:
+            with zipfile.ZipFile(str(zpath), "w", zipfile.ZIP_STORED) as z:
+                z.writestr(stem + ".edl", edl)
+                z.writestr(stem + ".csv", csv_text)
+                for mid, fname in plan:
+                    p = _loom_complete_clip(mid)
+                    if p is None:
+                        missing.append("%s  %s  (no complete file for this clip in the library)" % (fname, mid))
+                    elif p.suffix.lower() != ".mp4":
+                        missing.append("%s  %s  (the library file is %s, not .mp4)" % (fname, mid, p.suffix.lower()))
+                    else:
+                        z.write(str(p), arcname=fname)
+                if bed_path is not None:
+                    z.write(str(bed_path), arcname=bed_name)
+                if missing:
+                    z.writestr("MISSING.txt", "These clips are named in the edit decision list but are "
+                               "not in this zip:\r\n\r\n" + "\r\n".join(missing) + "\r\n")
+        except OSError as e:
+            _unlink_quiet(zpath)
+            return jsonify({"error": _redact_host_paths(str(e))[:160]}), 500
+        # Streamed from the temp file by a plain generator rather than send_file: a send_file
+        # response is "direct passthrough", and Werkzeug then never runs call_on_close -- the
+        # zip would outlive every download. Here the response's close() (the download ended,
+        # or the client went away) deletes it; the start-up sweep takes any a crash left.
+        from flask import Response
+
+        def _stream():
+            with open(str(zpath), "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    yield chunk
+        resp = Response(_stream(), mimetype="application/zip")
+        resp.headers["Content-Disposition"] = 'attachment; filename="%s.zip"' % stem
+        resp.headers["Content-Length"] = str(zpath.stat().st_size)
+        resp.headers["X-Edl-Missing-Count"] = str(len(missing))
+        resp.call_on_close(lambda: _unlink_quiet(zpath))
+        return resp
 
     @app.route("/api/loom/export", methods=["POST"])
     @tier(LOGIN)
