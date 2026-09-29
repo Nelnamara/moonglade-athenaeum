@@ -1600,6 +1600,7 @@ ${"=".repeat(48)}
     } finally {
       if (timer2) clearTimeout(timer2);
     }
+    if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
     let d = null;
     try {
       d = await r.json();
