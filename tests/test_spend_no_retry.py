@@ -378,3 +378,16 @@ class TestRestSpendPathsAreSingleAttempt:
             assert "for " not in src and "while " not in src, (
                 "{} grew a retry loop -- submit_fixer and claim_reward would "
                 "double-fire".format(name))
+
+    def test_the_recipe_delete_verb_has_no_retry_loop(self):
+        """Wave 2's recipe writes add the one /v2 DELETE (taking a recipe out of a set). It is
+        its own verb in moonglade_recipes, not a PixAIClient method, so it is pinned here beside
+        the others: one bare session.delete, no loop. Read from the module's source, because
+        tests/conftest.py blocks the live function for every test."""
+        import moonglade_recipes as rec
+        fn = next(n for n in ast.parse(inspect.getsource(rec)).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "_rest_delete")
+        src = ast.get_source_segment(inspect.getsource(rec), fn)
+        assert src.count(".delete(") == 1
+        assert "for " not in src and "while " not in src, (
+            "moonglade_recipes._rest_delete grew a retry loop")

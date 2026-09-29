@@ -15,6 +15,8 @@ What is pinned here, route by route:
   * opening a draft, the runs list and the datasets list only read.
 
 Fully offline: PixAI is the transport fake (tests/fake_pixai.py) or a stub."""
+import inspect
+import re
 import threading
 
 import pytest
@@ -139,6 +141,55 @@ def test_a_refusal_and_an_unclear_failure_are_told_apart():
     assert not core.definite_refusal(requests.ReadTimeout("slow"))
     assert not core.definite_refusal(requests.ConnectionError("dropped"))
     assert not core.definite_refusal(core.PixAIError("HTTP 200 non-JSON response"))
+
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code, self._body = status, body
+        self.ok = 200 <= status < 300
+        self.text = body if isinstance(body, str) else str(body)
+
+    def json(self):
+        if isinstance(self._body, str):
+            raise ValueError("not json")
+        return self._body
+
+
+class _Sess:
+    def __init__(self, resp):
+        self.resp = resp
+
+    def get(self, *a, **k):
+        return self.resp
+
+    post = put = patch = get
+
+
+def test_the_one_rest_error_serves_the_training_refusals_and_the_recipe_code():
+    """Wave 3's merge seam: wave 2 (recipes) and this lane each added a `_rest_error`, and a
+    plain merge kept both -- the later one shadowing the other, so no REST refusal would have
+    been a PixAIRestError and definite_refusal would have called every PixAI 4xx on a spend
+    "may have started". There is one now, on every /v2 verb, and it carries both vocabularies:
+    status/code/data (the training refusals) and http_status/body (the recipe refusals)."""
+    import moonglade_backup
+    assert len(re.findall(r"^def _rest_error\(", inspect.getsource(moonglade_backup), re.M)) == 1
+    body = {"code": "INSUFFICIENT_BALANCE", "data": {"mediaIds": ["5"]}}
+    for verb in ("rest_get", "rest_post", "rest_put", "rest_patch"):
+        client = core.PixAIClient(_Sess(_Resp(403, body)))
+        call = getattr(client, verb)
+        with pytest.raises(core.PixAIRestError) as ei:
+            call("/training-task/1") if verb == "rest_get" else call("/training-task/1", {})
+        e = ei.value
+        assert e.status == e.http_status == 403 and e.body == body
+        assert e.code == "INSUFFICIENT_BALANCE" and e.data == {"mediaIds": ["5"]}
+        assert core.definite_refusal(e)
+        assert core.training_error_words(e).startswith("there aren't enough credits")
+    client = core.PixAIClient(_Sess(_Resp(502, "<html>bad gateway</html>")))
+    with pytest.raises(core.PixAIRestError) as ei:
+        client.rest_put("/training-task/1/media", {})
+    assert ei.value.body is None and ei.value.code == "" and ei.value.data == {}
+    assert not core.definite_refusal(ei.value)
+    assert core.training_error_words(ei.value).startswith("REST PUT /training-task/1/media -> 502")
 
 
 # ------------------------------------------------------------ the draft route

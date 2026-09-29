@@ -964,3 +964,26 @@ def test_the_pilot_codename_has_no_page_route(app):
     assert "/next" not in {str(r) for r in app.url_map.iter_rules()}, (
         "a rule for /next is registered again -- see the docstring above before adding "
         "it back")
+
+
+# The wave 2 and wave 3 lanes' own POST families (recipes, Train a LoRA, the account store
+# Help and the recipe drafts share) each check the session's CSRF token before they act.
+# Older POSTs predate the rule and are not listed here; a NEW route under one of these
+# prefixes that forgets the check fails by name.
+_CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs")
+_CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
+
+
+def test_every_lane_post_checks_csrf(app):
+    import inspect
+    checked, missing = [], []
+    for rule in app.url_map.iter_rules():
+        if "POST" not in (rule.methods or ()) or not rule.rule.startswith(_CSRF_PREFIXES):
+            continue
+        src = inspect.getsource(app.view_functions[rule.endpoint])
+        (checked if any(h in src for h in _CSRF_HELPERS) else missing).append(rule.rule)
+    assert not missing, "POST routes with no CSRF check: %s" % sorted(missing)
+    # the families are really there (a renamed prefix would make this vacuous)
+    assert any(r.startswith("/api/train") for r in checked), checked
+    assert any(r.startswith("/api/recipes") for r in checked), checked
+    assert "/api/account/prefs" in checked, checked
