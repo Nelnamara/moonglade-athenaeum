@@ -324,3 +324,116 @@ export function basicFooterCost({ quota, tab, reuse }) {
   if (quota > 0) return { free: true, price: 0, struck: price, badge: quota + (quota === 1 ? " time free" : " times free"), reason: reuse ? "reusing a dataset" : "" };
   return { free: false, price, struck: null, badge: "", reason: reuse ? "reusing a dataset" : "" };
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Advanced (Training Handoff C / decision 3c, with the owner's 2026-09-28 corrections in
+   BUILD-w3-train.md section 5): the rules both Advanced screens (desktop TrainAdvanced, the
+   phone's Advanced steps) share. Pure; loom/test/train-core.test.js holds them. */
+
+/* PixAI's own defaults, the ones its advanced page locks and submits (and the server sends
+   verbatim: core.TRAIN_DEFAULT_OPTIONS). The contract's ranges are drawn on the locked tracks
+   so the page reads as the handoff draws it. */
+export const ADVANCED_DEFAULTS = Object.freeze({ steps: 325, learningRate: 0.0006, rank: 64, gradAccum: 2 });
+export const STEP_RANGE = Object.freeze({ min: 50, max: 800 });
+export const LR_RANGE = Object.freeze({ min: 0.00005, max: 0.001 });
+export const RANKS = Object.freeze([8, 16, 32, 64]);
+
+/* PixAI's own estimate (its advanced page): t = max(1, round(steps × 27/325)) minutes, shown as
+   "about t–round(t × 1.3) minutes". The same numbers the server's core.training_eta answers. */
+export function etaForSteps(steps) {
+  const s = Number(steps);
+  const t = Math.max(1, Math.round((Number.isFinite(s) ? s : ADVANCED_DEFAULTS.steps) * 27 / 325));
+  return { min: t, max: Math.round(t * 1.3) };
+}
+
+/* Where a value sits on its drawn track, 0-100 (the locked tracks' fill). */
+export function trackPercent(value, range) {
+  const v = Number(value), lo = Number(range && range.min), hi = Number(range && range.max);
+  if (!Number.isFinite(v) || !(hi > lo)) return 0;
+  return Math.round(Math.min(1, Math.max(0, (v - lo) / (hi - lo))) * 100);
+}
+
+/* Advanced's set-up line under the trigger box (handoff C1, peach inline): the tidied count out
+   of 256 and what is wrong, PixAI's spacing rule named. `warn` colours it peach; `block` is what
+   keeps "Next · creates a draft" off (the spacing is tidied before sending, so it warns only). */
+export function advancedTriggerLine(raw) {
+  const c = triggerCheck(raw, true);
+  const rules = "No double spaces, and no space at the start or end.";
+  if (!String(raw || "").length) {
+    return { text: "At least 30 characters, up to 256. " + rules, warn: false, block: true };
+  }
+  if (!c.ok) return { text: c.length + " / 256: " + c.problem + ". " + rules, warn: true, block: true };
+  if (c.spacing) {
+    return { text: c.length + " / 256: " + rules + " They're taken out before it's sent.", warn: true, block: false };
+  }
+  return { text: c.length + " / 256", warn: false, block: false };
+}
+
+/* PixAI's description filters (its step 2), in its order. */
+export const CAPTION_FILTERS = Object.freeze([
+  { key: "all", label: "All" },
+  { key: "auto", label: "Auto" },
+  { key: "edited", label: "Edited" },
+  { key: "none", label: "Not described yet" },
+]);
+
+export function captionFilter(ids, captions, key) {
+  if (!key || key === "all") return (ids || []).slice();
+  return (ids || []).filter((m) => captionState(m, captions) === key);
+}
+
+/* What the Descriptions step lets the owner press (BUILD 5 + spend review finding 9):
+   - describe: PixAI describes first, and only on its own quote (`quote` = the route's
+     {image_count, total_price}); never with fewer than 10 images, while it is already
+     describing, with nothing left to describe, without a quote, or while a save is pending.
+   - next ("Next: parameters"): only once every image in the set is described, 10 or more,
+     nothing pending and nothing describing.
+   Each gate answers why it is off, in words the screen can show. */
+export function advancedGates({ mediaIds, captions, quote, saving, status, busy }) {
+  const ids = mediaIds || [];
+  const caps = captions || {};
+  const left = ids.filter((m) => !caps[m]).length;
+  const pending = (saving || 0) > 0;
+  let describe = "";
+  if (ids.length < MIN_IMAGES) describe = "Add at least " + (MIN_IMAGES - ids.length) + " more image" + (MIN_IMAGES - ids.length === 1 ? "" : "s") + " first.";
+  else if (status === "captioning") describe = "PixAI is describing them now.";
+  else if (!left) describe = "Every image is described.";
+  else if (!quote || typeof quote.total_price !== "number") describe = "PixAI's price for describing couldn't be read; try again in a moment.";
+  else if (!(quote.image_count > 0)) describe = "Nothing left to describe.";
+  else if (pending) describe = "Saving your edits first.";
+  else if (busy) describe = "Working…";
+  let next = "";
+  if (ids.length < MIN_IMAGES) next = "At least " + MIN_IMAGES + " images.";
+  else if (status === "captioning") next = "Wait until PixAI has described them.";
+  else if (left) next = left + " image" + (left === 1 ? " isn't" : "s aren't") + " described yet.";
+  else if (pending) next = "Saving your edits first.";
+  else if (busy) next = "Working…";
+  return { describe: !describe, whyNoDescribe: describe, next: !next, whyNoNext: next, left };
+}
+
+/* The describe button (BUILD 5: "Describe automatically (N images)" with PixAI's own quote --
+   the count and the total come ONLY from the quote, never from the set's size or the config). */
+export function describeLabel(quote) {
+  if (!quote || !(quote.image_count > 0) || typeof quote.total_price !== "number") return "Describe automatically";
+  return "Describe automatically (" + quote.image_count + " image" + (quote.image_count === 1 ? "" : "s") + ") · " + credits(quote.total_price);
+}
+
+/* The per-image line under the describe question: PixAI's unit price, read off its own quote. */
+export function perImage(quote) {
+  if (!quote || !(quote.image_count > 0) || typeof quote.total_price !== "number") return null;
+  return Math.round(quote.total_price / quote.image_count);
+}
+
+/* The focus view's move (← → J K, the strip, a swipe): clamped to the set, never wrapping. */
+export function stepFocus(i, n, delta) {
+  if (!(n > 0)) return 0;
+  return Math.min(n - 1, Math.max(0, (Number(i) || 0) + delta));
+}
+
+/* The strip under the focus view: `count` thumbnails around the current one, clamped. */
+export function focusWindow(i, n, count = 10) {
+  if (!(n > 0)) return [];
+  const k = Math.min(count, n);
+  const start = Math.max(0, Math.min(n - k, i - Math.floor(k / 2) + 1));
+  return Array.from({ length: k }, (_, j) => start + j);
+}

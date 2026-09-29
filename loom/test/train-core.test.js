@@ -245,3 +245,94 @@ describe("the chooser, Use and the confirm button", () => {
     assert.equal(startLabel({ is_free: false, price: 100000 }, "Retry"), "Retry · 100,000");
   });
 });
+
+/* Stage B: Advanced (decision 3c with the owner's 2026-09-28 corrections, BUILD section 5). */
+import {
+  ADVANCED_DEFAULTS, CAPTION_FILTERS, LR_RANGE, STEP_RANGE, advancedGates, advancedTriggerLine,
+  captionFilter, describeLabel, etaForSteps, focusWindow, perImage, stepFocus, trackPercent,
+} from "../../gallery/src/gen/trainCore.js";
+
+describe("Advanced: set up", () => {
+  test("the peach line counts the tidied trigger out of 256 and names PixAI's spacing rule", () => {
+    const empty = advancedTriggerLine("");
+    assert.equal(empty.block, true);
+    assert.equal(empty.warn, false);
+    const short = advancedTriggerLine("nelna druid");
+    assert.equal(short.text, "11 / 256: needs at least 30 characters on this base. No double spaces, and no space at the start or end.");
+    assert.deepEqual([short.warn, short.block], [true, true]);
+    const ok = advancedTriggerLine("a moonlit night elf druid in the grove");
+    assert.deepEqual([ok.warn, ok.block, ok.text], [false, false, "38 / 256"]);
+    // double or edge spaces are tidied before sending, so they warn but never block
+    const spaced = advancedTriggerLine(" a moonlit night elf  druid in the grove");
+    assert.deepEqual([spaced.warn, spaced.block], [true, false]);
+    assert.equal(advancedTriggerLine("x".repeat(257)).block, true);
+  });
+});
+
+describe("Advanced: descriptions", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => String(100 + i));
+  const all = Object.fromEntries(ids.map((m) => [m, { source: "machine", text: "t" + m, machine_text: "t" + m }]));
+  const quote = { image_count: 12, total_price: 1800 };
+  test("PixAI describes first: describe is the way in, Next waits for every image", () => {
+    const g = advancedGates({ mediaIds: ids, captions: {}, quote, saving: 0, status: "draft", busy: "" });
+    assert.equal(g.describe, true);
+    assert.equal(g.next, false);
+    assert.equal(g.left, 12);
+    assert.equal(g.whyNoNext, "12 images aren't described yet.");
+    const done = advancedGates({ mediaIds: ids, captions: all, quote: { image_count: 0, total_price: 0 }, saving: 0, status: "captionReady", busy: "" });
+    assert.deepEqual([done.describe, done.next, done.left], [false, true, 0]);
+    // one image added after describing: it needs describing (at its quote) before Next
+    const one = advancedGates({ mediaIds: ids.concat(["999"]), captions: all, quote: { image_count: 1, total_price: 150 }, saving: 0, status: "captionReady", busy: "" });
+    assert.deepEqual([one.describe, one.next, one.whyNoNext], [true, false, "1 image isn't described yet."]);
+  });
+  test("describe stays off under 10, while describing, without a quote and while a save is pending", () => {
+    const nine = ids.slice(0, 9);
+    assert.equal(advancedGates({ mediaIds: nine, captions: {}, quote, status: "draft" }).whyNoDescribe, "Add at least 1 more image first.");
+    assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote, status: "captioning" }).describe, false);
+    assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote: null, status: "draft" }).describe, false);
+    assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote: { image_count: 0, total_price: 0 }, status: "draft" }).describe, false);
+    assert.equal(advancedGates({ mediaIds: ids, captions: {}, quote, status: "draft", saving: 1 }).describe, false);
+    assert.equal(advancedGates({ mediaIds: ids, captions: all, quote, status: "captionReady", saving: 2 }).next, false);
+  });
+  test("the button's count and total come only from PixAI's quote", () => {
+    assert.equal(describeLabel(quote), "Describe automatically (12 images) · 1,800");
+    assert.equal(describeLabel({ image_count: 1, total_price: 150 }), "Describe automatically (1 image) · 150");
+    assert.equal(describeLabel(null), "Describe automatically");
+    assert.equal(perImage(quote), 150);
+    assert.equal(perImage({ image_count: 0, total_price: 0 }), null);
+  });
+  test("PixAI's filters, in its order", () => {
+    assert.deepEqual(CAPTION_FILTERS.map((f) => f.label), ["All", "Auto", "Edited", "Not described yet"]);
+    const caps = { a: { source: "machine", text: "x", machine_text: "x" }, b: { source: "user", text: "y", machine_text: "x" } };
+    assert.deepEqual(captionFilter(["a", "b", "c"], caps, "all"), ["a", "b", "c"]);
+    assert.deepEqual(captionFilter(["a", "b", "c"], caps, "auto"), ["a"]);
+    assert.deepEqual(captionFilter(["a", "b", "c"], caps, "edited"), ["b"]);
+    assert.deepEqual(captionFilter(["a", "b", "c"], caps, "none"), ["c"]);
+  });
+  test("the focus view moves within the set and its strip keeps the image in view", () => {
+    assert.equal(stepFocus(0, 38, -1), 0);
+    assert.equal(stepFocus(37, 38, 1), 37);
+    assert.equal(stepFocus(13, 38, 1), 14);
+    assert.equal(stepFocus(3, 0, 1), 0);
+    assert.deepEqual(focusWindow(0, 38), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.ok(focusWindow(13, 38).includes(13));
+    assert.deepEqual(focusWindow(37, 38).slice(-1), [37]);
+    assert.deepEqual(focusWindow(1, 3), [0, 1, 2]);
+  });
+});
+
+describe("Advanced: parameters", () => {
+  test("PixAI's defaults, locked, and its own estimate", () => {
+    assert.deepEqual({ ...ADVANCED_DEFAULTS }, { steps: 325, learningRate: 0.0006, rank: 64, gradAccum: 2 });
+    assert.deepEqual(etaForSteps(325), { min: 27, max: 35 });
+    assert.deepEqual(etaForSteps(50), { min: 4, max: 5 });
+    assert.deepEqual(etaForSteps(1), { min: 1, max: 1 });
+    assert.deepEqual(etaForSteps(800), { min: 66, max: 86 });
+  });
+  test("the locked tracks sit where the defaults are", () => {
+    assert.equal(trackPercent(325, STEP_RANGE), 37);
+    assert.equal(trackPercent(0.0006, LR_RANGE), 58);
+    assert.equal(trackPercent(9999, STEP_RANGE), 100);
+    assert.equal(trackPercent("x", STEP_RANGE), 0);
+  });
+});
