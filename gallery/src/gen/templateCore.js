@@ -495,11 +495,15 @@ export const TERMINAL = ["sent", "stopped", "refused"];
 /* The run's read-back (review F4), a pure reducer. The dock POSTs /run ONCE and never again
    for that run_id; while the POST is out it reads GET /api/generate/runs/<id> every 2 s.
      state: {phase: "posting" | "reading" | "done" | "lost", since, run}
-     event: {type: "get404" | "get" | "post" | "postLost", run?, at}
+     event: {type: "get404" | "get" | "getFailed" | "post" | "postLost", run?, at}
    - a 404 while the POST is out means "not received yet" -- keep waiting;
    - a run from either answer that is terminal ends it ("done");
    - a lost POST (transport error) turns to reading back; a 404 that lasts READBACK_LOST_MS
-     after that is "lost": "may not have reached the server", never "not sent".
+     after that is "lost": "may not have reached the server", never "not sent";
+   - a read that FAILED (a transport error, a 5xx, a store that couldn't be read: getFailed)
+     counts toward the same window, from the last read that answered (review N8) -- so a
+     server that stopped answering never leaves Send disabled until a reload. After a run was
+     seen it ends "lost" with that run (LOST_SEEN_WORDS), never as "not sent".
    Send stays disabled until the phase is done or lost. */
 export function readBack(state, ev) {
   const s = state || { phase: "posting", since: ev && ev.at, run: null };
@@ -513,19 +517,48 @@ export function readBack(state, ev) {
     case "get": {
       const run = ev.run;
       if (run && TERMINAL.includes(run.status)) return { phase: "done", since: at, run };
-      return { ...s, run };
+      return { ...s, run, okAt: at };
     }
     case "get404":
       if (s.phase === "reading" && !s.run && at - s.since >= READBACK_LOST_MS) {
         return { phase: "lost", since: at, run: null };
       }
       return s;
+    case "getFailed": {
+      const from = Math.max(Number(s.since) || 0, Number(s.okAt) || 0);
+      if (s.phase === "reading" && at - from >= READBACK_LOST_MS) {
+        return { phase: "lost", since: at, run: s.run || null };
+      }
+      return s;
+    }
     default:
       return s;
   }
 }
 
+/* An apiGet answer from GET /api/generate/runs/<id> as a readBack event: a 404, a run, or a
+   read that failed (anything else: api.js's "network error: ..." body, a 5xx, the server's
+   "Couldn't read the run."). */
+export function readBackEvent(d, at) {
+  if (d && d.http_status === 404) return { type: "get404", at };
+  if (d && !d.error) return { type: "get", run: d, at };
+  return { type: "getFailed", at };
+}
+
 export const LOST_WORDS = "This run may not have reached the server — check the Activity tray before sending again.";
+export const LOST_SEEN_WORDS = "Lost touch with the server while this run was being sent — check the Activity tray before sending again.";
+
+/* The run's idempotency key: a uuid4 as 32 hex characters, drawn once per confirm (the
+   server's _RUN_ID_RE). Pure but for the random source. */
+export function newRunId() {
+  const c = (typeof crypto !== "undefined" && crypto) || null;
+  const bytes = new Uint8Array(16);
+  if (c && c.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;         // uuid4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /* The matrix reel grid (NOTES 8, page M6): the last axis across, the rest down. `cells`
    indexes by cell number. -> {across, rows: [{label, cells: [cell | null]}]} */

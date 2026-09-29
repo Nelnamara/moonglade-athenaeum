@@ -533,15 +533,24 @@ def run_digest(job_params, price_identity):
 ACK_FIELDS = ("count", "jobs", "each", "covered", "total", "digest")
 
 
-def ack_problem(ack, plan):
-    """The first acknowledgement field that differs from the fresh plan, or None."""
+def ack_problem(ack, plan, fields=ACK_FIELDS):
+    """The first acknowledgement field (of `fields`) that differs from the fresh plan, or
+    None."""
     if not isinstance(ack, dict):
         return "missing"
-    for k in ACK_FIELDS:
+    for k in fields:
         a, b = ack.get(k), plan.get(k)
         if isinstance(a, bool) or isinstance(b, bool) or a != b:
             return k
     return None
+
+
+def ack_count_problem(ack, plan):
+    """Review N6: the acknowledgement's count (images) and jobs (tasks) against the LOCAL
+    expansion, before any entitlement read, build or quote -- the design's cheap early
+    refusal. None when they agree."""
+    return ack_problem(ack, {"count": plan["images"], "jobs": len(plan["jobs"])},
+                       ("count", "jobs"))
 
 
 # ---------------------------------------------------------------------------------------
@@ -598,10 +607,22 @@ _JOB_COLS = ("run_id", "cell", "task_id", "prompt", "vars", "seed", "batch", "no
 _JSON_COLS = ("axes", "payload", "vars", "request")
 
 
+class RunsUnreadable(Exception):
+    """runs.db exists but could not be read (locked past the busy timeout, corrupt, a
+    missing table). Distinct from "no such run" (review N7): a route answers "couldn't read
+    the run" for this, never "not found", and never falls back to anything else."""
+
+
+RUN_UNREADABLE_WORDS = "Couldn't read the run."
+
+
 class RunsStore(object):
     """One SQLite file. Written ONLY by the run route (its reservation, its rows, each
     job's state) and by /api/generate after a single send has a task id -- never on open,
-    by /plan, by the Inspector or by History. A read never creates the file."""
+    by /plan, by the Inspector or by History. A read never creates the file. A read answers
+    None only when there is no such row (or no file yet); a store that exists but cannot be
+    read raises RunsUnreadable. Every connection is closed in a finally. There is no pruning
+    yet: the file grows with every run (reported as still to do)."""
 
     def __init__(self, out_dir):
         self.path = Path(out_dir) / RUNS_DB
@@ -611,12 +632,24 @@ class RunsStore(object):
         if not create and not self.path.exists():
             return None
         c = sqlite3.connect(str(self.path), timeout=5.0)
-        c.row_factory = sqlite3.Row
-        c.execute("PRAGMA busy_timeout=5000")
-        if create:
-            for stmt in _SCHEMA:
-                c.execute(stmt)
+        try:
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA busy_timeout=5000")
+            if create:
+                for stmt in _SCHEMA:
+                    c.execute(stmt)
+        except BaseException:
+            c.close()
+            raise
         return c
+
+    def _reader(self):
+        """A read connection, or None when there is no file yet; RunsUnreadable when the
+        file is there and cannot be opened."""
+        try:
+            return self._connect(False)
+        except sqlite3.Error as e:
+            raise RunsUnreadable(str(e))
 
     @staticmethod
     def _enc(col, v):
@@ -698,8 +731,9 @@ class RunsStore(object):
                 c.close()
 
     def get(self, run_id):
-        """{run..., "jobs": [...]} or None."""
-        c = self._connect(False)
+        """{run..., "jobs": [...]}, or None when there is no such run. Raises
+        RunsUnreadable when the store cannot be read."""
+        c = self._reader()
         if c is None:
             return None
         try:
@@ -710,18 +744,19 @@ class RunsStore(object):
             run["jobs"] = [self._row(x) for x in c.execute(
                 "SELECT * FROM run_jobs WHERE run_id=? ORDER BY cell", (run_id,))]
             return run
-        except sqlite3.DatabaseError:
-            return None
+        except sqlite3.Error as e:
+            raise RunsUnreadable(str(e))
         finally:
             c.close()
 
     def find_task(self, task_id):
-        """(run, job) for the job that holds `task_id`, or None. The run carries `account`,
-        which is what the routes check before serving anything."""
+        """(run, job) for the job that holds `task_id`, or None when no row holds it. The
+        run carries `account`, which is what the routes check before serving anything.
+        Raises RunsUnreadable when the store cannot be read."""
         tid = str(task_id or "").strip()
         if not tid:
             return None
-        c = self._connect(False)
+        c = self._reader()
         if c is None:
             return None
         try:
@@ -732,8 +767,8 @@ class RunsStore(object):
             if r is None:
                 return None
             return self._row(r), self._row(j)
-        except sqlite3.DatabaseError:
-            return None
+        except sqlite3.Error as e:
+            raise RunsUnreadable(str(e))
         finally:
             c.close()
 
@@ -848,6 +883,12 @@ def _quote(arg, shell):
             return arg
         return _ps_quote(arg)
     return shlex.quote(arg)
+
+
+# The name the Inspector shows beside Copy as CLI (review S3): the command is quoted for the
+# shell of the machine the server runs on, and only that one -- PowerShell's quoting is not
+# cmd.exe's (in cmd.exe `&` `|` `^` `%` stay live inside a PowerShell single-quoted word).
+SHELL_NAMES = {"powershell": "PowerShell", "posix": "bash"}
 
 
 def default_shell():
@@ -1002,4 +1043,5 @@ def cli_command(core, params, *, no_card=False, shell=None):
                             shell))
     if no_card:
         words.append("--no-card")
-    return {"command": " ".join(words), "form": form, "shell": shell}
+    return {"command": " ".join(words), "form": form, "shell": shell,
+            "shell_name": SHELL_NAMES.get(shell, shell)}

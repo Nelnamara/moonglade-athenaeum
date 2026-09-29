@@ -21994,7 +21994,10 @@ def create_app(out_dir: Path):
             try:
                 existing = store.get(run_id)
             except Exception:                                # noqa: BLE001
-                existing = None
+                # Review N7: a store that can't be read is not "no such run" -- the run id
+                # might be one already sent, so nothing goes out.
+                return jsonify({"error": "Couldn't read the run store, so nothing was "
+                                         "sent."}), 200
             if existing is not None:
                 if existing.get("account") != user:
                     return jsonify({"error": "That run id is taken — nothing was "
@@ -22036,6 +22039,13 @@ def create_app(out_dir: Path):
             if multi and not isinstance(ack, dict):
                 raise _RunRefused("Confirm the {} generations first — nothing was sent."
                                   .format(plan["images"]))
+            # Review N6: the acknowledgement's count and jobs against this local expansion,
+            # right here -- before the entitlement read, the builds and the quote (all checked
+            # again, with every other field, at step 10).
+            bad = runs.ack_count_problem(ack, plan) if multi else None
+            if bad:
+                raise _RunRefused("What would be sent changed since you confirmed — nothing "
+                                  "was sent.", changed=bad)
             # Step 6, the lane rule read off the app's own job log: one lane task at a time.
             if core.asks_unlimited(body) and _lane_job_running(core):
                 raise _RunRefused(core.UNLIMITED_BUSY)
@@ -22168,7 +22178,12 @@ def create_app(out_dir: Path):
         rid = str(run_id or "")
         if not _RUN_ID_RE.match(rid):
             return jsonify({"error": "not found"}), 404
-        run = runs.RunsStore(out_dir).get(rid)
+        try:
+            run = runs.RunsStore(out_dir).get(rid)
+        except runs.RunsUnreadable:
+            # Review N7: unreadable is not "not found" -- the dock's read-back counts this
+            # toward its lost window, never as "not received yet".
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
         if run is None or run.get("account") != user:
             return jsonify({"error": "not found"}), 404
         live = _run_inflight.get("run_id") == rid
@@ -22187,7 +22202,12 @@ def create_app(out_dir: Path):
         tid = str(task_id or "").strip()
         if not tid.isdigit():
             return jsonify({"error": "not found"}), 404
-        found = runs.RunsStore(out_dir).find_task(tid)
+        try:
+            found = runs.RunsStore(out_dir).find_task(tid)
+        except runs.RunsUnreadable:
+            # Review N7: the record may be another account's; with the store unreadable,
+            # nothing is served and PixAI is not asked (review F9).
+            return jsonify({"error": runs.RUN_UNREADABLE_WORDS}), 503
         import moonglade_backup as core
         if found is not None:
             run, job = found

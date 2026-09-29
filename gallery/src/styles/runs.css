@@ -87,6 +87,8 @@
 .mgrun-insptitle { flex: 1; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); }
 .mgrun-copy { font: inherit; font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 7px;
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; }
+/* review S3: the shell the Copy as CLI command is quoted for, beside the button */
+.mgrun-inspshell { font-size: 9.5px; color: var(--overlay0); white-space: nowrap; }
 .mgrun-inspx { font: inherit; font-size: 12px; padding: 0 6px; border: 0; background: transparent;
   color: var(--overlay0); cursor: pointer; }
 .mgrun-inspbody { font-size: 10px; line-height: 1.5; padding: 9px 11px; border-radius: 9px;

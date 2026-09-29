@@ -515,8 +515,21 @@ def test_a_25_cell_matrix_is_refused_whatever_the_client_claims(cli, rig):
     assert rig.network == 0 and rig.mutations == []
 
 
-@pytest.mark.parametrize("field,value", [("count", 3), ("jobs", 3), ("each", 1500),
-                                         ("covered", 1), ("total", 1), ("digest", "0" * 64)])
+@pytest.mark.parametrize("field", ["count", "jobs"])
+def test_ack_count_and_jobs_are_checked_before_any_pixai_call(cli, rig, field):
+    """Review N6: the acknowledgement's count and jobs against the local expansion, right after
+    it -- before the entitlement read, the builds and the quote."""
+    ack = {"count": 2, "jobs": 2, "each": 1600, "covered": 0, "total": 3200, "digest": "x"}
+    ack[field] = 3
+    d = run(cli, prompt="{a|b} x", count=2, ack=ack).get_json()
+    assert d["changed"] == field and "nothing was sent" in d["error"]
+    assert rig.network == 0 and rig.mutations == []
+
+
+# count and jobs are refused earlier, before the quote (review N6, the test above) -- so with no
+# fresh plan to hand back; every quoted field comes back with the fresh plan here.
+@pytest.mark.parametrize("field,value", [("each", 1500), ("covered", 1), ("total", 1),
+                                         ("digest", "0" * 64)])
 def test_any_acknowledgement_difference_refuses_with_the_fresh_plan(cli, rig, field, value):
     p = plan(cli, prompt="{a|b} x", count=2).get_json()
     ack = dict(ack_of(p), **{field: value})
@@ -852,6 +865,39 @@ def test_a_failed_task_id_write_still_answers_with_the_task_and_never_reads_not_
     assert logged and logged[0]["run"] == d["run_id"] and logged[0]["cell"] == 0
 
 
+def _unreadable_store(tmp_path):
+    (tmp_path / runs.RUNS_DB).write_bytes(b"this is not a SQLite database\n" * 64)
+
+
+def test_an_unreadable_store_is_not_no_such_run(cli, rig, tmp_path):
+    """Review N7: a store that exists but can't be read answers "couldn't read the run" --
+    never 404 (the dock would read "not received yet"), never a PixAI fallback, never a send
+    -- and the connection is closed either way (the file can be removed after)."""
+    _unreadable_store(tmp_path)
+    with pytest.raises(runs.RunsUnreadable):
+        runs.RunsStore(tmp_path).get("9" * 32)
+    with pytest.raises(runs.RunsUnreadable):
+        runs.RunsStore(tmp_path).find_task("424242")
+    g = cli.get("/api/generate/runs/" + "9" * 32)
+    assert g.status_code == 503 and g.get_json()["error"] == runs.RUN_UNREADABLE_WORDS
+    save_catalog(tmp_path / "catalog.db", [{f: "" for f in CATALOG_FIELDS} | {
+        "media_id": "M1", "task_id": "424242", "filename": "2025-01/a.png"}])
+    r = cli.get("/api/generate/request/424242")
+    assert r.status_code == 503 and r.get_json()["error"] == runs.RUN_UNREADABLE_WORDS
+    p = plan(cli, prompt="{a|b} x", count=2).get_json()
+    d = run(cli, ack=ack_of(p), prompt="{a|b} x", count=2).get_json()
+    assert "Couldn't read the run store" in d["error"]
+    assert rig.mutations == []
+    os.remove(tmp_path / runs.RUNS_DB)          # no connection left open on it
+
+
+def test_no_row_is_still_none_and_404(cli, rig, tmp_path):
+    runs.RunsStore(tmp_path).reserve("7" * 32, "someone", status="sent")
+    assert runs.RunsStore(tmp_path).get("8" * 32) is None
+    assert runs.RunsStore(tmp_path).find_task("555") is None
+    assert cli.get("/api/generate/runs/" + "8" * 32).status_code == 404
+
+
 def test_strip_secrets_removes_credential_keys_at_any_depth():
     got = runs.strip_secrets({"prompts": "x", "Authorization": "Bearer k", "csrf": "t",
                               "nested": {"apiKey": "k", "session_id": "s", "kaisuukenId": "K1",
@@ -954,8 +1000,10 @@ def test_a_cell_the_recipes_would_take_over_the_prompt_budget_is_named(cli, rig,
     """Review F7: checked on every resolved prompt before anything goes out."""
     monkeypatch.setattr(moonglade_recipes, "batch", lambda s, ids: [{"id": R1, "prompt_len": 4001}])
     long = "x" * 90
+    # count and jobs agree with the local expansion (review N6's early check), so the run
+    # reaches the recipe budget check, which refuses before any quote
     d = run(cli, prompt="{short|" + long + "} glade", var_mode="matrix", recipeIds=[R1],
-            ack={"count": 2}).get_json()
+            ack={"count": 2, "jobs": 2}).get_json()
     assert d["error"].startswith("Cell 2 (" + long + "): a recipe would make the prompt too long")
     assert rig.mutations == []
 
@@ -1186,13 +1234,34 @@ def test_powershell_quoting_doubles_every_single_quote_form():
     assert runs._ps_quote("no_space\\") == "'no_space\\'"
 
 
+def test_the_command_names_its_shell_because_cmd_exe_is_not_powershell():
+    """Review S3: Copy as CLI is quoted for ONE shell -- the server's (PowerShell on Windows,
+    bash elsewhere) -- and says which, beside the button. This documents why: cmd.exe has no
+    single quotes, so the word PowerShell reads as one inert literal carries live cmd.exe
+    metacharacters (`&` ends the command, `|` pipes it, `^` escapes, `%PATH%` expands). The
+    command is right for the shell it names and wrong for cmd.exe, by design."""
+    params = _web_params(prompt="a&b|c^d%PATH%")
+    ps = runs.cli_command(core, params, shell="powershell")
+    assert ps["shell_name"] == "PowerShell"
+    assert runs.cli_command(core, params, shell="posix")["shell_name"] == "bash"
+    assert runs.cli_command(core, params)["shell_name"] == (
+        "PowerShell" if os.name == "nt" else "bash")
+    word = ps["command"].split(" --prompt ", 1)[1].split(" ", 1)[0]
+    assert word == "'a&b|c^d%PATH%'"            # PowerShell: one literal word
+    assert all(ch in word for ch in "&|^%")     # cmd.exe: every one of these is live
+    js = open(os.path.join(HERE, "..", "gallery", "src", "components", "RunInspector.jsx"),
+              encoding="utf-8").read()
+    assert "entry.cli.shell_name" in js, "the Inspector names the shell beside Copy as CLI"
+
+
 @pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell.exe"),
                     reason="the server's own shell is Windows PowerShell only on Windows")
 @pytest.mark.parametrize("kw", [
     {"prompt": 'a "quoted" word, it\u2019s \u201cfancy\u201d, $HOME and `tick`'},
     {"prompt": "-dash first and a trailing backslash \\"},
     {"prompt": "{braces} and C:\\path\\ with spaces\\"},
-], ids=["quotes", "dash", "backslashes"])
+    {"prompt": "a&b|c^d %PATH% <e> (f) ;g"},
+], ids=["quotes", "dash", "backslashes", "cmd-metacharacters"])
 def test_the_powershell_command_survives_real_windows_powershell(tmp_path, cli_parser, kw):
     """Review F8: run the emitted line through real powershell.exe against a stub that dumps
     sys.argv, and check the CLI rebuilds the same parameters -- the JSON form too."""

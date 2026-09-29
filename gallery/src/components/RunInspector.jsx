@@ -46,6 +46,10 @@ export default function RunInspector({ source, onClose, floating, phone, inline 
   }
   const json = entry && entry.request ? JSON.stringify(entry.request, null, 2) : "";
   const cli = entry && entry.cli ? entry.cli.command : "";
+  // Review S3: the command is quoted for ONE shell, the one on the machine the server runs on
+  // (PowerShell on Windows, bash elsewhere) -- named beside Copy as CLI, because pasted into
+  // cmd.exe a PowerShell-quoted word's & | ^ % are live again.
+  const shell = entry && entry.cli ? entry.cli.shell_name || "" : "";
   const planError = source.kind === "plan" && source.plan && source.plan.error;
   const text = task && task.loading ? "Reading…" : task && task.error ? task.error
     : entry ? (tab === "cli" ? cli : json) : planError || "Nothing to show.";
@@ -68,6 +72,11 @@ export default function RunInspector({ source, onClose, floating, phone, inline 
           <button key={k} type="button" className={"mgrun-inspbtn" + (tab === k ? " on" : "")}
             onClick={() => setTab(k)}>{l}</button>
         ))}
+        {tab === "cli" && shell && (
+          <span className="mgrun-inspshell" title={"Quoted for " + shell + ", the shell where this app’s server runs"}>
+            {"for " + shell}
+          </span>
+        )}
         <button type="button" className="mgrun-copy" onClick={copy} disabled={!entry}>
           {copied ? "Copied ✓" : tab === "cli" ? "Copy as CLI" : "Copy JSON"}
         </button>
