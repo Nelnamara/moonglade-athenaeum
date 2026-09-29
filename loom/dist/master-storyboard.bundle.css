@@ -1266,6 +1266,122 @@ button.mgcp-chip .mgico {
 .gen-drawer[data-loom-ctx] .mgd-quality-wrap {
   display: none;
 }
+.mgd-ratiowrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.mgd-ratiochip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--surface1);
+  background: rgba(33, 31, 58, .5);
+  color: var(--subtext);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.mgd-ratiochip:hover,
+.mgd-ratiochip.open {
+  border-color: var(--lavender);
+  color: var(--text);
+}
+.mgd-ratiocaret {
+  font-size: 8px;
+  color: var(--overlay0);
+}
+.mgd-ratiopop {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 216px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--surface1);
+  background: var(--mantle);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
+  animation: mgdRatioPop .3s cubic-bezier(.2, .9, .24, 1) both;
+}
+.mgd-ratiotitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+@keyframes mgdRatioPop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mgd-rgrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.mgd-rchip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--surface1);
+  background: transparent;
+  color: var(--subtext);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color .2s,
+    color .2s,
+    background .2s;
+}
+.mgd-rchip:hover {
+  color: var(--text);
+}
+.mgd-rchip.on {
+  border-color: var(--lavender);
+  background: rgba(182, 146, 230, .14);
+  color: var(--text);
+}
+.mgd-rglyph {
+  display: inline-block;
+  flex: none;
+  border: 1.3px solid currentColor;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+.mgd-rglyph.auto {
+  width: 12px;
+  height: 12px;
+  border-style: dashed;
+  border-radius: 3px;
+}
+.mgd-rgrid.big .mgd-rchip {
+  min-height: 44px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+.gen-drawer .mgd-ratioblock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mgd-ratiopop {
+    animation: none;
+  }
+}
 .gen-drawer .mgd-seg .mgd-quality,
 .gen-drawer .mgd-seg .mgd-channel {
   font-size: 10.5px;
@@ -3376,6 +3492,9 @@ html.mg-updbanner-on .mgpal-scrim,
 html.mg-updbanner-on .mgpal-host,
 html.mg-updbanner-on .mgks-scrim,
 html.mg-updbanner-on .mgks-host,
+html.mg-updbanner-on .cpal-scrim,
+html.mg-updbanner-on .cpal-host,
+html.mg-updbanner-on .cpal-bandscrim,
 html.mg-updbanner-on .mg-gallery-picker,
 html.mg-updbanner-on .mgdock-scrim,
 html.mg-updbanner-on .mgdk,
