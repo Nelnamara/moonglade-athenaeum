@@ -849,7 +849,20 @@ breakdown** tier by tier — how much each rank pays, how many people place ther
 that adds up to — and the **requirements**: the tag an entry must carry, whether the contest
 restricts you to particular models or LoRAs, a link to its rules document if it published
 one, and how the winners get decided. Below that sit both dates, a preview of the entries,
-and the winners once results land.
+and the winners once results land. Each winner shows the **tier** it won — PixAI pays by tier
+(a tier can hold many winners), so the list never numbers its places — and what that tier paid.
+
+**Wins are verified, never taken on trust.** For every contest you entered, the app checks
+PixAI's own winners list at the contest's result date, then once a day for two weeks (it stops
+early once the prizes have been paid out and your entries are settled). A win is recorded only
+when your entry is on that list with a tier and the piece is yours; a list that hasn't been
+published yet counts as "not yet", never as a loss. Under **My entries** a verified row turns
+gold and reads its tier and prize ("Tier 2, 200,000 credits"). If one won but isn't shown,
+use **It won but isn't shown…** at the foot of the list (on a phone, the same link at the foot
+of My entries): choose the contest, paste the link to your entry from pixai.art and press
+**Check**. The app reads that contest's winners once and records the win only if it matches;
+the link is kept as the receipt. Only pixai.art pages count, and a check that doesn't verify
+says what didn't match. All of this only reads from PixAI — it never writes to your account.
 
 From there you can **enter** a published piece — also from **My Art**, or by picking a
 contest while you publish. Entering is an account write, not a browse: the artwork goes into a public contest

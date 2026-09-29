@@ -130,6 +130,22 @@ button.cmb-card.ended { opacity: .8; }
   font-weight: 700; letter-spacing: .08em; color: var(--subtext); }
 .cmb-cardstatus.won { color: var(--gold); }
 .cmb-cardstatus.awaiting { color: var(--overlay0); }
+.cmb-cardstatus.quiet { color: var(--overlay0); }
+/* A verified row's prize line and the foot link that opens the Check sheet (L3). */
+.cmb-cardwin { font-size: 10px; color: var(--gold); font-weight: 700; }
+button.cmb-recordlink { display: block; margin: 14px 0 0 auto; min-height: 44px; padding: 0 4px;
+  font-size: 11px; color: var(--lavender); text-decoration: underline dotted; background: none;
+  border: none; font-family: inherit; cursor: pointer; }
+button.cmb-recordlink:focus-visible { outline: 2px solid var(--lavender); outline-offset: 2px; }
+/* The Check sheet: the same body as the desktop dialog, at phone tap sizes. */
+.mgcrw.phone { padding: 4px 2px 8px; }
+.mgcrw.phone .mgcrw-input.sel { min-height: 44px; font-size: 14px; }
+.mgcrw.phone .mgcrw-input.url { min-height: 44px; font-size: 14px; padding: 0 11px; }
+.mgcrw.phone button.mgcrw-check { min-height: 44px; font-size: 13px; padding: 0 16px; }
+.mgcrw.phone .mgcrw-blurb { font-size: 12px; }
+.mgcrw.phone .mgcrw-msg { font-size: 12px; }
+.mgcrw.phone .mgcrw-foot { font-size: 10.5px; }
+.mgcrw.phone .mgctc-acts button { min-height: 44px; }
 .cmb-cardstatus.hot { color: var(--gold); }
 
 .cmb-note { font-size: 11px; line-height: 1.6; color: var(--subtext); padding: 14px 0; }

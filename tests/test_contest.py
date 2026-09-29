@@ -335,10 +335,12 @@ def test_sweep_is_paced():
     assert g._CONTEST_SYNC_MAX > 0          # and bounded
 
 
-def test_sweep_records_entries_and_only_decided_wins(tmp_path, monkeypatch, pixai):
-    """Entries land for every kept contest; winners are polled ONLY once a contest's result
-    date has passed (before that the endpoint answers an empty array -- asking early is a
-    request that cannot inform anything), and a win is the owner's own authorId."""
+def test_sweep_records_entries_and_reads_no_winners(tmp_path, monkeypatch, pixai):
+    """Entries land for every kept contest. WINS ARE NOT THE SWEEP'S ANY MORE (L3): a win is a
+    verified fact, established by the automatic check (tests/test_contest_wins.py), which reads
+    the winners list once per contest at its result time. The sweep used to match the author
+    alone and read the same list a second time; it now reads no winners at all, and a winners
+    row carrying this account's authorId records nothing here."""
     seen = []
     _no_pause(monkeypatch)
     monkeypatch.setattr(core, "list_contests", lambda s, **k: [
@@ -349,18 +351,16 @@ def test_sweep_records_entries_and_only_decided_wins(tmp_path, monkeypatch, pixa
                         lambda s, slug, uid: seen.append(("entries", slug, uid))
                         or [{"id": "e-" + slug}])
     monkeypatch.setattr(core, "contest_winners",
-                        lambda s, slug: seen.append(("winners", slug))
-                        or [{"authorId": pixai.user_id, "rank": 1}])
+                        lambda s, slug: pytest.fail("the entry sweep must not read winners"))
     assert g._contest_detection_sync(tmp_path) is True
     m = g.telemetry_metrics(tmp_path)
     assert m["contest_entries"] == 2
-    assert m["contest_wins"] == 1
-    assert [c for c in seen if c[0] == "winners"] == [("winners", "s2")]
+    assert m["contest_wins"] == 0
+    assert "contest_win_keys" not in g.load_telemetry(tmp_path)["sets"]
     assert all(c[2] == pixai.user_id for c in seen if c[0] == "entries")
     # re-sweeping is free: the same rows produce the same keys, which the set already holds
     g._contest_detection_sync(tmp_path)
-    m2 = g.telemetry_metrics(tmp_path)
-    assert (m2["contest_entries"], m2["contest_wins"]) == (2, 1)
+    assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
 def test_sweep_ignores_someone_elses_win(tmp_path, monkeypatch, pixai):
@@ -499,7 +499,7 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     monkeypatch.setattr(core, "contest_my_entries",
                         lambda s, slug, uid: [{"artworkId": "e1"}, {"artworkId": "e2"}])
     monkeypatch.setattr(core, "contest_winners",
-                        lambda s, slug: [{"authorId": pixai.user_id}])
+                        lambda s, slug: pytest.fail("the entry sweep must not read winners"))
     cli = _client(tmp_path)
     real = g.threading.Thread
     monkeypatch.setattr(g.threading, "Thread",
@@ -509,8 +509,9 @@ def test_sync_route_reports_one_count_and_never_the_win(tmp_path, monkeypatch, p
     monkeypatch.setattr(g.threading, "Thread", real)
     assert d["started"] is True
     assert "contest_wins" not in json.dumps(d)         # the seal, not an oversight
-    # ... and the win really was recorded; it just never appears in the response
-    assert g.telemetry_metrics(tmp_path)["contest_wins"] == 1
+    # The sweep reads entries only (L3 moved win detection to the verified check), so the
+    # metric stays where it was and the entries land.
+    assert g.telemetry_metrics(tmp_path)["contest_wins"] == 0
     assert g.telemetry_metrics(tmp_path)["contest_entries"] == 2
 
 
@@ -588,21 +589,34 @@ def test_artworks_route_soft_fails_as_200(tmp_path, pixai):
     assert d["entries"] == [] and d["error"]
 
 
-def test_winners_route_marks_the_owner_and_ranks_the_podium(tmp_path, pixai):
-    """The strip's whole job: who won, in order, and which row is the owner's. The
-    account id is compared server-side and never reaches the client."""
+def _placed(aid, author, tier, prize, **kw):
+    """One winners row shaped like the live response (PROBE 2026-09-29 addendum): an artwork
+    with a `contest` block whose `entry` carries the placement."""
+    return {"id": aid, "authorId": author, "authorName": kw.get("name", "@someone"),
+            "mediaId": kw.get("media", "M-" + aid),
+            "contest": {"id": "c1", "slug": "s1",
+                        "entry": {"rank": tier, "prizeAmount": prize, "source": "manual",
+                                  "submittedAt": "2026-09-10T00:00:00.000Z"}}}
+
+
+def test_winners_route_marks_the_owner_and_carries_the_real_tier_and_prize(tmp_path, pixai):
+    """The strip's whole job: who won, at which TIER (`entry.rank`, shared by everyone in that
+    tier) with what prize, and which row is the owner's. The old route numbered the list 1..N
+    and sent prize 0 because the mapper dropped the nested entry. The account id is compared
+    server-side and never reaches the client."""
     pixai.on("/contest/s1/winners", [
-        {"id": "w1", "authorId": "u-other", "authorName": "@someone", "mediaId": "M1",
-         "prizeAmount": 250000, "rank": 1},
-        {"id": "w2", "authorId": "u-test", "authorName": "me", "mediaId": "M2"},
+        _placed("w1", "u-other", 1, 500000, media="M1"),
+        _placed("w2", "u-test", 1, 500000, name="me", media="M2"),
+        _placed("w3", "u-other", 2, 200000),
+        {"id": "w4", "authorId": "u-other", "authorName": "@x", "mediaId": "M4"},  # no entry
     ])
     cli = _client(tmp_path)
     d = cli.get("/api/contest/s1/winners").get_json()
-    assert d["winners"][0]["rank"] == 1 and d["winners"][0]["mine"] is False
+    ranks = [w["rank"] for w in d["winners"]]
+    assert ranks == [1, 1, 2, 0], "tiers as sent, never list positions; unknown is 0"
+    assert [w["prize_amount"] for w in d["winners"]] == [500000, 500000, 200000, 0]
     assert d["winners"][0]["thumb"] == "https://api.pixai.art/v1/media/M1/thumbnail"
-    assert d["winners"][0]["prize_amount"] == 250000
-    # no rank field on the second row -> its position in the podium order stands in
-    assert d["winners"][1]["rank"] == 2 and d["winners"][1]["mine"] is True
+    assert [w["mine"] for w in d["winners"]] == [False, True, False, False]
     assert "u-test" not in json.dumps(d)          # the account id stays server-side
 
 
@@ -637,7 +651,12 @@ def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pi
     for name in ("contest_my_entries", "contest_winners"):
         monkeypatch.setattr(core, name, lambda *a, **k: pytest.fail(
             "the My-entries tab must not poll PixAI per contest"))
-    _seed_entries(tmp_path, ["c1:aw1", "c1:aw2", "c2:aw9"], wins=["c2"])
+    _seed_entries(tmp_path, ["c1:aw1", "c1:aw2", "c2:aw9", "c3:aw7"], wins=["c2"])
+    # c2 carries only the OLD sweep's flat win key (believed, never verified); c3 carries a
+    # VERIFIED win (a check matched the entry's artwork id to an integer tier).
+    g._cw_edit(tmp_path, lambda w, ch: g.contest_wins.record_win(
+        w, "c3", {"artwork_id": "aw7", "tier": 2, "prize": 200000}, "auto", 1.0,
+        "https://pixai.art/en/artwork/aw7"))
     cli = _client(tmp_path, [_row(media_id="m1", artwork_id="aw1", filename="a_m1.png",
                                   created_at="2026-08-06T00:00:00")])
     d = cli.get("/api/contest/mine").get_json()
@@ -645,10 +664,15 @@ def test_mine_is_telemetry_derived_with_one_board_read(tmp_path, monkeypatch, pi
     # contest reader goes through the same memo since the 2026-09-03 ultrareview.
     assert len(seen) == 1 and seen[0].get("max_pages") is None
     rows = {r["contest_id"]: r for r in d["contests"]}
-    assert d["total_entries"] == 3
+    assert d["total_entries"] == 4
     assert rows["c1"]["title"] == "First" and rows["c1"]["active"] is True
     assert rows["c1"]["entry_artwork_ids"] == ["aw1", "aw2"]
-    assert rows["c1"]["won"] is False and rows["c2"]["won"] is True
+    # `won` means VERIFIED: the old flat key is shown as unverified, never as a win
+    assert rows["c1"]["won"] is False and rows["c1"]["unverified_legacy"] is False
+    assert rows["c2"]["won"] is False and rows["c2"]["unverified_legacy"] is True
+    assert rows["c3"]["won"] is True and rows["c3"]["unverified_legacy"] is False
+    assert rows["c3"]["wins"][0]["label"] == "Tier 2, 200,000 credits"
+    assert rows["c3"]["wins"][0]["receipt_url"] == "https://pixai.art/en/artwork/aw7"
     # thumbs: the catalog knows aw1 (same row as its media_id), not aw2
     by_art = {e["artwork_id"]: e for e in rows["c1"]["entries"]}
     assert by_art["aw1"]["thumb"] == "/thumbs/m1.jpg"
@@ -689,11 +713,18 @@ def test_artwork_media_ids_maps_only_what_the_catalog_holds(tmp_path):
 # ---- the metrics ------------------------------------------------------------
 
 def test_metrics_are_the_set_cardinalities(tmp_path):
+    """Entries count their set. Wins count VERIFIED wins only (L3): the flat `contest_win_keys`
+    an older sweep wrote is on disk and is not counted."""
     assert g.telemetry_metrics(tmp_path)["contest_entries"] == 0
     for key in ("c1:a1", "c1:a1", "c1:a2", "c2:a1"):      # one repeat, deduped
         g.telem_set_add("contest_entry_keys", key, out_dir=tmp_path)
     for key in ("c1", "c1", "c2"):
         g.telem_set_add("contest_win_keys", key, out_dir=tmp_path)
+    m = g.telemetry_metrics(tmp_path)
+    assert (m["contest_entries"], m["contest_wins"]) == (3, 0)
+    for cid, aid in (("c1", "a1"), ("c1", "a2"), ("c2", "a1")):   # two contests, three entries
+        g._cw_edit(tmp_path, lambda w, ch, cid=cid, aid=aid: g.contest_wins.record_win(
+            w, cid, {"artwork_id": aid, "tier": 1, "prize": 1}, "auto", 1.0))
     m = g.telemetry_metrics(tmp_path)
     assert (m["contest_entries"], m["contest_wins"]) == (3, 2)
     assert isinstance(m["contest_entries"], int) and isinstance(m["contest_wins"], int)
