@@ -211,6 +211,38 @@ def test_a_definite_refusal_is_refused_and_frees_the_shot(rig):
     assert rig["cli"].post("/api/loom/generate", json=_body(submit_id="s2")).get_json()["task_id"]
 
 
+def test_the_invalid_media_id_fallback_is_journalled(rig):
+    """Open call 5 (kept, owner-confirmed): after a synchronous invalid_media_id GraphQL refusal
+    the route submits ONE more time. A refusal creates nothing, so that is not a re-send of a
+    render that may exist -- but it is a second attempt, and the journal must say so."""
+    calls = []
+
+    def _refuse_once(params):
+        calls.append(1)
+        if len(calls) == 1:
+            raise core.PixAIError("GraphQL error: invalid_media_id")
+        return "task-after-fallback"
+    rig["behaviour"] = _refuse_once
+    r = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sF")).get_json()
+    assert r["task_id"] == "task-after-fallback"
+    assert len(rig["submits"]) == 2, "exactly two submits: the refused passthrough and the fallback"
+    st = rig["cli"].get("/api/loom/submit-status?submit_id=sF").get_json()
+    assert st == {"state": "submitted", "task_id": "task-after-fallback"}
+    jf = rig["tmp"] / "loom" / "_submits" / (_account_key(_TEST_USERNAME) + ".jsonl")
+    entry = {}
+    for ln in jf.read_text(encoding="utf-8").splitlines():
+        rec = json.loads(ln)
+        if rec.get("submit_id") == "sF":
+            entry.update({k: v for k, v in rec.items() if v is not None})
+    assert entry.get("fallback") == "invalid_media_id", "the journal entry carries the fallback mark"
+    assert entry.get("state") == "submitted"
+    # A refusal that is NOT an invalid media id is never retried.
+    rig["submits"].clear()
+    rig["behaviour"] = lambda params: (_ for _ in ()).throw(core.PixAIError("GraphQL error: INSUFFICIENT_BALANCE"))
+    r2 = rig["cli"].post("/api/loom/generate", json=_body(submit_id="sG", card="c2")).get_json()
+    assert r2["state"] == "refused" and len(rig["submits"]) == 1
+
+
 def test_a_failure_before_the_mutation_is_not_sent(rig, monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("no key")

@@ -24495,6 +24495,13 @@ __DESIGN_TOKENS__
                 _logging_ = __import__("logging")
                 _logging_.getLogger(__name__).info(
                     "passthrough refused (%s); uploading frames and retrying", err[:80])
+                # Session P (BUILD-w5-p open call 5, owner-confirmed 2026-09-29): KEPT, and
+                # journalled. A GraphQL refusal creates nothing, so this second core.submit is
+                # not a re-send of a render that may exist -- but it IS a second attempt, and
+                # the journal says so, so the owner's spend review can see every one.
+                _journal(fallback=("invalid_reference_image_media_id"
+                                   if "invalid_reference_image_media_id" in err
+                                   else "invalid_media_id"))
                 # Re-resolve ONLY the catalog (digit) ids through the upload path. Anything
                 # else -- a Loom data: thumbnail already uploaded on the first pass, a bare
                 # filename that resolved to "" -- keeps its first-pass result. Re-running
