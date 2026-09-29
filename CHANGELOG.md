@@ -16,6 +16,11 @@ git tags. Full prose notes for tagged versions live on
 
 ## [Unreleased]
 
+- **On a phone or tablet, the bottom row of buttons is always within reach.** In the Lightbox with a long prompt open, on the image details screen, and in the sheets that slide up from the bottom, the last row of buttons could sit just past the end of the scroll — under the browser's own toolbar — where no amount of scrolling reached it. Every full-screen phone view now sizes itself to the part of the screen you can actually see, the Lightbox's lower panel scrolls with its action row pinned to the bottom, sheets are capped to the visible height with their buttons pinned to their foot, and everything leaves room for the home bar. (2026-09-28)
+- Panels, menus, sheets and celebrations now stack in three fixed layers — page, overlays, celebrations — so a menu or dialog can no longer end up behind something it should sit in front of. Nothing moves on screen. (2026-09-28)
+- An installed phone app is no longer locked to portrait by the browser; the app states it can turn. (2026-09-28)
+- Under the hood: a per-account settings store (one file per sign-in account, read and written through `/api/account/prefs`) for the features coming next that remember things per account. Nothing uses it yet. (2026-09-28)
+
 ## [3.14.0] - 2026-09-26 — Moving Pictures
 
 - **Two celebrations now play as video.** Two of the hidden celebrations are full video moments, with their ceremony drawn over the clip and matched frame for frame to their design pages. Press Esc or click to skip one; with animations turned off, each shows a still instead. The page underneath pauses its drawing while a moment plays, and a moment waits for the page to finish loading before it starts, so it plays smoothly on a large library. (2026-09-26)
