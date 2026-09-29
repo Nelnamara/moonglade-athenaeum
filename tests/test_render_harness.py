@@ -113,6 +113,36 @@ pytestmark = pytest.mark.render
 
 _USERNAME = "render-harness"
 _PASSWORD = "a-real-test-password-1"
+# Throwaway never-guided accounts for logged_in_page(fresh_account=True), one per call.
+_FRESH_ACCOUNTS = __import__("itertools").count(1)
+
+
+def _guide_surfaces():
+    """guideCore.js's GUIDE_SURFACES, read from the source so this harness never keeps a
+    second copy of the list."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "gallery", "src", "help", "guideCore.js"),
+               encoding="utf-8").read()
+    m = re.search(r"export const GUIDE_SURFACES = \[([^\]]*)\]", src)
+    assert m, "guideCore.js no longer exports GUIDE_SURFACES as a literal list"
+    surfaces = re.findall(r'"([a-z][a-z0-9_-]*)"', m.group(1))
+    assert surfaces, "guideCore.js's GUIDE_SURFACES is empty"
+    return surfaces
+
+
+def _seed_guide_seen(root, username=_USERNAME):
+    """Mark every surface's first-run guide (Session I decision 1) as already answered for
+    `username`, through the real per-account store the app itself writes
+    (account_prefs_update -> GET/POST /api/account/prefs).
+
+    Same "already-onboarded" reasoning as each server's API key and `seen` achievements: an
+    ABSENT guide.<surface> key is a first visit, so a fresh account correctly gets the
+    welcome card (.mgguide-root) -- and on the phone it sits over the grid and takes the
+    click an ordinary test makes on a tile. A test that is ABOUT the guide opts in to a
+    never-guided account instead: logged_in_page(fresh_account=True)."""
+    import moonglade_gallery as _gallery
+    _gallery.account_prefs_update(
+        root, username, set_={"guide." + s: "done" for s in _guide_surfaces()})
 
 # 1280x900 desktop: what every threshold below was measured at.
 DESKTOP = {"width": 1280, "height": 900}
@@ -301,6 +331,8 @@ def render_server(tmp_path_factory):
     cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
     cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
     config_path.write_text(json.dumps(cfg))
+    # ...and every surface's first-run guide already answered (_seed_guide_seen).
+    _seed_guide_seen(root)
 
     # Same "already-onboarded" reasoning as the API key above, extended to achievements.
     # Two pieces, both load-bearing:
@@ -376,7 +408,11 @@ def logged_in_page(render_server, render_browser, monkeypatch):
     assert core._config_path() == render_server.config_path
     contexts = []
 
-    def _open(width=DESKTOP["width"], height=DESKTOP["height"], **device):
+    def _open(width=DESKTOP["width"], height=DESKTOP["height"], fresh_account=False,
+              **device):
+        # fresh_account=True signs in as a brand-new account of its own instead of the
+        # module's already-onboarded one: no guide.<surface> keys, so every surface shows
+        # its first-run welcome card, exactly as a real first sign-in does.
         # base_url makes page.goto("/loom") resolve against the ephemeral port, so no test
         # has to carry the port around. `device` carries a real phone's identity when a test
         # opens one (IPHONE_PRO_MAX below): user agent, touch, mobile viewport semantics and
@@ -391,7 +427,12 @@ def logged_in_page(render_server, render_browser, monkeypatch):
         ctx.set_default_timeout(10_000)
         contexts.append(ctx)
         page = ctx.new_page()
-        _login(page)
+        if fresh_account:
+            username = "render-fresh-%d" % next(_FRESH_ACCOUNTS)
+            core.add_or_update_web_user(username, _PASSWORD)
+            _login(page, username)
+        else:
+            _login(page)
         return page
 
     try:
@@ -575,7 +616,7 @@ def _dismiss_any_achievement_toast(page, rounds=4):
             rounds))
 
 
-def _login(page):
+def _login(page, username=_USERNAME):
     """Post the real /login form. No bypass, no fabricated session cookie.
 
     LoginPage.jsx's submit is async (fetch POST /api/login, then a CLIENT-SIDE
@@ -589,7 +630,7 @@ def _login(page):
     it actually happens -- the same fix works for a synchronous native submit
     too, so this isn't React-specific plumbing leaking into a shared helper."""
     page.goto("/login", wait_until="domcontentloaded")
-    page.fill("input[name=username]", _USERNAME)
+    page.fill("input[name=username]", username)
     page.fill("input[name=password]", _PASSWORD)
     # The login's own budget, wider than the context default: on a two-core CI runner the
     # gallery's first load after sign-in (its data calls, then the quiet stretch
@@ -2818,6 +2859,8 @@ def paged_library_server(tmp_path_factory, monkeypatch):
     cfg = json.loads(config_path.read_text()) if config_path.exists() else {}
     cfg["PIXAI_API_KEY"] = "sk-render-harness-fake"
     config_path.write_text(json.dumps(cfg))
+    # ...and every surface's first-run guide already answered (_seed_guide_seen).
+    _seed_guide_seen(root)
     # ...and every earned achievement pre-marked seen, so no .ach-m2 celebration is up while
     # the grid is being measured. window.Ach.check() runs on mg-gen-done (App.jsx, and now
     # AppMobile.jsx too), which is precisely the event this test fires. With the clock pinned
