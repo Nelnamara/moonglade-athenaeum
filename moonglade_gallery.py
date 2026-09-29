@@ -5168,9 +5168,17 @@ def _telem_file_lock(out_dir):
     the same ledger). O_EXCL lockfile, short spin, stale takeover; on timeout we
     proceed anyway -- a rarely-lost bump beats a blocked backup. Returns the lock
     path if acquired (caller unlinks), else None."""
+    return _excl_lockfile(_telemetry_path(out_dir).with_suffix(".lock"))
+
+
+def _excl_lockfile(lock, wait_s=2.0, stale_s=10.0):
+    """The O_EXCL lockfile behind _telem_file_lock, shared with the per-account prefs
+    store: create `lock` exclusively, spinning up to `wait_s`; a lock older than
+    `stale_s` is a crashed writer's and is taken over. Returns the lock path if
+    acquired (the caller unlinks it), else None -- what a None MEANS is the caller's
+    call: telemetry proceeds anyway, the prefs store refuses the write."""
     import time as _t
-    lock = _telemetry_path(out_dir).with_suffix(".lock")
-    deadline = _t.monotonic() + 2.0
+    deadline = _t.monotonic() + wait_s
     while True:
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -5178,7 +5186,7 @@ def _telem_file_lock(out_dir):
             return lock
         except FileExistsError:
             try:                       # a crashed writer's lock goes stale fast
-                if _t.time() - lock.stat().st_mtime > 10:
+                if _t.time() - lock.stat().st_mtime > stale_s:
                     lock.unlink()
                     continue
             except OSError:
@@ -9439,6 +9447,236 @@ def _account_key(username):
     config.json's AUTH_USERS."""
     import hashlib
     return hashlib.sha256(str(username).encode("utf-8")).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Per-account preferences -- one small JSON document per app login account
+# ---------------------------------------------------------------------------
+# The home for state that belongs to ONE signed-in account rather than to the library:
+# which first-run guides it has dismissed, the "what's new" it has seen, per-base-family
+# generate defaults, a pinned goal. Deliberately generic -- a flat {key: JSON value}
+# document validated at the write boundary -- so each later consumer is a key name
+# (`guide.<surface>`, `seen.whatsnew`, `unleash`, ...), never another store.
+#
+# ON DISK: out_dir/account_prefs/<key>.json, where <key> is _account_key(username) --
+# the same case-safe digest every per-account store uses, never the raw name.
+#
+# WHICH ACCOUNT: the route passes session["user"] and nothing else; the body can never
+# name one. There is no web "no accounts" mode to key: the gallery has no localhost
+# bypass, and with zero accounts nothing past /login is reachable (DECISIONS: "The
+# gallery is default-deny, with no localhost bypass"), so every request that reaches
+# the route carries a real username. ACCOUNT_LOCAL is for a SERVER-SIDE caller that has
+# no web session at all (the CLI, the MCP server): it lands on account_prefs/_local.json.
+# It cannot collide with an account: a digest is 16 hex characters and never "_local",
+# and the sentinel is an object, not a string, so no session cookie can carry it. An
+# empty or missing username is refused outright -- it never falls back to _local.
+#
+# CORRUPT FILES: a read of a missing, unparsable or non-object file answers {} (fail
+# soft: a torn preference must never break a page). A WRITE never silently replaces a
+# corrupt file with that empty reading: the bad file is moved aside to
+# <key>.corrupt-<UTC stamp>.json (kept, logged) before the new document lands. A file
+# that exists but cannot be READ (a sharing violation, a permission error) refuses the
+# write instead -- what could not be read is not overwritten.
+#
+# LOCKING: one thread lock around every read-modify-write, plus a per-account O_EXCL
+# lockfile (_excl_lockfile, telemetry's) so a second process writing the same document
+# cannot interleave. A lockfile that cannot be taken in time refuses the write
+# (AccountPrefsBusy) rather than risk a lost update. Writes are atomic: temp file in
+# the same directory + core._atomic_replace.
+ACCOUNT_PREFS_DIRNAME = "account_prefs"
+ACCOUNT_PREF_KEY_MAX = 64
+ACCOUNT_PREF_VALUE_MAX = 64 * 1024        # one value's compact JSON, UTF-8 bytes
+ACCOUNT_PREFS_DOC_MAX = 1024 * 1024       # the whole document as written, UTF-8 bytes
+# Lowercase dotted names: segments of [a-z0-9_-], the first starting with a letter, the
+# rest with a letter or digit (so `seen.feat.12` works), no empty segment.
+ACCOUNT_PREF_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
+_ACCOUNT_LOCAL_FILEKEY = "_local"
+_ACCOUNT_PREFS_LOCK = threading.Lock()
+
+
+class _AccountLocal(object):
+    """The type of ACCOUNT_LOCAL. A distinct object, not a string, on purpose."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "ACCOUNT_LOCAL"
+
+
+ACCOUNT_LOCAL = _AccountLocal()
+
+
+class AccountPrefsError(ValueError):
+    """A change the store refuses (bad key, value not JSON, over a size cap, bad
+    shape). str(e) is a plain sentence the route returns verbatim with a 400."""
+
+
+class AccountPrefsBusy(RuntimeError):
+    """Another process held this account's document lock past the wait."""
+
+
+def account_prefs_path(out_dir, account):
+    """The one file `account`'s preferences live in. `account` is a username (the
+    session's own) or ACCOUNT_LOCAL; anything else -- None, "", whitespace, a
+    non-string -- raises ValueError rather than landing on some shared file."""
+    if account is ACCOUNT_LOCAL:
+        key = _ACCOUNT_LOCAL_FILEKEY
+    elif isinstance(account, str) and account.strip():
+        key = _account_key(account)
+    else:
+        raise ValueError("account prefs need a signed-in account (or ACCOUNT_LOCAL)")
+    return Path(out_dir) / ACCOUNT_PREFS_DIRNAME / (key + ".json")
+
+
+def _account_prefs_read(p):
+    """(document, state) for one prefs file. state: "ok", "missing", "corrupt" (not
+    UTF-8 JSON, or not an object) or "unreadable" (it exists, the OS would not hand it
+    over). The document is {} for every state but "ok"."""
+    try:
+        raw = p.read_bytes()
+    except FileNotFoundError:
+        return {}, "missing"
+    except OSError:
+        return {}, "unreadable"
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):      # UnicodeDecodeError is a ValueError
+        return {}, "corrupt"
+    if not isinstance(doc, dict):
+        return {}, "corrupt"
+    return doc, "ok"
+
+
+def account_pref_key_problem(key):
+    """A plain sentence saying why `key` is not a valid preference key, or None."""
+    if not isinstance(key, str) or not key:
+        return "Preference keys must be non-empty strings."
+    if len(key) > ACCOUNT_PREF_KEY_MAX:
+        return "Preference key '{}...' is longer than {} characters.".format(
+            key[:24], ACCOUNT_PREF_KEY_MAX)
+    if not ACCOUNT_PREF_KEY_RE.match(key):
+        return ("'{}' is not a valid preference key: use lowercase dotted names "
+                "like guide.library or seen.whatsnew.".format(key))
+    return None
+
+
+def _account_pref_normalise(key, value):
+    """`value` round-tripped through JSON exactly as it will be stored, or
+    AccountPrefsError. allow_nan=False: NaN/Infinity are not JSON, and the browser's
+    JSON.parse would choke on the file forever after."""
+    try:
+        enc = json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError, RecursionError):
+        raise AccountPrefsError("The value for '{}' is not plain JSON.".format(key))
+    size = len(enc.encode("utf-8"))
+    if size > ACCOUNT_PREF_VALUE_MAX:
+        raise AccountPrefsError(
+            "The value for '{}' is too large ({:,} bytes; the limit is {:,}).".format(
+                key, size, ACCOUNT_PREF_VALUE_MAX))
+    return json.loads(enc)
+
+
+def account_prefs_get(out_dir, account):
+    """`account`'s preferences document ({} when it has none, or its file is
+    corrupt or unreadable). Returns a fresh dict the caller may keep."""
+    p = account_prefs_path(out_dir, account)
+    with _ACCOUNT_PREFS_LOCK:
+        doc, _state = _account_prefs_read(p)
+    return doc
+
+
+def account_prefs_update(out_dir, account, set_=None, unset=None):
+    """Apply {key: value} sets and a list of key removals to `account`'s document, in
+    one locked, atomic read-modify-write. Returns the updated document.
+
+    Every key and value is validated before anything is written; one bad entry
+    refuses the whole change (AccountPrefsError, nothing written). The document cap is
+    checked on the result, except for a change that only REMOVES keys -- that is
+    always accepted, so an over-cap document (a hand-edited file) can still shrink.
+    Unsetting a key that is not there is a no-op, not an error. A change that alters
+    nothing writes nothing -- except over a corrupt file, which any change sets aside
+    and replaces.
+
+    Raises AccountPrefsError (refused change), AccountPrefsBusy (another process held
+    the lock), OSError (the file could not be read, preserved or written)."""
+    set_ = {} if set_ is None else set_
+    unset = [] if unset is None else unset
+    if not isinstance(set_, dict):
+        raise AccountPrefsError("'set' must be an object of {key: value}.")
+    if not isinstance(unset, (list, tuple)):
+        raise AccountPrefsError("'unset' must be a list of keys.")
+    clean = {}
+    for k, v in set_.items():
+        problem = account_pref_key_problem(k)
+        if problem:
+            raise AccountPrefsError(problem)
+        clean[k] = _account_pref_normalise(k, v)
+    drop = []
+    for k in unset:
+        problem = account_pref_key_problem(k)
+        if problem:
+            raise AccountPrefsError(problem)
+        if k in clean:
+            raise AccountPrefsError("'{}' is in both 'set' and 'unset'.".format(k))
+        drop.append(k)
+
+    p = account_prefs_path(out_dir, account)
+    with _ACCOUNT_PREFS_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lock = _excl_lockfile(p.with_suffix(".lock"))
+        if lock is None:
+            raise AccountPrefsBusy("Preferences are being saved elsewhere; try again.")
+        try:
+            doc, state = _account_prefs_read(p)
+            if state == "unreadable":
+                raise OSError("could not read the saved preferences to update them")
+            new = dict(doc)
+            new.update(clean)
+            for k in drop:
+                new.pop(k, None)
+            if new == doc and state != "corrupt":
+                return new      # nothing changed (a missing file stays missing)
+            data = json.dumps(new, indent=1, sort_keys=True, ensure_ascii=False,
+                              allow_nan=False).encode("utf-8")
+            if clean and len(data) > ACCOUNT_PREFS_DOC_MAX:
+                raise AccountPrefsError(
+                    "Saved preferences would be too large ({:,} bytes; the limit "
+                    "is {:,}).".format(len(data), ACCOUNT_PREFS_DOC_MAX))
+            if state == "corrupt":
+                _account_prefs_set_aside(p)
+            import moonglade_backup as core
+            tmp = p.with_name(p.name + ".tmp-%d" % os.getpid())
+            try:
+                tmp.write_bytes(data)
+                core._atomic_replace(tmp, p)
+            except OSError:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+            return new
+        finally:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
+def _account_prefs_set_aside(p):
+    """Move a corrupt prefs file out of the way (kept, never deleted) so the write
+    about to land does not silently destroy it. Raises OSError if it cannot be moved:
+    a file that could not be preserved is not overwritten."""
+    import logging as _logging
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    aside = p.with_name("{}.corrupt-{}.json".format(p.stem, stamp))
+    n = 1
+    while aside.exists():
+        n += 1
+        aside = p.with_name("{}.corrupt-{}-{}.json".format(p.stem, stamp, n))
+    os.replace(p, aside)
+    _logging.getLogger(__name__).warning(
+        "account prefs: %s was not a JSON object; kept it as %s and started a fresh "
+        "document", p.name, aside.name)
 
 
 # Any-OS user-home prefixes: X:\Users\<name>, /home/<name>, /Users/<name>.
@@ -18204,6 +18442,72 @@ def create_app(out_dir: Path):
                 tmp.write_text(json.dumps(presets, indent=1), encoding="utf-8")
                 os.replace(tmp, dest)   # atomic: a torn write can't eat the set
             return jsonify({"presets": presets})
+
+    # The one body shape POST /api/account/prefs accepts; anything else is refused.
+    _ACCOUNT_PREFS_BODY_KEYS = frozenset(("set", "unset", "csrf"))
+
+    @app.route("/api/account/prefs", methods=["GET", "POST"])
+    @tier(LOGIN)
+    def api_account_prefs():
+        """The signed-in account's own preferences document -- the store is
+        account_prefs_get/account_prefs_update above (see their section header for the
+        file, the key rules, the caps and the corrupt-file contract).
+
+        GET  -> {"prefs": {...}, "csrf": "..."}. The token rides along the way
+                /api/myart/items hands its own out, so the client hook needs no boot
+                plumbing to make its first write.
+        POST {"csrf": "...", "set": {key: value}, "unset": [key]} -> {"prefs": {...}},
+                the whole updated document. Either of set/unset may be omitted, not
+                both; any other top-level field is refused. One bad key or value refuses
+                the whole change (400, plain message) and writes nothing.
+
+        LOGIN tier -- per-account state, the same tier as /api/view-presets,
+        /api/snippets and the Loom's store. CSRF: the explicit-token class
+        (_check_csrf(), the helper /api/duplicates/resolve and the user-admin routes
+        use), because this is a state-changing POST a single forged request could
+        otherwise drive.
+
+        The account comes from the SESSION, never the body -- same contract as every
+        per-account store here: a client that could name the account could read and
+        overwrite anyone's."""
+        user = str(session.get("user") or "")
+        if not user:
+            # Unreachable through the front door; fails closed if that ever changes,
+            # and never falls back to ACCOUNT_LOCAL or a shared file.
+            return jsonify({"error": "authentication required"}), 401
+        if request.method == "GET":
+            session.setdefault("csrf", secrets.token_hex(16))
+            return jsonify({"prefs": account_prefs_get(out_dir, user),
+                            "csrf": session["csrf"]})
+        if (request.content_length or 0) > 2 * ACCOUNT_PREFS_DOC_MAX:
+            return jsonify({"error": "That change is too large to save."}), 400
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object: "
+                                     "{\"set\": {...}, \"unset\": [...]}."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 400
+        extra = sorted(str(k) for k in body if k not in _ACCOUNT_PREFS_BODY_KEYS)
+        if extra:
+            return jsonify({"error": "Unknown field(s): {}. Send only 'set' and "
+                                     "'unset'.".format(", ".join(extra)[:120])}), 400
+        if "set" not in body and "unset" not in body:
+            return jsonify({"error": "Nothing to change: send 'set' and/or 'unset'."}), 400
+        if "set" in body and not isinstance(body["set"], dict):
+            return jsonify({"error": "'set' must be an object of {key: value}."}), 400
+        if "unset" in body and not isinstance(body["unset"], list):
+            return jsonify({"error": "'unset' must be a list of keys."}), 400
+        try:
+            prefs = account_prefs_update(out_dir, user, set_=body.get("set"),
+                                         unset=body.get("unset"))
+        except AccountPrefsError as e:
+            return jsonify({"error": str(e)}), 400
+        except AccountPrefsBusy as e:
+            return jsonify({"error": str(e)}), 503
+        except OSError as e:
+            return jsonify({"error": "Could not save preferences: "
+                                     + _redact_host_paths(str(e))[:160]}), 500
+        return jsonify({"prefs": prefs})
 
     def _log_gen_failure(where, exc, params=None):
         """Record a failed spend attempt in the server log. Returns the redacted message so a
