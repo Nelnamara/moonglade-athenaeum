@@ -6395,14 +6395,18 @@ def _q_json(route, payload, status=200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True):
+def _q_page(render_browser, server, monkeypatch, init=None, connection=None, touch=True, viewport=None,
+            screen=None):
     """A logged-in 390x844 phone page on the Session Q server. Returns (ctx, page, seen) where `seen`
     collects [(method, url)] for every request the page makes. Nothing that could reach PixAI is left
     unanswered: the Panel's Sync now job, the model / task reads a remix makes, the price quote."""
     monkeypatch.setattr(core, "_config_path", lambda: server.config_path)
     opts = {"has_touch": True, "is_mobile": True} if touch else {}
+    vp = viewport or PHONE
+    if screen:
+        opts["screen"] = screen
     ctx = render_browser.new_context(
-        viewport={"width": PHONE["width"], "height": PHONE["height"]}, device_scale_factor=1,
+        viewport={"width": vp["width"], "height": vp["height"]}, device_scale_factor=1,
         base_url=server.base_url, timezone_id="UTC", **opts)
     ctx.set_default_timeout(10_000)
     ctx.add_init_script(_Q_WRITES_JS)
@@ -6985,5 +6989,343 @@ def test_pull_to_refresh_on_my_art_re_reads_the_list_and_calls_no_sync(
         assert len(items) == first + 1, "the list was re-read once"
         page.wait_for_function("() => !document.querySelector('.ptr.syncing')")
         assert runs == [], "My Art's pull calls no sync"
+    finally:
+        ctx.close()
+
+
+# ---------------------------------------------------------------------------
+# Session Q, Q4: the phone turned sideways (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 x 360"). The
+# same phone shell in both orientations -- a turn is CSS and one hook, never a remount -- with the tab
+# bar a 56 px left rail, 4 columns (3 under 700 px wide), the Lightbox picture fitting the height with
+# its actions in a right rail, and every sheet a side panel up to 380 px wide. Safe areas cannot be
+# simulated headlessly (env() resolves to 0), so those are held by the stylesheet test in loom/test.
+# Real-device behaviour (iOS Safari, Android, touch, notches) is NOT measured here.
+# ---------------------------------------------------------------------------
+
+LAND = {"width": 844, "height": 390}
+LAND_SMALL = {"width": 640, "height": 360}
+
+
+def _q_land(render_browser, server, monkeypatch, vp=None, **kw):
+    ctx, page, seen = _q_page(render_browser, server, monkeypatch, viewport=vp or LAND, **kw)
+    return ctx, page, seen
+
+
+def _q_box(page, sel):
+    return page.evaluate("""(s) => { const e = document.querySelector(s); if (!e) return null;
+        const b = e.getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; }""", sel)
+
+
+def test_landscape_phone_keeps_the_phone_shell_with_a_56px_rail_and_four_columns(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4. A phone turned sideways is 844 px wide -- past the 520 line that used to hand it to the desktop
+    build. It stays the phone shell: the tab bar is a 56 px rail on the left (44 px icon tiles, no labels),
+    the hero folds to one bar, and the gallery shows 4 columns of aligned rows, 3 on a 640 px phone."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        assert page.locator(".glm-stage").count() == 1, "the phone shell, not the desktop build"
+        nav = _q_box(page, ".glm-nav")
+        assert (nav["l"], nav["t"], nav["w"]) == (0, 0, 56) and abs(nav["h"] - LAND["height"]) < 1, nav
+        tab = _q_box(page, ".glm-navitem")
+        assert (round(tab["w"]), round(tab["h"])) == (44, 44), tab
+        assert page.evaluate("getComputedStyle(document.querySelector('.glm-navlabel')).display") == "none"
+        assert [b.get_attribute("aria-label") for b in page.locator(".glm-navitem").all()] == ["Gallery", "Create", "Control"]
+        hero = _q_box(page, ".glm-hero")
+        assert hero["l"] == 56 and hero["h"] < 60, "the hero is one bar, right of the rail: %r" % hero
+        # the shell is a grid: nothing but the hero, the body and the rail takes a row
+        assert page.evaluate("""() => [...document.querySelector('.glm-stage').children]
+            .filter((c) => getComputedStyle(c).position === 'static' || getComputedStyle(c).position === 'relative')
+            .map((c) => c.className.split(' ')[0])""") == ["glm-hero", "glm-body", "glm-nav"]
+        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 8)
+            .map((t) => Math.round(t.getBoundingClientRect().left))""")
+        assert len(set(lefts)) == 4 and lefts[:4] == sorted(lefts[:4]) and lefts[:4] == lefts[4:8], lefts
+        tops = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 4)
+            .map((t) => Math.round(t.getBoundingClientRect().top))""")
+        assert len(set(tops)) == 1, "the first row is aligned: %r" % tops
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "no sideways page scroll"
+        # phase two: drop the landscape rules in-page and the rail is a bottom bar spanning the width again
+        page.evaluate("""() => { for (const sh of [...document.styleSheets]) { try { for (let i = sh.cssRules.length - 1; i >= 0; i--) {
+            const r = sh.cssRules[i]; if (r.type === CSSRule.MEDIA_RULE && r.conditionText.includes('max-height: 520px')) sh.deleteRule(i); } } catch (e) {} } }""")
+        _settle(page)
+        assert _q_box(page, ".glm-nav")["w"] > 700, "without the landscape rules the tab bar spans the width again"
+    finally:
+        ctx.close()
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch, vp=LAND_SMALL)
+    try:
+        _q_open(page)
+        lefts = page.evaluate("""() => [...document.querySelectorAll('.glm-grid-rows .glm-tile')].slice(0, 6)
+            .map((t) => Math.round(t.getBoundingClientRect().left))""")
+        assert len(set(lefts)) == 3, "3 columns under 700 px wide: %r" % lefts
+    finally:
+        ctx.close()
+
+
+def test_a_tablet_turned_sideways_is_still_the_desktop_build(phone_q_server, render_browser, monkeypatch):
+    """Q4's other edge: the rule that keeps a phone a phone in landscape must not claim an iPad mini
+    (short side 744). Same page, a sideways viewport -- but a tablet's screen."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch,
+                              vp={"width": 1133, "height": 744}, screen={"width": 1133, "height": 744})
+    try:
+        _visit(page, "/")
+        page.wait_for_selector("#root *")
+        page.wait_for_timeout(500)
+        assert page.locator(".glm-stage").count() == 0, "the desktop build, not the phone shell"
+    finally:
+        ctx.close()
+
+
+def test_the_landscape_lightbox_fits_the_height_and_its_actions_are_a_right_rail(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4. The picture takes everything left of the rail and fits the height; the rail holds the action
+    list first (every button on screen and tappable), then the placard; the Upscale slab is a side panel
+    up to 380 px wide; opening the prompt slab cannot push the actions off; and the To Video pill takes
+    the same route as before (it only OPENS the Create tab)."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_tile(page, 0).click()
+        page.wait_for_selector(".lbm-placard .lbm-sib")
+        _settle(page)
+        stage, hero, rail = _q_box(page, ".lbm-stage"), _q_box(page, ".lbm-hero"), _q_box(page, ".lbm-bottom")
+        assert rail["l"] >= LAND["width"] - 200 and rail["r"] == LAND["width"], rail
+        assert stage["r"] <= rail["l"] + 1, "the picture is left of the rail"
+        assert hero["h"] >= stage["h"] - 16 - 1 and hero["t"] >= stage["t"], "the picture fits the height: %r %r" % (hero, stage)
+        acts = page.evaluate("""() => [...document.querySelectorAll('.lbm-actsrow > *')].map((c) => {
+            const b = c.getBoundingClientRect(); const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            return {t: c.textContent.trim(), l: b.left, r: b.right, top: b.top, bottom: b.bottom, hit: !!(e && c.contains(e))}; })""")
+        assert len(acts) >= 6
+        for a in acts:
+            assert a["l"] >= rail["l"] and a["r"] <= rail["r"] and a["top"] >= 0 and a["bottom"] <= LAND["height"] and a["hit"], a
+        assert [a["top"] for a in acts] == sorted(a["top"] for a in acts), "one column, top to bottom"
+        plac = _q_box(page, ".lbm-placard")
+        assert plac["t"] >= acts[-1]["bottom"] - 1, "the placard follows the action list in the rail"
+        # the prompt slab opens below the actions and cannot move them
+        # (position within the rail's own content: the click itself scrolls the rail to reach the box)
+        at = "() => document.querySelector('.lbm-actsrow').getBoundingClientRect().top + document.querySelector('.lbm-bottom').scrollTop"
+        before = page.evaluate(at)
+        page.click(".lbm-promptbox")
+        _settle(page)
+        assert page.evaluate(at) == before
+        page.click(".lbm-promptbox")
+        page.evaluate("document.querySelector('.lbm-bottom').scrollTop = 0")
+        # a sibling tap swaps in place and leaves the rail where it was (no scrollIntoView on the rail)
+        page.locator(".lbm-sib").nth(1).scroll_into_view_if_needed()
+        rail_top = page.evaluate("document.querySelector('.lbm-bottom').scrollTop")
+        page.locator(".lbm-sib").nth(1).click()
+        page.wait_for_function("() => document.querySelector('.lbm-index').textContent === '2'")
+        assert page.evaluate("document.querySelector('.lbm-bottom').scrollTop") == rail_top
+        # Upscale is a side panel
+        page.click(".lbm-chip:has-text('Upscale')")
+        page.wait_for_timeout(350)
+        slab = _q_box(page, ".lbm-sheet-slab")
+        assert slab["r"] == LAND["width"] and slab["w"] <= 380 and slab["h"] >= LAND["height"] - 1, slab
+        page.click(".lbm-sheet-x")
+        # To Video opens the Create tab's Video form and sends nothing
+        page.click(".lbm-chip:has-text('To Video')")
+        page.wait_for_selector(".lbm-root", state="detached")
+        assert _q_generation_posts(seen) == [], "opening the video form spends nothing"
+    finally:
+        ctx.close()
+
+
+def test_landscape_sheets_are_side_panels_up_to_380px_with_their_actions_reachable(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4. Sort, Advanced and Actions (and the Loom sheet) open from the right edge as a panel no wider
+    than 380 px and as tall as the screen; the sticky Apply / Clear row stays on screen and tappable; the
+    Loom sheet no longer asks the owner to turn the phone."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+
+        def panel():
+            page.wait_for_selector(".glm-sheet")
+            page.wait_for_timeout(350)
+            return _q_box(page, ".glm-sheet")
+
+        def close():
+            page.click(".glm-scrim", position={"x": 10, "y": 10})
+            page.wait_for_selector(".glm-sheet", state="detached")
+
+        page.click(".glm-bar2 .glm-metal:has-text('Sort')")
+        p = panel()
+        assert p["r"] == LAND["width"] and 300 <= p["w"] <= 380 and p["t"] == 0 and p["h"] == LAND["height"], p
+        close()
+        page.click(".glm-search-adv")
+        p = panel()
+        assert p["r"] == LAND["width"] and p["w"] <= 380, p
+        hit = page.evaluate("""() => { const b = document.querySelector('.glm-sheet .glm-primary').getBoundingClientRect();
+            const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            return {ok: !!(e && e.closest('.glm-primary')), bottom: b.bottom}; }""")
+        assert hit["ok"] and hit["bottom"] <= LAND["height"], "Apply is pinned on screen: %r" % hit
+        close()
+        page.click(".glm-bar .glm-metal:has-text('Select')")
+        _q_tile(page, 0).click()
+        page.click(".glm-bar2 .glm-pill-accent")
+        p = panel()
+        assert p["r"] == LAND["width"] and p["w"] <= 380, p
+        close()
+        page.click(".glm-bar .glm-metal:has-text('Cancel')")
+        page.click(".glm-iconbtn-teal")
+        panel()
+        note = page.locator(".glm-loom-note").inner_text()
+        assert "turn the phone" not in note.lower() and "rotate" not in note.lower(), note
+        assert "board and reel view" in note
+    finally:
+        ctx.close()
+
+
+def test_landscape_record_is_a_picture_beside_a_380px_panel_with_its_foot_pinned(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4 (the record's foot). Image Details sideways: the picture on the left fits the height, the record
+    is a side panel no wider than 380 px, and Remix / Send to Video sit pinned at the panel's foot,
+    on screen and tappable. Upright, the record's wrapper has no box at all."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_open_details(page, 0)
+        frame, rec, foot = _q_box(page, ".idm-frame"), _q_box(page, ".idm-rec"), _q_box(page, ".idm-recrow")
+        assert rec["w"] <= 380 and rec["r"] == LAND["width"], rec
+        assert frame["r"] <= rec["l"], "the picture is beside the record, not under it"
+        assert LAND["height"] - 1 <= foot["b"] <= LAND["height"] + 0.5, "pinned to the panel's foot: %r" % foot
+        for sel in (".idm-remixbtn.remix", ".idm-remixbtn.video"):
+            b = _q_box(page, sel)
+            assert b["h"] >= 44 and b["b"] <= LAND["height"]
+            assert page.evaluate("""(s) => { const b = document.querySelector(s).getBoundingClientRect();
+                const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest(s)); }""", sel)
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).overflowY") == "auto"
+        page.click(".idm-remixbtn.video")
+        page.wait_for_selector(".idm-root", state="detached")
+        assert _q_generation_posts(seen) == []
+    finally:
+        ctx.close()
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        _q_open_details(page, 0)
+        assert page.evaluate("getComputedStyle(document.querySelector('.idm-rec')).display") == "contents"
+        assert _q_box(page, ".idm-recrow")["b"] <= PHONE["height"] + 0.5
+    finally:
+        ctx.close()
+
+
+_Q_TOP_MID_JS = """() => { const host = document.querySelector('.glm-body'); const bar = document.querySelector('.glm-bar');
+    const vt = Math.max(host.getBoundingClientRect().top, bar.getBoundingClientRect().bottom);
+    let best = null; for (const el of document.querySelectorAll('[data-mid]')) { const b = el.getBoundingClientRect();
+      if (b.bottom > vt + 1 && (!best || b.top < best.top)) best = {mid: el.getAttribute('data-mid'), off: b.top - vt}; }
+    return best; }"""
+
+
+def test_a_turn_keeps_the_scroll_place_and_the_open_picture_and_never_remounts_the_shell(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4. Portrait -> landscape -> portrait mid-scroll: the picture at the top of the view is still at
+    the top afterwards (the columns re-flowed, so a pixel offset alone would land somewhere else -- shown
+    in the second phase), and a picture open in the Lightbox is still the one open. The shell is the same
+    DOM node throughout: a turn is not a remount."""
+    ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        page.evaluate("() => { window.__stage = document.querySelector('.glm-stage'); }")
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 1500")
+        page.wait_for_timeout(300)
+        _settle(page)
+        before = page.evaluate(_Q_TOP_MID_JS)
+        assert before and int(before["mid"]) >= 505, before
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length > 0")
+        page.wait_for_timeout(300)
+        _settle(page)
+        after = page.evaluate(_Q_TOP_MID_JS)
+        assert after["mid"] == before["mid"], "the same picture is at the top: %r -> %r" % (before, after)
+        assert abs(after["off"] - before["off"]) < 30, (before, after)
+        assert page.evaluate("document.querySelector('.glm-stage') === window.__stage"), "no remount"
+        # phase two: had the pixel offset simply been kept, a different picture would be showing
+        landed = page.evaluate("document.querySelector('.glm-body').scrollTop")
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 1500")
+        _settle(page)
+        assert page.evaluate(_Q_TOP_MID_JS)["mid"] != before["mid"], "the naive offset lands elsewhere (%d)" % landed
+        page.evaluate("(t) => { document.querySelector('.glm-body').scrollTop = t; }", landed)
+        page.set_viewport_size(PHONE)
+        page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0")
+        page.wait_for_timeout(300)
+        _settle(page)
+        back = page.evaluate(_Q_TOP_MID_JS)
+        assert back["mid"] == before["mid"], (before, back)
+        # a picture open in the Lightbox survives a turn
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 0")
+        _settle(page)
+        _q_tile(page, 2).click()
+        page.wait_for_selector(".lbm-placard .lbm-sib")
+        assert page.locator(".lbm-index").inner_text() == "3"
+        src = page.evaluate("document.querySelector('.lbm-hero img').getAttribute('src')")
+        page.set_viewport_size(LAND)
+        page.wait_for_function("() => getComputedStyle(document.querySelector('.lbm-root')).display === 'grid'")
+        assert page.locator(".lbm-root").count() == 1 and page.locator(".lbm-index").inner_text() == "3"
+        assert page.evaluate("document.querySelector('.lbm-hero img').getAttribute('src')") == src
+        page.set_viewport_size(PHONE)
+        page.wait_for_function("() => getComputedStyle(document.querySelector('.lbm-root')).display === 'flex'")
+        assert page.locator(".lbm-index").inner_text() == "3"
+    finally:
+        ctx.close()
+
+
+def test_landscape_pull_moon_and_the_newest_button_follow_the_rail(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4. Pull to refresh works at the top of the sideways gallery with the same numbers (a true
+    fraction, release line at 72), and the Newest jump rides the bottom of the scroller -- which is now
+    beside the rail and above the home bar -- inside the visible area, not under the rail."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch)
+    try:
+        _q_open(page)
+        release = _q_touch_drag(page, 400, 120, 200)          # 80 px of finger = 48 px of page
+        _settle(page)
+        st = page.evaluate(_Q_PULL_STATE_JS)
+        assert abs(st["px"] - 48) < 2 and 66 <= st["now"] <= 67, st
+        assert st["label"] == "pull to refresh"
+        release()
+        page.wait_for_function("() => new DOMMatrix(getComputedStyle(document.querySelector('.ptr-body')).transform).m42 === 0")
+        assert _q_generation_posts(seen) == [], "a short pull starts nothing"
+        page.evaluate("document.querySelector('.glm-body').scrollTop = 1400")
+        page.wait_for_selector(".glm-newest")
+        _settle(page)
+        n, body = _q_box(page, ".glm-newest"), _q_box(page, ".glm-body")
+        assert n["l"] >= body["l"] and n["r"] <= body["r"] and n["t"] >= body["t"] and n["b"] <= body["b"], (n, body)
+        assert body["l"] == 56, "beside the rail"
+        assert n["h"] >= 44
+        page.click(".glm-newest")
+        page.wait_for_function("() => document.querySelector('.glm-body').scrollTop < 5")
+    finally:
+        ctx.close()
+
+
+def test_landscape_feed_new_since_rule_and_saver_chip_are_all_there(
+        phone_q_server, render_browser, monkeypatch):
+    """Q4 with Stage A's pieces: the feed is one picture per row (never taller than the screen it is read
+    on), the 'N new since' rule runs the width of the list, and the header's Saver chip is in the one-row
+    hero. Uses the harness's own marker seed."""
+    ctx, page, seen = _q_land(render_browser, phone_q_server, monkeypatch, init=_q_marker_init())
+    try:
+        _q_seed_marker(page)
+        _q_open(page)
+        page.click(".glm-layout button[aria-label=Feed]")
+        page.wait_for_selector(".glm-feed .glm-tile-feed")
+        _settle(page)
+        tiles = page.evaluate("""() => [...document.querySelectorAll('.glm-feed .glm-tile')].slice(0, 4).map((t) => {
+            const b = t.getBoundingClientRect(); return {w: b.width, h: b.height}; })""")
+        for t in tiles:
+            assert t["h"] <= LAND["height"] - 70, "never taller than the screen: %r" % tiles
+        shapes = [(832, 1216), (1216, 832), (1024, 1024), (832, 1216)]
+        for t, (w, h) in zip(tiles, shapes):
+            assert abs(t["w"] / t["h"] - w / h) < 0.02, tiles
+        rule = _q_box(page, ".glm-newrule")
+        body = _q_box(page, ".glm-body")
+        assert rule["w"] >= body["w"] - 30 and page.locator(".glm-newrule").inner_text().strip() == "4 new since 21:40"
+        page.click(".glm-layout button[aria-label=Grid]")
+        page.evaluate("localStorage.setItem('mg_phone_saver', 'always')")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector(".glm-saverchip")
+        chip, hero = _q_box(page, ".glm-saverchip"), _q_box(page, ".glm-hero")
+        assert chip["t"] >= hero["t"] and chip["b"] <= hero["b"] and chip["r"] <= hero["r"], (chip, hero)
+        assert page.locator(".glm-tile-tag").first.inner_text() in ("256 px", "▶ paused")
     finally:
         ctx.close()
