@@ -81,6 +81,10 @@ import {
   CASTLIB_KEY, parseLibrary, libraryRows, rowMeta, untickQuestion, shotsUsing, memberFromAsset, tickMember,
   untickAsset, withLibId, syncPatch, addMember, editMember, editCopies, ticks, handoffCast, newMemberAsset,
 } from "./src/loom-cast-library.js";
+// Session P, Stage B2 (NOTES P8): find in storyboard -- the matching, the chips, the stepping.
+import {
+  emptyFind, findActive, findMatches, findChips, chipOn, toggleChip, currentIndex, stepIndex, findCountText,
+} from "./src/loom-find-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -807,6 +811,11 @@ const V2_STYLES = `
    selection outline still win over it). */
 .lv-card.stale{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-card:hover{border-color:var(--accent);}
+/* Session P (P8): find -- a card that does not match dims to 35%; the current match wears the
+   page's lavender border (over the selection's accent, which it usually also is). */
+.lv-card{transition:opacity .2s;}
+.lv-card.fdim{opacity:.35;}
+.lv-card.fcur,.lv-card.fcur:hover{border-color:var(--lavender);box-shadow:0 0 0 1px var(--lavender) inset;}
 .lv-card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
 .lv-code{font:700 9px/1 system-ui;color:var(--subtext);}
 .lv-ctitle{font:600 11px/1.2 system-ui;color:var(--text);margin:4px 0;min-height:26px;}
@@ -899,6 +908,27 @@ const V2_STYLES = `
    status bar sits on the same bottom 4px, so it steps up above the underline to keep both. */
 .lv-seg.stale{box-shadow:inset 0 -4px 0 var(--peach);}
 .lv-seg.stale .lv-segbar{bottom:4px;}
+/* Session P (P8): find's rings on the reel, the page's -- a match 1px lavender, the current
+   match 2px (over the selection's outline), a non-match at 35%. */
+.lv-seg{transition:opacity .2s;}
+.lv-seg.fmatch{outline:1px solid color-mix(in srgb,var(--lavender) 60%,transparent);outline-offset:-1px;z-index:1;}
+.lv-seg.fcur{outline:2px solid var(--lavender);outline-offset:-2px;z-index:3;}
+.lv-seg.fdim{opacity:.35;}
+/* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
+   the bar's own button chrome does not apply). */
+.lv-find{flex:1 1 180px;max-width:360px;min-width:160px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+  border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
+.lv-find.on{border-color:var(--lavender);}
+.lv-findico{font-size:11px;color:var(--overlay0);}
+.lv-findin{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--text);font:11.5px/1.2 system-ui,sans-serif;padding:0;}
+.lv-findin::placeholder{color:var(--overlay0);}
+.lv-findcount{font-size:10px;color:var(--subtext);font-family:ui-monospace,monospace;white-space:nowrap;}
+.lv-findstep{font-size:10px;color:var(--subtext);cursor:pointer;padding:0 3px;user-select:none;}
+.lv-findstep:hover{color:var(--lavender);}
+.lv-findchip{font-size:10px;padding:4px 9px;border-radius:999px;cursor:pointer;border:1px solid var(--surface1);color:var(--subtext);
+  white-space:nowrap;user-select:none;}
+.lv-findchip.on{border-color:var(--lavender);background:color-mix(in srgb,var(--lavender) 16%,transparent);color:var(--text);}
+.lv-findchip:focus-visible{outline:2px solid var(--lavender);outline-offset:1px;}
 .lv-segcode{font-size:9px;font-weight:700;color:rgba(6,4,14,.55);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;pointer-events:none;}
 .lv-segbar{position:absolute;left:0;right:0;bottom:0;height:4px;}
@@ -2293,6 +2323,87 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const codeById = new Map(entries.map((x) => [x.c.id, x.code]));
   const codeOf = (id) => codeById.get(id) || "the source shot";
   const stopCard = (ev) => ev.stopPropagation();
+
+  /* ---- FIND IN STORYBOARD (Session P, NOTES P8; the page's find pill, chips and rings) ----
+     A view over the board (loom/src/loom-find-core.js): typing or a chip is runFind, ↑ ↓ /
+     Enter is stepFind (which selects the current match and scrolls to it -- a selection change
+     only), Esc is clearFind. None of them writes the board, prices or renders (roots of
+     loom-no-auto-render.test.js). Another storyboard starts with no find. */
+  const [find, setFind] = useState(emptyFind);
+  const findInputRef = useRef(null);
+  useEffect(() => { setFind(emptyFind()); }, [projectApi.activeId]);
+  // The status a card shows (its paused / rendering poll first), as the board card reads it.
+  const shownStatus = (c) => {
+    const gs = genState[c.id];
+    return gs && gs.phase === "paused" ? "paused" : (gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" ? "wip" : c.status);
+  };
+  // "⚠ only" also keeps the ⚠ chips the card itself shows: a cast member with no picture, one
+  // past the reference limit, and an imported picture that can't be sent yet.
+  const cardWarns = (e) => castMissingImages(e, project, imgSrc).length > 0 || castPastBudget(e, project, imgSrc).length > 0
+    || unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
+  const findOn = findActive(find);
+  const findIds = findOn ? findMatches(entries, project, find.q, find, { byId: cardById, statusOf: shownStatus, warn: cardWarns }) : [];
+  const findSet = new Set(findIds);
+  const findCur = findIds.length ? findIds[currentIndex(find.cur, findIds.length)] : null;
+  const findChipList = findChips(entries, { statusOf: shownStatus });
+  const runFind = (next) => setFind((f) => ({ ...emptyFind(), ...(typeof next === "function" ? next(f) : { ...f, ...next }), cur: 0 }));
+  const stepFind = (dir) => {
+    if (!findIds.length) return;
+    // The first ↓ / Enter goes to the current match itself when it isn't the selected shot yet.
+    const n = dir > 0 && findCur && findCur !== selShot ? currentIndex(find.cur, findIds.length) : stepIndex(find.cur, findIds.length, dir);
+    const id = findIds[n];
+    setFind((f) => ({ ...f, cur: n }));
+    setSelShot(id);
+    scrollToCard(id);
+  };
+  const clearFind = () => { setFind(emptyFind()); };
+  const scrollToCard = (id) => {
+    const el = typeof document !== "undefined" ? document.querySelector('.lv-card[data-card-id="' + id + '"]') : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  // ⌘/Ctrl F focuses the field while the Loom's board is on screen (not over Deep Focus); Esc
+  // anywhere outside a text field clears an active find, as the page's own handler does.
+  useEffect(() => {
+    const onKey = (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === "f") {
+        const el = findInputRef.current;
+        if (!el || deepFocus) return;
+        ev.preventDefault(); el.focus(); el.select();
+      } else if (ev.key === "Escape" && !deepFocus && !pickerOpen) {
+        const t = ev.target;
+        if (t && t !== findInputRef.current && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+        setFind((f) => (findActive(f) ? emptyFind() : f));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deepFocus, pickerOpen]);
+  const findKeys = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform || "") ? "⌘F" : "Ctrl F";
+  const findPill = (
+    <div className={"lv-find" + (findOn ? " on" : "")}>
+      <span className="lv-findico" aria-hidden="true">&#8981;</span>
+      <input ref={findInputRef} className="lv-findin" value={find.q} aria-label="Find in storyboard"
+        placeholder={find.only && !find.q ? find.only.map(codeOf).join(" → ") + " (continuity pair)" : "find in storyboard  " + findKeys}
+        onChange={(ev) => runFind({ q: ev.target.value, only: null })}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") { ev.preventDefault(); stepFind(ev.shiftKey ? -1 : 1); }
+          else if (ev.key === "ArrowDown") { ev.preventDefault(); stepFind(1); }
+          else if (ev.key === "ArrowUp") { ev.preventDefault(); stepFind(-1); }
+          else if (ev.key === "Escape") { ev.preventDefault(); clearFind(); }
+        }} />
+      <span className="lv-findcount">{findCountText(find, findIds.length)}</span>
+      <span className="lv-findstep" role="button" tabIndex={-1} title="Previous match (↑)" onClick={() => stepFind(-1)}>&#8593;</span>
+      <span className="lv-findstep" role="button" tabIndex={-1} title="Next match (↓ or Enter)" onClick={() => stepFind(1)}>&#8595;</span>
+    </div>
+  );
+  const findChipsRow = findChipList.map((ch) => (
+    <span key={ch.kind + ch.key} className={"lv-findchip" + (chipOn(find, ch) ? " on" : "")} role="button" tabIndex={0}
+      aria-pressed={chipOn(find, ch)}
+      title={ch.kind === "warn" ? "Only shots with a ⚠: a changed anchor, a cast member with no picture or past the reference limit, an imported picture"
+        : ch.kind === "status" ? "Only " + ch.label + " shots" : "Only " + ch.label + " shots"}
+      onClick={() => runFind((f) => toggleChip(f, ch))}
+      onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); runFind((f) => toggleChip(f, ch)); } }}>{ch.label}</span>
+  ));
   // The board grid's JSX. Named boardGrid, not "board": a landing's {board: boardId} key is not
   // this view, and the no-render walkers match names, so the two must not share one.
   const boardGrid = (
@@ -2350,7 +2461,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                 const la = e.c.lastAttempt;
                 const retakeFailed = selN != null && !inFlight(e.c) && la && (la.state === "failed" || la.state === "refused");
                 return (
-                  <div key={e.c.id} className={"lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : "")} onClick={() => setSelShot(e.c.id)}
+                  <div key={e.c.id} data-card-id={e.c.id}
+                    className={"lv-card " + (e.c.id === selShot ? "sel" : "") + (stale ? " stale" : "")
+                      + (findOn ? (findSet.has(e.c.id) ? (e.c.id === findCur ? " fcur" : "") : " fdim") : "")}
+                    onClick={() => setSelShot(e.c.id)}
                     onDoubleClick={() => setDeepFocus(e)} title="Double-click to open in Deep Focus">
                     <div className="lv-cframe">{(() => { const s = frameSrc(e.c.openFrame) || (e.c.resultMid ? "/thumbs/" + e.c.resultMid + ".jpg" : null); return s ? <img src={s} alt="" /> : <span className="lv-cframeph">{e.c.mode}</span>; })()}</div>
                     <div className="lv-code">{e.code}</div>
@@ -2558,7 +2672,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
               // underline, and its title says so.
               const segStale = anchorInfo(x.c, cardById).state === "stale";
               return (
-                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : "")}
+                <div key={i} className={"lv-seg" + (x.c.id === selShot ? " sel" : "") + (segStale ? " stale" : "")
+                  + (findOn ? (findSet.has(x.c.id) ? (x.c.id === findCur ? " fcur" : " fmatch") : " fdim") : "")}
                   style={{
                     width: `${(durOf(x.c) / scale) * 100}%`,
                     backgroundImage: `repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0px, rgba(0,0,0,.32) 1px, transparent 1px, transparent 25px), ${tint}`,
@@ -3513,6 +3628,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             2026-08-13 styleset pass): the DC's bar opens straight with the
             storyboard caret; the document title still names the tool. */}
         <ProjectSwitcher api={projectApi} />
+        {/* Session P (P8): the page's find pill and filter chips, right after the storyboard's
+            name, as the page places them. */}
+        {findPill}
+        {findChipsRow}
         <label className={"lv-draft" + (project.draft ? " on" : "")}
           title="Draft mode renders every shot at the cheaper 'basic' quality — block out the animatic, then turn Draft off and re-generate the keepers at pro quality">
           <input type="checkbox" checked={!!project.draft} onChange={(e) => setDraft(e.target.checked)} />⚡ Draft</label>

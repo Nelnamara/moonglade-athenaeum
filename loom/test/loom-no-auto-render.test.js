@@ -403,6 +403,8 @@ const ROOTS = [
   // Stage B2 -- P7, the cast library: opening the Library view (a read), tick / untick, an edit
   // of a member everywhere it's used (the one multi-board write), and "+ Add".
   "openCastLibrary", "toggleCastTick", "editLibraryMember", "addLibraryMember",
+  // Stage B2 -- P8, find in storyboard: typing / a chip, ↑ ↓ / Enter, Esc.
+  "runFind", "stepFind", "clearFind",
 ];
 
 describe("the tokenizer reads JavaScript + JSX correctly (so the walk below means something)", () => {
@@ -644,7 +646,9 @@ describe("the pure modules can reach nothing", () => {
     // the music bed's rules and timing: the ★ take's settings, for "own audio"
     ["src/loom-bed-core.js", ["./loom-takes-core.js"]],
     // Stage B2 -- the cast library's views and patches (P7): the board walk and tag rule only
-    ["src/loom-cast-library.js", ["./loom-core.js"]]]) {
+    ["src/loom-cast-library.js", ["./loom-core.js"]],
+    // Stage B2 -- find in storyboard (P8): the prompt text and the stale-anchor view only
+    ["src/loom-find-core.js", ["./loom-core.js", "./loom-takes-core.js"]]]) {
     test(file + ": no fetch / window / document / XMLHttpRequest, imports only " + (allowedImports.join(", ") || "nothing") + ", names no sink", () => {
       const m = model(read(file));
       for (const g of ["fetch", "window", "document", "XMLHttpRequest", "globalThis", "require"]) {
