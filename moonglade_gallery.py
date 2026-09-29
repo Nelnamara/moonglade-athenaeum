@@ -539,6 +539,12 @@ def catalog(db_path):
     migrate(db_path)
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
+    # mg_loom_render(media_id) -> 1|0: is this picture a render the Loom made? Only the
+    # `type:loom` search operator (and its Storage-bar segment) calls it; nothing runs it
+    # unless asked, and it reads the Loom's boards from disk, never the network.
+    _loom_root = Path(db_path).parent
+    con.create_function("mg_loom_render", 1,
+                        lambda mid: 1 if str(mid or "") in loom_render_ids(_loom_root) else 0)
     try:
         yield con
     finally:
@@ -711,6 +717,9 @@ def _like_escape(s):
 #   note       substring of the personal note (Session N3)
 #   source     the dropdown's semantics (online = blank-or-online, deleted =
 #              deleted_remote flag), else substring on the source column
+#   aspect     width/height: W:H (within 3 percent), square, portrait, landscape, tall,
+#              wide, >N, <N (Session N7)
+#   type       image | video | loom, a partition of the library (Session N6)
 #
 # Deliberately NOT operators (one line each):
 #   url             expiring PixAI CDN link -- nothing sane to filter on
@@ -766,6 +775,14 @@ _SEARCH_OPS = {
     "collection": ("collection", "collections"),
     "collections": ("collection", "collections"),
     "source":   ("source", "source"),
+    # ar: the picture's shape, read from the width and height already on every row (Session
+    # N7). Evaluated HERE, in SQL, because the grid is paginated: a client-side filter would
+    # only ever see the page it holds. See _aspect_clause for the accepted values.
+    "ar":       ("aspect", None),            "aspect": ("aspect", None),
+    # type: which kind of picture -- image, video or loom (Session N6). The three PARTITION the
+    # library (a Loom render is a loom, whether it is a clip or a still), which is what lets
+    # the Storage bars' segments add up to the total and each segment's click land on exactly it.
+    "type":     ("type", None),
 }
 
 # Tokens: quoted runs group (model:"Ether Real" / "night elf" are ONE token each);
@@ -831,6 +848,144 @@ def _search_token_clause(tok):
             "OR LOWER(COALESCE(prompt_preview,'')) LIKE ? ESCAPE '\\')", [like, like])
 
 
+# ---- ar: the aspect operator (Session N7) -------------------------------------------------
+# The picture's shape as width / height. The width and height columns are TEXT and blank on
+# old imports, so the ratio is NULL for those rows; every comparison below is wrapped in
+# COALESCE(.., 0) so an unmeasured picture matches no ar: filter and, because NOT of a false
+# is true, still shows up under `-ar:tall` (the unknown is not "tall").
+#
+#   ar:W:H        within 3 percent of W/H       ar:3:2  ar:9:16  ar:1.91:1
+#   ar:square     0.97 to 1.03
+#   ar:portrait   below 1                        ar:landscape   above 1
+#   ar:tall       9:16 or taller                 ar:wide        16:9 or wider
+#   ar:>N ar:<N   the ratio itself               ar:>2  ar:<0.5
+#
+# The bounds are the design page's own (Curation Handoff, N7): "tall" is 9/16 with 0.005 to
+# spare and "wide" 16/9 with 0.01 to spare, so an exact 576x1024 and an exact 1920x1080
+# count without a rounding argument. Values are bound parameters; only the fixed expression is interpolated.
+_AR_EXPR = ("(CAST(COALESCE(NULLIF(width,''),'0') AS REAL) / "
+            "NULLIF(CAST(COALESCE(NULLIF(height,''),'0') AS REAL), 0))")
+AR_SQUARE = (0.97, 1.03)
+AR_TALL_MAX = 9 / 16 + 0.005
+AR_WIDE_MIN = 16 / 9 - 0.01
+AR_TOLERANCE = 0.03
+_AR_WH_RE = re.compile(r"^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$")
+_AR_CMP_RE = re.compile(r"^([<>])(\d*\.?\d+)$")
+
+
+def _aspect_clause(value):
+    """`ar:` value -> (sql, params), or None when the value is not one of the accepted forms
+    (the token then degrades to a plain prompt search, like any malformed operator)."""
+    v = str(value).strip().lower()
+    e = _AR_EXPR
+    if v == "square":
+        return ("COALESCE({0} >= ? AND {0} <= ?, 0)".format(e), [AR_SQUARE[0], AR_SQUARE[1]])
+    if v == "portrait":
+        return ("COALESCE({} < 1, 0)".format(e), [])
+    if v == "landscape":
+        return ("COALESCE({} > 1, 0)".format(e), [])
+    if v == "tall":
+        return ("COALESCE({} <= ?, 0)".format(e), [AR_TALL_MAX])
+    if v == "wide":
+        return ("COALESCE({} >= ?, 0)".format(e), [AR_WIDE_MIN])
+    m = _AR_CMP_RE.match(v)
+    if m:
+        return ("COALESCE({} {} ?, 0)".format(e, m.group(1)), [float(m.group(2))])
+    m = _AR_WH_RE.match(v)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if w <= 0 or h <= 0:
+            return None
+        n = w / h
+        # within 3 percent of n, either side; the epsilon keeps an exact 3 percent in
+        return ("COALESCE(ABS({} - ?) <= ?, 0)".format(e), [n, n * AR_TOLERANCE + 1e-9])
+    return None
+
+
+# ---- type: image | video | loom (Session N6) -----------------------------------------------
+def _type_clause(value):
+    v = str(value).strip().lower()
+    if v == "loom":
+        return ("mg_loom_render(media_id) = 1", [])
+    if v == "video":
+        return ("(is_video = '1' AND mg_loom_render(media_id) = 0)", [])
+    if v == "image":
+        return ("(COALESCE(is_video,'') != '1' AND mg_loom_render(media_id) = 0)", [])
+    return None
+
+
+_LOOM_IDS_CACHE = {}          # str(out_dir) -> (signature, frozenset of media ids)
+
+
+def _loom_board_files(out_dir):
+    """Every saved Loom board on disk: this install's per-account folders and the legacy shared
+    layer, both under loom/kv, keyed `storyboard:v2:proj:<id>` (the Loom's own PPRE) or the
+    legacy single-project key. Read-only; a missing folder is simply no boards."""
+    from urllib.parse import unquote
+    kv = Path(out_dir) / "loom" / "kv"
+    out = []
+    try:
+        entries = list(kv.iterdir())
+    except OSError:
+        return out
+    for p in entries:
+        try:
+            files = list(p.iterdir()) if p.is_dir() else [p]
+        except OSError:
+            continue
+        for f in files:
+            if f.suffix != ".json":
+                continue
+            key = unquote(f.stem)
+            if key.startswith("storyboard:v2:proj:") or key == "storyboard:v2:project":
+                out.append(f)
+    return out
+
+
+def loom_render_ids(out_dir):
+    """The media ids the Loom rendered: every board's shot result and every re-roll attempt it
+    kept, minus footage the owner imported into a shot (that is theirs, not a render). This is
+    what "Loom renders" means in the Storage bars and `type:loom`.
+
+    It reads the boards straight off disk -- nothing is written and no network is touched -- and
+    remembers the answer until a board's file moves (path, mtime and size are the key), so a
+    search that runs it per row costs one directory listing, not a re-parse."""
+    files = _loom_board_files(out_dir)
+    sig = []
+    for f in files:
+        try:
+            st = f.stat()
+            sig.append((str(f), st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    sig = tuple(sorted(sig))
+    hit = _LOOM_IDS_CACHE.get(str(out_dir))
+    if hit and hit[0] == sig:
+        return hit[1]
+    ids = set()
+    for f in files:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(data, str):            # the Loom stores a project as a JSON string
+                data = json.loads(data)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for act in data.get("acts") or []:
+            for card in (act or {}).get("cards") or []:
+                if not isinstance(card, dict) or card.get("imported"):
+                    continue
+                if card.get("resultMid"):
+                    ids.add(str(card["resultMid"]))
+                for a in card.get("attempts") or []:
+                    if isinstance(a, dict) and a.get("media_id"):
+                        ids.add(str(a["media_id"]))
+    frozen = frozenset(ids)
+    _LOOM_IDS_CACHE[str(out_dir)] = (sig, frozen)
+    return frozen
+
+
 def _operator_clause(key, value):
     """Compile one key:value search token into (sql_clause, params), or None when
     the token isn't a valid operator and should be searched as plain prompt text
@@ -840,6 +995,10 @@ def _operator_clause(key, value):
     if not spec or value == "":
         return None
     kind, col = spec
+    if kind == "aspect":
+        return _aspect_clause(value)
+    if kind == "type":
+        return _type_clause(value)
     if kind == "tag":
         # Session N3: the published art tags (substring, as before) OR a whole personal tag.
         return ("(LOWER(COALESCE(art_tags,'')) LIKE ? ESCAPE '\\' OR EXISTS ("
@@ -7416,8 +7575,12 @@ def collection_health(out_dir, db_path):
     # HEALTH_EXCLUDE is a named constant rather than the tuple spelled inline because
     # _health_dir_key() has to prune the SAME set: the memo's disk-side signal only means
     # anything if it watches exactly the roots this walk descends into.
+    size_by_rel = {}          # relative path -> bytes, images AND videos (the Storage bars)
     for e in scan_library(out_dir, kinds=("image", "video"), exclude=HEALTH_EXCLUDE):
-        on_disk_rels.add(str(e.rel).replace("\\", "/"))
+        _rel = str(e.rel).replace("\\", "/")
+        on_disk_rels.add(_rel)
+        if e.size is not None:
+            size_by_rel[_rel] = e.size
         if e.kind != "image":
             continue          # videos: track the path only; skip image-centric stats
         if e.size is None:
@@ -7481,6 +7644,10 @@ def collection_health(out_dir, db_path):
         # health count and what --import-local/Import would actually do stay in sync
         catalog_ids = {mid for (mid,) in con.execute(
             "SELECT media_id FROM catalog WHERE media_id != ''").fetchall()}
+        # what the Storage bars group by (Session N6): one small row per picture that has a file
+        storage_rows = con.execute(
+            "SELECT media_id, filename, is_video, model_name, collections FROM catalog "
+            "WHERE filename != ''").fetchall()
 
     tag_counter = Counter()
     for (tags,) in tag_rows:
@@ -7541,6 +7708,78 @@ def collection_health(out_dir, db_path):
         "top_tags": top_tags,
         "top_loras": top_loras,
         "top_words": top_words,
+        "storage": storage_breakdown(storage_rows, size_by_rel, loom_render_ids(out_dir)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# STORAGE BREAKDOWN (Session N6). Collection Health's one "Storage used" number became three
+# stacked bars: by TYPE (images, videos, Loom renders), by MODEL, and by COLLECTION. Sizes are
+# the bytes each catalogued picture's file takes on disk (the health walk already stats every
+# file; it just kept only the images' before). A picture whose file is not where the catalog
+# says is left out -- it takes no space we can measure -- so the bars total what is really
+# there, catalogued pictures only, which can be less than the folder (an uncataloged file
+# counts in the folder and in no bar).
+#
+#   type        an exclusive split: a Loom render (a board's shot result or a kept re-roll) is
+#               "loom" whether it is a clip or a still, else "video", else "image". It is the
+#               same partition `type:` searches by, so a segment's click lands on exactly it.
+#   model       the model name on the row; the top four by bytes, the rest (and any picture
+#               with no model recorded) folded into "Other", which is not a filter.
+#   collection  hand-picked collections only (a smart one is a search, it owns no bytes). A
+#               picture in two collections counts in both, so this bar can overlap and says
+#               so; its segments are shares of their own sum, not of the library. Top four by
+#               bytes plus "Other" for the rest.
+STORAGE_TOP = 4
+_STORAGE_TYPES = (("image", "Images"), ("video", "Videos"), ("loom", "Loom renders"))
+
+
+def storage_breakdown(rows, size_by_rel, loom_ids):
+    """Pure: catalog rows (media_id, filename, is_video, model_name, collections), the walk's
+    {relative path: bytes} and the Loom's render ids -> the payload's `storage` block."""
+    by_type = {k: [0, 0] for k, _ in _STORAGE_TYPES}          # key -> [bytes, count]
+    by_model, by_coll = {}, {}                                 # name -> [bytes, count]
+    total, files = 0, 0
+    for r in rows:
+        fn = str(r["filename"] or "").replace("\\", "/")
+        size = size_by_rel.get(fn)
+        if size is None:
+            continue
+        total += size
+        files += 1
+        mid = str(r["media_id"] or "")
+        kind = "loom" if mid in loom_ids else ("video" if str(r["is_video"] or "") == "1" else "image")
+        by_type[kind][0] += size
+        by_type[kind][1] += 1
+        name = str(r["model_name"] or "").strip()
+        m = by_model.setdefault(name, [0, 0])
+        m[0] += size
+        m[1] += 1
+        for c in _split_collections(r["collections"]):
+            cc = by_coll.setdefault(c, [0, 0])
+            cc[0] += size
+            cc[1] += 1
+
+    def seg(name, b, n, **extra):
+        return dict({"name": name, "bytes": b, "h": _fmt_size(b), "count": n}, **extra)
+
+    def top_plus_other(table, skip_blank):
+        named = sorted(((k, v) for k, v in table.items() if not (skip_blank and not k)),
+                       key=lambda kv: (-kv[1][0], kv[0].lower()))
+        segs = [seg(k, v[0], v[1], other=False) for k, v in named[:STORAGE_TOP]]
+        rest = named[STORAGE_TOP:]
+        rb = sum(v[0] for _, v in rest) + (table.get("", [0, 0])[0] if skip_blank else 0)
+        rn = sum(v[1] for _, v in rest) + (table.get("", [0, 0])[1] if skip_blank else 0)
+        if rb:
+            segs.append(seg("Other", rb, rn, other=True))
+        return segs
+
+    coll_segs = top_plus_other(by_coll, False)
+    return {
+        "total_bytes": total, "total_h": _fmt_size(total), "files": files,
+        "by_type": [seg(label, by_type[k][0], by_type[k][1], key=k) for k, label in _STORAGE_TYPES],
+        "by_model": top_plus_other(by_model, True),
+        "by_collection": {"sum_bytes": sum(sg["bytes"] for sg in coll_segs), "segments": coll_segs},
     }
 
 
