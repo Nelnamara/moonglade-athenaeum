@@ -1,0 +1,299 @@
+/* Session Q, "The phone" (Phone Handoff.dc.html, Q1 / Q3 / Q5 / Q6 / Q7): the pure rules behind the
+   placard, the reading feed, "new since", pull to refresh and Data saver. Everything here is a plain
+   function of its arguments -- no DOM, no storage, no network -- so loom/test/phone-core.test.js holds
+   the rules as written and the components only draw them.
+
+   THE FIVE THINGS THAT ARE PER DEVICE and where their values live is gallery/src/lib/phonePrefs.js:
+   the layout (Grid | Feed), the Data saver mode, and the "last seen" marker. Nothing in this file reads
+   or writes any of them. */
+
+/* ---------------------------------------------------------------------------------------------
+   Layout (Q3)
+   --------------------------------------------------------------------------------------------- */
+
+export const LAYOUTS = Object.freeze(["grid", "feed"]);
+export const DEFAULT_LAYOUT = "grid";
+
+/* Anything that is not exactly a known layout is the grid: the phone as built. */
+export function parseLayout(v) {
+  return v === "feed" ? "feed" : "grid";
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Data saver (Q7)
+   --------------------------------------------------------------------------------------------- */
+
+export const SAVER_MODES = Object.freeze(["off", "auto", "always"]);
+export const DEFAULT_SAVER_MODE = "auto";
+export const SAVER_THUMB = 256;                        // px, the server's ?s=256 tier
+
+export const SAVER_LABELS = Object.freeze({ off: "Off", auto: "Auto on metered", always: "Always" });
+
+/* The default is Auto. An unknown stored value is the default, never "Off" by accident. */
+export function parseSaverMode(v) {
+  return SAVER_MODES.indexOf(v) >= 0 ? v : DEFAULT_SAVER_MODE;
+}
+
+/* What this browser can tell about the connection, from the Network Information API
+   (navigator.connection) where it exists.
+     known     -- the browser answered the ONE question Auto asks: is this connection metered?
+     metered   -- cellular, or the user's own "save data" request. Only meaningful when known.
+   A browser with no API at all (every iPhone browser, and desktop Safari and Firefox) is not known,
+   and neither is one that only reports a speed class (effectiveType says how fast, never what it
+   costs). Chrome on Android reports `type`, which is what makes it known there. */
+export function connectionInfo(conn) {
+  if (!conn || typeof conn !== "object") {
+    return { known: false, metered: false, saveData: false, type: "", api: false };
+  }
+  const type = typeof conn.type === "string" ? conn.type : "";
+  const saveData = conn.saveData === true;
+  const typed = type !== "" && type !== "unknown" && type !== "other";
+  return {
+    known: typed || saveData,
+    metered: saveData || type === "cellular",
+    saveData, type, api: true,
+  };
+}
+
+/* Is Data saver acting right now? Off never, Always always, Auto only when the browser can say the
+   connection is metered. */
+export function saverActive(mode, info) {
+  const m = parseSaverMode(mode);
+  if (m === "always") return true;
+  if (m === "off") return false;
+  const i = info || connectionInfo(null);
+  return !!(i.known && i.metered);
+}
+
+/* The Control row's sub line -- what it is doing and, for Auto, why. The Auto-where-it-can't-tell
+   sentence is the honest one: iPhone Safari has no way to know, so Auto stays off there and the row
+   says so and points at Always. */
+export function saverSub(mode, info) {
+  const m = parseSaverMode(mode);
+  const i = info || connectionInfo(null);
+  if (m === "off") return "Off";
+  if (m === "always") return "On · always";
+  if (!i.api || !i.known) {
+    return "Auto · this browser can’t tell whether the connection is metered, so it stays off. Choose Always to save data.";
+  }
+  if (i.saveData && !(i.type === "cellular")) return "On · your browser is asking to save data";
+  return i.metered ? "On · metered connection" : "Auto · on Wi-Fi, so it’s off right now";
+}
+
+/* The ONE place that turns a thumbnail URL into its saver size. Only the library's own /thumbs/
+   route has the tier; a size the URL already carries is left alone; anything else is returned as it
+   came. When the saver is off the URL is returned untouched, so the phone as built is byte-identical. */
+export function thumbSrc(url, saver) {
+  if (!saver || typeof url !== "string" || url.indexOf("/thumbs/") !== 0) return url;
+  if (/[?&]s=/.test(url)) return url;
+  return url + (url.indexOf("?") >= 0 ? "&" : "?") + "s=" + SAVER_THUMB;
+}
+
+/* Full size waits for a tap while the saver acts: the picture has not been loaded this session. */
+export function needsFullTap(saver, loaded, mid) {
+  return !!saver && !(loaded && loaded[mid]);
+}
+
+/* "2.4 MB" for the Tap to load pill, from a byte count; "" when the size is not known. */
+export function humanBytes(n) {
+  const b = Number(n);
+  if (!Number.isFinite(b) || b <= 0) return "";
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return Math.round(b / 1024) + " KB";
+  const mb = b / (1024 * 1024);
+  return (mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10) + " MB";
+}
+
+/* The phone's own background reads -- the page-1 refresh a finished generation triggers -- wait while
+   the saver acts. A pull (Q6) is not one of them: it is an explicit request and never asks this. */
+export function backgroundReadAllowed(saver) {
+  return !saver;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   The placard (Q1)
+   --------------------------------------------------------------------------------------------- */
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/* A catalog number the app really has: the tail of the media id (four characters), which is
+   what a person can read off a card and tell apart. There is no separate accession register in
+   the catalog, so nothing is invented -- a local import's id is local_<hex> and gives its last four
+   hex characters, upper-cased. */
+export function catalogNumber(mediaId) {
+  const s = String(mediaId == null ? "" : mediaId).replace(/[^0-9A-Za-z]/g, "");
+  if (!s) return "";
+  return s.slice(-4).toUpperCase().padStart(4, "0");
+}
+
+function localDateParts(iso) {
+  if (!iso) return null;
+  const raw = String(iso);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { y: Number(raw.slice(0, 4)), m: Number(raw.slice(5, 7)), d: Number(raw.slice(8, 10)) };
+  }
+  const t = new Date(raw);
+  if (isNaN(t)) return null;
+  return { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() };
+}
+
+/* "ACC. 2026·0918·4401 · 18 SEP" -- the catalog number and the date, the desktop placard's two facts
+   in the page's own stamp. The date is the viewer's LOCAL day (the same rule every stamp in the app
+   keeps, gen/dates.js); with no date only the number is drawn, and with neither, nothing. */
+export function accessionStamp(item) {
+  if (!item) return "";
+  const no = catalogNumber(item.media_id);
+  const p = localDateParts(item.created_at);
+  if (!p && !no) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  if (!p) return "ACC. " + no;
+  const head = "ACC. " + p.y + "·" + pad(p.m) + pad(p.d) + (no ? "·" + no : "");
+  return head + " · " + pad(p.d) + " " + MONTHS[p.m - 1];
+}
+
+/* The distinct task ids of a page of pictures, for the ONE batched /api/siblings read. A picture with
+   no task (a local import) has no batch. */
+export function taskIdsOf(items) {
+  const out = [], seen = new Set();
+  (items || []).forEach((it) => {
+    const t = it && it.task_id ? String(it.task_id) : "";
+    if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+  });
+  return out;
+}
+
+/* The sibling strip for the picture on screen.
+     siblings   what the batched read answered for this picture's task ([{media_id, is_video, thumb}],
+                self included, absent for a single) -- never fetched per picture
+     items      the loaded page, so a tap can swap in place: each sibling carries its index there, or
+                -1 when it lives on another page (drawn dimmed, not tappable)
+   Returns {single, line, tiles}. A single image (no siblings, or only itself) says so instead of
+   drawing a strip. */
+export function placardStrip(item, siblings, items) {
+  const list = Array.isArray(siblings) ? siblings : [];
+  if (!item || list.length < 2) return { single: true, line: "single image", tiles: [] };
+  const at = new Map();
+  (items || []).forEach((it, k) => at.set(it.media_id, k));
+  const tiles = list.map((s) => ({
+    media_id: s.media_id, thumb: s.thumb, is_video: !!s.is_video,
+    index: at.has(s.media_id) ? at.get(s.media_id) : -1,
+    current: s.media_id === item.media_id,
+  }));
+  return { single: false, line: "siblings · batch of " + list.length, tiles };
+}
+
+/* ---------------------------------------------------------------------------------------------
+   New since (Q5)
+   --------------------------------------------------------------------------------------------- */
+
+/* The marker is the newest picture seen when the gallery was last left: its id, its own timestamp,
+   and the clock time the visit ended (what "HH:MM" says). */
+export function makeMarker(items, nowMs) {
+  const top = items && items[0];
+  if (!top || !top.media_id) return null;
+  return { id: String(top.media_id), ts: tsOf(top.created_at), at: Number(nowMs) || 0 };
+}
+
+export function parseMarker(raw) {
+  let m = raw;
+  if (typeof raw === "string") { try { m = JSON.parse(raw); } catch { return null; } }
+  if (!m || typeof m !== "object" || !m.id) return null;
+  return { id: String(m.id), ts: Number.isFinite(Number(m.ts)) ? Number(m.ts) : 0, at: Number(m.at) || 0 };
+}
+
+export function tsOf(iso) {
+  if (!iso) return 0;
+  const t = Date.parse(String(iso));
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/* How many of the loaded (newest-first) pictures are newer than the marker. The marker picture itself
+   is the boundary when it is on the page; when it is not (deleted, or pushed off by more than a page)
+   the timestamp decides, and when every loaded picture is newer the count is capped (`capped`) so the
+   label says "N+". Zero with no marker: a first visit has nothing to be new since. */
+export function newSince(items, marker) {
+  const list = items || [];
+  if (!marker || !list.length) return { count: 0, capped: false };
+  const at = list.findIndex((it) => String(it.media_id) === marker.id);
+  if (at >= 0) return { count: at, capped: false };
+  let n = 0;
+  while (n < list.length && marker.ts > 0 && tsOf(list[n].created_at) > marker.ts) n += 1;
+  if (marker.ts <= 0) return { count: 0, capped: false };
+  return { count: n, capped: n === list.length };
+}
+
+/* "5 new since 21:40" (24-hour local HH:MM, as the page draws it). No rule at zero. */
+export function newSinceLabel(count, capped, atMs) {
+  if (!count) return "";
+  const d = new Date(Number(atMs) || 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  const t = atMs ? pad(d.getHours()) + ":" + pad(d.getMinutes()) : "";
+  return count + (capped ? "+" : "") + " new" + (t ? " since " + t : "");
+}
+
+/* The rule only means something for the library's own front page: page 1, newest first, nothing
+   filtered, not a lookalike set. Anywhere else there is no rule and the marker is left alone. */
+export function isFrontPage({ page, advCount, applied, media, shelf, similar, loaded }) {
+  if (similar || !loaded) return false;
+  if ((page || 1) !== 1) return false;
+  if (advCount) return false;                 // any Advanced Search field, the sort included
+  return !(String(applied || "").trim() || media || shelf);
+}
+
+/* "↑ Newest" shows after one screen of scrolling. */
+export function showNewest(scrollTop, viewportHeight) {
+  const vh = Number(viewportHeight);
+  return Number(scrollTop) > (Number.isFinite(vh) && vh > 0 ? vh : 560);
+}
+
+export function newestLabel(count) {
+  return "↑ Newest" + (count ? " · " + count + " new" : "");
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Pull to refresh (Q6)
+   --------------------------------------------------------------------------------------------- */
+
+export const PULL_THRESHOLD = 72;     // px of pull that arms the release
+export const PULL_MAX = 90;           // the content never follows the finger further than this
+export const PULL_HOLD = 44;          // where the content rests while it syncs
+export const PULL_RESISTANCE = 0.6;   // the finger moves 1 px, the page 0.6
+
+/* Finger travel -> how far the page follows. Zero or negative travel is no pull. */
+export function pullDistance(dy) {
+  const d = Number(dy);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  return Math.min(PULL_MAX, d * PULL_RESISTANCE);
+}
+
+/* The moon's phase: a TRUE fraction of the distance to the release line (the moon gauge fills only
+   on one, DECISIONS "The moon gauge fills only on a true fraction"). */
+export function pullFraction(px) {
+  const p = Number(px);
+  if (!Number.isFinite(p) || p <= 0) return 0;
+  return Math.min(1, p / PULL_THRESHOLD);
+}
+
+export function pullArmed(px) {
+  return Number(px) >= PULL_THRESHOLD;
+}
+
+/* A pull can only begin at the very top of the scroller, and never while one is already syncing. */
+export function pullMayStart(scrollTop, syncing) {
+  return !syncing && Number(scrollTop) <= 0;
+}
+
+export function pullLabel({ syncing, px }) {
+  if (syncing) return "syncing with PixAI…";
+  return pullArmed(px) ? "release to sync" : "pull to refresh";
+}
+
+/* How the sync ended, in a sentence for the toast; "" when it needs none. */
+export function syncOutcomeText(outcome) {
+  if (!outcome) return "";
+  if (outcome.state === "done") return "";
+  if (outcome.state === "busy") return "A sync is already running — the library will refresh when it finishes.";
+  if (outcome.state === "timeout") return "Still syncing in the background — pull again in a minute to bring in what arrives.";
+  if (outcome.state === "failed") return "The sync didn’t finish" + (outcome.error ? ": " + outcome.error : ".");
+  return outcome.error ? String(outcome.error) : "The sync didn’t start.";
+}
