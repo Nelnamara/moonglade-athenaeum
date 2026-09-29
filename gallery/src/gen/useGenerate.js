@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
-import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply } from "./genCore.js";
+import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply, versionPatch } from "./genCore.js";
+import {
+  SEED_PROMPT, TSUBAKI3, contextMax, profileLocked, profileRows, renumberAfterRemove,
+} from "./tsubakiCore.js";
+import { GEN_PREFS_KEY, prefsFromState, stateFromPrefs } from "./genPrefs.js";
+import { accountPrefs } from "../hooks/useAccountPrefs.js";
 import { insertTriggerWords, removeTriggerWords } from "./loraTriggers.js";
 import { submitTask, useResultLines } from "./submitTask.js";
 import usePriceProbe from "./usePriceProbe.js";
@@ -18,14 +23,59 @@ import usePriceProbe from "./usePriceProbe.js";
      scheduling, the button re-enables when the server ANSWERS, concurrent
      submissions each own a result line, and there is NO retry anywhere. */
 
-export default function useGenerate({ costRef }) {
+export default function useGenerate({ costRef, isMember }) {
   const [s, setS] = useState(GEN_DEFAULTS);
   const [busy, setBusy] = useState(false);
   const [results, openLine] = useResultLines();
   const verSeq = useRef(0);
   const busyRef = useRef(false);
+  const sRef = useRef(s);
+  sRef.current = s;
 
   const set = useCallback((patch) => setS((old) => ({ ...old, ...patch })), []);
+
+  /* PixAI membership (true / false / null), from the host's /api/account read. It rides in the
+     state because the size tiers, the custom-size limit and the Pro / Ultra rows are pure
+     functions of it (tsubakiCore.tierLocked / profileLocked). */
+  useEffect(() => {
+    const v = isMember === true ? true : isMember === false ? false : null;
+    setS((old) => (old.member === v ? old : { ...old, member: v }));
+  }, [isMember]);
+
+  /* The dock's settings, per account (the wave-1 store, /api/account/prefs, key gen.image):
+     creativity, the size tier, the frame, Auto, the profile and the recipe row (gen/genPrefs.js
+     says exactly which, and validates what comes back). Read once when the store is ready,
+     written 500 ms after the last change. Never the prompt, the model or the images. */
+  const prefsLoaded = useRef(false);
+  useEffect(() => {
+    const store = accountPrefs();
+    const take = () => {
+      const snap = store.getSnapshot();
+      if (prefsLoaded.current || snap.status !== "ready") return;
+      prefsLoaded.current = true;
+      const patch = stateFromPrefs(snap.prefs && snap.prefs[GEN_PREFS_KEY]);
+      if (Object.keys(patch).length) setS((old) => ({ ...old, ...patch }));
+    };
+    const off = store.subscribe(take);
+    store.ensureLoaded().then(take);
+    take();
+    return off;
+  }, []);
+  const prefsTimer = useRef(0);
+  const prefsLast = useRef("");
+  const persistedKey = JSON.stringify(prefsFromState(s));
+  useEffect(() => {
+    if (!prefsLoaded.current) return undefined;
+    // The first value after the load is the loaded one (or the defaults): nothing to write.
+    if (!prefsLast.current) { prefsLast.current = persistedKey; return undefined; }
+    if (prefsLast.current === persistedKey) return undefined;
+    clearTimeout(prefsTimer.current);
+    prefsTimer.current = setTimeout(() => {
+      prefsLast.current = persistedKey;
+      accountPrefs().set(GEN_PREFS_KEY, JSON.parse(persistedKey));
+    }, 500);
+    return () => clearTimeout(prefsTimer.current);
+  }, [persistedKey]);
 
   /* ---- price preview: the SAME payload builder the submit uses ---- */
   const build = useCallback(() => {
@@ -48,46 +98,11 @@ export default function useGenerate({ costRef }) {
     s.model, s.loras, s.ref, s.refStrength, s.boosters,
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
     s.mode, s.steps, s.unlimited,
+    s.inputs, s.ctx, s.auto, s.landscape, s.tier, s.creativity, s.recipes, s.member,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- model pick -> version resolve (seq-guarded) ---- */
-  const applyFromVersion = (v) => {
-    const patch = {
-      caps: v.capabilities || [],
-      compat_neg: cget(v, "negativePrompt"),
-      compat_steps: cget(v, "samplingSteps"),
-      compat_cfg: cget(v, "cfgScale"),
-      compat_upscale: cget(v, "upscale"),
-      // SCOPE_2026-09-26 (owner ruling 1): Face Fix and Quality Tag read disabled on a model
-      // that does not take them. Face Fix through the same cget -- the server merges
-      // /features' enableADetailer:false (and the MMDiT / user-DiT model-type rule) into
-      // `compatibility`. Quality Tag from the version's own tag (G4): a row that answered
-      // with no tag is false; a server without the field stays unknown (fail open).
-      compat_face: cget(v, "enableADetailer"),
-      compat_quality: "quality_tag" in v ? !!v.quality_tag : undefined,
-      quality_tag: v.quality_tag || null,
-      // The size rule the server's gate snaps to (G1) and whether a reference goes out as a
-      // context image (G3). Set explicitly on EVERY apply, so a version picked from the list
-      // without them (only the latest row carries them) never inherits the previous one's.
-      size_rule: v.size_rule || null,
-      context_images: v.context_images === true,
-      // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
-      // null = the server could not determine them -> the drawer dims nothing, exactly as
-      // before. An array (including []) is a real answer.
-      profiles: Array.isArray(v.profiles) ? v.profiles : null,
-      // Tsubaki.3 Unlimited Mode status for THIS version (SCOPE_2026-09-26_unlimited-mode S2),
-      // set on every apply like size_rule. It only decides whether the switch is OFFERED: the
-      // switch's own state (s.unlimited) survives a model switch -- only the user turns it off
-      // (§8.1), and the server refuses a lane request this version cannot run.
-      unlimited: v.unlimited || null,
-      restrictions: v.restrictions || {},
-      preset: {
-        negative: v.negative_prompt || "", steps: v.sampling_steps,
-        cfg: v.cfg_scale, sampler: v.sampling_method || "",
-      },
-    };
-    return patch;
-  };
+  const applyFromVersion = (v) => versionPatch(v);
 
   /* Only patch a field the version actually carries -- the classic's
      applyModelDefaults ("only for fields the model has data for"). The first cut
@@ -137,7 +152,7 @@ export default function useGenerate({ costRef }) {
         // carried in on a model switch would still be priced and still be submitted,
         // then silently re-run on the model's default tier -- the very divergence the
         // dimming closes (red team 2026-09-07).
-        mode: modeAfterApply(old.mode, model.profiles),
+        mode: rowSafeMode(modeAfterApply(old.mode, model.profiles), model, old.member),
         ...presetPatch(latest),
       }));
       return model;
@@ -167,7 +182,7 @@ export default function useGenerate({ costRef }) {
           ? { ...old.boosters, hires: false } : old.boosters,
         // Same reset as applyModelRow: picking another VERSION of the same model changes
         // the offered profile set too (Tsubaki.2 -> .3 is one model, two sets).
-        mode: modeAfterApply(old.mode, model.profiles),
+        mode: rowSafeMode(modeAfterApply(old.mode, model.profiles), model, old.member),
         ...presetPatch(v),
       };
     });
@@ -303,13 +318,64 @@ export default function useGenerate({ costRef }) {
     refreshPrice({ force: true });
   }, [s, openLine, priceOk, refreshPrice]);
 
+  /* ---- the context slots (Session H decision 1) ----
+     addContext appends (a picture already in a slot is not added twice, and the live max is
+     the ceiling); removeContext drops slot k and renumbers the prompt's @image refs -- a ref to
+     the removed slot turns into the peach "no image" chip (tsubakiCore.renumberAfterRemove). */
+  const addContext = useCallback((img) => {
+    if (!img || !img.media_id) return;
+    setS((old) => {
+      const ctx = old.ctx || [];
+      if (ctx.some((c) => c.media_id === String(img.media_id))) return old;
+      if (ctx.length >= contextMax(old.model)) return old;
+      return { ...old, ctx: ctx.concat([{ media_id: String(img.media_id), thumb: img.thumb || "",
+        w: Number(img.w) || 0, h: Number(img.h) || 0 }]) };
+    });
+  }, []);
+  const removeContext = useCallback((k) => {
+    setS((old) => {
+      const ctx = old.ctx || [];
+      if (k < 0 || k >= ctx.length) return old;
+      return { ...old, ctx: ctx.filter((_, j) => j !== k), prompt: renumberAfterRemove(old.prompt, k) };
+    });
+  }, []);
+  /* The measured size of a slot's picture, when the picker could not say (an upload). */
+  const sizeContext = useCallback((mediaId, w, h) => {
+    setS((old) => ({ ...old, ctx: (old.ctx || []).map((c) => (c.media_id === mediaId
+      && !(c.w > 0 && c.h > 0) ? { ...c, w: Number(w) || 0, h: Number(h) || 0 } : c)) }));
+  }, []);
+
+  /* "Edit with Tsubaki" (decision 2): the Image tab on Tsubaki.3, the picture in context slot 1,
+     the prompt seeded "Use @image1 ...". Prefill only -- nothing is spent until the owner
+     presses Generate. Tsubaki.3 is applied only when it is not already the model, so an applied
+     version (and its LoRAs, held on this side) is left as it is. */
+  const tsubakiEdit = useCallback(async (img) => {
+    if (!img || !img.media_id) return false;
+    const cur = sRef.current.model;
+    if (!cur || cur.model_id !== TSUBAKI3.model_id || !cur.version_id) {
+      const model = await applyModelRow({ model_id: TSUBAKI3.model_id, title: TSUBAKI3.title, preview_url: "" });
+      if (!model) return false;
+    }
+    setS((old) => ({
+      ...old, inputs: "context", ctxWarned: true, auto: true, prompt: SEED_PROMPT,
+      customW: "", customH: "",            // Auto sizes a Tsubaki edit (decision 1)
+      ctx: [{ media_id: String(img.media_id), thumb: img.thumb || "/thumbs/" + img.media_id + ".jpg",
+        w: Number(img.w) || 0, h: Number(img.h) || 0 }],
+    }));
+    return true;
+  }, [applyModelRow]);
+
   return { s, set, busy, results, applyModelRow, pickVersion,
            addLora, removeLora, setLora, generate, refreshPrice,
+           addContext, removeContext, sizeContext, tsubakiEdit,
            canSubmit: priceOk };
 }
 
-
-function cget(v, key) {
-  const c = v.compatibility || {};
-  return key in c ? c[key] : undefined; // undefined = unknown = fail-open
+/* T1a: a members-only profile row is never picked for an account PixAI reports as non-member,
+   so a mode carried in from a member session drops back to `auto` when a version applies. */
+function rowSafeMode(mode, model, member) {
+  const rows = profileRows(model);
+  const row = rows && rows.find((r) => String(r.name).toLowerCase() === String(mode || "").toLowerCase());
+  return row && profileLocked(row, member) ? "auto" : mode;
 }
+

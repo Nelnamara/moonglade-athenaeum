@@ -163,7 +163,9 @@ describe("a mode the newly applied model does not offer falls back to auto", () 
   test("BOTH apply seams reset the mode -- a new model AND another version of one", () => {
     // applyModelRow (a fresh model pick) and pickVersion (the version dropdown) are the two
     // places a profile set changes underneath an already-selected mode. Neither may be left out.
-    const uses = hook.match(/mode:\s*modeAfterApply\(\s*old\.mode\s*,\s*model\.profiles\s*\)/g) || [];
+    // Session H (T1a) wraps the reset in rowSafeMode, which additionally drops a members-only
+    // profile for a non-member; the offered-set reset itself is unchanged and still at BOTH seams.
+    const uses = hook.match(/mode:\s*(?:rowSafeMode\()?modeAfterApply\(\s*old\.mode\s*,\s*model\.profiles\s*\)/g) || [];
     assert.equal(uses.length, 2,
       "expected the mode reset at BOTH useGenerate apply seams (applyModelRow, pickVersion); found "
       + uses.length);
