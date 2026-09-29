@@ -1249,8 +1249,9 @@ def test_train_refuses_to_spend_credits_without_explicit_acceptance(tmp_path, mo
     r = _post_train(cli, dict(body, confirm=True))
     assert r.status_code == 402
     assert not calls
-    # explicit acceptance lets it through
-    d = _post_train(cli, dict(body, confirm=True, accept_credit_cost=True)).get_json()
+    # explicit acceptance of the amount lets it through (a bare `true` is refused while there
+    # is a number to name -- spend review 2026-09-28, tests/test_training_advanced.py)
+    d = _post_train(cli, dict(body, confirm=True, accept_credit_cost=25000)).get_json()
     assert d["submitted"] is True and d["was_free"] is False
     assert len(calls) == 1
 

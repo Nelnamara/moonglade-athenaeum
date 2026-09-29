@@ -111,6 +111,37 @@ class PixAIError(Exception):
     """Raised instead of sys.exit() so the GUI and tests can catch errors cleanly."""
 
 
+class PixAIRestError(PixAIError):
+    """A /v2 REST route answered non-2xx. Still a PixAIError with the same message as before
+    (every existing catch site is unchanged); it also carries the HTTP `status` and PixAI's
+    parsed error body (`code`, `data`, the oRPC error shape) so a caller can say which images
+    PixAI refused, or that a task was not in the state a route needs, in PixAI's own terms
+    instead of a truncated string."""
+
+    def __init__(self, message, status=None, body=None):
+        super().__init__(message)
+        self.status = status
+        self.body = body if isinstance(body, dict) else {}
+
+    @property
+    def code(self):
+        return str(self.body.get("code") or "")
+
+    @property
+    def data(self):
+        d = self.body.get("data")
+        return d if isinstance(d, dict) else {}
+
+
+def _rest_error(verb, path, r):
+    try:
+        body = r.json()
+    except ValueError:
+        body = None
+    return PixAIRestError("REST {} {} -> {}: {}".format(verb, path, r.status_code, r.text[:300]),
+                          status=r.status_code, body=body)
+
+
 class EmptyOutputsError(PixAIError):
     """PixAI reported the task TERMINAL -- either 'done' with empty outputs, or a real
     failure (failed/error/cancelled/rejected) -- so it produced nothing and never will.
@@ -1475,7 +1506,8 @@ def _is_mutation_document(query):
 class PixAIClient:
     """The transport seam: everything this app asks PixAI, asked here.
 
-    Five verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`), one credential
+    Seven verbs (`query`, `mutate`, `persisted`, `rest_get`, `rest_post`, `rest_put`,
+    `rest_patch`), one credential
     choice (`for_create`), and the underlying requests.Session on `.session` for the call
     sites still mid-transition. `auth_kind` is `"api-key"` or `"web-jwt"`; `user_id` is the
     resolved account id.
@@ -1673,7 +1705,7 @@ class PixAIClient:
         Single-attempt by construction, like `rest_post` -- see its note."""
         r = self._session.get(REST_API_BASE + path, params=params, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST GET {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("GET", path, r)
         return r.json()
 
     def rest_post(self, path, body=None, timeout=60):
@@ -1685,7 +1717,27 @@ class PixAIClient:
         tests/test_spend_no_retry.py::test_rest_post_has_no_retry_loop."""
         r = self._session.post(REST_API_BASE + path, json=body, timeout=timeout)
         if not r.ok:
-            raise PixAIError("REST POST {} -> {}: {}".format(path, r.status_code, r.text[:300]))
+            raise _rest_error("POST", path, r)
+        return r.json()
+
+    def rest_patch(self, path, body=None, timeout=60):
+        """PATCH JSON to a /v2 oRPC REST route. Single attempt, like rest_post / rest_put:
+        its one caller (joining a LoRA to the rebate programme) cannot be undone."""
+        r = self._session.patch(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise _rest_error("PATCH", path, r)
+        return r.json()
+
+    def rest_put(self, path, body=None, timeout=60):
+        """PUT JSON to a /v2 oRPC REST route. Returns parsed JSON. Raises on non-2xx.
+
+        Single-attempt like `rest_post`, and by the same reasoning: the training routes that
+        ride it (a dataset replace, a description save) change the account, and a re-send
+        after a lost response can land on a task that has already moved on. Pinned alongside
+        rest_post by tests/test_spend_no_retry.py."""
+        r = self._session.put(REST_API_BASE + path, json=body, timeout=timeout)
+        if not r.ok:
+            raise _rest_error("PUT", path, r)
         return r.json()
 
     # -- which credential a create rides -------------------------------------
@@ -12485,14 +12537,23 @@ def training_price_for_version(version_id, config=None):
     return row.get("price") if row else None
 
 
+# The architecture PixAI marks "Recommended" on both train pages since 2026-09-27 (DiT.3), and
+# the one the Session J handoff pre-selects (decision 6a, DECISIONS 2026-09-28).
+TRAIN_RECOMMENDED_TYPE = "MMDIT26B_MODEL"
+
+
 def default_training_base(config=None):
-    """The base the panel pre-selects: the first SDXL row of the list, else the first row --
-    PixAI's own default (`e.find(SdxlModel) ?? e[0]`). Never "the first group's first model":
-    with Tsubaki.3 in the list that would pre-select the 100,000-credit base."""
+    """The base the panel pre-selects: the Recommended architecture's first row (Tsubaki.3 --
+    the handoff's 6a and PixAI's own basic page since 2026-09-27, whose DiT.3 tab opens
+    selected), else the first SDXL row (PixAI's older default, `e.find(SdxlModel) ?? e[0]`),
+    else the first row. This replaces the SCOPE_2026-09-26 E7 rule that avoided Tsubaki.3 for
+    its price: the price now sits on the review footer before Start, and a paid start still
+    needs the amount ticked."""
     cfg = config or training_config()
     offered = [m for m in cfg["models"] if m["model_type"] in dict(_TRAIN_ARCHS)]
-    pick = next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None) or \
-        (offered[0] if offered else None)
+    pick = (next((m for m in offered if m["model_type"] == TRAIN_RECOMMENDED_TYPE), None)
+            or next((m for m in offered if m["model_type"] == "SDXL_MODEL"), None)
+            or (offered[0] if offered else None))
     return pick["version_id"] if pick else ""
 
 
@@ -12510,8 +12571,11 @@ def list_trainable_base_models(session=None, per_type=None, config=None):
                    "cover": m["cover"], "usage": m["usage"]}
                   for m in cfg["models"] if m["model_type"] == arch]
         if models:
-            price = (cfg["pricing"].get(arch) or {}).get("price")
-            groups.append({"arch": arch, "label": label, "models": models, "price": price})
+            row = cfg["pricing"].get(arch) or {}
+            groups.append({"arch": arch, "label": label, "models": models,
+                           "price": row.get("price"), "reuse": row.get("reuse"),
+                           "list_price": row.get("originalPrice"),
+                           "recommended": arch == TRAIN_RECOMMENDED_TYPE})
     return groups
 
 
@@ -12728,6 +12792,414 @@ def submit_training(session, base_model_id, media_ids, title, trigger_words, cat
         inp["kaisuukenId"] = str(kaisuuken_id)
     d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
     return d.get("createTrainingTask") or {}
+
+
+# --- LoRA training: the advanced flow, runs, publish (Session J, 2026-09-28) ------------------
+# PixAI's advanced trainer is a draft (GraphQL createTrainingTask, trainingMode "advanced", no
+# images, free) worked on through REST under /v2/training-task/{id}: the dataset (PUT media,
+# free), a PAID describe round (POST caption, priced per task by GET caption-price), the owner's
+# own edits of those descriptions (PUT captions/{mediaId}, free, only once a machine description
+# exists), a PAID start (POST submit, priced by GET price), a PAID retry of a failed run (a NEW
+# run), and an irreversible publish. Every writer below calls _check_read_only first and rides a
+# single-attempt transport (gql_mutate, rest_post, rest_put, rest_patch). Callers preview and
+# acknowledge; nothing here decides that the user wants to pay. The wire facts and the guard
+# order are in ../moonglade-internal/design/notes/training/BUILD-w3-train.md.
+
+# Basic's four goals (and Advanced's categories), PixAI's own values: its "Something else"
+# sub-kind is never sent.
+TRAIN_GOALS = (("character", "Character"), ("style", "Art style"), ("clothing", "Outfit"),
+               ("other", "Something else"))
+# The architectures Advanced offers (Tsubaki.3 Recommended, then Tsubaki.2).
+TRAIN_ADVANCED_TYPES = ("MMDIT26B_MODEL", "MMDIT26A_MODEL")
+# What PixAI's own advanced page submits: its parameter controls are inert ("coming soon") and
+# it sends these defaults. Sent verbatim -- the quote route takes no length, and PixAI's own
+# fallback price scales with it, so an unquoted length is never sent (spend review, finding 3).
+TRAIN_DEFAULT_OPTIONS = {"trainingSteps": 325, "learningRate": 0.0006, "rank": 64,
+                         "gradAccum": 2}
+# A description, as PixAI's editor caps it (its contract would take 20,000; the editor is the
+# rule users meet).
+TRAIN_CAPTION_MAX = 1000
+
+_TRAINING_TASK_FIELDS = ("id userId status trainingMode type refId retryCount createdAt "
+                         "updatedAt startedAt endAt parameters { title mediaIds category "
+                         "baseModelId triggerWords } extra { progress estimatedTotalTime } "
+                         "outputs { message }")
+_TRAINING_TASK_Q = "query($id: ID!) { trainingTask(id: $id) { " + _TRAINING_TASK_FIELDS + " } }"
+_MY_LORAS_Q = ("query($au: ID, $ty: GenerationModelType, $n: Int, $b: String) { "
+               "generationModels(authorId: $au, type: $ty, last: $n, before: $b) { "
+               "pageInfo { hasPreviousPage startCursor } edges { node { id title isPrivate "
+               "visibilityType createdAt mediaId latestAvailableVersion { id } trainingTask { "
+               + _TRAINING_TASK_FIELDS + " } } } } }")
+_GEN_MODEL_Q = ("query($id: ID!) { generationModel(id: $id) { id authorId title type isPrivate "
+                "visibilityType } }")
+_UPSERT_MODEL = ("mutation upsertGenerationModel($id: ID, $input: UpsertGenerationModelInput!) "
+                 "{ upsertGenerationModel(id: $id, input: $input) { id isPrivate "
+                 "visibilityType } }")
+
+
+def training_eta(steps=325):
+    """PixAI's own estimate (its advanced page's Br()): t = max(1, round(steps * 27 / 325))
+    minutes, shown as "about t to round(t * 1.3) minutes" -- 27-35 at the default, the same
+    number its basic page prints."""
+    t = max(1, int(round(float(steps) * 27.0 / 325.0)))
+    return {"min": t, "max": int(round(t * 1.3))}
+
+
+def advanced_training_bases(config=None):
+    """The two bases Advanced offers: one row per advanced architecture (an "animation" row
+    preferred, as the site picks), Recommended first. [{version_id, title, cover, model_type,
+    recommended}]."""
+    cfg = config or training_config()
+    out = []
+    for mtype in TRAIN_ADVANCED_TYPES:
+        rows = [m for m in cfg["models"] if m["model_type"] == mtype]
+        pick = next((m for m in rows if m.get("usage") == "animation"), None) or \
+            (rows[0] if rows else None)
+        if pick:
+            out.append({"version_id": pick["version_id"], "title": pick["title"],
+                        "cover": pick["cover"], "model_type": mtype,
+                        "recommended": mtype == TRAIN_RECOMMENDED_TYPE})
+    return out
+
+
+def training_price_tier(version_id, tier="price", config=None):
+    """A base's price at one tier of PixAI's matrix (`price` fresh, `reuse` a reused dataset),
+    or None when unknown. Never `originalPrice`."""
+    cfg = config or training_config()
+    row = cfg["pricing"].get(training_model_type(version_id, cfg) or "") or {}
+    v = row.get(tier)
+    return v if isinstance(v, int) else None
+
+
+def definite_refusal(exc):
+    """True when PixAI answered and REFUSED (so nothing was created or charged): a 4xx from a
+    REST route, a GraphQL error body, or a 401. False for anything that may have reached PixAI
+    and succeeded -- a timeout, a dropped connection, a 5xx, an unreadable answer -- which a
+    spend guard must treat as "may have started"."""
+    if isinstance(exc, PixAIRestError):
+        return exc.status is not None and 400 <= int(exc.status) < 500
+    if isinstance(exc, PixAIError):
+        msg = str(exc)
+        return msg.startswith("GraphQL error") or msg.startswith("401 ")
+    return False
+
+
+_TRAIN_ERROR_WORDS = {
+    "TRAINING_IMAGE_REJECTED": "PixAI won't train on some of these images (smaller than its "
+                               "minimum size, or too long and thin)",
+    "TRAINING_DATASET_TOO_SMALL": "PixAI needs more images in this set before it can go on",
+    "INSUFFICIENT_BALANCE": "there aren't enough credits on the account; nothing was charged",
+    "MODEL_PUBLISH_CONFLICT": "another public LoRA already uses these weights",
+    "LORA_REBATE_REQUIRES_PUBLIC": "only a public LoRA can join rebates",
+}
+
+
+def training_error_words(exc):
+    """A PixAI training refusal in plain words: its defined code where it sent one, its own
+    message otherwise."""
+    if isinstance(exc, PixAIRestError):
+        if exc.code in _TRAIN_ERROR_WORDS:
+            return _TRAIN_ERROR_WORDS[exc.code]
+        msg = str(exc.body.get("message") or "").strip()
+        if msg:
+            return msg
+    return str(exc)
+
+
+def _task_path(task_id, suffix=""):
+    tid = str(task_id or "").strip()
+    if not tid.isdigit():
+        raise PixAIError("not a training task id: %r" % (task_id,))
+    return "/training-task/" + tid + suffix
+
+
+def training_task(session, task_id):
+    """One training task by id (GraphQL trainingTask) -- basic or advanced -- or raises.
+    Read-only. `extra.progress` is PixAI's percentage (0-100) and `estimatedTotalTime` its
+    whole-run estimate in milliseconds, both only while it runs."""
+    d = gql_adhoc(session, _TRAINING_TASK_Q, {"id": str(task_id)}) or {}
+    t = d.get("trainingTask")
+    if not isinstance(t, dict):
+        raise PixAIError("training task %s not found" % task_id)
+    return t
+
+
+def list_training_in_progress(session, limit=100):
+    """Every advanced task still in the owner's hands (drafts through failed), newest activity
+    first: [{id, status, title, baseModelId, mediaCount, updatedAt}]. Read-only."""
+    d = _rest_get(session, "/training-task/in-progress",
+                  params={"limit": max(1, min(int(limit), 100))}) or {}
+    return [t for t in (d.get("tasks") or []) if isinstance(t, dict)]
+
+
+def list_training_completed(session, limit=100):
+    """Every finished advanced task, newest first, published or not (`modelId` null until
+    published): [{id, title, baseModelId, mediaCount, modelId, completedAt}]. Read-only."""
+    d = _rest_get(session, "/training-task/completed",
+                  params={"limit": max(1, min(int(limit), 100))}) or {}
+    return [t for t in (d.get("tasks") or []) if isinstance(t, dict)]
+
+
+def list_my_trained_loras(session, pages=3, per_page=20):
+    """The account's own trained LoRAs with the run behind each (GraphQL generationModels
+    authorId + ANY_USER_LORA, the list PixAI's "Import from previous datasets" reads), newest
+    first, up to `pages` pages. Each row: {model_id, title, is_private, visibility, created_at,
+    cover_media_id, version_id, task} where task is the TrainingTask dict or None. Read-only."""
+    uid = str(_client_of(session).user_id or "")
+    out, before = [], None
+    for _ in range(max(1, int(pages))):
+        v = {"au": uid, "ty": "ANY_USER_LORA", "n": int(per_page)}
+        if before:
+            v["b"] = before
+        d = (gql_adhoc(session, _MY_LORAS_Q, v) or {}).get("generationModels") or {}
+        rows = []
+        for e in d.get("edges") or []:
+            n = (e or {}).get("node") or {}
+            if not n.get("id"):
+                continue
+            ver = n.get("latestAvailableVersion") or {}
+            rows.append({"model_id": str(n["id"]), "title": str(n.get("title") or ""),
+                         "is_private": bool(n.get("isPrivate")),
+                         "visibility": str(n.get("visibilityType") or ""),
+                         "created_at": str(n.get("createdAt") or ""),
+                         "cover_media_id": str(n.get("mediaId") or ""),
+                         "version_id": str(ver.get("id") or ""),
+                         "task": n.get("trainingTask") if isinstance(n.get("trainingTask"), dict)
+                         else None})
+        out.extend(reversed(rows))                 # `last` pages come oldest-first
+        info = d.get("pageInfo") or {}
+        if not info.get("hasPreviousPage") or not info.get("startCursor"):
+            break
+        before = info["startCursor"]
+    return out
+
+
+def training_caption_quote(session, task_id):
+    """What the next describe round would charge: {image_count, total_price} -- PixAI's own
+    per-task quote (the images with no machine description yet, times the unit price). The
+    config's captionPricing is stale (100 there; 150 on the owner's capture draft), so this,
+    never the config, is the number shown and acknowledged. Read-only."""
+    d = _rest_get(session, _task_path(task_id, "/caption-price")) or {}
+    if not isinstance(d.get("totalPrice"), (int, float)):
+        raise PixAIError("PixAI returned no describe price for training task %s" % task_id)
+    return {"image_count": int(d.get("imageCount") or 0),
+            "total_price": int(d.get("totalPrice") or 0)}
+
+
+def training_quote(session, task_id):
+    """What starting (or retrying) this advanced task would charge today, by its base model --
+    PixAI's own free quote (GET price). Read-only. Returns an int."""
+    d = _rest_get(session, _task_path(task_id, "/price")) or {}
+    if not isinstance(d.get("price"), (int, float)):
+        raise PixAIError("PixAI returned no price for training task %s" % task_id)
+    return int(d["price"])
+
+
+def training_captions(session, task_id):
+    """The task's descriptions: [{media_id, source (machine|user), caption_url, machine_url,
+    user_url}]. The links are short-lived; fetch_caption_text reads each. Read-only."""
+    d = _rest_get(session, _task_path(task_id, "/captions")) or {}
+    out = []
+    for it in d.get("items") or []:
+        if isinstance(it, dict) and it.get("mediaId"):
+            out.append({"media_id": str(it["mediaId"]), "source": str(it.get("source") or ""),
+                        "caption_url": str(it.get("captionUrl") or ""),
+                        "machine_url": str(it.get("machineCaptionUrl") or ""),
+                        "user_url": str(it.get("userCaptionUrl") or "")})
+    return out
+
+
+def fetch_caption_text(url, limit=64 * 1024):
+    """One description's text from its time-limited link (PixAI's own page fetches it the same
+    way, without credentials). HTTPS only; NO PixAI credential rides this request -- a plain
+    requests.get, never the account session; capped at `limit` bytes. Returns None on any
+    failure (the caller shows the description as unreadable, never as empty-and-editable)."""
+    u = str(url or "")
+    if not u.startswith("https://"):
+        return None
+    try:
+        r = requests.get(u, timeout=15, stream=True)
+        if not r.ok:
+            return None
+        raw = r.raw.read(limit + 1, decode_content=True) or b""
+        return raw[:limit].decode("utf-8", "replace").strip()
+    except (requests.RequestException, OSError, ValueError):
+        return None
+
+
+def create_advanced_training_draft(session, base_model_id, title, trigger_words, category,
+                                   config=None):
+    """Create an ADVANCED training draft -- PixAI's own step-1 call (createTrainingTask with
+    {type: LORA, trainingMode: advanced, title, category, baseModelId, triggerWords}, no
+    images). FREE, but it writes to the account, so it runs only on the user's deliberate
+    "Next · creates a draft" (DECISIONS 2026-09-28, nothing writes on open). Name, category,
+    base and trigger words are fixed from here. Single attempt. Returns {id}."""
+    _check_read_only("create a LoRA training draft")
+    cfg = config or training_config()
+    bases = {b["version_id"] for b in advanced_training_bases(cfg)}
+    if str(base_model_id) not in bases:
+        raise PixAIError("Advanced training runs on Tsubaki.3 or Tsubaki.2 only")
+    if str(category or "") not in dict(TRAIN_GOALS):
+        raise PixAIError("pick what you are training (%s)" % ", ".join(
+            lab for _, lab in TRAIN_GOALS))
+    # the dataset floor is checked when describing and starting, not here: a draft has none
+    tw = validate_training(base_model_id, [], title, trigger_words, category,
+                           training_task_id="draft", config=cfg)
+    inp = {"type": "LORA", "trainingMode": "advanced", "title": str(title).strip(),
+           "category": str(category), "baseModelId": str(base_model_id), "triggerWords": tw}
+    d = gql_mutate(session, _CREATE_TRAINING, {"input": inp}) or {}
+    task = d.get("createTrainingTask") or {}
+    if not task.get("id"):
+        raise PixAIError("PixAI created no draft")
+    return {"id": str(task["id"])}
+
+
+def replace_training_media(session, task_id, media_ids):
+    """Replace an advanced task's whole image list (PUT media, <=100, free). Single attempt."""
+    _check_read_only("change a LoRA training set")
+    ids = []
+    for m in media_ids or []:
+        m = str(m).strip()
+        if m and m not in ids:
+            ids.append(m)
+    if len(ids) > TRAIN_MAX_IMAGES:
+        raise PixAIError("training takes at most %d images -- you have %d"
+                         % (TRAIN_MAX_IMAGES, len(ids)))
+    d = _rest_put(session, _task_path(task_id, "/media"), {"mediaIds": ids}) or {}
+    return [str(m) for m in (d.get("mediaIds") or ids)]
+
+
+def start_training_captions(session, task_id):
+    """PAID: send the set's undescribed images to PixAI's describe round (POST caption). The
+    caller has quoted it (training_caption_quote) and had the amount acknowledged. Single
+    attempt. Returns PixAI's new status."""
+    _check_read_only("describe LoRA training images (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/caption"), {}) or {}
+    return str(d.get("status") or "")
+
+
+def save_training_caption(session, task_id, media_id, text):
+    """Save the owner's own description for one image (PUT captions/{mediaId}; free; PixAI
+    keeps it as a new version, the machine's stays on file). Only for an image PixAI has
+    described already. 1 to TRAIN_CAPTION_MAX characters. Single attempt."""
+    _check_read_only("edit a LoRA training description")
+    t = str(text or "").strip()
+    if not t:
+        raise PixAIError("a description can't be empty")
+    if len(t) > TRAIN_CAPTION_MAX:
+        raise PixAIError("a description is %d characters at most -- this one is %d"
+                         % (TRAIN_CAPTION_MAX, len(t)))
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        raise PixAIError("which image?")
+    _rest_put(session, _task_path(task_id, "/captions/" + mid), {"text": t})
+    return t
+
+
+def submit_advanced_training(session, task_id):
+    """PAID: start an advanced run (POST submit) with PixAI's own default options, exactly as
+    its page sends them (TRAIN_DEFAULT_OPTIONS). No free card rides it -- PixAI's page attaches
+    none. The caller has quoted it (training_quote) and had the amount acknowledged. Single
+    attempt. Returns PixAI's new status."""
+    _check_read_only("start a LoRA training run (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/submit"),
+                   {"trainingOptions": dict(TRAIN_DEFAULT_OPTIONS)}) or {}
+    return str(d.get("status") or "")
+
+
+def retry_training(session, task_id):
+    """PAID: a NEW run from a failed advanced one (POST retry: same set, same descriptions,
+    charged again at today's price). The failed task stays as it is, so a second call would
+    start and charge a second run -- the caller guards against that. Single attempt. Returns
+    {id (the new run), origin_id, status}."""
+    _check_read_only("retry a LoRA training run (spends credits)")
+    d = _rest_post(session, _task_path(task_id, "/retry"), {}) or {}
+    return {"id": str(d.get("trainingTaskId") or ""),
+            "origin_id": str(d.get("originTaskId") or task_id),
+            "status": str(d.get("status") or "")}
+
+
+def publish_training(session, task_id, visibility, rebate):
+    """IRREVERSIBLE: turn a finished advanced run into a LoRA (POST publish, once per run).
+    visibility private|public; rebate join|decline, and join only when public (refused here
+    before PixAI would). Single attempt. Returns {model_id, version_id}."""
+    _check_read_only("publish a trained LoRA")
+    if visibility not in ("private", "public"):
+        raise PixAIError("publish it private or public")
+    if rebate not in ("join", "decline"):
+        raise PixAIError("join or decline rebates")
+    if rebate == "join" and visibility != "public":
+        raise PixAIError(_TRAIN_ERROR_WORDS["LORA_REBATE_REQUIRES_PUBLIC"])
+    d = _rest_post(session, _task_path(task_id, "/publish"),
+                   {"visibility": visibility, "loraRebate": rebate}) or {}
+    return {"model_id": str(d.get("modelId") or ""), "version_id": str(d.get("versionId") or "")}
+
+
+def generation_model_brief(session, model_id):
+    """{id, author_id, title, type, is_private, visibility} for one model. Read-only."""
+    d = (gql_adhoc(session, _GEN_MODEL_Q, {"id": str(model_id)}) or {}).get("generationModel")
+    if not isinstance(d, dict):
+        raise PixAIError("model %s not found" % model_id)
+    return {"id": str(d.get("id") or ""), "author_id": str(d.get("authorId") or ""),
+            "title": str(d.get("title") or ""), "type": str(d.get("type") or ""),
+            "is_private": bool(d.get("isPrivate")),
+            "visibility": str(d.get("visibilityType") or "")}
+
+
+def make_model_public(session, model_id):
+    """IRREVERSIBLE: a private LoRA of yours goes public (upsertGenerationModel with just
+    {isPrivate: false}, exactly the site's call). Single attempt."""
+    _check_read_only("make a LoRA public")
+    d = gql_mutate(session, _UPSERT_MODEL, {"id": str(model_id),
+                                            "input": {"isPrivate": False}}) or {}
+    return d.get("upsertGenerationModel") or {}
+
+
+def lora_rebate_eligibility(session, model_id):
+    """PixAI's rebate check for one of your LoRAs: {offered, joined, can_join}. Read-only;
+    a failed read answers not offered."""
+    try:
+        d = _rest_get(session, "/generation-model/%s/lora-rebate-eligibility"
+                      % str(model_id).strip()) or {}
+    except (PixAIError, requests.RequestException):
+        return {"offered": False, "joined": False, "can_join": False}
+    offered = d.get("featureStatus") == "enabled"
+    joined = offered and d.get("eligibility") == "accept"
+    allowed = d.get("allowedTargetEligibilities") or []
+    return {"offered": offered, "joined": joined,
+            "can_join": offered and not joined and "accept" in allowed}
+
+
+_THUMB_VARIANTS = ("STILL_THUMBNAIL", "THUMBNAIL", "PUBLIC", "ORIGINAL")
+
+
+def media_thumbnail_url(session, media_id):
+    """A small picture URL for one PixAI media id -- for training-set images this library has
+    no thumbnail of (an upload, or an image imported from an earlier set). Reads the media
+    object (GET /v1/media/<id>, read-only) and prefers a thumbnail variant. None on failure."""
+    mid = str(media_id or "").strip()
+    if not mid.isdigit():
+        return None
+    try:
+        r = session.get(MEDIA_BASE.format(id=mid), timeout=20)
+        r.raise_for_status()
+        obj = r.json()
+    except (requests.RequestException, ValueError):
+        return None
+    by = {str(u.get("variant", "")).upper(): u.get("url") for u in (obj.get("urls") or [])
+          if isinstance(u, dict) and u.get("url")}
+    for v in _THUMB_VARIANTS:
+        if by.get(v):
+            return by[v]
+    return next(iter(by.values()), None)
+
+
+def join_lora_rebates(session, model_id):
+    """IRREVERSIBLE: join one of your public LoRAs to the rebate programme (PATCH
+    lora-rebate-eligibility {eligibility: accept}, the site's call). Single attempt."""
+    _check_read_only("join a LoRA to rebates")
+    return _rest_patch(session, "/generation-model/%s/lora-rebate-eligibility"
+                       % str(model_id).strip(), {"eligibility": "accept"}) or {}
 
 
 def source_media_of_task(task):
@@ -13543,6 +14015,18 @@ def _rest_post(session, path, body, timeout=60):
     THIN DELEGATE onto `PixAIClient.rest_post`, which carries the no-retry-loop rule that
     keeps `submit_fixer` and `claim_reward` single-attempt."""
     return _client_of(session).rest_post(path, body, timeout=timeout)
+
+
+def _rest_patch(session, path, body, timeout=60):
+    """PATCH JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_patch`
+    (single attempt). Blocked in tests by conftest."""
+    return _client_of(session).rest_patch(path, body, timeout=timeout)
+
+
+def _rest_put(session, path, body, timeout=60):
+    """PUT JSON to a /v2 oRPC REST route. THIN DELEGATE onto `PixAIClient.rest_put`
+    (single attempt). Blocked in tests by conftest, like _rest_get / _rest_post."""
+    return _client_of(session).rest_put(path, body, timeout=timeout)
 
 
 def _normalize_kaisuuken(raw):

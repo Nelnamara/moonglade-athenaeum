@@ -82,7 +82,9 @@ class FakePixAI:
     """A PixAI transport adapter that answers from a registry and records every call.
 
     Interface-compatible with `moonglade_backup.PixAIClient`: `query`, `mutate`,
-    `persisted`, `rest_get`, `rest_post`, `for_create`, plus `user_id` / `auth_kind`.
+    `persisted`, `rest_get`, `rest_post`, `rest_put`, `rest_patch`, `for_create`, plus
+    `user_id` / `auth_kind`. A PUT or PATCH is registered under "PUT <path>" / "PATCH <path>",
+    so it can never be answered by the GET or POST registered for the same path.
     `mutate` takes no `retries` argument here EITHER -- the rule has to hold on both
     adapters, or a test could pass against a fake that allows what the real client
     forbids."""
@@ -178,6 +180,14 @@ class FakePixAI:
     def rest_post(self, path, body=None, timeout=60):
         call = self._record(verb="rest_post", op=path, path=path, body=body)
         return self._resolve(path, "REST POST path", call)
+
+    def rest_put(self, path, body=None, timeout=60):
+        call = self._record(verb="rest_put", op=path, path=path, body=body)
+        return self._resolve("PUT " + path, "REST PUT path", call)
+
+    def rest_patch(self, path, body=None, timeout=60):
+        call = self._record(verb="rest_patch", op=path, path=path, body=body)
+        return self._resolve("PATCH " + path, "REST PATCH path", call)
 
     def for_create(self):
         """The fake IS the create adapter. The mirror-vs-key choice is the real client's

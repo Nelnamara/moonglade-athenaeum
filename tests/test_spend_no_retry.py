@@ -368,7 +368,12 @@ class TestRestSpendPathsAreSingleAttempt:
         the real road grew a loop. Both are checked: the delegate must stay a delegate and
         the verb must stay single-attempt."""
         for fn, name in ((core._rest_post, "_rest_post"),
-                         (core.PixAIClient.rest_post, "PixAIClient.rest_post")):
+                         (core.PixAIClient.rest_post, "PixAIClient.rest_post"),
+                         # the training routes' dataset/description PUT and the rebate PATCH
+                         (core._rest_put, "_rest_put"),
+                         (core.PixAIClient.rest_put, "PixAIClient.rest_put"),
+                         (core._rest_patch, "_rest_patch"),
+                         (core.PixAIClient.rest_patch, "PixAIClient.rest_patch")):
             src = inspect.getsource(fn)
             assert "for " not in src and "while " not in src, (
                 "{} grew a retry loop -- submit_fixer and claim_reward would "

@@ -152,8 +152,8 @@ PixAI. It spends, so it previews first and only starts when you confirm.
 
 - **Base models** are PixAI's own training list — DiT.3 (Tsubaki.3), DiT.2 (Tsubaki.2), DiT.1,
   SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
-  PixAI can't be reached. The panel starts on the first SDXL base, the same one PixAI's own
-  page starts on.
+  PixAI can't be reached. The panel starts on Tsubaki.3 (DiT.3, marked Recommended), the same
+  one PixAI's own page starts on; its price is shown before you start.
 - **What it costs** is shown before you start, with the base's normal price beside a free
   run. A run is free when your membership still has
   free trainings left (they only count while you are a member), or when you hold a training
