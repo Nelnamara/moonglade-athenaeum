@@ -3779,7 +3779,7 @@ def _empty_version_meta():
             "sampling_steps": None, "cfg_scale": None, "capabilities": [],
             "compatibility": {}, "restrictions": {}, "profiles": None,
             "quality_tag": None, "size_rule": None, "context_images": None,
-            "unlimited": None}
+            "color_palette": None, "unlimited": None}
 
 
 def _version_quality_tag(extra):
@@ -3844,8 +3844,8 @@ def _version_row_to_meta(r):
       has the same keys whether or not that caller ran the second read.
     - quality_tag: the version's own Quality Tag ({prefix, suffix}) or None -- see
       _version_quality_tag (SCOPE_2026-09-26 G4).
-    - size_rule / context_images: PLACEHOLDERS (None) like `profiles`, filled by
-      _attach_features on the opt-in path that already pays the profile read.
+    - size_rule / context_images / color_palette: PLACEHOLDERS (None) like `profiles`,
+      filled by _attach_features on the opt-in path that already pays the profile read.
     - unlimited: PLACEHOLDER (None), filled by _attach_unlimited on that same path for a
       version in UNLIMITED_VERSIONS (SCOPE_2026-09-26_unlimited-mode S2).
     - negative_prompt on an MMDIT26B version (Tsubaki.3) is routedNegativePrompts.default
@@ -3877,6 +3877,7 @@ def _version_row_to_meta(r):
         "quality_tag": _version_quality_tag(extra),
         "size_rule": None,
         "context_images": None,
+        "color_palette": None,
         "unlimited": None,
     }
 
@@ -3939,6 +3940,9 @@ def _attach_features(session, meta):
     - context_images: True only when /features answered with modelType MMDIT26B_MODEL and
       contextImages "on" -- the exact condition under which the gate sends a reference as a
       context image. None when /features could not be read.
+    - color_palette: True only when /features lists colorPalette "on" -- the one condition
+      under which the gate lets a colour palette through (it fails closed, unlike the strip
+      rules). False when /features answered without it, None when it could not be read.
     - size_rule: {step, lo, hi}, the rule the gate snaps a size to (see _size_rule), or None
       when /features could not be read. The drawer's dims() applies the identical snap, so
       its "-> W x H px" line is what is sent.
@@ -3964,6 +3968,7 @@ def _attach_features(session, meta):
                 compat[name] = False
     meta["compatibility"] = compat
     meta["context_images"] = None if feats is None else _context_images_on(feats)
+    meta["color_palette"] = None if feats is None else feats["status"].get("colorPalette") == "on"
     ranges = _model_size_config(session, vid) if mtype in DIT_SIZE_STEP_TYPES else None
     # The gate runs G1 whenever /features answered (an empty modelType included, on the
     # step-8 rule), so the drawer carries a rule exactly then.
@@ -7968,6 +7973,114 @@ def _is_turbo_refusal(err):
             or ("turbo" in s.lower() and "member" in s.lower()))
 
 
+# ---- Colour palettes (Session H decision 4, 2026-09-28) ------------------------------------
+# PixAI's shape, from its own contract: a palette is {overall?, background?, character?}, each
+# group {colors: [{hex: "#RRGGBB", ratio: 0-100}]} with 1-12 colours, and overall or background
+# must be present. A generation carries colorPalette: {name, palette} (the task-parameter
+# schema), which the Generate drawer builds (gallery/src/gen/colorPaletteCore.js). The official
+# palettes are one read-only GET; a user's own palettes live in the app's per-account store,
+# never on PixAI (saving there is a write this app does not make).
+PALETTE_GROUPS = ("overall", "background", "character")
+PALETTE_MAX_COLORS = 12
+PALETTE_NAME_MAX = 50
+PALETTE_NAME_DEFAULT = "Custom palette"
+_PALETTE_HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _palette_ratio(raw):
+    """A colour's share as PixAI takes it: a number 0-100, sent as a whole percent. None when
+    it is not a number in range."""
+    if isinstance(raw, bool):
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v < 0 or v > 100:                    # NaN or out of range
+        return None
+    return int(round(v))
+
+
+def _palette_group_colors(raw):
+    """[{hex, ratio}] from one palette group, or None when it is not a valid group: a list of
+    1-12 colours, each a #RRGGBB hex (upper-cased) and a 0-100 ratio (a whole percent)."""
+    colors = raw.get("colors") if isinstance(raw, dict) else None
+    if not isinstance(colors, list) or not 1 <= len(colors) <= PALETTE_MAX_COLORS:
+        return None
+    out = []
+    for c in colors:
+        hx = c.get("hex") if isinstance(c, dict) else None
+        ratio = _palette_ratio(c.get("ratio")) if isinstance(c, dict) else None
+        if not isinstance(hx, str) or not _PALETTE_HEX_RE.match(hx.strip()) or ratio is None:
+            return None
+        out.append({"hex": hx.strip().upper(), "ratio": ratio})
+    return out
+
+
+def clean_color_palette(raw):
+    """The web payload's `color_palette` -> the task parameter `colorPalette`
+    ({name, palette}), or None when the payload carries none (absent, null, or an empty
+    object -- the drawer leaves the key out when no palette applies).
+
+    Anything PixAI's own schema would refuse is refused HERE, before any network call, as a
+    builder refusal (PixAIError): the badge shows it as its note, the create route returns
+    it, and nothing is created or charged. Groups other than overall/background/character
+    are refused rather than dropped (a dropped group would change the picture asked for)."""
+    if raw is None or (isinstance(raw, dict) and not raw):
+        return None
+    bad = "The colour palette isn't valid: "
+    if not isinstance(raw, dict) or not isinstance(raw.get("palette"), dict):
+        raise PixAIError(bad + "it has no colour groups (nothing was sent or charged)")
+    pal = raw["palette"]
+    extra = [k for k in pal if k not in PALETTE_GROUPS]
+    if extra:
+        raise PixAIError(bad + "unknown group {} (nothing was sent or charged)".format(
+            ", ".join(sorted(str(k) for k in extra))[:40]))
+    out = {}
+    for k in PALETTE_GROUPS:
+        if pal.get(k) is None:
+            continue
+        colors = _palette_group_colors(pal[k])
+        if colors is None:
+            raise PixAIError(bad + "{} needs 1 to 12 #RRGGBB colours with 0-100 shares "
+                                   "(nothing was sent or charged)".format(k))
+        out[k] = {"colors": colors}
+    if "overall" not in out and "background" not in out:
+        raise PixAIError(bad + "it needs overall or background colours "
+                               "(nothing was sent or charged)")
+    name = raw.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    return {"name": (name or PALETTE_NAME_DEFAULT)[:PALETTE_NAME_MAX], "palette": out}
+
+
+def color_palette_presets(session):
+    """PixAI's official colour palettes -- GET /v2/color-palettes/presets, READ-ONLY -- as
+    [{id, name, cover_url, palette}], each palette holding only its valid groups (a group that
+    fails _palette_group_colors is left out; a preset left with neither overall nor background
+    is skipped). `cover_url` is PixAI's CDN thumbnail as given, or "". Raises on a failed read;
+    the caller decides how to fail soft."""
+    data = _rest_get(session, "/color-palettes/presets")
+    rows = (data or {}).get("palettes") if isinstance(data, dict) else None
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        raw = r.get("palette") if isinstance(r.get("palette"), dict) else {}
+        pal = {}
+        for k in PALETTE_GROUPS:
+            colors = _palette_group_colors(raw.get(k))
+            if colors:
+                pal[k] = {"colors": colors}
+        if "overall" not in pal and "background" not in pal:
+            continue
+        cover = r.get("coverUrl")
+        out.append({"id": str(r.get("id") or ""),
+                    "name": str(r.get("name") or "")[:PALETTE_NAME_MAX] or "Palette",
+                    "cover_url": cover if isinstance(cover, str) else "",
+                    "palette": pal})
+    return out
+
+
 def _gen_parameters(args):
     if getattr(args, "params_json", ""):
         return json.loads(args.params_json)
@@ -8092,6 +8205,12 @@ def _gen_parameters(args):
         params["upscaleSampler"] = str(getattr(args, "upscale_sampler", "") or "")
     if getattr(args, "face_fix", False):
         params["enableADetailer"] = True             # their "Face Fix" booster
+    # Colour palette: {name, palette}, already cleaned by clean_color_palette. Emitted only
+    # when asked for, so every other submit is byte-identical; the gate strips it where the
+    # model cannot take it (and says so).
+    cpal = getattr(args, "color_palette", None)
+    if cpal:
+        params["colorPalette"] = cpal
     qtag = str(getattr(args, "quality_tag", "") or "").strip()
     # Quality Tag is MEMBERS-ONLY on PixAI -- crowned in their Add Booster menu on every
     # model, and their own guide says "member-only" in writing. This app was never built to
@@ -10206,7 +10325,8 @@ def _lora_out_of_range(weight, lo, hi):
 def _gate_image_params(session, params):
     """THE per-model image gate: params -> (params, adjusted). See the section comment.
 
-    Order: the 2026-08-25 profile branch (unchanged) -> the Upscale road exits -> /features
+    Order: the 2026-08-25 profile branch (unchanged) -> the colour palette (fails closed,
+    so before the exits) -> the Upscale road exits -> /features
     (unknown -> exit, today's shape) -> G3 context image -> G2 strips -> G6 prompt helper ->
     G10 LoRA weights -> G1 size. Returns the ORIGINAL object when nothing changes and a
     shallow copy otherwise; nested dicts it changes (promptHelper, extra, lora,
@@ -10260,6 +10380,32 @@ def _gate_image_params(session, params):
     # not text-to-image; none of the rules below describe it.
     if "chat" in p:
         return p, adjusted
+    # Colour palette (Session H 4; lane w2-small 2026-09-28, spend review B1). This rule FAILS
+    # CLOSED, unlike every strip rule below, and so runs BEFORE the two early exits: a palette
+    # goes out only on a version whose /features lists colorPalette "on" -- PixAI's own client
+    # never sends one otherwise (its feature tracker reads an unread list as off) -- and never
+    # beside a context image (the site drops it there), on the Upscale road, or when /features
+    # could not be read. Each strip is a receipt. The price cannot move: /v2/task-price takes
+    # no colorPalette.
+    if "colorPalette" in p:
+        cpal = p.get("colorPalette")
+        cf = _model_features(session, params["modelId"])
+        why = None
+        upscale_road = bool(p.get("mediaId") and (p.get("enlarge") or p.get("upscale")))
+        if p.get("contextImages") or (p.get("mediaId") and not upscale_road
+                                      and _context_images_on(cf)):
+            why = "a context image takes no colour palette"
+        elif upscale_road:
+            why = "an upscale takes no colour palette"
+        elif cf is None:
+            why = "couldn't confirm this model takes a colour palette"
+        elif cf["status"].get("colorPalette") != "on":
+            why = "this model takes no colour palette"
+        if why:
+            adjusted.append({"field": "colorPalette",
+                             "asked": cpal.get("name") if isinstance(cpal, dict) else cpal,
+                             "used": None, "why": why})
+            _own().pop("colorPalette")
     # The UPSCALE road: a top-level mediaId together with enlarge or upscale is an Upscale
     # panel request, and it passes the new rules untouched -- no size snap, no strip, never a
     # context image. What PixAI does with an upscale of a Tsubaki picture is unobserved; the
@@ -11139,6 +11285,10 @@ def _gen_args_from_web_payload(p):
         upscale_denoising_steps=num("upscale_denoise_steps", None, int),
         face_fix=(p.get("face_fix") in (True, "1", "true", "on")),
         quality_tag=str(p.get("quality_tag") or "").strip(),
+        # The Generate drawer's colour palette (Session H 4): cleaned or REFUSED here, before
+        # any network call -- a refusal is the badge's note and costs nothing. The gate
+        # decides whether it may go out (see _gate_image_params' palette rule).
+        color_palette=clean_color_palette(p.get("color_palette")),
         kaisuuken_id="", no_card=bool(p.get("no_card")),
         # _gen_parameters reads named attributes only, so carrying the receipt on
         # the namespace costs the submit shape nothing and keeps it beside the values it

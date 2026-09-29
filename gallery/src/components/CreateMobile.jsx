@@ -14,6 +14,7 @@ import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
+import { PaletteRow } from "./ColorPalette.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -581,7 +582,7 @@ export default function CreateMobile({
             </div>
 
             <button type="button" className="cm-advrow" onClick={openAdv}>
-              ⚙ Advanced — LoRA, size, tuning, negative
+              ⚙ Advanced — LoRA, size, tuning, palette, negative
             </button>
 
             <span className="gd-cost cm-cost">
@@ -811,6 +812,11 @@ function ImageAdvanced({ s, set, setLora, m }) {
           Priority · {s.highPriority ? "high" : "standard"}
         </button>
       </div>
+
+      {/* Session H 4 / frame E: "Palette and negative stay in the shipped Advanced group, with
+          the same held treatment" -- the row and its sheet are ColorPalette.jsx's own. */}
+      <div className="cm-subhead">Palette</div>
+      <PaletteRow s={s} set={set} ctx={refIsContext(s)} phone />
 
       <div className="cm-subhead">Negative prompt</div>
       <textarea className="cm-ta" rows={2} value={s.negative}

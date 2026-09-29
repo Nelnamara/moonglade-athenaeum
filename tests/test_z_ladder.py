@@ -64,6 +64,8 @@ def z():
         "ks_host":       _z("styles/command-palette.css", ".mgks-host"),
         "ct_sub":        _z("styles/myart-contests.css", ".mgct-subscrim"),
         "ct_sub_host":   _z("styles/myart-contests.css", ".mgct-subhost"),
+        "pal_c_scrim":   _z("styles/color-palette.css", ".cpal-scrim"),
+        "pal_c_host":    _z("styles/color-palette.css", ".cpal-host"),
     }
 
 
@@ -100,6 +102,17 @@ def test_each_scrim_sits_under_its_own_content(z):
     # ...and the contest picker/confirm pair, which joined the same class of hazard the
     # day it was built: both open ON TOP of the Contests (or My Art) slab.
     assert z["ct_sub_host"] > z["ct_sub"]
+    # ...and the Generate drawer's colour palette (lane w2-small, 2026-09-28): it opens over the
+    # dock (7) and the phone's Advanced screen (308), above the phone's model sheet (345).
+    assert z["pal_c_host"] > z["pal_c_scrim"] > 345
+
+
+def test_the_colour_palette_stays_under_the_picker_it_opens():
+    """"Extract from image" -> "From the gallery" opens the shared picker ON TOP of the palette
+    window; flip that pair and the picker paints behind the window that asked for it."""
+    zz = {"host": _z("styles/color-palette.css", ".cpal-host"),
+          "picker": _z("styles/gallery-picker.css", ".mg-gallery-picker")}
+    assert zz["picker"] > zz["host"], zz
 
 
 def test_layers_that_stack_on_the_overlay_band_stay_above_it(z):

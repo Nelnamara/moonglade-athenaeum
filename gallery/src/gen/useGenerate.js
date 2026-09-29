@@ -47,7 +47,7 @@ export default function useGenerate({ costRef }) {
   useEffect(() => { refreshPrice(); }, [
     s.model, s.loras, s.ref, s.refStrength, s.boosters,
     s.aspect, s.size, s.customW, s.customH, s.count, s.highPriority,
-    s.mode, s.steps, s.unlimited,
+    s.mode, s.steps, s.unlimited, s.palette,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- model pick -> version resolve (seq-guarded) ---- */
@@ -71,6 +71,10 @@ export default function useGenerate({ costRef }) {
       // without them (only the latest row carries them) never inherits the previous one's.
       size_rule: v.size_rule || null,
       context_images: v.context_images === true,
+      // Whether this version takes a colour palette (Session H 4): true only when /features
+      // lists colorPalette "on"; false when it answered without it; null when unread. The
+      // palette is sent only on true (colorPaletteCore.paletteForPayload).
+      color_palette: v.color_palette === true ? true : (v.color_palette === false ? false : null),
       // The inference profiles this VERSION offers, by profileName (SCOPE 2026-08-17 §4b).
       // null = the server could not determine them -> the drawer dims nothing, exactly as
       // before. An array (including []) is a real answer.

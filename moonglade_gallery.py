@@ -18730,6 +18730,42 @@ def create_app(out_dir: Path):
             return jsonify({"error": _log_gen_failure(
                 "/api/edit", e, locals().get("params"))[:300]}), 200
 
+    # PixAI's official colour palettes change rarely (26 on 2026-09-26); one read an hour is
+    # plenty, and a failed read is not cached so the next open tries again.
+    _pal_presets_cache = {"at": 0.0, "palettes": None}
+    _PAL_PRESETS_TTL = 3600.0
+
+    @app.route("/api/palettes/presets")
+    @tier(LOGIN)
+    def api_palette_presets():
+        """The Generate drawer's colour palette Library tab: PixAI's official palettes
+        (core.color_palette_presets -> GET /v2/color-palettes/presets), READ-ONLY, spends
+        nothing. LOGIN tier like every other drawer read. Each cover goes through this app's
+        own CDN proxy (/api/pixai-cdn/thumb, SSRF-guarded to images-ng.pixai.art), because the
+        browser cannot load PixAI's CDN cross-origin from here; any other host gets no cover.
+        Fails soft: {"palettes": [], "error"} on a failed read, and the Library says so."""
+        import urllib.parse as _up
+        now = time.time()
+        cached = _pal_presets_cache["palettes"]
+        if cached is not None and (now - _pal_presets_cache["at"]) < _PAL_PRESETS_TTL:
+            return jsonify({"palettes": cached})
+        try:
+            core, gsession = _gen_session()
+            rows = core.color_palette_presets(gsession)
+        except Exception as e:
+            return jsonify({"palettes": [], "error": _redact_host_paths(str(e))[:200]})
+        for r in rows:
+            cover = r.get("cover_url") or ""
+            try:
+                ok = _up.urlparse(cover).scheme == "https" and \
+                    _up.urlparse(cover).netloc == "images-ng.pixai.art"
+            except ValueError:
+                ok = False
+            r["cover_url"] = ("/api/pixai-cdn/thumb?u=" + _up.quote(cover, safe="")) if ok else ""
+        _pal_presets_cache["palettes"] = rows
+        _pal_presets_cache["at"] = now
+        return jsonify({"palettes": rows})
+
     # Process cache for the Bridge preset prices: they are flat per workflow and account-
     # stable (source- AND priority-independent, verified live 2026-08-18), so a slab mount
     # need not be a dozen live REST calls. Only a REAL (mirror-reached) result is cached; a

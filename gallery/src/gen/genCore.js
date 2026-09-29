@@ -16,6 +16,8 @@
      silently burns credits.
    - A failed price check is "could not verify", NEVER "free" and never blank. */
 
+import { paletteForPayload } from "./colorPaletteCore.js";
+
 // PixAI's own captured Enhance Details values (task 2039053268124647852,
 // 2026-07-28) -- same constants the classic chip carries.
 export const MG_HIRES = { ratio: 1.5, denoise: 0.6 };
@@ -299,6 +301,7 @@ export function buildPayload(s) {
   // the classic sends its ||25 fallback to both (review: sending null to one and
   // a number to the other made the upscale pass stop mirroring sampling steps).
   const eff = s.steps === "" ? STEPS_FALLBACK : Number(s.steps);
+  const palette = paletteForPayload(s, refIsContext(s));
   return {
     version_id: s.model ? s.model.version_id : "",
     model_id: s.model ? s.model.model_id : "",
@@ -328,6 +331,11 @@ export function buildPayload(s) {
     // refuses what is not eligible; the drawer never drops the flag. Absent when off, so an
     // ordinary payload is byte-identical to before.
     ...(s.unlimited ? { unlimited: true } : {}),
+    // The colour palette (Session H 4, gen/colorPaletteCore.js): only with a palette applied,
+    // a version whose /features lists colorPalette "on", and no context image -- the pick is
+    // HELD otherwise, never cleared. Absent when it does not apply, so an ordinary payload is
+    // byte-identical to before.
+    ...(palette ? { color_palette: palette } : {}),
   };
 }
 
@@ -393,4 +401,5 @@ export const GEN_DEFAULTS = {
   ref: null, refStrength: 0.55,
   boosters: { hires: false, quality: false, face: false },
   unlimited: false,     // Tsubaki.3 Unlimited Mode (SCOPE_2026-09-26_unlimited-mode C1)
+  palette: null,        // the applied colour palette {name, palette, source, id, from} (Session H 4)
 };
