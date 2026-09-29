@@ -4893,7 +4893,9 @@ _UNL_CONTROLS_JS = """() => {
     const hp = [...document.querySelectorAll('.mgdock-sw')]
         .find(l => l.textContent.includes('High priority'));
     return {
-        modes: [...document.querySelectorAll('.mgdock-modebar')].map(b => b.disabled),
+        // Session H: a model whose /inference-profiles answered shows the Pro / Ultra rows
+        // in place of the mode bars; the lane pins them on Pro the same way.
+        modes: [...document.querySelectorAll('.mgdock-modebar, .mgts-profrow')].map(b => b.disabled),
         sizes: [...stops[0].querySelectorAll('button')].map(b => b.disabled),
         counts: [...stops[1].querySelectorAll('button')].map(b => b.disabled),
         highPriority: hp.querySelector('input').disabled,
@@ -4933,7 +4935,7 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
     assert "5,100" in badge.inner_text()
     off = page.evaluate(_UNL_CONTROLS_JS)
-    assert off == {"modes": [False, True, True, False, False],
+    assert off == {"modes": [False, False],
                    "sizes": [False, False, False, False],
                    "counts": [False, False, False, False], "highPriority": False}, off
 
@@ -4957,7 +4959,7 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
     assert inf["got"] == inf["want"], "the ∞ must be the fixed green token: %r" % inf
     assert not [p for p in matched if p.get("lane")], "a lane request reached the card check"
     on = page.evaluate(_UNL_CONTROLS_JS)
-    assert on == {"modes": [True, True, True, False, True],
+    assert on == {"modes": [False, True],
                   "sizes": [False, False, False, True],
                   "counts": [False, True, True, True], "highPriority": True}, on
 
@@ -4967,7 +4969,7 @@ def test_the_dock_offers_unlimited_mode_and_locks_what_the_lane_runs_on(
         "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
     assert badge.get_attribute("data-lane") is None
     assert page.evaluate(_UNL_CONTROLS_JS) == {
-        "modes": [False, True, True, False, False], "sizes": [False, False, False, False],
+        "modes": [False, False], "sizes": [False, False, False, False],
         "counts": [False, False, False, False], "highPriority": False}
 
 

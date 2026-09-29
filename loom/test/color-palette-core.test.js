@@ -241,7 +241,10 @@ describe("the drawer's payload (genCore.buildPayload)", () => {
     assert.deepEqual(on.color_palette, { name: "W", palette: pal.palette });
     const none = buildPayload({ ...GEN_DEFAULTS, model, prompt: "p" });
     assert.ok(!("color_palette" in none));
-    const held = buildPayload({ ...GEN_DEFAULTS, model, prompt: "p", palette: pal, ref: { media_id: "9" } });
+    // Context images are in play on the Context side of the LoRAs | Context images switch
+    // (tsubakiCore.onContextSide); a lone reference on a context model is not sent (refSent).
+    const held = buildPayload({ ...GEN_DEFAULTS, model, prompt: "p", palette: pal,
+      inputs: "context", ctx: [{ media_id: "9", thumb: "", w: 0, h: 0 }] });
     assert.ok(!("color_palette" in held), "a context image holds the palette");
     const off = buildPayload({ ...GEN_DEFAULTS, model: { ...model, color_palette: null }, prompt: "p", palette: pal });
     assert.ok(!("color_palette" in off), "unknown support is not sent");
