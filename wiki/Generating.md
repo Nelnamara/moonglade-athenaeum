@@ -132,8 +132,9 @@ cards cover it. **Cancel · nothing is sent** is exactly that. There is no "don'
 A single picture sends as it always has, with no confirm.
 
 **Variables in the prompt.** `{silver|cobalt|ember}` is a variable: each option is one value.
-`__poses__` reads one of your **saved lists** (the **Lists ▾** button beside the mode switch:
-a name, one item per line, saved with your Moonglade account so the phone sees them too).
+`__poses__` reads one of your **saved lists** (the **Lists ▾** button in the composer's header
+beside **Presets**: a name, one item per line, saved with your Moonglade account so the phone
+sees them too).
 Variables work in the prompt only; the negative is sent as typed. They are tinted in the line
 under the prompt, and anything that can't be read — an unclosed or nested brace, a stray `}`,
 an empty `{}`, a list you don't have — is tinted peach and blocks Send until you fix it. To
@@ -158,7 +159,8 @@ Reusing a run from the reel or History puts back its **template** (the variables
 Matrix, the count and the seed), not just one resolved prompt. An older picture's prompt comes
 back with its braces escaped, so sending it again sends exactly the same text.
 
-**Inspect `{ }`** (beside the snippets button, and on each finished tile in the reel) shows the
+**Inspect `{ }`** (beside the snippets button, on each finished tile in the reel, and under **⋯**
+on a picture's record page) shows the
 exact request a picture was — or will be — sent with, after the variables were filled in, with
 the template and the drawn values beside it. The API key, cookies and session tokens are
 removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
@@ -166,6 +168,41 @@ copies the matching `python moonglade_backup.py --generate …` command (quoted 
 server runs in — PowerShell on Windows). It never includes `--confirm`, so pasting it previews
 first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
 copies as `--params-json`.
+
+### Your defaults, ↺ Last, Presets and quick picks
+
+These live with your Moonglade account, so the phone has the same ones. **Nothing is saved just
+by opening the dock** — each of them is written by a click of your own, or by a send that
+PixAI accepted.
+
+- **A default negative for each base family.** Type a negative, then press **☆ Set as default**
+  on the NEGATIVE row (the ▲ settings must be open); the button then reads **★ Default · DiT**
+  (or SDXL, Pony, Illustrious, Flux — whichever family the model belongs to), and pressing it
+  again clears that family's default. When you pick a model, the negative fills in with its
+  family's default **only if the box is empty or still holds the previous family's default** —
+  a negative you typed yourself is never replaced. A model whose author ships a preset still
+  applies it, and its note says the preset replaces your default. On the phone it is the same
+  row under Create → Advanced.
+- **↺ Last** refills the composer from your last **successful** send — model, LoRAs and their
+  weights, the prompt template, negative, frame, count, steps, CFG, toggles and the seed. It is
+  greyed until you have sent something, and it never sends.
+- **Presets ▾** saves the composer as a named preset: the same things as ↺ Last, **except the
+  seed**, up to thirty. Picking one fills everything in and says nothing was sent; if its model
+  is no longer available the rest is still filled and the note says so. ✕ deletes one. Presets
+  hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
+  presets open as a sheet.
+- **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
+  and LoRAs plus the ones you ★ (the ☆ in the corner of a card in the model and LoRA pickers),
+  six to a row, then **+ more** into the picker. A model chip switches the model the same way
+  the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
+  removes it; a LoRA for another model family is dimmed, with the reason in its tooltip. On the
+  phone they are one scrolling row of large chips, models then LoRAs.
+
+**On the phone** the prompt has a small toolbar: **{ }** puts a variable at the cursor for you
+to type over, and **Lists** opens your saved lists as a sheet. Variables are tinted the same
+way. Random works on the phone; **setting up a Matrix is done on a computer**, but a matrix's
+results open as a grid from **⋯ → View this matrix as a grid** on any of its pictures' records,
+and **⋯ → Inspect the request** shows the exact request with **Copy JSON**.
 
 ### Tsubaki.3 Unlimited Mode
 
