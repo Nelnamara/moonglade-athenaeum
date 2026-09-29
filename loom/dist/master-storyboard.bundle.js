@@ -1150,11 +1150,11 @@ var LoomBundle = (() => {
       cards: a.cards.map((c) => c.id !== cardId ? c : fn(c))
     })
   });
-  var patchCardById = (project, cardId, patch2) => ({
+  var patchCardById = (project, cardId, patch) => ({
     ...project,
     acts: project.acts.map((a) => ({
       ...a,
-      cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch2 })
+      cards: a.cards.map((c) => c.id !== cardId ? c : { ...c, ...patch })
     }))
   });
   var patchCardByIdWith = (project, cardId, fn) => ({
@@ -1184,9 +1184,9 @@ var LoomBundle = (() => {
     if (lastMid) p.closeFrame = frame(lastMid, "last frame of the imported clip");
     return p;
   };
-  var patchAct = (project, actId, patch2) => ({
+  var patchAct = (project, actId, patch) => ({
     ...project,
-    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch2 })
+    acts: project.acts.map((a) => a.id !== actId ? a : { ...a, ...patch })
   });
   var patchAssets = (project, fn) => ({ ...project, assets: fn(project.assets || []) });
   var appendCardToAct = (project, actId, card) => ({
@@ -1320,7 +1320,7 @@ var LoomBundle = (() => {
     mode: connect === "flf" ? "FLF" : c.mode
   });
   var buildNewRef = (kind, id) => ({ id, kind, tag: "", role: "", source: "", thumbId: "" });
-  var patchRef = (project, actId, cardId, refId, patch2) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch2 }) }));
+  var patchRef = (project, actId, cardId, refId, patch) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.map((r) => r.id !== refId ? r : { ...r, ...patch }) }));
   var removeRef = (project, actId, cardId, refId) => patchCard(project, actId, cardId, (c) => ({ ...c, refs: c.refs.filter((r) => r.id !== refId) }));
   var countShots = (project) => (project.acts || []).reduce((n, a) => n + (a.cards || []).length, 0);
   var parseCastIdsFromSearch = (search, key = "cast") => (search || "").replace(/^\?/, "").split("&").map((kv) => kv.split("=")).filter(([k]) => k === key).flatMap(([, v]) => {
@@ -2041,10 +2041,10 @@ ${"=".repeat(48)}
     if (!assets.some((a) => a && a.id === assetId)) return project;
     return { ...project, assets: assets.map((a) => a && a.id === assetId ? { ...a, libId: str2(libId) } : a) };
   };
-  var syncPatch = (patch2) => {
+  var syncPatch = (patch) => {
     const out = {};
     MEMBER_SYNC_FIELDS.forEach((k) => {
-      if (patch2 && Object.prototype.hasOwnProperty.call(patch2, k)) out[k] = patch2[k];
+      if (patch && Object.prototype.hasOwnProperty.call(patch, k)) out[k] = patch[k];
     });
     if ("lock" in out) out.lock = !!out.lock;
     return out;
@@ -2055,14 +2055,14 @@ ${"=".repeat(48)}
     if ((base.members || []).some((m) => str2(m.libId) === str2(member.libId))) return base;
     return { ...base, members: (base.members || []).concat([member]) };
   };
-  var editMember = (lib, libId, patch2) => {
-    const p = syncPatch(patch2);
+  var editMember = (lib, libId, patch) => {
+    const p = syncPatch(patch);
     if (!lib || !libId || !Object.keys(p).length) return lib;
     if (!(lib.members || []).some((m) => str2(m.libId) === str2(libId))) return lib;
     return { ...lib, members: lib.members.map((m) => str2(m.libId) === str2(libId) ? { ...m, ...p } : m) };
   };
-  var editCopies = (project, libId, patch2) => {
-    const p = syncPatch(patch2);
+  var editCopies = (project, libId, patch) => {
+    const p = syncPatch(patch);
     if (!project || !libId || !Object.keys(p).length) return project;
     const assets = assetsOf(project);
     if (!assets.some((a) => a && str2(a.libId) === str2(libId))) return project;
@@ -2255,14 +2255,14 @@ ${"=".repeat(48)}
     }
     return isBoardId(raw) ? raw : null;
   }
-  function buildLoomUrl(patch2, search, pathname) {
+  function buildLoomUrl(patch, search, pathname) {
     let p;
     try {
       p = new URLSearchParams(search || "");
     } catch (e) {
       p = new URLSearchParams("");
     }
-    const patchObj = patch2 || {};
+    const patchObj = patch || {};
     if ("board" in patchObj) {
       if (isBoardId(patchObj.board)) p.set("board", String(patchObj.board));
       else p.delete("board");
@@ -3218,8 +3218,8 @@ ${"=".repeat(48)}
         page = 1;
         load2(false);
       }
-      function setFilters(patch2) {
-        Object.assign(filters, patch2 || {});
+      function setFilters(patch) {
+        Object.assign(filters, patch || {});
         page = 1;
         load2(false);
       }
@@ -5239,7 +5239,7 @@ ${"=".repeat(48)}
       setResults((rs) => rs.concat([{ id, ...line }]));
       return id;
     };
-    const updateLine = (id, patch2) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch2 } : l));
+    const updateLine = (id, patch) => setResults((rs) => rs.map((l) => l.id === id ? { ...l, ...patch } : l));
     const elapsedLabel2 = (ms) => ms < 36e5 ? Math.round(ms / 6e4) + "m" : Math.round(ms / 36e4) / 10 + "h";
     const doGenerate = async () => {
       const s2 = st.current, p = payload();
@@ -5310,17 +5310,17 @@ ${"=".repeat(48)}
       let tier = "normal";
       let lastErr = "";
       const short = () => String(taskId || "").slice(-6);
-      const emitLine = (patch2) => {
-        if (patch2.kind === "err") {
-          lastErr = patch2.text;
-          updateLine(id, { kind: "error", text: patch2.text, moon: false });
+      const emitLine = (patch) => {
+        if (patch.kind === "err") {
+          lastErr = patch.text;
+          updateLine(id, { kind: "error", text: patch.text, moon: false });
           return;
         }
-        if (patch2.kind === "ok") {
-          updateLine(id, { kind: "plain", text: patch2.text, moon: false });
+        if (patch.kind === "ok") {
+          updateLine(id, { kind: "plain", text: patch.text, moon: false });
           return;
         }
-        updateLine(id, { kind: "status", moon: true, text: patch2.text });
+        updateLine(id, { kind: "status", moon: true, text: patch.text });
       };
       const tierLine = (t, elapsed) => t === "stale" ? { kind: "status", moon: true, amber: true, text: "Still going after " + elapsedLabel2(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + short() + ")" } : { kind: "status", moon: true, amber: true, text: "Taking longer than expected (" + elapsedLabel2(elapsed) + ", task " + short() + ")" };
       const onPhase = (phase, d) => {
@@ -7100,7 +7100,7 @@ ${"=".repeat(48)}
           if (d && d.csrf) _csrf = d.csrf;
           return d;
         },
-        save: (patch2) => apiPost(PATH, { ...patch2, csrf: _csrf || _bootCsrf() })
+        save: (patch) => apiPost(PATH, { ...patch, csrf: _csrf || _bootCsrf() })
       });
     }
     return _store2;
@@ -13017,6 +13017,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     const sel = entries.find((e) => e.c.id === selShot) || null;
     const draftEntry = { a: { id: "__draft__" }, c: draftCard, code: "Draft" };
     const active = sel || draftEntry;
+    const patch = (fn) => {
+      if (sel) setCard(sel.a.id, sel.c.id, fn);
+      else setDraftCard(fn);
+    };
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     activeRef.current = active;
@@ -13637,14 +13641,10 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
     {
       const gs = genState[active.c.id];
       const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
-      const patch2 = (fn) => {
-        if (sel) setCard(sel.a.id, sel.c.id, fn);
-        else setDraftCard(fn);
-      };
-      const appendTo = (field, term) => patch2((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
+      const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
       const selIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
       const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
-      const patchFrame = (key, fp) => patch2((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
+      const patchFrame = (key, fp) => patch((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
       const inheritPrev = () => {
         if (!prevEntry || !sel) return;
         const target = sel, src = prevEntry;
@@ -13676,7 +13676,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             key: k,
             className: "lv-chip " + (k === (active.c.connect || "new") ? "on" : ""),
             title: CONNECT[k].hint,
-            onClick: () => patch2((c) => setShotConnect(c, k))
+            onClick: () => patch((c) => setShotConnect(c, k))
           },
           CONNECT[k].label
         ))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Prompt"), /* @__PURE__ */ React.createElement("textarea", { className: "lv-ta", value: active.c.prompt || "", onChange: (ev) => {
@@ -13684,8 +13684,8 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             setOverrideClearedFlash(true);
             setTimeout(() => setOverrideClearedFlash(false), 1600);
           }
-          patch2((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
-        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch2((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch2((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch2((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch2((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch2((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch2((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
+          patch((c) => ({ ...clearPromptOverride(c), prompt: ev.target.value }));
+        } }), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Camera ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("camera") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.camera || "", placeholder: "e.g. slow push in, shallow DoF", onChange: (ev) => patch((c) => ({ ...c, camera: ev.target.value })) }), palFor === "camera" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, Object.entries(CAM_PALETTE).map(([grp, items]) => /* @__PURE__ */ React.createElement("div", { key: grp, className: "lv-termsgrp" }, /* @__PURE__ */ React.createElement("div", { className: "lv-termsgrpt" }, grp), items.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("camera", t) }, t))))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Lighting ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("lighting") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.lighting || "", placeholder: "e.g. moonlit, soft haze", onChange: (ev) => patch((c) => ({ ...c, lighting: ev.target.value })) }), palFor === "lighting" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, LIGHTING_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => appendTo("lighting", t) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition in ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transIn") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transIn || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transIn: ev.target.value })) }), palFor === "transIn" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transIn: t })) }, t))), /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Transition out ", /* @__PURE__ */ React.createElement("button", { className: "lv-termsbtn", onClick: () => togglePal("transOut") }, "+ terms")), /* @__PURE__ */ React.createElement("input", { className: "lv-in", value: active.c.transOut || "", placeholder: "e.g. cut, dissolve", onChange: (ev) => patch((c) => ({ ...c, transOut: ev.target.value })) }), palFor === "transOut" && /* @__PURE__ */ React.createElement("div", { className: "lv-termspal" }, TRANS_PALETTE.map((t) => /* @__PURE__ */ React.createElement("span", { key: t, className: "lv-minichip", onClick: () => patch((c) => ({ ...c, transOut: t })) }, t))), /* @__PURE__ */ React.createElement("div", { className: "lv-refline" }, (active.c.cast || []).length, " cast \xB7 ", (active.c.refs || []).length, " refs ", /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "(toggle cast in the Cast & assets tab; add extra image/video/audio refs directly below)")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "10px 0 2px" } }, active.c.promptOverride ? /* @__PURE__ */ React.createElement("span", { className: "lv-dim lv-override-badge", title: "Hand-edited override -- Camera/Lighting/cast/notes above are NOT composed into it. Re-sync to go back to auto-compose." }, "\u270E override active \u2014 fields above not woven in") : /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "\u2193 woven into the form below"), /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => {
           promptDirtyRef.current = false;
           const composed = shotText({ ...active, c: { ...active.c, promptOverride: false } }, project, imgSrc);
           active.c.id === "__draft__" ? setDraftCard(clearPromptOverride) : setCard(active.a.id, active.c.id, clearPromptOverride);
@@ -13780,9 +13780,9 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             className: "lv-ta",
             value: active.c.imgPrompt || "",
             placeholder: "describe the reference still (subject, pose, composition, light)\u2026",
-            onChange: (ev) => patch2((c) => ({ ...c, imgPrompt: ev.target.value }))
+            onChange: (ev) => patch((c) => ({ ...c, imgPrompt: ev.target.value }))
           }
-        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch2((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), (() => {
+        ), sel && /* @__PURE__ */ React.createElement("button", { className: "lv-mini2", onClick: () => patch((c) => ({ ...c, imgPrompt: [c.title, c.prompt, c.openFrame && c.openFrame.desc || "", c.lighting || ""].filter(Boolean).join(", ") })) }, "\u21A7 seed from shot description"), (() => {
           const compat = imgModel && imgModel.compatibility || {};
           const restr = imgModel && imgModel.restrictions || {};
           const negOff = compat.negativePrompt === false;
@@ -13963,7 +13963,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             className: "lv-ta",
             value: active.c.editPrompt || "",
             placeholder: "e.g. make it night, add rain, warmer key light\u2026",
-            onChange: (ev) => patch2((c) => ({ ...c, editPrompt: ev.target.value }))
+            onChange: (ev) => patch((c) => ({ ...c, editPrompt: ev.target.value }))
           }
         ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: editCostRef, hint: "Add a source image and instruction to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyE || !src, onClick: () => genEdit(active) }, busyE ? ge.msg || "editing\u2026" : "\u2726 Edit the open frame"), ge.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, ge.msg), ge.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + ge.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genEditState, setGenEditState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (ge.routed === "cast" ? " on" : ""), onClick: () => routeGen(genEditState, setGenEditState, routeTarget || active, "cast", active.c.id) }, "cast")), ge.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", ge.routed))), editSub === "fixer" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("label", { className: "lv-lab" }, "Source \u2014 ", sel ? "this shot's" : "the draft's", " open frame"), src ? /* @__PURE__ */ React.createElement("div", { className: "lv-fixwrap" }, /* @__PURE__ */ React.createElement("img", { ref: fixImgRef, src: "/full/" + encodeURIComponent(src), alt: "source", onLoad: fixPaint, draggable: false }), /* @__PURE__ */ React.createElement(
           "canvas",
@@ -13993,7 +13993,7 @@ label.lv-libaddbtn:hover{color:var(--lavender);}
             className: "lv-ta",
             value: active.c.refPrompt || "",
             placeholder: "compose a new still from the references\u2026",
-            onChange: (ev) => patch2((c) => ({ ...c, refPrompt: ev.target.value }))
+            onChange: (ev) => patch((c) => ({ ...c, refPrompt: ev.target.value }))
           }
         ), /* @__PURE__ */ React.createElement(CostBadge_default, { ref: refCostRef, hint: "Add references and a prompt to see the cost.", cardLabel: "an Edit card" }), /* @__PURE__ */ React.createElement("button", { className: "lv-go", disabled: busyR || !refs.length, onClick: () => genRef(active) }, busyR ? gr.msg || "generating\u2026" : "\u2726 Generate from references"), gr.phase === "error" && /* @__PURE__ */ React.createElement("div", { className: "lv-gerr" }, gr.msg), gr.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gr.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "route \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "open" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "open", active.c.id) }, "open frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "close" ? " on" : ""), disabled: !routeTarget, onClick: () => routeTarget && routeGen(genRefState, setGenRefState, routeTarget, "close", active.c.id) }, "close frame"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn" + (gr.routed === "cast" ? " on" : ""), onClick: () => routeGen(genRefState, setGenRefState, routeTarget || active, "cast", active.c.id) }, "cast")), gr.routed && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 sent to ", gr.routed)));
       } else tabBody = /* @__PURE__ */ React.createElement("div", { className: "lv-ph" }, "The ", /* @__PURE__ */ React.createElement("b", null, tab), " tab renders the shot on PixAI.");
@@ -17951,9 +17951,9 @@ Your currently-open board is left untouched.`)) return;
   function useShotMutations(project, setProject) {
     const [open2, setOpen2] = useState2({});
     const setCard = useCallback2((aId, cId, fn) => setProject((p) => patchCard(p, aId, cId, fn)), [setProject]);
-    const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
+    const setAct = useCallback2((aId, patch) => setProject((p) => patchAct(p, aId, patch)), [setProject]);
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
-    const setCardStatus = (cardId, patch2) => setProject((p) => patchCardById(p, cardId, patch2));
+    const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
     const addCard = (aId) => {
       const c = newCard();
       setProject((p) => appendCardToAct(p, aId, c));
@@ -17968,8 +17968,8 @@ Your currently-open board is left untouched.`)) return;
         body: JSON.stringify({ video_media_id: mediaId })
       }).then((r) => r.json()).then((d) => {
         if (!d || d.error) return;
-        const patch2 = importedFramesPatch(d.first_media_id, d.last_media_id);
-        if (Object.keys(patch2).length) setCardStatus(c.id, patch2);
+        const patch = importedFramesPatch(d.first_media_id, d.last_media_id);
+        if (Object.keys(patch).length) setCardStatus(c.id, patch);
       }).catch(() => {
       });
       return c.id;
@@ -17993,7 +17993,7 @@ Your currently-open board is left untouched.`)) return;
       const tag = nextTag(card.refs.filter((r) => r.kind === kind), pre);
       setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] }));
     };
-    const setRef = (aId, cId, rId, patch2) => setProject((p) => patchRef(p, aId, cId, rId, patch2));
+    const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
     const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
     const splitShot = (entry, t) => {
       const cur2 = project && flat(project).find((e) => e.c.id === entry.c.id);
@@ -18203,8 +18203,8 @@ Your currently-open board is left untouched.`)) return;
       }
       setProject((p) => p ? untickAsset(p, asset.id) : p);
     };
-    const editLibraryMember = async (row, patch2) => {
-      const p = syncPatch(patch2);
+    const editLibraryMember = async (row, patch) => {
+      const p = syncPatch(patch);
       if (!row || !Object.keys(p).length) return;
       if (!begin(row.key)) return;
       try {

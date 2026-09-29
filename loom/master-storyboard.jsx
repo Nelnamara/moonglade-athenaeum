@@ -1950,6 +1950,12 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // the selected shot when bound, or whatever's chosen in the draft-mode shot picker.
   const draftEntry = { a: { id: "__draft__" }, c: draftCard, code: "Draft" };
   const active = sel || draftEntry;
+  // Writes into the selected shot when bound, or the draft card when not -- the Generate
+  // tab bodies and frame slots (inside `let gen; { ... }` below) and Filter compare's
+  // Save/No filter all read/write through this one function either way. Declared here, at
+  // LoomV2's own scope: it used to live inside that later block, where Filter compare's
+  // handlers could not see it, so Save and No filter threw "patch is not defined".
+  const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
@@ -2063,7 +2069,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // gradient-overlay recipes plus this app's own 5, composited entirely client-side (no
   // network call, no credit spend), same AF.groups()/AF.get()/AF.renderSwatch()/
   // AF.applyPreview()/AF.clearPreview() API LoomMobile already uses. Genuinely persists via
-  // the same `patch` every other Generate field writes through -- no new endpoint.
+  // the same `patch` every other Generate field writes through (declared beside `active`
+  // above -- it must stay above these handlers, at this scope) -- no new endpoint.
   const AF = MgArtFilters;   // was window.MgArtFilters (static/mg-art-filters.js), now bundled
   const [fcOpen, setFcOpen] = useState(false);
   const [fcActive, setFcActive] = useState(null);
@@ -2761,9 +2768,8 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     // "use existing video" attach isn't racing a live network call anymore. running/slow/
     // stale (still actively polling) still block it, same as before.
     const busy = gs && gs.phase && gs.phase !== "done" && gs.phase !== "error" && gs.phase !== "paused";
-    // Writes into the selected shot when bound, or the draft card when not -- everything
-    // below (tab bodies, frame slots) reads/writes through this one function either way.
-    const patch = (fn) => { if (sel) setCard(sel.a.id, sel.c.id, fn); else setDraftCard(fn); };
+    // Everything below (tab bodies, frame slots) writes through LoomV2's own `patch`,
+    // declared beside `active` above.
     const appendTo = (field, term) => patch((c) => ({ ...c, [field]: c[field] ? c[field] + ", " + term : term }));
     // Frame handoff (reparented from the classic CardEditor): open/close frame, same
     // splice-in-last-frame / inherit-close mechanics, driven by the same setCard.
