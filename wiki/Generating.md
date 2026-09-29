@@ -19,10 +19,10 @@ generations cost 0). Its controls map onto the same PixAI parameters:
 | **Prompt** / **Negative** | `prompts` / `negativePrompts` | natural language is fine |
 | **Model** picker | `modelId` | search resolves the correct *version* id automatically |
 | **LoRAs** → Add | `lora` + `loraParameters` | search → pick → weight; stack several |
-| **Aspect** / dimensions | `width`/`height` | presets at SDXL-friendly dims |
-| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range; the "→ W × H px" line is the size that is sent |
-| **Mode** | `inferenceProfile` | Auto (default) · Lite · Standard · Pro · Ultra |
-| **Prompt helper** | `promptHelper` | on by default; uncheck to use your prompt literally |
+| **Frame** | `width`/`height` | a **Portrait \| Landscape** switch over eleven ratios (1:1 · 5:4 · 9:7 · 4:3 · 3:2 · 5:3 · 16:9 · 2:1 · 21:9 · 3:1 · 4:1). On a model with PixAI's own size tiers (Tsubaki.3: **XL · L · M**) each tier reads PixAI's live sizes; elsewhere the long-edge stops stay. A custom W × H is held to your account's limit. The size line under it is exactly the size that is sent |
+| Steps / CFG / Count / Seed | the obvious params | blank seed = random; dims rounded to /8 — to /16 on DiT models (Tsubaki and friends), held to the model's own size range |
+| **Profile** / **Mode** | `inferenceProfile` | on a model with profiles, the rows under the model read PixAI's live list with each one's price over the default (Tsubaki.3: **Pro**, **Ultra +500**); a members-only row reads *Members* for a non-member and can't be picked. Other models keep the Auto · Lite · Standard · Pro · Ultra bars |
+| **Creativity** / **Prompt helper** | `promptHelper` | on Tsubaki.3, three stops: **As written** (off) · **Light touch** (low) · **Embellished** (medium, the default). Elsewhere the prompt helper is on or off |
 | **High priority** | `priority` | off = Turbo (500) if your membership covers it, otherwise standard (0) — both free; on = High (1000), faster and **costs extra credits** |
 
 A control the picked model does not take reads **disabled** and is not sent: Face Fix and
@@ -34,11 +34,42 @@ Details and the negative box can stay live and the size line keeps the /8 rule. 
 still drops or moves what that version does not take, and the cost badge names it before you
 spend.
 
-On Tsubaki.3 and Flash a **reference** image goes out as a context image (their
-Character/Style Reference): strength does not apply, and it cannot be combined with LoRAs — the
-cost badge says so instead of a price. Whenever the server adjusts a request (a size moved onto
-the model's grid, a field the model ignores, a reference's strength), the cost badge names the
-change **before** you spend.
+Whenever the server adjusts a request (a size moved onto the model's grid, a field the model
+ignores), the cost badge names the change **before** you spend.
+
+### Tsubaki.3: context images and @image prompts
+
+On Tsubaki.3 and Tsubaki.3 Flash the settings' first panel is **MODEL & INPUTS**, and a
+**LoRAs | Context images** switch takes the place of the single reference slot (other models
+keep the reference slot and its strength slider). Each side keeps its own picks; switching
+never deletes anything.
+
+- **Context images:** up to 3 (PixAI's live limit), from your history, the gallery or an
+  upload. Name them in the prompt as **@image1**, **@image2**, **@image3** — type **@** and pick
+  one from the menu (on a phone the choices sit as a row of chips under the prompt). A chip is
+  one token: backspace removes it whole, and it is sent as the plain text `@image1`.
+- Remove a picture and the chips **renumber**; a chip that pointed at the removed picture turns
+  peach and reads *no image*, and Generate waits until you fix or delete it.
+- With context images, **LoRAs, recipes, the colour palette and the negative prompt are held**:
+  dimmed, marked *Held · not sent with context images*, and restored the moment you switch back.
+  The first switch while any of them is set asks first. **Unlimited Mode** doesn't run with
+  context images, and **creativity** is set to Embellished by them.
+- The frame starts on **Auto**: the size follows @image1's own shape ("✦ Output size W × H ·
+  from @image1"). Picking a ratio or an orientation leaves Auto.
+- The cost badge names what the pictures add: "2 context images +1,800 · not Unlimited". When
+  you pick Ultra it adds "profile Ultra +500". Both are PixAI's own prices for this request.
+
+**Edit with Tsubaki.** Right-click a picture (or open its Details on a phone) and choose
+**Edit with Tsubaki**: the Image tab opens on Tsubaki.3 with that picture as @image1 and the
+prompt started as "Use @image1 …". Nothing is spent until you press Generate. The Edit card is
+unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
+
+**The Lightbox edit bar.** A picture made by Tsubaki.3 or Flash shows **Describe your edits…**
+over the foot of the Lightbox (on a phone, a bar under the picture). Type the change and press
+↵: it sends a Tsubaki.3 run with that picture as @image1, your words as the prompt, the dock's
+profile and an Auto size — no LoRAs, recipes, palette or negative. The price shows in the bar
+before you send, and the run joins the dock's reel and the Activity tray while the Lightbox stays
+open. **E** jumps to the bar; **Esc** leaves it (a second Esc closes the Lightbox).
 
 Submit and the result drops straight into your catalog, tagged `source='api'`, and
 appears in the gallery. Submitting doesn't lock the button — PixAI itself runs
@@ -81,17 +112,15 @@ URL (`pixai.art/model/<id>`) gives the *model* id, which generation rejects
 you the correct version id — prefer those.
 
 ### Modes are model-specific
-Lite/Standard suit older SD models; Pro/Ultra are for newer types. The Mode picker
-doesn't filter by model, so you can still pick an unsupported combination — pick
-**Auto** if you're not sure which your model takes. You don't have to get it right by
-hand, though: since 2026-07-24, an unsupported Mode no longer errors out. The shared
-submit path every generate/edit route goes through (the web Generate tab, and anything
-else submitting through it, including the Loom's own reference-image generation) now
-auto-falls-back to the model's default and resubmits once instead of failing — a
-rejected submit costs no credits either way, so the retry is free — matching the CLI's
-own long-standing behavior (see `--mode` below). If you ever see the raw error text
-itself instead of a friendly message, see
-[Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
+Lite/Standard suit older SD models; Pro/Ultra are for newer types. A model that lists its own
+profiles shows only those (the rows under the model), and a mode it doesn't offer is **refused
+before sending** rather than quoted and swapped. If PixAI refuses a profile the model *does*
+list — Ultra on an account without the membership — the app says so and **does not** resubmit
+it on Pro: that would be a different picture at a different price than the one you saw. Where
+the app can't read a model's profile list, the older behaviour still holds: an unsupported Mode
+falls back to the model's default and resubmits once (a rejected submit costs no credits), as
+the CLI always has (see `--mode` below). If you ever see the raw error text itself instead of a
+friendly message, see [Troubleshooting](Troubleshooting#unknown-inferenceprofile-).
 
 ### LoRAs are add-ons, not base models
 A LoRA can't be the **base** model. The base picker excludes LoRAs; add them via the
