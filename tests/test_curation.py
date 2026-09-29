@@ -578,3 +578,33 @@ def test_the_operators_a_smart_collection_saves_match_the_controls_they_stand_fo
         assert _ids(p, **op) == _ids(p, **chip), (op, chip)
     # model: and lora: are substring searches where their chips match the whole name
     assert set(_ids(p, model="Tsubaki.3")) <= set(_ids(p, q="model:Tsubaki.3"))
+
+
+# ------------------------------------ the other doors into a collection refuse a smart one
+
+def test_an_import_into_a_smart_collection_is_refused_before_any_file_lands(client, tmp_path, db):
+    """The importer names a collection to tag what it brings in. A smart collection is a saved
+    search, so the request is refused BEFORE anything is copied or catalogued."""
+    import io
+    pytest.importorskip("PIL")
+    from PIL import Image
+    _post(client, "/api/collections/manage", action="smart", query="keeper", name="Keepers")
+    png = io.BytesIO()
+    Image.new("RGB", (8, 8), (30, 40, 60)).save(png, "PNG")
+    png.seek(0)
+    before = len(load_catalog(db))
+    r = client.post("/api/import-local", data={"files": (png, "x.png"), "collection": "keepers"},
+                    content_type="multipart/form-data")
+    assert r.status_code == 400 and "smart collection" in r.get_json()["error"]
+    assert not (tmp_path / "imported").exists(), "a file was copied in before the refusal"
+    assert len(load_catalog(db)) == before
+
+
+def test_the_mcp_add_tool_refuses_a_smart_collection(db, monkeypatch):
+    pytest.importorskip("fastmcp")
+    import moonglade_mcp as m
+    monkeypatch.setattr(m, "DB", str(db))
+    save_smart_collection(db, "keeper", name="Keepers")
+    out = m.add_to_collection(["1"], "Keepers")
+    assert out["ok"] is False and "smart collection" in out["error"]
+    assert m.add_to_collection(["1"], "Faves")["ok"] is True
