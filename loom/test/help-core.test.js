@@ -212,10 +212,12 @@ describe("what's new", () => {
       { show: false, mark: true });
     assert.equal(whatsNewPlan({ seen: undefined, display: "3.15", kind: "minor", hasLibrary: true }).show, true);
   });
-  test("highlights are the block's first four, before its sections", () => {
+  test("highlights are the block's own first four, never its internal-notes section", () => {
     const items = [{ lead: "a", section: "" }, { lead: "u", section: "Under the hood" },
-      { lead: "b", section: "" }, { lead: "c", section: "" }];
-    assert.deepEqual(highlightsOf(items).map((i) => i.lead), ["a", "b", "c", "u"]);
+      { lead: "b", section: "" }, { lead: "c", section: "" }, { lead: "d", section: "" },
+      { lead: "e", section: "" }];
+    assert.deepEqual(highlightsOf(items).map((i) => i.lead), ["a", "b", "c", "d"]);
+    assert.deepEqual(highlightsOf(items.slice(0, 3)).map((i) => i.lead), ["a", "b"]);
     assert.equal(toastSummary({ title: "Moving Pictures", items }), "Moving Pictures");
     assert.equal(toastSummary({ title: "", items }), "a");
   });

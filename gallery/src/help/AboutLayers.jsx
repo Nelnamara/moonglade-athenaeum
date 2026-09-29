@@ -79,9 +79,7 @@ export function AboutCard({ inline, lead, onClose }) {
           </div>
         </div>
       </div>
-      <div className="mgab-kick">
-        CHANGELOG · {ver}{entry.title ? " — " + entry.title : ""}
-      </div>
+      <div className="mgab-kick">CHANGELOG · {ver}</div>
       {earlierOpen && !showing ? (
         <div className="mgab-earlier">
           {(about.earlier || []).map((e) => (
@@ -94,7 +92,7 @@ export function AboutCard({ inline, lead, onClose }) {
       ) : (
         <ul className="mgab-items">
           {items.map((i, k) => <li key={k}>{i.lead}</li>)}
-          {under.length ? <li className="under">Under the hood: {under.map((i) => i.lead).join(" · ")}</li> : null}
+          {under.length ? <li className="under">Under the hood: {under.map((i) => clip(i.lead, 64)).join(" · ")}</li> : null}
           {!items.length && !under.length ? <li className="under">This version has no changelog entry in this install.</li> : null}
         </ul>
       )}
@@ -130,8 +128,8 @@ export function AboutLayer({ phone }) {
   const cls = about.closing ? " closing" : "";
   return createPortal(
     <>
-      <div className={"mgab-scrim" + cls} onMouseDown={closeAbout} />
-      <div className={"mgab-host" + (phone ? " phone" : "") + cls}>
+      <div className={"mgab-scrim" + cls} onMouseDown={closeAbout} data-keeps-dock="1" />
+      <div className={"mgab-host" + (phone ? " phone" : "") + cls} data-keeps-dock="1">
         <div className={"mgab-modal" + (phone ? " phone" : "") + cls} role="dialog" aria-modal="true" aria-label="About Moonglade Athenaeum">
           <button type="button" className="mghelp-x mgab-x" onClick={closeAbout} aria-label="Close">×</button>
           <AboutCard key={about.nonce} lead={about.lead} onClose={closeAbout} />
@@ -152,8 +150,8 @@ export function WhatsNewSheet({ phone }) {
   const hl = highlightsOf(a.items, 4);
   return createPortal(
     <>
-      <div className={"mgwn-scrim" + cls} onMouseDown={closeWhatsNew} />
-      <div className={"mgwn-host" + (phone ? " phone" : "") + cls}>
+      <div className={"mgwn-scrim" + cls} onMouseDown={closeWhatsNew} data-keeps-dock="1" />
+      <div className={"mgwn-host" + (phone ? " phone" : "") + cls} data-keeps-dock="1">
         <div className={"mgwn" + (phone ? " phone" : "") + cls} role="dialog" aria-modal="true" aria-label={"New in " + a.display_version}>
           <div className="mgwn-head">
             <div className="mgwn-title">New in {a.display_version}</div>
@@ -162,7 +160,7 @@ export function WhatsNewSheet({ phone }) {
           <div className="mgwn-grid">
             {hl.map((h, i) => (
               <div className="mgwn-card" key={i}>
-                <div className="mgwn-t">{h.lead}</div>
+                <div className="mgwn-t">{clip(h.lead, 72)}</div>
                 {h.text ? <div className="mgwn-d">{firstSentence(h.text)}</div> : null}
                 {h.surface ? (
                   <button type="button" className="mgwn-show"
@@ -181,6 +179,12 @@ export function WhatsNewSheet({ phone }) {
     </>,
     document.body,
   );
+}
+
+/* A line cut at a word before `n` characters. */
+function clip(text, n) {
+  const s = String(text || "");
+  return s.length <= n ? s : s.slice(0, n - 1).replace(/\s+\S*$/, "") + "…";
 }
 
 /* A highlight card's line: the item's first sentence, kept short. */

@@ -345,7 +345,7 @@ export default function HelpOverlay({ phone }) {
   const cls = (closing ? " closing" : "");
   if (phone) {
     return createPortal(
-      <div className={"mghelp-sheet" + cls} role="dialog" aria-modal="true" aria-label="Guide">
+      <div className={"mghelp-sheet" + cls} role="dialog" aria-modal="true" aria-label="Guide" data-keeps-dock="1">
         <div className="mghelp-sheethead">
           <button type="button" className="mghelp-44" onClick={goBack}
             aria-label={back.length ? "Back" : "Close the guide"}>‹</button>
@@ -360,8 +360,8 @@ export default function HelpOverlay({ phone }) {
   }
   return createPortal(
     <>
-      <div className={"mghelp-scrim" + cls} onMouseDown={closeHelp} />
-      <div className={"mghelp-host" + cls}>
+      <div className={"mghelp-scrim" + cls} onMouseDown={closeHelp} data-keeps-dock="1" />
+      <div className={"mghelp-host" + cls} data-keeps-dock="1">
         <div className={"mghelp" + cls} role="dialog" aria-modal="true" aria-label="Guide">
           <div className="mghelp-head">
             <div className="mghelp-title">Guide</div>

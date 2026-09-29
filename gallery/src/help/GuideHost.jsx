@@ -359,5 +359,5 @@ export default function GuideHost({ surface, phone, paused }) {
     layer = <Notes guide={guide} phone={ph} n={st.n} onAdvance={write} />;
   }
   if (!layer) return null;
-  return createPortal(<div className="mgguide-root" data-surface={surface}>{layer}</div>, document.body);
+  return createPortal(<div className="mgguide-root" data-surface={surface} data-keeps-dock="1">{layer}</div>, document.body);
 }

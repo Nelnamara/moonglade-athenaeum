@@ -394,7 +394,11 @@ html.mg-updbanner-on .lv-overlay, html.mg-updbanner-on .lm-root,
 html.mg-updbanner-on .lv-df-veil, html.mg-updbanner-on .lv-mpick-veil,
 html.mg-updbanner-on .lv-fc-veil, html.mg-updbanner-on .lv-fc-host,
 html.mg-updbanner-on .sb-projveil,
-html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov{top:var(--mg-updbanner-h,0px);}
+html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov,
+html.mg-updbanner-on .mghelp-scrim, html.mg-updbanner-on .mghelp-host,
+html.mg-updbanner-on .mgab-scrim, html.mg-updbanner-on .mgab-host,
+html.mg-updbanner-on .mgwn-scrim, html.mg-updbanner-on .mgwn-host,
+html.mg-updbanner-on .mgguide-block{top:var(--mg-updbanner-h,0px);}
 /* The details page is the one layer above with an explicit height (styles.css, 100dvh for
    drift 122); pushed down without this it would run off the bottom by exactly the strip,
    taking its last action row with it. No 100vh twin: a browser without dvh finds this

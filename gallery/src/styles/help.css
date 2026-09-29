@@ -17,7 +17,7 @@
 /* ================================================================ the "?" in a header */
 .mghelp-q { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid;
   place-items: center; padding: 0; border: 1px solid var(--surface1); background: none;
-  color: var(--subtext); font: 600 12px/1 var(--font-system); cursor: pointer; }
+  color: var(--subtext); font: 600 12px/1 var(--font-system, system-ui, sans-serif); cursor: pointer; }
 .mghelp-q:hover { color: var(--text); border-color: var(--lavender); }
 /* Sized to the header it sits in: the dock's × and the overlays' × are 24 and 28. */
 .mghelp-q.mgdock-help { width: 24px; height: 24px; font-size: 11px; }
@@ -48,13 +48,13 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
   display: flex; flex-direction: column; border-radius: 18px; overflow: hidden;
   border: 1px solid var(--surface1); background: var(--base);
   box-shadow: 0 24px 60px rgba(0, 0, 0, .55); color: var(--text);
-  font-family: var(--font-system);
+  font-family: var(--font-system, system-ui, sans-serif);
   animation: mghelpIn .42s cubic-bezier(.2, .9, .24, 1) both; }
 .mghelp.closing { animation: mghelpOut .35s cubic-bezier(.4, 0, .2, 1) both; }
 
 .mghelp-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 11px 16px;
   border-bottom: 1px solid var(--surface0); }
-.mghelp-title { font-family: var(--font-hero); font-style: italic; font-size: 17px; }
+.mghelp-title { font-family: var(--font-hero, Georgia, serif); font-style: italic; font-size: 17px; }
 .mghelp-nav { display: flex; gap: 2px; }
 .mghelp-nav button { background: none; border: 0; padding: 0 3px; font-size: 12px;
   color: var(--overlay0); cursor: pointer; }
@@ -73,14 +73,14 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
 .mghelp-body { flex: 1; min-height: 380px; display: flex; overflow: hidden; }
 .mghelp-list { width: 200px; flex: none; display: flex; flex-direction: column; gap: 3px;
   padding: 12px; border-right: 1px solid var(--surface0); box-sizing: border-box; min-height: 0; }
-.mghelp-search { font: 11px/1.2 var(--font-system); padding: 6px 9px; border-radius: 8px;
+.mghelp-search { font: 11px/1.2 var(--font-system, system-ui, sans-serif); padding: 6px 9px; border-radius: 8px;
   border: 1px solid var(--surface1); background: none; color: var(--text); margin-bottom: 6px;
   outline: none; }
 .mghelp-search::placeholder { color: var(--overlay0); }
 .mghelp-search:focus { border-color: var(--lavender); }
 .mghelp-pages { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 3px;
   scrollbar-width: thin; }
-.mghelp-page, .mghelp-hit { text-align: left; font: 11.5px/1.3 var(--font-system); padding: 6px 9px;
+.mghelp-page, .mghelp-hit { text-align: left; font: 11.5px/1.3 var(--font-system, system-ui, sans-serif); padding: 6px 9px;
   border-radius: 8px; border: 0; background: none; color: var(--subtext); cursor: pointer; }
 .mghelp-page:hover, .mghelp-hit:hover { color: var(--text); }
 .mghelp-page.on, .mghelp-hit.on { background: color-mix(in srgb, var(--lavender) 16%, transparent); color: var(--text); }
@@ -90,7 +90,7 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
 .mghelp-acts { flex: none; display: flex; flex-direction: column; gap: 4px; padding-top: 8px;
   border-top: 1px solid var(--surface0); }
 .mghelp-acts button { text-align: left; background: none; border: 0; padding: 0; cursor: pointer;
-  font: 10.5px/1.5 var(--font-system); color: var(--lavender); }
+  font: 10.5px/1.5 var(--font-system, system-ui, sans-serif); color: var(--lavender); }
 .mghelp-acts button.dim { color: var(--overlay0); }
 .mghelp-acts button:hover { color: var(--mauve); }
 .mghelp-verline { font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); padding-top: 6px; }
@@ -100,11 +100,11 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
   font-size: 12px; line-height: 1.7; color: var(--subtext); scrollbar-width: thin; }
 .mghelp-reader > * { max-width: 560px; }
 .mghelp-loading { font-size: 11px; color: var(--overlay0); }
-.mghelp-h1 { margin: 0 0 10px; font-family: var(--font-hero); font-style: italic; font-weight: 400;
+.mghelp-h1 { margin: 0 0 10px; font-family: var(--font-hero, Georgia, serif); font-style: italic; font-weight: 400;
   font-size: 24px; line-height: 1.25; color: var(--text); }
-.mghelp-h2 { margin: 18px 0 6px; font-family: var(--font-hero); font-weight: 400; font-size: 15px;
+.mghelp-h2 { margin: 18px 0 6px; font-family: var(--font-hero, Georgia, serif); font-weight: 400; font-size: 15px;
   color: var(--text); scroll-margin-top: 8px; }
-.mghelp-h3 { margin: 14px 0 4px; font-family: var(--font-hero); font-style: italic; font-weight: 400;
+.mghelp-h3 { margin: 14px 0 4px; font-family: var(--font-hero, Georgia, serif); font-style: italic; font-weight: 400;
   font-size: 13px; color: var(--text); }
 .mghelp-h4 { margin: 12px 0 4px; font-size: 12px; font-weight: 700; color: var(--text); }
 .mghelp-p { margin: 0 0 10px; }
@@ -144,7 +144,7 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
 .mghelp-sheet { position: fixed; left: 0; right: 0; bottom: 0; top: max(10px, env(safe-area-inset-top, 0px));
   z-index: 451; display: flex; flex-direction: column; border-radius: 22px 22px 0 0;
   background: var(--mantle); border: 1px solid var(--surface1); border-bottom: 0;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, .55); color: var(--text); font-family: var(--font-system);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .55); color: var(--text); font-family: var(--font-system, system-ui, sans-serif);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   animation: mghelpSheetIn .42s cubic-bezier(.2, .9, .24, 1) both; }
 .mghelp-sheet.closing { animation: mghelpSheetOut .35s cubic-bezier(.4, 0, .2, 1) both; }
@@ -154,7 +154,7 @@ html.mg-noblur .mghelp-scrim { -webkit-backdrop-filter: none !important; backdro
   border: 0; background: none; color: var(--text); font-size: 18px; cursor: pointer; border-radius: 12px; }
 .mghelp-44:last-child { color: var(--subtext); }
 .mghelp-44.on { color: var(--lavender); }
-.mghelp-sheettitle { flex: 1; min-width: 0; font-family: var(--font-hero); font-style: italic; font-size: 16px;
+.mghelp-sheettitle { flex: 1; min-width: 0; font-family: var(--font-hero, Georgia, serif); font-style: italic; font-size: 16px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mghelp-sheet .mghelp-reader { padding: 14px 16px 24px; font-size: 13px; }
 .mghelp-sheet .mghelp-list { width: auto; flex: 1; border-right: 0; padding: 12px 14px; }
@@ -173,7 +173,7 @@ html.mg-noblur .mgab-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgab-modal { position: relative; pointer-events: auto; width: min(400px, calc(100vw - 32px));
   max-height: calc(100vh - 64px); max-height: calc(100dvh - 64px); overflow-y: auto; box-sizing: border-box;
   padding: 16px; border-radius: 16px; background: var(--base); border: 1px solid var(--surface1);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, .6); color: var(--text); font-family: var(--font-system);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .6); color: var(--text); font-family: var(--font-system, system-ui, sans-serif);
   animation: mgabIn .35s cubic-bezier(.2, .9, .24, 1) both; }
 .mgab-modal.closing { animation: mghelpOut .3s cubic-bezier(.4, 0, .2, 1) both; }
 .mgab-modal.phone { width: 100%; max-height: 88dvh; border-radius: 18px 18px 0 0; border-bottom: 0;
@@ -186,13 +186,13 @@ html.mg-noblur .mgab-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgab-upd { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
   border: 1px solid var(--lavender); background: color-mix(in srgb, var(--lavender) 10%, transparent); }
 .mgab-updtxt { flex: 1; font-size: 11.5px; line-height: 1.45; color: var(--text); }
-.mgab-updgo { flex: none; font: 700 10.5px/1 var(--font-system); padding: 6px 10px; border-radius: 8px;
+.mgab-updgo { flex: none; font: 700 10.5px/1 var(--font-system, system-ui, sans-serif); padding: 6px 10px; border-radius: 8px;
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; white-space: nowrap; }
 .mgab-id { display: flex; align-items: center; gap: 12px; padding-right: 26px; }
 .mgab-nel { flex: none; width: 44px; height: 44px; border-radius: 12px; background-color: var(--surface0);
   background-position: center; background-size: cover; }
 .mgab-idtxt { flex: 1; min-width: 0; }
-.mgab-name { font-family: var(--font-hero); font-style: italic; font-size: 18px; }
+.mgab-name { font-family: var(--font-hero, Georgia, serif); font-style: italic; font-size: 18px; }
 .mgab-stamp { font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); }
 .mgab-kick { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; color: var(--overlay0); text-transform: uppercase; }
 .mgab-items { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;
@@ -201,16 +201,16 @@ html.mg-noblur .mgab-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgab-items li.under { color: var(--overlay0); }
 .mgab-earlier { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
 .mgab-earlier button { display: flex; gap: 6px; align-items: baseline; text-align: left; background: none;
-  border: 0; padding: 4px 0; font: 11px/1.4 var(--font-system); color: var(--subtext); cursor: pointer; }
+  border: 0; padding: 4px 0; font: 11px/1.4 var(--font-system, system-ui, sans-serif); color: var(--subtext); cursor: pointer; }
 .mgab-earlier button:hover { color: var(--text); }
 .mgab-earlier .d { margin-left: auto; font-size: 10px; color: var(--overlay0); white-space: nowrap; }
 .mgab-none { font-size: 10.5px; color: var(--overlay0); }
 .mgab-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.mgab-link { align-self: flex-start; background: none; border: 0; padding: 0; font: 10.5px/1.4 var(--font-system);
+.mgab-link { align-self: flex-start; background: none; border: 0; padding: 0; font: 10.5px/1.4 var(--font-system, system-ui, sans-serif);
   color: var(--lavender); cursor: pointer; }
 .mgab-link:hover { color: var(--mauve); }
 .mgab-btns { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--surface0); }
-.mgab-btns button, .mgab-btns a { font: 10.5px/1 var(--font-system); padding: 5px 10px; border-radius: 8px;
+.mgab-btns button, .mgab-btns a { font: 10.5px/1 var(--font-system, system-ui, sans-serif); padding: 5px 10px; border-radius: 8px;
   border: 1px solid var(--surface1); background: none; color: var(--subtext); cursor: pointer; text-decoration: none; }
 .mgab-btns button:hover, .mgab-btns a:hover { color: var(--text); border-color: var(--lavender); }
 .mgab-modal.phone .mgab-btns button, .mgab-modal.phone .mgab-btns a { padding: 10px 12px; font-size: 12px; }
@@ -222,7 +222,7 @@ html.mg-noblur .mgab-scrim { -webkit-backdrop-filter: none !important; backdrop-
 /* The phone Control tab's About row. */
 .mghelp-aboutrow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px;
   padding: 10px 14px; border-radius: 12px; border: 1px solid var(--surface1); background: none;
-  color: var(--text); font: 13px/1.3 var(--font-system); cursor: pointer; text-align: left; }
+  color: var(--text); font: 13px/1.3 var(--font-system, system-ui, sans-serif); cursor: pointer; text-align: left; }
 .mghelp-aboutrow .v { font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--subtext); }
 .mghelp-aboutrow .c { margin-left: auto; color: var(--overlay0); }
 
@@ -236,14 +236,14 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgwn { pointer-events: auto; width: min(440px, calc(100vw - 32px)); box-sizing: border-box;
   display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px;
   background: var(--base); border: 1px solid var(--surface1); box-shadow: 0 20px 50px rgba(0, 0, 0, .6);
-  color: var(--text); font-family: var(--font-system);
+  color: var(--text); font-family: var(--font-system, system-ui, sans-serif);
   animation: mgabIn .35s cubic-bezier(.2, .9, .24, 1) both; }
 .mgwn.closing { animation: mghelpOut .3s cubic-bezier(.4, 0, .2, 1) both; }
 .mgwn.phone { width: 100%; border-radius: 18px 18px 0 0; border-bottom: 0; max-height: 88dvh; overflow-y: auto;
   padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   animation: mghelpSheetIn .35s cubic-bezier(.2, .9, .24, 1) both; }
 .mgwn-head { display: flex; align-items: center; gap: 10px; }
-.mgwn-title { flex: 1; font-family: var(--font-hero); font-style: italic; font-size: 22px; }
+.mgwn-title { flex: 1; font-family: var(--font-hero, Georgia, serif); font-style: italic; font-size: 22px; }
 .mgwn-nel { flex: none; width: 42px; height: 42px; border-radius: 50%; background-color: var(--surface0);
   background-position: center; background-size: cover; }
 .mgwn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -253,12 +253,12 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgwn-t { font-size: 11.5px; font-weight: 700; line-height: 1.35; }
 .mgwn-d { font-size: 10px; line-height: 1.45; color: var(--subtext); }
 .mgwn-show { align-self: flex-start; margin-top: auto; background: none; border: 0; padding: 0;
-  font: 10px/1.4 var(--font-system); color: var(--lavender); cursor: pointer; }
+  font: 10px/1.4 var(--font-system, system-ui, sans-serif); color: var(--lavender); cursor: pointer; }
 .mgwn-show:hover { color: var(--mauve); }
 .mgwn-foot { display: flex; gap: 8px; align-items: center; }
 .mgwn-full { flex: 1; text-align: left; background: none; border: 0; padding: 0;
-  font: 10.5px/1.4 var(--font-system); color: var(--lavender); cursor: pointer; }
-.mgwn-go { font: 700 11px/1 var(--font-system); padding: 7px 14px; border-radius: 9px; border: 0;
+  font: 10.5px/1.4 var(--font-system, system-ui, sans-serif); color: var(--lavender); cursor: pointer; }
+.mgwn-go { font: 700 11px/1 var(--font-system, system-ui, sans-serif); padding: 7px 14px; border-radius: 9px; border: 0;
   background: var(--lavender); color: var(--base); cursor: pointer; }
 .mgwn.phone .mgwn-go { min-height: 44px; padding: 0 18px; font-size: 13px; }
 
@@ -266,12 +266,12 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
 @keyframes mgguideIn { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
 @keyframes mgguidePulse { 0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--lavender) 25%, transparent); }
   50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--lavender) 10%, transparent); } }
-.mgguide-root { font-family: var(--font-system); color: var(--text); }
+.mgguide-root { font-family: var(--font-system, system-ui, sans-serif); color: var(--text); }
 .mgguide-nel { flex: none; border-radius: 50%; background-color: var(--surface0);
   background-position: center; background-size: cover; }
-.mgguide-primary { font: 700 10.5px/1 var(--font-system); padding: 4px 11px; border-radius: 7px;
+.mgguide-primary { font: 700 10.5px/1 var(--font-system, system-ui, sans-serif); padding: 4px 11px; border-radius: 7px;
   border: 0; background: var(--lavender); color: var(--base); cursor: pointer; white-space: nowrap; }
-.mgguide-ghost { font: 10.5px/1 var(--font-system); padding: 4px 9px; border-radius: 7px;
+.mgguide-ghost { font: 10.5px/1 var(--font-system, system-ui, sans-serif); padding: 4px 9px; border-radius: 7px;
   border: 1px solid var(--lavender); background: none; color: var(--text); cursor: pointer; white-space: nowrap; }
 
 /* ① the welcome card: bottom-left, 300 px, never modal */
@@ -280,7 +280,7 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
   border: 1px solid var(--surface1); box-shadow: 0 12px 30px rgba(0, 0, 0, .6);
   animation: mgguideIn .42s cubic-bezier(.2, .9, .24, 1) both; }
 .mgguide-wmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.mgguide-wtitle { font-family: var(--font-hero); font-style: italic; font-size: 14.5px; }
+.mgguide-wtitle { font-family: var(--font-hero, Georgia, serif); font-style: italic; font-size: 14.5px; }
 .mgguide-wtext { font-size: 10.5px; line-height: 1.5; color: var(--subtext); }
 .mgguide-wbtns { display: flex; gap: 6px; padding-top: 2px; }
 .mgguide-welcome.phone { left: 12px; right: 12px; width: auto; max-width: 360px; gap: 10px; padding: 12px; border-radius: 16px; }
@@ -301,7 +301,7 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgguide-step { font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--overlay0); }
 .mgguide-marktext { font-size: 12px; line-height: 1.45; }
 .mgguide-markbtns { display: flex; gap: 6px; justify-content: flex-end; }
-.mgguide-skip { font: 10.5px/1 var(--font-system); padding: 4px 10px; border: 0; background: none;
+.mgguide-skip { font: 10.5px/1 var(--font-system, system-ui, sans-serif); padding: 4px 10px; border: 0; background: none;
   color: var(--subtext); cursor: pointer; }
 .mgguide-skip:hover { color: var(--text); }
 .mgguide-markbtns .mgguide-primary { padding: 4px 12px; }
@@ -325,7 +325,7 @@ html.mg-noblur .mgwn-scrim { -webkit-backdrop-filter: none !important; backdrop-
 .mgguide-ntext { font-size: 11px; line-height: 1.45; }
 .mgguide-nfoot { display: flex; gap: 8px; font-size: 9.5px; color: var(--overlay0); }
 .mgguide-nfoot .sp { flex: 1; }
-.mgguide-gotit { background: none; border: 0; padding: 0; font: 9.5px/1.2 var(--font-system);
+.mgguide-gotit { background: none; border: 0; padding: 0; font: 9.5px/1.2 var(--font-system, system-ui, sans-serif);
   color: var(--lavender); cursor: pointer; white-space: nowrap; }
 .mgguide-gotit:hover { color: var(--mauve); }
 .mgguide-note.phone { align-items: center; padding: 10px 12px; border-radius: 14px; max-width: 360px; }

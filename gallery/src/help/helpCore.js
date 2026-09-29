@@ -402,14 +402,12 @@ export function whatsNewPlan({ seen, display, kind, hasLibrary }) {
   return { show: true, mark: true, opens: kind === "patch" ? "about" : "sheet" };
 }
 
-/* The sheet's four highlights: the entry's first four items, the block's own list before
-   any "### Under the hood" section, topped up from those sections only if the list is
-   short. */
+/* The sheet's highlights: the entry's first four items from the block's own list -- never
+   its "### Under the hood" section, which is for the curious, not for a what's-new card.
+   An entry with fewer than four shows fewer. */
 export function highlightsOf(items, n) {
   const k = n || 4;
-  const main = (items || []).filter((i) => !i.section);
-  const rest = (items || []).filter((i) => i.section);
-  return main.concat(rest).slice(0, k);
+  return (items || []).filter((i) => !i.section).slice(0, k);
 }
 
 /* The toast's middle line: the release's own title when it has one, else its first lead. */

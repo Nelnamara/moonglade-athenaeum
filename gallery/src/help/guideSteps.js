@@ -115,14 +115,16 @@ G.loom = {
   desktop: {
     welcome: { title: "The Loom", body: "Plan a video as acts and shots, then render it shot by shot." },
     steps: [
-      { id: "board", at: ".lv-board",
-        tour: "The board: your acts, with a card for each shot. Click a shot to work on it.",
-        moves: "wave 5 (P, the Loom)" },
-      { id: "reel", at: ".lv-reel", tour: "The reel bar: every shot, sized by how long it runs.",
-        moves: "wave 5 (P)" },
+      // Not the board itself: at a laptop's width the side panels stand over most of it.
+      { id: "reel", at: ".lv-reel",
+        tour: "The reel bar: every shot in order, sized by how long it runs. Click one to work on it.",
+        note: "The reel bar: every shot, sized by how long it runs.", moves: "wave 5 (P, the Loom)" },
       { id: "cast", at: ".lv-panel",
         tour: "Cast & assets: the people and things your shots cite as @image1, @video1.",
         note: "Cast & assets holds what your shots cite.", moves: "wave 5 (P)" },
+      { id: "drawer", at: ".lv-gen",
+        tour: "The drawer renders the selected shot, or a free draft you can route into one.",
+        moves: "wave 5 (P)" },
       { id: "genall", at: ".lv-genall",
         tour: "Generate all renders every shot that isn't done yet, one after another." },
       { id: "draft", at: ".lv-draft", note: "Draft renders at the cheaper quality. Turn it off for the keepers." },

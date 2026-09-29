@@ -335,7 +335,11 @@ export default function App({ boot }) {
       const st = dockStateRef.current;
       if (!st.open || st.closing) return;
       if (isMomentUp()) return;                     // a click on a moment ends the moment only
-      if (ev.target.closest && ev.target.closest("[data-dock-toggle]")) return;
+      // ...nor a click inside a layer that stands OVER the dock without replacing it: the
+      // guide's cards, Help, About and the what's-new sheet (Session I) mark themselves
+      // [data-keeps-dock], so answering the dock's own welcome card, or reading its page
+      // of the guide, does not shut the dock out from under it.
+      if (ev.target.closest && ev.target.closest("[data-dock-toggle], [data-keeps-dock]")) return;
       if (isPickerOpen()) return;
       const host = dockHostRef.current;
       if (host && !host.contains(ev.target)) closeDock();
