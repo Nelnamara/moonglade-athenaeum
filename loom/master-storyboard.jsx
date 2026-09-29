@@ -283,13 +283,15 @@ const STYLES = `
 .sb-edlcount{flex:1;font-size:10px;color:var(--subtext)}
 .sb-exportdiv{border-top:1px solid var(--line);margin:2px 0}
 /* Session P (P9): THE CONTINUITY RIBBON -- the Loom Handoff page's strip, its own sizes and tokens
-   (70x42 frames, a 7px wrap with a surface0 border, peach-tinted and dotted when flagged). In the
-   global sheet because both the desktop timeline and the phone's review panel draw it. */
+   (70x42 frames, a 7px wrap, peach-tinted and dotted when flagged). In the global sheet because
+   both the desktop timeline and the phone's review panel draw it. The page draws the wrap's border
+   in --surface0 on a panel darker than surface0; the Loom's timeline drawer IS --surface0, where
+   that border vanishes, so it is one step up (--surface1) for the same contrast. */
 .lv-ribbon{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
 .lv-ribcap{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--overlay0);}
 .lv-ribrow{display:flex;gap:10px;overflow-x:auto;padding:4px 4px 4px 0;}
 .lv-ribpair{position:relative;flex:none;display:flex;gap:2px;padding:3px;border-radius:7px;cursor:pointer;
-  border:1px solid var(--surface0);outline:none;}
+  border:1px solid var(--surface1);outline:none;}
 .lv-ribpair.flag{border-color:color-mix(in srgb,var(--peach) 50%,transparent);}
 .lv-ribpair:hover,.lv-ribpair:focus-visible{border-color:var(--lavender);}
 .lv-ribframe{position:relative;width:70px;height:42px;border-radius:5px;overflow:hidden;box-sizing:border-box;
@@ -946,7 +948,7 @@ const V2_STYLES = `
 .lv-seg.fdim{opacity:.35;}
 /* The find pill and its filter chips in the top bar (the page's sizes; spans, not buttons, so
    the bar's own button chrome does not apply). */
-.lv-find{flex:1 1 180px;max-width:360px;min-width:160px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+.lv-find{flex:1 1 180px;max-width:360px;min-width:236px;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
   border:1px solid var(--surface1);background:color-mix(in srgb,var(--base) 85%,transparent);box-sizing:border-box;}
 .lv-find.on{border-color:var(--lavender);}
 .lv-findico{font-size:11px;color:var(--overlay0);}
@@ -1119,7 +1121,7 @@ const V2_STYLES = `
 .lv-liblock{border:0;background:transparent;padding:0 0 0 4px;font-size:10px;line-height:1;cursor:pointer;opacity:0;}
 .lv-liblock.on{opacity:1;}
 .lv-librow:hover .lv-liblock:not(.on){opacity:.45;}
-.lv-libmeta{font-size:9.5px;color:var(--overlay0);font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lv-libmeta{font-size:9.5px;color:var(--overlay0);font-family:ui-monospace,monospace;overflow-wrap:anywhere;}
 .lv-libadd{display:flex;align-items:center;gap:12px;padding:4px 4px 0;}
 .lv-libaddbtn{border:0;background:transparent;padding:0;font:600 10px/1.2 system-ui,sans-serif;color:var(--lavender);cursor:pointer;}
 .lv-libaddbtn:disabled{opacity:.5;cursor:default;}
@@ -4301,7 +4303,7 @@ const LOOM_MOBILE_STYLES = `
   box-sizing:border-box;border:1.5px solid var(--surface1);color:var(--base);}
 .lm-libbox.on{background:var(--lavender);border-color:var(--lavender);}
 .lm-libav{border-radius:50%;}
-.lm-libmeta{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--overlay0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lm-libmeta{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--overlay0);overflow-wrap:anywhere;}
 .lm-footagegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
 .lm-fclip{border-radius:8px;overflow:hidden;border:1px solid var(--surface1);cursor:pointer;background:var(--base);}
 .lm-fclip img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;}
