@@ -15091,7 +15091,9 @@ def create_app(out_dir: Path):
                         "is_nsfw": "1" if isnsfw else "",
                         "thumb": "/thumbs/{}.jpg".format(mid),
                         "prompt": (r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
-                        "duration": (r.get("video_duration") or "") if isv else ""})
+                        "duration": (r.get("video_duration") or "") if isv else "",
+                        # Session H: a context image's size, for the drawer's Auto frame
+                        "w": str(r.get("width") or ""), "h": str(r.get("height") or "")})
         return jsonify({"images": out, "total": total, "page": page, "limit": limit})
 
     @app.route("/api/similar/<media_id>")
@@ -18201,7 +18203,8 @@ def create_app(out_dir: Path):
             preset=lambda u, name: _load_presets(u).get(name),
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession))
+            unlimited=core.unlimited_resolver(gsession),
+            features=core.features_resolver(gsession))
 
     def _submit_resolver(core, gsession):
         """For a SPEND. The price resolver plus the input resolver: a catalog media_id is
@@ -18215,7 +18218,8 @@ def create_app(out_dir: Path):
             media_id=lambda v: _input_media_id(core, gsession, v),
             gate=core.gate_resolver(gsession),
             video_duration=_video_duration_lookup,
-            unlimited=core.unlimited_resolver(gsession))
+            unlimited=core.unlimited_resolver(gsession),
+            features=core.features_resolver(gsession))
 
     def _lane_job_running(core):
         """True while the app's own job log holds an Unlimited Mode task that has not
@@ -19360,6 +19364,8 @@ __DESIGN_TOKENS__
             batch=(request.args.get("batch") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
 
+        from moonglade_backup import TSUBAKI_EDIT_VERSIONS as _tsubaki_edit
+
         def _card(r):
             """One grid card dict for a catalog row -- the SINGLE definition both the
             plain row listing and a grouped unit's cover build, so a series cover is
@@ -19389,6 +19395,11 @@ __DESIGN_TOKENS__
                 "title": str(r.get("title") or "").strip(),
                 "batch_index": str(r.get("batch_index") or ""),   # #33: PixAI's own output number
                 "batch_size": str(r.get("batch_size") or ""),
+                # Session H T3a: the Lightbox edit bar is offered on pictures Tsubaki.3 or
+                # Tsubaki.3 Flash made (TSUBAKI_EDIT_VERSIONS; the catalog's model_id is the
+                # version the task rendered with). Never on a video.
+                "tsubaki_edit": (str(r.get("is_video") or "") != "1"
+                                 and str(r.get("model_id") or "") in _tsubaki_edit),
             }
 
         if group == "series":
