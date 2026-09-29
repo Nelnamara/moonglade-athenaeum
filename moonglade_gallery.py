@@ -18,6 +18,8 @@ Usage:
 
 import argparse
 import csv
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -3170,6 +3172,158 @@ def _earned_roster_flags(entry):
                                if isinstance(k, str) and isinstance(v, str)}
                               if isinstance(copy, dict) else {})
     return out
+
+
+# ---------------------------------------------------------------------------
+# MASKED FEATS (Session G): the Folio's ONE veil card. The payload carries a riddle and an
+# alpha-only silhouette of the NEXT unfound feat's badge, and nothing else about it -- no
+# id, name, description, count, order, points, earned-by, badge art or file name. The
+# roster fields it reads are the sealed `riddle` (and its unleashed twin `riddle_nsfw`);
+# a feat whose roster entry carries no riddle is never picked, so a pack that has none yet
+# shows no veil at all rather than invented copy.
+# ---------------------------------------------------------------------------
+FEAT_MASK_PX = 256
+
+
+def feat_mask_png(badge_bytes, max_px=FEAT_MASK_PX):
+    """The alpha-only mask of one badge: white on transparent, cut from the badge's OWN
+    alpha channel and never carrying its colours. `badge_bytes` is the badge file's bytes
+    (any format Pillow reads); the result is PNG bytes at most `max_px` on the long edge,
+    or None when the bytes are not an image. A badge with no alpha at all yields a solid
+    silhouette (its honest outline) rather than a leak of its pixels.
+
+    A small PURE helper on purpose: the pack build (pack v6) calls it too, to pre-cut the
+    masks it ships, so the lazy cut below and the pre-cut file can never disagree."""
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(badge_bytes)) as im:
+            im.load()
+            if "A" in im.getbands() or "transparency" in im.info:
+                alpha = im.convert("RGBA").getchannel("A")
+            else:
+                alpha = Image.new("L", im.size, 255)
+        alpha.thumbnail((int(max_px), int(max_px)))
+        out = Image.new("RGBA", alpha.size, (255, 255, 255, 255))
+        out.putalpha(alpha)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _feat_riddles(entry):
+    """(riddle, riddle_nsfw) from one sealed roster entry: stripped strings, "" when the
+    field is absent or not text. Never invents a riddle."""
+    if not isinstance(entry, dict):
+        return "", ""
+    out = []
+    for key in ("riddle", "riddle_nsfw"):
+        v = entry.get(key)
+        out.append(v.strip() if isinstance(v, str) else "")
+    return out[0], out[1]
+
+
+def _pick_masked_feat(earned_ids, roster=None, has_art=None):
+    """The roster entry the veil card is drawn for, or None. It is the first hidden feat,
+    in roster order, that is not earned yet, carries a riddle and (when `has_art` is given)
+    has badge art to cut a silhouette from. None until a feat has been earned at all (the
+    Feats section stays cloaked until then), and None once nothing eligible is left.
+
+    The server picks; the client never names which. Roster order is used only to choose --
+    it is never sent."""
+    roster = _roster() if roster is None else roster
+    entries = [a for a in roster if isinstance(a, dict)]
+    if not any(a.get("tier") == "feat" and a.get("id") in earned_ids for a in entries):
+        return None
+    for a in entries:
+        aid = a.get("id")
+        if not a.get("hidden") or not aid or aid in earned_ids:
+            continue
+        if not _feat_riddles(a)[0]:
+            continue
+        if has_art is not None and not has_art(aid):
+            continue
+        return a
+    return None
+
+
+def _feat_mask_token(secret, aid):
+    """The opaque token that names the veil's mask in its URL: an HMAC of the achievement
+    id under this install's own secret, so it reveals nothing about the feat's id, name or
+    file, is stable for one feat on one install (the browser can cache the mask), and
+    cannot be computed by anyone who lacks the secret."""
+    key = ("feat-mask:" + str(secret)).encode("utf-8")
+    return hmac.new(key, str(aid).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def _feats_payload(earned_ids, n_masked, feats_revealed, unleashed, secret):
+    """The `feats` object /api/achievements carries beside the earned feats (which stay in
+    `achievements`, unchanged):
+
+        masked     None, or {"riddle", "mask_url"[, "riddle_nsfw"]} for the ONE feat the
+                   server picks. `riddle_nsfw` is the unleashed twin, present only where
+                   roast_nsfw is (the account has earned Triggered) and the pack has one:
+                   the client's Unleash switch chooses which line to show, exactly as it
+                   does for the roast.
+        all_found  True only when the roster has hidden feats and none is left. It is what
+                   tells the client "Every secret found" apart from "no veil yet" (a pack
+                   with no riddles), and it says nothing a masked veil does not already.
+
+    Both are cloaked (None / False) until a feat has been earned, so devtools before the
+    first earn learns nothing. Nothing else about a masked feat is ever built into this."""
+    out = {"masked": None, "all_found": False}
+    if not feats_revealed:
+        return out
+    hidden_total = len(_ach_hidden())
+    out["all_found"] = bool(hidden_total) and n_masked == 0
+    pick = _pick_masked_feat(
+        earned_ids, has_art=lambda aid: _branding_exists(_role_rel("badges", aid + ".png")))
+    if pick is not None:
+        riddle, riddle_nsfw = _feat_riddles(pick)
+        masked = {"riddle": riddle,
+                  "mask_url": "/feat-mask/" + _feat_mask_token(secret, pick["id"]) + ".png"}
+        if unleashed and riddle_nsfw:
+            masked["riddle_nsfw"] = riddle_nsfw
+        out["masked"] = masked
+    return out
+
+
+def feat_mask_cache_dir(out_dir):
+    """Where the lazily cut masks live: `out_dir/gallery/cache/_masks/`, a sibling of
+    badge_cache_dir()'s `_badges` for the same reasons (outside the coded branding tree,
+    under `gallery/`, which every walker skips). Files are named by the opaque token, never
+    by the achievement id."""
+    return Path(out_dir) / "gallery" / "cache" / "_masks"
+
+
+def _feat_mask_bytes(out_dir, aid, token):
+    """The mask PNG bytes for one feat: the pack's badge cut to its alpha silhouette once
+    and cached under the library folder (re-cut when the badge master changes). None when
+    the badge is missing or unreadable. A cache that cannot be written still answers."""
+    rel = _role_rel("badges", aid + ".png")
+    if not _branding_exists(rel):
+        return None
+    dst = feat_mask_cache_dir(out_dir) / (token + ".png")
+    src_mtime = _branding_mtime(rel)
+    try:
+        if dst.is_file() and src_mtime is not None and dst.stat().st_mtime >= src_mtime:
+            return dst.read_bytes()
+    except OSError:
+        pass
+    raw = _branding_bytes(rel)
+    if raw is None:
+        return None
+    png = feat_mask_png(raw)
+    if png is None:
+        return None
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(png)
+    except OSError:
+        pass
+    return png
 
 
 def _ach_name(aid):
@@ -15874,6 +16028,42 @@ def create_app(out_dir: Path):
         resp.headers["Cache-Control"] = "public, max-age=86400"
         return resp
 
+    @app.route("/feat-mask/<token>.png")
+    @tier(LOGIN)
+    def feat_mask(token):
+        """The veil card's silhouette: an alpha-only PNG (white on transparent) cut from the
+        badge of the NEXT unfound feat, named in the URL by an opaque HMAC token
+        (_feat_mask_token) that says nothing about the feat's id, name or file.
+
+        It serves ONLY the current pick's mask. A token for any other feat, a token that is
+        not one, a feat already earned (the pick has moved on) and every request made before
+        a first feat is earned all answer the same bare 404, so the route is not an oracle
+        for which feats exist or which is next. The pick is recomputed from a fresh earned
+        set on every request -- never from the 5-second cache -- so the mask for the feat
+        that became the veil a moment ago is never refused off stale state. Read-only; no
+        spend and nothing written beyond the regenerable cache file."""
+        from flask import abort
+        if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+            abort(404)
+
+        def has_art(aid):
+            return _branding_exists(_role_rel("badges", aid + ".png"))
+
+        # need="" is in no cached set, so the helper recomputes instead of answering from its
+        # 5-second cache -- an earn that landed since the cache was filled is never missed.
+        earned = _earned_achievement_ids(out_dir, db_path, need="")
+        pick = _pick_masked_feat(earned, has_art=has_art)
+        if pick is None:
+            abort(404)
+        if not hmac.compare_digest(_feat_mask_token(app.secret_key, pick["id"]), token):
+            abort(404)
+        png = _feat_mask_bytes(out_dir, pick["id"], token)
+        if png is None:
+            abort(404)
+        resp = app.response_class(png, mimetype="image/png")
+        resp.headers["Cache-Control"] = "private, max-age=86400"
+        return resp
+
     @app.route("/contact-sheet")
     @tier(LOGIN)
     def contact_sheet():
@@ -18935,13 +19125,14 @@ def create_app(out_dir: Path):
             a["earned"] for a in result["achievements"] if a["tier"] == "feat")
         unleashed = any(a["id"] == "triggered" and a["earned"]
                         for a in result["achievements"])
-        # Masked feats COLLAPSE to a single placeholder (2026-08-13): the old
-        # scheme kept one "hidden-feat-N" entry per undiscovered feat, so the
-        # array length -- and any earned/total arithmetic a client renders --
-        # counted exactly how many secrets were left. One placeholder says only
-        # what the placeholder itself already publicizes, and nothing more.
+        # Hidden feats never appear in the array until they are earned. They used to
+        # collapse to ONE "???" placeholder entry (2026-08-13); Session G replaced that with
+        # `feats.masked` below -- a riddle and a silhouette for one feat, and no entry at
+        # all, so neither the array's length nor any entry in it says anything about how
+        # many secrets remain.
         masked_metrics, n_masked, visible = set(), 0, []
         sealed_by_id = {r["id"]: r for r in _roster() if isinstance(r, dict)}
+        earned_ids = {a["id"] for a in result["achievements"] if a["earned"]}
         for a in result["achievements"]:
             if a["hidden"] and not a["earned"]:
                 n_masked += 1
@@ -18955,14 +19146,8 @@ def create_app(out_dir: Path):
             if a["earned"]:                   # the roster flags go out only once earned
                 a.update(_earned_roster_flags(sealed_by_id.get(a["id"])))
             visible.append(a)
-        if n_masked:
-            visible.append({
-                "id": "hidden-feat", "name": "???", "icon": "❓",
-                "desc": "A hidden feat of the Athenaeum.",
-                "tier": "feat", "bucket": "feat", "metric": "", "threshold": 1,
-                "current": 0, "earned": False, "skin": "", "hidden": True,
-                "banner_reward": False, "points": 0, "roast": "", "roast_nsfw": "",
-            })
+        result["feats"] = _feats_payload(earned_ids, n_masked, feats_revealed, unleashed,
+                                         app.secret_key)
         result["achievements"] = visible
         # a masked feat's metric name/value must not leak through the metrics echo
         still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}

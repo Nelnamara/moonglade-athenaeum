@@ -144,19 +144,18 @@ def test_api_masks_hidden_feats_and_cloaks_tab(tmp_path):
                                        created_at="2025-01-01T00:00:00")])
     with mock.patch("datetime.datetime", _FixedNoon):   # never trip a time-of-day feat mid-test
         d = cli.get("/api/achievements").get_json()
-    # every hidden feat is unearned here, and they COLLAPSE to one placeholder
-    # (2026-08-13): the payload must not reveal how many remain undiscovered --
-    # previously the array carried one hidden-feat-N entry per secret, so its
-    # length counted them for anyone reading devtools
+    # every hidden feat is unearned here, and NONE of them is in the array: the one "???"
+    # placeholder that used to stand for them all is gone (Session G) -- the payload must not
+    # reveal how many remain undiscovered, and an entry count that moved with them would.
     n_hidden = sum(1 for a in g._roster() if a.get("hidden"))
-    assert n_hidden > 1                     # the collapse is genuinely collapsing
-    assert len(d["achievements"]) == len(g._roster()) - n_hidden + 1
-    hidden = [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]]
-    assert len(hidden) == 1 and hidden[0]["name"] == "???"
-    # devtools must not spoil the secrets: no real id/metric on the masked card,
-    # and the metrics echo drops every still-hidden feat's counter
-    assert hidden[0]["id"] == "hidden-feat" and hidden[0]["metric"] == ""
-    assert hidden[0]["roast"] == "" and hidden[0]["roast_nsfw"] == ""
+    assert n_hidden > 1                     # there really are several hidden feats to hide
+    assert len(d["achievements"]) == len(g._roster()) - n_hidden
+    assert not [a for a in d["achievements"] if a["tier"] == "feat" and not a["earned"]
+                and a.get("hidden")]
+    assert not [a for a in d["achievements"] if a["name"] == "???" or a["id"] == "hidden-feat"]
+    # ...and before a first feat is earned the veil is cloaked too: no riddle, no mask url
+    assert d["feats"] == {"masked": None, "all_found": False}
+    # devtools must not spoil the secrets: the metrics echo drops every still-hidden feat's counter
     # Self-computed: a metric used ONLY by hidden achievements (all unearned here) must be
     # stripped from the echo; a metric shared with any visible achievement must survive.
     by_metric = {}
@@ -203,8 +202,10 @@ def test_api_masked_feats_leak_no_points(tmp_path):
     with mock.patch("datetime.datetime", _FixedNoon):
         d = cli.get("/api/achievements").get_json()
     assert "earned_points" in d and "possible_points" in d
-    masked = [a for a in d["achievements"] if a["name"] == "???"]
-    assert masked and all(a["points"] == 0 for a in masked)
+    # no hidden feat rides the array at all now, so nothing carries a point value that could
+    # hint at one, and every feat that does ride it scores zero
+    assert not [a for a in d["achievements"] if a["name"] == "???"]
+    assert all(a["points"] == 0 for a in d["achievements"] if a["tier"] == "feat")
 
 
 @needs_donor
@@ -217,8 +218,9 @@ def test_earn_dates_stamped_persisted_and_no_leak(tmp_path):
     assert "earned_at" in d
     earned_ids = {a["id"] for a in d["achievements"] if a["earned"]}
     assert earned_ids and all(i in d["earned_at"] for i in earned_ids)   # every earned gets a date
-    masked = [a for a in d["achievements"] if a["name"] == "???"]        # hidden feats never leak a date
-    assert all(a["id"] not in d["earned_at"] for a in masked)
+    hidden_unearned = [h for h in g._roster() if h.get("hidden") and h["id"] not in earned_ids]
+    assert hidden_unearned                                               # hidden feats never leak a date
+    assert all(h["id"] not in d["earned_at"] for h in hidden_unearned)
     st = g.load_ach_state(out)                                           # persisted to disk
     assert st["earned_at"] and all(i in st["earned_at"] for i in earned_ids)
 

@@ -306,6 +306,7 @@ TIER_SNAPSHOT = [
     "/contact-sheet [GET] LOGIN",
     "/export-csv [GET] LOGIN",
     "/export-zip [POST] LOGIN",
+    "/feat-mask/<token>.png [GET] LOGIN",
     "/full/<media_id> [GET] LOGIN",
     "/login [GET] PUBLIC",
     "/loom [GET] LOGIN",
