@@ -9,6 +9,8 @@ import SimilarResults from "./SimilarResults.jsx";
 import CurationSheetMobile from "./CurationSheetMobile.jsx";
 import PullToRefresh from "./PullToRefresh.jsx";
 import useDataSaver, { useFeedLayout } from "../hooks/usePhonePrefs.js";
+import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
+import useScrollAnchor from "../hooks/useScrollAnchor.js";
 import { newSince, newSinceLabel, newestLabel, showNewest } from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
@@ -69,7 +71,11 @@ import "../styles/phone-q.css";
          lib/phoneCore.js's, and the rule is only ever drawn there (page 1, newest first, unfiltered).
      Q6  pull to refresh: the whole tab body sits in <PullToRefresh>, and `onPullRefresh` -- the shell's
          "Sync now" plus a reload of the page in view -- is what a release past the line runs.
-     Q7  `saver` (Data saver active) makes the grid draw 256 px thumbnails. */
+     Q7  `saver` (Data saver active) makes the grid draw 256 px thumbnails.
+     Q4  landscape: the grid deals its pictures across 4 columns (3 under 700 px wide) and a turn of the
+         phone keeps your place -- the picture at the top of the view is scrolled back to the same spot
+         once the columns have re-flowed (hooks/useScrollAnchor.js). The rail, the side panels and the
+         rest of the layout are CSS (styles/phone-landscape.css). */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -106,6 +112,8 @@ export default function GalleryMobile({
   const [layout, setLayout] = useFeedLayout();
   const saver = useDataSaver().active;
   const rootRef = useRef(null);
+  const { landscape, cols } = usePhoneLandscape();
+  useScrollAnchor(rootRef, ".glm-body", (landscape ? "L" : "P") + cols);
   const ns = frontPage ? newSince(items, marker) : { count: 0, capped: false };
   const ruleText = newSinceLabel(ns.count, ns.capped, marker && marker.at);
   /* "↑ Newest" -- after one screen of scrolling, on the tab's own scroller (.glm-body). The state only
@@ -318,7 +326,7 @@ export default function GalleryMobile({
         <GalleryGridMobile
           items={items} loading={loading} selectMode={selectMode} selected={selected}
           toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
-          layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText}
+          layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText} cols={cols}
         />
       )}
 

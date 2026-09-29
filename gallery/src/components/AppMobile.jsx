@@ -59,6 +59,9 @@ import GuideHost from "../help/GuideHost.jsx";
 import { OPEN_SURFACE_EVENT } from "../help/helpStore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/create-mobile.css";
+/* Last, on purpose: the landscape rules re-flow rules from every sheet above, and at equal specificity
+   the later stylesheet wins (Session Q, Q4). */
+import "../styles/phone-landscape.css";
 
 /* The mobile Gallery/Create/Control shell (design spec: Moonglade Mobile.dc.html)
    -- rendered by main.jsx in place of App.jsx whenever useIsMobile() is true,
@@ -1526,16 +1529,15 @@ export default function AppMobile({ boot }) {
       <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
 
       <MobileSheet open={sheet === "loom"} closing={closing} onClose={closeSheet} title="THE LOOM">
-        {/* THE ROTATE LINE WAS TRUE UNTIL 2026-09-06 and is not any more: the Loom now
-            opens a phone layout by itself on a phone, built for a narrow screen. Telling
-            the owner to turn the phone right before the button that gives him a portrait
-            tool was the sheet contradicting the app. The wide four-panel board is still
-            there and still wants landscape -- but only once he has asked for it, so that
-            is what this now says. */}
+        {/* THE ROTATE LINE IS GONE (Session Q, Q4). It was untrue on 2026-09-06, when the Loom began
+            opening a phone layout by itself on a phone, and it is doubly so now that the phone has a
+            landscape of its own: nothing here asks the owner to turn the phone. The wide four-panel
+            board is still one tap away in the Loom's own bar, and it opens by itself when the phone is
+            already sideways. */}
         <div className="glm-loom-note">
-          Weave shots into a video sequence. On a phone it opens a <b>board and reel</b> view
-          built for the narrow screen. The wide four-panel board is still one tap away —
-          tap <b>🖥 Desktop</b> in the Loom's own bar, and turn the phone to landscape for it.
+          Weave shots into a video sequence. On a phone held upright it opens a <b>board and reel</b>{" "}
+          view built for the narrow screen; held sideways it opens the wide four-panel board. Either
+          way the other view is one tap away in the Loom's own bar (<b>🖥 Desktop</b> or <b>Mobile view</b>).
         </div>
         <div className="glm-sheet-actions">
           <a className="glm-primary glm-primary-loom" href="/loom">Open The Loom</a>

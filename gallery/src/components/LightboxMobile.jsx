@@ -5,6 +5,7 @@ import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
 import PlacardMobile from "./PlacardMobile.jsx";
 import useDataSaver from "../hooks/usePhonePrefs.js";
+import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
 import useFullGate from "../hooks/useFullGate.js";
 import { apiGet, fetchSiblings } from "../api.js";
 import { taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
@@ -99,6 +100,9 @@ import "../styles/phone-q.css";
    SESSION Q, THE PHONE, additive to everything above:
      Q1  the placard -- accession stamp and the sibling strip -- between the picture and the meta row
          (PlacardMobile.jsx). The siblings are ONE batched POST /api/siblings per page of pictures.
+     Q4  landscape: the picture fits the height and the lower panel becomes the right rail, the action
+         list first (styles/phone-landscape.css); the film strip centres its own thumb without
+         scrolling the rail.
      Q7  Data saver: while it acts the picture opens as its 256 px thumbnail behind a "Tap to load full
          size" line (the size from a HEAD), a video does not autoplay and does not preload, and the
          film strip draws 256 px thumbnails. A picture loaded once stays loaded for the session.
@@ -134,6 +138,7 @@ export default function LightboxMobile({
   const [, bumpDetail] = useState(0); // re-render tick when a lazy detail row lands
 
   const saver = useDataSaver().active;
+  const { landscape } = usePhoneLandscape();
   const [sibMap, setSibMap] = useState({});                  // task_id -> [{media_id, thumb, is_video}]
   const upEl = useRef(null);
   const closingRef = useRef(false);
@@ -247,8 +252,16 @@ export default function LightboxMobile({
     const host = stripRef.current;
     if (!host) return;
     const on = host.querySelector(".lbm-thumb.on");
-    if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [index]);
+    if (!on) return;
+    if (landscape) {
+      /* Sideways the strip lives inside the right rail, which scrolls too: scrollIntoView would also
+         slide the RAIL down to the strip and take the action list out of view (Q4). Centre the thumb
+         along the strip and leave the rail where it is. */
+      host.scrollLeft = Math.max(0, on.offsetLeft - (host.clientWidth - on.offsetWidth) / 2);
+    } else if (on.scrollIntoView) {
+      on.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [index, landscape]);
 
   /* Pointer drag -- captured so a fast swipe past the stage's edges keeps
      tracking (Pointer Events, not touch-only, so this also drags with a

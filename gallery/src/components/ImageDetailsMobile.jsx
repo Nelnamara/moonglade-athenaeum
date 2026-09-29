@@ -276,6 +276,10 @@ export default function ImageDetailsMobile({
           ) : null}
         </div>
 
+        {/* Q4: the record proper. Upright it is `display: contents` -- no box, the children are the body's
+            own, exactly as before. Sideways it is the side panel beside the picture: its own scroller,
+            up to 380 px wide, with the foot pinned to ITS bottom. */}
+        <div className="idm-rec">
         <div className="idm-chiprow">
           <a className="idm-chip" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
           {/* ☁ Publish -- real since 2026-08-07, same real pipeline as desktop's
@@ -466,6 +470,7 @@ export default function ImageDetailsMobile({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Upscale bottom sheet -- ALWAYS mounted (host div + wrapper both);

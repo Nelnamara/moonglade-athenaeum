@@ -32,13 +32,16 @@ import "../styles/phone-q.css";
    real mouse on a narrow desktop browser window, which is how this surface gets
    exercised by both a human and Playwright.
 
-   SESSION Q (2026-09-29), ADDITIVE -- the grid above is untouched when none of the four new props is
-   set:
+   SESSION Q (2026-09-29), ADDITIVE -- the grid above is untouched when none of the new props is set:
      layout="feed" (Q3)  one picture per row, edge to edge at its true aspect, prompt and stars over
                          the foot; the same tap / long-press / select gestures as a tile.
      newCount / newLabel (Q5)  the lavender "N new since HH:MM" rule after the first N pictures. The
                          grid is cut in two at the rule (the page does the same), each half keeping the
                          two-column stagger; the feed is one list with the rule in it.
+     cols (Q4)           how many columns the run of pictures is dealt across: 2 upright, 4 sideways
+                         (3 under 700 px wide), laid straight into a grid the way the page draws it.
+                         Every picture wears data-mid, which is how a turn of the phone finds the one
+                         at the top of the view again (hooks/useScrollAnchor.js).
      saver (Q7)          256 px thumbnails, and the page's small tag on each tile ("256 px", or
                          "▶ paused" on a video). Full size is the Lightbox's business, not this grid's. */
 
@@ -57,7 +60,8 @@ function Tile({ it, selectMode, selected, pressing, handlers, saver, feed }) {
   return (
     <figure
       className={"glm-tile" + (feed ? " glm-tile-feed" : "") + (selected ? " sel" : "") + (pressing ? " pressing" : "")}
-      style={{ aspectRatio: trueRatio(it) }}
+      style={{ aspectRatio: trueRatio(it), "--ar": trueRatio(it) }}
+      data-mid={it.media_id}
       onContextMenu={(e) => e.preventDefault()}
       {...handlers}
     >
@@ -88,7 +92,7 @@ function Tile({ it, selectMode, selected, pressing, handlers, saver, feed }) {
 
 export default function GalleryGridMobile({
   items, loading, selectMode, selected, toggleSelected, onArmSelect, onTapView,
-  layout = "grid", saver = false, newCount = 0, newLabel = "",
+  layout = "grid", saver = false, newCount = 0, newLabel = "", cols = 2,
 }) {
   const pressRef = useRef(null); // {mid, timer, x, y, moved, armed}
   const [pressingId, setPressingId] = useState(null);
@@ -144,8 +148,18 @@ export default function GalleryGridMobile({
     <Tile key={it.media_id} it={it} selectMode={selectMode} selected={selected.has(it.media_id)}
       pressing={pressingId === it.media_id} handlers={makeHandlers(it.media_id)} saver={saver} feed={feed} />
   );
-  // The two-column stagger of one run of pictures; the second column offset 22px down (the DC's own).
+  // One run of pictures. Upright it is the DC's own stagger: two flex columns, the second offset 22px
+  // down. Sideways (Q4) it is the Phone Handoff's landscape grid: 4 columns (3 on the narrow phones) of
+  // tiles laid straight into a CSS grid in reading order, rows aligned, no stagger -- as the page draws it.
   const grid = (list, key) => {
+    if (cols > 2) {
+      return (
+        <div key={key} className={"glm-grid glm-grid-rows" + (loading ? " loading" : "")}
+          style={{ gridTemplateColumns: "repeat(" + cols + ", minmax(0, 1fr))" }}>
+          {list.map(tile)}
+        </div>
+      );
+    }
     const left = list.filter((_, i) => i % 2 === 0);
     const right = list.filter((_, i) => i % 2 === 1);
     return (

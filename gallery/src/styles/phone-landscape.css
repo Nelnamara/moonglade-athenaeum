@@ -1,0 +1,167 @@
+/* ============================================================================
+   Session Q, Q4 -- THE PHONE TURNED SIDEWAYS (Phone Handoff.dc.html, "Q4 · LANDSCAPE · 740 × 360").
+   ADDITIVE to Moonglade Mobile and Lightbox Mobile: every rule below sits inside one media query, so
+   upright (portrait) the phone is exactly what it was. The condition is lib/phoneCore.js's
+   LANDSCAPE_QUERY, character for character (tests/test_render_harness.py holds the two together), and
+   hooks/usePhoneLandscape.js watches the same query for the one thing CSS cannot do -- deal the
+   gallery's pictures across 4 columns (3 under 700 px wide).
+
+   WHAT THE PAGE DRAWS, and where it lands here:
+     - the tab bar becomes a 56 px LEFT RAIL (icons only, 44 px tiles, the active one lavender on a
+       12% wash)                                                      .glm-nav
+     - the gallery is 4 columns, 3 on the smaller phones (JS: cols)     .glm-grid-rows
+     - the Lightbox picture fits the HEIGHT and its actions move to a RIGHT RAIL   .lbm-root / .lbm-bottom
+     - sheets open as SIDE PANELS, up to 380 px wide: Sort, Advanced, Actions and the rest of the
+       shared sheets, the Upscale slabs, the model picker, and the record's foot   .glm-sheet ...
+     - the safe areas (notch on either side, the home bar) are respected on both sides.
+   The page is a simplified shell with sample pictures, so where the real app has more than it shows
+   (the hero, the goal chips, the search bar, the placard, the prompt slab, the film strip) the piece keeps
+   its own look and simply re-flows; those choices are stated in the wiki page's Landscape section.
+
+   Every colour is an app token. z-index: nothing here is raised; the bands are the ones already in use
+   (components 0-7, overlays 300-500, ambient 510-520). Sizes are the page's own where it draws them. */
+
+/* Upright the record's wrapper has no box of its own: its children are the body's, exactly as they were. */
+.idm-rec { display: contents; }
+
+@keyframes glmPanelIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes glmPanelOut { from { transform: translateX(0); } to { transform: translateX(100%); } }
+
+@media (orientation: landscape) and (max-height: 520px) {
+
+  /* ---- the shell: rail | (hero, tab, goal chips) ------------------------------------------------
+     A grid instead of a column. The rail spans every row; the notch's inset on the left is added to
+     its width (and taken off its padding) so the 56 px the page draws is the usable part; the inset on
+     the right and the home bar's below are the stage's own padding, on the stage's own background. */
+  .glm-stage { display: grid; grid-template-columns: calc(56px + env(safe-area-inset-left)) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) 0; }
+  .glm-stage > .glm-hero { grid-column: 2; grid-row: 1; }
+  .glm-stage > .glm-body { grid-column: 2; grid-row: 2; }
+  .glm-stage > .mgg-chips { grid-column: 2; grid-row: 3; }
+
+  /* ---- Q4 the rail (page: 56 px, 44 px tiles, 16 px apart, 24 px down, a hairline on its right) ---- */
+  .glm-stage > .glm-nav { grid-column: 1; grid-row: 1 / -1; flex-direction: column; align-items: center;
+    justify-content: flex-start; gap: 16px; padding: 24px 0 0 env(safe-area-inset-left);
+    border-top: 0; border-right: 1px solid var(--surface0); overflow: hidden; }
+  .glm-nav .glm-navitem { flex: none; width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center;
+    border-radius: 12px; }
+  .glm-nav .glm-navitem.on { background: color-mix(in srgb, var(--lavender) 12%, transparent); }
+  .glm-nav .glm-navicon { font-size: 18px; line-height: 1; }
+  .glm-nav .glm-navlabel, .glm-nav .glm-navdot { display: none; }
+
+  /* ---- the hero folds to one bar. 172 px of banner is half a 390 px screen; the brand, the counts,
+     the Saver chip, the credits and the five icon buttons keep every control and go on one row. ---- */
+  .glm-hero { height: auto; min-height: 46px; display: flex; align-items: center; gap: 10px;
+    padding: env(safe-area-inset-top) 11px 0 11px; --glm-safetop: 0px; }
+  .glm-hero-brand, .glm-hero-stats, .glm-hero-credits, button.glm-hero-claim, .glm-hero-icons {
+    position: relative; inset: auto; }
+  .glm-hero-brand { order: 1; flex: 1 1 auto; max-width: none; min-width: 0; align-items: center; }
+  /* the mark scales from the hero's own token like the upright one (marks ruling: never a literal px) */
+  .glm-hero-mark { width: calc(var(--mark-hero) * 30 / 96); height: calc(var(--mark-hero) * 30 / 96); border-radius: 9px; }
+  .glm-hero-brandtext { min-width: 0; max-width: none; }
+  .glm-hero-name { font-size: 14px; }
+  .glm-hero-flavour { display: none; }
+  .glm-hero-stats { order: 2; flex: none; }
+  .glm-hero-credits { order: 3; flex: none; }
+  button.glm-hero-claim { order: 3; flex: none; }
+  .glm-hero-icons { order: 4; flex: none; }
+  @media (max-width: 720px) {
+    .glm-hero-stats > span:not(.glm-saverchip) { display: none; }
+  }
+
+  /* ---- the gallery: 4 columns of tiles laid straight into a grid (page: 6 px gaps, 12 px in) ---- */
+  .glm-grid.glm-grid-rows { gap: 6px; padding: 12px 12px 12px 12px; align-items: start; }
+  .glm-grid-rows .glm-tile { border-radius: 7px; }
+  /* The search bar stops being sticky: on a 390 px screen the hero and a pinned bar would hold a third of
+     the height for good. It scrolls away with the list (a pull or ↑ Newest brings it back). */
+  .glm-bar { position: static; padding-left: 12px; padding-right: 12px; }
+  .glm-bar2 { padding-left: 12px; padding-right: 12px; }
+  .glm-pager { padding-bottom: 12px; }
+
+  /* The reading feed, sideways: one picture per row at its true aspect, but never taller than the screen
+     it is read on -- a portrait picture edge to edge on an 788 px bar would be three screens tall. Wider
+     than tall it still runs edge to edge; taller than wide it is the biggest that fits, centred. */
+  .glm-grid.glm-feed .glm-tile-feed { width: min(100%, calc((100dvh - 80px) * var(--ar, 1)));
+    margin-left: auto; margin-right: auto; }
+
+  /* "N new since HH:MM" is a row in the flow -- it takes the grid's whole width (or the feed's) as is. */
+  .glm-grid-rows + .glm-newrule, .glm-newrule { padding-left: 12px; padding-right: 12px; }
+  /* "↑ Newest" is sticky to the bottom of the tab's own scroller, which now ends above the home bar
+     (the stage pads it) and beside the rail: it needs nothing more than a smaller lift. */
+  .glm-newest-wrap { bottom: 8px; }
+
+  /* ---- sheets: side panels, up to 380 px wide, from the right edge ------------------------------
+     The bottom sheet's own arithmetic (drift 122: a pinned foot, the home bar's pad) is unchanged; the
+     slab is only turned to stand on the right. Its foot is its bottom, so the sticky offsets stand. The
+     right inset joins the padding so nothing sits under a notch on that side. */
+  .glm-sheet { left: auto; right: 0; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
+    border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
+    padding: 12px calc(13px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) 13px;
+    animation-name: glmPanelIn; }
+  .glm-sheet.closing { animation-name: glmPanelOut; }
+  .glm-sheet .glm-sheet-actions, .glm-sheet .mgdrm-confirm-actions {
+    margin-right: calc(-13px - env(safe-area-inset-right));
+    padding-right: calc(13px + env(safe-area-inset-right)); }
+
+  /* the Create tab's model / LoRA picker is a sheet too */
+  .cm-modelwrap .mfly { inset: 0 0 0 auto; width: min(380px, 100%); max-width: none; height: auto; max-height: none;
+    border-radius: 16px 0 0 16px; border: 1px solid var(--surface1); border-right: 0; border-top: 0; border-bottom: 0;
+    padding-right: calc(13px + env(safe-area-inset-right));
+    box-shadow: -20px 0 60px rgba(0, 0, 0, .55); animation-name: glmPanelIn; }
+
+  /* ---- the Lightbox: the picture fits the HEIGHT, the actions are a right rail -------------------
+     Page: the picture takes everything left of a 170 px rail; the rail is the back link then the actions
+     in a column. Here the rail is the whole lower panel (placard, mark, prompt, film strip and the
+     actions), the actions first so they never sit past a scroll; the top bar (close, index, stars,
+     slideshow) stays over the picture. */
+  .lbm-root { display: grid; grid-template-columns: minmax(0, 1fr) calc(188px + env(safe-area-inset-right));
+    grid-template-rows: auto minmax(0, 1fr); padding-left: env(safe-area-inset-left); }
+  .lbm-topbar { grid-column: 1; grid-row: 1; padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
+  .lbm-stage { grid-column: 1; grid-row: 2; min-height: 0; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+  .lbm-hero { height: 100%; }
+  .lbm-bottom { grid-column: 2; grid-row: 1 / -1; min-height: 0; gap: 8px; overscroll-behavior: contain;
+    border-left: 1px solid var(--surface0);
+    padding: max(8px, env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) 10px; }
+  .lbm-bottom > * { min-width: 0; }
+  /* the foot -- the action list -- LEADS the rail instead of being pinned under it: first in the rail it
+     cannot be pushed off by the prompt slab opening below it (drift 122's promise, turned on its side),
+     and a rail that is scrolled down to the placard simply scrolls it away like any list. */
+  .lbm-foot { order: -1; position: static; margin: 0; padding: 0 0 6px; background: none; }
+  .lbm-foot:last-child { margin-bottom: 0; }
+  .lbm-actsrow { flex-direction: column; gap: 5px; overflow: visible; padding: 0; }
+  .lbm-actsrow > .lbm-chip, .lbm-actsrow > * { width: 100%; box-sizing: border-box; text-align: left;
+    padding: 6px 9px; border-radius: 9px; overflow: hidden; text-overflow: ellipsis; }
+  .lbm-hint { display: none; }
+  .lbm-placard, .lbm-promptbox { margin-left: 0; margin-right: 0; }
+  .lbm-metarow { flex-wrap: wrap; gap: 4px 10px; padding: 0 2px; white-space: normal; overflow: visible; }
+  .lbm-strip { padding: 0 2px; }
+  /* the Upscale slab: a side panel */
+  .lbm-sheet-slab { left: auto; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
+    border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
+    padding-right: calc(15px + env(safe-area-inset-right)); transform: translateX(100%); }
+  .lbm-sheet-slab.open { transform: translateX(0); }
+
+  /* ---- the record (Image Details): the picture beside a side panel, the foot pinned to the panel --- */
+  .idm-root { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  .idm-topbar { padding: max(8px, env(safe-area-inset-top)) 12px 6px; }
+  .idm-body { flex-direction: row; gap: 0; overflow: hidden; padding: 10px 0 0 14px; }
+  .idm-body > .idm-frame { flex: 1 1 0; min-width: 0; align-self: center; width: auto; margin-right: 14px; }
+  .idm-frame img, .idm-frame video { max-height: calc(100dvh - 70px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .idm-rec { display: flex; flex-direction: column; gap: 14px; flex: none; width: min(380px, 46%);
+    min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    border-left: 1px solid var(--surface0);
+    padding: 0 14px calc(16px + env(safe-area-inset-bottom)); }
+  /* the foot is a sticky bar bleeding to the panel's edges (its margins are the panel's 14 px pad) */
+  .idm-rec .idm-recrow { margin: 0 -14px; }
+  .idm-rec .idm-recrow:last-child { margin-bottom: calc(-16px - env(safe-area-inset-bottom)); }
+  /* the Upscale slab: a side panel */
+  .idm-sheet-slab { left: auto; top: 0; bottom: 0; width: min(380px, 100%); max-height: none;
+    border-radius: 16px 0 0 16px; border-top: 0; border-left: 1px solid var(--lavender);
+    padding-right: calc(15px + env(safe-area-inset-right)); transform: translateX(100%); }
+  .idm-sheet-slab.open { transform: translateX(0); }
+}
+
+@media (orientation: landscape) and (max-height: 520px) and (prefers-reduced-motion: reduce) {
+  .glm-sheet, .cm-modelwrap .mfly { animation: none; }
+}
