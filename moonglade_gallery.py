@@ -5790,6 +5790,44 @@ def _best_day_streak(days):
     return best
 
 
+def vigil_status(days, today=None):
+    """The Vigil chip's numbers (Folio for completionists, O5): {"day": int, "best": int}.
+
+    `days` is the ISO-date list of days that had at least one generation collected (the same
+    `gen_days` ledger Seven Candles reads, marked by the server's LOCAL date, date.today()).
+
+    `day` is the run of consecutive generation days that ends today -- or ends yesterday when
+    today has none YET, because a day that has not finished is not a missed one. A run that
+    ended before yesterday is over: the chip starts again at day 1. It is never 0 and never
+    says a word about a miss; there is no message, no toast and no state to explain, only a
+    smaller number. `best` is the longest run ever recorded, and is never below `day`.
+
+    A malformed list, a date in the future or an unparseable entry is skipped, never raised."""
+    import datetime as _dt
+    if today is None:
+        today = _dt.date.today()
+    elif isinstance(today, str):
+        today = _dt.date.fromisoformat(today)
+    dates = set()
+    for s in (days or []):
+        try:
+            d = _dt.date.fromisoformat(str(s))
+        except (TypeError, ValueError):
+            continue
+        if d <= today:
+            dates.add(d)
+    one = _dt.timedelta(days=1)
+    anchor = today if today in dates else (today - one if (today - one) in dates else None)
+    run = 0
+    if anchor is not None:
+        cur = anchor
+        while cur in dates:
+            run += 1
+            cur -= one
+    day = max(1, run)
+    return {"day": day, "best": max(day, _best_day_streak([d.isoformat() for d in dates]))}
+
+
 def telemetry_metrics(out_dir, telem=None):
     """Flatten the telemetry store into the achievement metric namespace.
     Counters/maxima pass through, sets become cardinalities, flags become 0/1.
@@ -19317,6 +19355,13 @@ def create_app(out_dir: Path):
         still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
         for k in masked_metrics - still_visible:
             metrics.pop(k, None)
+        # The Vigil chip (O5): the run of days with a generation, and the best run ever. From the
+        # same ledger Seven Candles reads; a fresh install with no days answers day 1, best 1.
+        try:
+            _gd = (telem.get("day_lists") or {}).get("gen_days")
+            result["vigil"] = vigil_status(_gd if isinstance(_gd, list) else [])
+        except Exception:
+            result["vigil"] = {"day": 1, "best": 1}
         result["feats_revealed"] = feats_revealed
         result["unleash_available"] = unleashed
         result["skin"] = state.get("skin", "moonglade")
