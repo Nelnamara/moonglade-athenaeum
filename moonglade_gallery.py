@@ -3179,6 +3179,22 @@ def _earned_roster_flags(entry):
     return out
 
 
+def earned_relic_marks(out_dir, earned_ids):
+    """The marks an achievement AWARDED and the account has earned -- the Folio's Marks row
+    (Small Calls L2, relics by kind). A free mark (no `unlock` binding) is not a relic, and an
+    unearned one is never listed at all, so nothing here says a locked mark exists: the row is
+    built from earned marks only and the client shows no empty slot. `unlock` is the awarding
+    achievement's id (list_marks blanks it for a hidden feat until that feat is earned, so a
+    listed mark's binding is always one the account already holds); the client dates the mark
+    by that achievement's earned_at. `earned_ids` is the set of currently-earned ids."""
+    out = []
+    for m in list_marks(out_dir, set(earned_ids or ())):
+        if m.get("earned") and m.get("unlock"):
+            out.append({"id": m["id"], "label": m["label"], "png": m["png"],
+                        "animated": bool(m.get("animated")), "unlock": m["unlock"]})
+    return out
+
+
 # ---------------------------------------------------------------------------
 # MASKED FEATS (Session G): the Folio's ONE veil card. The payload carries a riddle and an
 # alpha-only silhouette of the NEXT unfound feat's badge, and nothing else about it -- no
@@ -5323,6 +5339,62 @@ def compute_achievements(metrics, seen=(), sets=None, earned_at=None):
     possible_points = sum(x["points"] for x in achs)
     return {"achievements": achs, "skins": skins, "ladders": _ladder_tracks(), "newly": newly,
             "earned_points": earned_points, "possible_points": possible_points}
+
+
+# THE METRICS THIS SERVER MEASURES THAT A FRESH INSTALL DOES NOT YET HOLD A KEY FOR. The bundle
+# behind /api/achievements is open-ended: a telemetry counter, maximum or flag exists in it only
+# once something has bumped it, so "the key is absent" cannot tell "measured, and still zero"
+# from "a metric nobody counts". The first is a true 0-of-N; only the second shows no count.
+# Every name below is one code in this app bumps (telem_bump / telem_max), plus the metrics
+# compute_achievements() resolves ITSELF in a post-pass (Skin Changer counts the skins that very
+# computation unlocked). Feat metrics are deliberately NOT listed: achievement_progress refuses
+# a feat before it ever reads this set. tests/test_achievement_progress.py pins that every
+# non-feat metric in the sealed roster is either in the bundle or here, so a new honor added
+# without its metric being declared fails a test instead of silently losing its count.
+_MEASURED_METRICS = frozenset({
+    "claims", "culled", "edits", "enhances", "free_cards_applied", "jobs_concurrent",
+    "lora_stacked", "lora_used", "loras_trained", "organize_runs", "similar_uses",
+    "skin_changed_runs", "storyboards", "uploads",
+    "skins_unlocked",
+})
+
+
+def achievement_progress(entry, metrics):
+    """The "N to go" numbers for ONE unearned achievement entry (Folio for completionists, O1),
+    or None when there is nothing true to say:
+
+        {"current": int, "threshold": int, "left": int, "fraction": float}
+
+    `left` is threshold - current from the server's own metric, never negative; `fraction` is
+    current / threshold clamped to [0, 1] -- the true fraction the moon gauge draws.
+
+    NONE for every case that must show no count, no moon and no pin:
+      * a FEAT of any kind (tier or bucket feat, or a meta): feats leak nothing (Session G), so
+        this function refuses them by construction rather than trusting a caller to skip them;
+      * an entry already earned (there is nothing to go);
+      * a metric this server does not measure (neither in the bundle nor in _MEASURED_METRICS --
+        compute_achievements reads a missing metric as 0, which would draw a false "N to go"
+        from a metric nobody counts);
+      * a threshold that is not a positive whole number.
+    Pure: it reads the entry and the metric bundle it is handed."""
+    if not isinstance(entry, dict) or entry.get("earned"):
+        return None
+    if entry.get("tier") == "feat" or entry.get("bucket") in ("feat", "meta"):
+        return None
+    metric = entry.get("metric")
+    if not isinstance(metrics, dict) or (
+            metric not in metrics and metric not in _MEASURED_METRICS):
+        return None
+    try:
+        threshold = int(entry.get("threshold") or 0)
+        current = int(entry.get("current") or 0)
+    except (TypeError, ValueError):
+        return None
+    if threshold <= 0 or current < 0:
+        return None
+    return {"current": current, "threshold": threshold,
+            "left": max(0, threshold - current),
+            "fraction": min(1.0, current / threshold)}
 
 
 def claim_job_label(claimed, credits):
@@ -19228,9 +19300,18 @@ def create_app(out_dir: Path):
                 a["roast_nsfw"] = ""
             if a["earned"]:                   # the roster flags go out only once earned
                 a.update(_earned_roster_flags(sealed_by_id.get(a["id"])))
+            else:                             # "N to go": never a feat, never an unmeasured metric
+                prog = achievement_progress(a, metrics)
+                if prog is not None:
+                    a["progress"] = prog
             visible.append(a)
         result["feats"] = _feats_payload(earned_ids, n_masked, feats_revealed, unleashed,
                                          app.secret_key)
+        # The Folio's Marks row (relics by kind): earned, awarded marks only.
+        try:
+            result["relics"] = {"marks": earned_relic_marks(out_dir, earned_ids)}
+        except Exception:
+            result["relics"] = {"marks": []}
         result["achievements"] = visible
         # a masked feat's metric name/value must not leak through the metrics echo
         still_visible = {a["metric"] for a in result["achievements"] if a.get("metric")}
