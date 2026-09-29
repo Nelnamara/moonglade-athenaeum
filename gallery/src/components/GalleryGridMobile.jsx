@@ -1,4 +1,6 @@
 import React, { useRef, useState } from "react";
+import { thumbSrc } from "../lib/phoneCore.js";
+import "../styles/phone-q.css";
 
 /* The 2-column staggered tile grid (design spec: Moonglade Mobile.dc.html
    gridStyle/colStyle/colOffStyle/capStyle, lines 89-106 & 930-934) -- deliberately
@@ -28,7 +30,17 @@ import React, { useRef, useState } from "react";
    viewer opens -- it just calls onTapView. Built on Pointer Events
    (not touch-only) so it also works with a
    real mouse on a narrow desktop browser window, which is how this surface gets
-   exercised by both a human and Playwright. */
+   exercised by both a human and Playwright.
+
+   SESSION Q (2026-09-29), ADDITIVE -- the grid above is untouched when none of the four new props is
+   set:
+     layout="feed" (Q3)  one picture per row, edge to edge at its true aspect, prompt and stars over
+                         the foot; the same tap / long-press / select gestures as a tile.
+     newCount / newLabel (Q5)  the lavender "N new since HH:MM" rule after the first N pictures. The
+                         grid is cut in two at the rule (the page does the same), each half keeping the
+                         two-column stagger; the feed is one list with the rule in it.
+     saver (Q7)          256 px thumbnails, and the page's small tag on each tile ("256 px", or
+                         "▶ paused" on a video). Full size is the Lightbox's business, not this grid's. */
 
 const LONG_PRESS_MS = 480;
 const MOVE_CANCEL_PX = 10;
@@ -38,23 +50,33 @@ function trueRatio(it) {
   return w > 0 && h > 0 ? w / h : 1;
 }
 
-function Tile({ it, selectMode, selected, pressing, handlers }) {
+function Tile({ it, selectMode, selected, pressing, handlers, saver, feed }) {
   const caption = (it.prompt || "").trim().slice(0, 70) || it.model || "";
+  const stars = it.rating > 0 ? "★".repeat(Math.min(5, it.rating)) : "";
+  const tag = saver && !selectMode ? (it.is_video ? "▶ paused" : "256 px") : "";
   return (
     <figure
-      className={"glm-tile" + (selected ? " sel" : "") + (pressing ? " pressing" : "")}
+      className={"glm-tile" + (feed ? " glm-tile-feed" : "") + (selected ? " sel" : "") + (pressing ? " pressing" : "")}
       style={{ aspectRatio: trueRatio(it) }}
       onContextMenu={(e) => e.preventDefault()}
       {...handlers}
     >
-      <img className="glm-tile-img" src={it.thumb} alt="" loading="lazy" draggable={false} />
-      {it.is_video ? <span className="glm-tile-vid" aria-hidden="true">▶</span> : null}
+      <img className="glm-tile-img" src={thumbSrc(it.thumb, saver)} alt="" loading="lazy" draggable={false} />
+      {it.is_video && !tag ? <span className="glm-tile-vid" aria-hidden="true">▶</span> : null}
+      {tag ? <span className="glm-tile-tag" aria-hidden="true">{tag}</span> : null}
       {selectMode ? (
         <span className={"glm-tile-chk" + (selected ? " on" : "")} aria-hidden="true">
           {selected ? "✓" : ""}
         </span>
       ) : null}
-      {caption ? (
+      {feed ? (
+        (caption || stars) ? (
+          <figcaption className="glm-tile-cap">
+            <span className="glm-tile-prompt">{(it.prompt || "").trim() || it.model || ""}</span>
+            {stars ? <><span className="glm-tile-sep" aria-hidden="true">{"·"}</span><span className="glm-tile-stars">{stars}</span></> : null}
+          </figcaption>
+        ) : null
+      ) : caption ? (
         <figcaption className="glm-tile-cap">
           <span className="glm-tile-model">{caption}</span>
           {it.date ? <span className="glm-tile-date">{it.date}</span> : null}
@@ -66,6 +88,7 @@ function Tile({ it, selectMode, selected, pressing, handlers }) {
 
 export default function GalleryGridMobile({
   items, loading, selectMode, selected, toggleSelected, onArmSelect, onTapView,
+  layout = "grid", saver = false, newCount = 0, newLabel = "",
 }) {
   const pressRef = useRef(null); // {mid, timer, x, y, moved, armed}
   const [pressingId, setPressingId] = useState(null);
@@ -116,23 +139,48 @@ export default function GalleryGridMobile({
     return <div className="glm-empty">No matches — try clearing a filter.</div>;
   }
 
-  const left = items.filter((_, i) => i % 2 === 0);
-  const right = items.filter((_, i) => i % 2 === 1);
-
-  return (
-    <div className={"glm-grid" + (loading ? " loading" : "")}>
-      <div className="glm-col">
-        {left.map((it) => (
-          <Tile key={it.media_id} it={it} selectMode={selectMode} selected={selected.has(it.media_id)}
-            pressing={pressingId === it.media_id} handlers={makeHandlers(it.media_id)} />
-        ))}
+  const feed = layout === "feed";
+  const tile = (it) => (
+    <Tile key={it.media_id} it={it} selectMode={selectMode} selected={selected.has(it.media_id)}
+      pressing={pressingId === it.media_id} handlers={makeHandlers(it.media_id)} saver={saver} feed={feed} />
+  );
+  // The two-column stagger of one run of pictures; the second column offset 22px down (the DC's own).
+  const grid = (list, key) => {
+    const left = list.filter((_, i) => i % 2 === 0);
+    const right = list.filter((_, i) => i % 2 === 1);
+    return (
+      <div key={key} className={"glm-grid" + (loading ? " loading" : "")}>
+        <div className="glm-col">{left.map(tile)}</div>
+        <div className="glm-col glm-col-off">{right.map(tile)}</div>
       </div>
-      <div className="glm-col glm-col-off">
-        {right.map((it) => (
-          <Tile key={it.media_id} it={it} selectMode={selectMode} selected={selected.has(it.media_id)}
-            pressing={pressingId === it.media_id} handlers={makeHandlers(it.media_id)} />
-        ))}
-      </div>
+    );
+  };
+  const rule = newCount > 0 && newCount <= items.length && newLabel;
+  // Q5: the rule goes after the first newCount pictures, in either layout. When every loaded picture
+  // is new (a capped count) the rule closes the list.
+  const fresh = rule ? items.slice(0, newCount) : [];
+  const older = rule ? items.slice(newCount) : items;
+  const ruleEl = rule ? (
+    <div key="rule" className="glm-newrule" role="separator" aria-label={newLabel}>
+      <i /><span>{newLabel}</span><i />
     </div>
+  ) : null;
+
+  if (feed) {
+    return (
+      <div className={"glm-grid glm-feed" + (loading ? " loading" : "")}>
+        {fresh.map(tile)}
+        {ruleEl}
+        {older.map(tile)}
+      </div>
+    );
+  }
+  if (!rule) return grid(items, "all");
+  return (
+    <>
+      {fresh.length ? grid(fresh, "new") : null}
+      {ruleEl}
+      {older.length ? grid(older, "old") : null}
+    </>
   );
 }

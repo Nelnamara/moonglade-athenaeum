@@ -3,6 +3,10 @@ import { apiGet, apiPost } from "../api.js";
 import { fmt, artworksNeverSynced, NEVER_SYNCED_WHY } from "../hooks/useMyArt.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
+import PullToRefresh from "./PullToRefresh.jsx";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import { thumbSrc } from "../lib/phoneCore.js";
+import { invalidate } from "../hooks/swrCache.js";
 import "../styles/control-mobile.css";
 import "../styles/create-mobile.css";
 import "../styles/myart-contests.css";
@@ -63,6 +67,7 @@ const SORT_OPTS = [["latest", "Latest first"], ["oldest", "Oldest first"],
   ["liked", "Most liked"], ["viewed", "Most viewed"]];
 
 export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
+  const saver = useDataSaver().active;          // Q7: 256 px thumbnails while the saver acts
   const [rows, setRows] = useState(null);
   // #42 -- the catalog-wide counts that let the empty state name its own cause. Same
   // field the desktop overlay reads off the same route; see useMyArt.js.
@@ -95,27 +100,40 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
       setRows(j.items || []); setCoverage(j.coverage || null); setCsrf(j.csrf || "");
     });
 
+  // The totals row -- one read, used on open and again by a pull to refresh (Session Q, Q6).
+  const loadStats = (isDead) => apiGet("/api/your-art").then((d) => {
+    if (isDead && isDead()) return;
+    // A REAL LIFETIME TOTAL as of 2026-09-06, not a top-twelve subtotal -- views ride
+    // --sync-artworks into the catalog now, so the sum covers the whole published
+    // library. A partly-swept library says so in the label rather than passing a
+    // subtotal off as a total, which is the job "(TOP 12)" used to do here.
+    const t = d.totals || {};
+    const label = d.views_synced && (t.views_rows || 0) < (t.count || 0)
+      ? "VIEWS (" + (t.views_rows || 0) + " OF " + (t.count || 0) + ")" : "TOTAL VIEWS";
+    setStats([
+      { value: fmt(t.count), label: "PUBLISHED", accent: false },
+      { value: d.views_synced ? fmt(t.views) : "—", label, accent: true },
+      { value: fmt(t.likes), label: "LIKES", accent: false },
+      { value: fmt(t.comments), label: "COMMENTS", accent: false },
+    ]);
+  }).catch(() => {});
+
   useEffect(() => {
     let dead = false;
     load().catch((e) => { if (!dead) setRowsErr(String(e.message || e)); });
-    apiGet("/api/your-art").then((d) => {
-      if (dead) return;
-      // A REAL LIFETIME TOTAL as of 2026-09-06, not a top-twelve subtotal -- views ride
-      // --sync-artworks into the catalog now, so the sum covers the whole published
-      // library. A partly-swept library says so in the label rather than passing a
-      // subtotal off as a total, which is the job "(TOP 12)" used to do here.
-      const t = d.totals || {};
-      const label = d.views_synced && (t.views_rows || 0) < (t.count || 0)
-        ? "VIEWS (" + (t.views_rows || 0) + " OF " + (t.count || 0) + ")" : "TOTAL VIEWS";
-      setStats([
-        { value: fmt(t.count), label: "PUBLISHED", accent: false },
-        { value: d.views_synced ? fmt(t.views) : "—", label, accent: true },
-        { value: fmt(t.likes), label: "LIKES", accent: false },
-        { value: fmt(t.comments), label: "COMMENTS", accent: false },
-      ]);
-    }).catch(() => {});
+    loadStats(() => dead);
     return () => { dead = true; };
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Session Q, Q6: pull to refresh on My Art. It RE-READS the list and the totals from this library --
+     it does not call PixAI. (The published-artwork sync that fills these rows is the Control tab's
+     "Sync published-artwork metadata"; it reads a view of every published work by design, so a casual
+     pull never runs it.) A pull is explicit, so it works under Data saver. */
+  const pullRefresh = async () => {
+    invalidate(["/api/your-art"]);
+    try { await load(); setRowsErr(""); } catch (e) { setRowsErr(String(e.message || e)); }
+    await loadStats();
+  };
 
   useEffect(() => {
     if (tab !== "loras" || loras !== null) return;
@@ -231,6 +249,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
 
   return (
     <>
+      <PullToRefresh onRefresh={pullRefresh}
+        labels={{ idle: "pull to refresh", armed: "release to refresh", busy: "refreshing\u2026" }}>
       {stats && (
         <div className="myam-statrow">
           {stats.map((st) => (
@@ -306,7 +326,7 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
                     else if (onOpenPost) onOpenPost(it.media_id);
                   }}>
                   <div className="myam-thumb">
-                    <img src={it.thumb} alt="" loading="lazy"
+                    <img src={thumbSrc(it.thumb, saver)} alt="" loading="lazy"
                       onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
                     {it.is_video && <span className="myam-play">▶</span>}
                     {manageOn ? (
@@ -398,6 +418,8 @@ export default function MyArtMobile({ onOpenPost, onOpenTrain }) {
           <button type="button" className="myam-bulkbtn" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Clear</button>
         </div>
       )}
+
+      </PullToRefresh>
 
       {/* Sort sheet */}
       <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">

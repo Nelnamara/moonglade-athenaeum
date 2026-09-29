@@ -7,10 +7,14 @@ import MobileSheet from "./MobileSheet.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import SimilarResults from "./SimilarResults.jsx";
 import CurationSheetMobile from "./CurationSheetMobile.jsx";
+import PullToRefresh from "./PullToRefresh.jsx";
+import useDataSaver, { useFeedLayout } from "../hooks/usePhonePrefs.js";
+import { newSince, newSinceLabel, newestLabel, showNewest } from "../lib/phoneCore.js";
 import { ASPECT_CHOICES, aspectError, aspectIn, parseAspect, withAspect } from "../curation/aspectCore.js";
 import { canSaveSmart, checkTag } from "../curation/curationCore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/curation-mobile.css";
+import "../styles/phone-q.css";
 
 /* The Gallery tab (design spec: Moonglade Mobile.dc.html isGallery block, lines
    65-107 & 912-934) -- the one fully-real tab this increment ships. Every
@@ -55,7 +59,17 @@ import "../styles/curation-mobile.css";
    430px basis to make room, and a 390px phone bar has none to give -- the field
    would be crushed to a few characters. Same token, same thumb, same ✕, one line
    lower. Nothing about the library's own state changes while it is up, so ✕ is
-   the whole way back. */
+   the whole way back.
+
+   SESSION Q, THE PHONE (2026-09-29; Phone Handoff.dc.html), all additive:
+     Q3  the Grid | Feed toggle in the pill row (saved per device -- hooks/usePhonePrefs.js); the
+         feed itself is GalleryGridMobile's `layout="feed"`.
+     Q5  the "N new since HH:MM" rule and the "↑ Newest" jump. The shell hands down the marker it read
+         when it opened and whether this is the library's own front page; the count and the label are
+         lib/phoneCore.js's, and the rule is only ever drawn there (page 1, newest first, unfiltered).
+     Q6  pull to refresh: the whole tab body sits in <PullToRefresh>, and `onPullRefresh` -- the shell's
+         "Sync now" plus a reload of the page in view -- is what a release past the line runs.
+     Q7  `saver` (Data saver active) makes the grid draw 256 px thumbnails. */
 
 const MEDIA_PILLS = [["", "All"], ["image", "Images"], ["video", "Videos"]];
 const SORT_OPTS = [
@@ -77,6 +91,9 @@ export default function GalleryMobile({
   selectMode, setSelectMode, selected, setSelected, toggleSelected,
   onOpenDetails, onOpenLightbox, onOpenContactSheet,
   similar, similarState, similarSource, onSimilar, onClearSimilar,
+  /* Session Q: the shell's marker (what "new since" measures from), whether the view is the library's
+     own front page, and what a pull runs. */
+  marker, frontPage, onPullRefresh,
   /* Session N: what curation hands this tab -- {smart, curate, saveSmart, composeView, strip}.
      smart is the saved searches ({name, query}) listed in the Collection field with the refresh
      mark; curate is the shell's useCurate (the bulk verbs and their undo toast); saveSmart and
@@ -86,6 +103,32 @@ export default function GalleryMobile({
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
   const hasCuration = !!curation;
+  const [layout, setLayout] = useFeedLayout();
+  const saver = useDataSaver().active;
+  const rootRef = useRef(null);
+  const ns = frontPage ? newSince(items, marker) : { count: 0, capped: false };
+  const ruleText = newSinceLabel(ns.count, ns.capped, marker && marker.at);
+  /* "↑ Newest" -- after one screen of scrolling, on the tab's own scroller (.glm-body). The state only
+     changes when the threshold is crossed, so a scroll is not a render. */
+  const [jump, setJump] = useState(false);
+  useEffect(() => {
+    const host = rootRef.current && rootRef.current.closest(".glm-body");
+    if (!host) return undefined;
+    let on = false;
+    const onScroll = () => {
+      const v = showNewest(host.scrollTop, host.clientHeight);
+      if (v !== on) { on = v; setJump(v); }
+    };
+    host.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => host.removeEventListener("scroll", onScroll);
+  }, []);
+  const toNewest = () => {
+    const host = rootRef.current && rootRef.current.closest(".glm-body");
+    if (!host) return;
+    const calm = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    host.scrollTo({ top: 0, behavior: calm ? "auto" : "smooth" });
+  };
   const [draft, setDraft] = useState(() => ({ ...adv, shelf, perPage }));
   const actionsHostRef = useRef(null);
 
@@ -185,7 +228,8 @@ export default function GalleryMobile({
   const tapView = (mid) => (onOpenLightbox || onOpenDetails)(mid);
 
   return (
-    <div className="glm-tab glm-tab-gallery">
+    <div className="glm-tab glm-tab-gallery" ref={rootRef}>
+      <PullToRefresh onRefresh={onPullRefresh} enabled={!similar && !selectMode && !!onPullRefresh}>
       <div className="glm-bar">
         <div className="glm-search">
           <span className="glm-search-icon" onClick={() => submitQuery()} title="Search"><Icon name="search" /></span>
@@ -240,9 +284,18 @@ export default function GalleryMobile({
             )}
           </>
         ) : (
-          <button type="button" className="glm-metal glm-pill-auto" onClick={() => openSheet("sort")}>
-            Sort ▾
-          </button>
+          <>
+            {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. */}
+            <div className="glm-layout" role="group" aria-label="Layout" style={{ marginLeft: "auto" }}>
+              <button type="button" className={layout === "grid" ? "on" : ""} aria-pressed={layout === "grid"}
+                onClick={() => setLayout("grid")}>{"▦"} Grid</button>
+              <button type="button" className={layout === "feed" ? "on" : ""} aria-pressed={layout === "feed"}
+                onClick={() => setLayout("feed")}>{"▭"} Feed</button>
+            </div>
+            <button type="button" className="glm-metal" onClick={() => openSheet("sort")}>
+              Sort ▾
+            </button>
+          </>
         )}
       </div>
 
@@ -265,6 +318,7 @@ export default function GalleryMobile({
         <GalleryGridMobile
           items={items} loading={loading} selectMode={selectMode} selected={selected}
           toggleSelected={toggleSelected} onArmSelect={armSelect} onTapView={tapView}
+          layout={layout} saver={saver} newCount={ns.count} newLabel={ruleText}
         />
       )}
 
@@ -282,6 +336,15 @@ export default function GalleryMobile({
           </button>
         </nav>
       )}
+
+      {/* Q5: the jump rides the scroller once you are a screen down. It sits in a zero-height sticky
+          wrapper so it floats over the list, above the tab bar, without a fixed layer of its own. */}
+      {jump && !similar ? (
+        <div className="glm-newest-wrap">
+          <button type="button" className="glm-newest" onClick={toNewest}>{newestLabel(ns.count)}</button>
+        </div>
+      ) : null}
+      </PullToRefresh>
 
       <MobileSheet open={sheet === "search"} closing={closing} onClose={closeSheet} title="ADVANCED SEARCH">
         <div className="glm-legend">

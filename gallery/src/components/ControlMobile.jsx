@@ -5,6 +5,7 @@ import {
   MarkArt, fmtEvery, BlurToggleTile,
 } from "./ControlPanelOverlay.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import DataSaverRow from "./DataSaverRow.jsx";
 import UpdatePhases, { UpdateRefusal, UPDATE_WHAT } from "./UpdatePhases.jsx";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { subscribe as subscribeBanner, takeOpenIntent, subscribeOpenIntent } from "../notify/bannerStore.js";
@@ -572,6 +573,11 @@ export default function ControlMobile({ account, brandRequest }) {
           This is the surface it matters MOST on: a phone is the machine the owner's
           ruling names as wanting the blur off while the home desktop keeps it. The tile
           takes no span class here; ctm-sec is a full-width block, not the 12-col grid. */}
+      {/* Session Q (Q7): the Data saver row -- Off / Auto on metered / Always, per device. */}
+      <div className="ctm-sec">
+        <DataSaverRow />
+      </div>
+
       <div className="ctm-sec">
         <BlurToggleTile className="mgcp-tile" />
       </div>
