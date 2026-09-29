@@ -130,6 +130,8 @@
 @keyframes m2sheen{0%{left:-60%;}30%{left:130%;}100%{left:130%;}}
 .ach-m2 .rwd{display:inline-block;margin:8px 0 0 8px;font-size:11px;color:var(--gold);border:1px solid #6b5330;background:rgba(230,200,120,.1);border-radius:7px;padding:3px 9px;opacity:0;}
 .ach-m2 .tw.go .rwd{animation:m2fade .4s ease 1.34s forwards;}
+.ach-m2 .rwd.see-folio{cursor:pointer;color:var(--text);border-color:color-mix(in srgb,var(--tc) 55%,transparent);background:color-mix(in srgb,var(--tc) 12%,transparent);}
+.ach-m2 .rwd.see-folio:hover,.ach-m2 .rwd.see-folio:focus-visible{background:color-mix(in srgb,var(--tc) 24%,transparent);outline:none;}
 /* Confetti sheet sits BEHIND the card: .ach-m2 is its own stacking context, so "behind" is
    local z 1 -- under the toast (z 3) and mascot (z 2), above the veil. */
 .m2-conf{position:fixed;top:-3vh;width:7px;height:14px;border-radius:2px;z-index:1;pointer-events:none;animation:m2conffall linear forwards;}

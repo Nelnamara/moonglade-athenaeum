@@ -47,6 +47,7 @@ import { cameFromLoom, readLibraryReturn } from "./lib/loomCrossing.js";
 import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
+import { registerFolioOpener } from "./notify/ach.js";
 import GuideHost from "./help/GuideHost.jsx";
 import { openHelp, OPEN_SURFACE_EVENT } from "./help/helpStore.js";
 import { useGuideIndex } from "./help/helpData.js";
@@ -263,6 +264,9 @@ export default function App({ boot }) {
      registration and one flag, rather than a prop chain from the body-level banner down
      into the overlay's own state. */
   useEffect(() => registerUpdateHost(() => setOverlay("panel")), []);
+  /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. The feat to
+     scroll to is left for the Folio itself (folio/folioFocus.js). */
+  useEffect(() => registerFolioOpener(() => setOverlay("folio")), []);
   // Contact Sheet's two entry points hand it different targets: the Actions
   // menu freezes the explicit selection (ids); the Advanced flyout prints the
   // current collection view (collectionName) -- the same ids-or-collection

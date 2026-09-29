@@ -36,6 +36,7 @@ import useClaimModal from "../hooks/useClaimModal.js";
 import ActivityRow from "../notify/ActivityRow.jsx";
 import { subscribe as subscribeJobs, dismiss as dismissJob, clearFinished as clearFinishedJobs } from "../notify/jobsStore.js";
 import { registerUpdateHost } from "../notify/bannerStore.js";
+import { registerFolioOpener } from "../notify/ach.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "../notify/panelRequest.js";
 import { installStarfallTrigger } from "../moments/starfallTrigger.js";
 import HelpButton from "../help/HelpButton.jsx";
@@ -382,6 +383,8 @@ export default function AppMobile({ boot }) {
      intent up on mount and pushes its update screen. Same two-part contract App.jsx uses
      for the Panel overlay -- see notify/bannerStore.js. */
   useEffect(() => registerUpdateHost(() => setTab("control")), []);
+  /* The earn moment's "See it in the Folio" (notify/ach.js): this shell's door to the Folio. */
+  useEffect(() => registerFolioOpener(() => setFolioOpen(true)), []);
   /* "Show me ›" (the what's-new sheet, Session I 3c), on the phone: the surface's own tab,
      or the Folio. The Loom is a page of its own -- not claimed, so helpStore navigates. */
   useEffect(() => {

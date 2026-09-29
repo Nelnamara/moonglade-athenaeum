@@ -5,6 +5,8 @@ import MobileSheet from "./MobileSheet.jsx";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
+import { VeilBanner, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
+import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
 import "../styles/folio-mobile.css";
@@ -130,12 +132,23 @@ function subFor(a, earnedAt) {
   return "not yet";
 }
 
+// A bucket's count chip/cell. The Feats bucket says what has been FOUND and never out of what: a
+// total would tell the reader how many secrets are left (Session G, 2a).
+function bucketCt(b, revealed) {
+  if (b.key === "feat") return revealed ? featCountText(b.earned) : "???";
+  return fmt(b.earned) + "/" + fmt(b.total);
+}
+
 /* One achievement/tier row -- shared by the ladder list, Milestones,
-   Masteries and Feats. Locked FEATS render as a separate, non-interactive
-   branch (server already sanitizes a hidden feat's id/name/desc/icon before
-   this ever sees it) -- everything else stays clickable whether earned or
-   locked, matching mkTierRow/mkFlatRow's own onClick (fires either way). */
-function Row({ a, ladderName, onOpen }) {
+   Masteries and Feats. A locked FEAT that is listed at all (a visible one; the
+   hidden ones are never sent -- the phone shows their veil as a banner above the
+   Feats list, not as a row) renders as a separate, non-interactive branch --
+   everything else stays clickable whether earned or locked, matching
+   mkTierRow/mkFlatRow's own onClick (fires either way). An earned feat may be
+   mid-glitch-reveal: `frame` is the reveal's frame for this row's 46 px thumb
+   (folio/maskedFeatsCore.revealFrame), null when it is not revealing, and a
+   "NEW" chip stands until the Folio closes. */
+function Row({ a, ladderName, onOpen, frame }) {
   const isFeat = displayBucket(a) === "feat";   // meta folds into feats; streak into masteries
   if (isFeat && !a.earned) {
     return (
@@ -160,19 +173,24 @@ function Row({ a, ladderName, onOpen }) {
     : a.bucket === "milestone" ? "milestone" : "mastery";
   return (
     <button type="button" className={"fm-row " + tierClass + (a.earned ? " earned" : " locked")}
+      data-feat-id={isFeat && a.earned ? a.id : undefined}
       onClick={() => onOpen(a)}>
       <span className="fm-row-gem" />
       <div className="fm-row-thumbwrap">
         <img src={badgeSrc(a.id)} alt="" loading="lazy" draggable={false}
           onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
         {!a.earned && <div className="fm-row-lock">🔒</div>}
+        <RevealLayers id={a.id} frame={frame} />
       </div>
       <div className="fm-row-textcol">
         <div className="fm-row-name">{a.name}</div>
         <div className="fm-row-meta">{meta}</div>
       </div>
       {isFeat ? (
-        <div className="fm-row-rightcol center"><span className="fm-row-glyph">✓</span></div>
+        <div className="fm-row-rightcol center">
+          {frame && frame.ribbon && <span className="mgfm-new">NEW</span>}
+          <span className="fm-row-glyph">✓</span>
+        </div>
       ) : (
         <div className="fm-row-rightcol">
           <span className="fm-row-pill">{a.tier}</span>
@@ -187,6 +205,7 @@ export default function FolioMobile({ onClose }) {
   const folio = useFolio();
   const {
     data, err, vm, earnedAt,
+    veil, frameFor, veilWaiting, foundCount,
     tab, setTab,
     bucketFilter, toggleBucket,
     activeLadder, setActiveLadderId,
@@ -329,12 +348,12 @@ export default function FolioMobile({ onClose }) {
                 <div className="fm-ledgerbox">
                   {vm.buckets.map((b) => {
                     const masked = b.key === "feat" && !data.feats_revealed;
-                    const pct = b.total ? (b.earned / b.total) * 100 : 0;
+                    const pct = b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0);   // feats have no total to fill toward
                     return (
                       <div className="fm-progrow" key={b.key}>
                         <div className="fm-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
                         <div className="fm-bartrack"><i style={{ width: (masked ? 0 : pct) + "%" }} /></div>
-                        <div className="fm-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                        <div className={"fm-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                       </div>
                     );
                   })}
@@ -382,12 +401,11 @@ export default function FolioMobile({ onClose }) {
                 <div className="fm-chipsrow">
                   {vm.buckets.map((b) => {
                     const active = bucketFilter === b.key;
-                    const masked = b.key === "feat" && !data.feats_revealed;
                     const label = b.key === "feat" ? "Feats" : b.label.replace(" Ladders", "");
                     return (
                       <button type="button" key={b.key} className={"fm-chip" + (active ? " on" : "")}
                         onClick={() => toggleBucket(b.key)}>
-                        {label} <span className="fm-chip-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</span>
+                        {label} <span className="fm-chip-ct">{bucketCt(b, data.feats_revealed)}</span>
                       </button>
                     );
                   })}
@@ -486,11 +504,17 @@ export default function FolioMobile({ onClose }) {
 
                 {folio.showFeats && (
                   <>
+                    {/* The phone's Feats (Masked Feats Handoff, C): the veil banner heads the list --
+                        it IS the veil card, so there is no veil row -- then the earned feats, each
+                        with a 46 px thumb the reveal plays on. All found: the gold line replaces the
+                        banner. The header counts what is found and never out of anything. */}
                     <div className="fm-sech feat"><b>Feats</b>
-                      <span className="fm-count feat">{vm.earnedFeats}/{vm.totalFeats}</span>
+                      <span className="fm-count feat">{foundText(foundCount, veil.allFound)}</span>
                     </div>
+                    {veil.show && <VeilBanner maskUrl={veil.maskUrl} riddle={veil.riddle} waiting={veilWaiting} />}
+                    {veil.allFound && <AllFound phone waiting={veilWaiting} />}
                     <div className="fm-listcol">
-                      {folio.filteredFeats.map((a) => <Row key={a.id} a={a} onOpen={openDetail} />)}
+                      {folio.filteredFeats.map((a) => <Row key={a.id} a={a} onOpen={openDetail} frame={frameFor(a.id)} />)}
                     </div>
                   </>
                 )}
@@ -517,8 +541,8 @@ export default function FolioMobile({ onClose }) {
                     return (
                       <div className="fm-progrow" key={b.key}>
                         <div className="fm-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
-                        <div className="fm-bartrack"><i style={{ width: (masked ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)) + "%" }} /></div>
-                        <div className="fm-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                        <div className="fm-bartrack"><i style={{ width: (masked || b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)) + "%" }} /></div>
+                        <div className={"fm-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                       </div>
                     );
                   })}

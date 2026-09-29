@@ -8,6 +8,8 @@ import useScrollLock from "../hooks/useScrollLock.js";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
 import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
+import { VeilCard, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
+import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -63,10 +65,21 @@ function Bar({ pct, variant, tier }) {
   );
 }
 
+// A bucket's count. The Feats bucket says what has been FOUND and never out of what: a total
+// would tell the reader how many secrets are left (Session G, 2a). "???" until a first is earned.
+function bucketCt(b, revealed) {
+  if (b.key === "feat") return revealed ? featCountText(b.earned) : "???";
+  return fmt(b.earned) + "/" + fmt(b.total);
+}
+
 /* One achievement/tier card -- shared by the ladder grid, Milestones,
-   Masteries and Feats (masked hidden feats arrive from the server already
-   sanitized -- id/name/desc/icon replaced -- so this needs no client-side
-   masking logic of its own, just a render branch for the "masked" look).
+   Masteries and Feats.
+
+   A FEAT card (the Feats section) is drawn as the Masked Feats Handoff draws it -- 92 px well,
+   gunmetal band and pill, ruby glow -- and may be mid-glitch-reveal: `frame` is the reveal's
+   frame for this card (folio/maskedFeatsCore.revealFrame), null when it is not revealing.
+   Hidden feats no longer arrive here unearned at all: the server sends one riddle and one
+   silhouette for the next (data.feats.masked, drawn by VeilCard), never a card.
 
    Layout matches the DC's own tierCard/flatCard exactly: name + description
    (+ ladder meta, + criteria checklist) in the body, tier pill + points +
@@ -76,35 +89,31 @@ function Bar({ pct, variant, tier }) {
    says "not yet". Criteria checklists (full-toolbox/master-of-the-loom)
    are a real field the DC's own mock predates -- kept per the task's data
    contract and wiki/Folio-of-Honors.md, not a DC omission to second-guess. */
-function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
-  const masked = !a.earned && a.hidden;
+function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame }) {
   const isFeat = displayBucket(a) === "feat";   // meta folds into feats (no points, "for the glory")
   const tierClass = "mgfo-t-" + (a.tier || "common");
-  // Masked cards keep the mystery art (the id is sanitized anyway); every real badge
-  // takes the webp-first ladder -- badgeHop returns false for the mystery src, so the
-  // handler below still falls through to the old "remove the element" behaviour.
-  const badgeUrl = masked
-    ? "/branding/mystery/secret_feat.png"
-    : badgeSrc(a.id);
-  const desc = masked ? "Hidden until earned" : commentary(a, reveal);
+  const desc = commentary(a, reveal);
   const skinName = a.skin && skinsById && skinsById[a.skin] ? skinsById[a.skin].name : a.skin;
   const sub = a.earned ? (date || "") : "not yet";
 
   return (
     // Click replays this card's earn celebration (Ach/mg-notify.js precedent:
-    // earned-only -- onReplay/replayToast no-ops on a locked/masked card).
-    <div className={"mgfo-card " + tierClass + (a.earned ? " earned" : " locked") + (masked ? " masked" : "")}
+    // earned-only -- onReplay/replayToast no-ops on a locked card).
+    <div className={"mgfo-card " + tierClass + (a.earned ? " earned" : " locked")
+      + (isFeat ? " mgfo-card-feat" : "") + (frame ? " fresh" + (frame.glow ? "" : " pre") : "")}
+      data-feat-id={isFeat && a.earned ? a.id : undefined}
       onClick={() => onReplay && onReplay(a)}>
       <span className="mgfo-card-gem" aria-hidden="true" />
       <div className="mgfo-card-ico">
-        <span className="mgfo-card-emoji" aria-hidden="true">{masked ? "❓" : a.icon}</span>
-        <img className="mgfo-card-badge" src={badgeUrl} alt="" loading="lazy" draggable={false}
+        <span className="mgfo-card-emoji" aria-hidden="true">{a.icon}</span>
+        <img className="mgfo-card-badge" src={badgeSrc(a.id)} alt="" loading="lazy" draggable={false}
           onError={(e) => { if (!badgeHop(e.currentTarget, a.id)) e.currentTarget.remove(); }} />
+        <RevealLayers id={a.id} frame={frame} />
       </div>
       <div className="mgfo-card-body">
-        <div className="mgfo-card-nm">{masked ? "???" : a.name}</div>
-        <div className={"mgfo-card-ds" + (masked ? "" : revealMod(a, reveal))}>{desc}</div>
-        {a.bucket === "ladder" && ladderName && !masked && (
+        <div className="mgfo-card-nm">{a.name}</div>
+        <div className={"mgfo-card-ds" + revealMod(a, reveal)}>{desc}</div>
+        {a.bucket === "ladder" && ladderName && (
           <div className="mgfo-card-meta">{ladderName} · {fmt(a.threshold)}</div>
         )}
         {a.criteria && a.criteria.length > 0 && (
@@ -114,16 +123,17 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
             ))}
           </div>
         )}
-        {!masked && a.skin && <div className="mgfo-flag">❖ unlocks {skinName} skin</div>}
-        {!masked && a.banner_reward && <div className="mgfo-flag">⚑ unlocks a banner</div>}
+        {a.skin && <div className="mgfo-flag">❖ unlocks {skinName} skin</div>}
+        {a.banner_reward && <div className="mgfo-flag">⚑ unlocks a banner</div>}
       </div>
       <div className="mgfo-card-side">
-        {!masked && <span className="mgfo-pill">{isFeat ? "feat" : a.tier}</span>}
+        <span className="mgfo-pill">{isFeat ? "feat" : a.tier}</span>
         <span className="mgfo-card-pts">
-          {a.points ? "+" + a.points + " pts" : (isFeat && !masked ? "for the glory" : "")}
+          {a.points ? "+" + a.points + " pts" : (isFeat ? "for the glory" : "")}
         </span>
-        {!masked && <span className="mgfo-card-subl">{sub}</span>}
+        <span className="mgfo-card-subl">{sub}</span>
       </div>
+      {frame && frame.ribbon && <div className="mgfm-ribbon">NEWLY FOUND</div>}
     </div>
   );
 }
@@ -131,7 +141,7 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay }) {
 // spanWrap: the DC's own tierCard/flatCard helper (wrapStyle/innerStyle) --
 // a trailing ODD card spans both grid columns and centers at half width,
 // instead of stretching full-width alone on its own row.
-function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, onReplay }) {
+function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, onReplay, frameFor }) {
   if (!items.length) return emptyLabel ? <div className="mgfo-empty-mini">{emptyLabel}</div> : null;
   return (
     <div className="mgfo-cardgrid">
@@ -140,7 +150,7 @@ function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, 
         return (
           <div key={a.id} className={"mgfo-card-wrap" + (lastOdd ? " last-odd" : "")}>
             <AchCard a={a} ladderName={ladderName} date={earnedAt[a.id]} skinsById={skinsById}
-              reveal={reveal} onReplay={onReplay} />
+              reveal={reveal} onReplay={onReplay} frame={frameFor ? frameFor(a.id) : null} />
           </div>
         );
       })}
@@ -152,6 +162,7 @@ export default function FolioOverlay({ onClose }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const {
     data, err, vm, earnedAt,
+    veil, frameFor, veilWaiting, foundCount,
     tab, setTab, q, onSearchChange,
     bucketFilter, toggleBucket, setBucketFilter,
     activeLadder, setActiveLadderId,
@@ -267,7 +278,7 @@ export default function FolioOverlay({ onClose }) {
                     <div className="mgfo-stat">
                       <div className="mgfo-stat-lab feat">Feats</div>
                       <div className="mgfo-stat-val feat">{data.feats_revealed ? fmt(vm.earnedFeats) : "???"}</div>
-                      <div className="mgfo-stat-sub">{data.feats_revealed ? "of " + fmt(vm.totalFeats) + " feats" : "cloaked"}</div>
+                      <div className="mgfo-stat-sub">{data.feats_revealed ? "found" : "cloaked"}</div>
                     </div>
                   </div>
                 </div>
@@ -314,12 +325,12 @@ export default function FolioOverlay({ onClose }) {
                       <div className="mgfo-ledger">
                         {vm.buckets.map((b) => {
                           const masked = b.key === "feat" && !data.feats_revealed;
-                          const pct = b.total ? (b.earned / b.total) * 100 : 0;
+                          const pct = b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0);   // feats have no total to fill toward
                           return (
                             <div className="mgfo-progrow" key={b.key}>
                               <div className="mgfo-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
                               <Bar pct={masked ? 0 : pct} />
-                              <div className="mgfo-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                              <div className={"mgfo-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                             </div>
                           );
                         })}
@@ -555,13 +566,23 @@ export default function FolioOverlay({ onClose }) {
 
                     {showFeats && (
                       <>
+                        {/* The Feats section (Masked Feats Handoff, A): the earned feats in the order
+                            they were found, then ONE veil card whatever the number left -- or the
+                            gold line when none is. The header counts what is found and never out of
+                            anything. The section stays cloaked until the first is earned. */}
                         <div className="mgfo-sec-h feat">
-                          <b>Feats of the Athenaeum</b><span>no points — done for the glory. Cloaked until the first is earned.</span>
+                          <b>Feats of the Athenaeum</b><span>no points — done for the glory</span>
                           <i className="mgfo-flex1" />
-                          <span className="mgfo-count feat">{vm.earnedFeats}/{vm.totalFeats}</span>
+                          <span className="mgfo-count feat">{foundText(foundCount, veil.allFound)}</span>
                         </div>
-                        <CardGrid items={filteredFeats} earnedAt={earnedAt} skinsById={vm.skinsById}
-                          reveal={reveal} onReplay={replayToast} />
+                        <div className="mgfo-featgrid">
+                          {filteredFeats.map((a) => (
+                            <AchCard key={a.id} a={a} date={earnedAt[a.id]} skinsById={vm.skinsById}
+                              reveal={reveal} onReplay={replayToast} frame={frameFor(a.id)} />
+                          ))}
+                          {veil.show && <VeilCard maskUrl={veil.maskUrl} riddle={veil.riddle} waiting={veilWaiting} />}
+                          {veil.allFound && <AllFound waiting={veilWaiting} />}
+                        </div>
                       </>
                     )}
                   </div>
@@ -588,8 +609,8 @@ export default function FolioOverlay({ onClose }) {
                           return (
                             <div className="mgfo-progrow" key={b.key}>
                               <div className="mgfo-progrow-lab">{b.key === "feat" ? "Feats" : b.label}</div>
-                              <Bar pct={masked ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)} />
-                              <div className="mgfo-progrow-ct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</div>
+                              <Bar pct={masked || b.key === "feat" ? 0 : (b.total ? (b.earned / b.total) * 100 : 0)} />
+                              <div className={"mgfo-progrow-ct" + (b.key === "feat" ? " found" : "")}>{bucketCt(b, data.feats_revealed)}</div>
                             </div>
                           );
                         })}
@@ -673,12 +694,11 @@ export default function FolioOverlay({ onClose }) {
                     <div className="mgfo-catlist">
                       {vm.buckets.map((b) => {
                         const active = bucketFilter === b.key;
-                        const masked = b.key === "feat" && !data.feats_revealed;
                         return (
                           <div key={b.key} className={"mgfo-catrow" + (active ? " on" : "")} onClick={() => toggleBucket(b.key)}>
                             <span className="mgfo-catlab">{b.label}</span>
                             <i className="mgfo-flex1" />
-                            <span className="mgfo-catct">{masked ? "???" : fmt(b.earned) + "/" + fmt(b.total)}</span>
+                            <span className="mgfo-catct">{bucketCt(b, data.feats_revealed)}</span>
                           </div>
                         );
                       })}

@@ -20,6 +20,7 @@
 
 import { apiGet } from "../api.js";
 import { badgeSrc, badgeHop } from "./badgeArt.js";
+import { setFolioFocus } from "../folio/folioFocus.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
@@ -71,6 +72,17 @@ export function isBespoke(a) { return !!(a && a.moment); }
 let _bespoke = 0;                // depth, not a bool: two moments may overlap and compose
 let _pendingDrain = false;       // the dequeue was asked to run while the gate was closed
 const _whenClear = [];           // callers waiting for the celebration layer to be EMPTY
+
+/* THE FOLIO'S DOOR, for a host that has one (the gallery app; the Loom has no Folio). The earn
+   moment of a FEAT offers "See it in the Folio" only when a host has registered how to open it;
+   the click leaves the feat's id for the Folio to scroll to (folio/folioFocus.js) and opens it.
+   The id is the earned feat's own -- the moment is only ever built for a feat already earned. */
+let _folioOpener = null;
+export function registerFolioOpener(fn) {
+  _folioOpener = typeof fn === "function" ? fn : null;
+  return () => { if (_folioOpener === fn) _folioOpener = null; };
+}
+
 
 /* THE MOMENT HOST (review amendment 1). The shell's own "play this feat's moment": a
    function taking the achievement and returning a Promise that settles when the moment has
@@ -340,6 +352,16 @@ function _mkMoment(a, opts) {
     + (rwd ? '<span class="rwd"><i class="giftbox"></i>' + esc(rwd) + "</span>" : "")
     + '</div><div class="flash"></div></div>';
   tw.innerHTML = '<div class="mglow"></div>' + toastHTML;
+  if (opts.folioLink && _folioOpener) {
+    const go = document.createElement("span");
+    go.className = "rwd see-folio"; go.setAttribute("role", "button"); go.tabIndex = 0;
+    go.textContent = "See it in the Folio";
+    const open = () => { setFolioFocus(a.id); try { _folioOpener(); } catch { /* the Folio is best-effort */ } };
+    go.addEventListener("click", open);        // the moment's own click then dismisses it
+    go.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); m.click(); } });
+    const body = tw.querySelector(".tbody");
+    if (body) body.appendChild(go);
+  }
   stage.appendChild(tw); m.appendChild(stage);
   const cap = tw.querySelector(".cap");
   if (opts.badge === false) {                    // summary: trophy in the well
@@ -759,7 +781,7 @@ function _drain() {
   _chime(tier);
   const built = e.replay
     ? _mkMoment(a, { eyebrow: "Achievement · Replay", line: (e.opts || {}).line })
-    : _mkMoment(a, {});
+    : _mkMoment(a, { folioLink: tier === "feat" });
   // `replay: true` -- see _flair. A replay casts no bespoke moment, so a bespoke feat's Folio
   // card keeps the ordinary feat fanfare.
   _flair(built, a, e.replay ? { replay: true } : undefined);

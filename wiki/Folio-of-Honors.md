@@ -39,9 +39,20 @@ can see *which* piece you're still missing rather than just "2 / 3".
 
 There is a fourth category — **Feats of the Athenaeum** — and it stays completely
 cloaked. No tab, no rail entry, no placeholder count, until the day you earn your first
-one. After that it appears as its own section with the rest still masked as **???**.
-Feats are worth **no points** on purpose, so your score can never quietly hint that one
-is out there. They're found by playing, not by reading. Good luck.
+one. After that it appears as its own section: the feats you have found, in the order you
+found them, and after them a single dashed **veil** card holding a riddle and the shadow
+of a badge. It is always one card, however many are left, so nothing here tells you how
+many secrets remain — the section's count only ever says how many you have **found**.
+Solve the riddle and the shadow becomes the feat: the card flickers, snaps to its badge
+and wears a **newly found** ribbon until you close the Folio, and the next riddle takes
+its place. Find them all and the veil gives way to a line saying so. (With reduced motion
+turned on, the card simply appears at rest with its ribbon.) The search box never matches
+the veil. On a phone the veil is a banner heading the Feats list, and new finds carry a
+**NEW** chip. Feats are worth **no points** on purpose, so your score can never quietly
+hint that one is out there. They're found by playing, not by reading. Good luck.
+
+A feat's earn moment carries a **See it in the Folio** button that opens the Folio at its
+card.
 
 ## Rarity and points
 

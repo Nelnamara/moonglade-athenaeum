@@ -4601,6 +4601,12 @@ ${"=".repeat(48)}
     return true;
   }
 
+  // ../gallery/src/folio/folioFocus.js
+  var _focus = null;
+  function setFolioFocus(id) {
+    _focus = typeof id === "string" && id ? id : null;
+  }
+
   // ../gallery/src/notify/ach.js
   var data = null;
   function isBespoke(a) {
@@ -4609,6 +4615,7 @@ ${"=".repeat(48)}
   var _bespoke = 0;
   var _pendingDrain = false;
   var _whenClear = [];
+  var _folioOpener = null;
   var _momentHost = null;
   function registerMomentHost(fn) {
     _momentHost = typeof fn === "function" ? fn : null;
@@ -4821,6 +4828,30 @@ ${"=".repeat(48)}
     else if (a.banner_reward) rwd = "Unlocks a banner";
     const toastHTML = '<div class="toast"><div class="cap"></div><div class="tbody"><div class="u">' + esc(opts.eyebrow || "New Achievement") + '</div><div class="n">' + esc(a.name) + '</div><div class="r">' + esc(line) + "</div>" + (opts.pill === false ? "" : '<span class="tier-pill">' + esc(tier) + "</span>") + (a.points && opts.pill !== false ? '<span class="pts-pill">+' + (Number(a.points) || 0) + "</span>" : "") + (rwd ? '<span class="rwd"><i class="giftbox"></i>' + esc(rwd) + "</span>" : "") + '</div><div class="flash"></div></div>';
     tw.innerHTML = '<div class="mglow"></div>' + toastHTML;
+    if (opts.folioLink && _folioOpener) {
+      const go = document.createElement("span");
+      go.className = "rwd see-folio";
+      go.setAttribute("role", "button");
+      go.tabIndex = 0;
+      go.textContent = "See it in the Folio";
+      const open2 = () => {
+        setFolioFocus(a.id);
+        try {
+          _folioOpener();
+        } catch {
+        }
+      };
+      go.addEventListener("click", open2);
+      go.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open2();
+          m.click();
+        }
+      });
+      const body = tw.querySelector(".tbody");
+      if (body) body.appendChild(go);
+    }
     stage.appendChild(tw);
     m.appendChild(stage);
     const cap = tw.querySelector(".cap");
@@ -5135,7 +5166,7 @@ ${"=".repeat(48)}
     const e = _q.shift();
     const a = e.a, tier = a.tier || "common";
     _chime(tier);
-    const built = e.replay ? _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: (e.opts || {}).line }) : _mkMoment(a, {});
+    const built = e.replay ? _mkMoment(a, { eyebrow: "Achievement \xB7 Replay", line: (e.opts || {}).line }) : _mkMoment(a, { folioLink: tier === "feat" });
     _flair(built, a, e.replay ? { replay: true } : void 0);
     if (e.replay) _bind(e, built);
     _cur = built.m;

@@ -2626,6 +2626,17 @@ body.mg-moment-up > #root {
 .ach-m2 .tw.go .rwd {
   animation: m2fade .4s ease 1.34s forwards;
 }
+.ach-m2 .rwd.see-folio {
+  cursor: pointer;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--tc) 55%, transparent);
+  background: color-mix(in srgb, var(--tc) 12%, transparent);
+}
+.ach-m2 .rwd.see-folio:hover,
+.ach-m2 .rwd.see-folio:focus-visible {
+  background: color-mix(in srgb, var(--tc) 24%, transparent);
+  outline: none;
+}
 .m2-conf {
   position: fixed;
   top: -3vh;

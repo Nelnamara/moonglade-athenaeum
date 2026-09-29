@@ -3,6 +3,11 @@ import { apiGet } from "../api.js";
 import { sendAchEvent } from "../notify/achNonce.js";
 import { noticeAchievements } from "../notify/ach.js";
 import { peek, put } from "./swrCache.js";
+import useAccountPrefs from "./useAccountPrefs.js";
+import { takeFolioFocus } from "../folio/folioFocus.js";
+import {
+  SEEN_KEY, REVEAL, orderFeats, unseenFeatIds, nextSeen, veilState, revealFrame,
+} from "../folio/maskedFeatsCore.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -274,6 +279,23 @@ export default function useFolio() {
   const scrIvRef = useRef({});
   const scrTRef = useRef({});
   const mountedRef = useRef(true);
+
+  // ---- Masked feats (Session G). `seen` is the account's record of which earned feats it has
+  // been shown (the wave-1 store, key SEEN_KEY); an earned feat NOT on it plays the glitch
+  // reveal once, on the first Folio view after the earn. `freshIds` are the feats revealing
+  // in THIS visit (they keep their ribbon until the Folio closes, then are on the record);
+  // `clock` is how many milliseconds of the Feats section the reader has actually had on
+  // screen -- the reveal's own timeline, paused while they are on another tab. ----
+  const prefs = useAccountPrefs();
+  const seenRaw = prefs.get(SEEN_KEY, undefined);
+  const [focusId] = useState(() => takeFolioFocus());
+  const [freshIds, setFreshIds] = useState(() => new Set());
+  const [clock, setClock] = useState(0);
+  const [scrollTarget, setScrollTarget] = useState(null);
+  const clockRef = useRef(0);
+  const startRef = useRef({});          // id -> the clock reading when it became new
+  const wroteRef = useRef(new Set());   // ids whose "seen" write has been sent
+  const introRef = useRef(false);       // the one time the Folio steers itself to the Feats
   // The REAL celebration moment currently on screen (Ach.replay()'s handle,
   // tagged with the achievement id it belongs to) -- NOT React-rendered; it
   // lives in its own DOM node appended straight to document.body by
@@ -532,7 +554,9 @@ export default function useFolio() {
   const filteredActiveTiers = activeLadder ? activeLadder.tiers.filter((t) => matchesQuery(t, qlc)) : [];
   const filteredMilestones = vm ? vm.milestones.filter((a) => matchesQuery(a, qlc)) : [];
   const filteredMasteries = vm ? vm.masteries.filter((a) => matchesQuery(a, qlc)) : [];
-  const filteredFeats = vm ? vm.feats.filter((a) => matchesQuery(a, qlc)) : [];
+  // Earned feats stand in the order they were found; the search filters them like any other
+  // card. The veil is never one of them (see `veil` below).
+  const filteredFeats = vm ? orderFeats(vm.feats.filter((a) => matchesQuery(a, qlc)), data.earned_at) : [];
 
   // ---- "Every rung, every ladder" (desktop-only, Folio of Honors.dc.html's
   // showGroups/ladderGroups): every ladder's OWN filtered tiers, grouped --
@@ -560,8 +584,83 @@ export default function useFolio() {
     (!showFeats || filteredFeats.length === 0)
   );
 
+  // ---- THE VEIL AND THE REVEAL -------------------------------------------------------
+  const featsPayload = (data && data.feats) || null;
+  const veil = veilState(featsPayload, { query: qlc, unleashed });
+  const reduced = reducedMotion();
+  // The Feats section is on screen: its own tab, and not filtered out by a category.
+  const featsOnScreen = tab === "all" && showFeats;
+
+  // Which earned feats are new to this account. Runs when the roster and the account's own
+  // record have both arrived, and again if a new earn lands while the Folio is open. The FIRST
+  // time it finds any (or when the earn moment's link asked for one) it steers the Folio to
+  // the All tab and scrolls the card into view -- "the Folio opens scrolled to the Feats".
+  useEffect(() => {
+    if (!data || !prefs.ready) return;
+    const feats = (data.achievements || []).filter((a) => displayBucket(a) === "feat");
+    const fresh = unseenFeatIds({ feats, earnedAt: data.earned_at, seen: seenRaw })
+      .filter((id) => !Object.prototype.hasOwnProperty.call(startRef.current, id));
+    if (fresh.length) {
+      fresh.forEach((id) => { startRef.current[id] = clockRef.current; });
+      setFreshIds((prev) => new Set([...prev, ...fresh]));
+    }
+    if (!introRef.current) {
+      const aim = (focusId && feats.some((a) => a.id === focusId && a.earned)) ? focusId : fresh[fresh.length - 1];
+      if (aim) {
+        introRef.current = true;
+        setTab("all");
+        setBucketFilter(null);
+        setScrollTarget(aim);
+      }
+    }
+  }, [data, prefs.ready, seenRaw, focusId]);
+
+  // Scroll the aimed-at card into view once it is on the page.
+  useEffect(() => {
+    if (!scrollTarget || !featsOnScreen) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector('[data-feat-id="' + String(scrollTarget).replace(/["\\]/g, "") + '"]');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "auto" });
+      setScrollTarget(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollTarget, featsOnScreen, vm]);
+
+  // The reveal's clock: runs only while a revealing feat is unfinished AND the Feats section is
+  // on screen, so a reader who tabs away mid-reveal does not miss it.
+  const unfinished = [...freshIds].some((id) => (clock - (startRef.current[id] || 0)) < REVEAL.VEIL + REVEAL.VEIL_FADE);
+  useEffect(() => {
+    if (!featsOnScreen || !unfinished) return;
+    const t0 = performance.now() - clockRef.current;
+    const iv = setInterval(() => {
+      clockRef.current = performance.now() - t0;
+      setClock(clockRef.current);
+    }, 30);
+    return () => clearInterval(iv);
+  }, [featsOnScreen, unfinished]);
+
+  // The one-time "seen" write: only when the reader has actually had the revealing card on
+  // screen for the whole reveal, and never on open. It records every earned feat now on the
+  // page, so a first write cannot leave an older feat "new" next time.
+  useEffect(() => {
+    if (!data || !prefs.ready) return;
+    const due = [...freshIds].filter((id) => !wroteRef.current.has(id)
+      && (clock - (startRef.current[id] || 0)) >= REVEAL.VEIL);
+    if (!due.length) return;
+    due.forEach((id) => wroteRef.current.add(id));
+    const feats = (data.achievements || []).filter((a) => displayBucket(a) === "feat");
+    prefs.set(SEEN_KEY, nextSeen(seenRaw, feats));
+  }, [clock, freshIds, data, prefs.ready]);
+
+  // One card's reveal frame (null when it is not revealing) and whether the next veil must
+  // still wait for the reveal to reach its last beat.
+  const frameFor = (id) => (freshIds.has(id)
+    ? revealFrame(featsOnScreen ? clock - (startRef.current[id] || 0) : 0, reduced) : null);
+  const veilWaiting = [...freshIds].some((id) => !frameFor(id).veilIn);
+
   return {
     data, err, vm, earnedAt,
+    veil, frameFor, veilWaiting, freshIds, foundCount: vm ? vm.earnedFeats : 0,
     tab, setTab, q, setQ, onSearchChange,
     bucketFilter, toggleBucket, setBucketFilter,
     activeLadderId, setActiveLadderId, ladderId, activeLadder,
