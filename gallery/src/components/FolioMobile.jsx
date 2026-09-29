@@ -3,6 +3,8 @@ import useFolio, { NARRATOR_LINES, commentary, revealMod, fmt, displayBucket } f
 import Icon from "../icons/Icons.jsx";
 import MobileSheet from "./MobileSheet.jsx";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
 import "../styles/folio-mobile.css";
@@ -265,6 +267,8 @@ export default function FolioMobile({ onClose }) {
             platform's. */}
         <div className="fm-titlechip"><Icon name="folio" /> Folio</div>
         <div className="fm-fill" />
+        {/* The guide's "?" (Session I decision 2): Help on the Folio's page. */}
+        <HelpButton surface="folio" className="fm-help" />
         {/* Poke until it snaps -- 5 real, server-persisted pokes (the SAME
             /api/ach-event narrator_pokes counter the classic Trophy Hall's
             Ach.poke() and desktop's own header avatar use) earns "Triggered"
@@ -273,6 +277,9 @@ export default function FolioMobile({ onClose }) {
           <span className="fm-avatar-dot" />
         </button>
       </div>
+
+      {/* The Folio's first-run guide (Session I decision 1), phone layout. */}
+      <GuideHost surface="folio" phone />
 
       {!data && !err && <div className="fm-loading">opening the record…</div>}
       {err && <div className="fm-loading">couldn't load the Folio — {err}</div>}

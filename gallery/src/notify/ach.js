@@ -115,6 +115,15 @@ function _resume() {
   _drain();
 }
 
+/* Is the celebration layer quiet right now: no marking read in the air, nothing queued,
+   nothing presenting, no hold? Read-only. The post-update "what's new" toast (help/
+   whatsNew.js, Session I decision 3) queues AFTER the achievement toasts of the same sign-in,
+   and polls this rather than joining the queue -- it is a notice, not a celebration, and must
+   never hold one up. */
+export function celebrationsIdle() {
+  return !_marking && !_q.length && !_cur && !_live.size && !_heldOff();
+}
+
 export function beginBespokeMoment() { _bespoke++; }
 export function endBespokeMoment() {
   if (_bespoke > 0) _bespoke--;

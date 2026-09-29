@@ -6,6 +6,8 @@ import useFolio, { BUCKETS, NARRATOR_LINES, commentary, revealMod, fmt, displayB
 import useHealth from "../hooks/useHealth.js";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { badgeSrc, badgeHop } from "../notify/badgeArt.js";
+import HelpButton from "../help/HelpButton.jsx";
+import GuideHost from "../help/GuideHost.jsx";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -233,8 +235,11 @@ export default function FolioOverlay({ onClose }) {
               <span className="mgfo-search-ic"><Icon name="search" /></span>
               <input type="text" placeholder="search the record…" value={q} onChange={onSearchChange} />
             </div>
+            <HelpButton surface="folio" className="mgv-help" />
             <button type="button" className="mgv-x" onClick={handleClose} aria-label="Close">×</button>
           </div>
+          {/* The Folio's first-run guide (Session I decision 1). */}
+          <GuideHost surface="folio" />
 
           {!data && !err && <div className="mgh-loading">opening the record…</div>}
           {err && <div className="mgh-loading">couldn't load the Folio — {err}</div>}

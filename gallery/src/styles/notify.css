@@ -274,6 +274,17 @@
 /* Thumb is a background-image span, not <img src> -- the design-spec toast icon rule. */
 .mg-toast .mt-thumb{width:34px;height:34px;border-radius:6px;background-position:center;background-size:cover;background-repeat:no-repeat;flex:none;}
 .mg-toast .mt-x{background:none;border:none;color:var(--overlay0);cursor:pointer;font-size:14px;padding:0 1px;flex:none;line-height:1;}
+/* The post-update toast (Session I 3b, Help and First Run Handoff.dc.html section C ①): Nel's
+   30px portrait in the glyph's place, the version in mono, one bordered "What's new" button.
+   Its own card face -- the base surface with an even border, no kind stripe -- because it is
+   news about the app, not a result. */
+.mg-toast .mt-avatar{width:30px;height:30px;border-radius:50%;flex:none;background-color:var(--surface0);background-position:center;background-size:cover;background-repeat:no-repeat;}
+.mg-toast .mt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;}
+.mg-toast .mt-act{flex:none;align-self:center;font:700 10.5px/1 var(--font-system,system-ui,sans-serif);padding:5px 10px;border-radius:8px;border:1px solid var(--lavender);background:none;color:var(--text);cursor:pointer;white-space:nowrap;}
+.mg-toast .mt-act:hover{background:color-mix(in srgb,var(--lavender) 14%,transparent);}
+.mg-toast.whatsnew{align-items:center;background:var(--base);border:1px solid var(--surface1);border-radius:12px;padding:10px 12px;}
+.mg-toast.whatsnew .mt-title{font-size:12px;font-weight:400;}
+.mg-toast.whatsnew .mt-msg{font-size:10.5px;}
 .mg-toast .mt-x:hover{color:var(--text);}
 @keyframes mg-toast-in{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
 @keyframes mg-toast-out{to{opacity:0;transform:translateX(20px);}}

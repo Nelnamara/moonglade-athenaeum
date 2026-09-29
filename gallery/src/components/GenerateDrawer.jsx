@@ -23,6 +23,7 @@ import Darkroom from "./Darkroom.jsx";
 import RunsReel, { isRunningJob } from "./RunsReel.jsx";
 import HistoryStrip, { RunTip } from "./HistoryStrip.jsx";
 import { askPicker, isPickerOpen } from "./PickerHost.jsx";
+import HelpButton from "../help/HelpButton.jsx";
 import "../styles/dock.css";
 
 /* The Generate DOCK — the designed bottom-center glass reshell of the pilot's
@@ -805,6 +806,7 @@ function GenerateDrawer({ open, onClose, account, request }) {
             onClick={() => setHistoryOpen((v) => !v)}>
             {historyOpen ? "Hide history" : "History"}
           </button>
+          <HelpButton surface="dock" className="mgdock-help" />
           <button type="button" className="mgdock-x" onClick={closeDrawer}
             title="Close the dock — runs keep going">×</button>
         </div>

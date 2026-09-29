@@ -3,6 +3,7 @@ import NavSpine from "./NavSpine.jsx";
 import CostBadge from "./CostBadge.jsx";
 import CustomSlider from "./CustomSlider.jsx";
 import ActivityChip from "../notify/ActivityChip.jsx";
+import HelpButton from "../help/HelpButton.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
 import "../styles/shell.css";
@@ -255,6 +256,14 @@ export default function SeparatorBar({
             {claiming ? "claiming…" : "+" + Number(claimCredits).toLocaleString() + " claim"}
           </button>
         ) : null}
+
+        {/* The guide's "?" (Session I decision 2; the handoff's section A header draws it
+            just before Generate). In the hero state it stands before the banner's own
+            Generate button (Banner.jsx) -- this row has no room to spare at 1280 and would
+            wrap onto a second line -- so here it shows only in the slim state, beside the
+            slim launcher, and below 1200 px, where this row already wraps and the banner's
+            row has no room either (help.css). */}
+        <HelpButton surface="gallery" className={"mgx-sephelp" + (slim ? " slim" : "")} />
 
         {/* slim-state Generate launcher — the banner's big button is hidden then */}
         {slim ? (

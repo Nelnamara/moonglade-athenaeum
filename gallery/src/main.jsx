@@ -8,6 +8,8 @@ import SetupWizard from "./components/SetupWizard.jsx";
 import SetupWizardMobile from "./components/SetupWizardMobile.jsx";
 import useIsMobile from "./hooks/useIsMobile.js";
 import { installNotify, NotifyRoot } from "./notify/index.jsx";
+import HelpRoot from "./help/HelpRoot.jsx";
+import { markWhatsNewSeen } from "./help/whatsNew.js";
 import { syncBlurClass } from "./lib/blurPref.js";
 import { syncPairing } from "./lib/fonts.js";
 import { rememberLibrary, libraryPlace } from "./lib/loomCrossing.js";
@@ -118,14 +120,30 @@ function Root() {
       <>
         {isMobile ? <SetupWizardMobile boot={boot} /> : <SetupWizard boot={boot} />}
         <NotifyRoot />
+        {boot.needs_key || boot.catalog_empty ? <WizardNotesVersion /> : null}
       </>
     );
   }
+  /* <HelpRoot/> -- the guide's page-level layers (Help, About, what's new; Session I),
+     mounted beside the notify root on the real gallery only. `whatsNew`: this is where the
+     first sign-in after an update lands, so this is where its toast is raised. */
   return (
     <>
       {isMobile ? <AppMobile boot={boot} /> : <App boot={boot} />}
       <NotifyRoot />
+      <HelpRoot boot={boot} whatsNew />
     </>
   );
+}
+
+/* An install ONBOARDED through the setup wizard (no key yet, or an empty catalog) is on this
+   version from the start: it was never "updated" to it, so the post-update toast must not
+   greet its first gallery load. Not for a wizard shown only to fetch the art pack -- that is
+   an existing install, very often one that has just been updated to a release with a new
+   pack, and its toast is still owed. Draws nothing; notes the version once
+   (help/whatsNew.js). */
+function WizardNotesVersion() {
+  React.useEffect(() => { markWhatsNewSeen(); }, []);
+  return null;
 }
 createRoot(document.getElementById("root")).render(<Root />);
