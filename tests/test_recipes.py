@@ -98,7 +98,7 @@ def _resolver(gate=True):
         gate=(lambda params: (params, [])) if gate else None)
 
 
-def test_build_request_attaches_recipes_after_the_gate():
+def test_build_request_carries_the_recipes_through_the_gate():
     req = core.build_request({"version_id": "1983308862240288769", "prompt": "a moon",
                               "recipeIds": [RID]}, mode="image", resolve=_resolver())
     assert req.parameters["recipeIds"] == [RID]
@@ -655,3 +655,115 @@ def test_generate_answers_a_recipe_refusal_structured(tmp_path, monkeypatch):
                                         "prompt": "a moon", "recipeIds": [RID]}).get_json()
     assert d["recipe_error"]["reason"] == "model_mismatch"
     assert d["error"] == d["recipe_error"]["copy"]
+
+
+# ---------------------------------------------------------------------------
+# Integration with the Tsubaki.3 dock (lanes w2-gen x w2-recipes). The recipe ids are
+# attached right after _gen_parameters, so w2-gen's creativity step-down (built params'
+# recipeIds, review S3) sees them; every forbidden combination is checked again after the
+# gate. The client half of this seam is loom/test/recipes-dock.test.js.
+# ---------------------------------------------------------------------------
+
+from tests.test_tsubaki3_generate import T3, Rest, ctx_payload, road  # noqa: E402
+
+
+@pytest.fixture
+def t3rest(monkeypatch):
+    fake = Rest()
+    monkeypatch.setattr(core, "_rest_get", fake)
+    return fake
+
+
+def _t3(**kw):
+    p = {"version_id": T3, "prompt": "<p>", "mode": "pro", "width": 1024, "height": 1024,
+         "prompt_helper": True, "creativity": "medium"}
+    p.update(kw)
+    return p
+
+
+@pytest.mark.parametrize("asked,used", [("medium", "low"), ("low", "off"), ("off", "off")])
+def test_a_recipe_request_steps_creativity_down_in_the_built_params(asked, used, t3rest):
+    req = road(_t3(creativity=asked, prompt_helper=asked != "off", recipeIds=[RID]))
+    assert req.parameters["recipeIds"] == [RID]
+    assert req.parameters["promptHelper"] == {"creativity": used,
+                                              "forcePromptHelperDetectionSide": "server"}
+    receipts = [a for a in req.adjusted if a["field"] == "promptHelper"]
+    assert bool(receipts) == (asked != "off")
+    if receipts:
+        assert receipts[0]["asked"] == asked and receipts[0]["used"] == used
+
+
+@pytest.mark.parametrize("asked", ["off", "low", "medium"])
+def test_without_recipes_creativity_goes_out_as_asked(asked, t3rest):
+    for extra in ({}, {"recipeIds": []}, {"recipeIds": None}):
+        req = road(_t3(creativity=asked, prompt_helper=asked != "off", **extra))
+        assert req.parameters["promptHelper"]["creativity"] == asked
+        assert "recipeIds" not in req.parameters
+        assert not [a for a in req.adjusted if a["field"] == "promptHelper"]
+
+
+def test_both_recipe_steps_hand_back_the_same_object_without_recipes():
+    params = {"modelId": "1", "prompts": "x"}
+    for payload in ({}, {"recipeIds": None}, {"recipeIds": []}):
+        assert rec.attach_to_built(params, payload) is params
+        assert rec.attach_to_built(params, payload, gated=False) is params
+        assert rec.apply_to_params(params, payload) is params
+
+
+def test_ids_that_rode_through_the_gate_are_not_copied_again():
+    built = rec.attach_to_built({"modelId": "1"}, {"recipeIds": [RID2, RID]})
+    assert built["recipeIds"] == [RID2, RID]
+    assert rec.apply_to_params(built, {"recipeIds": [RID2, RID]}) is built
+
+
+def test_a_no_recipe_payload_builds_the_bytes_it_did_before_the_recipe_steps(t3rest, monkeypatch):
+    """The Tsubaki.3 road with the two recipe steps in place, against the same road with both
+    replaced by a pass-through (the road as it was before recipes existed): same JSON."""
+    payloads = [_t3(), _t3(creativity="low"), ctx_payload(),
+                _t3(loras=[{"version_id": "L1", "weight": 0.7}])]
+    real = [json.dumps(road(dict(p)).parameters) for p in payloads]
+    monkeypatch.setattr(rec, "attach_to_built", lambda params, payload, gated=True: params)
+    monkeypatch.setattr(rec, "apply_to_params", lambda params, payload, gated=True: params)
+    before = [json.dumps(road(dict(p)).parameters) for p in payloads]
+    assert real == before
+
+
+def test_recipes_beside_context_images_refuse_in_one_wording_and_nothing_is_priced(t3rest):
+    # the drawer's own context images (refused at build, before the gate)
+    with pytest.raises(core.PixAIError) as err:
+        road(ctx_payload(recipeIds=[RID]))
+    assert str(err.value) == rec.HELD_WITH_CONTEXT
+    # a reference the gate turns into a context image (refused after the gate)
+    with pytest.raises(core.PixAIError) as err:
+        road(_t3(ref_media_id="701", ref_strength=0.5, recipeIds=[RID]))
+    assert str(err.value) == rec.HELD_WITH_CONTEXT
+    # the gate's own check on a hand-built dict (w2-gen review S4) says the same words
+    with pytest.raises(core.PixAIError) as err:
+        core._gate_image_params(object(), {"prompts": "p", "modelId": T3, "width": 1024,
+                                           "height": 1024, "batchSize": 1,
+                                           "contextImages": ["701"], "recipeIds": [RID]})
+    assert str(err.value) == rec.HELD_WITH_CONTEXT
+    assert t3rest.priced == [], "a refusal is decided before any price read"
+
+
+def test_the_send_backstop_uses_the_same_wording(monkeypatch):
+    fake = FakePixAI()
+    monkeypatch.setattr(core, "_gate_params_for_model", lambda s, p: p)
+    with pytest.raises(core.PixAIError) as err:
+        core.submit_generation(fake, {"modelId": "1", "contextImages": ["9"],
+                                      "recipeIds": [RID]})
+    assert str(err.value) == rec.HELD_WITH_CONTEXT
+    assert not [c for c in fake.calls if c.verb == "mutate"]
+
+
+def test_the_task_price_query_of_a_built_recipe_request_carries_its_recipe_ids(t3rest,
+                                                                             monkeypatch):
+    monkeypatch.setattr(core, "match_kaisuuken", lambda *a, **k: None)
+    req = road(_t3(recipeIds=[RID2, RID]))
+    out = core.price(object(), req)
+    assert out["cost"] == 4000
+    assert t3rest.priced, "the quote was read"
+    for q in t3rest.priced:
+        assert q["recipeIds"] == json.dumps([RID2, RID])
+    # and the quote's query names the very list that would be sent
+    assert json.loads(t3rest.priced[0]["recipeIds"]) == req.parameters["recipeIds"]
