@@ -288,9 +288,9 @@ export default function GalleryMobile({
             {/* Q3: the page's own ▦ Grid | ▭ Feed seg control. Saved per device. */}
             <div className="glm-layout" role="group" aria-label="Layout" style={{ marginLeft: "auto" }}>
               <button type="button" className={layout === "grid" ? "on" : ""} aria-pressed={layout === "grid"}
-                onClick={() => setLayout("grid")}>{"▦"} Grid</button>
+                aria-label="Grid" onClick={() => setLayout("grid")}>{"▦"}<span className="lbl"> Grid</span></button>
               <button type="button" className={layout === "feed" ? "on" : ""} aria-pressed={layout === "feed"}
-                onClick={() => setLayout("feed")}>{"▭"} Feed</button>
+                aria-label="Feed" onClick={() => setLayout("feed")}>{"▭"}<span className="lbl"> Feed</span></button>
             </div>
             <button type="button" className="glm-metal" onClick={() => openSheet("sort")}>
               Sort ▾

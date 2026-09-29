@@ -341,11 +341,11 @@ export default function LightboxMobile({
       </div>
 
       <div className="lbm-bottom">
-        {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
-            on every still picture (renders nothing on a video). */}
         {/* Q1: the placard sits right under the picture, above the meta row and the action row. */}
         <PlacardMobile item={it} items={items} siblings={it.task_id ? sibMap[it.task_id] : null}
           onPick={(k) => { setDragDX(0); setPromptOpen(false); setIndex(k); }} />
+        {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
+            on every still picture (renders nothing on a video). */}
         <TsubakiEditBar item={it} member={member} phone />
         <div className="lbm-metarow">
           {it.model ? <b className="lbm-model">{it.model}</b> : null}
