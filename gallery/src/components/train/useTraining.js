@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost, apiUpload } from "../../api.js";
 import {
-  CAPTION_MAX, GOALS, LONG_TRIGGER_ARCHS, MIN_IMAGES, acceptCostField, archTabs,
-  basicFooterCost, countedItems, defaultBase, imageProblem, loraForDock, markRejected,
+  CAPTION_MAX, GOALS, LONG_TRIGGER_ARCHS, MAX_IMAGES, MIN_IMAGES, acceptCostField, advancedGates,
+  archTabs, basicFooterCost, countedItems, defaultBase, imageProblem, loraForDock, markRejected,
   mergeImages, reuseCandidate, roomLeft, triggerCheck,
 } from "../../gen/trainCore.js";
 
@@ -22,6 +22,17 @@ import {
    retry, an on-disk guard. */
 
 export const USE_LORA_EVENT = "mg-use-lora";
+
+/* Advanced's focus view owns Escape (handoff 3c: "Esc returns to the grid"), the way the
+   Control Panel owns its own ladder: while it is up, App.jsx's capture-phase overlay closer
+   stands aside (it reads this), and the focus view's own listener takes the grid back. */
+let escOwners = 0;
+export function trainOwnsEscape() { return escOwners > 0; }
+export function holdTrainEscape() {
+  escOwners += 1;
+  let held = true;
+  return () => { if (held) { held = false; escOwners -= 1; } };
+}
 
 /* "Use" (handoff 5c): a trained LoRA into the Generate dock (desktop) or the Create tab
    (phone). The hosts listen; this only announces. */
@@ -348,7 +359,17 @@ export function useBasicTraining(setup, csrf) {
 
 /* One advanced draft (handoff 3c, corrected by the 2026-09-28 capture: images are added on the
    Descriptions step, PixAI describes them first -- paid, the only way in -- and a description
-   can be rewritten only after that, up to 1,000 characters). */
+   can be rewritten only after that, up to 1,000 characters). Both the desktop wizard
+   (TrainAdvanced.jsx) and the phone's Advanced steps (TrainMobile.jsx) draw this.
+
+   THE PAID PRESSES, each ONE deliberate confirm naming PixAI's own quoted number:
+   - Describe: the draft's read (GET /api/train/advanced/<id>) carries PixAI's per-task
+     describe quote (`caption_quote`: the count and the total); `describe()` sends exactly that
+     total as accept_credit_cost. The server re-quotes and refuses a different number (409,
+     nothing sent), and the fresh quote is read back for the next ask.
+   - Start: "Next: parameters" asks the run's price (a preview; nothing is spent) and Start
+     sends that number back. The server re-quotes the same way.
+   Neither is ever retried here: a failed press shows its error and waits for another press. */
 export function useAdvancedTraining(setup, csrf, initialDraftId) {
   const [draftId, setDraftId] = useState(initialDraftId || "");
   const [phase, setPhase] = useState(initialDraftId ? "descriptions" : "setup");
@@ -359,12 +380,12 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
   const [detail, setDetail] = useState(null);
   const [edits, setEdits] = useState({});           // mid -> text not yet saved
   const [saving, setSaving] = useState(0);
-  const [capAsk, setCapAsk] = useState(null);       // the describe confirm's quote
-  const [startAsk, setStartAsk] = useState(null);   // the start confirm's quote
+  const [startAsk, setStartAsk] = useState(null);   // the start's quote (a preview)
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [rejected, setRejected] = useState([]);
   const [started, setStarted] = useState(null);
+  const [maybe, setMaybe] = useState(false);
 
   const bases = (setup.cfg && setup.cfg.advanced_bases) || [];
   useEffect(() => {
@@ -383,60 +404,76 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
   useEffect(() => { if (initialDraftId) load(initialDraftId); }, [initialDraftId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = detail ? detail.task.status : "";
-  // While PixAI describes, look again every 4 s (its own page polls every 3).
+  // While PixAI describes, look again every 4 s (its own page polls every 3). A read.
   useEffect(() => {
     if (status !== "captioning") return undefined;
     const t = setInterval(() => { load(); }, 4000);
     return () => clearInterval(t);
   }, [status, load]);
 
-  /* "Next · creates a draft": the one call that creates it, on the press, once. */
+  /* "Next · creates a draft": the one call that creates it, on the press, once. The button
+     disables on press (busy) and a created draft is never created again from here. */
   const createDraft = async () => {
-    if (busy || draftId) { if (draftId) setPhase("descriptions"); return; }
+    if (busy) return;
+    if (draftId) { setPhase("descriptions"); return; }
     setBusy("draft"); setErr("");
     const d = await apiPost("/api/train/advanced/draft", {
       base_model_id: base, title: name, trigger_words: trigger, category: goal, csrf });
-    setBusy("");
-    if (d.error) { setErr(d.error); return; }
+    if (d.error) { setBusy(""); setErr(d.error); return; }
     setDraftId(d.id);
     setPhase("descriptions");
     await load(d.id);
+    setBusy("");
   };
 
   const mediaIds = detail ? detail.task.media_ids : [];
   /* Adding or removing images replaces the draft's set on PixAI (free) -- a press, not an open. */
   const putMedia = async (ids) => {
+    if (!draftId) return false;
     setBusy("media"); setErr(""); setRejected([]);
     const d = await apiPost("/api/train/advanced/" + draftId + "/media", { media_ids: ids, csrf });
-    setBusy("");
     if (d.error) {
+      setBusy("");
       setErr(d.error);
       if (d.rejected_ids) setRejected(d.rejected_ids);
       return false;
     }
     await load();
+    setBusy("");
     return true;
   };
   const addImages = (incoming) => {
     const merged = mergeImages(mediaIds.map((m) => ({ media_id: m, source: "history" })), incoming, "history");
+    if (merged.items.length === mediaIds.length) return Promise.resolve(false);
     return putMedia(merged.items.map((x) => x.media_id));
   };
   const removeImage = (mid) => putMedia(mediaIds.filter((m) => m !== mid));
   const upload = async (files) => {
-    const room = Math.max(0, 100 - mediaIds.length);
+    setErr("");
+    const room = Math.max(0, MAX_IMAGES - mediaIds.length);
     const { ok, rejected: rj } = await uploadTrainingFiles(files, setup.cfg && setup.cfg.image_constraints, room);
     if (ok.length) await addImages(ok);
     if (rj.length) setErr(rj.map((r) => r.name + ": " + r.reason).join(" · "));
   };
 
-  /* Descriptions. A save goes after a 900 ms pause in typing, one at a time per draft, and
-     Describe / Next / Start wait for them all (spend review, finding 9). */
+  /* Descriptions. A save goes after a 900 ms pause in typing (and when the owner leaves the
+     image), one at a time per draft, and Describe / Next / Start wait for them all (spend
+     review, finding 9). Only a changed, non-empty text of 1-1,000 characters is sent. */
   const queue = useRef(Promise.resolve());
   const timers = useRef({});
   const pending = useRef(0);
+  const editsRef = useRef(edits);
+  editsRef.current = edits;
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
   const saveNow = useCallback((mid, text) => {
     const t = String(text || "").trim();
     if (!t || t.length > CAPTION_MAX) return;
+    const cur = detailRef.current && detailRef.current.captions && detailRef.current.captions[mid];
+    if (cur && cur.text === t) {
+      setEdits((e) => { if (e[mid] !== text) return e; const n = { ...e }; delete n[mid]; return n; });
+      return;
+    }
     pending.current += 1;
     setSaving(pending.current);
     queue.current = queue.current.then(async () => {
@@ -445,26 +482,29 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
       setSaving(pending.current);
       if (d.error) { setErr(d.error); return; }
       setEdits((e) => { if (e[mid] !== text) return e; const n = { ...e }; delete n[mid]; return n; });
-      setDetail((cur) => {
-        if (!cur) return cur;
-        const c = { ...(cur.captions || {}) };
+      setDetail((c0) => {
+        if (!c0) return c0;
+        const c = { ...(c0.captions || {}) };
         const old = c[mid] || {};
         c[mid] = { source: "user", text: t, machine_text: old.machine_text !== undefined ? old.machine_text : old.text };
-        return { ...cur, captions: c };
+        return { ...c0, captions: c };
       });
     });
   }, [draftId, csrf]);
   const editCaption = (mid, text) => {
     setEdits((e) => ({ ...e, [mid]: text }));
     clearTimeout(timers.current[mid]);
-    timers.current[mid] = setTimeout(() => saveNow(mid, text), 900);
+    timers.current[mid] = setTimeout(() => { delete timers.current[mid]; saveNow(mid, text); }, 900);
+  };
+  /* Leaving an image (the focus view moves, Esc, the grid) saves its edit now. */
+  const saveOne = (mid) => {
+    if (timers.current[mid] === undefined) return;
+    clearTimeout(timers.current[mid]);
+    delete timers.current[mid];
+    if (editsRef.current[mid] !== undefined) saveNow(mid, editsRef.current[mid]);
   };
   const flush = async () => {
-    for (const [mid, t] of Object.entries(timers.current)) {
-      clearTimeout(t);
-      delete timers.current[mid];
-      if (edits[mid] !== undefined) saveNow(mid, edits[mid]);
-    }
+    for (const mid of Object.keys(timers.current)) saveOne(mid);
     await queue.current;
   };
   useEffect(() => () => { Object.values(timers.current).forEach(clearTimeout); }, []);
@@ -474,80 +514,92 @@ export function useAdvancedTraining(setup, csrf, initialDraftId) {
     return c ? (c.text === null ? null : c.text) : undefined;
   };
   /* Apply a change to many descriptions at once (find/replace, +/- tag, restore automatic):
-     each changed one is saved through the same queue. */
+     each changed one is saved through the same one-at-a-time queue. Answers how many changed. */
   const applyAll = (mids, fn) => {
     let n = 0;
+    const next = {};
     for (const mid of mids) {
       const cur = textOf(mid);
       if (typeof cur !== "string") continue;
-      const next = fn(cur, mid);
-      if (typeof next === "string" && next !== cur) {
-        n += 1;
-        setEdits((e) => ({ ...e, [mid]: next }));
-        saveNow(mid, next);
-      }
+      const out = fn(cur, mid);
+      if (typeof out === "string" && out !== cur) { next[mid] = out; n += 1; }
+    }
+    if (!n) return 0;
+    setEdits((e) => ({ ...e, ...next }));
+    for (const [mid, t] of Object.entries(next)) {
+      clearTimeout(timers.current[mid]);
+      delete timers.current[mid];
+      saveNow(mid, t);
     }
     return n;
   };
   const restoreAutomatic = (mids) => applyAll(mids, (cur, mid) => {
     const c = detail && detail.captions && detail.captions[mid];
-    return c && typeof c.machine_text === "string" ? c.machine_text : null;
+    return c && typeof c.machine_text === "string" && c.machine_text ? c.machine_text : null;
   });
 
-  /* Describe automatically (PAID): the quote first, then the confirm with that total. */
-  const describePreview = async () => {
-    if (busy) return;
+  const captions = (detail && detail.captions) || {};
+  const quote = (detail && detail.caption_quote) || null;
+  const gates = advancedGates({ mediaIds, captions, quote, saving, status, busy });
+
+  /* Describe automatically (PAID; the only way in): ONE press, sending PixAI's own quote --
+     the number on the button -- as the acknowledged amount. */
+  const describe = async () => {
+    if (busy || !gates.describe || !quote) return;
+    const total = quote.total_price;
+    setBusy("describe"); setErr("");
     await flush();
-    setBusy("describe"); setErr("");
-    const d = await apiPost("/api/train/advanced/" + draftId + "/caption", { csrf });
-    setBusy("");
-    if (d.error) { setErr(d.error); return; }
-    setCapAsk(d);
-  };
-  const describeConfirm = async () => {
-    if (busy || !capAsk) return;
-    setBusy("describe"); setErr("");
     const d = await apiPost("/api/train/advanced/" + draftId + "/caption",
-      { confirm: true, accept_credit_cost: capAsk.total_price, csrf });
-    setBusy("");
-    setCapAsk(null);
-    if (d.error) { setErr(d.error); await load(); return; }
+      { confirm: true, accept_credit_cost: total, csrf });
+    if (d.error) setErr(d.error);
     await load();
+    setBusy("");
   };
 
-  const toParameters = async () => { await flush(); setPhase("parameters"); };
-
-  /* Start (PAID): PixAI's own quote, then the confirm with that number. */
-  const startPreview = async () => {
-    if (busy) return;
+  /* "Next: parameters": the saves first, then PixAI's price for the run (a free quote). */
+  const toParameters = async () => {
+    if (busy || !gates.next) return;
+    setBusy("quote"); setErr(""); setStartAsk(null);
     await flush();
-    setBusy("start"); setErr("");
     const d = await apiPost("/api/train/advanced/" + draftId + "/submit", { csrf });
     setBusy("");
     if (d.error) { setErr(d.error); return; }
     setStartAsk(d);
+    setPhase("parameters");
   };
-  const startConfirm = async () => {
-    if (busy || !startAsk) return;
-    setBusy("start"); setErr("");
-    const d = await apiPost("/api/train/advanced/" + draftId + "/submit",
-      { confirm: true, accept_credit_cost: startAsk.price, csrf });
+  const refreshQuote = async () => {
+    if (busy) return;
+    setBusy("quote"); setErr("");
+    const d = await apiPost("/api/train/advanced/" + draftId + "/submit", { csrf });
     setBusy("");
-    setStartAsk(null);
-    if (d.error) { setErr(d.error); return; }
+    if (d.error) { setErr(d.error); setStartAsk(null); return; }
+    setStartAsk(d);
+  };
+
+  /* Start (PAID): ONE press, sending the quoted price on the button. */
+  const start = async () => {
+    if (busy || !startAsk || started) return;
+    setBusy("start"); setErr(""); setMaybe(false);
+    await flush();
+    const d = await apiPost("/api/train/advanced/" + draftId + "/submit",
+      { confirm: true, ...(startAsk.is_free ? {} : { accept_credit_cost: startAsk.price }), csrf });
+    setBusy("");
+    if (d.error) {
+      setErr(d.error);
+      if (d.maybe_started) { setMaybe(true); setStartAsk(null); }
+      return;
+    }
     setStarted(d);
   };
 
-  const captions = (detail && detail.captions) || {};
-  const described = mediaIds.filter((m) => captions[m]).length;
   return {
     draftId, phase, setPhase, name, setName, trigger, setTrigger, trig, goal, setGoal, base,
     setBase, bases, detail, status, load, createDraft, mediaIds, addImages, removeImage, upload,
-    rejected, captions, described, edits, textOf, editCaption, applyAll, restoreAutomatic,
-    saving, flush, capAsk, setCapAsk, describePreview, describeConfirm, toParameters,
-    startAsk, setStartAsk, startPreview, startConfirm, started, busy, err, setErr,
+    rejected, captions, quote, gates, edits, textOf, editCaption, saveOne, applyAll,
+    restoreAutomatic, saving, flush, describe, toParameters, refreshQuote, startAsk, start,
+    started, maybe, busy, err, setErr,
     enough: mediaIds.length >= MIN_IMAGES,
-    allDescribed: mediaIds.length > 0 && described === mediaIds.length,
+    allDescribed: mediaIds.length > 0 && gates.left === 0,
   };
 }
 

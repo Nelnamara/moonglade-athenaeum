@@ -15,6 +15,7 @@ import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import PublishOverlay from "./components/PublishOverlay.jsx";
 import TrainOverlay from "./components/TrainOverlay.jsx";
+import { trainOwnsEscape } from "./components/train/useTraining.js";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
@@ -284,6 +285,7 @@ export default function App({ boot }) {
       if (overlayRef.current === "panel") return;   // panel runs its own ladder
       if (isPickerOpen()) return;                   // picker dismisses itself
       if (paletteUpRef.current) return;             // the palette/cheat-sheet close FIRST
+      if (overlayRef.current === "train" && trainOwnsEscape()) return;   // focus view -> grid
       e.stopPropagation();
       setOverlay(null);
     };
