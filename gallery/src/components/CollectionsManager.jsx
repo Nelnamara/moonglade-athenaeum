@@ -111,13 +111,7 @@ export default function CollectionsManager({ csrf, onClose, onChanged, renderRow
                 value={drafts[c.name] !== undefined ? drafts[c.name] : c.name}
                 onChange={(e) => setDrafts((d) => ({ ...d, [c.name]: e.target.value }))}
                 onBlur={() => rename(c)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
-                  else if (e.key === "Escape" && drafts[c.name] !== undefined) {
-                    e.stopPropagation();
-                    setDrafts((d) => { const n = { ...d }; delete n[c.name]; return n; });
-                  }
-                }} />
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} />
               <span className="mgcu-mmeta">
                 {(smart ? "⟳ smart · " : "") + c.count + (first && plan.can ? " · merge target" : "")}
               </span>
