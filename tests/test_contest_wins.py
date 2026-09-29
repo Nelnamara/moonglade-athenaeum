@@ -22,7 +22,6 @@ import pytest
 import moonglade_backup as core
 import moonglade_contest_wins as cw
 import moonglade_gallery as g
-from moonglade_gallery import save_catalog
 from tests.conftest import login_client
 
 DAY = 86400.0
