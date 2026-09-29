@@ -24,6 +24,19 @@ import { setFolioFocus } from "../folio/folioFocus.js";
 
 let data = null;                 // last /api/achievements payload (skinName for reward ribbons)
 
+/* THE ANSWERS THIS ENGINE READS, for the header's goal chips (Session O). Every /api/achievements
+   answer that reaches load() -- the boot check, one after a generation -- is handed to whoever
+   subscribed, with whether it was a MARKING read (only those carry a trustworthy `newly`). The
+   chips need no read of their own while this engine is reading anyway. Read-only: a listener
+   is told, it cannot change what is toasted. */
+const _dataListeners = new Set();
+export function lastAchievements() { return data; }
+export function onAchievements(fn) {
+  if (typeof fn !== "function") return () => {};
+  _dataListeners.add(fn);
+  return () => { _dataListeners.delete(fn); };
+}
+
 /* ---- BESPOKE MOMENTS (owner ruling 2026-09-10) -----------------------------------------
    A couple of feats have a celebration of their own, and a bespoke moment REPLACES the
    generic flair rather than layering on it. Two rules, both enforced here rather than at
@@ -83,6 +96,14 @@ export function registerFolioOpener(fn) {
   return () => { if (_folioOpener === fn) _folioOpener = null; };
 }
 
+/* Open the Folio from outside its tree (the header's pinned-goal chip). True when this shell has
+   a Folio to open; false on a host that has none (the Loom), and the caller navigates instead. */
+export function openFolio() {
+  if (!_folioOpener) return false;
+  try { _folioOpener(); } catch { return false; }
+  return true;
+}
+
 
 /* THE MOMENT HOST (review amendment 1). The shell's own "play this feat's moment": a
    function taking the achievement and returning a Promise that settles when the moment has
@@ -104,11 +125,30 @@ export function registerMomentHost(fn) {
    _unmount, so the ledger cannot drift from the DOM; the module still reads no element,
    class or stylesheet, it only counts what it put there itself. */
 const _live = new Set();
-function _mount(el) { _live.add(el); document.body.appendChild(el); }
+function _mount(el) { _live.add(el); document.body.appendChild(el); _celebChanged(); }
 function _unmount(el) {
   _live.delete(el);
   if (el.parentNode) el.remove();
   _flushClear();
+  _celebChanged();
+}
+
+/* IS A CELEBRATION ON SCREEN -- as a subscribable fact, for the header's goal chips (Session O:
+   the pinned goal and the Vigil are hidden while anything in the z 510-520 band is up, so a
+   toast or a moment is never crowded by a chip beside it). It is the layer ledger above plus the
+   bespoke hold: true from the moment something is mounted (or a bespoke moment arms its hold)
+   until the last thing has left and the hold has lifted. Read-only; it builds and moves nothing. */
+const _celebListeners = new Set();
+export function celebrationUp() { return _live.size > 0 || _bespoke > 0; }
+export function onCelebration(fn) {
+  if (typeof fn !== "function") return () => {};
+  _celebListeners.add(fn);
+  return () => { _celebListeners.delete(fn); };
+}
+function _celebChanged() {
+  if (!_celebListeners.size) return;
+  const up = celebrationUp();
+  _celebListeners.forEach((fn) => { try { fn(up); } catch { /* a listener's own problem */ } });
 }
 
 /* THE GATE, as one predicate. The dequeue is held while a bespoke moment owns the screen,
@@ -136,10 +176,11 @@ export function celebrationsIdle() {
   return !_marking && !_q.length && !_cur && !_live.size && !_heldOff();
 }
 
-export function beginBespokeMoment() { _bespoke++; }
+export function beginBespokeMoment() { _bespoke++; _celebChanged(); }
 export function endBespokeMoment() {
   if (_bespoke > 0) _bespoke--;
   _resume();
+  _celebChanged();
 }
 
 /* whenClear(fn): the reverse direction of the hold. The hold keeps a moment off a cast that
@@ -235,6 +276,7 @@ function load(mark) {
       done();
       if (d.error) return;
       data = d;
+      _dataListeners.forEach((fn) => { try { fn(d, !!mark); } catch { /* a listener's own problem */ } });
       if (mark) toastNew(d);
       syncSkin(d);
     }, done);

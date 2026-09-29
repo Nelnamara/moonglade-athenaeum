@@ -4,6 +4,7 @@ import CostBadge from "./CostBadge.jsx";
 import CustomSlider from "./CustomSlider.jsx";
 import ActivityChip from "../notify/ActivityChip.jsx";
 import HelpButton from "../help/HelpButton.jsx";
+import GoalChips from "./GoalChips.jsx";
 import ActivityPanel from "../notify/ActivityPanel.jsx";
 import useActivity from "../notify/useActivity.js";
 import "../styles/shell.css";
@@ -184,6 +185,11 @@ export default function SeparatorBar({
         <span className={"mgx-costslot" + (hasCost ? " has" : "")}>
           <CostBadge compact onCost={() => setHasCost(true)} />
         </span>
+
+        {/* The pinned goal and the Vigil (Session O, O4/O5), beside the credits. Draws nothing
+            unless the account pinned a goal or turned the Vigil switch on; the gallery and the
+            Generate dock share this bar. */}
+        <GoalChips />
 
         {/* FOLLOWERS / FOLLOWING (owner, 2026-09-06: "BOTH beside the credits chip and in
             the account popup"). Free -- both numbers already ride the same /api/account

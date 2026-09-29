@@ -48,6 +48,7 @@ import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
 import { registerFolioOpener } from "./notify/ach.js";
+import { readFolioHash, setFolioRow } from "./folio/folioFocus.js";
 import GuideHost from "./help/GuideHost.jsx";
 import { openHelp, OPEN_SURFACE_EVENT } from "./help/helpStore.js";
 import { useGuideIndex } from "./help/helpData.js";
@@ -377,6 +378,17 @@ export default function App({ boot }) {
      contract -- the drawer now skips the i2v prefill for a midless request,
      so the deep link lands on the Video tab with clean slots
      in the shared video component — the GenerateDock retab owns fixing that. */
+  /* "#folio" / "#folio=<id>": the Loom's pinned-goal chip has no Folio of its own, so it crosses
+     here with the request in the address (folio/folioFocus.js). Opened once, then stripped. */
+  useEffect(() => {
+    const fh = readFolioHash(window.location.hash);
+    if (!fh) return;
+    setFolioRow(fh.row);
+    setOverlay("folio");
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch { /* hash simply stays; harmless */ }
+  }, []);
   useEffect(() => {
     const hash = (window.location.hash || "").replace("#", "");
     if (hash !== "image" && hash !== "edit" && hash !== "video") return;

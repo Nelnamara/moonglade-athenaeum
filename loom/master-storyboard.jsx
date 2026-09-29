@@ -80,6 +80,7 @@ import { installNotify, NotifyRoot } from "../gallery/src/notify/index.jsx";
 import HelpRoot from "../gallery/src/help/HelpRoot.jsx";
 import GuideHost from "../gallery/src/help/GuideHost.jsx";
 import ActivityChip from "../gallery/src/notify/ActivityChip.jsx";
+import GoalChips from "../gallery/src/components/GoalChips.jsx";
 import ActivityPanel from "../gallery/src/notify/ActivityPanel.jsx";
 import useActivity from "../gallery/src/notify/useActivity.js";
 // The one price transport, shared with the gallery's own cost lines (gen/usePriceProbe.js
@@ -3141,6 +3142,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             own CSS comment above) -- margin-left:auto lives on it, "← Gallery" follows with
             its normal gap. When docked left (act.edge === "left") the whole control instead
             mounts near the row's START, right after the banner-show button -- see above. */}
+        {/* The pinned goal and the Vigil (Session O), beside the flush-right pair: the Loom's
+            header has no credits chip of its own, so they sit at its right end. A click on the
+            pin crosses to the gallery's Folio (the Loom has no Folio). Renders nothing unless a
+            pin or the Vigil switch is on. */}
+        <GoalChips />
         {act.edge === "left" ? null : activityControl}
         <a className="lv-close" href={GALLERY_HREF} style={{ textDecoration: "none" }}>← Gallery</a>
       </div>
