@@ -9049,9 +9049,27 @@ EDIT_PRO_MODEL_ID = "2006468692917575683"
 #     does NOT promise to keep the source's frame (the probe's verifier saw a 0.595 source
 #     come back 2:3), so no copy anywhere may say it does.
 # editCore.js EDIT_CAPS mirrors this table by hand; tests/test_edit_upload.py's parity test
-# reads both and fails if their aspects or defaults drift apart.
+# reads both and fails if their aspects, defaults, reference caps, resolutions or qualities
+# drift apart.
+#
+# PixAI Edit v4.0 (Session L decision 6, lane w2-small 2026-09-28), copied from its own model
+# record -- the preset roster's version row 1983993578828959744, extra.chatEditing, read
+# 2026-09-28: maxInputImageCount 10; supportedResolutionOptions 1K/2K/4K, defaultResolution
+# 1K; no quality options; no defaultAspectRatio; fourteen aspects down to 1:8 / 8:1, in the
+# record's own order. No published default aspect means PixAI's own client sends no
+# aspectRatio (modelParams `ge`), so "auto" is its first aspect and its default, exactly as for
+# Reference Pro. Listed first; the card's default model stays Edit Pro.
 EDIT_ASPECT_AUTO = "auto"
 EDIT_MODELS = {
+    "edit-v4": {
+        "model_id": "1983993578828959744",
+        "label": "Edit v4.0", "max_refs": 10,
+        "resolutions": ["1K", "2K", "4K"],
+        "qualities": [],
+        "aspects": [EDIT_ASPECT_AUTO, "16:9", "9:16", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5",
+                    "5:4", "21:9", "1:4", "4:1", "1:8", "8:1"],
+        "default": {"resolution": "1K", "quality": "", "aspect": EDIT_ASPECT_AUTO},
+    },
     "edit-pro": {
         "model_id": EDIT_PRO_MODEL_ID,
         "label": "Edit Pro", "max_refs": 4,
@@ -9087,7 +9105,8 @@ FIXER_MODEL_ID = EDIT_MODELS["reference-pro"]["model_id"]
 
 
 def edit_model_id(key):
-    """model_id for an Edit-card model key ('edit-pro'/'reference-pro'); '' if unknown."""
+    """model_id for an Edit-card model key ('edit-v4'/'edit-pro'/'reference-pro'); '' if
+    unknown."""
     return (EDIT_MODELS.get((key or "").strip()) or {}).get("model_id", "")
 
 

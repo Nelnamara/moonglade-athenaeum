@@ -5,10 +5,14 @@ import {
   dims, goGate, laneRefusesFrame, loraIncompat, loraRange, loraStep, modeOffered,
   qualityTagTitle, refIsContext,
 } from "../gen/genCore.js";
-import { EDIT_CAPS, editAspectLabel, editCaps, refTag } from "../gen/editCore.js";
+import {
+  EDIT_CAPS, editAspectExtreme, editAspectGroups, editAspectLabel, editCaps, editModelIsNew, refTag,
+} from "../gen/editCore.js";
 import { insertTriggerWords } from "../gen/loraTriggers.js";
 import ModelFlyout from "./ModelFlyout.jsx";
 import MobileScreen from "./MobileScreen.jsx";
+import MobileSheet from "./MobileSheet.jsx";
+import useSheet from "../hooks/useSheet.js";
 import useLayerHistory from "../hooks/useLayerHistory.js";
 import { askPicker } from "./PickerHost.jsx";
 import { ResultLines } from "./EditTab.jsx";
@@ -267,6 +271,8 @@ export default function CreateMobile({
   // ownership contract is deliberately identical to MobileSheet.jsx's).
   const [advOpen, setAdvOpen] = useState(false);
   const [advClosing, setAdvClosing] = useState(false);
+  // Session L 6, phone: "the same select as a sheet" -- the edit model's chooser.
+  const modelSheet = useSheet();
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
   const gate = goGate(s, loraCap);
@@ -379,13 +385,12 @@ export default function CreateMobile({
                   onChange={(e) => edit.set({ instruction: e.target.value })} />
 
                 <div className="cm-lbl">Model</div>
-                <div className="cm-chiprow">
-                  {Object.entries(EDIT_CAPS).map(([k, cap]) => (
-                    <button key={k} type="button"
-                      className={"glm-metal cm-chip" + (edit.s.model === k ? " on" : "")}
-                      onClick={() => edit.chooseModel(k)}>{cap.label}</button>
-                  ))}
-                </div>
+                <button type="button" className="cm-editmodel" aria-haspopup="dialog"
+                  onClick={() => modelSheet.open("model")}>
+                  <span>{editCapsNow.label}</span>
+                  {editModelIsNew(edit.s.model) ? <span className="cm-newtag">new</span> : null}
+                  <span className="cm-editmodel-caret">▾</span>
+                </button>
                 <div className="cm-hint">
                   {editCapsNow.label} takes up to {editCapsNow.max_refs} reference{editCapsNow.max_refs === 1 ? "" : "s"}.
                 </div>
@@ -408,7 +413,7 @@ export default function CreateMobile({
                 </div>
 
                 {(edit.s.refs.length > 0 || editUsed < editCapsNow.max_refs) && (
-                  <div className="cm-chiprow cm-refgrid">
+                  <div className="cm-refgrid">
                     {edit.s.refs.map((r, i) => (
                       <span className="cm-refthumbwrap" key={r.media_id + i}>
                         <img src={r.thumb} alt="" />
@@ -428,6 +433,23 @@ export default function CreateMobile({
                 <button type="button" className="cm-advrow" onClick={openAdv}>
                   ⚙ Advanced — resolution, quality, aspect
                 </button>
+
+                {sheetHost ? createPortal(
+                  <MobileSheet open={modelSheet.sheet === "model"} closing={modelSheet.closing}
+                    onClose={modelSheet.close} title="EDIT MODEL" className="cm-sheetover">
+                    {Object.entries(EDIT_CAPS).map(([k, cap]) => (
+                      <button key={k} type="button" role="radio" aria-checked={edit.s.model === k}
+                        className={"cm-sheetrow" + (edit.s.model === k ? " on" : "")}
+                        onClick={() => { edit.chooseModel(k); modelSheet.close(); }}>
+                        <span className="cm-sheetrow-main">
+                          <b>{cap.label}</b>
+                          <span>{cap.max_refs} images · {cap.resolutions.join(" / ")}</span>
+                        </span>
+                        {editModelIsNew(k) ? <span className="cm-newtag">new</span> : null}
+                        {edit.s.model === k ? <span className="cm-sheetrow-tick">✓</span> : null}
+                      </button>
+                    ))}
+                  </MobileSheet>, sheetHost) : null}
 
                 <span className="gd-cost cm-cost">
                   <CostBadge ref={editCostRef} hint="Pick an image to edit to see the cost." />
@@ -833,6 +855,11 @@ function ImageAdvanced({ s, set, setLora, m }) {
    above uses -- no parallel state. ---- */
 function EditAdvanced({ edit }) {
   const caps = editCaps(edit.s.model);
+  const groups = editAspectGroups(edit.s.model);
+  const onExtreme = editAspectExtreme(edit.s.aspect);
+  const ratioSheet = useSheet();
+  const [host, setHost] = useState(null);
+  useEffect(() => { setHost(document.querySelector(".glm-stage") || document.body); }, []);
   return (
     <>
       <div className="cm-subhead">Resolution</div>
@@ -860,10 +887,31 @@ function EditAdvanced({ edit }) {
       )}
 
       <div className="cm-subhead">Aspect</div>
-      <select className="cm-select" value={edit.s.aspect}
-        onChange={(e) => edit.set({ aspect: e.target.value })}>
-        {caps.aspects.map((a) => <option key={a} value={a}>{editAspectLabel(a)}</option>)}
-      </select>
+      {/* Session L 6: the common ratios as chips; More ▾ opens the ratio sheet with the
+          extremes (21:9, 1:3, 1:4, 1:8 and their flips), only for a model that has one. */}
+      <div className="cm-chiprow">
+        {groups.common.map((a) => (
+          <button key={a} type="button"
+            className={"glm-metal cm-chip cm-chip44" + (edit.s.aspect === a ? " on" : "")}
+            onClick={() => edit.set({ aspect: a })}>{editAspectLabel(a)}</button>
+        ))}
+        {groups.extreme.length ? (
+          <button type="button" aria-haspopup="dialog"
+            className={"glm-metal cm-chip cm-chip44" + (onExtreme ? " on" : "")}
+            onClick={() => ratioSheet.open("ratios")}>{onExtreme ? edit.s.aspect + " ▾" : "More ▾"}</button>
+        ) : null}
+      </div>
+      {host ? createPortal(
+        <MobileSheet open={ratioSheet.sheet === "ratios"} closing={ratioSheet.closing}
+          onClose={ratioSheet.close} title="MORE RATIOS" className="cm-sheetover">
+          <div className="cm-chiprow cm-sheetchips">
+            {groups.extreme.map((a) => (
+              <button key={a} type="button"
+                className={"glm-metal cm-chip cm-chip44" + (edit.s.aspect === a ? " on" : "")}
+                onClick={() => { edit.set({ aspect: a }); ratioSheet.close(); }}>{a}</button>
+            ))}
+          </div>
+        </MobileSheet>, host) : null}
     </>
   );
 }
