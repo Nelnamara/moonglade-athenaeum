@@ -327,6 +327,18 @@ export default function App({ boot }) {
     setDockOpen(true);
     setDockClosing(false);
   }, []);
+  /* THE FOLIO'S "→" (Session O, O1): each honor with a count points at the surface that advances
+     it -- Generate, The Loom, Contests or Publish. The Folio names the target (folio/
+     completionistCore.js JUMPS); this shell knows how to get there. Generate closes the overlay
+     and opens the dock; the Loom is a page of its own; Contests and Publish are overlays that
+     replace the Folio (there is one overlay at a time). Nothing is written by the jump. */
+  const jumpFromFolio = useCallback((to) => {
+    if (to === "loom") { window.location.href = "/loom"; return; }
+    if (to === "contests") { setOverlay("contests"); return; }
+    if (to === "publish") { setPublishFor(""); setOverlay("publish"); return; }
+    setOverlay(null);
+    openDock();
+  }, [openDock]);
   const toggleDock = useCallback(() => {
     const st = dockStateRef.current;
     if (st.open && !st.closing) closeDock();
@@ -1712,7 +1724,7 @@ export default function App({ boot }) {
         />
       )}
       {overlay === "folio" && (
-        <FolioOverlay onClose={() => setOverlay(null)} />
+        <FolioOverlay onClose={() => setOverlay(null)} onJump={jumpFromFolio} />
       )}
       {overlay === "aitools" && (
         <AiToolsModal open onClose={() => setOverlay(null)} onPick={requestScene} />

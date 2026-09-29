@@ -7,9 +7,11 @@ import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { VeilBanner, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
 import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
+import { requestPanelTab } from "../notify/panelRequest.js";
 import "../styles/gallery-mobile.css";
 import "../styles/folio-overlay.css";
 import "../styles/folio-mobile.css";
+import "../styles/folio-completionist.css";
 
 /* The Folio of Honors -- MOBILE full-page destination. Data/narrator/
    glitch-reveal/replay engine is useFolio.js (gallery/src/hooks/), the
@@ -213,6 +215,7 @@ export default function FolioMobile({ onClose }) {
     triggered, unleashed, toggleUnleash,
     reveal,
     pokeNarrator, replayToast,
+    relics, pickSkin,
   } = folio;
 
   const [closing, setClosing] = useState(false);
@@ -222,11 +225,7 @@ export default function FolioMobile({ onClose }) {
   const [sheetClosing, setSheetClosing] = useState(false);
   const sheetTimer = useRef(null);
 
-  const [relicsOpen, setRelicsOpen] = useState(false);
-  const [relicsClosing, setRelicsClosing] = useState(false);
-  const relicsTimer = useRef(null);
-
-  useEffect(() => () => { clearTimeout(sheetTimer.current); clearTimeout(relicsTimer.current); }, []);
+  useEffect(() => () => { clearTimeout(sheetTimer.current); }, []);
 
   // Tap an earned/locked (non-feat-locked) row or a Recently-entered card:
   // open the static detail sheet (design's own interaction) AND, for earned
@@ -240,12 +239,6 @@ export default function FolioMobile({ onClose }) {
     setSheetClosing(true);
     clearTimeout(sheetTimer.current);
     sheetTimer.current = setTimeout(() => { setSheetId(null); setSheetClosing(false); }, 280);
-  }
-  function openRelics() { setRelicsOpen(true); }
-  function closeRelics() {
-    setRelicsClosing(true);
-    clearTimeout(relicsTimer.current);
-    relicsTimer.current = setTimeout(() => { setRelicsOpen(false); setRelicsClosing(false); }, 280);
   }
 
   // Plays the exit fade before the real unmount, same overlay law every big
@@ -271,9 +264,9 @@ export default function FolioMobile({ onClose }) {
   const nextTier = () => setTierIdx(tiersLen ? (tierIdxSafe + 1) % tiersLen : 0);
   const selectLadder = (id) => { setActiveLadderId(id); setTierIdx(0); };
 
-  // Honors-total denominator: only folds the real feat count in once
-  // feats_revealed, matching every other feats-masking spot -- point 5 above.
-  const grandTotal = vm ? vm.totalNonFeat + (data.feats_revealed ? vm.totalFeats : 0) : 0;
+  // The honors total is ladders + milestones + masteries and nothing else (Session O, O2; drift
+  // 110): a feat is never part of a denominator, only "N found" beside it.
+  const grandTotal = vm ? vm.totalNonFeat : 0;
 
   return (
     <div className={"fm-root" + (closing ? " closing" : "")} role="dialog" aria-modal="true" aria-label="The Folio of Honors">
@@ -372,19 +365,32 @@ export default function FolioMobile({ onClose }) {
                   </div>
                 ))}
 
-                <div className="fm-sech"><b>Relics</b><span>from the Control Panel</span></div>
-                <div className="fm-relicnote">tap to see the full list</div>
-                <div className="fm-hscroll" onClick={openRelics} role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter") openRelics(); }}>
-                  {vm.relics.map((r) => (
-                    <div className={"fm-relicchip" + (r.earned ? "" : " dim")} key={r.id}>
-                      <div className="fm-relicsw">
-                        {(SKIN_SW[r.id] || []).map((c, i) => <i key={i} style={{ background: c }} />)}
-                      </div>
-                      <div className="fm-relicchip-name">{r.name}</div>
+                <div className="fm-sech"><b>Relics</b><span>earned rewards</span></div>
+                {relics.length === 0
+                  ? <div className="fm-empty">No relics yet — honors award them.</div>
+                  : (
+                    <div className="fm-kinds">
+                      {relics.map((row) => (
+                        <div className="fm-kindrow" key={row.kind} data-kind={row.kind}>
+                          <div className="fm-kind-lab">{row.label} <b>{row.items.length}</b></div>
+                          <div className="fm-kind-tiles">
+                            {row.items.map((it) => (
+                              <button type="button" key={it.id} aria-label={it.name + (it.active ? " (active)" : "")}
+                                className={"fm-tile " + row.kind + (it.active ? " active" : "")}
+                                style={row.kind === "skins"
+                                  ? { background: (SKIN_SW[it.id] || SKIN_SW.moonglade)[0],
+                                    borderColor: (SKIN_SW[it.id] || SKIN_SW.moonglade)[1] } : undefined}
+                                onClick={() => (row.kind === "skins" ? pickSkin(it.id) : requestPanelTab("brand"))}>
+                                {row.kind === "marks" && it.png && <img src={it.png} alt="" draggable={false}
+                                  onError={(e) => e.currentTarget.remove()} />}
+                                <span className="fm-tile-nm">{it.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
 
                 <div className="fm-nelstrip">
                   <div className="fm-nelimg" />
@@ -594,26 +600,6 @@ export default function FolioMobile({ onClose }) {
         )}
       </MobileSheet>
 
-      {/* Relics sheet -- the FULL list (Summary's carousel only fits what
-          scrolls into view); real skin data throughout (name/desc/active/
-          earned), swatches from the byte-for-byte SKIN_SW table above. */}
-      <MobileSheet open={relicsOpen} closing={relicsClosing} onClose={closeRelics} title="Relics — earned rewards">
-        {vm && vm.relics.map((r) => (
-          <div className="fm-relicrow" key={r.id}>
-            <div className="fm-relicrow-sw">
-              {(SKIN_SW[r.id] || []).map((c, i) => <i key={i} style={{ background: c }} />)}
-            </div>
-            <div className="fm-relicrow-textcol">
-              <div className={"fm-relicrow-name" + (r.active ? " active" : "")}>{r.name}</div>
-              <div className="fm-relicrow-desc">{r.desc}</div>
-            </div>
-            <div className={"fm-relicrow-sub" + (r.active ? " active" : "")}>
-              {r.active ? "active" : r.earned ? "unlocked" : "🔒 locked"}
-            </div>
-          </div>
-        ))}
-        <button type="button" className="fm-sheet-closebtn" onClick={closeRelics}>Close</button>
-      </MobileSheet>
     </div>
   );
 }

@@ -10,6 +10,13 @@ import HelpButton from "../help/HelpButton.jsx";
 import GuideHost from "../help/GuideHost.jsx";
 import { VeilCard, AllFound, RevealLayers } from "../folio/MaskedFeatParts.jsx";
 import { foundText, featCountText } from "../folio/maskedFeatsCore.js";
+import MoonGauge from "./MoonGauge.jsx";
+import { GAUGE_SIZES, fractionOf } from "../lib/moonGaugeCore.js";
+import {
+  SORTS, sortNote, progressOf, jumpOf, toGoText, meterLine,
+} from "../folio/completionistCore.js";
+import { requestPanelTab } from "../notify/panelRequest.js";
+import "../styles/folio-completionist.css";
 
 /* The Folio of Honors -- the seventh designed nav overlay to port, opened from
    Banner.jsx's gold "🏆 Folio" button (App.jsx's onFolio -> openOverlay("folio"),
@@ -89,12 +96,16 @@ function bucketCt(b, revealed) {
    says "not yet". Criteria checklists (full-toolbox/master-of-the-loom)
    are a real field the DC's own mock predates -- kept per the task's data
    contract and wiki/Folio-of-Honors.md, not a DC omission to second-guess. */
-function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame }) {
+function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame, onJump }) {
   const isFeat = displayBucket(a) === "feat";   // meta folds into feats (no points, "for the glory")
   const tierClass = "mgfo-t-" + (a.tier || "common");
   const desc = commentary(a, reveal);
   const skinName = a.skin && skinsById && skinsById[a.skin] ? skinsById[a.skin].name : a.skin;
   const sub = a.earned ? (date || "") : "not yet";
+  // "N to go" (Session O, O1): only for an unearned honor the server sent a count for, and
+  // never for a feat -- progressOf answers null for both, so nothing below can draw for one.
+  const prog = progressOf(a);
+  const jump = jumpOf(a);
 
   return (
     // Click replays this card's earn celebration (Ach/mg-notify.js precedent:
@@ -125,6 +136,20 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame }) {
         )}
         {a.skin && <div className="mgfo-flag">❖ unlocks {skinName} skin</div>}
         {a.banner_reward && <div className="mgfo-flag">⚑ unlocks a banner</div>}
+        {prog && (
+          <div className="mgfo-goto">
+            <MoonGauge fraction={prog.fraction} size={GAUGE_SIZES.folio} className="mgfo-goto-gauge"
+              label={a.name + ": " + toGoText(prog)} />
+            <div className="mgfo-goto-row">
+              <span className="mgfo-goto-n">{toGoText(prog)}</span>
+              <i className="mgfo-flex1" />
+              {jump && onJump && (
+                <button type="button" className="mgfo-goto-jump" title={"Open " + jump.label}
+                  onClick={(e) => { e.stopPropagation(); onJump(jump.to); }}>→ {jump.label}</button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
       <div className="mgfo-card-side">
         <span className="mgfo-pill">{isFeat ? "feat" : a.tier}</span>
@@ -141,7 +166,7 @@ function AchCard({ a, ladderName, date, skinsById, reveal, onReplay, frame }) {
 // spanWrap: the DC's own tierCard/flatCard helper (wrapStyle/innerStyle) --
 // a trailing ODD card spans both grid columns and centers at half width,
 // instead of stretching full-width alone on its own row.
-function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, onReplay, frameFor }) {
+function CardGrid({ items, ladderName, ladderNames, earnedAt, skinsById, emptyLabel, reveal, onReplay, frameFor, onJump }) {
   if (!items.length) return emptyLabel ? <div className="mgfo-empty-mini">{emptyLabel}</div> : null;
   return (
     <div className="mgfo-cardgrid">
@@ -149,7 +174,8 @@ function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, 
         const lastOdd = items.length % 2 !== 0 && i === items.length - 1;
         return (
           <div key={a.id} className={"mgfo-card-wrap" + (lastOdd ? " last-odd" : "")}>
-            <AchCard a={a} ladderName={ladderName} date={earnedAt[a.id]} skinsById={skinsById}
+            <AchCard a={a} ladderName={ladderName || (ladderNames && ladderNames[a.track])}
+              date={earnedAt[a.id]} skinsById={skinsById} onJump={onJump}
               reveal={reveal} onReplay={onReplay} frame={frameFor ? frameFor(a.id) : null} />
           </div>
         );
@@ -158,7 +184,39 @@ function CardGrid({ items, ladderName, earnedAt, skinsById, emptyLabel, reveal, 
   );
 }
 
-export default function FolioOverlay({ onClose }) {
+/* RELICS BY KIND (Small Calls L2): one row per kind -- Skins, Banners, Marks -- each hidden when
+   the account has earned nothing of that kind (folio/completionistCore.relicRows), so nothing
+   unearned is ever shown and there are no empty slots. Newest first. A tap applies a skin; a
+   banner or a mark opens the Control Panel's Branding tab. */
+function RelicRows({ rows, onPickSkin, onOpenBranding }) {
+  return (
+    <div className="mgfo-relics mgfo-kinds">
+      {rows.map((row) => (
+        <div className="mgfo-kindrow" key={row.kind} data-kind={row.kind}>
+          <div className="mgfo-kind-lab">{row.label} <b>{row.items.length}</b></div>
+          <div className="mgfo-kind-tiles">
+            {row.items.map((it) => {
+              const sw = row.kind === "skins" ? (SKIN_SW[it.id] || SKIN_SW.moonglade) : null;
+              return (
+                <button type="button" key={it.id} title={it.desc ? it.name + " — " + it.desc : it.name}
+                  className={"mgfo-tile " + row.kind + (it.active ? " active" : "")}
+                  style={sw ? { background: sw[0], borderColor: sw[1] } : undefined}
+                  aria-label={it.name + (it.active ? " (active)" : "")}
+                  onClick={() => (row.kind === "skins" ? onPickSkin(it.id) : onOpenBranding())}>
+                  {row.kind === "marks" && it.png && <img src={it.png} alt="" draggable={false}
+                    onError={(e) => e.currentTarget.remove()} />}
+                  <span className="mgfo-tile-nm">{it.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function FolioOverlay({ onClose, onJump }) {
   useScrollLock();   // page never scrolls behind a full-screen panel (2026-08-06)
   const {
     data, err, vm, earnedAt,
@@ -171,6 +229,7 @@ export default function FolioOverlay({ onClose }) {
     reveal,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
+    meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
     // filteredActiveTiers is deliberately NOT destructured here any more: the ALL tab
     // stopped rendering the active ladder's own grid (handoff C4). It stays on the hook
     // for FolioMobile, whose ladder screen IS that per-ladder detail view.
@@ -200,12 +259,14 @@ export default function FolioOverlay({ onClose }) {
   const nextTier = () => setTierIdx(tiersLen ? (tierIdxSafe + 1) % tiersLen : 0);
   const selectLadder = (id) => { setActiveLadderId(id); setTierIdx(0); };
 
-  // Feats-total denominator: only folds the real feat count in once
-  // data.feats_revealed (== "any feat earned"), matching FolioMobile.jsx's
-  // own grandTotal (that file's header comment, point 5). Desktop previously
-  // never added it back in (vm.totalNonFeat alone), permanently excluding
-  // feats from these two header numbers even after the first was earned.
-  const grandTotal = vm ? vm.totalNonFeat + (data && data.feats_revealed ? vm.totalFeats : 0) : 0;
+  // The honors total is ladders + milestones + masteries and NOTHING else (Session O, O2; drift
+  // 110). Feats never enter a denominator: adding the count of the feats found would grow "of M"
+  // by one for every secret the account finds, and say how many exist. They are shown as
+  // "N found" beside it.
+  const grandTotal = vm ? vm.totalNonFeat : 0;
+  const ladderNames = {};
+  if (vm) vm.ladders.forEach((l) => { ladderNames[l.id] = l.name; });
+  const sorted = sortKey !== "default";
 
   // Statistics tab, owner-requested addition (not in the DC mock): more of
   // the real collection data already computed for Health, reused rather
@@ -263,6 +324,18 @@ export default function FolioOverlay({ onClose }) {
                     <div className="mgfo-h1">The Folio of Honors</div>
                     <div className="mgfo-rule" />
                   </div>
+                  {meter && (
+                    <div className="mgfo-meter" title="Ladders, milestones and masteries. Feats are never counted in it.">
+                      <div className="mgfo-meter-top">
+                        <MoonGauge fraction={fractionOf(meter.earned, meter.total)} size={18} bar={false}
+                          label="Completion" />
+                        <span className="mgfo-meter-lab">Completion</span>
+                        <div className="mgfo-meter-track"><i style={{ width: meter.pct + "%" }} /></div>
+                        <span className="mgfo-meter-pct">{meter.pct}%</span>
+                      </div>
+                      <div className="mgfo-meter-line">{meterLine(meter)}</div>
+                    </div>
+                  )}
                   <div className="mgfo-stats-trio">
                     <div className="mgfo-stat">
                       <div className="mgfo-stat-lab">Points</div>
@@ -347,48 +420,39 @@ export default function FolioOverlay({ onClose }) {
                               <i className="mgfo-flex1" />
                               <span className="mgfo-reachpts">+{a.points} pts</span>
                             </div>
-                            <Bar pct={a._ratio * 100} variant="reach" />
+                            <MoonGauge fraction={a._ratio} size={GAUGE_SIZES.folio} className="mgfo-reach-gauge"
+                              label={a.name + " progress"} />
                           </div>
                         ))}
                       </div>
 
                       <div className="mgfo-sec-h emerald"><span className="mgfo-dot" /><b>Relics — earned rewards</b></div>
-                      <div className="mgfo-relicnote">applied from the Control Panel; recorded here</div>
-                      <div className="mgfo-relics">
-                        {vm.relics.map((r) => (
-                          <div className={"mgfo-relicrow" + (r.active ? " active" : r.earned ? " unlocked" : "")} key={r.id}>
-                            <div className="mgfo-relic-sw">
-                              {(SKIN_SW[r.id] || SKIN_SW.moonglade).map((c, i) => <span key={i} style={{ background: c }} />)}
-                            </div>
-                            <span className="mgfo-relicnm">{r.name}</span>
-                            <i className="mgfo-flex1" />
-                            <span className="mgfo-relicsub">{r.active ? "active" : r.earned ? "unlocked" : "🔒 locked"}</span>
-                            <div className="mgfo-relic-tip">
-                              <p className="mgfo-relic-tip-nm">{r.name}</p>
-                              <p className="mgfo-relic-tip-ds">{r.desc}</p>
-                            </div>
-                          </div>
-                        ))}
-                        <div className="mgfo-relicrow dim">
-                          <span className="mgfo-relicnm-small">Banner</span>
-                          <span className="mgfo-relicsub-txt">The Great Library</span>
-                          <i className="mgfo-flex1" />
-                          <span className="mgfo-relicsub">🔒 50k images</span>
-                        </div>
-                        <div className="mgfo-relicrow dim">
-                          <span className="mgfo-relicnm-small">Icons</span>
-                          <span className="mgfo-relicsub-txt">Feat sigils</span>
-                          <i className="mgfo-flex1" />
-                          <span className="mgfo-relicsub">🔒 any feat</span>
-                        </div>
-                        <div className="mgfo-relic-secret">…and one the Athenaeum keeps to itself.</div>
-                      </div>
+                      {relics.length === 0
+                        ? <div className="mgfo-empty-mini">No relics yet — honors award them.</div>
+                        : (
+                          <>
+                            <div className="mgfo-relicnote">tap a skin to wear it · banners and marks open ✦ Branding</div>
+                            <RelicRows rows={relics} onPickSkin={pickSkin}
+                              onOpenBranding={() => requestPanelTab("brand")} />
+                          </>
+                        )}
                     </div>
                   </div>
                 )}
 
                 {tab === "all" && (
                   <div className="mgfo-all">
+                    {/* O3: the All tab's sort, remembered on this device. Feats are in none of
+                        the orders; their section stays below, in the order they were found. */}
+                    <div className="mgfo-sortrow">
+                      <span className="mgfo-sortlab">ALL · SORT</span>
+                      {SORTS.map((c) => (
+                        <button type="button" key={c.key} className={"mgfo-sortchip" + (sortKey === c.key ? " on" : "")}
+                          aria-pressed={sortKey === c.key} onClick={() => chooseSort(c.key)}>{c.label}</button>
+                      ))}
+                      <i className="mgfo-flex1" />
+                      <span className="mgfo-sortnote">{sortNote(sortKey)}</span>
+                    </div>
                     {nothingFound && (
                       <div className="mgfo-nothingfound">
                         <div className="mgfo-nf-h">Nothing in the record</div>
@@ -402,7 +466,19 @@ export default function FolioOverlay({ onClose }) {
                       </div>
                     )}
 
-                    {showLadders && vm.ladders.length > 0 && (
+                    {sorted && sortedHonors.length > 0 && (
+                      <>
+                        <div className="mgfo-sec-h">
+                          <b>All honors</b>
+                          <i className="mgfo-flex1" />
+                          <span className="mgfo-count">{sortedHonors.length}</span>
+                        </div>
+                        <CardGrid items={sortedHonors} ladderNames={ladderNames} earnedAt={earnedAt}
+                          skinsById={vm.skinsById} reveal={reveal} onReplay={replayToast} onJump={onJump} />
+                      </>
+                    )}
+
+                    {!sorted && showLadders && vm.ladders.length > 0 && (
                       <>
                         {activeLadder && carTier && (
                           <div className={"mgfo-plinth-row mgfo-t-" + (carTier.tier || "common")}>
@@ -529,7 +605,7 @@ export default function FolioOverlay({ onClose }) {
                                     <div className="mgfo-group-rule" />
                                   </div>
                                   <CardGrid items={l.filteredTiers} ladderName={l.name}
-                                    earnedAt={earnedAt} skinsById={vm.skinsById}
+                                    earnedAt={earnedAt} skinsById={vm.skinsById} onJump={onJump}
                                     reveal={reveal} onReplay={replayToast} />
                                 </div>
                               ))}
@@ -539,7 +615,7 @@ export default function FolioOverlay({ onClose }) {
                       </>
                     )}
 
-                    {showMilestones && filteredMilestones.length > 0 && (
+                    {!sorted && showMilestones && filteredMilestones.length > 0 && (
                       <>
                         <div className="mgfo-sec-h">
                           <b>Milestones</b><span>one-shot firsts</span>
@@ -547,11 +623,11 @@ export default function FolioOverlay({ onClose }) {
                           <span className="mgfo-count">{vm.buckets.find((b) => b.key === "milestone").earned}/{vm.buckets.find((b) => b.key === "milestone").total}</span>
                         </div>
                         <CardGrid items={filteredMilestones} earnedAt={earnedAt} skinsById={vm.skinsById}
-                          reveal={reveal} onReplay={replayToast} />
+                          reveal={reveal} onReplay={replayToast} onJump={onJump} />
                       </>
                     )}
 
-                    {showMasteries && filteredMasteries.length > 0 && (
+                    {!sorted && showMasteries && filteredMasteries.length > 0 && (
                       <>
                         <div className="mgfo-sec-h">
                           <b>Masteries</b><span>breadth over depth</span>
@@ -559,7 +635,7 @@ export default function FolioOverlay({ onClose }) {
                           <span className="mgfo-count">{vm.buckets.find((b) => b.key === "mastery").earned}/{vm.buckets.find((b) => b.key === "mastery").total}</span>
                         </div>
                         <CardGrid items={filteredMasteries} earnedAt={earnedAt} skinsById={vm.skinsById}
-                          reveal={reveal} onReplay={replayToast} />
+                          reveal={reveal} onReplay={replayToast} onJump={onJump} />
                       </>
                     )}
 
@@ -719,7 +795,7 @@ export default function FolioOverlay({ onClose }) {
                   </div>
                 </div>
                 <div className="mgfo-rail-foot">
-                  <b>Relics</b> apply from the <b>Control Panel</b> — recorded on the Summary page.
+                  <b>Relics</b> are earned rewards — a skin wears on a tap, and banners and marks open <b>✦ Branding</b>. Recorded on the Summary page.
                 </div>
               </div>
             </div>

@@ -9,6 +9,10 @@ import { UNLEASH_KEY, isUnleashed } from "../folio/unleashPref.js";
 import {
   SEEN_KEY, REVEAL, orderFeats, unseenFeatIds, nextSeen, veilState, revealFrame,
 } from "../folio/maskedFeatsCore.js";
+import {
+  progressOf, completionOf, loadSort, saveSort, sortHonors, relicRows,
+} from "../folio/completionistCore.js";
+import { applySkin } from "./useControlPanel.js";
 
 /* useFolio -- FolioOverlay.jsx's fetch/state/narrator/glitch-reveal/replay
    engine, mechanically lifted out (2026-08-03), same precedent as
@@ -198,15 +202,18 @@ export function buildViewModel(data) {
 
   // ---- Within reach: closest LOCKED non-feat achievements to their threshold.
   // Feats are excluded -- most are one-shot triggers where a "% there" number
-  // would be meaningless (or a de-facto spoiler) rather than informative. ----
+  // would be meaningless (or a de-facto spoiler) rather than informative. Only an honor the
+  // server sent a count for is measured: one whose metric is not tracked has no count, so it
+  // is not "within reach" of anything (Session O, O1: no count, no moon).
   const withinReach = nonFeat
-    .filter((a) => !a.earned && a.threshold > 0)
-    .map((a) => ({ ...a, _ratio: Math.min(1, a.current / a.threshold) }))
+    .map((a) => ({ a, p: progressOf(a) }))
+    .filter(({ p }) => p && p.threshold > 0)
+    .map(({ a, p }) => ({ ...a, _ratio: p.fraction }))
     .sort((x, y) => y._ratio - x._ratio)
     .slice(0, 3);
 
-  // ---- Relics: read-only skin display; active = the currently-applied skin. ----
-  const relics = (data.skins || []).map((s) => ({ ...s, active: s.id === data.skin }));
+  // The relics are drawn by kind from relicRows (folio/completionistCore.js), not from here:
+  // the skins list carries locked skins too, and only what is earned is ever shown.
   const skinsById = {};
   (data.skins || []).forEach((s) => { skinsById[s.id] = s; });
 
@@ -225,10 +232,16 @@ export function buildViewModel(data) {
     milestones: achievements.filter((a) => displayBucket(a) === "milestone"),
     masteries: achievements.filter((a) => displayBucket(a) === "mastery"),
     feats,
-    buckets, recent, withinReach, relics, skinsById, rarityRows, ladderRows,
+    buckets, recent, withinReach, skinsById, rarityRows, ladderRows,
     earnedNonFeat: nonFeat.filter((a) => a.earned).length, totalNonFeat: nonFeat.length,
     earnedFeats: feats.filter((a) => a.earned).length, totalFeats: feats.length,
   };
+}
+
+// localStorage, or null when the browser refuses even to hand it over (private windows,
+// blocked site data): the sort then simply does not persist.
+function safeStorage() {
+  try { return window.localStorage || null; } catch { return null; }
 }
 
 export default function useFolio() {
@@ -244,6 +257,10 @@ export default function useFolio() {
   const [bucketFilter, setBucketFilter] = useState(null);
   const [activeLadderId, setActiveLadderId] = useState(null);
   const [quoteIdx, setQuoteIdx] = useState(0);
+  // The All tab's sort (Session O, O3): remembered per DEVICE (this browser's storage), read
+  // once here and written only when a chip is clicked -- never on open.
+  const [sortKey, setSortKey] = useState(() => loadSort(
+    typeof window !== "undefined" ? safeStorage() : null));
 
   // ---- Unleash + glitch-reveal state (folio-glitch-spec.md). `triggered`
   // gates the pill's existence; `unleashed` is the free toggle once it
@@ -533,6 +550,25 @@ export default function useFolio() {
   const vm = useMemo(() => (data ? buildViewModel(data) : null), [data]);
   const earnedAt = (data && data.earned_at) || {};
 
+  // ---- The completion meter (O2): ladders + milestones + masteries only; feats are "N found"
+  // and never part of the total. Relics by kind (Small Calls L2): earned rewards only, one row
+  // per kind, hidden when empty.
+  const meter = useMemo(() => (data ? completionOf(data.achievements) : null), [data]);
+  const relics = useMemo(() => (data ? relicRows({
+    skins: data.skins, achievements: data.achievements,
+    marks: data.relics && data.relics.marks, earnedAt: data.earned_at, activeSkin: data.skin,
+  }) : []), [data]);
+  // A relic skin's tap applies it (POST /api/skin, the same road the Control Panel uses); a
+  // refusal is a quiet no-op. Only a click ever writes.
+  function pickSkin(id) {
+    if (!data || data.skin === id) return;
+    applySkin(id, data, setData).catch(() => {});
+  }
+  function chooseSort(key) {
+    setSortKey(key);
+    saveSort(safeStorage(), key);
+  }
+
   // Default ladder: "archive" (The Archive), matching the DC script's own
   // state default -- falls back to whichever ladder actually exists first if
   // that track is somehow absent from this install's roster.
@@ -560,6 +596,19 @@ export default function useFolio() {
   // Earned feats stand in the order they were found; the search filters them like any other
   // card. The veil is never one of them (see `veil` below).
   const filteredFeats = vm ? orderFeats(vm.feats.filter((a) => matchesQuery(a, qlc)), data.earned_at) : [];
+
+  // ---- The sorted view (O3). Any sort but Default lays the ladders' rungs, the milestones and
+  // the masteries out as ONE list in the chosen order, under the same search and category
+  // filter as the sections it replaces. Feats are never in it (sortHonors sets them aside) and
+  // keep their own section below, in the order they were found. ----
+  const sortedHonors = useMemo(() => {
+    if (!vm || sortKey === "default") return [];
+    const flat = [];
+    if (showLadders) vm.ladders.forEach((l) => l.tiers.forEach((t) => { if (matchesQuery(t, qlc)) flat.push(t); }));
+    if (showMilestones) filteredMilestones.forEach((a) => flat.push(a));
+    if (showMasteries) filteredMasteries.forEach((a) => flat.push(a));
+    return sortHonors(flat, sortKey, earnedAt);
+  }, [vm, sortKey, showLadders, showMilestones, showMasteries, qlc, filteredMilestones, filteredMasteries, earnedAt]);
 
   // ---- "Every rung, every ladder" (desktop-only, Folio of Honors.dc.html's
   // showGroups/ladderGroups): every ladder's OWN filtered tiers, grouped --
@@ -672,6 +721,7 @@ export default function useFolio() {
     reveal, activeToast,
     pokeNarrator, replayToast, close,
     showLadders, showMilestones, showMasteries, showFeats,
+    meter, relics, pickSkin, sortKey, chooseSort, sortedHonors,
     filteredActiveTiers, filteredMilestones, filteredMasteries, filteredFeats, nothingFound,
     filteredLadderGroups, showGroups, groupedTierCount,
   };
