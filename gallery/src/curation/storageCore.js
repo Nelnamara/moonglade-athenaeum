@@ -4,16 +4,19 @@
    into segments (widths, hues, titles) and into the filter a click opens. Desktop and phone
    draw the SAME rows, so it is one module. loom/test/storage-core.test.js pins it.
 
-   THE HUES ARE FIXED PER KIND, not per skin-of-the-day: lavender for images, the Loom's teal
-   for video, gold for Loom renders (the page's order: the pictures, the clips, the Loom's own).
-   They are the app's tokens, never hexes. Models and collections take a quiet run of shades so
-   a segment reads as one of a set: models fade lavender toward the deep violet, collections cycle violet,
-   teal and gold at a lower strength than the type hues, so no collection reads as "a type". */
+   THE TYPE HUES FOLLOW THE SELECTED SKIN, except one (the owner's ruling, 2026-09-29): images
+   take the skin's accent (--accent, the token every skin redefines), video takes a second tone
+   derived from that same accent (the accent mixed toward the page's own ground, so it is the
+   same hue, plainly darker), and Loom renders are ALWAYS the Loom's own cyan (--loomc: cyan
+   means the Loom in every skin, and no skin ever changes it). Gold is billing only and is never
+   used on these bars. They are the app's tokens, never hexes. Models fade lavender (a skin token
+   too) toward the deep violet; collections cycle accent, cyan, mauve and emerald at a lower strength
+   than the type hues, so no collection reads as "a type". */
 
 export const TYPE_HUES = {
-  image: "var(--lavender)",
-  video: "var(--loomc)",
-  loom: "var(--gold)",
+  image: "var(--accent)",
+  video: "color-mix(in oklab, var(--accent) 50%, var(--base))",
+  loom: "var(--loomc)",
 };
 
 const MODEL_HUES = [
@@ -25,7 +28,7 @@ const MODEL_HUES = [
 const COLLECTION_HUES = [
   "color-mix(in oklab, var(--accent) 62%, var(--base))",
   "color-mix(in oklab, var(--loomc) 55%, var(--base))",
-  "color-mix(in oklab, var(--gold) 55%, var(--base))",
+  "color-mix(in oklab, var(--mauve) 55%, var(--base))",
   "color-mix(in oklab, var(--emerald) 50%, var(--base))",
 ];
 const OTHER_HUE = "var(--surface1)";

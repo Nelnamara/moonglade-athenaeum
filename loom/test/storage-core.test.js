@@ -41,12 +41,30 @@ describe("the bars", () => {
     assert.deepEqual(bars[2].segments.map((s) => Math.round(s.pct)), [60, 27, 13]);
     for (const b of bars) assert.ok(Math.abs(b.segments.reduce((a, s) => a + s.pct, 0) - 100) < 1e-9);
   });
-  test("the type hues are fixed: lavender image, the Loom's cyan video, gold Loom render", () => {
-    assert.equal(TYPE_HUES.image, "var(--lavender)");
-    assert.equal(TYPE_HUES.video, "var(--loomc)");
-    assert.equal(TYPE_HUES.loom, "var(--gold)");
-    assert.equal(bars[0].segments[0].hue, "var(--lavender)");
-    assert.equal(bars[0].segments[1].hue, "var(--gold)");
+  test("the type hues follow the skin: accent image, an accent-derived video, the Loom's own cyan for renders", () => {
+    // the owner's colour ruling, 2026-09-29
+    assert.equal(TYPE_HUES.image, "var(--accent)");
+    assert.match(TYPE_HUES.video, /^color-mix\(in oklab, var\(--accent\) \d+%, var\(--base\)\)$/);
+    assert.notEqual(TYPE_HUES.video, TYPE_HUES.image, "video is a second tone, not the image tone");
+    assert.equal(TYPE_HUES.loom, "var(--loomc)");
+    assert.equal(bars[0].segments[0].hue, TYPE_HUES.image);
+    assert.equal(bars[0].segments[1].hue, "var(--loomc)");
+  });
+  test("gold is billing only: no hue on any bar reads --gold", () => {
+    const wide = storageBars({ ...STORAGE, by_type: [seg("Images", 500, 1, { key: "image" }), seg("Videos", 300, 1, { key: "video" }), seg("Loom renders", 200, 1, { key: "loom" })],
+      by_collection: { sum_bytes: 900, segments: [1, 2, 3, 4, 5, 6].map((i) => seg("C" + i, 150, 1, { other: false })) } });
+    for (const b of wide) for (const s of b.segments) assert.doesNotMatch(s.hue, /--gold/, s.title);
+    assert.doesNotMatch(src("curation/storageCore.js").replace(/\/\*[\s\S]*?\*\//g, ""), /--gold/);
+    assert.doesNotMatch(src("components/StorageBars.jsx").replace(/\/\*[\s\S]*?\*\//g, ""), /--gold/);
+  });
+  test("no skin redefines --loomc (cyan means the Loom in every skin), and every skin redefines --accent", () => {
+    const tokens = readFileSync(path.join(here, "..", "..", "static", "design-tokens.css"), "utf8").replace(/\r\n/g, "\n");
+    const skins = [...tokens.matchAll(/html\[data-skin="(\w+)"\]\s*\{([^}]*)\}/g)];
+    assert.deepEqual(skins.map((m) => m[1]).sort(), ["ember", "moonlit", "nightfallen", "verdant"]);
+    for (const [, name, body] of skins) {
+      assert.doesNotMatch(body, /--loomc\s*:/, name + " must not change the Loom's cyan");
+      assert.match(body, /--accent\s*:/, name + " sets the accent the bars follow");
+    }
   });
   test("every hue is a token, never a hex", () => {
     for (const b of bars) for (const s of b.segments) assert.ok(!/#[0-9a-f]{3,8}/i.test(s.hue), s.hue);
