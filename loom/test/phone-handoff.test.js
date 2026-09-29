@@ -71,8 +71,9 @@ describe("which prompt a remix restores", () => {
     for (const run of [undefined, null, {}, { var_mode: "" }, { var_mode: "batch", template: "x" }]) {
       const r = remixPatch(ROW, run, {});
       assert.equal(r.source, "recorded");
-      // escapeLiteral: braces, and the underscore pair that would otherwise be a saved-list token
-      assert.equal(r.patch.prompt, "a \\{braced\\} scene, \\_\\_list\\_\\_ and plain");
+      // escapeLiteral (the S1 rule): an ordinary {braced} group is literal and stays as typed; only the
+      // saved-list token gets a backslash, on its first underscore
+      assert.equal(r.patch.prompt, "a {braced} scene, \\__list__ and plain");
       assert.equal("varMode" in r.patch, false);
       assert.equal(r.patch.seed, "12345");
     }
