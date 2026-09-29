@@ -20,11 +20,13 @@ import path from "node:path";
 import {
   LOOM_VIEW_KEY, LEGACY_MOBILE_UI_KEY, readStoredView, resolveLoomView,
 } from "../src/loom-url.js";
+import { isPhoneViewport } from "../../gallery/src/lib/phoneCore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rd = (p) => readFileSync(path.resolve(__dirname, "..", p), "utf8");
 const loom = rd("master-storyboard.jsx");
 const isMobileSrc = rd("../gallery/src/hooks/useIsMobile.js");
+const phoneCoreSrc = rd("../gallery/src/lib/phoneCore.js");
 
 const store = (seed) => ({ getItem: (k) => (k in seed ? seed[k] : null) });
 
@@ -102,7 +104,7 @@ describe("readStoredView -- what counts as an answer", () => {
 describe("the phone rule the Loom defers to still excludes tablets", () => {
   test("the Loom keys on useIsMobile itself -- it does not re-decide what a phone is", () => {
     assert.match(loom, /import useIsMobile from "\.\.\/gallery\/src\/hooks\/useIsMobile\.js";/);
-    assert.match(loom, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\)\);/);
+    assert.match(loom, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\{ landscapePhones: false \}\)\);/);
     assert.equal((loom.match(/useIsMobile\(/g) || []).length, 1,
       "exactly one call site -- a second would be a second opinion about what a phone is");
     assert.doesNotMatch(loom, /max-width:\s*\d+px\)"/,
@@ -111,23 +113,33 @@ describe("the phone rule the Loom defers to still excludes tablets", () => {
 
   test("that rule is still the one width line (520px since 2026-09-07), with its coarse-pointer fallback", () => {
     assert.match(isMobileSrc, /const MOBILE_QUERY = "\(max-width: 520px\)";/);   // 430 -> 520 on 2026-09-07: the Pro Max class is 440 wide
-    assert.match(isMobileSrc, /coarse && portrait && screenW <= 520/,
+    // Since Session Q (Q4) the rule itself lives in lib/phoneCore.js and the hook only feeds it.
+    assert.match(isMobileSrc, /isPhoneViewport\(\{/, "the hook asks the one pure rule");
+    assert.match(phoneCoreSrc, /return !!coarse && sw <= PHONE_MAX;/,
       "the fallback's screen.width clause is what keeps a real tablet on the desktop build");
+    assert.match(phoneCoreSrc, /export const PHONE_MAX = 520;/);
   });
 
   test("a tablet fails it by construction: coarse and portrait are not enough", () => {
-    // The rule as code, driven the only way a pure test can drive it -- the two clauses
-    // that decide, in the same order the hook evaluates them. An iPad in portrait is
+    // The real rule, driven the only way a pure test can drive it. An iPad in portrait is
     // coarse-pointer and portrait, and its screen.width (768+) is what refuses it.
-    const rule = (layoutW, coarse, portrait, screenW) =>
-      layoutW <= 520 || (coarse && portrait && screenW <= 520);
+    // (layoutW is folded into `width` exactly as the hook does: 0 when the 520 query matches.)
+    const rule = (layoutW, coarse, portrait, screenW, screenH = screenW, landscapePhones = true) =>
+      isPhoneViewport({ width: layoutW <= 520 ? 0 : Infinity, coarse, portrait, screenW, screenH, landscapePhones });
     assert.equal(rule(390, true, true, 390), true, "iPhone portrait is a phone");
     assert.equal(rule(440, true, true, 440), true, "an iPhone Pro Max (440 wide since the 16) is a phone -- the 2026-09-07 case");
     assert.equal(rule(489, true, true, 440), true, "the same phone with Safari page zoom at 90% is still a phone");
     assert.equal(rule(1024, true, true, 390), true, "iOS Chrome's desktop-wide viewport, still a phone");
     assert.equal(rule(768, true, true, 768), false, "iPad portrait stays on desktop");
-    assert.equal(rule(1024, true, false, 1024), false, "iPad landscape stays on desktop");
-    assert.equal(rule(1440, false, false, 1440), false, "a laptop stays on desktop");
+    assert.equal(rule(1024, true, false, 1024, 768), false, "iPad landscape stays on desktop");
+    assert.equal(rule(1440, false, false, 1440, 900), false, "a laptop stays on desktop");
+    // Q4: a phone turned sideways is a phone to the app's shell -- but not to the Loom, whose wide
+    // board is at home there.
+    assert.equal(rule(844, true, false, 844, 390), true, "an iPhone held sideways is a phone (the shell)");
+    assert.equal(rule(844, true, false, 390, 844), true, "iOS keeps screen.width upright while sideways: the short side still says phone");
+    assert.equal(rule(844, true, false, 844, 390, false), false, "the Loom asks landscapePhones:false and gets its wide board");
+    assert.equal(rule(1180, true, false, 1180, 820), false, "an iPad Air sideways is still no phone");
+    assert.equal(rule(1133, true, false, 1133, 744), false, "an iPad mini sideways (short side 744) is still no phone");
   });
 });
 

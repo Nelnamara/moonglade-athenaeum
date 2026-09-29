@@ -297,3 +297,64 @@ export function syncOutcomeText(outcome) {
   if (outcome.state === "failed") return "The sync didn’t finish" + (outcome.error ? ": " + outcome.error : ".");
   return outcome.error ? String(outcome.error) : "The sync didn’t start.";
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Landscape (Q4)
+   --------------------------------------------------------------------------------------------- */
+
+export const PHONE_MAX = 520;         // the phone line: a screen this narrow (or this short) is a phone
+/* The one landscape-phone geometry. gallery/src/styles/phone-landscape.css writes the same query as
+   its @media condition (a test holds the two together), and hooks/usePhoneLandscape.js watches it. */
+export const LANDSCAPE_QUERY = "(orientation: landscape) and (max-height: 520px)";
+export const LANDSCAPE_COLS = 4;      // Q4: the gallery's columns in landscape...
+export const LANDSCAPE_COLS_NARROW = 3;   // ...and under this many CSS px wide
+export const LANDSCAPE_NARROW_PX = 700;
+
+/* Is this screen a phone -- the question main.jsx asks to choose the phone shell (the ONE rule; the
+   Loom defers to it too). It was portrait-only until Q4: a phone turned sideways is 844 px wide, past
+   the 520 line, so it fell onto the desktop build and lost every phone screen. Now:
+     width <= 520                       any window that narrow (a phone upright, a desktop window dragged in)
+     coarse, upright, screen <= 520     the fallback for iOS Chrome / Firefox, whose layout viewport can
+                                        report desktop-wide on a real phone
+     sideways, SHORT SIDE <= 520        a phone turned to landscape. The short side, because iOS Safari
+                                        keeps screen.width at the upright width whichever way the phone
+                                        is held while Android swaps the two -- the minimum is right for
+                                        both. An iPad mini's short side is 744, so a tablet never trips
+                                        it, and a laptop's is far beyond it.
+   `landscapePhones: false` is the Loom's ask: its wide four-panel board is at home in landscape, so a
+   phone turned sideways opens the board, not the phone view. */
+export function isPhoneViewport({ width, coarse, portrait, screenW, screenH, landscapePhones = true }) {
+  const w = Number(width);
+  if (Number.isFinite(w) && w <= PHONE_MAX) return true;
+  const sw = Number.isFinite(Number(screenW)) && Number(screenW) > 0 ? Number(screenW) : Infinity;
+  const sh = Number.isFinite(Number(screenH)) && Number(screenH) > 0 ? Number(screenH) : Infinity;
+  if (portrait) return !!coarse && sw <= PHONE_MAX;
+  return landscapePhones && Math.min(sw, sh) <= PHONE_MAX;
+}
+
+/* How many columns the phone gallery draws: two upright; sideways four, or three under 700 px wide. */
+export function phoneColumns(width, landscape) {
+  if (!landscape) return 2;
+  const w = Number(width);
+  return Number.isFinite(w) && w < LANDSCAPE_NARROW_PX ? LANDSCAPE_COLS_NARROW : LANDSCAPE_COLS;
+}
+
+/* Rotation keeps your place. Before the turn the gallery notes WHICH picture sits at the top of the
+   view and how far below the top edge it is; after the columns re-flow it scrolls that same picture
+   back to the same place, rather than trusting a pixel offset into a list that is now a different
+   height. `tiles` is [{id, top, bottom}] (any order); `viewTop` is the top of the visible area (below
+   the sticky search bar). Returns {id, offset} or null when nothing is in view. */
+export function pickAnchor(tiles, viewTop) {
+  let best = null;
+  for (const t of tiles || []) {
+    if (!t || !(Number(t.bottom) > Number(viewTop) + 1)) continue;
+    if (!best || Number(t.top) < Number(best.top)) best = t;
+  }
+  return best ? { id: best.id, offset: Number(best.top) - Number(viewTop) } : null;
+}
+
+/* The scrollTop that puts the anchored picture back where it was, never negative. */
+export function anchorScrollTop(scrollTop, tileTop, viewTop, offset) {
+  const next = Number(scrollTop) + (Number(tileTop) - Number(viewTop) - Number(offset || 0));
+  return Number.isFinite(next) ? Math.max(0, Math.round(next)) : 0;
+}

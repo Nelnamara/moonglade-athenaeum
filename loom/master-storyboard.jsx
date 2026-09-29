@@ -7205,7 +7205,10 @@ export default function App() {
   // LoomMobile's own top bar). Since 2026-09-06 a PHONE opens LoomMobile by itself when
   // neither switch has ever been flipped -- see useLoomView above for the whole rule, and
   // useIsMobile for the phone test it defers to (a tablet fails it, deliberately).
-  const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
+  // `landscapePhones: false` (Session Q, Q4): the app's phone shell now claims a phone held sideways
+  // too, but THIS board is at home in landscape -- so a phone opened sideways gets the wide board and
+  // an upright one gets the board-and-reel view, which is what the Loom always did.
+  const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
   // draftCard/draftTarget/draftAttachedInfo -- LIFTED up from LoomV2's own component state
   // (mobile-board-view pass, 2026-08-03) so an in-progress Generate-drawer draft (no shot
   // selected yet, keyed "__draft__" the same way genState/genImgState/etc already are)
