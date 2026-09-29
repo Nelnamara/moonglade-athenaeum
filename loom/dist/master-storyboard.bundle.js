@@ -2506,6 +2506,18 @@ ${"=".repeat(48)}
     ));
   }
 
+  // ../gallery/src/recipes/recipesCore.js
+  var CATEGORIES = [
+    ["character", "Character", "Keeps the same character across results"],
+    ["style", "Style", "Reproduces an art style"],
+    ["pose", "Pose & Framing", "Fixes the pose or framing"],
+    ["panel", "Manga Panel", "Lays out a multi-panel page"],
+    ["effect", "Effect", "Adds a visual effect"],
+    ["outfit", "Outfit", "Dresses the subject in an outfit"],
+    ["scene", "Scene", "Places the subject in a setting"]
+  ];
+  var CAT_LABEL = Object.fromEntries(CATEGORIES.map(([k, l]) => [k, l]));
+
   // ../gallery/src/gen/genCore.js
   var ASPECTS = [
     ["1:1", 1],
