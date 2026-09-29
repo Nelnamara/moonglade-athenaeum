@@ -671,11 +671,11 @@ ${"=".repeat(48)}
     const clips = entries.filter((e) => e.c.resultMid).map((e) => {
       const dur = e.c.actualDur || e.c.duration || 8, cin = e.c.trimIn || 0;
       const cout = e.c.trimOut != null ? e.c.trimOut : dur;
-      const clip = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
+      const clip2 = { mid: e.c.resultMid, in: cin, out: e.c.trimOut, span: Math.max(0.1, cout - cin) };
       const cr = e.c.crop;
       if (cr && cr.w > 0.05 && cr.h > 0.05 && (cr.w < 0.99 || cr.h < 0.99 || cr.x > 0.01 || cr.y > 0.01))
-        clip.crop = { x: cr.x, y: cr.y, w: cr.w, h: cr.h };
-      return clip;
+        clip2.crop = { x: cr.x, y: cr.y, w: cr.w, h: cr.h };
+      return clip2;
     });
     const total = clips.reduce((s, c) => s + c.span, 0);
     return { clips, total };
@@ -895,21 +895,21 @@ ${"=".repeat(48)}
     const [isMobile, setIsMobile] = useState(detectMobile);
     useEffect(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
-      const sync = () => setIsMobile(detectMobile());
-      sync();
+      const sync2 = () => setIsMobile(detectMobile());
+      sync2();
       const mqls = [
         window.matchMedia(MOBILE_QUERY),
         window.matchMedia("(orientation: portrait)")
       ];
-      const bind = (mql) => mql.addEventListener ? mql.addEventListener("change", sync) : mql.addListener(sync);
-      const unbind = (mql) => mql.removeEventListener ? mql.removeEventListener("change", sync) : mql.removeListener(sync);
+      const bind = (mql) => mql.addEventListener ? mql.addEventListener("change", sync2) : mql.addListener(sync2);
+      const unbind = (mql) => mql.removeEventListener ? mql.removeEventListener("change", sync2) : mql.removeListener(sync2);
       mqls.forEach(bind);
-      window.addEventListener("resize", sync);
-      window.addEventListener("orientationchange", sync);
+      window.addEventListener("resize", sync2);
+      window.addEventListener("orientationchange", sync2);
       return () => {
         mqls.forEach(unbind);
-        window.removeEventListener("resize", sync);
-        window.removeEventListener("orientationchange", sync);
+        window.removeEventListener("resize", sync2);
+        window.removeEventListener("orientationchange", sync2);
       };
     }, []);
     return isMobile;
@@ -1441,7 +1441,7 @@ ${"=".repeat(48)}
       return layers;
     }
     var STYLE_ID = "mg-art-filters-style";
-    var CSS = [
+    var CSS2 = [
       ".mgaf-stage,.mgaf-swatch{position:relative;isolation:isolate;}",
       ".mgaf-stage{display:inline-block;line-height:0;}",
       ".mgaf-stage>[data-mgaf-layer],.mgaf-swatch>[data-mgaf-layer]{position:absolute;",
@@ -1452,7 +1452,7 @@ ${"=".repeat(48)}
       if (document.getElementById(STYLE_ID)) return;
       var s = document.createElement("style");
       s.id = STYLE_ID;
-      s.textContent = CSS;
+      s.textContent = CSS2;
       (document.head || document.documentElement).appendChild(s);
     }
     function clearLayers(host2) {
@@ -1790,7 +1790,7 @@ ${"=".repeat(48)}
     showSource = false,
     showUpload = false,
     showCopyPrompt = false,
-    sheet = false,
+    sheet: sheet2 = false,
     onPick,
     onClose
   }) {
@@ -1852,7 +1852,7 @@ ${"=".repeat(48)}
       } catch {
       }
     }, [tile]);
-    const schedule2 = useCallback(() => {
+    const schedule3 = useCallback(() => {
       clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         if (coreRef.current) coreRef.current.setFilters(fRef.current);
@@ -1872,11 +1872,11 @@ ${"=".repeat(48)}
       setTimeout(() => onClose && onClose(), 340);
     }, [onClose]);
     useEffect(() => {
-      const onKey2 = (e) => {
+      const onKey3 = (e) => {
         if (e.key === "Escape") doClose();
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [doClose]);
     const pick = (m) => {
       if (copyOn && m.prompt) {
@@ -1913,7 +1913,7 @@ ${"=".repeat(48)}
         pick({ media_id: d.media_id, prompt: "", thumb: URL.createObjectURL(f) });
       });
     };
-    const cls = "mg-gallery-picker" + (sheet ? " sheet" : "") + (closing ? " mg-closing" : "") + privacyBlurClass(isPrivacyBlurOn());
+    const cls = "mg-gallery-picker" + (sheet2 ? " sheet" : "") + (closing ? " mg-closing" : "") + privacyBlurClass(isPrivacyBlurOn());
     return /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
@@ -1933,7 +1933,7 @@ ${"=".repeat(48)}
           value: q,
           onChange: (e) => {
             setQ(e.target.value);
-            schedule2();
+            schedule3();
           }
         }
       ), /* @__PURE__ */ react_global_shim_default.createElement(
@@ -1953,23 +1953,23 @@ ${"=".repeat(48)}
           value: collection,
           onChange: (e) => {
             setCollection(e.target.value);
-            schedule2();
+            schedule3();
           }
         },
         /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "All collections"),
         collections.map((c) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: c, value: c }, c))
       ), showType && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "type", value: type, onChange: (e) => {
         setType(e.target.value);
-        schedule2();
+        schedule3();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "all" }, "Image + video"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "image" }, "Images"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "video" }, "Videos")), showSource && /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "source", value: source, onChange: (e) => {
         setSource(e.target.value);
-        schedule2();
+        schedule3();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "" }, "Any source"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "api" }, "Generated (AI)"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "local" }, "Imported local")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "rating", value: rating, onChange: (e) => {
         setRating(+e.target.value);
-        schedule2();
+        schedule3();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "0" }, "Any rating"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "1" }, "\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "2" }, "\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "3" }, "\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "4" }, "\u2605\u2605\u2605\u2605+"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "5" }, "\u2605\u2605\u2605\u2605\u2605")), /* @__PURE__ */ react_global_shim_default.createElement("select", { "data-f": "sort", value: sort, onChange: (e) => {
         setSort(e.target.value);
-        schedule2();
+        schedule3();
       } }, /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "newest" }, "Newest first"), /* @__PURE__ */ react_global_shim_default.createElement("option", { value: "oldest" }, "Oldest first")), showUpload && /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(
         "button",
         {
@@ -2590,12 +2590,12 @@ ${"=".repeat(48)}
     return { state: "error", note: "", msg: "", raw: d };
   }
   function build(view, props) {
-    const { state, note: note3, msg, raw } = view;
+    const { state: state2, note: note3, msg, raw } = view;
     const d = raw || {};
     const warn = (props.warn || "").trim();
     const compact = !!props.compact;
     let main = "", sub = null, title = "", val = "", lab = "", tip = "", dot = false, short = false;
-    const lane = state === "free" && d.unlimited === true;
+    const lane = state2 === "free" && d.unlimited === true;
     const heldN = cardCount(d.cards_held != null ? d.cards_held : d.cards);
     const needN = cardCount(d.cards_needed);
     if (lane) {
@@ -2604,7 +2604,7 @@ ${"=".repeat(48)}
       val = "Free";
       lab = "Unlimited Mode";
       tip = title;
-    } else if (state === "free") {
+    } else if (state2 === "free") {
       const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
       const leftN = heldN != null ? fmt2(heldN) + " left" : "";
       const usesN = needN != null && needN > 1 ? "uses " + fmt2(needN) + " of " + (heldN != null ? fmt2(heldN) : "your") + " cards" : "";
@@ -2619,7 +2619,7 @@ ${"=".repeat(48)}
         tip += " Card " + sub.text + " \u2014 " + sub.title + ".";
         dot = sub.days <= 7;
       }
-    } else if (state === "paid") {
+    } else if (state2 === "paid") {
       const n = Number(d.cost);
       short = n !== 0 && isShort(d);
       const shortNote = short ? "You hold " + (heldN != null ? fmt2(heldN) : "?") + " of the " + (needN != null ? fmt2(needN) : "?") + " cards this needs \u2014 not enough, so no card is used. Costs the full ~" + fmt2(n) + " credits." : "";
@@ -2629,41 +2629,41 @@ ${"=".repeat(48)}
       val = n === 0 ? "0" : (warn || short ? "\u26A0 " : "") + "\u2248 " + fmt2(n);
       lab = n === 0 ? "credits \u2014 spends nothing" : short ? "credits \xB7 card short" : "credits";
       tip = n !== 0 && warn ? "\u26A0 " + warn + ". " + title : title;
-    } else if (state === "error") {
+    } else if (state2 === "error") {
       main = "\u26A0 " + (msg || ERR_TEXT);
       title = ERR_TITLE;
       tip = ERR_TITLE;
-    } else if (state === "checking") {
+    } else if (state2 === "checking") {
       main = "Checking cost\u2026";
     } else {
       main = note3 || (props.hint || "").trim() || DEFAULT_HINT;
     }
-    const adjTxt = state === "free" || state === "paid" ? adjustedText(d.adjusted) : "";
+    const adjTxt = state2 === "free" || state2 === "paid" ? adjustedText(d.adjusted) : "";
     const adj0 = adjTxt ? "Adjusted before sending: " + adjTxt : "";
     const brk = [];
-    if (state === "paid" && Number(d.context_images) > 0) {
+    if (state2 === "paid" && Number(d.context_images) > 0) {
       const n = Number(d.context_images);
       brk.push(fmt2(n) + (n === 1 ? " context image" : " context images") + (d.context_charge != null && isFinite(Number(d.context_charge)) ? " +" + fmt2(d.context_charge) : "") + (props.laneHeld ? " \xB7 not Unlimited" : ""));
     }
-    if (state === "paid" && d.profile && Number(d.profile_extra) > 0) {
+    if (state2 === "paid" && d.profile && Number(d.profile_extra) > 0) {
       brk.push("profile " + d.profile + " +" + fmt2(d.profile_extra));
     }
     const adj = [brk.join(" \xB7 "), adj0].filter(Boolean).join(" \xB7 ");
     if (adj) tip = (tip ? tip + " " : "") + adj + ".";
     const noteLine = adj ? sub ? { text: sub.text + " \xB7 " + adj, title: sub.title + " \xB7 " + adj, days: sub.days } : { text: adj, title: adj, days: null } : sub;
     const text = main + (lane ? " \u221E" : "") + (noteLine ? " \xB7 " + noteLine.text : "");
-    const stack = !!props.stack;
+    const stack2 = !!props.stack;
     let line = "";
-    if (stack) {
+    if (stack2) {
       const parts = [];
       const countN = cardCount(props.count);
       if (lane) {
-      } else if (state === "free") {
+      } else if (state2 === "free") {
         const card = d.card_name || (props.cardLabel || "").trim() || "a free card";
         parts.push(/\bcard\b/i.test(card) ? card : card + " card");
         if (countN != null && countN > 1) parts.push(fmt2(countN) + " images");
         if (sub) parts.push(sub.text);
-      } else if (state === "paid" && countN != null && countN > 1) {
+      } else if (state2 === "paid" && countN != null && countN > 1) {
         parts.push(fmt2(countN) + " images");
       }
       const balanceN = props.balance != null && props.balance !== "" && isFinite(Number(props.balance)) ? Number(props.balance) : null;
@@ -2671,7 +2671,7 @@ ${"=".repeat(48)}
       if (balanceN != null) parts.push(fmt2(balanceN) + " credits");
       line = parts.join(" \xB7 ");
     }
-    return { state, warn, compact, stack, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
+    return { state: state2, warn, compact, stack: stack2, short, lane, main, sub, noteLine, adj, title, val, lab, tip, dot, text, line, d };
   }
   function detailOf(m) {
     const d = m.d || {};
@@ -2691,7 +2691,7 @@ ${"=".repeat(48)}
   }
   var IDLE = { state: "idle", note: "", msg: "", raw: null };
   var CostBadge = forwardRef(function CostBadge2(props, ref) {
-    const { hint, warn, compact, stack, count, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
+    const { hint, warn, compact, stack: stack2, count, balance, cardLabel, laneHeld, onCost, id, className, style } = props;
     const [view, setView] = useState(IDLE);
     const viewRef = useRef(view);
     const propsRef = useRef(props);
@@ -2741,7 +2741,7 @@ ${"=".repeat(48)}
         propsRef.current.onCost(detailOf(build(viewRef.current, propsRef.current)));
       }
     }, [view]);
-    const m = build(view, { hint, warn, compact, stack, count, balance, cardLabel, laneHeld });
+    const m = build(view, { hint, warn, compact, stack: stack2, count, balance, cardLabel, laneHeld });
     mRef.current = m;
     const dataWarn = m.state === "paid" && (m.warn || m.short) ? "1" : void 0;
     const dataShort = m.state === "paid" && m.short ? "1" : void 0;
@@ -2919,8 +2919,8 @@ ${"=".repeat(48)}
   function snapDuration(d, model) {
     d = Number(d);
     if (!isFinite(d)) return 5;
-    const set = model ? durationsFor(model) : DURATIONS;
-    return set.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
+    const set2 = model ? durationsFor(model) : DURATIONS;
+    return set2.reduce((best, v) => Math.abs(v - d) < Math.abs(best - d) ? v : best);
   }
   function refItem(r) {
     const mid = String(r.media_id || r.mid);
@@ -3175,7 +3175,7 @@ ${"=".repeat(48)}
         put2(settledFor(key));
       });
     }, [costRef, put2]);
-    const refresh2 = useCallback((opts) => {
+    const refresh3 = useCallback((opts) => {
       if (!enabledRef.current) return;
       const force = !!(opts && opts.force);
       const built2 = buildRef.current() || {};
@@ -3192,12 +3192,12 @@ ${"=".repeat(48)}
         stop();
         return;
       }
-      refresh2({ force: true });
-    }, [enabled, refresh2, stop]);
+      refresh3({ force: true });
+    }, [enabled, refresh3, stop]);
     useEffect(() => stop, [stop]);
     const built = build2 ? build2() || {} : {};
     return {
-      refresh: refresh2,
+      refresh: refresh3,
       verdict,
       canSubmit: canSubmit(verdict, built.payload, skipKeys),
       response
@@ -3205,7 +3205,7 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit6, count, onPhase }) {
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase }) {
     let d;
     try {
       const r = await fetch(route, {
@@ -3215,14 +3215,14 @@ ${"=".repeat(48)}
       });
       d = await r.json();
     } catch {
-      emit6({
+      emit7({
         kind: "err",
         text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
       });
       return null;
     }
     if (d.error || !d.task_id) {
-      emit6({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
+      emit7({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
       return null;
     }
     const adj = adjustedText(d.adjusted);
@@ -3233,9 +3233,9 @@ ${"=".repeat(48)}
         msg: adj
       });
     }
-    emit6({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
+    emit7({ text: "Queued \u2014 running\u2026" + (adj ? "  (adjusted: " + adj + ")" : "") });
     if (!window.Jobs) {
-      emit6({
+      emit7({
         kind: "ok",
         text: "Submitted \u2014 task " + d.task_id + ". Live tracking is unavailable on this page; it will land in your library."
       });
@@ -3245,7 +3245,7 @@ ${"=".repeat(48)}
       const data2 = st || {};
       if (phase === "done") {
         const paid = data2.paid_credit;
-        emit6({
+        emit7({
           kind: "ok",
           // An Unlimited Mode run is free by the entitlement, never by a card
           // (SCOPE_2026-09-26_unlimited-mode §8.7).
@@ -3255,12 +3255,12 @@ ${"=".repeat(48)}
         window.dispatchEvent(new CustomEvent("mg-gen-done"));
         if (window.Ach) window.Ach.check();
       } else if (phase === "failed") {
-        emit6({
+        emit7({
           kind: "err",
           text: friendlyGenErr2(data2.error || data2.reason || data2.status || "failed")
         });
       } else if (phase === "stalled") {
-        emit6({
+        emit7({
           kind: "err",
           text: "This tab stopped watching after 6h \u2014 the task may still finish; check the Activity tray."
         });
@@ -3480,7 +3480,7 @@ ${"=".repeat(48)}
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
-    const emit6 = useCallback((name, detail) => {
+    const emit7 = useCallback((name, detail) => {
       const n = liveNode.current;
       if (n) n.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail: detail || {} }));
     }, []);
@@ -3501,7 +3501,7 @@ ${"=".repeat(48)}
     };
     const userSetMode = (m) => {
       setMode(m, true);
-      emit6("mg-mode-commit", { vmode: m });
+      emit7("mg-mode-commit", { vmode: m });
     };
     const applyModelGating2 = (userDriven) => {
       applyModelGating(st.current, userDriven);
@@ -3544,11 +3544,11 @@ ${"=".repeat(48)}
     const emitCommitIfDirty = () => {
       if (!dirty.current) return;
       dirty.current = false;
-      emit6("mg-prompt-commit", { text: promptText2() });
+      emit7("mg-prompt-commit", { text: promptText2() });
     };
     const onCeInput = useCallback(() => {
       dirty.current = true;
-      emit6("mg-dirty", {});
+      emit7("mg-dirty", {});
       clearTimeout(chipTimer.current);
       chipTimer.current = setTimeout(() => {
         chipify2(false);
@@ -3598,7 +3598,7 @@ ${"=".repeat(48)}
       previewTimer.current = setTimeout(() => p.classList.remove("open"), 180);
     };
     const requestPick = (bank, i) => {
-      emit6("mg-pick-request", {
+      emit7("mg-pick-request", {
         slot: i,
         bank,
         mode: st.current.mode,
@@ -3718,21 +3718,21 @@ ${"=".repeat(48)}
         const elapsed = Date.now() - startedAt;
         if (phase === "done") {
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-          emit6("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          emit7("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
         } else if (phase === "failed") {
           const msg = friendlyGenErr3(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
-          emit6("mg-error", { error: msg });
+          emit7("mg-error", { error: msg });
         } else if (phase === "stalled") {
           updateLine(id, {
             kind: "plain",
             text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
           });
-          emit6("mg-paused", { task_id: taskId });
+          emit7("mg-paused", { task_id: taskId });
         } else if (phase === "slow" || phase === "stale") {
           tier = phase;
           updateLine(id, tierLine(phase, elapsed));
-          emit6("mg-slow", { tier: phase, elapsed, task_id: taskId });
+          emit7("mg-slow", { tier: phase, elapsed, task_id: taskId });
         } else {
           updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
         }
@@ -3740,16 +3740,16 @@ ${"=".repeat(48)}
       const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
       unlock();
       if (!tid) {
-        emit6("mg-error", { error: lastErr || "submit failed" });
+        emit7("mg-error", { error: lastErr || "submit failed" });
         return;
       }
       taskId = tid;
-      emit6("mg-submit", { task_id: tid, payload: p });
+      emit7("mg-submit", { task_id: tid, payload: p });
       reprice({ force: true });
     };
     const renderError = (msg) => {
       pushLine({ kind: "error", text: msg });
-      emit6("mg-error", { error: msg });
+      emit7("mg-error", { error: msg });
     };
     const setRefs = (refs) => {
       applySetRefs(st.current, refs);
@@ -4027,7 +4027,7 @@ ${"=".repeat(48)}
           st.current.audioGen = e.target.checked;
           rerender();
           reprice();
-          emit6("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
+          emit7("mg-audio-commit", { audioGen: e.target.checked, audioLanguage: st.current.audioLanguage });
         }
       }
     ), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swtrack" }, /* @__PURE__ */ react_global_shim_default.createElement("i", null)), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgd-swlab" }, "Generate audio")), /* @__PURE__ */ react_global_shim_default.createElement("label", { className: "mgd-sw", title: "Off by default \u2014 the opposite of image gen" }, /* @__PURE__ */ react_global_shim_default.createElement(
@@ -4052,7 +4052,7 @@ ${"=".repeat(48)}
           st.current.audioLanguage = e.target.value;
           rerender();
           reprice();
-          emit6("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
+          emit7("mg-audio-commit", { audioGen: st.current.audioGen, audioLanguage: e.target.value });
         }
       },
       AUDIO_LANGS.map(([v, l]) => /* @__PURE__ */ react_global_shim_default.createElement("option", { key: v, value: v }, l))
@@ -4073,7 +4073,7 @@ ${"=".repeat(48)}
             st.current.duration = d;
             rerender();
             reprice();
-            emit6("mg-duration-commit", { duration: d });
+            emit7("mg-duration-commit", { duration: d });
           }
         },
         d
@@ -4132,6 +4132,9 @@ ${"=".repeat(48)}
       title: o.title || "",
       msg: o.msg || "",
       thumb: o.thumb || "",
+      avatar: o.avatar || "",
+      code: o.code || "",
+      action: o.action && typeof o.action.run === "function" ? { label: String(o.action.label || ""), run: o.action.run } : null,
       sticky: !!o.sticky,
       out: false
     }]);
@@ -4144,6 +4147,11 @@ ${"=".repeat(48)}
   // ../gallery/src/hooks/swrStore.js
   var _store = /* @__PURE__ */ new Map();
   var _isPlainPayload = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  function peek(path) {
+    if (!path) return null;
+    const hit = _store.get(String(path));
+    return hit === void 0 ? null : hit;
+  }
   function put(path, data2) {
     if (!path || !_isPlainPayload(data2) || data2.error) return false;
     let keep = data2;
@@ -4253,6 +4261,14 @@ ${"=".repeat(48)}
   function emit3() {
     subs3.forEach((fn) => fn(current));
   }
+  function subscribe3(fn) {
+    subs3.add(fn);
+    fn(current);
+    return () => subs3.delete(fn);
+  }
+  function getUpdate() {
+    return current;
+  }
   function parseVersion(v) {
     const s = String(v == null ? "" : v).trim().replace(/^v/i, "");
     if (!/^\d+(\.\d+)*$/.test(s)) return null;
@@ -4297,6 +4313,16 @@ ${"=".repeat(48)}
     return true;
   }
   var RECEIPT_KEY = "mg_update_receipt";
+  var receiptToast = null;
+  function retireReceiptToast() {
+    if (receiptToast) {
+      try {
+        receiptToast();
+      } catch {
+      }
+    }
+    receiptToast = null;
+  }
   function versionFromStamp(stamp) {
     return String(stamp == null ? "" : stamp).trim().split(/[·\s]/)[0] || "";
   }
@@ -4326,7 +4352,7 @@ ${"=".repeat(48)}
     clearReceipt();
     if (cmpVersions(have, want) !== 0) return false;
     const label = /^v/i.test(want) ? want : "v" + want;
-    show({
+    receiptToast = show({
       kind: "ok",
       sticky: true,
       title: "Updated to " + label,
@@ -4347,7 +4373,7 @@ ${"=".repeat(48)}
   function emit4() {
     subs4.forEach((fn) => fn({ jobs, open }));
   }
-  function subscribe3(fn) {
+  function subscribe4(fn) {
     subs4.add(fn);
     fn({ jobs, open });
     return () => subs4.delete(fn);
@@ -4608,6 +4634,9 @@ ${"=".repeat(48)}
     if (!_pendingDrain) return;
     _pendingDrain = false;
     _drain();
+  }
+  function celebrationsIdle() {
+    return !_marking && !_q.length && !_cur && !_live.size && !_heldOff();
   }
   function beginBespokeMoment() {
     _bespoke++;
@@ -5270,19 +5299,40 @@ ${"=".repeat(48)}
     const [toasts2, setToasts] = useState([]);
     useEffect(() => subscribe(setToasts), []);
     return createPortal(
-      /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "mg-toasts", "aria-live": "polite" }, toasts2.map((t) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, className: "mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "") }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null), t.thumb ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-thumb", style: { backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" } }) : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "mt-x", "aria-label": "Dismiss", onClick: () => dismiss(t.id) }, "\xD7")))),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { id: "mg-toasts", "aria-live": "polite" }, toasts2.map((t) => /* @__PURE__ */ react_global_shim_default.createElement("div", { key: t.id, className: "mg-toast" + (t.kind ? " " + t.kind : "") + (t.out ? " out" : "") }, t.avatar ? /* @__PURE__ */ react_global_shim_default.createElement(
+        "span",
+        {
+          className: "mt-avatar",
+          "aria-hidden": "true",
+          style: { backgroundImage: "url('" + t.avatar.replace(/'/g, "%27") + "')" }
+        }
+      ) : /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-ic" }, t.icon), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-main" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-title" }, t.title, t.code ? /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, " ", /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mt-code" }, t.code)) : null), t.msg ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mt-msg" }, t.msg) : null), t.thumb ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mt-thumb", style: { backgroundImage: "url('" + t.thumb.replace(/'/g, "%27") + "')" } }) : null, t.action ? /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mt-act",
+          onClick: () => {
+            dismiss(t.id);
+            try {
+              t.action.run();
+            } catch {
+            }
+          }
+        },
+        t.action.label
+      ) : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { className: "mt-x", "aria-label": "Dismiss", onClick: () => dismiss(t.id) }, "\xD7")))),
       document.body
     );
   }
 
   // ../gallery/src/notify/BannerHost.jsx
   function BannerHost() {
-    const [state, setState] = useState({ banner: null, collapsed: false });
+    const [state2, setState] = useState({ banner: null, collapsed: false });
     const [, setHasHost] = useState(false);
     const ref = useRef(null);
     useEffect(() => subscribe2((banner3, isCollapsed) => setState({ banner: banner3, collapsed: isCollapsed })), []);
     useEffect(() => subscribeUpdateHost(setHasHost), []);
-    const { banner: banner2, collapsed: collapsed2 } = state;
+    const { banner: banner2, collapsed: collapsed2 } = state2;
     useLayoutEffect(() => {
       const root = typeof document !== "undefined" ? document.documentElement : null;
       const el = ref.current;
@@ -5430,13 +5480,13 @@ ${"=".repeat(48)}
   function needsSeek(currentTime, ct) {
     return Math.abs(Number(currentTime) - ct) > SEEK_EPSILON;
   }
-  function startClock(now) {
-    return { phase: "lead", t0: now, T: 0, holdBase: 0, holdAt: 0 };
+  function startClock(now2) {
+    return { phase: "lead", t0: now2, T: 0, holdBase: 0, holdAt: 0 };
   }
-  function stepClock(s, { now, videoTime = 0, ended = false, clipEnd = CLIP_DUR, total }) {
+  function stepClock(s, { now: now2, videoTime = 0, ended = false, clipEnd = CLIP_DUR, total }) {
     const out = { ...s, play: false, pause: false, seekTo: null, done: false };
     if (s.phase === "lead") {
-      const T = (now - s.t0) / 1e3;
+      const T = (now2 - s.t0) / 1e3;
       if (T < LEAD) {
         out.T = Math.max(0, T);
         return out;
@@ -5451,7 +5501,7 @@ ${"=".repeat(48)}
       if (ended || videoTime >= clipEnd - 0.1) {
         out.phase = "hold";
         out.holdBase = out.T;
-        out.holdAt = now;
+        out.holdAt = now2;
         out.pause = true;
         const ct = clipTime(out.T, clipEnd);
         if (needsSeek(videoTime, ct)) out.seekTo = ct;
@@ -5459,7 +5509,7 @@ ${"=".repeat(48)}
       return out;
     }
     if (s.phase === "hold") {
-      const T = s.holdBase + (now - s.holdAt) / 1e3;
+      const T = s.holdBase + (now2 - s.holdAt) / 1e3;
       out.T = Math.min(T, total);
       const ct = clipTime(out.T, clipEnd);
       if (needsSeek(videoTime, ct)) out.seekTo = ct;
@@ -5894,7 +5944,7 @@ ${"=".repeat(48)}
       }
     });
   }
-  function subscribe4(fn) {
+  function subscribe5(fn) {
     subs5.add(fn);
     return () => subs5.delete(fn);
   }
@@ -6109,17 +6159,17 @@ ${"=".repeat(48)}
     const { id, kind, a } = moment;
     const achievement = a || {};
     const copy = achievement.moment_copy || {};
-    const clip = String(achievement.moment_clip || "");
+    const clip2 = String(achievement.moment_clip || "");
     const [{ cues, total }] = useState(() => cuesFrom(SCENES[kind]));
     const [reduced] = useState(prefersReducedMotion);
     const [greet] = useState(greeting);
-    const [mode, setMode] = useState(clip ? "loading" : "fallback");
+    const [mode, setMode] = useState(clip2 ? "loading" : "fallback");
     const [shown, setShown] = useState(false);
     const [leaving, setLeaving] = useState(false);
     const [T, setT] = useState(0);
     const [wall, setWall] = useState(0);
     const [needsSound, setNeedsSound] = useState(false);
-    const [vp, setVp] = useState(viewport);
+    const [vp2, setVp] = useState(viewport);
     const videoRef = useRef(null);
     const modeRef = useRef(mode);
     modeRef.current = mode;
@@ -6193,7 +6243,7 @@ ${"=".repeat(48)}
       attachMoment(id, () => finishRef.current("skipped"));
       const onResize = () => setVp(viewport());
       window.addEventListener("resize", onResize);
-      if (!clip) {
+      if (!clip2) {
         wallAtRef.current = performance.now();
         setShown(true);
         playTracks();
@@ -6243,9 +6293,9 @@ ${"=".repeat(48)}
       let stalled = 0;
       const tick = () => {
         if (doneRef.current || frozenRef.current || modeRef.current !== "play") return;
-        const now = performance.now();
+        const now2 = performance.now();
         const s = stepClock(clockRef.current, {
-          now,
+          now: now2,
           videoTime: v ? v.currentTime : 0,
           ended: !!(v && v.ended),
           clipEnd: clipEndOf(v && v.duration),
@@ -6268,8 +6318,8 @@ ${"=".repeat(48)}
         }
         if (v && s.pause && !v.paused) v.pause();
         if (v && s.seekTo != null) v.currentTime = s.seekTo;
-        stalled = s.phase === "clip" && s.T <= lastT ? stalled + Math.min(now - lastNow, 100) : 0;
-        lastNow = now;
+        stalled = s.phase === "clip" && s.T <= lastT ? stalled + Math.min(now2 - lastNow, 100) : 0;
+        lastNow = now2;
         lastT = s.T;
         if (stalled > LOAD_CEILING_MS) {
           settle("fallback");
@@ -6350,8 +6400,8 @@ ${"=".repeat(48)}
       const opened = openPanelHere("brand");
       finish("button", opened ? null : () => carryPanelTab("brand"));
     };
-    const st = fitStage(vp.w, vp.h);
-    const sf = fitSafe(vp.w, vp.h);
+    const st = fitStage(vp2.w, vp2.h);
+    const sf = fitSafe(vp2.w, vp2.h);
     const settled = mode === "still" || mode === "fallback";
     const overlayT = settled ? STILL[kind].overlay(cues) : T;
     const clipT = settled ? STILL[kind].still(cues) : T;
@@ -6360,13 +6410,13 @@ ${"=".repeat(48)}
     const rootOpacity = shown && !leaving ? 1 : 0;
     const rootMotion = mode === "frozen" ? "none" : "opacity " + FADE_OUT_MS + "ms ease";
     const flare = f.castflare || f.doorflare;
-    const showVideo = !!clip && mode !== "fallback";
-    return /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-moment": kind, className: "mgm-root" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgm-scrim", style: { width: vp.w, height: vp.h, opacity: rootOpacity, transition: rootMotion } }), /* @__PURE__ */ react_global_shim_default.createElement(
+    const showVideo = !!clip2 && mode !== "fallback";
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { "data-moment": kind, className: "mgm-root" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgm-scrim", style: { width: vp2.w, height: vp2.h, opacity: rootOpacity, transition: rootMotion } }), /* @__PURE__ */ react_global_shim_default.createElement(
       "div",
       {
         className: "mgm-host",
         onClick: skip,
-        style: { width: vp.w, height: vp.h, opacity: rootOpacity, transition: rootMotion, pointerEvents: shown ? "auto" : "none" }
+        style: { width: vp2.w, height: vp2.h, opacity: rootOpacity, transition: rootMotion, pointerEvents: shown ? "auto" : "none" }
       },
       /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgm-fade", style: { opacity: fade } }, /* @__PURE__ */ react_global_shim_default.createElement(
         "div",
@@ -6380,7 +6430,7 @@ ${"=".repeat(48)}
           {
             ref: videoRef,
             "data-part": "clip",
-            src: clip,
+            src: clip2,
             style: f.clip,
             playsInline: true,
             preload: "auto",
@@ -6439,7 +6489,7 @@ ${"=".repeat(48)}
 
   // ../gallery/src/moments/MomentHost.jsx
   function MomentHost() {
-    const cur2 = useSyncExternalStore(subscribe4, currentMoment, currentMoment);
+    const cur2 = useSyncExternalStore(subscribe5, currentMoment, currentMoment);
     if (!cur2 || !cur2.ready || typeof document === "undefined") return null;
     return createPortal(/* @__PURE__ */ react_global_shim_default.createElement(ClipMoment, { key: cur2.id, moment: cur2 }), document.body);
   }
@@ -6468,6 +6518,2092 @@ ${"=".repeat(48)}
   }
   function NotifyRoot() {
     return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(BannerHost, null), /* @__PURE__ */ react_global_shim_default.createElement(ToastHost, null), /* @__PURE__ */ react_global_shim_default.createElement(MomentHost, null));
+  }
+
+  // ../gallery/src/hooks/accountPrefsStore.js
+  var PREF_KEY_RE = /^[a-z][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$/;
+  var PREF_KEY_MAX = 64;
+  var _isPlainObject = (d) => !!d && typeof d === "object" && !Array.isArray(d);
+  var _has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  function prefKeyProblem(key) {
+    if (typeof key !== "string" || !key) return "Preference keys must be non-empty strings.";
+    if (key.length > PREF_KEY_MAX) return "Preference keys are at most " + PREF_KEY_MAX + " characters.";
+    if (!PREF_KEY_RE.test(key)) {
+      return "'" + key + "' is not a valid preference key: use lowercase dotted names like guide.library.";
+    }
+    return "";
+  }
+  function applyOps(base, ops) {
+    const out = { ...base };
+    for (const op of ops) {
+      for (const k of Object.keys(op.set)) out[k] = op.set[k];
+      for (const k of op.unset) delete out[k];
+    }
+    return out;
+  }
+  function readPref(prefs, key, fallback) {
+    return prefs && _has(prefs, key) ? prefs[key] : fallback;
+  }
+  function _jsonValue(value) {
+    let enc;
+    try {
+      enc = JSON.stringify(value);
+    } catch {
+      return void 0;
+    }
+    return enc === void 0 ? void 0 : JSON.parse(enc);
+  }
+  function createPrefsStore({ load: load2, save }) {
+    let base = {};
+    let pending2 = [];
+    let status = "idle";
+    let error = "";
+    let loadRun = null;
+    let queue = Promise.resolve();
+    let snap = { status, error, prefs: base };
+    const subs8 = /* @__PURE__ */ new Set();
+    function publish() {
+      snap = { status, error, prefs: applyOps(base, pending2) };
+      for (const fn of [...subs8]) {
+        try {
+          fn();
+        } catch {
+        }
+      }
+    }
+    function enqueue(job) {
+      const run = queue.then(job);
+      queue = run.then(() => void 0, () => void 0);
+      return run;
+    }
+    function ensureLoaded() {
+      if (status === "ready") return Promise.resolve(true);
+      if (loadRun) return loadRun;
+      status = "loading";
+      error = "";
+      publish();
+      loadRun = enqueue(async () => {
+        let d;
+        try {
+          d = await load2();
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        loadRun = null;
+        if (status === "ready") return true;
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+        } else {
+          status = "error";
+          error = d && d.error || "could not load preferences";
+        }
+        publish();
+        return status === "ready";
+      });
+      return loadRun;
+    }
+    function write(setObj, unsetList) {
+      const op = { set: setObj, unset: unsetList };
+      pending2 = [...pending2, op];
+      publish();
+      ensureLoaded();
+      return enqueue(async () => {
+        let d;
+        try {
+          d = await save({ set: op.set, unset: op.unset });
+        } catch (e) {
+          d = { error: "network error: " + (e && e.message || "unreachable") };
+        }
+        pending2 = pending2.filter((o) => o !== op);
+        if (d && !d.error && _isPlainObject(d.prefs)) {
+          base = d.prefs;
+          status = "ready";
+          error = "";
+          publish();
+          return { ok: true };
+        }
+        publish();
+        return { error: d && d.error || "could not save preferences" };
+      });
+    }
+    function set2(key, value) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      const v = _jsonValue(value);
+      if (v === void 0) {
+        return Promise.resolve({ error: "The value for '" + key + "' is not plain JSON (use unset to remove a key)." });
+      }
+      return write({ [key]: v }, []);
+    }
+    function unset(key) {
+      const problem = prefKeyProblem(key);
+      if (problem) return Promise.resolve({ error: problem });
+      return write({}, [key]);
+    }
+    return {
+      ensureLoaded,
+      set: set2,
+      unset,
+      get: (key, fallback) => readPref(snap.prefs, key, fallback),
+      getSnapshot: () => snap,
+      subscribe(fn) {
+        subs8.add(fn);
+        return () => {
+          subs8.delete(fn);
+        };
+      }
+    };
+  }
+
+  // ../gallery/src/hooks/useAccountPrefs.js
+  var PATH = "/api/account/prefs";
+  var _csrf = "";
+  var _store2 = null;
+  function _bootCsrf() {
+    try {
+      return typeof window !== "undefined" && window.MG_BOOT && window.MG_BOOT.csrf || "";
+    } catch {
+      return "";
+    }
+  }
+  function accountPrefs() {
+    if (!_store2) {
+      _store2 = createPrefsStore({
+        load: async () => {
+          const d = await apiGet(PATH);
+          if (d && d.csrf) _csrf = d.csrf;
+          return d;
+        },
+        save: (patch2) => apiPost(PATH, { ...patch2, csrf: _csrf || _bootCsrf() })
+      });
+    }
+    return _store2;
+  }
+  function useAccountPrefs() {
+    const store = accountPrefs();
+    const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+    useEffect(() => {
+      store.ensureLoaded();
+    }, [store]);
+    const get = useCallback((key, fallback) => readPref(snap.prefs, key, fallback), [snap]);
+    return {
+      prefs: snap.prefs,
+      status: snap.status,
+      ready: snap.status === "ready",
+      error: snap.error,
+      get,
+      set: store.set,
+      unset: store.unset
+    };
+  }
+
+  // ../gallery/src/hooks/useLayerHistory.js
+  var stack = [];
+  var depth = 0;
+  var unwinding = 0;
+  var bound = false;
+  var scheduled2 = false;
+  function onPop() {
+    if (unwinding > 0) {
+      unwinding -= 1;
+      return;
+    }
+    if (!depth) return;
+    depth -= 1;
+    for (let i = stack.length - 1; i >= 0; i -= 1) {
+      if (!stack[i].closing) {
+        stack[i].closing = true;
+        stack[i].close();
+        break;
+      }
+    }
+    schedule2();
+  }
+  function sync() {
+    const want = stack.length;
+    while (depth < want) {
+      depth += 1;
+      window.history.pushState({ mgLayer: depth }, "");
+    }
+    if (depth > want) {
+      const drop = depth - want;
+      depth = want;
+      unwinding += drop;
+      window.history.go(-drop);
+    }
+  }
+  function schedule2() {
+    if (scheduled2) return;
+    scheduled2 = true;
+    Promise.resolve().then(() => {
+      scheduled2 = false;
+      sync();
+    });
+  }
+  function useLayerHistory(open2, close) {
+    const closeRef = useRef(close);
+    useEffect(() => {
+      closeRef.current = close;
+    });
+    useEffect(() => {
+      if (!open2) return void 0;
+      if (!bound) {
+        bound = true;
+        window.addEventListener("popstate", onPop);
+      }
+      const entry = { close: () => closeRef.current(), closing: false };
+      stack.push(entry);
+      schedule2();
+      return () => {
+        const i = stack.indexOf(entry);
+        if (i >= 0) stack.splice(i, 1);
+        schedule2();
+      };
+    }, [open2]);
+  }
+
+  // ../gallery/src/palette/paletteCore.js
+  function matchScore(label, q) {
+    if (!q) return 0;
+    const s = String(label == null ? "" : label).toLowerCase();
+    const ql = String(q).toLowerCase();
+    let qi = 0;
+    let first = -1;
+    let last2 = -1;
+    for (let i = 0; i < s.length && qi < ql.length; i++) {
+      if (s[i] !== ql[qi]) continue;
+      if (first < 0) first = i;
+      last2 = i;
+      qi++;
+    }
+    if (qi < ql.length) return null;
+    const spread = last2 - first - (ql.length - 1);
+    return first * 2 + spread;
+  }
+
+  // ../gallery/src/help/helpCore.js
+  function githubSlug(text, used) {
+    let s = plainInline(text).toLowerCase().replace(/[^\p{L}\p{M}\p{N}_\- ]/gu, "").replace(/ /g, "-");
+    if (used) {
+      const base = s;
+      let n = 0;
+      while (used.has(s)) {
+        n += 1;
+        s = base + "-" + n;
+      }
+      used.add(s);
+    }
+    return s;
+  }
+  var INLINE = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^()\s]+)\)|\*\*(.+?)\*\*|\*([^*\s][^*\n]*?)\*|(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu;
+  function parseInline(text) {
+    const src = String(text == null ? "" : text);
+    const out = [];
+    const push = (v) => {
+      if (!v) return;
+      const last2 = out[out.length - 1];
+      if (last2 && last2.t === "text") last2.v += v;
+      else out.push({ t: "text", v });
+    };
+    let at = 0;
+    const re = new RegExp(INLINE.source, INLINE.flags);
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      push(src.slice(at, m.index));
+      at = re.lastIndex;
+      if (m[1] != null) out.push({ t: "code", v: m[1] });
+      else if (m[2] != null) out.push({ t: "a", href: m[3], c: parseInline(m[2]) });
+      else if (m[4] != null) out.push({ t: "b", c: parseInline(m[4]) });
+      else if (m[5] != null) out.push({ t: "i", c: parseInline(m[5]) });
+      else if (m[6] != null) out.push({ t: "i", c: parseInline(m[6]) });
+    }
+    push(src.slice(at));
+    return out;
+  }
+  function spansText(spans) {
+    return (spans || []).map((s) => s.c ? spansText(s.c) : s.t === "br" ? " " : s.v || "").join("");
+  }
+  function plainInline(text) {
+    return spansText(parseInline(text)).replace(/\s+/g, " ").trim();
+  }
+  var FENCE = /^\s*```/;
+  var HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+  var HR = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+  var BULLET = /^([ \t]*)[-*+][ \t]+(.*)$/;
+  var ORDERED = /^([ \t]*)(\d{1,9})[.)][ \t]+(.*)$/;
+  var TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+  function tableCells(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+    return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+  }
+  function parseWiki(md, used) {
+    const lines = String(md == null ? "" : md).replace(/\r\n?/g, "\n").split("\n");
+    const anchors = used || /* @__PURE__ */ new Set();
+    const blocks = [];
+    let i = 0;
+    const isBlank = (l) => !l || !l.trim();
+    const startsBlock = (l) => FENCE.test(l) || HEADING.test(l) || HR.test(l) || /^\s*>/.test(l) || BULLET.test(l) || ORDERED.test(l) || /^\s*\|/.test(l);
+    while (i < lines.length) {
+      const line = lines[i];
+      if (isBlank(line)) {
+        i++;
+        continue;
+      }
+      if (FENCE.test(line)) {
+        const body = [];
+        i++;
+        while (i < lines.length && !FENCE.test(lines[i])) {
+          body.push(lines[i]);
+          i++;
+        }
+        i++;
+        blocks.push({ type: "code", text: body.join("\n") });
+        continue;
+      }
+      const h = HEADING.exec(line);
+      if (h) {
+        const spans = parseInline(h[2]);
+        const text = spansText(spans).replace(/\s+/g, " ").trim();
+        blocks.push({ type: "h", level: h[1].length, spans, text, anchor: githubSlug(text, anchors) });
+        i++;
+        continue;
+      }
+      if (HR.test(line)) {
+        blocks.push({ type: "hr" });
+        i++;
+        continue;
+      }
+      if (/^\s*>/.test(line)) {
+        const inner = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) {
+          inner.push(lines[i].replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        blocks.push({ type: "quote", blocks: parseWiki(inner.join("\n"), anchors) });
+        continue;
+      }
+      if (/^\s*\|/.test(line) && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
+        const head = tableCells(line).map(parseInline);
+        const align = tableCells(lines[i + 1]).map((c) => /^:-+:$/.test(c) ? "center" : /^-+:$/.test(c) ? "right" : /^:-+$/.test(c) ? "left" : "");
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|/.test(lines[i])) {
+          rows.push(tableCells(lines[i]).map(parseInline));
+          i++;
+        }
+        blocks.push({ type: "table", head, align, rows });
+        continue;
+      }
+      const b = BULLET.exec(line);
+      const o = b ? null : ORDERED.exec(line);
+      if (b || o) {
+        const ordered = !!o;
+        const items = [];
+        let cur2 = null;
+        while (i < lines.length) {
+          const l = lines[i];
+          const mb = BULLET.exec(l);
+          const mo = mb ? null : ORDERED.exec(l);
+          if ((ordered ? mo : mb) && !(ordered ? mo[1] : mb[1])) {
+            cur2 = [ordered ? mo[3] : mb[2]];
+            items.push(cur2);
+            i++;
+            continue;
+          }
+          if (isBlank(l)) {
+            const next = lines[i + 1];
+            if (next && (ordered ? ORDERED.test(next) : BULLET.test(next)) && !/^[ \t]/.test(next)) {
+              i++;
+              continue;
+            }
+            break;
+          }
+          if (cur2 && (/^[ \t]/.test(l) || !startsBlock(l))) {
+            const sub = BULLET.exec(l);
+            cur2.push(sub ? "\n\u2022 " + sub[2] : l.trim());
+            i++;
+            continue;
+          }
+          break;
+        }
+        blocks.push({
+          type: ordered ? "ol" : "ul",
+          ...ordered ? { start: Number(o[2]) || 1 } : {},
+          items: items.map((parts) => {
+            const spans = [];
+            parts.join(" ").split("\n").forEach((seg, k) => {
+              if (k) spans.push({ t: "br" });
+              parseInline(seg.trim()).forEach((s) => spans.push(s));
+            });
+            return spans;
+          })
+        });
+        continue;
+      }
+      const para = [line.trim()];
+      i++;
+      while (i < lines.length && !isBlank(lines[i]) && !startsBlock(lines[i])) {
+        para.push(lines[i].trim());
+        i++;
+      }
+      blocks.push({ type: "p", spans: parseInline(para.join(" ")) });
+    }
+    return blocks;
+  }
+  var WIKI_WEB = /^https:\/\/github\.com\/Nelnamara\/moonglade-athenaeum\/wiki(?:\/([A-Za-z0-9][A-Za-z0-9_-]*))?\/?(?:#(.*))?$/;
+  var SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+  function classifyHref(href, slugs) {
+    const h = String(href == null ? "" : href).trim();
+    if (!h) return { kind: "text" };
+    if (h.startsWith("#")) return { kind: "anchor", anchor: decodeURIComponent(h.slice(1)) };
+    const web = WIKI_WEB.exec(h);
+    if (web) return { kind: "page", slug: web[1] || "Home", anchor: web[2] ? decodeURIComponent(web[2]) : "" };
+    if (/^https?:\/\//i.test(h)) return { kind: "external", href: h };
+    const [slug, anchor] = h.split("#");
+    if (SLUG.test(slug) && (!slugs || slugs.has(slug))) {
+      return { kind: "page", slug, anchor: anchor ? decodeURIComponent(anchor) : "" };
+    }
+    return { kind: "text" };
+  }
+  function escapeRe(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  function glossaryMatchers(terms) {
+    return (terms || []).map((t) => {
+      const term = String(t.term || "").trim();
+      const key = term.replace(/^the\s+/i, "").trim();
+      if (key.length < 3) return null;
+      const cased = /[A-Z]/.test(key);
+      const body = escapeRe(key).replace(/\s+/g, "\\s+");
+      const re = new RegExp(
+        "(?<![\\p{L}\\p{N}_-])(" + body + (cased ? "" : "s?") + ")(?![\\p{L}\\p{N}_-])",
+        cased ? "u" : "iu"
+      );
+      return { term, key, def: String(t.def || ""), re };
+    }).filter(Boolean).sort((a, b) => b.key.length - a.key.length);
+  }
+  function markGlossary(spans, matchers, used) {
+    if (!matchers || !matchers.length) return spans;
+    const walk = (list) => {
+      const out = [];
+      for (const s of list || []) {
+        if (s.t === "text") out.push(...splitText(s.v));
+        else if (s.t === "b" || s.t === "i") out.push({ ...s, c: walk(s.c) });
+        else out.push(s);
+      }
+      return out;
+    };
+    const splitText = (text) => {
+      let best = null;
+      for (const m of matchers) {
+        if (used.has(m.key.toLowerCase())) continue;
+        const hit = m.re.exec(text);
+        if (hit && (!best || hit.index < best.index)) best = { m, index: hit.index, v: hit[1] };
+      }
+      if (!best) return text ? [{ t: "text", v: text }] : [];
+      used.add(best.m.key.toLowerCase());
+      const before = text.slice(0, best.index);
+      const after = text.slice(best.index + best.v.length);
+      return [
+        ...before ? [{ t: "text", v: before }] : [],
+        { t: "term", v: best.v, term: best.m.term, def: best.m.def },
+        ...splitText(after)
+      ];
+    };
+    return walk(spans);
+  }
+  function markPage(blocks, matchers, used) {
+    const seen2 = used || /* @__PURE__ */ new Set();
+    const inBlock = (b) => {
+      if (b.type === "p") return { ...b, spans: markGlossary(b.spans, matchers, seen2) };
+      if (b.type === "ul" || b.type === "ol") return { ...b, items: b.items.map((it) => markGlossary(it, matchers, seen2)) };
+      if (b.type === "quote") return { ...b, blocks: b.blocks.map(inBlock) };
+      if (b.type === "table") return { ...b, rows: b.rows.map((r) => r.map((c) => markGlossary(c, matchers, seen2))) };
+      return b;
+    };
+    return (blocks || []).map(inBlock);
+  }
+  function searchGuide(pages, q, limit) {
+    const query = String(q || "").trim();
+    if (!query) return [];
+    const hits = [];
+    (pages || []).forEach((p, pi) => {
+      const ts = matchScore(p.title, query);
+      if (ts !== null) hits.push({ slug: p.slug, title: p.title, heading: "", level: 0, score: ts, pi, hi: -1 });
+      (p.headings || []).forEach((h, hi) => {
+        const hs = matchScore(h.text, query);
+        if (hs !== null) hits.push({ slug: p.slug, title: p.title, heading: h.text, level: h.level, score: hs + 1, pi, hi });
+      });
+    });
+    hits.sort((a, b) => a.score - b.score || a.pi - b.pi || a.hi - b.hi);
+    return hits.slice(0, limit || 40).map(({ pi, hi, ...h }) => h);
+  }
+  var SURFACE_PAGE = {
+    gallery: "Gallery",
+    dock: "Generating",
+    loom: "The-Loom",
+    folio: "Folio-of-Honors",
+    panel: "Control-Panel",
+    branding: "Control-Panel"
+  };
+  var ABOUT_SLUG = "__about";
+  function pageForSurface(surface) {
+    return SURFACE_PAGE[surface] || "Home";
+  }
+  var HIDDEN_UNTIL_UNLOCK = /\bbranding\b/i;
+  function visiblePages(pages, brandingUnlocked) {
+    if (brandingUnlocked) return pages || [];
+    return (pages || []).filter((p) => !HIDDEN_UNTIL_UNLOCK.test(p.title) && !HIDDEN_UNTIL_UNLOCK.test(p.slug)).map((p) => ({ ...p, headings: (p.headings || []).filter((h) => !HIDDEN_UNTIL_UNLOCK.test(h.text)) }));
+  }
+  function whatsNewPlan({ seen: seen2, display, kind, hasLibrary }) {
+    if (!display) return { show: false, mark: false };
+    if (seen2 === display) return { show: false, mark: false };
+    if (seen2 === void 0 || seen2 === null || seen2 === "") {
+      if (!hasLibrary) return { show: false, mark: true };
+    }
+    return { show: true, mark: true, opens: kind === "patch" ? "about" : "sheet" };
+  }
+  function highlightsOf(items, n) {
+    const k = n || 4;
+    return (items || []).filter((i) => !i.section).slice(0, k);
+  }
+  function toastSummary(about2) {
+    if (!about2) return "";
+    return about2.title || ((about2.items || [])[0] || {}).lead || "";
+  }
+
+  // ../gallery/src/help/guideCore.js
+  var GUIDE_SURFACES = ["gallery", "dock", "loom", "folio", "panel", "branding"];
+  var NOTES_HIDDEN_KEY = "guide.notes_hidden";
+  function guideKey(surface) {
+    return "guide." + surface;
+  }
+  function readGuide(v) {
+    if (v === void 0 || v === null || v === "" || v === "welcome") return { phase: "welcome", n: 0 };
+    if (v === "tour") return { phase: "tour", n: 0 };
+    if (v === "done") return { phase: "done", n: 0 };
+    const m = /^notes:(\d{1,4})$/.exec(String(v));
+    if (m) return { phase: "notes", n: Number(m[1]) };
+    return { phase: "done", n: 0 };
+  }
+  function afterWelcome(choice) {
+    return choice === "tour" ? "tour" : "notes:0";
+  }
+  function afterTour(k, stepCount) {
+    const next = Math.max(0, Math.min((k | 0) + 1, stepCount | 0));
+    return "notes:" + next;
+  }
+  function afterNote(j, total) {
+    const next = (j | 0) + 1;
+    return next >= (total | 0) ? "done" : "notes:" + next;
+  }
+  function tourSteps(steps) {
+    return (steps || []).filter((s) => s && s.tour);
+  }
+  function noteText(step) {
+    return step && (step.note || step.tour) || "";
+  }
+  function firstPresentNote(steps, n, present) {
+    for (let j = Math.max(0, n | 0); j < (steps || []).length; j++) {
+      if (present(steps[j], j)) return j;
+    }
+    return -1;
+  }
+  function placeBeside(rect, size, viewport2, gap, margin) {
+    const g = gap == null ? 10 : gap;
+    const mg = margin == null ? 12 : margin;
+    const vw = viewport2.w, vh = viewport2.h;
+    const below = rect.bottom + g;
+    const above = rect.top - g - size.h;
+    let placement = "below";
+    let top = below;
+    if (below + size.h > vh - mg && above >= mg) {
+      placement = "above";
+      top = above;
+    }
+    const onRight = (rect.left + rect.right) / 2 > vw / 2;
+    let left = onRight ? rect.right - size.w : rect.left;
+    left = Math.max(mg, Math.min(left, vw - mg - size.w));
+    top = Math.max(mg, Math.min(top, vh - mg - size.h));
+    return { left: Math.round(left), top: Math.round(top), placement };
+  }
+  function rectShowing(rect, viewport2) {
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    return rect.bottom > 0 && rect.right > 0 && rect.top < viewport2.h && rect.left < viewport2.w;
+  }
+
+  // ../gallery/src/help/guideSteps.js
+  var G = {};
+  G.gallery = {
+    desktop: {
+      // Welcome copy verbatim from the handoff (section A, ① Welcome card).
+      welcome: {
+        title: "Welcome to the stacks",
+        body: "Your PixAI work, backed up and browsable. Search, filter, open anything. \u2726 Generate makes more."
+      },
+      steps: [
+        {
+          id: "search",
+          at: ".mgl-search",
+          tour: "Search every prompt, model and tag you've saved. The \u25BE beside it opens the full set of filters.",
+          note: "Search reads prompts, models and tags."
+        },
+        // Handoff section A, ② Tour, step 2 of 4 -- verbatim.
+        {
+          id: "generate",
+          at: [".mgx-actrow [data-dock-toggle]", ".mgx-launcher"],
+          tour: "Everything you make starts here. The dock slides up, and your runs appear above the prompt."
+        },
+        {
+          id: "rooms",
+          at: ".mgx-navspine",
+          tour: "Your other rooms: My Art, Contests, Health and the Control Panel. Each opens over the library; Esc brings you back.",
+          note: "My Art, Contests, Health and the Control Panel open over the library."
+        },
+        {
+          id: "activity",
+          at: ".mgx-act-wrap",
+          tour: "Activity lists what the app just did: generations, syncs and jobs. It keeps going while you browse."
+        },
+        // Handoff section A, ③ Nel's notes -- verbatim.
+        { id: "filters", at: ".mgl-filters", note: 'Filters live here. Try "videos only".' },
+        { id: "layout", at: ".mgx-lay", note: "Four layouts: masonry, grid, hero and timeline." },
+        { id: "size", at: ".mgx-size", note: "Drag SIZE to make the pictures bigger or smaller." },
+        { id: "folio", at: ".mgx-metal-folio", note: "The Folio of Honors keeps what you've earned." },
+        {
+          id: "help",
+          at: [".mgx-help", ".mgx-sephelp"],
+          note: "The ? opens the guide on the page you're on. So does the ? key."
+        }
+      ]
+    },
+    phone: {
+      // Phone copy from the options page's 1b phone card (Session I Help and First Run Options).
+      welcome: { title: "Welcome to the stacks", body: "Tap anything to open it. Create makes more." },
+      steps: [
+        {
+          id: "search",
+          at: ".glm-search",
+          tour: "Search your prompts, models and tags. Advanced holds the filters."
+        },
+        // Options page 1a phone card -- verbatim.
+        {
+          id: "create",
+          at: ".glm-nav .glm-navitem:nth-child(2)",
+          tour: "Create is where everything starts.",
+          moves: "wave 5 (Q, the phone)"
+        },
+        {
+          id: "icons",
+          at: ".glm-hero-icons",
+          tour: "The Folio, the Loom, Activity and the menu live up here.",
+          moves: "wave 5 (Q, the phone)"
+        },
+        { id: "select", at: ".glm-bar .glm-metal", note: "Select picks several pictures at once." },
+        { id: "kinds", at: ".glm-bar2", note: "Show everything, only images or only videos, and change the sort." },
+        { id: "control", at: ".glm-nav .glm-navitem:nth-child(3)", note: "Control runs the syncs and the library's upkeep." },
+        { id: "help", at: ".glm-help", note: "The ? opens the guide for the screen you're on." }
+      ]
+    }
+  };
+  G.dock = {
+    desktop: {
+      welcome: {
+        title: "The Generate dock",
+        body: "Write a prompt, pick a model, press Generate. Runs land above the prompt as they finish."
+      },
+      steps: [
+        { id: "tabs", at: ".mgdock-tabs", tour: "Image, Edit or Video. Each tab keeps its own settings." },
+        {
+          id: "model",
+          at: [".mgdock-modelchip", ".mgdock-modelrow"],
+          tour: "Pick a model first. Browse opens the full picker, with the LoRAs beside it.",
+          note: "Pick a model; browse opens the picker.",
+          moves: "wave 2 (H, the Tsubaki.3 drawer: the LoRAs | Context images switch and the recipe row)"
+        },
+        { id: "prompt", at: ".mgdock-prompt", tour: "Describe the picture here." },
+        {
+          id: "go",
+          at: [".mgdock-gen", ".mgdock-gocol"],
+          tour: "Generate. The price shows above it before you spend, and a free card is used when one fits.",
+          moves: "wave 5 (M, the multi-send confirm)"
+        },
+        {
+          id: "settings",
+          at: ".mgdock-expand",
+          note: "\u25B2 opens the settings: frame, size, count and tuning.",
+          moves: "wave 2 (H, eleven ratios and size tiers) and wave 5 (M)"
+        },
+        { id: "history", at: ".mgdock-hist", note: "History shows the last seven days of runs." },
+        {
+          id: "snippets",
+          at: ".mgdock-snipbtn",
+          note: "Snippets keeps the prompt pieces you reuse.",
+          moves: "wave 5 (M, presets and lists)"
+        },
+        { id: "close", at: ".mgdock-x", note: "\xD7 closes the dock. Runs keep going." }
+      ]
+    },
+    phone: {
+      welcome: { title: "Create", body: "Write a prompt, pick a model and tap Generate." },
+      steps: [
+        { id: "modes", at: ".cm-seg3", tour: "Image, Edit or Video." },
+        { id: "prompt", at: ".cm-ta", tour: "Describe the picture here." },
+        {
+          id: "model",
+          at: ".cm-modelrow",
+          tour: "Pick a model; browse opens the picker.",
+          moves: "wave 2 (H) and wave 5 (Q)"
+        },
+        { id: "go", at: ".cm-generate", tour: "Generate shows its price above it before you spend." },
+        { id: "lora", at: ".cm-addlora", note: "Add a LoRA to steer the style.", moves: "wave 2 (H)" },
+        { id: "ratio", at: ".cm-chiprow", note: "Pick the frame's shape.", moves: "wave 2 (H, eleven ratios)" },
+        { id: "advanced", at: ".cm-advrow", note: "Advanced holds size, count and tuning.", moves: "wave 2 (H)" }
+      ]
+    }
+  };
+  G.loom = {
+    desktop: {
+      welcome: { title: "The Loom", body: "Plan a video as acts and shots, then render it shot by shot." },
+      steps: [
+        // Not the board itself: at a laptop's width the side panels stand over most of it.
+        {
+          id: "reel",
+          at: ".lv-reel",
+          tour: "The reel bar: every shot in order, sized by how long it runs. Click one to work on it.",
+          note: "The reel bar: every shot, sized by how long it runs.",
+          moves: "wave 5 (P, the Loom)"
+        },
+        {
+          id: "cast",
+          at: ".lv-panel",
+          tour: "Cast & assets: the people and things your shots cite as @image1, @video1.",
+          note: "Cast & assets holds what your shots cite.",
+          moves: "wave 5 (P)"
+        },
+        {
+          id: "drawer",
+          at: ".lv-gen",
+          tour: "The drawer renders the selected shot, or a free draft you can route into one.",
+          moves: "wave 5 (P)"
+        },
+        {
+          id: "genall",
+          at: ".lv-genall",
+          tour: "Generate all renders every shot that isn't done yet, one after another."
+        },
+        { id: "draft", at: ".lv-draft", note: "Draft renders at the cheaper quality. Turn it off for the keepers." },
+        { id: "cost", at: ".lv-cost-pill", note: "The estimate for Generate all. Click it to refresh." },
+        { id: "back", at: ".lv-close", note: "\u2190 Gallery takes you back to where you were." },
+        { id: "help", at: "#eb-help-btn", note: "The ? opens The Loom's page of the guide." }
+      ]
+    },
+    phone: {
+      welcome: { title: "The Loom", body: "Plan a video as acts and shots, then render it shot by shot." },
+      steps: [
+        { id: "card", at: ".lm-card", tour: "Each card is a shot. Tap one to work on it.", moves: "wave 5 (P)" },
+        { id: "reel", at: ".lm-reelbar", tour: "The reel: every shot, sized by its length.", moves: "wave 5 (P)" },
+        { id: "addshot", at: ".lm-addshot", tour: "+ Shot adds one to this act." },
+        { id: "draft", at: ".lm-chip", note: "Draft renders at the cheaper quality." },
+        { id: "addact", at: ".lm-addact", note: "+ New act starts the next part of the piece." },
+        { id: "back", at: ".lm-back", note: "\u2190 Gallery takes you back." }
+      ]
+    }
+  };
+  G.folio = {
+    desktop: {
+      welcome: {
+        title: "The Folio of Honors",
+        body: "What you've earned, and what's close. The ladders climb from common to legendary."
+      },
+      steps: [
+        {
+          id: "tabs",
+          at: ".mgfo-tabs",
+          tour: "The summary, the full list, and your statistics.",
+          moves: "wave 4 (G and O, the Folio)"
+        },
+        {
+          id: "reach",
+          at: ".mgfo-reach",
+          tour: "Within reach: the honors you're closest to.",
+          moves: "wave 4 (O)"
+        },
+        {
+          id: "rail",
+          at: ".mgfo-catlist",
+          tour: "Categories: jump to a ladder or a milestone.",
+          moves: "wave 4 (O)"
+        },
+        { id: "search", at: ".mgfo-search", note: "Search the record by name." },
+        { id: "ledger", at: ".mgfo-ledger", note: "Your progress in each category.", moves: "wave 4 (O)" },
+        {
+          id: "relics",
+          at: ".mgfo-relics",
+          note: "Relics: skins and banners, applied from the Control Panel.",
+          moves: "wave 4 (L2, relics by kind)"
+        }
+      ]
+    },
+    phone: {
+      welcome: { title: "The Folio of Honors", body: "What you've earned, and what's close." },
+      steps: [
+        {
+          id: "tabs",
+          at: ".fm-tabsrow",
+          tour: "The summary, the full list, and your statistics.",
+          moves: "wave 4 (G and O)"
+        },
+        { id: "recent", at: ".fm-hscroll", tour: "Recently entered: the newest first." },
+        { id: "ledger", at: ".fm-ledgerbox", tour: "Your progress in each category.", moves: "wave 4 (O)" },
+        { id: "reach", at: ".fm-reachcard", note: "The honor you're closest to.", moves: "wave 4 (O)" },
+        { id: "relics", at: ".fm-relicchip", note: "Relics: tap to see the full list.", moves: "wave 4 (L2)" },
+        { id: "back", at: ".fm-back", note: "\u2190 Gallery takes you back." }
+      ]
+    }
+  };
+  G.panel = {
+    desktop: {
+      welcome: {
+        title: "The Control Panel",
+        body: "The jobs that keep the library current, and the switches that run it."
+      },
+      steps: [
+        {
+          id: "console",
+          at: ".mgcp-consolehead",
+          tour: "The job console: one job at a time, with its log as it runs."
+        },
+        {
+          id: "living",
+          at: ".mgcp-living",
+          tour: "Runs itself: the jobs the app does on its own, how often, and Run now."
+        },
+        { id: "sync", at: ".mgcp-syncbtn", tour: "Sync now pulls new work and fills in what's missing." },
+        { id: "version", at: ".mgcp-ver", tour: "The version stamp. Click it for About and what changed." },
+        { id: "ledger", at: ".mgcp-seg", note: "Ledger lists every run the console has recorded." },
+        { id: "server", at: ".mgcp-srvrow", note: "Restart or stop the server from here." },
+        { id: "lan", at: ".mgcp-bonjour", note: "Let phones on your Wi-Fi find the gallery." }
+      ]
+    },
+    phone: {
+      welcome: { title: "Control", body: "Syncs, upkeep and the switches that run the library." },
+      steps: [
+        { id: "glance", at: ".ctm-statgrid", tour: "At a glance: what the library holds." },
+        { id: "mirror", at: ".ctm-mirror", tour: "Live Mirror pulls in each finished generation as it lands." },
+        { id: "sync", at: ".mgcp-syncbtn", tour: "Sync now pulls new work and fills in what's missing." },
+        { id: "about", at: ".mghelp-aboutrow", note: "About shows the version and what changed in it." },
+        { id: "ledger", at: ".glm-tab .cm-seg3", note: "Ledger lists every run the console has recorded." },
+        { id: "skins", at: ".mgcp-skinsrow-wrap", note: "Skins recolour the whole app." }
+      ]
+    }
+  };
+  G.branding = {
+    desktop: {
+      welcome: {
+        title: "Branding",
+        body: "The mark, its motion, the type and the banners. Make the Athenaeum yours."
+      },
+      steps: [
+        { id: "sections", at: ".mgcp-brandnav", tour: "The tab's sections, one at a time." },
+        { id: "mark", at: ".mgcp-markprevrow", tour: "Your mark, animated live as you change it." },
+        { id: "motion", at: ".mgcp-animchips", tour: "How the mark moves. The sliders below tune its speed and size." },
+        { id: "type", at: ".mgcp-fontrow", note: "Type pairings for the whole app." },
+        { id: "sliders", at: ".mgcp-sliderbox", note: "Speed and size of the mark's motion." },
+        { id: "launcher", at: ".mgcp-launcherbtn", note: "Use your mark as the installed app's icon." }
+      ]
+    },
+    phone: {
+      welcome: {
+        title: "Branding",
+        body: "The mark, its motion, the type and the banners."
+      },
+      steps: [
+        { id: "sections", at: ".mgcp-brandnav", tour: "The tab's sections, one at a time." },
+        { id: "mark", at: ".mgcp-markprevrow", tour: "Your mark, animated live as you change it." },
+        { id: "motion", at: ".mgcp-animchips", tour: "How the mark moves." },
+        { id: "type", at: ".mgcp-fontrow", note: "Type pairings for the whole app." },
+        { id: "launcher", at: ".mgcp-launcherbtn", note: "Use your mark as the installed app's icon." }
+      ]
+    }
+  };
+  function stepsFor(surface, phone) {
+    const g = G[surface];
+    if (!g) return null;
+    return phone ? g.phone : g.desktop;
+  }
+
+  // ../gallery/src/help/helpData.js
+  var memo2 = /* @__PURE__ */ new Map();
+  function once2(key, load2) {
+    if (!memo2.has(key)) {
+      const p = load2().then((d) => {
+        if (!d || d.error) memo2.delete(key);
+        return d;
+      });
+      memo2.set(key, p);
+    }
+    return memo2.get(key);
+  }
+  function loadIndex() {
+    return once2("index", () => apiGet("/api/help/index"));
+  }
+  function loadPage(slug) {
+    return once2("page:" + slug, () => apiGet("/api/help/page/" + encodeURIComponent(slug)));
+  }
+  function loadAbout() {
+    return once2("about", () => apiGet("/api/help/about"));
+  }
+  function checkOnline(slug) {
+    return apiGet("/api/help/online/" + encodeURIComponent(slug));
+  }
+  function brandingKnownUnlocked() {
+    try {
+      const d = peek("/api/achievements");
+      return (d && d.achievements || []).some((a) => a && a.unlocks === "branding_tab" && a.earned);
+    } catch {
+      return false;
+    }
+  }
+  function visibleIndex(index) {
+    if (!index || index.error) return index;
+    return { ...index, pages: visiblePages(index.pages, brandingKnownUnlocked()) };
+  }
+  function useAbout(enabled) {
+    const [about2, setAbout] = useState(null);
+    useEffect(() => {
+      if (enabled === false) return void 0;
+      let live = true;
+      loadAbout().then((d) => {
+        if (live && d && !d.error) setAbout(d);
+      });
+      return () => {
+        live = false;
+      };
+    }, [enabled]);
+    return about2;
+  }
+
+  // ../gallery/src/notify/achNonce.js
+  var current2 = null;
+  var RETRY_AFTER_MS = 6e4;
+  var BOOT_AT = now();
+  var adoptedAt = 0;
+  function now() {
+    return typeof Date !== "undefined" && Date.now ? Date.now() : 0;
+  }
+  function seed() {
+    if (current2 === null) {
+      const w = typeof window !== "undefined" ? window : null;
+      current2 = w && (w.MG_BOOT && w.MG_BOOT.ach_nonce || w.MG_ACH_NONCE) || "";
+      adoptedAt = BOOT_AT;
+    }
+    return current2;
+  }
+  function heldForMs() {
+    return seed() ? now() - adoptedAt : Infinity;
+  }
+  function take() {
+    return seed();
+  }
+  function set(next) {
+    if (next) {
+      current2 = next;
+      adoptedAt = now();
+    }
+  }
+  async function refresh2() {
+    const d = await apiGet("/api/ach-nonce");
+    if (d && d.nonce) {
+      current2 = d.nonce;
+      adoptedAt = now();
+      return current2;
+    }
+    return "";
+  }
+  async function sendAchEvent(event) {
+    const stale = heldForMs() >= RETRY_AFTER_MS;
+    let res = await apiPost("/api/ach-event", { event, nonce: take() });
+    if (res && res.error && res.http_status === 403 && stale) {
+      const fresh = await refresh2();
+      if (!fresh) return res;
+      res = await apiPost("/api/ach-event", { event, nonce: fresh });
+    }
+    set(res && res.next_nonce);
+    return res;
+  }
+
+  // ../gallery/src/help/helpStore.js
+  var EXIT_MS = 350;
+  var state = { open: false, closing: false, slug: "Home", anchor: "", from: "", nonce: 0 };
+  var subs6 = /* @__PURE__ */ new Set();
+  var exitTimer = null;
+  function emit6() {
+    subs6.forEach((fn) => {
+      try {
+        fn(state);
+      } catch {
+      }
+    });
+  }
+  function subscribe6(fn) {
+    subs6.add(fn);
+    fn(state);
+    return () => subs6.delete(fn);
+  }
+  var surfaces = [];
+  var surfSubs = /* @__PURE__ */ new Set();
+  function emitSurfaces() {
+    surfSubs.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+      }
+    });
+  }
+  function pushSurface(name) {
+    const tok = { name };
+    surfaces.push(tok);
+    emitSurfaces();
+    return () => {
+      const i = surfaces.indexOf(tok);
+      if (i >= 0) surfaces.splice(i, 1);
+      emitSurfaces();
+    };
+  }
+  function currentSurface() {
+    return surfaces.length ? surfaces[surfaces.length - 1].name : "";
+  }
+  function isTopSurface(name) {
+    return currentSurface() === name;
+  }
+  function subscribeSurfaces(fn) {
+    surfSubs.add(fn);
+    return () => surfSubs.delete(fn);
+  }
+  function beacon() {
+    try {
+      Promise.resolve(sendAchEvent("docs")).catch(() => {
+      });
+    } catch {
+    }
+  }
+  var hosts = 0;
+  function registerHelpHost() {
+    hosts += 1;
+    return () => {
+      hosts = Math.max(0, hosts - 1);
+    };
+  }
+  function openHelp(opts) {
+    if (!hosts) return;
+    const o = opts || {};
+    const from = o.surface || currentSurface() || "gallery";
+    clearTimeout(exitTimer);
+    const wasOpen = state.open;
+    state = {
+      open: true,
+      closing: false,
+      slug: o.slug || pageForSurface(from),
+      anchor: o.anchor || "",
+      from,
+      nonce: state.nonce + 1
+    };
+    emit6();
+    if (!wasOpen) beacon();
+  }
+  function closeHelp() {
+    if (!state.open) return;
+    state = { ...state, open: false, closing: true };
+    emit6();
+    clearTimeout(exitTimer);
+    exitTimer = setTimeout(() => {
+      state = { ...state, closing: false };
+      emit6();
+    }, EXIT_MS);
+  }
+  var about = { open: false, closing: false, lead: "", nonce: 0 };
+  var sheet = { open: false, closing: false, about: null };
+  var aboutSubs = /* @__PURE__ */ new Set();
+  function emitAbout() {
+    aboutSubs.forEach((fn) => {
+      try {
+        fn(about, sheet);
+      } catch {
+      }
+    });
+  }
+  function subscribeAbout(fn) {
+    aboutSubs.add(fn);
+    fn(about, sheet);
+    return () => aboutSubs.delete(fn);
+  }
+  var aboutTimer = null;
+  var sheetTimer = null;
+  function openAbout(lead) {
+    if (!hosts) return;
+    clearTimeout(aboutTimer);
+    about = { open: true, closing: false, lead: lead || "", nonce: about.nonce + 1 };
+    emitAbout();
+  }
+  function closeAbout() {
+    if (!about.open) return;
+    about = { ...about, open: false, closing: true };
+    emitAbout();
+    clearTimeout(aboutTimer);
+    aboutTimer = setTimeout(() => {
+      about = { ...about, closing: false };
+      emitAbout();
+    }, EXIT_MS);
+  }
+  function openWhatsNew(payload) {
+    if (!hosts) return;
+    clearTimeout(sheetTimer);
+    sheet = { open: true, closing: false, about: payload || sheet.about };
+    emitAbout();
+  }
+  function closeWhatsNew() {
+    if (!sheet.open) return;
+    sheet = { ...sheet, open: false, closing: true };
+    emitAbout();
+    clearTimeout(sheetTimer);
+    sheetTimer = setTimeout(() => {
+      sheet = { ...sheet, closing: false };
+      emitAbout();
+    }, EXIT_MS);
+  }
+  var OPEN_SURFACE_EVENT = "mg-open-surface";
+  function requestSurface(surface) {
+    let claimed = false;
+    try {
+      const ev = new CustomEvent(OPEN_SURFACE_EVENT, { detail: { surface }, cancelable: true });
+      claimed = !window.dispatchEvent(ev);
+    } catch {
+      claimed = false;
+    }
+    if (!claimed) {
+      try {
+        window.location.href = surface === "loom" ? "/loom" : "/";
+      } catch {
+      }
+    }
+  }
+  var escClaims = [];
+  function claimEscape(fn) {
+    const tok = { fn };
+    escClaims.push(tok);
+    return () => {
+      const i = escClaims.indexOf(tok);
+      if (i >= 0) escClaims.splice(i, 1);
+    };
+  }
+  var isTyping = (el) => !!(el && el.closest && el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+  function onKey2(e) {
+    if (e.key === "Escape") {
+      let handled = false;
+      if (sheet.open) {
+        closeWhatsNew();
+        handled = true;
+      } else if (about.open) {
+        closeAbout();
+        handled = true;
+      } else if (state.open) {
+        closeHelp();
+        handled = true;
+      } else if (state.closing || about.closing || sheet.closing) handled = true;
+      else if (escClaims.length) {
+        try {
+          escClaims[escClaims.length - 1].fn();
+        } catch {
+        }
+        handled = true;
+      }
+      if (handled) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
+    if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey || !hosts) return;
+    if (e.defaultPrevented || isTyping(e.target)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (state.open) closeHelp();
+    else openHelp();
+  }
+  var installed2 = false;
+  function installHelpKeys() {
+    if (installed2 || typeof window === "undefined") return;
+    installed2 = true;
+    window.addEventListener("keydown", onKey2, true);
+    window.mgHelp = { open: (slug) => openHelp(slug ? { slug } : void 0), close: closeHelp };
+  }
+  installHelpKeys();
+
+  // ../gallery/src/help/guideActions.js
+  var replay2 = 0;
+  var subs7 = /* @__PURE__ */ new Set();
+  function replayCount() {
+    return replay2;
+  }
+  function subscribeReplay(fn) {
+    subs7.add(fn);
+    return () => subs7.delete(fn);
+  }
+  function replayTour(surface) {
+    if (!GUIDE_SURFACES.includes(surface)) return Promise.resolve({ error: "no guide here" });
+    replay2 += 1;
+    subs7.forEach((fn) => {
+      try {
+        fn(replay2);
+      } catch {
+      }
+    });
+    return accountPrefs().set(guideKey(surface), "tour");
+  }
+  function setNotesHidden(hidden) {
+    const store = accountPrefs();
+    return hidden ? store.set(NOTES_HIDDEN_KEY, true) : store.unset(NOTES_HIDDEN_KEY);
+  }
+  async function resetGuides() {
+    const store = accountPrefs();
+    await store.ensureLoaded();
+    const have = store.getSnapshot().prefs || {};
+    const keys = GUIDE_SURFACES.map(guideKey).concat([NOTES_HIDDEN_KEY]).filter((k) => Object.prototype.hasOwnProperty.call(have, k));
+    for (const k of keys) {
+      const r = await store.unset(k);
+      if (r && r.error) return r;
+    }
+    return { ok: true };
+  }
+
+  // ../gallery/src/help/AboutLayers.jsx
+  var NEL = "/branding/mascots/gen_nel.png";
+  var nelStyle = { backgroundImage: "url('" + NEL + "')" };
+  function useUpdatePayload(ask) {
+    const [u, setU] = useState(() => getUpdate());
+    useEffect(() => subscribe3((p) => setU(p)), []);
+    useEffect(() => {
+      if (!ask || u) return void 0;
+      let live = true;
+      apiGet("/api/update/check").then((d) => {
+        if (live && d && d.behind) setU(d);
+      });
+      return () => {
+        live = false;
+      };
+    }, [ask, u]);
+    return u && u.behind ? u : null;
+  }
+  function packLabel(pack) {
+    if (!pack || !pack.installed) return "art pack not installed";
+    return pack.version ? "art pack v" + pack.version : "art pack installed";
+  }
+  function AboutCard({ inline, lead, onClose }) {
+    const about2 = useAbout(true);
+    const update = useUpdatePayload(lead === "update");
+    const [showing, setShowing] = useState(null);
+    const [earlierOpen, setEarlierOpen] = useState(false);
+    if (!about2) return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-loading" }, "Reading this install\u2026");
+    const entry = showing || about2;
+    const items = (entry.items || []).filter((i) => !i.section);
+    const under = (entry.items || []).filter((i) => i.section);
+    const ver = showing ? showing.version : about2.display_version;
+    const done = () => {
+      if (onClose) onClose();
+    };
+    return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab" + (inline ? " inline" : "") }, update ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-upd" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-updtxt" }, /* @__PURE__ */ react_global_shim_default.createElement("b", { className: "mgab-mono" }, update.latest), " is out", update.title ? " \xB7 " + update.title : ""), /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "mgab-updgo",
+        onClick: () => {
+          done();
+          requestUpdateOpen();
+        }
+      },
+      "View the update \u203A"
+    )) : null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-id" }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-nel", style: nelStyle, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-idtxt" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-name" }, "Moonglade Athenaeum"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-stamp" }, "app ", about2.version, " \xB7 ", packLabel(about2.pack), about2.date ? " \xB7 " + about2.date : ""))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-kick" }, "CHANGELOG \xB7 ", ver), earlierOpen && !showing ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-earlier" }, (about2.earlier || []).map((e) => /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", key: e.version, onClick: () => setShowing(e) }, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgab-mono" }, e.version), " ", e.title, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "d" }, e.date))), !(about2.earlier || []).length ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-none" }, "No earlier versions in this install's changelog.") : null) : /* @__PURE__ */ react_global_shim_default.createElement("ul", { className: "mgab-items" }, items.map((i, k) => /* @__PURE__ */ react_global_shim_default.createElement("li", { key: k }, i.lead)), under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "Under the hood: ", under.map((i) => clip(i.lead, 64)).join(" \xB7 ")) : null, !items.length && !under.length ? /* @__PURE__ */ react_global_shim_default.createElement("li", { className: "under" }, "This version has no changelog entry in this install.") : null), showing ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setShowing(null) }, "\u2039 This version") : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgab-link", onClick: () => setEarlierOpen((v) => !v) }, earlierOpen ? "\u2039 This version" : "Earlier versions \u203A"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-btns" }, inline ? null : /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
+      done();
+      openHelp({ slug: "Home" });
+    } }, "Guide"), /* @__PURE__ */ react_global_shim_default.createElement("a", { href: about2.issues_url, target: "_blank", rel: "noopener noreferrer" }, "Report an issue \u2197"), /* @__PURE__ */ react_global_shim_default.createElement("a", { href: about2.releases_url, target: "_blank", rel: "noopener noreferrer" }, "Releases \u2197")));
+  }
+  function useAboutState() {
+    const [s, setS] = useState({ about: { open: false, closing: false, lead: "" }, sheet: { open: false, closing: false, about: null } });
+    useEffect(() => subscribeAbout((about2, sheet2) => setS({ about: { ...about2 }, sheet: { ...sheet2 } })), []);
+    return s;
+  }
+  function AboutLayer({ phone }) {
+    const { about: about2 } = useAboutState();
+    const up = about2.open || about2.closing;
+    useLayerHistory(!!(phone && about2.open), closeAbout);
+    if (!up) return null;
+    const cls = about2.closing ? " closing" : "";
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-scrim" + cls, onMouseDown: closeAbout, "data-keeps-dock": "1" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-host" + (phone ? " phone" : "") + cls, "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgab-modal" + (phone ? " phone" : "") + cls, role: "dialog", "aria-modal": "true", "aria-label": "About Moonglade Athenaeum" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mghelp-x mgab-x", onClick: closeAbout, "aria-label": "Close" }, "\xD7"), /* @__PURE__ */ react_global_shim_default.createElement(AboutCard, { key: about2.nonce, lead: about2.lead, onClose: closeAbout })))),
+      document.body
+    );
+  }
+  function WhatsNewSheet({ phone }) {
+    const { sheet: sheet2 } = useAboutState();
+    const up = sheet2.open || sheet2.closing;
+    useLayerHistory(!!(phone && sheet2.open), closeWhatsNew);
+    if (!up || !sheet2.about) return null;
+    const a = sheet2.about;
+    const cls = sheet2.closing ? " closing" : "";
+    const hl = highlightsOf(a.items, 4);
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-scrim" + cls, onMouseDown: closeWhatsNew, "data-keeps-dock": "1" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-host" + (phone ? " phone" : "") + cls, "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn" + (phone ? " phone" : "") + cls, role: "dialog", "aria-modal": "true", "aria-label": "New in " + a.display_version }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-head" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-title" }, "New in ", a.display_version), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgwn-nel", style: nelStyle, "aria-hidden": "true" })), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-grid" }, hl.map((h, i) => /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-card", key: i }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-t" }, clip(h.lead, 72)), h.text ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-d" }, firstSentence(h.text)) : null, h.surface ? /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mgwn-show",
+          onClick: () => {
+            closeWhatsNew();
+            requestSurface(h.surface);
+          }
+        },
+        "Show me \u203A"
+      ) : null))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgwn-foot" }, /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mgwn-full",
+          onClick: () => {
+            closeWhatsNew();
+            openAbout("");
+          }
+        },
+        "Full changelog in About \u203A"
+      ), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgwn-go", onClick: closeWhatsNew, autoFocus: true }, "Continue"))))),
+      document.body
+    );
+  }
+  function clip(text, n) {
+    const s = String(text || "");
+    return s.length <= n ? s : s.slice(0, n - 1).replace(/\s+\S*$/, "") + "\u2026";
+  }
+  function firstSentence(text) {
+    const s = String(text || "");
+    const m = /^(.{12,200}?[.!?])(\s|$)/.exec(s);
+    const one = m ? m[1] : s;
+    return one.length > 140 ? one.slice(0, 137).replace(/\s+\S*$/, "") + "\u2026" : one;
+  }
+
+  // ../gallery/src/help/HelpOverlay.jsx
+  function useHelpState() {
+    const [s, setS] = useState(null);
+    useEffect(() => subscribe6((x) => setS({ ...x })), []);
+    return s;
+  }
+  function Spans({ spans, ctx }) {
+    return (spans || []).map((s, i) => {
+      switch (s.t) {
+        case "text":
+          return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: i }, s.v);
+        case "b":
+          return /* @__PURE__ */ react_global_shim_default.createElement("b", { key: i }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: s.c, ctx }));
+        case "i":
+          return /* @__PURE__ */ react_global_shim_default.createElement("i", { key: i }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: s.c, ctx }));
+        case "code":
+          return /* @__PURE__ */ react_global_shim_default.createElement("code", { key: i }, s.v);
+        case "br":
+          return /* @__PURE__ */ react_global_shim_default.createElement("br", { key: i });
+        case "term":
+          return /* @__PURE__ */ react_global_shim_default.createElement(Term, { key: i, s, ctx });
+        case "a":
+          return /* @__PURE__ */ react_global_shim_default.createElement(Link, { key: i, s, ctx });
+        default:
+          return null;
+      }
+    });
+  }
+  function Link({ s, ctx }) {
+    const where = classifyHref(s.href, ctx.slugs);
+    const label = /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: s.c, ctx });
+    if (where.kind === "external") {
+      return /* @__PURE__ */ react_global_shim_default.createElement("a", { className: "mghelp-a ext", href: where.href, target: "_blank", rel: "noopener noreferrer" }, label, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mghelp-ext", "aria-hidden": "true" }, " \u2197"));
+    }
+    if (where.kind === "page" || where.kind === "anchor") {
+      const go = (e) => {
+        e.preventDefault();
+        if (where.kind === "anchor") ctx.go(ctx.slug, where.anchor);
+        else ctx.go(where.slug, where.anchor);
+      };
+      return /* @__PURE__ */ react_global_shim_default.createElement("a", { className: "mghelp-a", href: "#" + (where.slug || "") + (where.anchor ? "#" + where.anchor : ""), onClick: go }, label);
+    }
+    return /* @__PURE__ */ react_global_shim_default.createElement("span", null, label);
+  }
+  function Term({ s, ctx }) {
+    const ref = useRef(null);
+    const show2 = () => ctx.showTerm(s, ref.current);
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "span",
+      {
+        ref,
+        className: "mghelp-term",
+        tabIndex: 0,
+        role: "button",
+        "aria-label": s.v + ": " + s.def,
+        onMouseEnter: ctx.phone ? void 0 : show2,
+        onMouseLeave: ctx.phone ? void 0 : ctx.hideTermSoon,
+        onFocus: show2,
+        onBlur: ctx.hideTermSoon,
+        onClick: (e) => {
+          e.stopPropagation();
+          ctx.toggleTerm(s, ref.current);
+        }
+      },
+      s.v
+    );
+  }
+  function Block({ b, ctx }) {
+    switch (b.type) {
+      case "h": {
+        const cls = "mghelp-h" + Math.min(4, b.level);
+        const Tag = "h" + Math.min(6, b.level + 1);
+        return /* @__PURE__ */ react_global_shim_default.createElement(Tag, { id: "mgh-" + b.anchor, className: cls }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: b.spans, ctx }));
+      }
+      case "p":
+        return /* @__PURE__ */ react_global_shim_default.createElement("p", { className: "mghelp-p" }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: b.spans, ctx }));
+      case "ul":
+      case "ol": {
+        const Tag = b.type;
+        return /* @__PURE__ */ react_global_shim_default.createElement(Tag, { className: "mghelp-list-b", start: b.type === "ol" ? b.start : void 0 }, b.items.map((it, i) => {
+          const lead = ctx.slug === "Glossary" && it[0] && it[0].t === "b" ? spansText(it[0].c) : "";
+          return /* @__PURE__ */ react_global_shim_default.createElement("li", { key: i, id: lead ? "mgh-term-" + githubSlug(lead) : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: it, ctx }));
+        }));
+      }
+      case "code":
+        return /* @__PURE__ */ react_global_shim_default.createElement("pre", { className: "mghelp-code" }, b.text);
+      case "hr":
+        return /* @__PURE__ */ react_global_shim_default.createElement("hr", { className: "mghelp-hr" });
+      case "quote":
+        return /* @__PURE__ */ react_global_shim_default.createElement("blockquote", { className: "mghelp-quote" }, b.blocks.map((x, i) => /* @__PURE__ */ react_global_shim_default.createElement(Block, { key: i, b: x, ctx })));
+      case "table":
+        return /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-tablewrap" }, /* @__PURE__ */ react_global_shim_default.createElement("table", { className: "mghelp-table" }, /* @__PURE__ */ react_global_shim_default.createElement("thead", null, /* @__PURE__ */ react_global_shim_default.createElement("tr", null, b.head.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement("th", { key: i, style: b.align[i] ? { textAlign: b.align[i] } : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: c, ctx }))))), /* @__PURE__ */ react_global_shim_default.createElement("tbody", null, b.rows.map((r, ri) => /* @__PURE__ */ react_global_shim_default.createElement("tr", { key: ri }, r.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement("td", { key: i, style: b.align[i] ? { textAlign: b.align[i] } : void 0 }, /* @__PURE__ */ react_global_shim_default.createElement(Spans, { spans: c, ctx }))))))));
+      default:
+        return null;
+    }
+  }
+  function HelpOverlay({ phone }) {
+    const st = useHelpState();
+    const open2 = !!(st && st.open);
+    const closing = !!(st && st.closing);
+    const up = open2 || closing;
+    const [index, setIndex] = useState(null);
+    const [cur2, setCur] = useState({ slug: "Home", anchor: "" });
+    const [back, setBack] = useState([]);
+    const [fwd, setFwd] = useState([]);
+    const [page, setPage] = useState(null);
+    const [online, setOnline] = useState(null);
+    const [q, setQ] = useState("");
+    const [sel, setSel] = useState(0);
+    const [listOpen, setListOpen] = useState(false);
+    const [term, setTerm] = useState(null);
+    const readerRef = useRef(null);
+    const hideTimer = useRef(null);
+    const prefs = useAccountPrefs();
+    useEffect(() => {
+      if (!st || !st.open) return;
+      setCur({ slug: st.slug, anchor: st.anchor || "" });
+      setBack([]);
+      setFwd([]);
+      setQ("");
+      setListOpen(false);
+      setTerm(null);
+    }, [st && st.nonce]);
+    useEffect(() => {
+      if (!up || index) return;
+      loadIndex().then((d) => {
+        if (d && !d.error) setIndex(visibleIndex(d));
+      });
+    }, [up, index]);
+    useLayerHistory(!!(phone && open2), closeHelp);
+    const pages = index && index.pages || [];
+    const slugs = useMemo(() => new Set(pages.map((p) => p.slug)), [pages]);
+    const matchers = useMemo(() => glossaryMatchers(index && index.glossary || []), [index]);
+    const titleOf = useCallback((slug) => {
+      if (slug === ABOUT_SLUG) return "About";
+      const p = pages.find((x) => x.slug === slug);
+      return p ? p.title : slug.replace(/-/g, " ");
+    }, [pages]);
+    useEffect(() => {
+      if (!up) return void 0;
+      let live = true;
+      setOnline(null);
+      setTerm(null);
+      if (cur2.slug === ABOUT_SLUG) {
+        setPage({ slug: ABOUT_SLUG, blocks: [] });
+        return void 0;
+      }
+      setPage((p) => p && p.slug === cur2.slug ? p : null);
+      loadPage(cur2.slug).then((d) => {
+        if (!live) return;
+        if (!d || d.error) {
+          setPage({ slug: cur2.slug, error: d && d.error || "That page could not be read." });
+          return;
+        }
+        const blocks = parseWiki(d.markdown);
+        setPage({ slug: cur2.slug, blocks: cur2.slug === "Glossary" ? blocks : markPage(blocks, matchers) });
+        checkOnline(cur2.slug).then((o) => {
+          if (live && o && !o.error) setOnline(o);
+        });
+      });
+      return () => {
+        live = false;
+      };
+    }, [up, cur2.slug, matchers]);
+    useEffect(() => {
+      const el = readerRef.current;
+      if (!el || !page || page.slug !== cur2.slug) return;
+      if (cur2.anchor) {
+        const target = el.querySelector("#" + CSS.escape("mgh-" + cur2.anchor)) || el.querySelector("#" + CSS.escape("mgh-term-" + cur2.anchor));
+        if (target) {
+          el.scrollTop = target.offsetTop - 8;
+          return;
+        }
+      }
+      el.scrollTop = 0;
+    }, [page, cur2]);
+    const go = useCallback((slug, anchor) => {
+      setBack((b) => b.concat([cur2]));
+      setFwd([]);
+      setCur({ slug, anchor: anchor || "" });
+      setQ("");
+      setListOpen(false);
+    }, [cur2]);
+    const goBack = () => {
+      if (!back.length) {
+        if (phone) closeHelp();
+        return;
+      }
+      setFwd((f) => [cur2].concat(f));
+      setCur(back[back.length - 1]);
+      setBack((b) => b.slice(0, -1));
+    };
+    const goFwd = () => {
+      if (!fwd.length) return;
+      setBack((b) => b.concat([cur2]));
+      setCur(fwd[0]);
+      setFwd((f) => f.slice(1));
+    };
+    const placeTerm = useCallback((s, el) => {
+      const reader2 = readerRef.current;
+      if (!reader2 || !el) return;
+      clearTimeout(hideTimer.current);
+      const rr = reader2.getBoundingClientRect();
+      const tr = el.getBoundingClientRect();
+      const w = Math.min(240, rr.width - 24);
+      const left = Math.max(12, Math.min(tr.left - rr.left, rr.width - w - 12));
+      const top = tr.bottom - rr.top + reader2.scrollTop + 8;
+      setTerm({ s, left, top, w });
+    }, []);
+    const ctx = {
+      slug: cur2.slug,
+      slugs,
+      phone: !!phone,
+      go,
+      showTerm: placeTerm,
+      toggleTerm: (s, el) => {
+        if (term && term.s === s) {
+          setTerm(null);
+          return;
+        }
+        placeTerm(s, el);
+      },
+      hideTermSoon: () => {
+        clearTimeout(hideTimer.current);
+        hideTimer.current = setTimeout(() => setTerm(null), 220);
+      }
+    };
+    const hits = useMemo(() => searchGuide(pages, q, 40), [pages, q]);
+    useEffect(() => {
+      setSel(0);
+    }, [q]);
+    const openHit = (h) => {
+      if (h) go(h.slug, h.heading ? githubSlug(h.heading) : "");
+    };
+    const onSearchKey = (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSel((x) => Math.min(x + 1, Math.max(0, hits.length - 1)));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSel((x) => Math.max(0, x - 1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        openHit(hits[sel]);
+      }
+    };
+    if (!up) return null;
+    const from = st && st.from || "";
+    const canReplay = GUIDE_SURFACES.includes(from) && !!stepsFor(from, !!phone);
+    const notesHidden = !!prefs.get(NOTES_HIDDEN_KEY, false);
+    const version = index ? "v" + index.display_version + " \xB7 this install" : "";
+    const crumb = cur2.slug === "Home" ? ["Home"] : ["Home", titleOf(cur2.slug)];
+    const list = /* @__PURE__ */ react_global_shim_default.createElement("nav", { className: "mghelp-list", "aria-label": "Guide pages" }, /* @__PURE__ */ react_global_shim_default.createElement(
+      "input",
+      {
+        className: "mghelp-search",
+        type: "search",
+        placeholder: "Search the guide",
+        value: q,
+        onChange: (e) => setQ(e.target.value),
+        onKeyDown: onSearchKey,
+        "aria-label": "Search the guide",
+        autoFocus: !phone
+      }
+    ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-pages" }, q.trim() ? hits.length ? hits.map((h, i) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        key: h.slug + "|" + h.heading + "|" + i,
+        className: "mghelp-hit" + (i === sel ? " on" : ""),
+        onClick: () => openHit(h)
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "t" }, h.heading || h.title),
+      h.heading ? /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "s" }, h.title) : null
+    )) : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-none" }, "Nothing in the guide matches.") : pages.map((p) => ({ slug: p.slug, title: p.title })).concat([{ slug: ABOUT_SLUG, title: "About" }]).map((p) => /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        key: p.slug,
+        className: "mghelp-page" + (cur2.slug === p.slug ? " on" : ""),
+        "aria-current": cur2.slug === p.slug ? "page" : void 0,
+        onClick: () => go(p.slug, "")
+      },
+      p.title
+    ))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-acts" }, canReplay ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => {
+      replayTour(from);
+      closeHelp();
+    } }, "Replay this tour") : null, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => setNotesHidden(!notesHidden) }, notesHidden ? "Show Nel's notes" : "Hide Nel's notes"), /* @__PURE__ */ react_global_shim_default.createElement(
+      "button",
+      {
+        type: "button",
+        className: "dim",
+        onClick: () => {
+          resetGuides().then(() => closeHelp());
+        }
+      },
+      "Reset guides"
+    ), phone && version ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-verline" }, version) : null));
+    const reader = /* @__PURE__ */ react_global_shim_default.createElement("article", { className: "mghelp-reader", ref: readerRef, onClick: () => term && setTerm(null) }, cur2.slug === ABOUT_SLUG ? /* @__PURE__ */ react_global_shim_default.createElement(AboutCard, { inline: true }) : !page || page.slug !== cur2.slug ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-loading" }, "Opening the page\u2026") : page.error ? /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-loading" }, page.error) : /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, page.blocks.map((b, i) => /* @__PURE__ */ react_global_shim_default.createElement(Block, { key: i, b, ctx })), online && online.differs ? /* @__PURE__ */ react_global_shim_default.createElement("a", { className: "mghelp-online", href: online.url, target: "_blank", rel: "noopener noreferrer" }, "A newer version of this page is online \u2197") : null), term ? /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mghelp-card",
+        style: { left: term.left, top: term.top, width: term.w },
+        onMouseEnter: () => clearTimeout(hideTimer.current),
+        onMouseLeave: ctx.hideTermSoon,
+        onClick: (e) => e.stopPropagation()
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("b", null, term.s.term.charAt(0).toUpperCase() + term.s.term.slice(1)),
+      " \xB7 ",
+      term.s.def,
+      " ",
+      /* @__PURE__ */ react_global_shim_default.createElement(
+        "button",
+        {
+          type: "button",
+          className: "mghelp-cardlink",
+          onClick: () => {
+            setTerm(null);
+            go("Glossary", "term-" + githubSlug(term.s.term));
+          }
+        },
+        "Glossary \u203A"
+      )
+    ) : null);
+    const cls = closing ? " closing" : "";
+    if (phone) {
+      return createPortal(
+        /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-sheet" + cls, role: "dialog", "aria-modal": "true", "aria-label": "Guide", "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-sheethead" }, /* @__PURE__ */ react_global_shim_default.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mghelp-44",
+            onClick: goBack,
+            "aria-label": back.length ? "Back" : "Close the guide"
+          },
+          "\u2039"
+        ), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-sheettitle" }, listOpen ? "Guide" : titleOf(cur2.slug)), /* @__PURE__ */ react_global_shim_default.createElement(
+          "button",
+          {
+            type: "button",
+            className: "mghelp-44" + (listOpen ? " on" : ""),
+            onClick: () => setListOpen((v) => !v),
+            "aria-label": "Pages",
+            "aria-expanded": listOpen
+          },
+          "\u2630"
+        )), listOpen ? list : reader),
+        document.body
+      );
+    }
+    return createPortal(
+      /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-scrim" + cls, onMouseDown: closeHelp, "data-keeps-dock": "1" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-host" + cls, "data-keeps-dock": "1" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp" + cls, role: "dialog", "aria-modal": "true", "aria-label": "Guide" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-head" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-title" }, "Guide"), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-nav" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goBack, disabled: !back.length, "aria-label": "Back" }, "\u2039"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: goFwd, disabled: !fwd.length, "aria-label": "Forward" }, "\u203A")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-crumb" }, crumb.map((c, i) => /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, { key: i }, i ? " / " : "", i === 0 && crumb.length > 1 ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", onClick: () => go("Home", "") }, c) : /* @__PURE__ */ react_global_shim_default.createElement("span", null, c)))), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "sp" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-ver" }, version), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mghelp-x", onClick: closeHelp, "aria-label": "Close the guide" }, "\xD7")), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mghelp-body" }, list, reader)))),
+      document.body
+    );
+  }
+
+  // ../gallery/src/help/whatsNew.js
+  var SEEN_KEY2 = "seen.whatsnew";
+  var POLL_MS2 = 500;
+  var QUIET_POLLS = 3;
+  var GIVE_UP_MS = 5 * 60 * 1e3;
+  var NEL2 = "/branding/mascots/gen_nel.png";
+  var started2 = false;
+  function whenCelebrationsSettle(fn) {
+    const t0 = Date.now();
+    let quiet = 0;
+    const tick = () => {
+      if (Date.now() - t0 > GIVE_UP_MS) return;
+      let idle = true;
+      try {
+        idle = celebrationsIdle();
+      } catch {
+        idle = true;
+      }
+      quiet = idle ? quiet + 1 : 0;
+      if (quiet >= QUIET_POLLS) {
+        fn();
+        return;
+      }
+      setTimeout(tick, POLL_MS2);
+    };
+    setTimeout(tick, POLL_MS2);
+  }
+  function startWhatsNew(boot) {
+    if (started2) return;
+    started2 = true;
+    const store = accountPrefs();
+    Promise.all([store.ensureLoaded(), loadAbout()]).then(([ok, about2]) => {
+      if (!ok || !about2 || about2.error || !about2.display_version) return;
+      const stats = boot && boot.stats || {};
+      const plan = whatsNewPlan({
+        seen: store.get(SEEN_KEY2, void 0),
+        display: about2.display_version,
+        kind: about2.kind,
+        hasLibrary: (Number(stats.images) || 0) + (Number(stats.videos) || 0) > 0
+      });
+      if (!plan.show) {
+        if (plan.mark) store.set(SEEN_KEY2, about2.display_version);
+        return;
+      }
+      whenCelebrationsSettle(() => {
+        if (store.get(SEEN_KEY2, void 0) === about2.display_version) return;
+        store.set(SEEN_KEY2, about2.display_version);
+        retireReceiptToast();
+        show({
+          kind: "whatsnew",
+          sticky: true,
+          avatar: NEL2,
+          title: "Updated to",
+          code: about2.display_version,
+          msg: toastSummary(about2),
+          action: {
+            label: "What's new",
+            run: () => plan.opens === "sheet" ? openWhatsNew(about2) : openAbout("")
+          }
+        });
+      });
+    });
+  }
+
+  // ../gallery/src/help/HelpRoot.jsx
+  function HelpRoot({ boot, whatsNew }) {
+    const phone = useIsMobile();
+    useEffect(() => registerHelpHost(), []);
+    useEffect(() => {
+      if (whatsNew) startWhatsNew(boot);
+    }, [whatsNew]);
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement(HelpOverlay, { phone }), /* @__PURE__ */ react_global_shim_default.createElement(AboutLayer, { phone }), /* @__PURE__ */ react_global_shim_default.createElement(WhatsNewSheet, { phone }));
+  }
+
+  // ../gallery/src/help/GuideHost.jsx
+  var SETTLE_MS = 900;
+  var NOTE_POLL_MS = 600;
+  var NEL3 = "/branding/mascots/gen_nel.png";
+  function vp() {
+    return {
+      w: window.innerWidth || document.documentElement.clientWidth || 0,
+      h: window.innerHeight || document.documentElement.clientHeight || 0
+    };
+  }
+  function findAnchor(step) {
+    const list = Array.isArray(step.at) ? step.at : [step.at];
+    const view = vp();
+    for (const sel of list) {
+      let el = null;
+      try {
+        el = document.querySelector(sel);
+      } catch {
+        el = null;
+      }
+      if (el && rectShowing(el.getBoundingClientRect(), view)) return el;
+    }
+    return null;
+  }
+  function phoneFloor() {
+    const nav = document.querySelector(".glm-nav");
+    const r = nav ? nav.getBoundingClientRect() : null;
+    return r && r.height ? Math.max(0, (window.innerHeight || 0) - r.top) : 0;
+  }
+  function dockTop() {
+    const dock = document.querySelector(".mgx-dock-host.open .mgdock");
+    const r = dock ? dock.getBoundingClientRect() : null;
+    return r && r.height ? Math.max(0, (window.innerHeight || 0) - r.top) : 0;
+  }
+  function useHelpLayersUp() {
+    const [up, setUp] = useState(false);
+    useEffect(() => {
+      let h = false, a = false;
+      const u1 = subscribe6((s) => {
+        h = s.open || s.closing;
+        setUp(h || a);
+      });
+      const u2 = subscribeAbout((ab, sh) => {
+        a = ab.open || ab.closing || sh.open || sh.closing;
+        setUp(h || a);
+      });
+      return () => {
+        u1();
+        u2();
+      };
+    }, []);
+    return up;
+  }
+  function Nel({ size }) {
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "span",
+      {
+        className: "mgguide-nel",
+        "aria-hidden": "true",
+        style: { width: size, height: size, backgroundImage: "url('" + NEL3 + "')" }
+      }
+    );
+  }
+  function Welcome({ guide, phone, onTour, onDone }) {
+    const [bottom, setBottom] = useState(16);
+    useLayoutEffect(() => {
+      const measure = () => setBottom(phone ? phoneFloor() + 12 : Math.max(16, dockTop() + 16));
+      measure();
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }, [phone]);
+    return /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        className: "mgguide-welcome" + (phone ? " phone" : ""),
+        style: { bottom },
+        role: "dialog",
+        "aria-label": guide.welcome.title
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement(Nel, { size: phone ? 44 : 54 }),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-wmain" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-wtitle" }, guide.welcome.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-wtext" }, guide.welcome.body), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-wbtns" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-ghost", onClick: onTour }, phone ? "Show me" : "Show me around"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-primary", onClick: onDone }, "Got it")))
+    );
+  }
+  function Tour({ guide, phone, onEnd, restartKey }) {
+    const [marks, setMarks] = useState(null);
+    const [k, setK] = useState(0);
+    const [rect, setRect] = useState(null);
+    const cardRef = useRef(null);
+    const [card, setCard] = useState({ w: phone ? 0 : 240, h: 110 });
+    useEffect(() => {
+      const all = tourSteps(guide.steps);
+      const found = [];
+      all.forEach((s) => {
+        if (findAnchor(s)) found.push({ step: s, idx: guide.steps.indexOf(s) });
+      });
+      setMarks(found);
+      setK(0);
+    }, [guide, restartKey]);
+    const tourCount = tourSteps(guide.steps).length;
+    const end = useCallback((finished) => {
+      const cur2 = marks && marks[k];
+      const lastIdx = finished ? tourCount - 1 : cur2 ? cur2.idx : -1;
+      onEnd(afterTour(lastIdx, tourCount));
+    }, [marks, k, tourCount, onEnd]);
+    useEffect(() => {
+      if (marks && !marks.length) onEnd(afterTour(-1, tourCount));
+    }, [marks, tourCount, onEnd]);
+    useEffect(() => claimEscape(() => end(false)), [end]);
+    useEffect(() => {
+      if (!marks || !marks[k]) return void 0;
+      let raf = 0;
+      const tick = () => {
+        const el = findAnchor(marks[k].step);
+        const r = el ? el.getBoundingClientRect() : null;
+        setRect((old) => {
+          if (!r) return old;
+          if (old && old.left === r.left && old.top === r.top && old.width === r.width && old.height === r.height) return old;
+          return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+        });
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+      return () => cancelAnimationFrame(raf);
+    }, [marks, k]);
+    useLayoutEffect(() => {
+      const el = cardRef.current;
+      if (!el) return;
+      const b = el.getBoundingClientRect();
+      if (Math.abs(b.height - card.h) > 1 || Math.abs(b.width - card.w) > 1) setCard({ w: b.width, h: b.height });
+    });
+    if (!marks || !marks.length || !marks[k] || !rect) return null;
+    const view = vp();
+    const pad = 4;
+    const ring = { left: rect.left - pad, top: rect.top - pad, width: rect.width + 2 * pad, height: rect.height + 2 * pad };
+    const last2 = k === marks.length - 1;
+    const next = () => last2 ? end(true) : setK(k + 1);
+    let cardStyle;
+    let docked = false;
+    if (phone) {
+      const floor = phoneFloor();
+      const h = card.h || 140;
+      if (rect.bottom + 8 < view.h - floor - h) {
+        docked = true;
+        cardStyle = { left: 12, right: 12, bottom: floor + 8 };
+      } else {
+        cardStyle = { left: 12, right: 12, top: Math.max(12, rect.top - h - 14) };
+      }
+    } else {
+      const p = placeBeside(rect, { w: 240, h: card.h || 110 }, view, 14);
+      cardStyle = { left: p.left, top: p.top, width: 240 };
+    }
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-block", onMouseDown: (e) => e.preventDefault() }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-ring", style: ring }), /* @__PURE__ */ react_global_shim_default.createElement(
+      "div",
+      {
+        ref: cardRef,
+        className: "mgguide-mark" + (phone ? " phone" : "") + (docked ? " docked" : ""),
+        style: cardStyle,
+        role: "dialog",
+        "aria-label": "Step " + (k + 1) + " of " + marks.length
+      },
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-step" }, "STEP ", k + 1, " OF ", marks.length),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-marktext" }, marks[k].step.tour),
+      /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-markbtns" }, /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-skip", onClick: () => end(false) }, phone ? "Skip" : "Skip tour"), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-primary", onClick: next, autoFocus: true }, last2 ? "Done" : "Next"))
+    ));
+  }
+  function Notes({ guide, phone, n, onAdvance }) {
+    const total = guide.steps.length;
+    const [n0] = useState(n);
+    const [j, setJ] = useState(-1);
+    const [rect, setRect] = useState(null);
+    const cardRef = useRef(null);
+    const [cardH, setCardH] = useState(70);
+    useEffect(() => {
+      let live = true;
+      const look = () => {
+        if (!live) return;
+        const at = firstPresentNote(guide.steps, n, (s) => !!findAnchor(s));
+        setJ(at);
+        const el = at >= 0 ? findAnchor(guide.steps[at]) : null;
+        const r = el ? el.getBoundingClientRect() : null;
+        setRect(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } : null);
+      };
+      look();
+      const t = setInterval(look, NOTE_POLL_MS);
+      window.addEventListener("resize", look);
+      window.addEventListener("scroll", look, true);
+      return () => {
+        live = false;
+        clearInterval(t);
+        window.removeEventListener("resize", look);
+        window.removeEventListener("scroll", look, true);
+      };
+    }, [guide, n]);
+    useEffect(() => {
+      if (j < 0) return void 0;
+      let fired2 = false;
+      const onUse = (e) => {
+        if (fired2) return;
+        const el = findAnchor(guide.steps[j]);
+        if (!el || !e.target || !el.contains(e.target)) return;
+        fired2 = true;
+        setTimeout(() => onAdvance(afterNote(j, total)), 500);
+      };
+      document.addEventListener("pointerdown", onUse, true);
+      document.addEventListener("input", onUse, true);
+      document.addEventListener("keydown", onUse, true);
+      return () => {
+        document.removeEventListener("pointerdown", onUse, true);
+        document.removeEventListener("input", onUse, true);
+        document.removeEventListener("keydown", onUse, true);
+      };
+    }, [guide, j, total, onAdvance]);
+    useLayoutEffect(() => {
+      const el = cardRef.current;
+      if (!el) return;
+      const h = el.getBoundingClientRect().height;
+      if (h && Math.abs(h - cardH) > 1) setCardH(h);
+    });
+    if (j < 0 || !rect) return null;
+    const view = vp();
+    const dot = { left: Math.round(rect.right - 5), top: Math.round(rect.top - 4) };
+    let cardStyle;
+    if (phone) {
+      cardStyle = { left: 12, right: 12, bottom: phoneFloor() + 12 };
+    } else {
+      const p = placeBeside(rect, { w: 250, h: cardH }, view, 12);
+      cardStyle = { left: p.left, top: p.top, width: 250 };
+    }
+    return /* @__PURE__ */ react_global_shim_default.createElement(react_global_shim_default.Fragment, null, /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mgguide-dot", style: dot, "aria-hidden": "true" }), /* @__PURE__ */ react_global_shim_default.createElement("div", { ref: cardRef, className: "mgguide-note" + (phone ? " phone" : ""), style: cardStyle, role: "note" }, /* @__PURE__ */ react_global_shim_default.createElement(Nel, { size: phone ? 32 : 28 }), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nmain" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-ntext" }, noteText(guide.steps[j])), phone ? null : /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-nfoot" }, /* @__PURE__ */ react_global_shim_default.createElement("span", null, "note ", j - n0 + 1, " of ", total - n0), /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "sp" }), /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit", onClick: () => onAdvance(afterNote(j, total)) }, "got it"))), phone ? /* @__PURE__ */ react_global_shim_default.createElement("button", { type: "button", className: "mgguide-gotit phone", onClick: () => onAdvance(afterNote(j, total)) }, "got it") : null));
+  }
+  function GuideHost({ surface, phone, paused }) {
+    const isMobile = useIsMobile();
+    const ph = phone == null ? isMobile : !!phone;
+    const guide = stepsFor(surface, ph);
+    const { ready, get, set: set2 } = useAccountPrefs();
+    const [top, setTop] = useState(false);
+    const [settled, setSettled] = useState(false);
+    const [restart, setRestart] = useState(replayCount());
+    const helpUp = useHelpLayersUp();
+    useEffect(() => {
+      const pop = pushSurface(surface);
+      const sync2 = () => setTop(isTopSurface(surface));
+      sync2();
+      const unsub = subscribeSurfaces(sync2);
+      return () => {
+        unsub();
+        pop();
+      };
+    }, [surface]);
+    useEffect(() => subscribeReplay((n) => setRestart(n)), []);
+    const raw = ready ? get(guideKey(surface)) : null;
+    const st = readGuide(raw);
+    const phaseKey = st.phase + ":" + st.n + ":" + restart;
+    useEffect(() => {
+      setSettled(false);
+      const t = setTimeout(() => setSettled(true), SETTLE_MS);
+      return () => clearTimeout(t);
+    }, [phaseKey]);
+    const write = useCallback((v) => {
+      set2(guideKey(surface), v);
+    }, [set2, surface]);
+    if (!guide || !ready || !top || paused || helpUp || !settled) return null;
+    let layer = null;
+    if (st.phase === "welcome") {
+      layer = /* @__PURE__ */ react_global_shim_default.createElement(
+        Welcome,
+        {
+          guide,
+          phone: ph,
+          onTour: () => write(afterWelcome("tour")),
+          onDone: () => write(afterWelcome("gotit"))
+        }
+      );
+    } else if (st.phase === "tour") {
+      layer = /* @__PURE__ */ react_global_shim_default.createElement(Tour, { guide, phone: ph, onEnd: write, restartKey: restart });
+    } else if (st.phase === "notes" && !get(NOTES_HIDDEN_KEY, false)) {
+      layer = /* @__PURE__ */ react_global_shim_default.createElement(Notes, { guide, phone: ph, n: st.n, onAdvance: write });
+    }
+    if (!layer) return null;
+    return createPortal(/* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mgguide-root", "data-surface": surface, "data-keeps-dock": "1" }, layer), document.body);
   }
 
   // ../gallery/src/notify/ActivityChip.jsx
@@ -6724,12 +8860,12 @@ ${"=".repeat(48)}
     }
   }
   function useActivity() {
-    const [state, setState] = useState({ jobs: [], open: false });
+    const [state2, setState] = useState({ jobs: [], open: false });
     const [expandedId, setExpandedId] = useState(null);
     const [closing, setClosing] = useState(false);
     const [edge, setEdgeState] = useState(readEdge);
     const closeTimer = useRef(null);
-    useEffect(() => subscribe3(setState), []);
+    useEffect(() => subscribe4(setState), []);
     useEffect(() => () => clearTimeout(closeTimer.current), []);
     const setEdge = useCallback((next) => {
       const v = next === "left" ? "left" : "right";
@@ -6739,7 +8875,7 @@ ${"=".repeat(48)}
       } catch {
       }
     }, []);
-    const { jobs: jobs2, open: open2 } = state;
+    const { jobs: jobs2, open: open2 } = state2;
     useEffect(() => {
       if (expandedId && !jobs2.find((j) => j.job_id === expandedId)) setExpandedId(null);
     }, [expandedId, jobs2]);
@@ -7716,11 +9852,11 @@ ${"=".repeat(48)}
     const { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject } = api;
     useEffect2(() => {
       if (!projMenu) return;
-      const onKey2 = (ev) => {
+      const onKey3 = (ev) => {
         if (ev.key === "Escape") setProjMenu(false);
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [projMenu, setProjMenu]);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
@@ -7740,11 +9876,11 @@ ${"=".repeat(48)}
     const [open2, setOpen2] = useState2(false);
     useEffect2(() => {
       if (!open2) return;
-      const onKey2 = (ev) => {
+      const onKey3 = (ev) => {
         if (ev.key === "Escape") setOpen2(false);
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [open2]);
     return /* @__PURE__ */ React.createElement("div", { className: "sb-projwrap" }, /* @__PURE__ */ React.createElement(
       "button",
@@ -7984,19 +10120,19 @@ ${"=".repeat(48)}
     }, []);
     useEffect2(() => {
       if (!deepFocus) return;
-      const onKey2 = (ev) => {
+      const onKey3 = (ev) => {
         if (ev.key === "Escape") setDeepFocus(null);
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [deepFocus]);
     useEffect2(() => {
       if (!pickerOpen) return;
-      const onKey2 = (ev) => {
+      const onKey3 = (ev) => {
         if (ev.key === "Escape") setPickerOpen(false);
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [pickerOpen]);
     const [pickerMounted, setPickerMounted] = useState2(false);
     useEffect2(() => {
@@ -10205,11 +12341,11 @@ ${"=".repeat(48)}
     }, [pickerOpen]);
     useEffect2(() => {
       if (!pickerOpen) return;
-      const onKey2 = (ev) => {
+      const onKey3 = (ev) => {
         if (ev.key === "Escape") closePicker();
       };
-      window.addEventListener("keydown", onKey2);
-      return () => window.removeEventListener("keydown", onKey2);
+      window.addEventListener("keydown", onKey3);
+      return () => window.removeEventListener("keydown", onKey3);
     }, [pickerOpen]);
     const imgModelSeqRef = useRef2(0);
     const loraRange = useMemo2(() => {
@@ -12437,10 +14573,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         setState((s) => ({ ...s, [cardId]: { phase: "error", msg: "network error" } }));
       }
     };
-    const routeGen = (state, setState, entry, target, sourceId) => {
+    const routeGen = (state2, setState, entry, target, sourceId) => {
       const c = entry.c;
       const sid = sourceId || c.id;
-      const gs = state[sid];
+      const gs = state2[sid];
       if (!gs || !gs.mid) return;
       const mid = gs.mid;
       if (target === "open") setCard(entry.a.id, c.id, (x) => ({ ...x, openFrame: { ...x.openFrame, mediaId: mid, thumbId: "", source: "", desc: x.openFrame.desc || "generated in Loom" } }));
@@ -13017,7 +15153,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const anyDone = entries.some((e) => e.c.resultMid);
     const { total, scale, over } = reelStats(entries, project.target);
     const done = entries.filter((x) => x.c.status === "done").length;
-    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(NotifyRoot, null), mobileUI ? /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(NotifyRoot, null), /* @__PURE__ */ React.createElement(HelpRoot, null), /* @__PURE__ */ React.createElement(GuideHost, { surface: "loom", phone: mobileUI }), mobileUI ? /* @__PURE__ */ React.createElement(V2Boundary, null, /* @__PURE__ */ React.createElement(
       LoomMobile,
       {
         project,
@@ -13374,17 +15510,17 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const vRef = useRef2(null);
     const [i, setI] = useState2(0);
     const [muted, setMuted] = useState2(true);
-    const clip = clips[i];
+    const clip2 = clips[i];
     useEffect2(() => {
       const v = vRef.current;
       if (v) v.muted = muted;
     }, [muted, i]);
     useEffect2(() => {
       const v = vRef.current;
-      if (!v || !clip) return;
+      if (!v || !clip2) return;
       const seekPlay = () => {
         try {
-          v.currentTime = clip.in || 0;
+          v.currentTime = clip2.in || 0;
         } catch (e) {
         }
         v.play().catch(() => {
@@ -13395,7 +15531,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         else onClose();
       };
       const onTime = () => {
-        const end = (clip.out != null ? clip.out : v.duration) || 0;
+        const end = (clip2.out != null ? clip2.out : v.duration) || 0;
         if (end && v.currentTime >= end - 0.04) advance();
       };
       v.addEventListener("loadedmetadata", seekPlay);
@@ -13415,15 +15551,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       window.addEventListener("keydown", esc2);
       return () => window.removeEventListener("keydown", esc2);
     }, []);
-    if (!clip) return null;
+    if (!clip2) return null;
     return /* @__PURE__ */ React.createElement("div", { className: "sb-seq", onClick: (e) => {
       if (e.target === e.currentTarget) onClose();
     } }, /* @__PURE__ */ React.createElement("div", { className: "sb-seq-box" }, /* @__PURE__ */ React.createElement(
       "video",
       {
         ref: vRef,
-        key: clip.mid,
-        src: "/video-file/" + clip.mid,
+        key: clip2.mid,
+        src: "/video-file/" + clip2.mid,
         autoPlay: true,
         muted: true,
         playsInline: true,
@@ -13432,7 +15568,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
           v.paused ? v.play() : v.pause();
         }
       }
-    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip.code ? " \xB7 " + clip.code : "", clip.title ? " \u2014 " + clip.title : ""), /* @__PURE__ */ React.createElement(
+    ), /* @__PURE__ */ React.createElement("div", { className: "sb-seq-bar" }, /* @__PURE__ */ React.createElement("span", null, "Shot ", i + 1, "/", clips.length, clip2.code ? " \xB7 " + clip2.code : "", clip2.title ? " \u2014 " + clip2.title : ""), /* @__PURE__ */ React.createElement(
       "button",
       {
         className: "sb-btn ghost sm",
