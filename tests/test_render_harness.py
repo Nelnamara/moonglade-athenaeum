@@ -7249,6 +7249,9 @@ def test_a_turn_keeps_the_scroll_place_and_the_open_picture_and_never_remounts_t
         _settle(page)
         assert page.evaluate(_Q_TOP_MID_JS)["mid"] != before["mid"], "the naive offset lands elsewhere (%d)" % landed
         page.evaluate("(t) => { document.querySelector('.glm-body').scrollTop = t; }", landed)
+        # the anchor notes the top picture one frame after a scroll: let that frame pass before the turn,
+        # as it always does for a hand that scrolls and then rotates, or the turn reads the note from 1500
+        _settle(page)
         page.set_viewport_size(PHONE)
         page.wait_for_function("() => document.querySelectorAll('.glm-grid-rows').length === 0")
         page.wait_for_timeout(300)
