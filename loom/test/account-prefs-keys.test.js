@@ -9,12 +9,14 @@ import { GEN_PREFS_KEY } from "../../gallery/src/gen/genPrefs.js";
 import { MINE_KEY } from "../../gallery/src/gen/colorPaletteCore.js";
 import { DRAFT_PREFIX, draftId } from "../../gallery/src/recipes/recipesCore.js";
 import { GUIDE_SURFACES, NOTES_HIDDEN_KEY, guideKey } from "../../gallery/src/help/guideCore.js";
+import { SEEN_KEY as FOLIO_SEEN_KEY } from "../../gallery/src/folio/maskedFeatsCore.js";
 
 /* The account store (/api/account/prefs, one document per account) is shared by three lanes
    that never saw each other: wave 2's dock settings (gen.image), palettes (palette.mine) and
    recipe drafts (recipes.draft.<id>, recipes.picker-size), and wave 3's Help -- the guide's
    per-surface state (guide.<surface>), its notes switch (guide.notes_hidden) and the version
-   what's new last showed (seen.whatsnew). Each lane owns its own first segment, so no key of
+   what's new last showed (seen.whatsnew), and wave 4's Folio -- the record of which earned feats
+   the account has been shown (folio.seen). Each lane owns its own first segment, so no key of
    one can be a key of another, and every key passes the store's own rule. */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +36,7 @@ const OWNERS = {
   "wave 2 palette": [MINE_KEY],
   "wave 2 recipes": [DRAFT_PREFIX + draftId(1759000000000, "abc123"), PICKER_SIZE],
   "wave 3 help": GUIDE_SURFACES.map(guideKey).concat([NOTES_HIDDEN_KEY, SEEN_KEY]),
+  "wave 4 folio": [FOLIO_SEEN_KEY],
 };
 
 describe("the shared account store's keys", () => {
