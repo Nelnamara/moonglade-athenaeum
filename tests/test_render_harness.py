@@ -6926,8 +6926,9 @@ def test_the_records_foot_is_reachable_and_send_to_video_opens_the_video_form_wi
 
 def test_remix_fills_the_image_form_with_the_recorded_prompt_or_a_runs_template_and_sends_nothing(
         phone_q_server, render_browser, monkeypatch):
-    """Q2. A remix of an ordinary picture puts its RECORDED prompt (braces escaped, so it re-sends byte for
-    byte) in the Create tab's Image form; a picture that came from a Generate power tools run restores that
+    """Q2. A remix of an ordinary picture puts its RECORDED prompt in the Create tab's Image form (only what
+    the S1 template rule would act on is escaped, so an ordinary {emphasis} brace stays exactly as recorded
+    and the prompt re-sends byte for byte); a picture that came from a Generate power tools run restores that
     run's TEMPLATE instead. Either way the form says nothing is sent and no generation was submitted."""
     ctx, page, seen = _q_page(render_browser, phone_q_server, monkeypatch)
     try:
@@ -6937,7 +6938,7 @@ def test_remix_fills_the_image_form_with_the_recorded_prompt_or_a_runs_template_
         page.wait_for_selector(".idm-root", state="detached")
         page.wait_for_selector("textarea.cm-ta")
         page.wait_for_function("() => document.querySelector('textarea.cm-ta').value.indexOf('night market 1') >= 0")
-        assert page.input_value("textarea.cm-ta") == "moonwell, night market 1, soft rim light, \\{moonlit\\}"
+        assert page.input_value("textarea.cm-ta") == "moonwell, night market 1, soft rim light, {moonlit}"
         assert "Nothing is sent" in page.locator(".mgpow-note").first.inner_text()
         assert _q_generation_posts(seen) == []
         # a picture from a power-tools run: its details route carries a run block
