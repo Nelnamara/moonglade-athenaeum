@@ -56,9 +56,14 @@ def test_loom_shell_lifts_help_widget_above_the_overlay(tmp_path):
     """
     cli = login_client(tmp_path)
     body = cli.get("/loom").get_data(as_text=True)
-    # the shell-only help FAB + its modal clear .lv-overlay(400) via 401/402 (not the old 300/301)
+    # the shell-only help FAB clears .lv-overlay(400) via 401 (not the old 300)
     assert "right:18px;z-index:401;width:38px" in body                # #eb-help-btn
-    assert "inset:0;z-index:402;background:rgba(6,4,16,.72)" in body   # #eb-help modal
+    # Session I (2026-09-28): the hand-written quick-guide modal (#eb-help, 402) retired --
+    # the "?" opens the in-app guide on The Loom's page, drawn by the bundle's HelpRoot at the
+    # overlay band's Help rung (help.css), and the shell no longer posts a beacon of its own.
+    assert "window.mgHelp.open('The-Loom')" in body
+    assert 'id="eb-help"' not in body and "mgAchDocs" not in body
+    assert 'window.MG_ACH_NONCE = "' in body          # the nonce the bundle's poster seeds from
     # notify.css no longer ships a base 234/235 at all -- there is no floating tray left to
     # lift, on either host.
     css = _notify_css()

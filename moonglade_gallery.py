@@ -8788,62 +8788,23 @@ window.storage = {
   list:function(p){ return fetch('/api/loom/list?prefix='+encodeURIComponent(p||'')).then(function(r){return r.json();}).then(function(d){ return {keys:(d&&d.keys)||[]}; }); },
   delete:function(k){ return fetch('/api/loom/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); }
 };
-/* The Read the Manual beacon, and the nonce it needs (2026-09-07 ruling -- see
-   api_ach_event()). The classic Loom shell has no bundle seam to import
-   gallery/src/notify/achNonce.js from, so it carries the same three rules by hand:
-   send the nonce, adopt the next_nonce an accepted event returns, and on a stale-page
-   403 ask /api/ach-nonce once and retry once -- but ONLY when the nonce it just lost is
-   missing or older than the 60s window (2026-09-07, refining the same day's ruling; see
-   achNonce.js's own writeup). A double-fired click on the ? button sends one nonce twice;
-   the twin that loses is refused 403 as consumed, and retrying THAT one with a fresh nonce
-   counts one press as two the moment the round trip outruns the server's 150ms debounce.
-   Anything else is a quiet no-op -- the feat stays earnable on the next open. The value
-   below is a PLACEHOLDER the /loom route substitutes on the way out -- a fresh mint per
-   render, exactly as app_page puts one in MG_BOOT. (Naming the placeholder token in this
-   comment would substitute it here too.) */
+/* The feat beacon's per-render nonce (2026-09-07 ruling -- see api_ach_event()). Since
+   Session I (2026-09-28) this shell posts NOTHING itself: the "?" below opens the guide, and
+   the guide's own open sends the docs event through gallery/src/notify/achNonce.js, which the
+   Loom bundle carries -- the one poster, with the one set of rules (send the nonce, adopt
+   next_nonce, one conditional stale-page retry). That module reads its first nonce from
+   here when there is no MG_BOOT. The value below is a PLACEHOLDER the /loom route substitutes
+   on the way out -- a fresh mint per render, exactly as app_page puts one in MG_BOOT.
+   (Naming the placeholder token in this comment would substitute it here too.) */
 window.MG_ACH_NONCE = "__ACH_NONCE__";
-window.MG_ACH_NONCE_AT = Date.now();     // when the nonce we hold was minted
-window.mgAchDocs = function (retried) {
-  // Read the age BEFORE the request: a twin that beat us may adopt its own next_nonce
-  // while ours is in flight, and reset the clock this decision reads.
-  var stale = !window.MG_ACH_NONCE || (Date.now() - window.MG_ACH_NONCE_AT) >= 60000;
-  fetch('/api/ach-event', {method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({event:'docs', nonce: window.MG_ACH_NONCE})})
-    .then(function (r) { return r.json().then(function (d) { return {status: r.status, body: d || {}}; },
-                                              function () { return {status: r.status, body: {}}; }); })
-    .then(function (x) {
-      if (x.body.next_nonce) { window.MG_ACH_NONCE = x.body.next_nonce;
-                               window.MG_ACH_NONCE_AT = Date.now(); return; }
-      // 429, anything else, or a 403 on a nonce young enough to have been spent by this
-      // click's own twin: give up quietly.
-      if (x.status !== 403 || retried || !stale) return;
-      return fetch('/api/ach-nonce').then(function (r) { return r.json(); }).then(function (d) {
-        if (d && d.nonce) { window.MG_ACH_NONCE = d.nonce; window.MG_ACH_NONCE_AT = Date.now();
-                            window.mgAchDocs(true); }
-      });
-    })
-    .catch(function () {});
-};
 </script>
 __RUNTIME_SCRIPT_BLOCK__
-<button id="eb-help-btn" onclick="document.getElementById('eb-help').style.display='flex';try{window.mgAchDocs()}catch(e){}"
+<!-- The Loom's "?" (Session I decision 2): the hand-written quick guide that used to open
+     here retired; the button opens the in-app guide (the wiki this install carries) on The
+     Loom's page, through the verb the bundle publishes (gallery/src/help/helpStore.js). -->
+<button id="eb-help-btn" onclick="if(window.mgHelp)window.mgHelp.open('The-Loom')"
   style="position:fixed;bottom:18px;right:18px;z-index:401;width:38px;height:38px;border-radius:50%;background:var(--accent);color:var(--base);border:none;font-size:19px;font-weight:700;cursor:pointer;box-shadow:0 4px 18px rgba(0,0,0,.5);"
-  title="How The Loom works">?</button>
-<div id="eb-help" onclick="if(event.target===this)this.style.display='none'"
-  style="position:fixed;inset:0;z-index:402;background:rgba(6,4,16,.72);display:none;align-items:center;justify-content:center;">
-  <div style="width:680px;max-width:92vw;max-height:86vh;overflow-y:auto;background:var(--surface0);border:1px solid var(--surface1);border-radius:14px;padding:22px 26px;color:var(--text);font:13.5px/1.55 system-ui,sans-serif;">
-    <h2 style="margin:0 0 4px;color:var(--text);">The Loom &mdash; quick guide</h2>
-    <p style="color:var(--subtext);margin:0 0 14px;">A storyboard for multi-clip AI video: plan the whole piece, then render shot by shot.</p>
-    <p><b>Acts &amp; Shots.</b> Your video is a list of <i>acts</i>, each holding <i>shot cards</i>. The reel bar tracks total runtime against your target. Add a shot, give it a duration, and write what happens.</p>
-    <p><b>Modes.</b> Each shot has a generation mode: <b>I2V</b> animate from one image &middot; <b>FLF</b> morph from a start frame to an end frame &middot; <b>R2V</b> multi-reference (cast + scenes) &middot; <b>V2V</b> extend/transform an existing clip. (Text-only T2V is retired &mdash; these video models all need an input frame or reference.)</p>
-    <p><b>Cast &amp; Assets.</b> Reusable references. Cite them in shot text as <b>@image1 @video1 @audio1</b> (lowercase). "Lock appearance" keeps a character consistent across shots.</p>
-    <p><b>Frame handoff.</b> Every card has an open and close frame. "&#8627; inherit prev close" chains one shot's last frame into the next shot's first, so the cut is continuous; once a shot has rendered, the same button offers "&#9986; splice" to take its real last frame instead.</p>
-    <p><b>&#9654; Generate shot.</b> Renders the card on PixAI's video engine (V4.0): your cast + frames upload in @-order, the shot text becomes the prompt, and the finished clip lands in the gallery catalog &mdash; free when a V4.0 card covers it. Status shows on the card; "open clip &#8599;" plays it.</p>
-    <p><b>Copy shot.</b> The same assembled prompt, to your clipboard &mdash; paste it into any Seedance-style generator. The board is engine-agnostic by design: plan here, render anywhere.</p>
-    <p><b>Saving.</b> The board autosaves to the gallery server (survives restarts). Backup .json / export .txt live in the header.</p>
-    <p style="color:var(--subtext);">Full manual: the wiki&rsquo;s <a href="https://github.com/Nelnamara/moonglade-athenaeum/wiki/The-Loom" target="_blank" rel="noopener">The Loom</a> page.</p>
-  </div>
-</div>
+  title="The Loom's page of the guide (?)" aria-label="Open the guide">?</button>
 </body></html>"""
 
 # The Loom's ONE delivery path (bundle-only since the Babel-standalone retirement,
