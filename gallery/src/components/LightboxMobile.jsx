@@ -298,7 +298,7 @@ export default function LightboxMobile({
 
       <div className="lbm-bottom">
         {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
-            only for a picture Tsubaki.3 / Flash made (renders nothing otherwise). */}
+            on every still picture (renders nothing on a video). */}
         <TsubakiEditBar item={it} member={member} phone />
         <div className="lbm-metarow">
           {it.model ? <b className="lbm-model">{it.model}</b> : null}

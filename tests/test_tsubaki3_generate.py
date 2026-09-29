@@ -381,12 +381,10 @@ def test_an_sdxl_version_has_no_tiers_no_max_and_no_creativity(rest):
 # the JS mirrors
 # =============================================================================
 
-def test_the_tsubaki_edit_ids_match_the_drawer_copy():
+def test_the_tsubaki3_ids_match_the_drawer_copy():
     js = (ROOT / "gallery/src/gen/tsubakiCore.js").read_text(encoding="utf-8")
     m = re.search(r'TSUBAKI3 = \{ model_id: "(\d+)", version_id: "(\d+)"', js)
     assert m and m.group(1) == core.TSUBAKI3_MODEL_ID and m.group(2) == core.TSUBAKI3_VERSION_ID
-    ids = re.search(r"TSUBAKI_EDIT_VERSIONS = \[([^\]]*)\]", js).group(1)
-    assert set(re.findall(r'"(\d+)"', ids)) == set(core.TSUBAKI_EDIT_VERSIONS)
     assert core.TSUBAKI3_VERSION_ID in core.UNLIMITED_VERSIONS
 
 

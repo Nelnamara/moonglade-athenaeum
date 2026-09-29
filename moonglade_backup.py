@@ -10916,13 +10916,12 @@ UNLIMITED_LANE = "infinite"
 # The versions the lane is offered on: PixAI's own site asks the status for Tsubaki.3's id and
 # no other (§8.4). Not "any MMDIT26B" -- Flash is MMDIT26B too and has no lane.
 UNLIMITED_VERSIONS = frozenset(("2024383379556065549",))
-# Session H (decision 2 / T3a): a Tsubaki edit runs on Tsubaki.3; the Lightbox edit bar is
-# offered on pictures made by Tsubaki.3 or Tsubaki.3 Flash (PixAI's own Edit dialog routes those
-# two to its Tsubaki entry). gallery/src/gen/tsubakiCore.js carries the same ids
+# Session H (decision 2 / T3a): a Tsubaki edit runs on Tsubaki.3. It is offered on every still
+# picture -- the "Edit with Tsubaki" menu item and the Lightbox edit bar alike (owner ruling,
+# 2026-09-28), whatever model made it. gallery/src/gen/tsubakiCore.js carries the same ids
 # (tests/test_tsubaki3_generate.py pins the copies together).
 TSUBAKI3_MODEL_ID = "2024383378759147749"
 TSUBAKI3_VERSION_ID = "2024383379556065549"
-TSUBAKI_EDIT_VERSIONS = frozenset(("2024383379556065549", "2050048243034896798"))
 # The status is cached RAW, keyed by (version, the identity that creates), and the expiry is
 # compared with the clock at every check (§8.8): an hour's success TTL is too long for a grant
 # that ends on a fixed date, so success keeps 5 minutes and a failure the gate's own minute.

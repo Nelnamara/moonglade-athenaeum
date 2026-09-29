@@ -293,8 +293,7 @@ export function profilePicked(row, rows, mode) {
 }
 
 /* ---- the Tsubaki edit (decision 2's menu item and T3a's Lightbox bar) --------------------- */
-/* The versions whose pictures the Lightbox bar offers to edit, and the model a Tsubaki edit
-   runs on. Mirrors moonglade_backup.TSUBAKI_EDIT_VERSIONS / TSUBAKI3_MODEL
-   (tests/test_tsubaki3_generate.py pins the two copies together). */
+/* The model a Tsubaki edit runs on. Mirrors moonglade_backup.TSUBAKI3_MODEL_ID /
+   TSUBAKI3_VERSION_ID (tests/test_tsubaki3_generate.py pins the two copies together). The
+   edit is offered on every still picture, whatever model made it (the card's tsubaki_edit). */
 export const TSUBAKI3 = { model_id: "2024383378759147749", version_id: "2024383379556065549", title: "Tsubaki.3" };
-export const TSUBAKI_EDIT_VERSIONS = ["2024383379556065549", "2050048243034896798"];

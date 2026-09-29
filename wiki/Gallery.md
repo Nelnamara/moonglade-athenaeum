@@ -185,7 +185,7 @@ so you can bookmark one, and the browser's Back button closes it.
 - **Click an image** → the lightbox overlay: swipe / `←` `→` to browse, `F`/Space
   slideshow, `Esc` or ✕ to close. Arrow keys **roll over page boundaries** — reach the
   end of a page and it loads the next one, continuing seamlessly. Closing leaves your
-  scroll and selections intact. A picture Tsubaki.3 or Flash made carries a **Describe your
+  scroll and selections intact. Every still picture carries a **Describe your
   edits…** bar (`E` to jump to it) that sends a Tsubaki.3 edit of it, priced before you send —
   see [Generating](Generating#tsubaki3-context-images-and-image-prompts).
 - **Detail page** (via the lightbox's *Details*, or by clicking a video): full

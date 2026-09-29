@@ -317,8 +317,8 @@ export default function Lightbox({
               ) : null}
             </div>
           </div>
-          {/* Session H T3a: the Tsubaki edit bar over the stage foot -- only for a picture
-              Tsubaki.3 / Flash made; it renders nothing otherwise. */}
+          {/* Session H T3a: the Tsubaki edit bar over the stage foot -- on every still picture
+              (the card's tsubaki_edit); it renders nothing on a video. */}
           <TsubakiEditBar ref={barRef} item={it} member={member} />
         </div>
 

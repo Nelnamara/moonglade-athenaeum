@@ -64,7 +64,7 @@ never deletes anything.
 prompt started as "Use @image1 …". Nothing is spent until you press Generate. The Edit card is
 unchanged (Edit Pro and Reference Pro are PixAI's own edit models).
 
-**The Lightbox edit bar.** A picture made by Tsubaki.3 or Flash shows **Describe your edits…**
+**The Lightbox edit bar.** Every still picture shows **Describe your edits…**
 over the foot of the Lightbox (on a phone, a bar under the picture). Type the change and press
 ↵: it sends a Tsubaki.3 run with that picture as @image1, your words as the prompt, the dock's
 profile and an Auto size — no LoRAs, recipes, palette or negative. The price shows in the bar

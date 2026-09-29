@@ -19400,8 +19400,6 @@ __DESIGN_TOKENS__
             batch=(request.args.get("batch") or "").strip(),
             published_only=(request.args.get("published") or "") == "1")
 
-        from moonglade_backup import TSUBAKI_EDIT_VERSIONS as _tsubaki_edit
-
         def _card(r):
             """One grid card dict for a catalog row -- the SINGLE definition both the
             plain row listing and a grouped unit's cover build, so a series cover is
@@ -19431,11 +19429,10 @@ __DESIGN_TOKENS__
                 "title": str(r.get("title") or "").strip(),
                 "batch_index": str(r.get("batch_index") or ""),   # #33: PixAI's own output number
                 "batch_size": str(r.get("batch_size") or ""),
-                # Session H T3a: the Lightbox edit bar is offered on pictures Tsubaki.3 or
-                # Tsubaki.3 Flash made (TSUBAKI_EDIT_VERSIONS; the catalog's model_id is the
-                # version the task rendered with). Never on a video.
-                "tsubaki_edit": (str(r.get("is_video") or "") != "1"
-                                 and str(r.get("model_id") or "") in _tsubaki_edit),
+                # Session H T3a: the Lightbox edit bar is offered on the same pictures as the
+                # "Edit with Tsubaki" menu item -- every still, whatever model made it (owner
+                # ruling, 2026-09-28). Never on a video.
+                "tsubaki_edit": str(r.get("is_video") or "") != "1",
             }
 
         if group == "series":
