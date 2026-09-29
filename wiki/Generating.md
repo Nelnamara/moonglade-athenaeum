@@ -147,36 +147,75 @@ shown. Clear the base model to see all of them.
 
 ### Training your own LoRA
 
-**Train** in the side rail (on the phone: **Train a LoRA**) sends a basic LoRA training run to
-PixAI. It spends, so it previews first and only starts when you confirm.
+**Train** in the side rail (on the phone: **Train a LoRA**) trains a LoRA on PixAI. Opening it
+only reads: nothing is sent to PixAI until you press a button that says what it does.
 
-- **Base models** are PixAI's own training list — DiT.3 (Tsubaki.3), DiT.2 (Tsubaki.2), DiT.1,
-  SDXL and SD 1.5 — read from PixAI when the panel opens, with a built-in copy of that list if
-  PixAI can't be reached. The panel starts on Tsubaki.3 (DiT.3, marked Recommended), the same
-  one PixAI's own page starts on; its price is shown before you start.
-- **What it costs** is shown before you start, with the base's normal price beside a free
-  run. A run is free when your membership still has
-  free trainings left (they only count while you are a member), or when you hold a training
-  free card for that base — the card is used up by the run. If your free cards can't be
-  checked at that moment, the run is quoted as paid and starts only if you tick the amount. If you have both, this app uses one
-  of your free trainings and keeps the card (PixAI's own page would use the card). Otherwise
-  the panel quotes PixAI's own price for that base and asks you to tick that you will spend
-  that amount. Change the base, the images or any field after the quote and the quote closes —
-  press **Train it** (on the phone: **Preview & start training**) again for a fresh one; a run
-  is never started at a price you did not tick.
+On the desktop it opens on a chooser: **Basic training** (about 30 minutes, good for your first
+LoRA), **Advanced training** (arriving in the next update), and **Runs**. While something is
+training, a strip on top shows the newest run with its progress, and **View ›** opens Runs.
+The phone keeps its one-page screen for now (**Preview & start training**), with the same
+prices, free trainings and confirm rules as below.
+
+**Basic training** is PixAI's own three steps:
+
+1. **Choose a goal** — Character, Art style, Outfit or Something else.
+2. **Add images** — from **Upload** (your device), **From history** (your library, Grouped by
+   generation or All pictures, with the library's search; it keeps loading as you scroll) or
+   **Import a dataset** (the image sets of your earlier Basic runs, with their counts; a set
+   that won't fit what's left of 100 is dimmed, and importing one fills in its old name,
+   trigger words and goal where those are still empty). Everything lands in one grid, each
+   picture once, with a mark for where it came from.
+3. **Review and start** — the LoRA's name, its trigger words and the base model, then a
+   summary with the price, the time it takes, and **Start training**.
+
+- **Base models** are PixAI's own training list, one tab per architecture — DiT.3 (Tsubaki.3,
+  marked Recommended and selected first), DiT.2 (Tsubaki.2), DiT.1, SDXL and SD 1.5 — read from
+  PixAI when the panel opens, with a built-in copy of that list if PixAI can't be reached.
+- **What it costs** is on the summary before you press Start, with the base's normal price
+  struck through when the run is free. A run is free when your membership still has free
+  trainings left (they only count while you are a member), or when you hold a training free
+  card for that base — the card is used up by the run. If your free cards can't be checked at
+  that moment, the run is quoted as paid. If you have both, this app uses one of your free
+  trainings and keeps the card (PixAI's own page would use the card). Reusing a whole earlier
+  set exactly as it was (imported, nothing added or taken out) is priced at PixAI's lower rate
+  for reusing a dataset, and the summary says so.
+- **Start training asks once.** It first gets PixAI's price for exactly this run (nothing is
+  spent), then shows one confirm whose button names that amount — for a paid run you also tick
+  that you will spend it. Change the base, the images or any field and the confirm closes;
+  a run is never started at a price you did not see and tick. If PixAI doesn't answer clearly
+  after you confirm, the panel says the run **may have started**: check Runs before starting
+  it again (starting the same run again is refused for a while, so a double click can't charge
+  twice).
 - **Trigger words** are tidied the way PixAI tidies them before they are sent: line breaks
   become commas, extra spaces and repeated commas are removed, and everything is lowercased.
-  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. On the desktop panel the
-  counter beside the box shows the tidied length, counted the way PixAI counts it (an emoji
-  counts as 2).
-- **Images**: between 10 and 100, each at least 512 pixels on both sides and no longer than
-  3:1. If an image fails that rule the run is refused and the image is named — PixAI's own
-  page quietly drops such images and trains on the rest, and this app would rather not train
-  on a different set than the one you picked. An image whose size your library doesn't know
-  is listed as not checked.
+  Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30. The line under the box shows
+  the tidied length when it is too short or too long, counted the way PixAI counts it (an
+  emoji counts as 2).
+- **Images**: between 10 and 100, PNG, JPG or WebP, each at least 512 pixels on both sides and
+  no longer than 3:1. An upload that fails the rule never leaves your computer and is listed
+  with its reason. A picture from your library that fails it is marked in the grid with its
+  reason in peach and is not counted or sent — take it out or add others. An image whose size
+  your library doesn't know is listed as not checked.
 - **If PixAI has paused new training runs**, starting one is refused (nothing is spent) and,
   when PixAI says, the message names when it expects to be back. Runs already training carry
   on.
+
+**Runs** lists your training runs, newest first, with filters for All, Drafts, Done and
+Failed. Each row shows the run's status — a draft and the step it stopped at, Queued,
+Training with PixAI's percentage (and a moon that fills as it goes), Done or Failed (PixAI's
+reason on hover) — and one thing you can do with it:
+
+- **View** opens a queued or training run's progress.
+- **Publish** (a finished Advanced run) opens a sheet: Private or Public, and for a public
+  LoRA whether it joins LoRA rebates. Under **This can't be undone** each permanent
+  consequence is its own line to tick — you can no longer delete the LoRA, and a public one
+  can't go back to private — and Publish stays off until every line is ticked. Joining
+  rebates can't be undone either. A private LoRA's **Private** label opens the same sheet to
+  make it public later.
+- **Retry** (a failed Advanced run) starts a new run on the same set: it asks PixAI's price
+  first and the confirm's button names it; nothing is spent until you tick and confirm.
+- **Use** adds a trained LoRA to the Generate dock, trigger words and all. Nothing is
+  generated until you press Generate.
 
 ## On the CLI
 
