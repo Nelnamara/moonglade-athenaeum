@@ -70,6 +70,10 @@ def z():
         "recipes_host":  _z("styles/recipes.css", ".rcp-host"),
         "recipes_phone": _z("styles/recipes.css", ".rcp-m "),
         "gallery_picker": _z("styles/gallery-picker.css", ".mg-gallery-picker"),
+        # Session N (wave 5): the collections manager and the curation undo toast
+        "cu_scrim":      _z("styles/curation.css", ".mgcu-scrim"),
+        "cu_mgr":        _z("styles/curation.css", ".mgcu-mgr "),
+        "cu_toast":      _z("styles/curation.css", ".mgcu-toast "),
     }
 
 
@@ -109,6 +113,19 @@ def test_each_scrim_sits_under_its_own_content(z):
     # ...and the Generate drawer's colour palette (lane w2-small, 2026-09-28): it opens over the
     # dock (7) and the phone's Advanced screen (308), above the phone's model sheet (345).
     assert z["pal_c_host"] > z["pal_c_scrim"] > 345
+
+
+def test_the_collections_manager_and_its_undo_toast_keep_their_rungs(z):
+    """Session N: the manager takes the free 418/419 between the recipe picker and the upscale
+    panel (it opens over the gallery, never from inside a layer, so it needs no more than the
+    band's floor above the lightbox); its scrim sits under its own slab. The undo toast is a
+    rating pressed INSIDE any layer's answer -- the lightbox, the record -- so it must clear
+    every sub-overlay a rating can be pressed under, and stay below the power modal."""
+    assert z["cu_mgr"] > z["cu_scrim"], "the manager's scrim would eat clicks meant for its own rows"
+    assert z["cu_scrim"] > z["lbx"] and z["cu_scrim"] > z["recipes_host"]
+    assert z["cu_mgr"] < z["upscale"]
+    assert z["cu_toast"] > z["ct_sub_host"] > z["cp_sub_host"], "a rating's Undo hid under a sub-overlay"
+    assert z["cu_toast"] > z["cu_mgr"] and z["cu_toast"] < z["cp_pwr"]
 
 
 def test_the_colour_palette_stays_under_the_picker_it_opens():

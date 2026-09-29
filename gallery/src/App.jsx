@@ -20,6 +20,10 @@ import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
+import CollectionsManager from "./components/CollectionsManager.jsx";
+import CurationBar from "./components/CurationBar.jsx";
+import CurateToast from "./components/CurateToast.jsx";
+import SmartStrip from "./components/SmartStrip.jsx";
 import FolioOverlay from "./components/FolioOverlay.jsx";
 import AiToolsModal from "./components/AiToolsModal.jsx";
 import GenerateDrawer from "./components/GenerateDrawer.jsx";
@@ -33,9 +37,14 @@ import useCommandPalette from "./hooks/useCommandPalette.js";
 import { shortId } from "./palette/paletteCore.js";
 import "./styles/shell.css";
 import {
-  fetchAccount, fetchCollections,
+  fetchAccount, fetchCollections, fetchCollectionDetail, manageCollections,
   apiGet, apiPost, downloadZipForm, rateImage, resolveVideoIds, rebuildPoster,
 } from "./api.js";
+import useCurate from "./hooks/useCurate.js";
+import { flashRating } from "./curation/flash.js";
+import {
+  addedSummary, checkTag, composeSmartQuery, isTypingTarget, pickHotkeyTargets, ratingFromKey,
+} from "./curation/curationCore.js";
 import { isMomentUp } from "./moments/momentStore.js";
 import { installStarfallTrigger } from "./moments/starfallTrigger.js";
 import { OPEN_PANEL_EVENT, takeCarriedPanelTab } from "./notify/panelRequest.js";
@@ -48,7 +57,7 @@ import { isPrivacyBlurOn, setPrivacyBlurOn } from "./lib/privacyBlur.js";
 import { landingAfterViewer, landInScroller, viewportOfScroller } from "./lib/viewerLanding.js";
 import { registerUpdateHost } from "./notify/bannerStore.js";
 import GuideHost from "./help/GuideHost.jsx";
-import { openHelp, OPEN_SURFACE_EVENT } from "./help/helpStore.js";
+import { openHelp, OPEN_SURFACE_EVENT, isHelpUp, isAboutUp, isWhatsNewUp } from "./help/helpStore.js";
 import { useGuideIndex } from "./help/helpData.js";
 import { githubSlug } from "./help/helpCore.js";
 
@@ -156,6 +165,21 @@ export default function App({ boot }) {
   const refreshAccount = () => fetchAccount().then(setAccount);
   const claimModal = useClaimModal(account, refreshAccount);
   const [collections, setCollections] = useState(boot.collections || []);
+  /* SMART COLLECTIONS (Session N1): saved searches, listed beside the hand-picked ones.
+     `collections` stays the HAND-PICKED names (the import, contest and "Add to" flows all
+     mean exactly that); a smart collection is browsed, never added to. */
+  const [smart, setSmart] = useState(boot.smart_collections || []);
+  const isSmartShelf = !!shelf && smart.some((c) => c.name === shelf);
+  const smartOpen = isSmartShelf ? smart.find((c) => c.name === shelf) : null;
+  // the name of the smart collection whose query is being edited in the search field, or ""
+  const [editingSmart, setEditingSmart] = useState("");
+  const refreshCollections = useCallback(async () => {
+    const rows = await fetchCollectionDetail();
+    if (!rows) return null;
+    setCollections(rows.filter((c) => c.kind === "hand").map((c) => c.name));
+    setSmart(rows.filter((c) => c.kind === "smart").map((c) => ({ name: c.name, query: c.query })));
+    return rows;
+  }, []);
   // ui -- blur shares the classic gallery's localStorage key on purpose: one
   // setting, both surfaces, exactly the classic semantics (all thumbs 16px,
   // flagged 28px, hover reveals). The key moved into lib/privacyBlur.js on
@@ -836,6 +860,90 @@ export default function App({ boot }) {
     afterMutation();
   };
 
+  /* ======================= CURATION (Session N, wave 5) =============================
+     Handoff: Curation Handoff.dc.html (moonglade-internal/design/handoff-2026-09-04), notes
+     in design/notes/curation/NOTES.md. Everything here is the LOCAL catalog: smart
+     collections are saved searches, the mark / tags / note never leave it, and nothing on this
+     surface reaches PixAI.
+
+     useCurate owns the server answers -- the honest count and the per-picture Undo -- and the
+     toast; the verbs below are what the bulk bar, the rating keys, the palette and the
+     collections manager call. ---------------------------------------------------------- */
+  const curate = useCurate({ csrf: boot.csrf || "", setItems });
+
+  const openCollectionsManager = useCallback(() => setOverlay("collections"), []);
+  /* The manager tells the shell what moved. The open collection follows its own rename, falls
+     back to the target when it was merged away, and goes back to the whole library when it was
+     deleted; a merge INTO the open collection reloads it so the newcomers show. */
+  const onCollectionsChanged = useCallback(async (chg) => {
+    await refreshCollections();
+    invalidate(["/api/next/library"]);
+    if (chg.renamed && shelf === chg.renamed.from) applyAdvanced({ shelf: chg.renamed.to });
+    else if (chg.merged && chg.merged.others.indexOf(shelf) >= 0) applyAdvanced({ shelf: chg.merged.target });
+    else if (chg.merged && chg.merged.target === shelf) load(1, true);
+    else if (chg.deleted && shelf === chg.deleted) applyAdvanced({ shelf: "" });
+  }, [refreshCollections, shelf, applyAdvanced, load]);
+
+  /* N1: "Save as smart collection" stores the search in the field as a query and opens the
+     new collection. Nothing is stored about which pictures match. */
+  const say = curate.say;
+  const saveSmart = useCallback(async (query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query });
+    if (d.error) { say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    applyAdvanced({ shelf: d.name, q: "" });
+    say("Saved \u201c" + d.name + "\u201d \u27f3. It updates as you make and mark pictures.");
+  }, [boot.csrf, say, refreshCollections, applyAdvanced]);
+  const saveSmartOver = useCallback(async (name, query) => {
+    const d = await manageCollections(boot.csrf || "", { action: "smart", query, replace: name });
+    if (d.error) { say(d.error, null, "peach"); return; }
+    await refreshCollections();
+    setEditingSmart("");
+    applyAdvanced({ shelf: d.name, q: "" });
+    say("Updated \u201c" + d.name + "\u201d \u27f3 with the new search.");
+  }, [boot.csrf, say, refreshCollections, applyAdvanced]);
+  // opening a smart collection IS running its query; this runs it again
+  const refreshSmart = useCallback(() => {
+    invalidate(["/api/next/library"]);
+    userLoad(1, true);
+    refreshCollections();
+  }, [userLoad, refreshCollections]);
+  useEffect(() => { if (shelf && editingSmart) setEditingSmart(""); }, [shelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* WHAT "SAVE" SAVES: the whole view as a search -- the field's text plus every chip and
+     flyout filter that has an operator (curationCore.composeSmartQuery) -- so a smart
+     collection matches what was on screen, not just what was typed. `applied` is what the grid
+     is showing (the draft strip); `query` is what is typed now (the edit strip). A smart
+     collection open as the shelf is its own query, so it contributes no collection: term. */
+  const composeView = (text) => composeSmartQuery({
+    q: text, media, shelf: isSmartShelf ? "" : shelf, adv,
+  });
+  const draftQuery = composeView(applied);
+
+  /* N5/N4: rate any set of pictures. A flash confirms on each target; more than one gets the
+     honest-count toast with Undo, one is quiet. */
+  const rateTargets = useCallback((ids, n, openId) => {
+    flashRating(ids, n, openId);
+    return curate.apply(ids, { rating: n }, ids.length > 1);
+  }, [curate.apply]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const bulk = {
+    star: (n) => rateTargets(selIds, n, null),
+    tag: (raw) => {
+      const chk = checkTag(raw, []);
+      if (!chk.ok) { say(chk.error, null, "peach"); return; }
+      curate.apply(selIds, { add_tag: chk.tag }, true);
+    },
+    keeper: () => curate.apply(selIds, { mark: "keeper" }, true),
+    reject: () => curate.apply(selIds, { mark: "reject" }, true),
+    addTo: async (name) => {
+      const d = await apiPost("/api/collection", { action: "add", collection: name, media_ids: selIds });
+      if (d.error) { say(d.error, null, "peach"); return; }
+      invalidate(["/api/next/library"]);
+      say(addedSummary(d.count || 0, name, selIds.length));
+    },
+  };
+
   const rate = useCallback(async (mid, value) => {
     // optimistic; the server clamps 0-5 and answers the stored value
     setItems((old) => old.map((it) => (it.media_id === mid ? { ...it, rating: value } : it)));
@@ -1334,6 +1442,18 @@ export default function App({ boot }) {
         keys: [],
       });
     }
+    // Smart collections (N1) open the same way, marked as saved searches.
+    for (const c of smart) {
+      list.push({
+        id: "collection:" + c.name,
+        group: "Go to",
+        icon: <Icon name="collection" />,
+        label: "Collection: " + c.name,
+        sub: "smart \u27f3",
+        run: () => { goLibrary(); applyAdvanced({ shelf: c.name }); },
+        keys: [],
+      });
+    }
 
     // The layout picker's own modes and its own exact glyphs, active one marked with the
     // emerald ✓. §8.2's ruling is "the layout picker's exact glyphs", so these follow the
@@ -1369,6 +1489,31 @@ export default function App({ boot }) {
       keys: ["/"], hotkey: "/", run: jumpToSearch,
     });
     list.push({ id: "do.sync", group: "Do", icon: "⟳", label: "Sync now", keys: [], run: syncNow });
+    // N2: the collections manager.
+    list.push({
+      id: "do.collections", group: "Do", icon: <Icon name="collection" />, label: "Manage collections",
+      keys: [], run: () => openOverlay("collections"),
+    });
+    // N5: "Rate 1-5". The row is the hotkeys' own listing (the keys are global and work with
+    // the palette shut); typing "rate" also offers each rating as a row, aimed at the
+    // selection, else the picture in focus -- absent while there is nothing to rate.
+    list.push({
+      id: "do.rate", group: "Do", icon: "\u2605", label: "Rate 1\u20135", sub: "0 clears",
+      keys: ["1\u20135"],
+      run: () => curate.say("Press 1\u20135 to rate the selection, the open picture or the one under the pointer. 0 clears."),
+    });
+    const rateIds = selected.size ? Array.from(selected) : focusItem ? [focusItem.media_id] : [];
+    if (rateIds.length) {
+      for (let n = 0; n <= 5; n++) {
+        list.push({
+          id: "do.rate." + n, group: "Do", icon: "\u2605",
+          label: n ? "Rate \u2605" + n : "Clear rating",
+          sub: rateIds.length > 1 ? rateIds.length + " pictures" : "",
+          keys: [], queryOnly: true,
+          run: () => rateTargets(rateIds, n, focusItem ? focusItem.media_id : null),
+        });
+      }
+    }
     // K decision 1: the palette's "Browse recipes" opens the recipe picker at market size.
     list.push({
       id: "do.recipes", group: "Do", icon: "⁂", label: "Browse recipes", sub: "the recipe market",
@@ -1435,13 +1580,46 @@ export default function App({ boot }) {
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collections, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
-      openDock, openOverlay, applyAdvanced, openPublish, guideIndex]);
+  }, [collections, smart, selected, layout, group, claimable, focusItem, goLibrary, jumpToSearch, syncNow,
+      openDock, openOverlay, applyAdvanced, openPublish, guideIndex, rateTargets, curate.say]);
 
   const palette = useCommandPalette(commands);
   paletteRef.current = palette;
   // The Escape ladder guard App's own overlay closer reads (see that listener above).
   useEffect(() => { paletteUpRef.current = palette.open || palette.sheetOpen; });
+
+  /* RATING HOTKEYS (Session N5). 1-5 rate and 0 clears. The target is the selection if there
+     is one, otherwise the open Lightbox picture, otherwise the open record, otherwise the
+     picture under the pointer; the keys are ignored while typing in a field and while any
+     layer that owns the keyboard is up (an overlay, the palette, a menu, the guide). A gold
+     flash confirms on each target, static under reduced motion. Several targets share the
+     undo toast, one target stays quiet. The hover is read off the DOM's own :hover rather than
+     tracked in state, because the grid is memoized and takes no per-pointer props. */
+  const hotRef = useRef({});
+  hotRef.current = {
+    selIds,
+    lbId: lbIndex != null && items[lbIndex] ? items[lbIndex].media_id : null,
+    detailsFor,
+    blocked: !!(overlay || ctxMenu || stackFor || claimModal.open || palette.active || palette.sheetActive),
+  };
+  useEffect(() => {
+    const onKey = (e) => {
+      const n = ratingFromKey(e);
+      if (n == null || e.defaultPrevented || e.repeat) return;
+      if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return;
+      const st = hotRef.current;
+      if (st.blocked || isPickerOpen() || isRecipesOpen() || isMomentUp()
+          || isHelpUp() || isAboutUp() || isWhatsNewUp()) return;
+      const hoverEl = document.querySelector(".mgg-card:hover");
+      const hoverId = hoverEl && !hoverEl.classList.contains("mgg-stack") ? hoverEl.getAttribute("data-id") : null;
+      const t = pickHotkeyTargets({ selected: st.selIds, lightboxId: st.lbId, detailsId: st.detailsFor, hoverId });
+      if (!t.ids.length) return;
+      e.preventDefault();
+      rateTargets(t.ids, n, st.lbId || st.detailsFor || null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rateTargets]);
 
   /* Grid arrow-key navigation (#31, Refit #7) only while the grid is the top
      layer: no lightbox, no Details, no nav overlay, no dock, no context menu, no
@@ -1499,7 +1677,14 @@ export default function App({ boot }) {
               lib={lib}
               boot={boot}
               actions={actions}
-              collections={collections}
+              curation={{
+                names: collections.map((name) => ({ name, kind: "hand" }))
+                  .concat(smart.map((c) => ({ name: c.name, kind: "smart", query: c.query })))
+                  .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+                smartShelf: isSmartShelf,
+                onManage: openCollectionsManager,
+                onClear: () => setEditingSmart(""),
+              }}
               group={group} setGroup={setGroup}
               layout={layout} setLayout={setLayout}
               similar={similarToken} onClearSimilar={() => setSimilarFor(null)}
@@ -1530,7 +1715,8 @@ export default function App({ boot }) {
           createPortal(
             <DetailsView
               mediaId={detailsFor} onClose={closeDetails} onNavigate={openDetails}
-              onRate={rate} onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
+              onRate={rate} onCurate={(ids, op) => curate.apply(ids, op, false)}
+              onEdit={requestEdit} onRemix={requestRemix} onVideo={requestVideo} onPublish={openPublish}
               /* Same policy as the completion handler: deleting the picture you were
                  reading is not a reason to be thrown back to the top of the library, so
                  the CURRENT page reloads in place. The one case that has to move is the
@@ -1581,6 +1767,25 @@ export default function App({ boot }) {
             onClear={() => setSimilarFor(null)}
           />
         ) : (
+          <>
+          {/* N1: a smart collection is open (or its query is being edited) */}
+          {(smartOpen || editingSmart || draftQuery) ? (
+            <SmartStrip
+              name={smartOpen ? smartOpen.name : ""} query={smartOpen ? smartOpen.query : ""}
+              editing={editingSmart} draft={draftQuery} canSave={!!composeView(query)}
+              onSaveDraft={() => saveSmart(draftQuery)}
+              onRefresh={refreshSmart}
+              onEdit={() => { setEditingSmart(smartOpen.name); applyAdvanced({ shelf: "", q: smartOpen.query }); }}
+              onSaveOver={() => saveSmartOver(editingSmart, composeView(query))}
+              onSaveNew={() => saveSmart(composeView(query))}
+              onCancel={() => { const back = editingSmart; setEditingSmart(""); applyAdvanced({ shelf: back, q: "" }); }} />
+          ) : null}
+          {/* N4: the bulk bar, while anything is ticked */}
+          {selected.size > 0 ? (
+            <CurationBar count={selected.size} handCollections={collections}
+              onStar={bulk.star} onTag={bulk.tag} onKeeper={bulk.keeper} onReject={bulk.reject}
+              onAddTo={bulk.addTo} onClear={() => setSelected(new Set())} />
+          ) : null}
           <Grid
             items={items} total={total} loading={loading}
             page={page} pages={pages}
@@ -1599,6 +1804,7 @@ export default function App({ boot }) {
             onOpenSeries={openSeries}
             onOpenBatch={openBatch}
           />
+          </>
         )}
       </main>
 
@@ -1710,6 +1916,10 @@ export default function App({ boot }) {
       {overlay === "folio" && (
         <FolioOverlay onClose={() => setOverlay(null)} />
       )}
+      {overlay === "collections" && (
+        <CollectionsManager csrf={boot.csrf || ""} onClose={() => setOverlay(null)}
+          onChanged={onCollectionsChanged} />
+      )}
       {overlay === "aitools" && (
         <AiToolsModal open onClose={() => setOverlay(null)} onPick={requestScene} />
       )}
@@ -1749,6 +1959,7 @@ export default function App({ boot }) {
           paused={palette.active || palette.sheetActive || claimModal.open || isPickerOpen()} />
       )}
 
+      <CurateToast toast={curate.toast} onUndo={curate.undo} onDismiss={curate.dismiss} />
       <CommandPalette palette={palette} />
       <ShortcutSheet open={palette.sheetOpen} closing={palette.sheetClosing}
         onClose={palette.closeSheet} />

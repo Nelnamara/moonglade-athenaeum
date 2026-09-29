@@ -3,7 +3,9 @@ import Icon from "../icons/Icons.jsx";
 import Flyout from "./Flyout.jsx";
 import ActionsMenu from "./ActionsMenu.jsx";
 import LayoutStrip from "./LayoutStrip.jsx";
+import CollectionsPanel from "./CollectionsPanel.jsx";
 import "../styles/librarybar.css";
+import "../styles/curation.css";
 
 /* ============================================================================
    The LibraryBar (the Library Bar workstream's deliverable, DC drift §10):
@@ -62,11 +64,17 @@ function cycleNext(list, cur) {
    Commits ride applyAdvanced — App.jsx's existing one-patch commit path — so
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
-export function FilterTray({ closing, media, shelf, perPage, adv, collections, models, commit, group, setGroup }) {
+export function FilterTray({ closing, media, shelf, perPage, adv, models, commit, group, setGroup,
+    collectionNames, onManageCollections }) {
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
-  const shelfOpts = [""].concat(collections || []);
   const stars = adv.ratingMin || 0;
+  /* The Collection chip opens the collections list (Session N, N1/N2) -- every hand-picked
+     and smart collection with its count, and Manage -- where it used to cycle through the
+     names one press at a time. Same reasoning as the Model chip below: a library with dozens
+     of collections cannot be cycled. */
+  const [colOpen, setColOpen] = useState(false);
+  const colBtn = useRef(null);
   /* Model chip (DC filterChips lead with it). The DC cycles a 3-entry
      placeholder list; the real library has dozens of models, so cycling is
      unusable -- the chip opens an anchored list of the library's real models
@@ -139,9 +147,17 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
       <Chip label={"★ " + (stars >= 5 ? "5" : stars + "+")} active={stars > 0}
         title="Minimum rating"
         onClick={() => commit({ ratingMin: (stars + 1) % 6 })} />
-      <Chip label={"Collection · " + (shelf || "any")} active={!!shelf}
-        title="Cycle through your collections"
-        onClick={() => commit({ shelf: cycleNext(shelfOpts, shelf || "") })} />
+      <span ref={colBtn}>
+        <Chip label={"Collection · " + (shelf || "any")} active={!!shelf}
+          title="Browse and manage your collections"
+          onClick={() => setColOpen((v) => !v)} />
+      </span>
+      {colOpen && (
+        <CollectionsPanel anchor={colBtn} active={shelf} names={collectionNames}
+          onPick={(name) => { setColOpen(false); commit({ shelf: name }); }}
+          onManage={() => { setColOpen(false); if (onManageCollections) onManageCollections(); }}
+          onClose={() => setColOpen(false)} />
+      )}
       <Chip label={"Page · " + perPage} active={perPage !== 100}
         title="Results per page"
         onClick={() => commit({ perPage: cycleNext(PER_CYCLE, perPage) })} />
@@ -154,8 +170,9 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
    INTERFACE. Sixteen of its props were one object taken apart: it is a view of the LIBRARY --
    filters, query, selection, the flyout -- so it takes `lib`, the useLibrary() return, whole.
    The rest is what the library does not own: `boot` (models, is_true_local), `actions` (App's
-   verb table, which the Flyout and the actions menu both read), `collections`, and the two
-   optional post-mutation hooks a mount may supply.
+   verb table, which the Flyout and the actions menu both read), `curation` (Session N: the
+   collections list and Manage), and the two optional post-mutation
+   hooks a mount may supply.
 
    B1 (2026-09-04) took the `layout`/`setLayout` pair back out again: the layout picker moved
    to the separator bar's SIZE group, so this bar no longer touches it.
@@ -173,7 +190,12 @@ export function FilterTray({ closing, media, shelf, perPage, adv, collections, m
 
    Strip's Import stub is dropped: the NavSpine carries Import (gated on boot.is_true_local). */
 export function LibraryBar({
-  lib, boot, actions, collections,
+  lib, boot, actions,
+  /* Session N: what curation hands the bar -- {names, smartShelf, onManage, onClear}. names is
+     every collection ({name, kind}) for the tray's list;
+     smartShelf says the open collection is a saved search, so the Actions menu does not offer
+     "Remove from" on it (pictures leave one by no longer matching). */
+  curation,
   onSendVideo, onMutated,
   group, setGroup,
   layout, setLayout,
@@ -238,6 +260,7 @@ export function LibraryBar({
     resetAll();
     clearSelection();
     setSelectMode(false);
+    if (curation && curation.onClear) curation.onClear();
   };
 
   const trayShown = trayOpen || trayClosing;
@@ -248,7 +271,8 @@ export function LibraryBar({
         <FilterTray
           closing={trayClosing}
           media={media} shelf={shelf} perPage={perPage} adv={adv}
-          collections={collections}
+          collectionNames={curation ? curation.names : undefined}
+          onManageCollections={curation ? curation.onManage : undefined}
           models={boot.models || []}
           commit={applyAdvanced}
           group={group} setGroup={setGroup}
@@ -339,7 +363,7 @@ export function LibraryBar({
 
         <ActionsMenu
           ids={selectedIds}
-          shelf={shelf}
+          shelf={curation && curation.smartShelf ? "" : shelf}
           isTrueLocal={boot.is_true_local}
           onSendCast={actions && actions.sendCast}
           onPrintSheet={actions && actions.printSheet}

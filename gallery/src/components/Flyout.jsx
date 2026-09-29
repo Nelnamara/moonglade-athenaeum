@@ -101,6 +101,13 @@ export default function Flyout({ boot, current, onApply, onClose, onPrintCollect
           <code>night*</code> <span>wildcard</span> · <code>model:tsubaki</code>{" "}
           <span>by model</span> · <code>2038314167804392533</code> <span>a task or media id</span>
         </div>
+        {/* Session N3: the personal layer's operators. A leading - negates any of them. */}
+        <div>
+          <code>keeper</code> · <code>reject</code> <span>your mark</span> ·{" "}
+          <code>tag:pose-study</code> <span>your tag</span> · <code>note:&quot;hands&quot;</code>{" "}
+          <span>your note</span> · <code>★4+</code> <span>stars</span> · <code>-reject</code>{" "}
+          <span>leave one out</span>
+        </div>
       </div>
       <div className="flygrid">
         <div className="flyrow"><label>Sort</label>

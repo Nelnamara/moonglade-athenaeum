@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Stars from "./Stars.jsx";
+import YourLayer from "./YourLayer.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
@@ -199,7 +200,7 @@ function groupSeriesSteps(steps, currentTaskId) {
    classic, file-existence isn't precomputed server-side -- the <img>/<video>
    onError below gets the same "not found" message for free. */
 export default function DetailsView({
-  mediaId, onClose, onNavigate, onRate, onEdit, onRemix, onVideo, onDeleted,
+  mediaId, onClose, onNavigate, onRate, onCurate, onEdit, onRemix, onVideo, onDeleted,
   onFilterByModel, onFilterByBatch, advParams,
   items, onOpenLightbox, onPublish, onSimilar,
   morph = true,
@@ -235,6 +236,7 @@ export default function DetailsView({
     busy, deleteLocal, deleteCloud,
     upEl,
     handleRate,
+    personal,
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   // ◈ SIMILAR (Image Details.dc.html:127-140): the same /api/similar data path the mobile
@@ -499,6 +501,13 @@ export default function DetailsView({
               {tagList.map((t) => <span key={"t" + t} className="p-tag">{t}</span>)}
               {collectionList.map((c) => <span key={"c" + c} className="p-tag p-tag-shelf">{c}</span>)}
             </div>
+          ) : null}
+
+          {/* YOUR LAYER (Session N3): keeper / reject, tags and a note -- the owner's own,
+              in the local catalog, never sent to PixAI. Rendered once the detail read has
+              landed its `personal`; a change made elsewhere reaches it through the bus. */}
+          {onCurate && personal ? (
+            <YourLayer mediaId={row.media_id} personal={personal} onCurate={onCurate} />
           ) : null}
 
           {/* THE LEDGER -- Image Details.dc.html:90-100 + :375-387: exactly the DC's eleven
