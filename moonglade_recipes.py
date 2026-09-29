@@ -8,9 +8,11 @@ applied to a generation by id -- up to ten `recipeIds` per task. Styles became r
 through moonglade_backup's transport (`_rest_get` / `_rest_post`), so the suite's offline
 guards cover it; the schemas are the site's own (see the design note named below).
 
-THE SPEND PATH. `apply_to_params` is the only thing a generation sees from this module: the
-image road in `moonglade_backup.build_request` calls it once, after the per-model gate and
-before the Unlimited Mode check. `refusal_from` turns PixAI's 422 RECIPE_UNAVAILABLE /
+THE SPEND PATH. `attach_to_built` and `apply_to_params` are what a generation sees from this
+module: the image road in `moonglade_backup.build_request` attaches the ids right after
+building the params (before the creativity step-down reads them and before the gate), and
+checks them again after the per-model gate and before the Unlimited Mode check.
+`refusal_from` turns PixAI's 422 RECIPE_UNAVAILABLE /
 RECIPE_INCOMPATIBLE into a structured answer the client can read, and `price_refusal` asks
 /v2/task-price why a quote with recipes failed. The design, its guard order and its
 adversarial review: moonglade-internal/design/notes/recipes/BUILD-w2-recipes.md.
@@ -102,15 +104,16 @@ def _combination_problem(params):
     return None
 
 
-def apply_to_params(params, payload, gated=True):
-    """The image road's recipe step (moonglade_backup.build_request). Returns `params`
-    ITSELF when the payload names no recipe -- so every payload without recipes builds the
-    byte-identical dict it always did -- else a copy carrying `recipeIds`. Refuses (raises
-    core.PixAIError; nothing is priced, matched or sent) on a malformed list, on a road with
-    no per-model gate (`gated` False: it cannot vouch for the combination, the rule the lane
-    follows), on context images and on the Upscale road. Runs AFTER the gate, so it sees the
-    dict that goes out, and BEFORE the Unlimited Mode check, which refuses any recipe on the
-    lane."""
+def attach_to_built(params, payload, gated=True):
+    """The FIRST of the image road's two recipe steps (moonglade_backup.build_request): the
+    payload's ids, validated by recipe_ids_from, onto the freshly BUILT params -- right after
+    _gen_parameters and BEFORE _shape_creativity, whose recipe step-down (medium -> low,
+    low -> off, PixAI's own rule) reads the built params' `recipeIds` and must see them (lane
+    w2-gen review S3, this lane's review finding 6). Returns `params` ITSELF when the payload
+    names no recipe, else a copy carrying `recipeIds`. Refuses what it can already see: a
+    malformed list, a road with no gate, and the combinations visible before the gate
+    (context images the drawer built, the Upscale road). The gate may still change the dict
+    (a reference becoming a context image), so apply_to_params checks again after it."""
     ids = recipe_ids_from(payload)
     if not ids or not isinstance(params, dict):
         return params
@@ -119,6 +122,31 @@ def apply_to_params(params, payload, gated=True):
     why = _combination_problem(params)
     if why:
         raise core.PixAIError(why)
+    out = dict(params)
+    out["recipeIds"] = ids
+    return out
+
+
+def apply_to_params(params, payload, gated=True):
+    """The SECOND recipe step (moonglade_backup.build_request), on the dict the gate
+    returned. Returns `params` ITSELF when the payload names no recipe -- so every payload
+    without recipes builds the byte-identical dict it always did -- and ITSELF when the ids
+    attach_to_built put there are still there, as sent; else a copy carrying `recipeIds`.
+    Refuses (raises core.PixAIError; nothing is priced, matched or sent) on a malformed list,
+    on a road with no per-model gate (`gated` False: it cannot vouch for the combination, the
+    rule the lane follows), on context images and on the Upscale road. Runs AFTER the gate,
+    so it sees the dict that goes out, and BEFORE the Unlimited Mode check, which refuses any
+    recipe on the lane."""
+    ids = recipe_ids_from(payload)
+    if not ids or not isinstance(params, dict):
+        return params
+    if not gated:
+        raise core.PixAIError(UNGATED)
+    why = _combination_problem(params)
+    if why:
+        raise core.PixAIError(why)
+    if params.get("recipeIds") == ids:
+        return params
     out = dict(params)
     out["recipeIds"] = ids
     return out

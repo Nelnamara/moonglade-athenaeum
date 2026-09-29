@@ -10536,7 +10536,10 @@ def _check_context_images(session, p):
     if (isinstance(lmap, dict) and lmap) or (isinstance(lpar, list) and lpar):
         raise PixAIError(_CONTEXT_LORA_REFUSAL)
     if p.get("recipeIds"):
-        raise PixAIError("Recipes are held while context images are on — send one or the other")
+        # ONE wording for this refusal wherever it fires (the build, this gate, the send's
+        # backstop): the recipe lane's, which tells the user how to send them.
+        import moonglade_recipes as _recipes
+        raise PixAIError(_recipes.HELD_WITH_CONTEXT)
     if p.get("modelStyle"):
         raise PixAIError("A style can't ride with context images — PixAI would drop the images")
     if p.get("lane"):
@@ -11946,6 +11949,14 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             args.quality_tag = ""
     params = _gen_parameters(args)
     adjusted = args.clamped
+    # Recipes, step 1 (lanes w2-recipes x w2-gen): the payload's `recipeIds`, validated by
+    # moonglade_recipes.recipe_ids_from, onto the BUILT params HERE -- before the creativity
+    # step-down below reads them (w2-gen review S3) and before the gate. Refuses a malformed
+    # list, a gateless road, and recipes beside context images or on the Upscale road.
+    # Returns `params` itself when the payload names none. Design:
+    # design/notes/recipes/BUILD-w2-recipes.md.
+    import moonglade_recipes as _recipes
+    params = _recipes.attach_to_built(params, p, gated=rs.gate is not None)
     # Session H decision 5 -- the creativity stop, shaped at BUILD on the architecture the
     # gate itself reads (rs.features, the same cached /features; review B3). The gate's G6 then
     # relocates naturalPrompts and forces medium beside context images, idempotently.
@@ -11968,11 +11979,10 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             raise
         adjusted = list(adjusted) + list(gate_adjusted or [])
         _refuse_lost_upscale(args, params)   # an Upscale is never billed as a new generation
-    # Recipes (lane w2-recipes): the payload's `recipeIds`, checked and attached in ONE call
-    # whose rules live in moonglade_recipes (after the gate so it sees the dict that is sent,
-    # before the lane check so Unlimited Mode still refuses a recipe). Returns `params`
-    # itself when the payload names none. Design: design/notes/recipes/BUILD-w2-recipes.md.
-    import moonglade_recipes as _recipes
+    # Recipes, step 2: every forbidden combination checked AGAIN on the dict the gate returned
+    # (it can turn a reference into a context image), before the lane check so Unlimited Mode
+    # still refuses a recipe. Returns `params` itself when the payload names none, or when
+    # step 1's ids rode through the gate as sent.
     params = _recipes.apply_to_params(params, p, gated=rs.gate is not None)
     # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode S3): checked AFTER the one gate and its
     # profile fill, on the dict that will be quoted and sent. A road without the entitlement
@@ -11995,6 +12005,12 @@ def _image_refs(prompt):
     return [int(m.group(1)) for m in _IMAGE_REF_RE.finditer(str(prompt or ""))]
 
 
+def _recipes_in(params):
+    """True when the built params carry recipes, read by the recipe lane's one parser."""
+    import moonglade_recipes as _recipes
+    return bool(_recipes.recipe_ids_from(params))
+
+
 def _shape_creativity(params, level, rs, version_id, adjusted):
     """Session H decision 5: the web payload's creativity stop onto the params, in place.
 
@@ -12005,7 +12021,9 @@ def _shape_creativity(params, level, rs, version_id, adjusted):
     run it at medium, and recipes run it one step lower (medium -> low, low -> off), as PixAI's
     own builder does (task-*.js). Both are receipt entries. The recipe step lives HERE, at
     build, because the gate must stay idempotent; it reads the BUILT params' recipeIds, so it
-    fires only when recipes are really sent (review S3)."""
+    fires only when recipes are really sent (review S3). build_request attaches them before
+    this runs (moonglade_recipes.attach_to_built), and they are read here through the same
+    parser, moonglade_recipes.recipe_ids_from (recipes review finding 6)."""
     if rs.features is None:
         return
     feats = rs.features(version_id)
@@ -12023,7 +12041,7 @@ def _shape_creativity(params, level, rs, version_id, adjusted):
             adjusted.append({"field": "promptHelper", "asked": level, "used": "medium",
                              "why": "a context image runs the prompt helper at medium, as "
                                     "PixAI's own site does"})
-    elif params.get("recipeIds") and level in ("medium", "low"):
+    elif level in ("medium", "low") and _recipes_in(params):
         used = "low" if level == "medium" else "off"
         adjusted.append({"field": "promptHelper", "asked": level, "used": used,
                          "why": "recipes run the prompt helper one step lower, as PixAI's "
