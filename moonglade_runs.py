@@ -11,8 +11,10 @@ moonglade-internal/design/notes/generate-power-tools/BUILD-w5-m.md.
 
 This module is the pure half and the store:
 
-  parse / plan_jobs / escape_literal   the template syntax (NOTES 1): `{a|b|c}` inline,
-                                       `__name__` a saved list, `\\{` `\\}` `\\_` literal.
+  parse / plan_jobs / escape_literal   the template syntax (NOTES 1, as the S1 ruling reads
+                                       it): `{a|b|c}` inline, `__name__` a saved list, a
+                                       brace group with no `|` literal, a backslash
+                                       dropped only where it changes the parse.
                                        The dock's gallery/src/gen/templateCore.js is the same
                                        rule in JS; tests/fixtures/template_vectors.json pins
                                        both to one set of answers, so the preview the dock
@@ -56,11 +58,21 @@ MAX_LIST_ITEMS = 200
 LIST_ITEM_MAX = 200
 
 _LIST_TOKEN_RE = re.compile(r"__([a-z0-9_]+)__")
-_ESCAPABLE = "{}_"
+
+# What an option and a list item are trimmed of (review N5): ONE explicit set, the same in
+# templateCore.js, because Python's str.strip() and JS's String.trim() disagree (JS keeps
+# U+0085 and U+001C-U+001F, Python keeps U+FEFF). It is the union of the two.
+TRIM_CHARS = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0 "
+              "           "
+              "    　﻿")
+
+
+def trim(text):
+    return str(text).strip(TRIM_CHARS)
+
 
 # The refusals, word for word (BUILD-w5-m s1.2). The dock paints the same sentences peach.
 ERR_UNCLOSED = "Unclosed or nested brace. Nesting isn’t supported."
-ERR_STRAY = "Stray closing brace — write \\} for a literal one."
 ERR_EMPTY = "Empty variable."
 ERR_TOO_MANY_VARS = "Up to {} variables in one prompt.".format(MAX_VARS)
 ERR_TOO_MANY_OPTS = "Up to {} options in one variable.".format(MAX_OPTIONS)
@@ -106,7 +118,7 @@ def clean_list(items):
     for it in items:
         if not isinstance(it, str):
             return None
-        t = it.strip()
+        t = trim(it)
         if not t:
             continue
         if len(t) > LIST_ITEM_MAX:
@@ -126,23 +138,107 @@ def lists_from_prefs(prefs):
     return {str(k): v for k, v in raw.items() if LIST_NAME_RE.match(str(k))}
 
 
+def _brace_structure(s):
+    """The raw brace structure of `s`, every backslash ignored: ({open: close} for each
+    matched pair, {open: the enclosing open or None}, [the opens left unclosed]). Inside a
+    matched pair every `{` is matched too (a `}` closes the innermost open), so a pair's
+    contents are fully nested pairs."""
+    stack, pairs, parent = [], {}, {}
+    for i, c in enumerate(s):
+        if c == "{":
+            parent[i] = stack[-1] if stack else None
+            stack.append(i)
+        elif c == "}" and stack:
+            pairs[stack.pop()] = i
+    return pairs, parent, stack
+
+
+def _pair_shape(s, o, c, pairs):
+    """(has a top-level `|`, holds a nested pair) for the pair (o, c)."""
+    i, pipe, child = o + 1, False, False
+    while i < c:
+        ch = s[i]
+        if ch == "{":
+            child = True
+            i = pairs[i] + 1
+            continue
+        if ch == "|":
+            pipe = True
+        i += 1
+    return pipe, child
+
+
+def _template_marks(s):
+    """Where the template rule acts (the orchestrator's S1 ruling, BUILD-w5-m "Rulings"):
+    groups {open: (kind, close)} for every pair holding a top-level `|` -- "live" (a
+    variable), "escaped" (its `{` or `}` has a backslash before it: literal, that backslash
+    dropped) or "nested" (refused: it sits in another pair or holds one); `consume`, the
+    backslash positions dropped; `bad_open`, the unclosed `{` with a `|` after it and no
+    backslash (refused -- it looks like an intended variable). Every other brace is literal
+    text and every other backslash stays."""
+    pairs, parent, unclosed = _brace_structure(s)
+    groups, consume, bad_open = {}, set(), set()
+
+    def esc(k):
+        return k > 0 and s[k - 1] == "\\"
+
+    for o, c in pairs.items():
+        pipe, child = _pair_shape(s, o, c, pairs)
+        if not pipe:
+            continue
+        if esc(o) or esc(c):
+            groups[o] = ("escaped", c)
+            if esc(o):
+                consume.add(o - 1)
+            if esc(c):
+                consume.add(c - 1)
+        elif child or parent.get(o) in pairs:
+            groups[o] = ("nested", c)
+        else:
+            groups[o] = ("live", c)
+    for u in unclosed:
+        if "|" in s[u + 1:]:
+            if esc(u):
+                consume.add(u - 1)
+            else:
+                bad_open.add(u)
+    return groups, consume, bad_open
+
+
 def parse(template, lists=None):
     """Scan `template` left to right, once. Returns
         {"parts": [...], "vars": [...], "error": str|None, "syntax": bool}
     part = {"lit": text}                       literal, escapes already applied
          | {"var": token, "options": [...], "kind": "inline"|"list", "name"?: str}
          | {"bad": token, "error": msg}
+
+    THE RULE (the orchestrator's S1 ruling, recorded in BUILD-w5-m's rulings; it deviates
+    from the Handoff page's parser, which read every brace as syntax):
+      * a `{...}` group is a VARIABLE only when it holds a top-level `|` -- `{a|b|c}`. A brace
+        group with no `|` is literal text, sent exactly as typed, braces and all
+        (`{masterpiece}`, `{{best quality}}`, `{}`);
+      * `__name__` reads a saved list;
+      * a backslash is dropped only where it changes the parse: before the `{` or `}` of a
+        `|` group (that group is then literal), before an unclosed `{` that has a `|` after
+        it, or before the `__` of a list token. Anywhere else it stays as typed, so
+        `a\\_b` and a kaomoji's `\\_` reach PixAI unchanged;
+      * an unclosed `{` or a stray `}` with no `|` group involved is literal; an unclosed
+        `{` with a `|` after it is refused, and a `|` group nested in (or holding) another
+        brace group is refused -- both look like an intended variable the rule can't read.
+    So a prompt with no `|` group and no `__name__` token resolves to itself byte for byte:
+    it never changes what PixAI receives and never needs a confirm.
+
     `vars` are the variable parts in order of appearance (the same token twice is two
-    variables). `error` is the FIRST refusal by position. `syntax` is True when the text
-    uses anything but plain literal text -- a variable, a list, an escape or a bad brace --
-    which is what /api/generate refuses (a single send there must not reach PixAI with
-    literal braces the dock would have read as a template; review F2)."""
+    variables). `error` is the FIRST refusal by position. `syntax` is True when the rule
+    acted at all -- a variable, a list, a dropped backslash or a refusal -- which is what
+    /api/generate refuses (review F2)."""
     s = str(template if template is not None else "")
     lists = lists or {}
     parts, error, syntax = [], None, False
     buf = []
     n = len(s)
     nvars = 0
+    groups, consume, bad_open = _template_marks(s)
 
     def flush():
         if buf:
@@ -170,34 +266,47 @@ def parse(template, lists=None):
     i = 0
     while i < n:
         c = s[i]
-        if c == "\\" and i + 1 < n and s[i + 1] in _ESCAPABLE:
-            buf.append(s[i + 1])
+        if i in consume:                     # a backslash that changes the parse: dropped
             syntax = True
-            i += 2
+            i += 1
+            continue
+        if c == "\\":
+            m = _LIST_TOKEN_RE.match(s, i + 1)
+            if m:                            # \__name__ is the literal text __name__
+                buf.append(m.group(0))
+                syntax = True
+                i = m.end()
+                continue
+            buf.append(c)
+            i += 1
             continue
         if c == "{":
-            syntax = True
-            j = i + 1
-            while j < n and s[j] not in "{}":
-                j += 1
-            if j >= n or s[j] == "{":
+            g = groups.get(i)
+            if g is not None and g[0] == "live":
+                syntax = True
+                j = g[1]
+                token = s[i:j + 1]
+                opts = [trim(o) for o in s[i + 1:j].split("|")]
+                opts = [o for o in opts if o]
+                if not opts:
+                    bad(token, ERR_EMPTY)
+                elif len(opts) > MAX_OPTIONS:
+                    bad(token, ERR_TOO_MANY_OPTS)
+                else:
+                    add_var({"var": token, "options": opts, "kind": "inline"})
+                i = j + 1
+                continue
+            if g is not None and g[0] == "nested":
+                syntax = True
+                bad(s[i:g[1] + 1], ERR_UNCLOSED)
+                i = g[1] + 1
+                continue
+            if i in bad_open:
+                syntax = True
                 bad("{", ERR_UNCLOSED)
                 i += 1
                 continue
-            token = s[i:j + 1]
-            opts = [o.strip() for o in s[i + 1:j].split("|")]
-            opts = [o for o in opts if o]
-            if not opts:
-                bad(token, ERR_EMPTY)
-            elif len(opts) > MAX_OPTIONS:
-                bad(token, ERR_TOO_MANY_OPTS)
-            else:
-                add_var({"var": token, "options": opts, "kind": "inline"})
-            i = j + 1
-            continue
-        if c == "}":
-            syntax = True
-            bad("}", ERR_STRAY)
+            buf.append(c)                    # a literal brace (an escaped group's too)
             i += 1
             continue
         if c == "_":
@@ -322,7 +431,7 @@ def plan_jobs(template, lists, var_mode, count, run_seed=None):
         mode = "random"
         axes = None
     for j in jobs:
-        if not j["prompt"].strip():
+        if not trim(j["prompt"]):
             return {"error": err_blank_cell(j["cell"] + 1)}
     out = {"mode": mode, "images": len(jobs), "product": product, "jobs": jobs}
     if axes is not None:
@@ -330,22 +439,59 @@ def plan_jobs(template, lists, var_mode, count, run_seed=None):
     return out
 
 
+def forces_no_card(plan):
+    """True when a send of `plan` goes out with no free card, whatever the payload says:
+    a Matrix of 2 or more cells (Settled 2 -- free cards never cover queued matrix cells).
+    A one-cell matrix is an ordinary single send and its card applies as for any single send
+    (review B1). The dock's cost badge prices with no_card on exactly when this is True."""
+    return bool(plan) and not plan.get("error") and plan.get("mode") == "matrix" \
+        and len(plan.get("jobs") or []) >= 2
+
+
+def same_prompt_cells(plan):
+    """(a, b), the first two cell numbers (1-based) of a Matrix plan whose resolved prompts
+    are the same, or None (review N4: with a fixed seed they would pay twice for one image)."""
+    if not plan or plan.get("mode") != "matrix":
+        return None
+    seen = {}
+    for j in plan.get("jobs") or []:
+        if j["prompt"] in seen:
+            return seen[j["prompt"]] + 1, j["cell"] + 1
+        seen[j["prompt"]] = j["cell"]
+    return None
+
+
 def escape_literal(text):
     """A plain prompt made safe to put back in the composer (History reuse of a run with no
-    stored template, open call 3): parse(escape_literal(t)) resolves to exactly t. Braces
-    get a backslash; an underscore gets one only where it could start a list token (next to
-    another underscore) or sits after a backslash -- so `long_hair` stays as it is."""
+    stored template, open call 3): parse(escape_literal(t)) resolves to exactly t, with no
+    variable and no refusal. Under the S1 rule only what the rule would act on gets a
+    backslash: the `{` of every `|` group (and its `}` when a backslash already sits before
+    it, so that one survives), an unclosed `{` with a `|` after it, and the first `_` of
+    every list token. Everything else -- ordinary braces, `long_hair`, a kaomoji's `\\_` --
+    stays exactly as it is."""
     s = str(text or "")
-    out = []
     n = len(s)
-    for i, c in enumerate(s):
-        if c in "{}":
-            out.append("\\" + c)
-        elif c == "_" and ((i > 0 and s[i - 1] in "_\\") or (i + 1 < n and s[i + 1] == "_")):
-            out.append("\\_")
-        else:
-            out.append(c)
-    return "".join(out)
+    pairs, _parent, unclosed = _brace_structure(s)
+    ins = set()
+    for o, c in pairs.items():
+        pipe, _child = _pair_shape(s, o, c, pairs)
+        if pipe:
+            ins.add(o)
+            if s[c - 1] == "\\":
+                ins.add(c)
+    for u in unclosed:
+        if "|" in s[u + 1:]:
+            ins.add(u)
+    i = 0
+    while i < n:                    # list tokens, found the way parse's scan finds them
+        if s[i] == "_":
+            m = _LIST_TOKEN_RE.match(s, i)
+            if m:
+                ins.add(i)
+                i = m.end()
+                continue
+        i += 1
+    return "".join(("\\" + ch) if k in ins else ch for k, ch in enumerate(s))
 
 
 def strict_int(v, lo, hi):

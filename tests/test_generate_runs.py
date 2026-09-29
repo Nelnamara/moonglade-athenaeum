@@ -199,6 +199,64 @@ def test_escape_literal_round_trips_byte_for_byte(e):
     assert "".join(x["lit"] for x in p["parts"]) == e["text"]
 
 
+@pytest.mark.parametrize("t", VECTORS["trim"], ids=[ascii(t["raw"]) for t in VECTORS["trim"]])
+def test_options_and_list_items_trim_the_one_shared_set(t):
+    """Review N5: one explicit trim set in both halves (templateCore.js reads these too)."""
+    assert runs.trim(t["raw"]) == t["trimmed"]
+    assert runs.clean_list([t["raw"]]) == ([t["trimmed"]] if t["trimmed"] else [])
+    p = runs.parse("{" + t["raw"] + "|z}", {})
+    assert p["vars"][0]["options"] == ([t["trimmed"]] if t["trimmed"] else []) + ["z"]
+
+
+@pytest.mark.parametrize("t", VECTORS["invariant"], ids=[ascii(t) for t in VECTORS["invariant"]])
+def test_a_prompt_with_no_pipe_group_and_no_list_token_is_byte_identical(t):
+    """The S1 ruling's invariant: it never changes what PixAI receives, never needs a confirm."""
+    for vm in ("random", "matrix"):
+        got = runs.plan_jobs(t, VECTORS["lists"], vm, 1, 5)
+        assert got["mode"] == "single" and got["jobs"][0]["prompt"] == t
+    assert runs.parse(t, VECTORS["lists"])["syntax"] is False
+
+
+def _lcg_strings(alphabet, count, seed, max_len=14):
+    """Deterministic pseudo-random strings (the same generator loom/test/template-core.test.js
+    uses), so the two halves are driven by the same inputs."""
+    s = seed
+    out = []
+    for _ in range(count):
+        s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+        n = s % max_len
+        w = []
+        for _k in range(n):
+            s = (s * 1664525 + 1013904223) & 0xFFFFFFFF
+            w.append(alphabet[s % len(alphabet)])
+        out.append("".join(w))
+    return out
+
+
+PROPERTY_ALPHABET = ["{", "}", "\\", "_", "a", " ", "(", ")", ",", "__x__", "é"]
+
+
+def test_property_no_pipe_and_no_list_token_resolves_to_itself():
+    """Review S1: the invariant as a property -- any text with no `|` and no __name__ token,
+    whatever its braces and backslashes, resolves to itself byte for byte with no syntax."""
+    checked = 0
+    for t in _lcg_strings(PROPERTY_ALPHABET, 4000, 20260929):
+        if "|" in t or runs._LIST_TOKEN_RE.search(t):
+            continue
+        checked += 1
+        assert runs.parse(t, {})["syntax"] is False, t
+        assert runs.plan_jobs(t, {}, "matrix", 1, 1)["jobs"][0]["prompt"] == t, t
+    assert checked > 500
+
+
+def test_property_escape_literal_always_round_trips():
+    """History reuse: any text at all, escaped, parses back to exactly itself, no variable."""
+    for t in _lcg_strings(PROPERTY_ALPHABET + ["|"], 4000, 7):
+        p = runs.parse(runs.escape_literal(t), {"x": ["q"]})
+        assert p["error"] is None and not p["vars"], t
+        assert "".join(x["lit"] for x in p["parts"]) == t, t
+
+
 def test_the_keys_and_numbers_match_the_dock():
     js = open(os.path.join(HERE, "..", "gallery", "src", "gen", "templateCore.js"),
               encoding="utf-8").read()
@@ -229,12 +287,24 @@ def test_api_generate_refuses_more_than_one_with_nothing_sent(cli, rig, count):
     assert rig.network == 0
 
 
-@pytest.mark.parametrize("prompt", ["a {b|c}", "a __poses__", "a \\{b\\}", "{unclosed", "stray }"])
+@pytest.mark.parametrize("prompt", ["a {b|c}", "a __poses__", "a \\{b|c\\}", "{unclosed | pipe",
+                                    "{{nested|group}}", "\\__poses__"])
 def test_api_generate_refuses_the_template_syntax_with_nothing_sent(cli, rig, prompt):
     r = cli.post("/api/generate", json=dict(BASE, prompt=prompt, count=1))
     assert r.status_code == 400
     assert "template syntax" in r.get_json()["error"]
     assert rig.network == 0
+
+
+@pytest.mark.parametrize("prompt", VECTORS["invariant"] + [
+    "masterpiece, {{best quality}}, (smile:1.2), a | b, ¯\\_(ツ)_/¯"])
+def test_ordinary_braces_and_backslashes_reach_pixai_exactly_as_typed(cli, rig, prompt):
+    """The S1 ruling: a prompt with no `|` group and no __name__ token is an ordinary single
+    send -- /api/generate takes it and PixAI receives it byte for byte, braces and all."""
+    rig.card_default = None
+    d = cli.post("/api/generate", json=dict(BASE, prompt=prompt, count=1)).get_json()
+    assert d.get("task_id"), d
+    assert rig.mutations[-1]["prompts"] == prompt
 
 
 def test_the_upscale_road_keeps_its_stored_prompt_braces_and_all(cli, rig):
@@ -364,7 +434,8 @@ def test_run_read_only_refuses_before_any_pixai_call(cli, rig, monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("kw,words", [
-    ({"prompt": "a {b"}, "Unclosed or nested brace"),
+    ({"prompt": "a {b|c"}, "Unclosed or nested brace"),
+    ({"prompt": "{{a|b}}"}, "Unclosed or nested brace"),
     ({"prompt": "__nope__ x"}, "No list named __nope__."),
     ({"prompt": "{a|b|c|d|e} {1|2|3|4|5}", "var_mode": "matrix"}, "over the 24-cell cap"),
     ({"count": 5}, "Pick 1 to 4 images."),

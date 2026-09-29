@@ -21625,7 +21625,7 @@ def create_app(out_dir: Path):
     # session["user"]. {run_id, account, done, total} while a run is planned or sent.
     _run_inflight = {}
     _SINGLE_COUNT_WORDS = "Send more than one through the confirm — nothing was sent."
-    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b}, __list__ or \\{) — "
+    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b} or __list__) — "
                        "send it from the Generate dock, which expands it first. Nothing was "
                        "sent.")
     _RUN_PAYLOAD_DROP = ("csrf", "run_id", "ack", "var_mode", "run_seed")
