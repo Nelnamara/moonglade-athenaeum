@@ -3355,6 +3355,8 @@ html.mg-updbanner-on .wz-stage,
 html.mg-updbanner-on .wzm-stage {
   padding-top: var(--mg-updbanner-h,0px);
 }
+html.mg-updbanner-on .detail-wrap,
+html.mg-updbanner-on .lb,
 html.mg-updbanner-on .lbx,
 html.mg-updbanner-on .mgv-scrim,
 html.mg-updbanner-on .mgv-host,
@@ -3398,4 +3400,7 @@ html.mg-updbanner-on .sb-projveil,
 html.mg-updbanner-on .sb-seq,
 html.mg-updbanner-on .sb-pick-ov {
   top: var(--mg-updbanner-h,0px);
+}
+html.mg-updbanner-on .detail-wrap {
+  height: calc(100dvh - var(--mg-updbanner-h,0px));
 }
