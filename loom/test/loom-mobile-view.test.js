@@ -75,7 +75,7 @@ describe("the Mobile-view toggle: a new, persisted, manual owner-preference swit
   });
 
   test("App() wires mobileUI/setMobileUI through useLoomView, keyed on the app's phone rule", () => {
-    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\)\);/);
+    assert.match(src, /const \[mobileUI, setMobileUI\] = useLoomView\(useIsMobile\(\{ landscapePhones: false \}\)\);/);
   });
 
   test("a toggle chip lives in LoomV2's own .lv-top bar, reusing .lv-draft's exact visual pattern", () => {

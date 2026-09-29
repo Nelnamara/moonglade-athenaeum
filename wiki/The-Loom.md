@@ -38,8 +38,8 @@ for. The header button is there at every screen width, phones included.
 the narrow screen. Tablets are unaffected and still get the full desktop tool. Both switches
 still work and always win: untick **📱 Mobile view** in the top bar to get the wide board on
 a phone, or tap **🖥 Desktop** in the phone bar, and the Loom remembers your choice in that
-browser from then on. The wide board is a dense four-panel tool, so if you do ask for it on
-a phone, **turn the phone to landscape** — portrait works but is cramped.
+browser from then on. A phone that is already **held sideways** when the Loom opens gets the
+wide four-panel board straight away; held upright it gets the board-and-reel view.
 
 The choice is decided once, when the Loom opens, and after that only those two switches
 change it. Turning the phone over mid-session will not swap the tool out from under you.

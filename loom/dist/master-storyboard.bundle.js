@@ -881,21 +881,41 @@ ${"=".repeat(48)}
   var Component = React2.Component;
   var PureComponent = React2.PureComponent;
 
+  // ../gallery/src/lib/phoneCore.js
+  var LAYOUTS = Object.freeze(["grid", "feed"]);
+  var SAVER_MODES = Object.freeze(["off", "auto", "always"]);
+  var SAVER_LABELS = Object.freeze({ off: "Off", auto: "Auto on metered", always: "Always" });
+  var PHONE_MAX = 520;
+  function isPhoneViewport({ width, coarse, portrait, screenW, screenH, landscapePhones = true }) {
+    const w = Number(width);
+    if (Number.isFinite(w) && w <= PHONE_MAX) return true;
+    const sw = Number.isFinite(Number(screenW)) && Number(screenW) > 0 ? Number(screenW) : Infinity;
+    const sh = Number.isFinite(Number(screenH)) && Number(screenH) > 0 ? Number(screenH) : Infinity;
+    if (portrait) return !!coarse && sw <= PHONE_MAX;
+    return landscapePhones && Math.min(sw, sh) <= PHONE_MAX;
+  }
+
   // ../gallery/src/hooks/useIsMobile.js
   var MOBILE_QUERY = "(max-width: 520px)";
-  function detectMobile() {
+  function detectMobile(landscapePhones) {
     if (typeof window === "undefined" || !window.matchMedia) return false;
-    if (window.matchMedia(MOBILE_QUERY).matches) return true;
-    const coarse = window.matchMedia("(pointer: coarse)").matches;
-    const portrait = window.matchMedia("(orientation: portrait)").matches;
-    const screenW = window.screen && window.screen.width || Infinity;
-    return coarse && portrait && screenW <= 520;
+    const scr = window.screen || {};
+    return isPhoneViewport({
+      width: window.matchMedia(MOBILE_QUERY).matches ? 0 : Infinity,
+      // the one width line, as the query reads it
+      coarse: window.matchMedia("(pointer: coarse)").matches,
+      portrait: window.matchMedia("(orientation: portrait)").matches,
+      screenW: scr.width,
+      screenH: scr.height,
+      landscapePhones
+    });
   }
-  function useIsMobile() {
-    const [isMobile, setIsMobile] = useState(detectMobile);
+  function useIsMobile(opts) {
+    const landscapePhones = !(opts && opts.landscapePhones === false);
+    const [isMobile, setIsMobile] = useState(() => detectMobile(landscapePhones));
     useEffect(() => {
       if (typeof window === "undefined" || !window.matchMedia) return;
-      const sync2 = () => setIsMobile(detectMobile());
+      const sync2 = () => setIsMobile(detectMobile(landscapePhones));
       sync2();
       const mqls = [
         window.matchMedia(MOBILE_QUERY),
@@ -911,7 +931,7 @@ ${"=".repeat(48)}
         window.removeEventListener("resize", sync2);
         window.removeEventListener("orientationchange", sync2);
       };
-    }, []);
+    }, [landscapePhones]);
     return isMobile;
   }
 
@@ -1600,6 +1620,7 @@ ${"=".repeat(48)}
     } finally {
       if (timer2) clearTimeout(timer2);
     }
+    if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
     let d = null;
     try {
       d = await r.json();
@@ -15797,7 +15818,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
   }
   function App() {
     const [selShot, setSelShot] = useState2(null);
-    const [mobileUI, setMobileUI] = useLoomView(useIsMobile());
+    const [mobileUI, setMobileUI] = useLoomView(useIsMobile({ landscapePhones: false }));
     const [draftCard, setDraftCard] = useState2(() => ({
       id: "__draft__",
       mode: "R2V",

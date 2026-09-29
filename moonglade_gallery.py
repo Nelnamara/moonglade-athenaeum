@@ -15956,13 +15956,18 @@ def create_app(out_dir: Path):
     _STRIP_CACHE = _THUMB_CACHE   # same 300s as the 768: media_id is an identity, not a hash
     _STRIP_ID_OK = re.compile(r"[0-9A-Za-z_-]+")
 
-    def strip_cache_dir():
-        return out_dir / "gallery" / "cache" / "_strip"
+    # The allowlist of derived thumb sizes, ?s=<key> -> (longest side in px, cache folder).
+    # 32 is the Sibling Strip's; 256 is the phone's Data saver tier (Session Q, Q7): the
+    # same derive-from-the-768, cache-beside-the-badges, self-healing shape, additive and
+    # read-only -- an unlisted key still answers the plain 768 thumb.
+    _THUMB_TIERS = {"32": (32, "_strip"), "256": (256, "_t256")}
 
-    def _strip_thumb(media_id):
-        """Path of the cached 32px strip thumb for media_id, (re)cut from the 768
-        thumb when missing or stale. None when there is no 768 thumb to derive from
-        or the cut fails -- the caller then falls through to the normal thumb."""
+    def _sized_thumb(media_id, key):
+        """Path of the cached derived thumb (`key` names a tier in _THUMB_TIERS) for
+        media_id, (re)cut from the 768 thumb when missing or stale. None when there is
+        no 768 thumb to derive from or the cut fails -- the caller then falls through
+        to the normal thumb."""
+        side, folder = _THUMB_TIERS[key]
         # ALLOWLIST the id here, inside the helper, so every caller is covered. A
         # denylist of / \ .. missed the Windows drive letter: pathlib's `/` RESETS to
         # a drive-relative path when the right operand carries one, so
@@ -15974,7 +15979,7 @@ def create_app(out_dir: Path):
         src = thumb_dir / (media_id + ".jpg")
         if not src.is_file():
             return None
-        dst = strip_cache_dir() / (media_id + ".jpg")
+        dst = out_dir / "gallery" / "cache" / folder / (media_id + ".jpg")
         try:
             src_mtime = src.stat().st_mtime
             if dst.is_file() and dst.stat().st_mtime >= src_mtime:
@@ -15990,7 +15995,7 @@ def create_app(out_dir: Path):
             try:
                 with Image.open(src) as im:
                     im = im.convert("RGB")
-                    im.thumbnail((32, 32))
+                    im.thumbnail((side, side))
                     im.save(tmp, "JPEG", quality=80)
                 os.replace(tmp, dst)
             finally:
@@ -16006,10 +16011,11 @@ def create_app(out_dir: Path):
     @app.route("/thumbs/<media_id>.jpg")
     @tier(LOGIN)
     def thumb(media_id):
-        # ?s=32 is an allowlist of exactly one size; anything else is the 768 thumb.
-        if (request.args.get("s") or "") == "32" and "/" not in media_id \
+        # ?s= is an allowlist (_THUMB_TIERS: 32 and 256); anything else is the 768 thumb.
+        size_key = request.args.get("s") or ""
+        if size_key in _THUMB_TIERS and "/" not in media_id \
                 and "\\" not in media_id and ".." not in media_id:
-            p = _strip_thumb(media_id)
+            p = _sized_thumb(media_id, size_key)
             if p is not None:
                 resp = send_from_directory(str(p.parent), p.name, max_age=86400)
                 resp.headers["Cache-Control"] = _STRIP_CACHE

@@ -90,6 +90,8 @@ async function request(path, init) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+  // A HEAD has no body to read: its whole answer is the header (apiHeadSize below).
+  if (rest.method === "HEAD") return { size: r.ok ? Number(r.headers.get("Content-Length")) || 0 : 0 };
   let d = null;
   try { d = await r.json(); } catch { d = null; }   // an HTML error page, a 204, a cut stream
   // rule 1: the body wins, HTTP 200 included. `http_status` rides along on any non-2xx,
@@ -116,6 +118,17 @@ export function apiPost(path, body, opts) {
     body: JSON.stringify(body || {}),
     ...(opts || {}),
   });
+}
+
+/* The size in bytes of a served file, from a HEAD -- headers only, no body. The phone's Data saver reads
+   it for the "Tap to load full size · 2.4 MB" line (Session Q, Q7). It rides request() like every other
+   call (a HEAD answers {size} there, before any body is looked for), so this module still has one fetch
+   and one place that reads a body. Fail-soft by design: 0 means "not known" (a 404, a server that sends
+   no Content-Length, offline) and the caller simply draws the line without a size. Never throws, never
+   retries. */
+export async function apiHeadSize(path) {
+  const d = await request(path, { method: "HEAD" });
+  return d && d.size > 0 ? d.size : 0;
 }
 
 /* Multipart POST -- the browser sets its own Content-Type boundary, so there are no headers

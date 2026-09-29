@@ -8,7 +8,11 @@ import useSheet from "../hooks/useSheet.js";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import useFullGate from "../hooks/useFullGate.js";
+import { thumbSrc } from "../lib/phoneCore.js";
 import { apiGet } from "../api.js";
+import "../styles/phone-q.css";
 import "../styles/power.css";
 import "../styles/gallery-mobile.css";
 import "../styles/image-details-mobile.css";
@@ -66,14 +70,15 @@ import "../styles/curation-mobile.css";
        it filters by the model that made the picture and never found lookalikes,
        so the borrowed word made two unrelated controls look like a pair),
        View batch (real, same onFilterByBatch),
-       Suggest prompt (real, same runSuggest). Send to Video is a DISCLOSED
-       placeholder toast: AppMobile.jsx's Video mode (VideoMode.jsx) has no
-       "load this image as the source frame" entry point at all yet (unlike
-       desktop's requestVideo/genRequest one-shot contract) -- wiring a fake
-       tab-switch with no actual frame loaded would be worse than an honest
-       toast, matching this exact codebase's own established convention for
-       an undone surface (the same message GalleryMobile.jsx's own tapView
-       used before this build, and AppMobile.jsx's soonToast()).
+       Suggest prompt (real, same runSuggest). Send to Video was a DISCLOSED
+       placeholder toast until 2026-09-29 (Session Q, Q2): the Video mode had no
+       "load this image as the source frame" entry point. It has one now (the
+       shell hands the video drawer its prefill), and the record's foot carries
+       the page's two 44 px buttons -- Remix and Send to Video -- pinned with the
+       chips row (drift 122). Both OPEN the Create tab already filled in; neither
+       sends (gen/phoneRemix.js).
+     - DATA SAVER (Q7): while it acts the picture opens as its 256 px thumbnail behind
+       a "Tap to load full size" line, and a clip does not autoplay or preload.
      - SIMILAR box: REAL data (GET /api/similar/<mid>?k=48, through the shared
        useSimilar hook every Similar surface in the app reads) -- not the design
        mock's placeholder PHOTOS array. First 8 render in the strip; "see all N"
@@ -114,7 +119,7 @@ import "../styles/curation-mobile.css";
 export default function ImageDetailsMobile({
   mediaId, onClose, onNavigate, onRate, onCurate, onDeleted,
   onFilterByModel, onFilterByBatch, advParams, items,
-  onOpenLightbox, onPublish, onEnterContest, onTsubakiEdit,
+  onOpenLightbox, onPublish, onEnterContest, onTsubakiEdit, onRemix, onSendToVideo,
 }) {
   const [closing, setClosing] = useState(false);
   const [mediaOk, setMediaOk] = useState(true);
@@ -140,6 +145,9 @@ export default function ImageDetailsMobile({
   } = useImageDetails({ mediaId, advParams, onRate, onDeleted });
 
   const similar = useSimilar(row ? row.media_id : null);
+  // Q7: the saver, and the full-size gate for a still (a clip has none; it just does not autoplay).
+  const saver = useDataSaver().active;
+  const fullGate = useFullGate(row ? row.media_id : null, saver && !!row && row.is_video !== "1");
 
   // this component's OWN local resets on navigate (mediaOk/the see-all sheet
   // aren't shared with the desktop surface -- see useImageDetails.js for
@@ -185,8 +193,6 @@ export default function ImageDetailsMobile({
   // boundaries via the server's prev_id/next_id, exactly like desktop).
   const idx = items ? items.findIndex((it) => it.media_id === mediaId) : -1;
   const indexLabel = idx >= 0 && items ? (idx + 1) + " of " + items.length : "";
-
-  const toast = (title, msg) => { if (window.Toast) window.Toast.show({ title, msg }); };
 
   if (state.loading) {
     return (
@@ -249,20 +255,31 @@ export default function ImageDetailsMobile({
       </div>
 
       <div className="idm-body">
-        <div className="idm-frame" key={row.media_id}>
+        <div className={"idm-frame" + (fullGate.gated ? " gated" : "")} key={row.media_id}>
           {!mediaOk ? (
             <div className="gd-note">{row.is_video === "1" ? "Video file not found on disk." : "Image file not found on disk."}</div>
           ) : row.is_video === "1" ? (
-            <video controls autoPlay loop playsInline preload="metadata"
-              poster={"/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg"}
+            <video controls autoPlay={!saver} loop playsInline preload={saver ? "none" : "metadata"}
+              poster={thumbSrc("/thumbs/" + encodeURIComponent(row.poster_media_id || row.media_id) + ".jpg", saver)}
               onError={() => setMediaOk(false)}>
               <source src={"/video-file/" + encodeURIComponent(row.media_id)} />
             </video>
+          ) : fullGate.gated ? (
+            <img src={thumbSrc("/thumbs/" + encodeURIComponent(row.media_id) + ".jpg", true)} alt="" decoding="async" onError={() => setMediaOk(false)} />
           ) : (
             <img src={"/full/" + encodeURIComponent(row.media_id)} alt="" decoding="async" onError={() => setMediaOk(false)} />
           )}
+          {fullGate.gated && mediaOk ? (
+            <button type="button" className="lbm-tapfull" onClick={fullGate.load}>
+              {"\u25D0"} Tap to load full size{fullGate.size ? " \u00b7 " + fullGate.size : ""}
+            </button>
+          ) : null}
         </div>
 
+        {/* Q4: the record proper. Upright it is `display: contents` -- no box, the children are the body's
+            own, exactly as before. Sideways it is the side panel beside the picture: its own scroller,
+            up to 380 px wide, with the foot pinned to ITS bottom. */}
+        <div className="idm-rec">
         <div className="idm-chiprow">
           <a className="idm-chip" href={"/full/" + encodeURIComponent(row.media_id) + "?dl=1"}>⬇ Download</a>
           {/* ☁ Publish -- real since 2026-08-07, same real pipeline as desktop's
@@ -381,7 +398,7 @@ export default function ImageDetailsMobile({
             <div className="idm-simstrip">
               {similar.images.slice(0, 8).map((it) => (
                 <button key={it.media_id} type="button" className="idm-simtile" onClick={() => onNavigate(it.media_id)}>
-                  <img src={it.thumb} alt="" loading="lazy" />
+                  <img src={thumbSrc(it.thumb, saver)} alt="" loading="lazy" />
                   {it.is_video === "1" ? <span className="vbadge">▶</span> : null}
                 </button>
               ))}
@@ -392,11 +409,23 @@ export default function ImageDetailsMobile({
         </div>
 
         <div className="idm-recrow">
+          {/* Q2: the page's two buttons, 44 px+ each, first in the pinned foot. Remix opens Create
+              (a still into the Image composer, a clip into the Video drawer); Send to Video opens
+              Create -> Video with this picture as the start frame. Neither sends anything. A clip has
+              no still to start from, so it offers Remix alone. */}
+          {onRemix || onSendToVideo ? (
+            <div className="idm-remixrow">
+              {onRemix ? (
+                <button type="button" className="idm-remixbtn remix"
+                  onClick={() => onRemix(row.media_id, row.is_video === "1")}>{"\u21bb"} Remix</button>
+              ) : null}
+              {onSendToVideo && row.is_video !== "1" ? (
+                <button type="button" className="idm-remixbtn video"
+                  onClick={() => onSendToVideo(row.media_id)}>{"\u25b6"} Send to Video</button>
+              ) : null}
+            </div>
+          ) : null}
           <button type="button" className="idm-chip" onClick={() => setEditingPrompt((v) => !v)}>Edit prompt</button>
-          <button type="button" className="idm-chip"
-            onClick={() => toast("Send to Video", "Its own mobile wiring — coming later.")}>
-            Send to Video
-          </button>
           {/* "Filter by model" was called "Find similar (model)" until the phone's
               Similar pass (2026-09-05), the same rename the desktop record took in B2:
               it never did find lookalikes, it filtered the library by the model that
@@ -441,6 +470,7 @@ export default function ImageDetailsMobile({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Upscale bottom sheet -- ALWAYS mounted (host div + wrapper both);
@@ -495,7 +525,7 @@ export default function ImageDetailsMobile({
           {similar.images.map((it) => (
             <button key={it.media_id} type="button" className="idm-simtile"
               onClick={() => { closeSimSheet(); onNavigate(it.media_id); }}>
-              <img src={it.thumb} alt="" loading="lazy" />
+              <img src={thumbSrc(it.thumb, saver)} alt="" loading="lazy" />
               {it.is_video === "1" ? <span className="vbadge">▶</span> : null}
             </button>
           ))}

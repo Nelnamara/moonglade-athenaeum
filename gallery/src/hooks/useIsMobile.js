@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isPhoneViewport } from "../lib/phoneCore.js";
 
 /* Reactive mobile-viewport detection -- the first hook in gallery/src/hooks/
    built for a viewport-driven surface (LoginPageMobile.jsx, 2026-08-02) and
@@ -32,25 +33,34 @@ const MOBILE_QUERY = "(max-width: 520px)";
    phone-width (screen.width, which is independent of the layout-viewport quirk)
    is a phone regardless of what innerWidth claims. Both extra clauses are
    necessary to stay off desktops: a mouse laptop is never coarse-pointer, and a
-   real tablet's screen.width is > 520 -- so neither can trip this. Landscape is
-   deliberately left to the desktop build, exactly as the max-width query did. */
-function detectMobile() {
+   real tablet's screen.width is > 520 -- so neither can trip this.
+
+   LANDSCAPE (Session Q, Q4, 2026-09-29): this used to say "Landscape is deliberately left to the
+   desktop build". The Phone Handoff draws the phone turned sideways -- a left rail, four columns,
+   side panels -- so a phone held that way is a phone now: its SHORT side is <= 520 (an iPad mini's
+   is 744, a laptop's far more). The rule itself is lib/phoneCore.js's isPhoneViewport, so the
+   node tests hold it as written. The Loom passes `{ landscapePhones: false }`: its wide four-panel
+   board is at home in landscape, and a phone turned sideways should still open the board. */
+function detectMobile(landscapePhones) {
   if (typeof window === "undefined" || !window.matchMedia) return false;
-  if (window.matchMedia(MOBILE_QUERY).matches) return true;
-  const coarse = window.matchMedia("(pointer: coarse)").matches;
-  const portrait = window.matchMedia("(orientation: portrait)").matches;
-  const screenW = (window.screen && window.screen.width) || Infinity;
-  return coarse && portrait && screenW <= 520;   // same line as MOBILE_QUERY, see above
+  const scr = window.screen || {};
+  return isPhoneViewport({
+    width: window.matchMedia(MOBILE_QUERY).matches ? 0 : Infinity,   // the one width line, as the query reads it
+    coarse: window.matchMedia("(pointer: coarse)").matches,
+    portrait: window.matchMedia("(orientation: portrait)").matches,
+    screenW: scr.width, screenH: scr.height, landscapePhones,
+  });
 }
 
-export default function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(detectMobile);
+export default function useIsMobile(opts) {
+  const landscapePhones = !(opts && opts.landscapePhones === false);
+  const [isMobile, setIsMobile] = useState(() => detectMobile(landscapePhones));
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     // Recompute the whole decision on any change -- the fallback depends on
     // orientation and screen metrics, not just the max-width breakpoint.
-    const sync = () => setIsMobile(detectMobile());
+    const sync = () => setIsMobile(detectMobile(landscapePhones));
     sync();   // re-sync after commit (viewport may have settled since first render)
     const mqls = [
       window.matchMedia(MOBILE_QUERY),
@@ -70,7 +80,7 @@ export default function useIsMobile() {
       window.removeEventListener("resize", sync);
       window.removeEventListener("orientationchange", sync);
     };
-  }, []);
+  }, [landscapePhones]);
 
   return isMobile;
 }

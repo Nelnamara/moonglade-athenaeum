@@ -247,6 +247,16 @@ restores the same blur — nothing else about how popups look or open changes ei
 
 The same switch is on the phone's **Control** screen.
 
+**Data saver** (phone). A row on the phone's **Control** screen with three modes — **Off**,
+**Auto on metered** (the default) and **Always** — kept in the phone's browser like the blur. While it
+is on: thumbnails are the small 256 px size, a picture opens as a blurred thumbnail with **Tap to load
+full size** (and its size) until you tap, videos do not autoplay or preload, the phone's own automatic
+refresh after a generation finishes waits (a pull still works), and a **◐ Saver** chip shows in the
+header. **Auto** follows the connection where the browser can report it — Chrome on Android says whether
+you are on cellular — and where it cannot, which is every iPhone browser, Auto stays off and the row says
+so; choose **Always** there. The server's own scheduled sync runs on the machine it is on and is not
+affected.
+
 ## Identity
 
 The **mark** beside the title and the **skin** the whole suite wears, in one strip at the

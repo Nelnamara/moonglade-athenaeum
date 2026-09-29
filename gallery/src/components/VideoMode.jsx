@@ -1,5 +1,7 @@
 import React, { useRef } from "react";
 import VideoDrawer from "./VideoDrawer.jsx";
+import "../styles/power.css";
+import "../styles/phone-q.css";
 
 /* Create tab, Video mode -- the shared video Generate form. Since the no-vanilla port
    (2026-08-08) this renders the React <VideoDrawer> (gallery/src/components/VideoDrawer.jsx),
@@ -31,10 +33,20 @@ import VideoDrawer from "./VideoDrawer.jsx";
    (.cm-videowrap, create-mobile.css) sized to .glm-body's own already-correct content area, with
    an invisible ghost copy of the segmented control reserving the same vertical gap the REAL one
    (rendered by CreateMobile.jsx, still visible and clickable underneath) occupies. */
-export default function VideoMode({ visible }) {
-  const drawerRef = useRef(null);
+export default function VideoMode({ visible, drawerRef: shared, note, onDismissNote }) {
+  const own = useRef(null);
+  // Session Q (Q2): the shell holds this handle so Send to Video / a video's Remix can hand the drawer
+  // its start frame or its recipe (gen/phoneRemix.js). The drawer's own prefill does the rest; it sends
+  // nothing. `note` is the page's "Sent from Details" line, dismissible, shown above the form.
+  const drawerRef = shared || own;
   return (
     <div className="cm-videohost" style={{ display: visible ? "" : "none" }}>
+      {note ? (
+        <div className="mgpow-note phone cm-handoffnote" role="status">
+          <span>{note}</span>
+          <button type="button" className="cm-handoffx" aria-label="Dismiss" onClick={onDismissNote}>{"×"}</button>
+        </div>
+      ) : null}
       <VideoDrawer ref={drawerRef} />
     </div>
   );

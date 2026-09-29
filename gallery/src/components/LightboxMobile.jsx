@@ -3,9 +3,15 @@ import Stars from "./Stars.jsx";
 import UpscalePanel from "./UpscalePanel.jsx";
 import TsubakiEditBar from "./TsubakiEditBar.jsx";
 import MakeRecipeChip from "../recipes/MakeRecipeChip.jsx";
-import { apiGet } from "../api.js";
+import PlacardMobile from "./PlacardMobile.jsx";
+import useDataSaver from "../hooks/usePhonePrefs.js";
+import usePhoneLandscape from "../hooks/usePhoneLandscape.js";
+import useFullGate from "../hooks/useFullGate.js";
+import { apiGet, fetchSiblings } from "../api.js";
+import { taskIdsOf, thumbSrc } from "../lib/phoneCore.js";
 import "../styles/lightbox-mobile.css";
 import "../styles/curation-mobile.css";
+import "../styles/phone-q.css";
 
 /* Lightbox Mobile -- design spec: "Lightbox Mobile.dc.html" (design_handoff_
    moonglade_suite/). The mobile pass of the desktop Lightbox.jsx -- Details'
@@ -87,6 +93,19 @@ import "../styles/curation-mobile.css";
    CreateMobile.jsx's Video mode, ImageDetailsMobile.jsx's "Send to Video"),
    not silent dead taps and not newly-invented functionality outside this
    build's brief. Upscale/Details/Slideshow are all real.
+   (SESSION Q, 2026-09-29: ▶ To Video is real now -- it takes the same route as the record's Send to
+   Video, `onSendToVideo`: the Create tab's Video mode with this picture as the start frame, nothing
+   sent. Edit is still the disclosed toast.)
+
+   SESSION Q, THE PHONE, additive to everything above:
+     Q1  the placard -- accession stamp and the sibling strip -- between the picture and the meta row
+         (PlacardMobile.jsx). The siblings are ONE batched POST /api/siblings per page of pictures.
+     Q4  landscape: the picture fits the height and the lower panel becomes the right rail, the action
+         list first (styles/phone-landscape.css); the film strip centres its own thumb without
+         scrolling the rail.
+     Q7  Data saver: while it acts the picture opens as its 256 px thumbnail behind a "Tap to load full
+         size" line (the size from a HEAD), a video does not autoplay and does not preload, and the
+         film strip draws 256 px thumbnails. A picture loaded once stays loaded for the session.
 
    ◈ SIMILAR IS REAL NOW (2026-09-05). It was the third of those stubs -- a
    toast saying its own mobile pass was coming. It is a DOOR: `onSimilar` is
@@ -106,7 +125,7 @@ function toast(title, msg) {
 
 export default function LightboxMobile({
   items, index, setIndex, onClose, onRate, onCurate, page, pages, loadPage, onOpenDetails, onSimilar,
-  onEnterContest, member,
+  onEnterContest, member, onSendToVideo,
 }) {
   const it = items[index];
   const mid = it ? it.media_id : null;
@@ -118,6 +137,9 @@ export default function LightboxMobile({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [, bumpDetail] = useState(0); // re-render tick when a lazy detail row lands
 
+  const saver = useDataSaver().active;
+  const { landscape } = usePhoneLandscape();
+  const [sibMap, setSibMap] = useState({});                  // task_id -> [{media_id, thumb, is_video}]
   const upEl = useRef(null);
   const closingRef = useRef(false);
   const detailCache = useRef(new Map()); // media_id -> {negative_prompt, loras}
@@ -207,6 +229,20 @@ export default function LightboxMobile({
     return () => { dead = true; };
   }, [mid, promptOpen]);
 
+  /* Q1: the placard's siblings, ONE batched read for the page of pictures (keyed on the task ids, so a
+     star tap that rebuilds the array does not ask again). Fail-soft: no answer means "single image". */
+  const taskKey = taskIdsOf(items).join(",");
+  useEffect(() => {
+    if (!taskKey) { setSibMap({}); return undefined; }
+    let dead = false;
+    fetchSiblings(taskKey.split(",")).then((d) => { if (!dead) setSibMap((d && d.by_task) || {}); });
+    return () => { dead = true; };
+  }, [taskKey]);
+
+  /* Q7: the picture waits on a tap while the saver acts (hooks/useFullGate.js: the tap, the size behind
+     it, and "loaded once stays loaded"). A clip has no gate. */
+  const fullGate = useFullGate(mid, saver && !!it && !it.is_video);
+
   // The upscale panel must never outlive the picture it was opened for.
   useEffect(() => { closeUpscale(); }, [mid]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (upEl.current) upEl.current.close(); }, []);
@@ -216,8 +252,16 @@ export default function LightboxMobile({
     const host = stripRef.current;
     if (!host) return;
     const on = host.querySelector(".lbm-thumb.on");
-    if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [index]);
+    if (!on) return;
+    if (landscape) {
+      /* Sideways the strip lives inside the right rail, which scrolls too: scrollIntoView would also
+         slide the RAIL down to the strip and take the action list out of view (Q4). Centre the thumb
+         along the strip and leave the rail where it is. */
+      host.scrollLeft = Math.max(0, on.offsetLeft - (host.clientWidth - on.offsetWidth) / 2);
+    } else if (on.scrollIntoView) {
+      on.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [index, landscape]);
 
   /* Pointer drag -- captured so a fast swipe past the stage's edges keeps
      tracking (Pointer Events, not touch-only, so this also drags with a
@@ -254,6 +298,7 @@ export default function LightboxMobile({
   const pending = promptOpen && !detailCache.current.has(mid);
   const field = (v) => (pending ? "…" : (v == null || v === "" ? "—" : v));
   const promptText = (row && row.prompt_full) || it.prompt || "—";
+  const gated = fullGate.gated;
 
   return (
     <div className={"lbm-root" + (closing ? " closing" : "")} role="dialog" aria-modal="true" aria-label="Full-screen viewer">
@@ -282,13 +327,23 @@ export default function LightboxMobile({
           transform: "translateX(" + (dragDX * 0.4) + "px)",
           transition: dragging ? "0s" : "transform .3s cubic-bezier(.2,.9,.24,1)",
         }}>
-          <div className={"lbm-hero" + (hasAR ? "" : " noar")} style={hasAR ? { aspectRatio: W + " / " + H } : undefined}>
+          <div className={"lbm-hero" + (hasAR ? "" : " noar") + (gated ? " gated" : "")} style={hasAR ? { aspectRatio: W + " / " + H } : undefined}>
             {it.is_video ? (
+              /* Data saver (Q7): a clip does not autoplay and does not preload; it shows its poster and
+                 waits for the play button, so opening the viewer costs a thumbnail, not a video. */
               <video key={it.media_id} src={"/video-file/" + encodeURIComponent(it.media_id)}
-                controls autoPlay loop playsInline />
+                controls autoPlay={!saver} preload={saver ? "none" : undefined}
+                poster={saver ? thumbSrc(it.thumb, true) : undefined} loop playsInline />
+            ) : gated ? (
+              <img key={it.media_id + ":thumb"} src={thumbSrc(it.thumb, true)} alt="" decoding="async" draggable={false} />
             ) : (
               <img key={it.media_id} src={"/full/" + encodeURIComponent(it.media_id)} alt="" decoding="async" draggable={false} />
             )}
+            {gated ? (
+              <button type="button" className="lbm-tapfull" onClick={fullGate.load}>
+                {"\u25D0"} Tap to load full size{fullGate.size ? " \u00b7 " + fullGate.size : ""}
+              </button>
+            ) : null}
             {slideOn ? (
               <div className="lbm-slidetrack" aria-hidden="true">
                 <div key={page + ":" + index} className="lbm-slidefill" />
@@ -299,6 +354,9 @@ export default function LightboxMobile({
       </div>
 
       <div className="lbm-bottom">
+        {/* Q1: the placard sits right under the picture, above the meta row and the action row. */}
+        <PlacardMobile item={it} items={items} siblings={it.task_id ? sibMap[it.task_id] : null}
+          onPick={(k) => { setDragDX(0); setPromptOpen(false); setIndex(k); }} />
         {/* Session H T3a, phone: the Tsubaki edit pill between the stage and the rows below,
             on every still picture (renders nothing on a video). */}
         <TsubakiEditBar item={it} member={member} phone />
@@ -346,7 +404,7 @@ export default function LightboxMobile({
                 style={{ width: wpx + "px" }}
                 title={(k + 1) + " / " + items.length}
                 onClick={() => { setDragDX(0); setPromptOpen(false); setIndex(k); }}>
-                <img src={sh.thumb} alt="" loading="lazy" draggable={false} />
+                <img src={thumbSrc(sh.thumb, saver)} alt="" loading="lazy" draggable={false} />
               </button>
             );
           })}
@@ -359,8 +417,12 @@ export default function LightboxMobile({
         <div className="lbm-actsrow">
           <button type="button" className="lbm-chip"
             onClick={() => toast("Edit", "Its own mobile wiring — coming later.")}>✎ Edit</button>
-          <button type="button" className="lbm-chip"
-            onClick={() => toast("Send to Video", "Its own mobile wiring — coming later.")}>▶ To Video</button>
+          {/* Q2: the same route as the record's Send to Video -- the Create tab's Video mode with this
+              picture as the start frame. Nothing is sent. A clip has no still to start from. */}
+          {!it.is_video ? (
+            <button type="button" className="lbm-chip"
+              onClick={() => onSendToVideo && onSendToVideo(it.media_id)}>▶ To Video</button>
+          ) : null}
           <button type="button" className="lbm-chip lbm-similar"
             title="Find what looks like this one"
             onClick={() => onSimilar && onSimilar(it.media_id)}>◈ Similar</button>
