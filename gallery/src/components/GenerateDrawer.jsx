@@ -397,10 +397,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
       // with the seed re-rolled on the way through so the next Generate is a fresh draw.
       if (request.mid) prefillRun("", request.mid, { newSeed: !!request.newSeed });
     } else if (request.tab === "lora") {
-      // Train a LoRA's "Use" (Training Handoff 5c): the trained LoRA onto the Image tab, the
-      // picker's own addLora road (trigger words and all). A pick; nothing is generated.
+      // Train a LoRA's "Use" (Training Handoff 5c): the trained LoRA onto the Image tab's LoRA
+      // side (off the Context side, where a LoRA is held and never sent), then the picker's
+      // own addLora road (trigger words and all). A pick; nothing is generated.
       setTab("image");
-      if (request.lora && request.lora.model_id) g.addLora(request.lora);
+      if (request.lora && request.lora.model_id) g.takeLora(request.lora);
     }
   }, [request]);
 

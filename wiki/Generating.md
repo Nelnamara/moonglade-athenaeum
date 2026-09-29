@@ -330,7 +330,9 @@ reason on hover) — and one thing you can do with it:
 - **Retry** (a failed Advanced run) starts a new run on the same set: it asks PixAI's price
   first and the confirm's button names it; nothing is spent until you tick and confirm.
 - **Use** adds a trained LoRA to the Generate dock (on the phone, to the Create tab), trigger
-  words and all. Nothing is generated until you press Generate.
+  words and all. If the dock was on **Context images**, it switches back to **LoRAs** so the
+  LoRA is sent; your context images stay in their slots, held, for when you switch back.
+  Nothing is generated until you press Generate.
 
 ## On the CLI
 

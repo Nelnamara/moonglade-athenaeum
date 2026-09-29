@@ -997,7 +997,8 @@ export default function AppMobile({ boot }) {
 
   /* Train a LoRA (Session J, one step per screen): the screen's head ‹ steps back inside the
      train flow first (TrainMobile sets trainBack), and closes the screen only from its chooser.
-     Its Runs "Use" puts a trained LoRA on the Create tab's composer -- the same useGenerate
+     Its Runs "Use" puts a trained LoRA on the Create tab's composer, on the LoRA side (off the
+     Context side, where a LoRA is held and never sent) -- useGenerate.takeLora, then the same
      addLora the model sheet's LoRA pick calls (trigger words and all); a pick, never a submit. */
   const trainBack = useRef(null);
   const screenBack = () => {
@@ -1005,7 +1006,7 @@ export default function AppMobile({ boot }) {
     closeScreen();
   };
   const takeTrainedLora = (lora) => {
-    gen.addLora(lora);
+    gen.takeLora(lora);
     closeScreen();
     setTab("create");
   };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet } from "../api.js";
-import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply, versionPatch } from "./genCore.js";
+import { buildPayload, clampLoras, GEN_DEFAULTS, goGate, modeAfterApply, toLoraSide, versionPatch } from "./genCore.js";
 import {
   SEED_PROMPT, TSUBAKI3, contextMax, profileLocked, profileRows, renumberAfterRemove,
 } from "./tsubakiCore.js";
@@ -375,8 +375,16 @@ export default function useGenerate({ costRef, isMember }) {
     return true;
   }, [applyModelRow]);
 
+  /* A LoRA from outside the picker (Train a LoRA's "Use"): onto the LoRA side first, so it is
+     sent rather than held behind context images (genCore.toLoraSide), then the picker's own
+     addLora road, trigger words and all. A pick; nothing is generated. */
+  const takeLora = useCallback((row) => {
+    setS(toLoraSide);
+    return addLora(row);
+  }, [addLora]);
+
   return { s, set, busy, results, applyModelRow, pickVersion,
-           addLora, removeLora, setLora, generate, refreshPrice,
+           addLora, takeLora, removeLora, setLora, generate, refreshPrice,
            addContext, removeContext, sizeContext, tsubakiEdit,
            canSubmit: priceOk, priceAnswer };
 }

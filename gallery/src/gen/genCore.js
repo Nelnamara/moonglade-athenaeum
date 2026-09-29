@@ -533,6 +533,14 @@ export function tsubakiEditState({ model, image, prompt, mode, tier, member }) {
   };
 }
 
+/* A LoRA handed in from outside the dock's own picker (Train a LoRA's "Use", Training Handoff
+   5c) goes on the LoRA side: on the Context side the LoRAs are held, not sent (buildPayload),
+   so a LoRA added there would sit unseen and never run. This is the dock's state moved to the
+   LoRA side -- its context images kept, held, exactly as the switch itself leaves them. */
+export function toLoraSide(s) {
+  return s && s.inputs !== "loras" ? { ...s, inputs: "loras" } : s;
+}
+
 /* The classic's curated error guidance (moonglade_gallery.py friendlyGenErr).
    This is the THIRD hand-maintained copy -- the others live in
    gallery/src/gen/videoDrawerCore.js (the video drawer's copy) and
