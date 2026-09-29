@@ -2397,7 +2397,7 @@ def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line
     """The handoff's one door: "MY ENTRIES · n" does not open a second layout, it filters
     THIS board to the contests this library has pieces in and adds ONE status line to the
     same card. Asserted as rendered DOM -- same .cmb-card class, one row per entered
-    contest, a derived status (running / awaiting results / won / not placed), and no
+    contest, a derived status (running / awaiting results / a verified tier / not placed), and no
     official hero, because a filtered board is not the board plus a list."""
     page = logged_in_page(**MOBILE)
     _open_contests_on_the_phone(page, [])
@@ -2410,6 +2410,9 @@ def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line
              "url": "", "entry_artwork_ids": ["art0", "art1"], "entries": []},
             {"contest_id": "c-old", "slug": "spring-oath", "title": "Spring Oath",
              "type": "official", "active": False, "won": True,
+             # since L3 a win is VERIFIED and arrives with its tier and prize
+             "wins": [{"artwork_id": "art2", "tier": 2, "prize_amount": 200000,
+                       "label": "Tier 2, 200,000 credits", "how": "auto", "receipt_url": ""}],
              "end_at": "2026-08-20T00:00:00.000Z", "result_at": "2026-08-25T00:00:00.000Z",
              "url": "", "entry_artwork_ids": ["art2"], "entries": []},
         ]})
@@ -2433,7 +2436,7 @@ def test_the_phone_my_entries_door_filters_the_same_board_and_adds_a_status_line
     assert "2 pieces" in by["JoJo Pose"]["status"], by
     # An ENDED contest is not on the running board at all, so its card is rebuilt from the
     # entries row itself -- the only way a finished contest can still be opened in-app.
-    assert "WON" in by["Spring Oath"]["status"] and "won" in by["Spring Oath"]["cls"], by
+    assert "TIER 2" in by["Spring Oath"]["status"] and "won" in by["Spring Oath"]["cls"], by
     assert page.locator(".cmb-hero").count() == 0, (
         "the official hero is still painted in the My-entries view")
 
