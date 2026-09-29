@@ -5810,3 +5810,128 @@ def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_brandi
     page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
     assert page.evaluate("() => sessionStorage.getItem('mg_panel_tab_request')") is None, (
         "the one-shot is consumed by the gallery that honoured it")
+
+
+# ---------------------------------------------------------------------------
+# Session M: THE ONE multi-send confirm (Generate Power Tools Handoff, "$" + frame A)
+# ---------------------------------------------------------------------------
+# The whole road is real -- the dock's pick, the template's tint and mode row, /api/generate/plan
+# pricing through core._rest_get's fake /task-price -- with PixAI faked at the seam, so nothing
+# leaves the machine and no mutation can happen (gql_mutate raises). Cancel is the only way out
+# taken: no POST /api/generate/run may leave the page.
+
+def _run_harness_guards(page, monkeypatch):
+    posts = []
+    page.on("request", lambda req: posts.append(req.url) if (
+        req.method == "POST" and "/api/generate" in req.url) else None)
+
+    def _no_mutation(*a, **k):
+        raise AssertionError("the confirm harness must never reach a mutation")
+    monkeypatch.setattr(core, "gql_mutate", _no_mutation)
+    return posts
+
+
+def _confirm_geometry(page, root):
+    return page.evaluate("""(root) => {
+        const c = document.querySelector(root + ' .mgrun-confirm');
+        if (!c) return null;
+        const b = c.getBoundingClientRect();
+        const go = c.querySelector('.mgrun-cgo');
+        const g = go.getBoundingClientRect();
+        const at = document.elementFromPoint(g.x + g.width / 2, g.y + g.height / 2);
+        return {top: b.top, bottom: b.bottom, left: b.left, right: b.right,
+                vw: innerWidth, vh: innerHeight, goHit: !!(at && (at === go || go.contains(at))),
+                title: c.querySelector('.mgrun-ctitle').textContent,
+                credits: c.querySelector('.mgrun-ccredits').textContent,
+                cards: c.querySelector('.mgrun-ccards').textContent,
+                go: go.textContent,
+                cancel: c.querySelector('.mgrun-ccancel').textContent,
+                creditsColor: getComputedStyle(c.querySelector('.mgrun-ccredits')).color};
+    }""", root)
+
+
+def test_the_dock_opens_one_confirm_for_a_run_and_cancel_sends_nothing(logged_in_page, monkeypatch):
+    """Desktop 1280x900: a template prompt tints its variables and shows the Random | Matrix row;
+    Generate on a Random x2 opens THE confirm with the server's own quote (5,100 each, no card),
+    inside the viewport, its Go button the topmost thing at its centre; Cancel closes it and
+    no /api/generate/run leaves the page."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    posts = _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    if not page.locator(".mgdock-modelrow").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-modelrow", state="visible")
+    page.click(".mgdock-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
+    page.click(".mgdock-expand")                      # settings closed: the composer alone
+    page.fill(".mgdock-prompt", "1girl, {silver|cobalt} hair, moonlit glade")
+    page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
+    assert page.locator(".mgrun-tok.var").first.inner_text() == "{silver|cobalt} ·2"
+    assert page.locator(".mgrun-seg button.on").first.inner_text() == "Random"
+    page.locator(".mgrun-seg button:has-text('×2')").click()
+    assert page.locator(".mgrun-prevrow").count() == 2
+    page.wait_for_function("() => !document.querySelector('.mgdock-gocol > .mgdock-gen').disabled")
+    assert "Generate 2" in page.locator(".mgdock-gocol > .mgdock-gen").inner_text()
+    page.click(".mgdock-gocol > .mgdock-gen")
+    page.wait_for_selector(".mgrun-confirm .mgrun-ctitle")
+    _settle(page)
+    geo = _confirm_geometry(page, ".mgdock")
+    assert geo["title"] == "Send 2 generations?"
+    assert geo["credits"] == "≈ 10,200 credits in total · 5,100 each × 2"
+    assert geo["cards"] == "No free card covers this."
+    assert geo["go"] == "Send 2" and geo["cancel"] == "Cancel · nothing is sent"
+    assert 0 <= geo["top"] and geo["bottom"] <= geo["vh"] and geo["right"] <= geo["vw"], geo
+    assert geo["goHit"], "the Go button must be the topmost thing at its own centre"
+    gold = page.evaluate("""() => { const p = document.createElement('span');
+        p.style.color = 'var(--gold)'; document.body.appendChild(p);
+        const c = getComputedStyle(p).color; p.remove(); return c; }""")
+    assert geo["creditsColor"] == gold, "the confirm's credits line is the gold spend colour"
+    page.click(".mgrun-ccancel")
+    page.wait_for_selector(".mgrun-confirm", state="detached")
+    assert [u for u in posts if u.endswith("/api/generate/run")] == [], posts
+    assert [u for u in posts if u.endswith("/api/generate/plan")], "the confirm is the server's quote"
+
+
+def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, monkeypatch):
+    """Phone 390x844: a plain batch x2 on the Create tab opens the same confirm (one task of 2
+    images at the server's price), on screen and tappable; Cancel sends nothing."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**PHONE)
+    posts = _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-modelrow")
+    page.click(".cm-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    page.click(".cm-advrow")
+    page.wait_for_selector(".glm-screen .cm-chip")
+    page.locator(".glm-screen .cm-chiprow").filter(has_text="4").locator("button:has-text('2')").last.click()
+    page.click(".glm-screen-back")
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_function("() => { const b = document.querySelector('.cm-generate'); return b && !b.disabled; }")
+    assert "Generate 2" in page.locator(".cm-generate").inner_text()
+    page.click(".cm-generate")
+    page.wait_for_selector(".mgrun-confirm .mgrun-ctitle")
+    page.locator(".mgrun-confirm").scroll_into_view_if_needed()
+    _settle(page)
+    geo = _confirm_geometry(page, "body")
+    assert geo["title"] == "Send 2 generations?"
+    assert geo["credits"] == "≈ 5,100 credits in total · one task of 2 images"
+    assert 0 <= geo["left"] and geo["right"] <= geo["vw"], geo
+    assert 0 <= geo["top"] and geo["bottom"] <= geo["vh"], geo
+    assert geo["goHit"], "the Go button must be tappable on the phone"
+    page.click(".mgrun-ccancel")
+    page.wait_for_selector(".mgrun-confirm", state="detached")
+    assert [u for u in posts if u.endswith("/api/generate/run")] == [], posts
