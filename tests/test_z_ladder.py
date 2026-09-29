@@ -167,3 +167,45 @@ def test_actions_menu_can_never_outgrow_the_viewport():
     assert m, "no .mgl-menu rule"
     assert "max-height" in m.group(1), ".mgl-menu lost its viewport max-height (issue #40)"
     assert re.search(r"overflow-y:\s*auto", m.group(1)), ".mgl-menu lost its internal scroll"
+
+
+def test_the_guide_and_help_sit_over_every_surface_and_under_the_palette(z):
+    """Session I (lane w3-help, help.css's THE RUNGS): the first-run guide's blocker, ring and
+    cards stand over every surface they point at -- the Control Panel and its subs top out at
+    the claim modal -- Help stands over the guide it can replay, About opens from Help's own
+    page and the what's-new sheet opens About; the command palette, which closes before
+    anything it opens, stays above all of them."""
+    h = {
+        "block": _z("styles/help.css", ".mgguide-block"),
+        "ring": _z("styles/help.css", ".mgguide-ring"),
+        "mark": _z("styles/help.css", ".mgguide-mark"),
+        "welcome": _z("styles/help.css", ".mgguide-welcome"),
+        "help_scrim": _z("styles/help.css", ".mghelp-scrim"),
+        "help_host": _z("styles/help.css", ".mghelp-host"),
+        "ab_scrim": _z("styles/help.css", ".mgab-scrim"),
+        "ab_host": _z("styles/help.css", ".mgab-host"),
+        "wn_scrim": _z("styles/help.css", ".mgwn-scrim"),
+        "wn_host": _z("styles/help.css", ".mgwn-host"),
+    }
+    assert h["block"] > z["claim_host"] and h["block"] > z["cp_pwr_host"], h
+    assert h["block"] > z["recipes_host"] and h["block"] > z["mgv_host"], h
+    assert h["ring"] > h["block"] and h["mark"] > h["ring"] and h["welcome"] == h["mark"], h
+    assert h["help_scrim"] > h["mark"] and h["help_host"] > h["help_scrim"], h
+    assert h["ab_scrim"] > h["help_host"] and h["ab_host"] > h["ab_scrim"], h
+    assert h["wn_scrim"] > h["ab_host"] and h["wn_host"] > h["wn_scrim"], h
+    assert z["pal_scrim"] > h["wn_host"], "the palette opens under Help's layers"
+    assert all(300 <= v <= 500 for v in h.values()), "a Help layer left the overlay band"
+
+
+def test_train_a_lora_phone_sheets_open_over_their_screen(z):
+    """Session J (lane w3-train, train-mobile.css): Train a LoRA's phone sheets are portalled to
+    .glm-stage, so they need a rung above the pushed screen they open from (.glm-screen 308),
+    scrim under slab, and stay under the full-screen viewers (315) and the Create tab's model
+    sheet (345)."""
+    screen = _z("styles/gallery-mobile.css", ".glm-screen ")
+    scrim = _z("styles/train-mobile.css", ".glm-scrim.trm-sheet")
+    sheet = _z("styles/train-mobile.css", ".glm-sheet.trm-sheet")
+    viewer = _z("styles/image-details-mobile.css", ".idm-root")
+    assert sheet > scrim > screen, (screen, scrim, sheet)
+    assert sheet < viewer, "a Train sheet would cover the full-screen viewer"
+    assert all(300 <= v <= 500 for v in (screen, scrim, sheet)), "a phone layer left the band"

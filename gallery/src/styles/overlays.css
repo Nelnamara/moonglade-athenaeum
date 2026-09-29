@@ -19,6 +19,8 @@
      .lbx 400 < .mgv-scrim/.mgv-host 410/411 < .mgai-scrim 412 < .mgss 414/415
      < .rcp-scrim/.rcp-host (and the phone's .rcp-m) 416/417 < .upscale-panel 420 < .mgcp-sub 422/423 < .mgct-sub 424/425 < .mgcp-pwr 430/431
      < .mgl-scrim/.mgl-menu 432/433 < .mgclaim 440/441
+     < the first-run guide's .mgguide-block/-ring 442/443 and its cards 444 (help.css)
+     < Help .mghelp-scrim/-host 450/451 < About .mgab 452/453 < what's new .mgwn 454/455
      < .mgpal-scrim/.mgpal-host 460/461 < .mgpal-gchip 462
      < .mgks-scrim/.mgks-host 470/471 < .mg-gallery-picker 490
      < the two hover previews, .mgd-preview / .model-picker .mg-preview, 500
