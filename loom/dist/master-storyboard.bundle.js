@@ -24,6 +24,7 @@ var LoomBundle = (() => {
   });
 
   // src/loom-takes-core.js
+  var own = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
   var str = (v) => v == null ? "" : String(v);
   var num = (v) => {
     const n = Number(v);
@@ -60,6 +61,64 @@ var LoomBundle = (() => {
     }
     return stored;
   };
+  var selectedTakeOf = (card) => {
+    const mid = str(card && card.resultMid);
+    if (!mid) return null;
+    const ts = takesOf(card);
+    const pinned = ts.find((t) => t.n === card.selectedTake && str(t.mid) === mid);
+    const hit = pinned || ts.find((t) => str(t.mid) === mid);
+    return hit ? hit.n : null;
+  };
+  var takeSeqOf = (card) => {
+    if (!card) return 0;
+    return Math.max(Number(card.takeSeq) || 0, maxN(takesOf(card)));
+  };
+  var selectedTakeView = (card) => {
+    const n = selectedTakeOf(card);
+    if (n == null) return null;
+    const t = takesOf(card).find((x) => x.n === n) || mirrorTake(card, n);
+    const v = {
+      ...t,
+      mid: str(card.resultMid),
+      dur: num(card.actualDur) != null ? num(card.actualDur) : t.dur,
+      trimIn: Number(card.trimIn) || 0,
+      trimOut: card.trimOut == null ? null : Number(card.trimOut),
+      imported: !!card.imported
+    };
+    if (card.crop) v.crop = card.crop;
+    else delete v.crop;
+    return v;
+  };
+  var inFlight = (card) => !!(card && (card.pendingSubmitId || card.pendingTaskId));
+  var goBlocked = (card, paused) => {
+    if (!inFlight(card)) return false;
+    if (card.pendingSubmitId && !card.pendingTaskId) return true;
+    return !paused;
+  };
+  var sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pendingTaskId && card.lastAttempt && card.lastAttempt.state === "unclear");
+  var unsendableImages = (payload) => (payload && payload.images || []).map((x) => str(x).trim()).filter((s) => s && !/^\d+$/.test(s) && !s.startsWith("data:"));
+  var cardForSubmit = (project, submitId) => {
+    const sid = str(submitId);
+    if (!sid) return null;
+    for (const a of (project || {}).acts || []) {
+      for (const c of (a || {}).cards || []) if (c && str(c.pendingSubmitId) === sid) return c;
+    }
+    return null;
+  };
+  var cardForTask = (project, taskId) => {
+    const tid = str(taskId);
+    if (!tid) return null;
+    let sup = null;
+    for (const a of (project || {}).acts || []) {
+      for (const c of (a || {}).cards || []) {
+        if (!c) continue;
+        if (str(c.pendingTaskId) === tid) return c;
+        if (!sup && (c.supersededTasks || []).some((x) => str(x) === tid)) sup = c;
+      }
+    }
+    return sup;
+  };
+  var needsRender = (card) => !!card && selectedTakeOf(card) == null && !inFlight(card) && card.status !== "wip";
   var spendMidsOf = (card) => {
     const out = [];
     let imported = 0;
@@ -82,6 +141,449 @@ var LoomBundle = (() => {
       if (a && a.media_id) add(a.media_id);
     });
     return { mids: out, imported };
+  };
+  var withTakes = (card) => {
+    const ts = takesOf(card);
+    const sel = selectedTakeOf(card);
+    const seq3 = takeSeqOf(card);
+    const takes = ts.map((t) => {
+      if (t.n !== sel) return t;
+      const v = selectedTakeView(card);
+      const out = { ...t, mid: v.mid, dur: v.dur, trimIn: v.trimIn, trimOut: v.trimOut, imported: v.imported };
+      if (v.crop) out.crop = v.crop;
+      else delete out.crop;
+      return out;
+    });
+    const next = { ...card, takes, takeSeq: seq3 };
+    if (sel == null) delete next.selectedTake;
+    else next.selectedTake = sel;
+    return next;
+  };
+  var mirrorOnto = (card, t) => {
+    const next = {
+      ...card,
+      resultMid: str(t.mid),
+      actualDur: t.dur == null ? null : t.dur,
+      trimIn: Number(t.trimIn) || 0,
+      trimOut: t.trimOut == null ? null : t.trimOut,
+      imported: !!t.imported,
+      selectedTake: t.n
+    };
+    if (t.crop) next.crop = t.crop;
+    else delete next.crop;
+    return next;
+  };
+  var PENDING = [
+    "pendingTaskId",
+    "pendingSubmitId",
+    "pendingSettings",
+    "pendingAnchor",
+    "pendingBoard",
+    "pendingQuote",
+    "genStartedAt"
+  ];
+  var clearPending = (card) => {
+    const next = { ...card };
+    PENDING.forEach((k) => {
+      if (own(next, k)) next[k] = null;
+    });
+    return next;
+  };
+  var withoutSuperseded = (card, taskId) => {
+    const s = (card.supersededTasks || []).filter((x) => str(x) !== str(taskId));
+    const next = { ...card };
+    if (s.length) next.supersededTasks = s;
+    else delete next.supersededTasks;
+    return next;
+  };
+  var settledStatus = (card) => selectedTakeOf(card) != null ? "done" : "error";
+  var landTake = (card, rep) => {
+    const r = rep || {};
+    const mid = str(r.mid), taskId = str(r.taskId);
+    if (!card || !mid) return { card, outcome: "invalid" };
+    const pend = str(card.pendingTaskId);
+    const isPending = !!taskId && taskId === pend;
+    if (isPending && card.pendingBoard && r.board && str(card.pendingBoard) !== str(r.board)) {
+      return { card, outcome: "not-owned" };
+    }
+    const superseded = !!taskId && (card.supersededTasks || []).some((x) => str(x) === taskId);
+    const existing = takesOf(card).find((t) => str(t.mid) === mid);
+    if (existing) {
+      if (!isPending) {
+        if (superseded) return { card: withoutSuperseded(card, taskId), outcome: "repeat" };
+        return { card, outcome: "repeat" };
+      }
+      let c = withTakes(card);
+      const sel = selectedTakeOf(c);
+      if (existing.n !== sel) c = selectTake(c, existing.n);
+      c = clearPending(c);
+      return { card: { ...c, status: "done", lastAttempt: null }, outcome: "repeat" };
+    }
+    if (!isPending && !superseded) return { card, outcome: "not-owned" };
+    const c0 = withTakes(card);
+    const n = takeSeqOf(c0) + 1;
+    const take2 = {
+      id: "t" + n,
+      n,
+      mid,
+      taskId,
+      at: str(r.at),
+      dur: num(r.dur) > 0 ? num(r.dur) : null,
+      trimIn: 0,
+      trimOut: null,
+      settings: isPending ? card.pendingSettings || null : null,
+      anchor: isPending ? card.pendingAnchor || null : null,
+      imported: false,
+      source: "render"
+    };
+    if (isPending && card.pendingQuote) take2.quoted = card.pendingQuote;
+    const withTake = { ...c0, takes: c0.takes.concat([take2]), takeSeq: n };
+    if (!isPending) return { card: withoutSuperseded(withTake, taskId), outcome: "unselected" };
+    const c1 = clearPending(mirrorOnto(withTake, take2));
+    return { card: { ...c1, status: "done", lastAttempt: null }, outcome: "landed" };
+  };
+  var attachTake = (card, rep) => {
+    const r = rep || {};
+    const mid = str(r.mid);
+    if (!card || !mid) return { card, outcome: "invalid" };
+    if (card.pendingSubmitId && !card.pendingTaskId) return { card, outcome: "unclear" };
+    let c = withTakes(card);
+    if (c.pendingTaskId) {
+      const s = (c.supersededTasks || []).concat([str(c.pendingTaskId)]);
+      c = { ...c, supersededTasks: s };
+    }
+    c = clearPending(c);
+    const existing = takesOf(c).find((t) => str(t.mid) === mid);
+    if (existing) {
+      c = selectTake(c, existing.n);
+      return { card: { ...c, status: "done", lastAttempt: null }, outcome: "selected" };
+    }
+    const n = takeSeqOf(c) + 1;
+    const imported = !!r.imported;
+    const take2 = {
+      id: "t" + n,
+      n,
+      mid,
+      taskId: "",
+      at: str(r.at),
+      dur: num(r.dur) > 0 ? num(r.dur) : null,
+      trimIn: 0,
+      trimOut: null,
+      settings: imported ? null : r.settings || null,
+      anchor: null,
+      imported,
+      source: imported ? "attach" : "render"
+    };
+    const withTake = { ...c, takes: c.takes.concat([take2]), takeSeq: n };
+    const sel = selectedTakeOf(c);
+    let base = withTake;
+    if (sel != null) base = writeBack(withTake, sel);
+    return { card: { ...mirrorOnto(base, take2), status: "done", lastAttempt: null }, outcome: "landed" };
+  };
+  var writeBack = (card, n) => {
+    const v = selectedTakeView(card);
+    if (!v || v.n !== n) return card;
+    const takes = (card.takes || []).map((t) => {
+      if (t.n !== n) return t;
+      const out = { ...t, dur: v.dur, trimIn: v.trimIn, trimOut: v.trimOut };
+      if (v.crop) out.crop = v.crop;
+      else delete out.crop;
+      return out;
+    });
+    return { ...card, takes };
+  };
+  var selectTake = (card, n) => {
+    if (!card) return card;
+    const sel = selectedTakeOf(card);
+    if (n === sel) return card;
+    const c = withTakes(card);
+    const t = c.takes.find((x) => x.n === n);
+    if (!t) return card;
+    const base = sel != null ? writeBack(c, sel) : c;
+    const next = mirrorOnto(base, base.takes.find((x) => x.n === n));
+    return { ...next, status: inFlight(card) ? card.status : "done" };
+  };
+  var scrub = (v) => {
+    if (typeof v === "string") return v.startsWith("data:") ? "" : v;
+    if (Array.isArray(v)) return v.map(scrub);
+    if (v && typeof v === "object") {
+      const o = {};
+      Object.keys(v).forEach((k) => {
+        o[k] = scrub(v[k]);
+      });
+      return o;
+    }
+    return v;
+  };
+  var frameRef = (f) => {
+    const x = f || {};
+    return { mediaId: str(x.mediaId), thumbId: str(x.thumbId), source: str(x.source), desc: str(x.desc), tag: str(x.tag) };
+  };
+  var snapshotSettings = (card, project, sentPrompt, quality) => {
+    const c = card || {};
+    return scrub({
+      mode: str(c.mode),
+      duration: num(c.duration),
+      quality: str(quality || ((project || {}).draft ? "basic" : "professional")),
+      connect: str(c.connect),
+      prompt: str(c.prompt),
+      promptOverride: !!c.promptOverride,
+      promptOverrideText: str(c.promptOverrideText),
+      sentPrompt: str(sentPrompt),
+      camera: str(c.camera),
+      lighting: str(c.lighting),
+      audioCue: str(c.audioCue),
+      audioGen: !!c.audioGen,
+      audioLanguage: str(c.audioLanguage || "english"),
+      isPrivate: !!c.isPrivate,
+      cast: (c.cast || []).slice(),
+      refs: (c.refs || []).map((r) => ({
+        id: str(r.id),
+        kind: str(r.kind),
+        tag: str(r.tag),
+        source: str(r.source),
+        thumbId: str(r.thumbId),
+        mediaId: str(r.mediaId)
+      })),
+      openFrame: frameRef(c.openFrame),
+      closeFrame: frameRef(c.closeFrame),
+      look: str((project || {}).look)
+    });
+  };
+  var beginRender = (card, m, opts) => {
+    if (!card) return null;
+    const o = opts || {};
+    if (card.pendingSubmitId && !card.pendingTaskId) return null;
+    if (card.pendingTaskId && !o.pausedOk) return null;
+    const x = m || {};
+    const c = { ...card };
+    if (c.pendingTaskId) c.supersededTasks = (c.supersededTasks || []).concat([str(c.pendingTaskId)]);
+    return {
+      ...c,
+      status: "wip",
+      pendingTaskId: null,
+      pendingSubmitId: str(x.submitId),
+      pendingSettings: x.settings || null,
+      pendingAnchor: x.anchor || null,
+      pendingBoard: x.board ? str(x.board) : null,
+      pendingQuote: x.quote || null,
+      genStartedAt: x.startedAt || null
+    };
+  };
+  var cancelRender = (card, submitId, before) => {
+    if (!card || str(card.pendingSubmitId) !== str(submitId)) return card;
+    const b = before || {};
+    const out = clearPending(card);
+    ["status", "pendingTaskId", "genStartedAt", "supersededTasks"].forEach((k) => {
+      if (own(b, k)) out[k] = b[k];
+      else delete out[k];
+    });
+    return out;
+  };
+  var adoptTask = (card, submitId, taskId) => {
+    if (!card || !taskId) return card;
+    if (str(card.pendingSubmitId) === str(submitId)) {
+      return { ...card, pendingTaskId: str(taskId), status: "wip" };
+    }
+    const s = card.supersededTasks || [];
+    if (s.includes(str(taskId)) || str(card.pendingTaskId) === str(taskId)) return card;
+    return { ...card, supersededTasks: s.concat([str(taskId)]) };
+  };
+  var failRender = (card, rep) => {
+    const r = rep || {};
+    if (!card) return card;
+    const matchTask = r.taskId && str(card.pendingTaskId) === str(r.taskId);
+    const matchSubmit = r.submitId && str(card.pendingSubmitId) === str(r.submitId);
+    if (!matchTask && !matchSubmit) {
+      if (r.taskId && (card.supersededTasks || []).some((x) => str(x) === str(r.taskId))) {
+        return withoutSuperseded(card, r.taskId);
+      }
+      return card;
+    }
+    const c = clearPending(card);
+    return { ...c, status: settledStatus(c), lastAttempt: { state: str(r.state || "failed"), msg: str(r.msg), at: str(r.at) } };
+  };
+  var markUnclear = (card, submitId, msg, at) => {
+    if (!card || str(card.pendingSubmitId) !== str(submitId)) return card;
+    return { ...card, status: "wip", lastAttempt: { state: "unclear", msg: str(msg), at: str(at) } };
+  };
+  var abandonSubmit = (card, submitId, at) => failRender(card, {
+    submitId,
+    state: "abandoned",
+    at,
+    msg: "Released after you checked Activity. If that render was sent after all, its clip is in your library."
+  });
+  var classifySubmit = ({ threw, status, body } = {}) => {
+    if (threw || !body || typeof body !== "object") return { kind: "unclear" };
+    if (body.task_id) return { kind: "accepted", taskId: str(body.task_id) };
+    if (body.unclear || body.state === "sending" || body.state === "may_have_started") {
+      return { kind: "unclear", error: str(body.error) };
+    }
+    if (status === 409 && body.task_id == null && /already rendering/i.test(str(body.error))) {
+      return { kind: "busy", error: str(body.error), taskId: str(body.busy_task_id) };
+    }
+    return { kind: "refused", error: str(body.error || "submit failed") };
+  };
+  var classifySubmitStatus = (body) => {
+    const b = body || {};
+    if (b.state === "submitted" && b.task_id) return { kind: "accepted", taskId: str(b.task_id) };
+    if (b.state === "refused" || b.state === "not_sent" || b.state === "abandoned") return { kind: "refused", error: str(b.error) };
+    return { kind: "unclear", state: str(b.state || "unknown") };
+  };
+  var submitsToCheck = (project, seen2) => {
+    const s = seen2 || /* @__PURE__ */ Object.create(null);
+    const out = [];
+    ((project || {}).acts || []).forEach((a) => ((a || {}).cards || []).forEach((c) => {
+      if (!c || c.status !== "wip" || !c.pendingSubmitId || c.pendingTaskId) return;
+      const k = "s:" + c.pendingSubmitId;
+      if (own(s, k)) return;
+      s[k] = true;
+      out.push({ id: c.id, submitId: str(c.pendingSubmitId), board: c.pendingBoard || null });
+    }));
+    return out;
+  };
+  var stripInFlight = (project) => {
+    if (!project || !Array.isArray(project.acts)) return project;
+    return { ...project, acts: project.acts.map((a) => ({ ...a, cards: (a.cards || []).map((c) => {
+      if (!c) return c;
+      const busy = inFlight(c) || c.status === "wip" || (c.supersededTasks || []).length;
+      if (!busy) return c;
+      const next = { ...c };
+      PENDING.forEach((k) => {
+        delete next[k];
+      });
+      delete next.supersededTasks;
+      if (next.status === "wip") {
+        next.status = selectedTakeOf(next) != null ? "done" : "error";
+        next.lastAttempt = {
+          state: "copied",
+          at: "",
+          msg: "This shot was rendering when the storyboard was copied; that render belongs to the original."
+        };
+      }
+      return next;
+    }) })) };
+  };
+  var cutPointOf = (card) => {
+    if (!card) return null;
+    if (card.trimOut != null) return Number(card.trimOut);
+    const d = num(card.actualDur);
+    return d != null ? d : null;
+  };
+  var makeAnchor = (src, frameMid, via) => ({
+    shot: str(src && src.id),
+    take: selectedTakeOf(src),
+    at: cutPointOf(src),
+    frame: str(frameMid),
+    via: via || "splice"
+  });
+  var splicePatch = (card, m) => {
+    const x = m || {};
+    if (!card || !x.frameMid) return card;
+    const of = card.openFrame || {};
+    return {
+      ...card,
+      openFrame: {
+        ...of,
+        mediaId: str(x.frameMid),
+        thumbId: "",
+        source: "",
+        desc: "handed off from " + str(x.srcCode || "prev shot")
+      },
+      anchor: x.src && selectedTakeOf(x.src) != null ? makeAnchor(x.src, x.frameMid, "splice") : null,
+      anchorKept: null
+    };
+  };
+  var shouldSave = (json, lastSavedJson) => typeof json === "string" && json !== lastSavedJson;
+  var cardsById = (project) => {
+    const m = /* @__PURE__ */ new Map();
+    ((project || {}).acts || []).forEach((a, ai) => ((a || {}).cards || []).forEach((c) => {
+      if (c && c.id) m.set(c.id, { c, a, ai });
+    }));
+    return m;
+  };
+  var mergeBoards = (local, remote, opts) => {
+    if (!remote) return { project: local, changed: [] };
+    if (!local) return { project: remote, changed: [] };
+    const resolved = new Set(((opts || {}).resolvedSubmits || []).map(str));
+    const loc = cardsById(local);
+    const changed = [];
+    const remIds = cardsById(remote);
+    const merged = { ...remote, acts: (remote.acts || []).map((a) => ({ ...a, cards: (a.cards || []).map((rc) => {
+      const hit = loc.get(rc.id);
+      if (!hit) return rc;
+      const lc = hit.c;
+      const rTakes = takesOf(rc);
+      const dead = /* @__PURE__ */ new Set([
+        ...(rc.attempts || []).map((x) => str(x && x.media_id)),
+        ...(rc.deletedTakes || []).map(str),
+        ...(lc.deletedTakes || []).map(str)
+      ]);
+      const rMids = new Set(rTakes.map((t) => str(t.mid)));
+      const extra = takesOf(lc).filter((t) => !rMids.has(str(t.mid)) && !dead.has(str(t.mid)));
+      let out = rc;
+      const renum = {};
+      if (extra.length) {
+        out = withTakes(rc);
+        let n = takeSeqOf(out);
+        const add = extra.map((t) => {
+          n += 1;
+          renum[t.n] = n;
+          return { ...t, id: "t" + n, n };
+        });
+        out = { ...out, takes: out.takes.concat(add), takeSeq: n };
+        if (selectedTakeOf(rc) == null) {
+          const lsel2 = selectedTakeOf(lc);
+          const target = lsel2 != null && renum[lsel2] != null ? renum[lsel2] : null;
+          if (target != null) {
+            const t = out.takes.find((x) => x.n === target);
+            const lv = selectedTakeView(lc);
+            out = mirrorOnto(out, { ...t, trimIn: lv.trimIn, trimOut: lv.trimOut, crop: lv.crop, dur: lv.dur });
+            if (out.status !== "wip") out = { ...out, status: "done" };
+          }
+        }
+      }
+      if (dead.size && Array.isArray(out.takes)) {
+        const sel = selectedTakeOf(out);
+        const kept = out.takes.filter((t) => t.n === sel || !dead.has(str(t.mid)));
+        if (kept.length !== out.takes.length) out = { ...out, takes: kept };
+      }
+      if ((lc.deletedTakes || []).length) {
+        const tomb = Array.from(/* @__PURE__ */ new Set([...(out.deletedTakes || []).map(str), ...(lc.deletedTakes || []).map(str)]));
+        out = { ...out, deletedTakes: tomb };
+      }
+      const lpTask = str(lc.pendingTaskId), lpSub = str(lc.pendingSubmitId);
+      const remoteBusy = !!(rc.pendingTaskId || rc.pendingSubmitId);
+      const taskLanded = lpTask && takesOf(out).some((t) => str(t.taskId) === lpTask);
+      if ((lpTask || lpSub) && !remoteBusy && !taskLanded && !(lpSub && resolved.has(lpSub))) {
+        PENDING.forEach((k) => {
+          if (lc[k] != null) out = { ...out, [k]: lc[k] };
+        });
+        out = { ...out, status: "wip" };
+      }
+      const lSup = lc.supersededTasks || [];
+      if (lSup.length) {
+        const sup = Array.from(/* @__PURE__ */ new Set([...out.supersededTasks || [], ...lSup])).filter((tid) => !takesOf(out).some((t) => str(t.taskId) === str(tid)));
+        if (sup.length) out = { ...out, supersededTasks: sup };
+      }
+      const lsel = selectedTakeOf(lc), osel = selectedTakeOf(out);
+      const lview = lsel != null ? str(selectedTakeView(lc).mid) : "";
+      const oview = osel != null ? str(selectedTakeView(out).mid) : "";
+      if (lview !== oview || Object.keys(renum).length) changed.push({ id: rc.id, star: lview !== oview, renumbered: Object.keys(renum).length > 0 });
+      return out;
+    }) })) };
+    loc.forEach(({ c, a }) => {
+      if (remIds.has(c.id) || !takesOf(c).length) return;
+      const act = merged.acts.find((x) => x.id === a.id) || merged.acts[0];
+      if (!act) {
+        merged.acts = [{ ...a, cards: [c] }];
+        changed.push({ id: c.id, kept: true });
+        return;
+      }
+      act.cards = act.cards.concat([c]);
+      changed.push({ id: c.id, kept: true });
+    });
+    return { project: merged, changed };
   };
 
   // src/loom-core.js
@@ -342,9 +844,9 @@ var LoomBundle = (() => {
       const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
       ((act || {}).cards || []).forEach((c) => {
         if (!c) return;
-        const own = spendMidsOf(c);
-        imported += own.imported;
-        own.mids.forEach((m) => {
+        const own2 = spendMidsOf(c);
+        imported += own2.imported;
+        own2.mids.forEach((m) => {
           if (!seen2[m]) {
             seen2[m] = true;
             bucket.mids.push(m);
@@ -448,8 +950,8 @@ var LoomBundle = (() => {
     const head = `Spent so far: ${paid} paid (~${Math.round(credits).toLocaleString()} credits), ${s.zero || 0} free-card/zero-cost, ${s.unpriced || 0} unpriced, ${s.missing || 0} with no catalog row` + (s.imported ? `, plus ${s.imported} imported clip(s) not counted \u2014 paid for elsewhere` : "") + ".";
     const acts = (s.byAct || []).filter((a) => a.results > 0);
     const actLine = (a) => {
-      const own = formatSpend(a);
-      if (own) return own;
+      const own2 = formatSpend(a);
+      if (own2) return own2;
       if (a.sharedElsewhere > 0) {
         return a.sharedWith ? `counted in ${a.sharedWith}` : "counted in an earlier act";
       }
@@ -520,20 +1022,6 @@ var LoomBundle = (() => {
       cards: a.cards.map((c) => c.id !== cardId ? c : fn(c))
     }))
   });
-  var withResult = (card, patch2, at) => {
-    const prev = card && card.resultMid ? String(card.resultMid) : "";
-    const next = patch2 && patch2.resultMid ? String(patch2.resultMid) : "";
-    const had = card && card.attempts || [];
-    const wasImported = !!(card && card.imported);
-    const keep = prev && prev !== next && !wasImported && !had.some((a) => a && String(a.media_id) === prev);
-    const imported = patch2 && Object.prototype.hasOwnProperty.call(patch2, "imported") ? !!patch2.imported : next && next !== prev ? false : wasImported;
-    return {
-      ...card,
-      ...patch2,
-      imported,
-      attempts: keep ? [...had, { media_id: prev, at: at || "" }] : had
-    };
-  };
   var setPromptOverride = (c, text) => ({ ...c, promptOverride: true, promptOverrideText: text });
   var clearPromptOverride = (c) => ({ ...c, promptOverride: false, promptOverrideText: "" });
   var importedFootagePatch = (mediaId, duration) => {
@@ -544,19 +1032,6 @@ var LoomBundle = (() => {
       trimIn: 0,
       trimOut: null,
       imported: true,
-      ...dur > 0 ? { actualDur: dur } : {}
-    };
-  };
-  var attachedVideoPatch = (mediaId, duration) => {
-    const dur = Number(duration);
-    return {
-      status: "done",
-      resultMid: mediaId,
-      trimIn: 0,
-      trimOut: null,
-      imported: true,
-      pendingTaskId: null,
-      genStartedAt: null,
       ...dur > 0 ? { actualDur: dur } : {}
     };
   };
@@ -853,6 +1328,78 @@ ${"=".repeat(48)}
       prompt_helper: !!a.promptHelper
     };
   }
+
+  // src/loom-store-core.js
+  var makeSaveQueue = (write) => {
+    const keys = /* @__PURE__ */ new Map();
+    const slot = (k) => {
+      if (!keys.has(k)) keys.set(k, { rev: void 0, busy: null, next: null });
+      return keys.get(k);
+    };
+    const settle = (waiters, res) => waiters.forEach((w) => w(res));
+    const pump = (k) => {
+      const s = slot(k);
+      if (s.busy || !s.next) return;
+      const job = s.next;
+      s.next = null;
+      s.busy = (async () => {
+        let res;
+        try {
+          const base = job.baseRev !== void 0 ? job.baseRev : s.rev;
+          res = await write(k, job.json, base);
+          if (!res || !res.ok && !res.conflict) res = { failed: true, error: "no answer" };
+        } catch (e) {
+          res = { failed: true, error: e };
+        }
+        if (res.ok && res.rev != null) s.rev = res.rev;
+        settle(job.waiters, res);
+        s.busy = null;
+        if (res.conflict && s.next) {
+          const stale = s.next;
+          s.next = null;
+          settle(stale.waiters, res);
+        }
+        pump(k);
+      })();
+    };
+    return {
+      /** The rev a read returned (or a sentinel for a missing key). */
+      setRev(k, rev) {
+        slot(k).rev = rev;
+      },
+      getRev(k) {
+        return slot(k).rev;
+      },
+      /** Queue `json` for key `k`. Resolves with the write's answer (or the answer of a newer
+       *  write this one was collapsed into). opts.baseRev overrides the tracked rev, for the
+       *  write of a merge made against the remote board. */
+      save(k, json, opts) {
+        const s = slot(k);
+        const baseRev = opts && Object.prototype.hasOwnProperty.call(opts, "baseRev") ? opts.baseRev : void 0;
+        return new Promise((resolve) => {
+          if (s.next) {
+            s.next.json = json;
+            if (baseRev !== void 0) s.next.baseRev = baseRev;
+            s.next.waiters.push(resolve);
+          } else {
+            s.next = { json, baseRev, waiters: [resolve] };
+          }
+          pump(k);
+        });
+      },
+      /** Resolves once nothing is in flight or queued for `k`. */
+      async idle(k) {
+        const s = slot(k);
+        while (s.busy || s.next) {
+          await s.busy;
+        }
+      },
+      /** Forget a key (a deleted board). */
+      forget(k) {
+        keys.delete(k);
+      }
+    };
+  };
 
   // src/loom-url.js
   function isBoardId(s) {
@@ -3340,22 +3887,25 @@ ${"=".repeat(48)}
   }
 
   // ../gallery/src/gen/submitTask.js
-  async function submitTask(route, payload, { label, emit: emit7, count, onPhase }) {
-    let d;
+  async function submitTask(route, payload, { label, emit: emit7, count, onPhase, onAnswer }) {
+    let d, status = 0;
     try {
       const r = await fetch(route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+      status = r.status;
       d = await r.json();
     } catch {
+      if (onAnswer) onAnswer({ threw: true });
       emit7({
         kind: "err",
         text: "No answer from the server \u2014 the task MAY still have been submitted. Check the Activity tray before trying again."
       });
       return null;
     }
+    if (onAnswer) onAnswer({ threw: false, status, body: d });
     if (d.error || !d.task_id) {
       emit7({ kind: "err", text: friendlyGenErr2(d.error || "Submit failed.") });
       return null;
@@ -3583,6 +4133,12 @@ ${"=".repeat(48)}
     } })) : null);
   }
   var lineSeq = 0;
+  var newSubmitId = () => "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+  var answerFlags = (a) => {
+    const b = a && a.body;
+    const unclear = !a || !!a.threw || !b || typeof b !== "object" || !!b.unclear;
+    return { unclear, answer: a || { threw: true } };
+  };
   var VideoDrawer = forwardRef(function VideoDrawer2(props, ref) {
     const { loomCtx, style, className, dock } = props;
     const inDock = !!dock;
@@ -3610,7 +4166,10 @@ ${"=".repeat(48)}
       negative: "",
       modeNote: "",
       rendering: false,
-      hostBusy: false
+      hostBusy: false,
+      // The Loom's target for a Go click (loomCtx only): {board_id, card_id, draft}, set by the
+      // host as its selection changes (node.setLoomTarget) and CAPTURED at the click.
+      loomTarget: null
       // The price VERDICT no longer lives here: it is the shared probe's React state
       // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
       // rerender() that used to sit beside each verdict write by hand.
@@ -3629,6 +4188,7 @@ ${"=".repeat(48)}
       rootRef.current = n;
       if (n) liveNode.current = n;
     }, []);
+    const hostRef = useRef(null);
     const chipTimer = useRef(0);
     const previewTimer = useRef(0);
     const dirty = useRef(false);
@@ -3840,6 +4400,15 @@ ${"=".repeat(48)}
         if (!checkInFlight) reprice();
         return;
       }
+      const target = loomCtx ? st.current.loomTarget : null;
+      if (loomCtx && !(target && target.board_id && target.card_id)) {
+        pushLine({ kind: "error", text: "This render isn't tied to a shot, so nothing was sent." });
+        return;
+      }
+      const submitId = loomCtx ? newSubmitId() : null;
+      const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
+      const quoted = probe.response || null;
+      const expectFree = !!(quoted && quoted.free);
       const id = pushLine({ kind: "status", moon: true, text: "Submitting\u2026" });
       setReuseChip(null);
       st.current.rendering = true;
@@ -3848,6 +4417,36 @@ ${"=".repeat(48)}
         st.current.rendering = false;
         rerender();
       };
+      if (loomCtx) {
+        const host2 = hostRef.current;
+        let verdict = null;
+        try {
+          verdict = host2 && host2.beforeSend ? await host2.beforeSend({
+            ...loomIds,
+            payload: p,
+            quote: quoted ? { cost: quoted.cost == null ? null : quoted.cost, free: !!quoted.free } : null
+          }) : null;
+        } catch (e) {
+          verdict = null;
+        }
+        if (!verdict || verdict.refused || !verdict.ok) {
+          updateLine(id, {
+            kind: "error",
+            moon: false,
+            text: verdict && verdict.refused || "The storyboard didn't take this render, so nothing was sent."
+          });
+          unlock();
+          return;
+        }
+      }
+      const tag = (detail, withTask) => loomIds ? { ...detail, ...loomIds, ...withTask ? { task_id: taskId } : {} } : detail;
+      const sent = loomIds ? {
+        ...p,
+        submit_id: submitId,
+        ...target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } },
+        ...expectFree ? { expect_free: true } : {}
+      } : p;
+      let answer = null;
       const startedAt = Date.now();
       let taskId = null;
       let tier = "normal";
@@ -3870,33 +4469,40 @@ ${"=".repeat(48)}
         const elapsed = Date.now() - startedAt;
         if (phase === "done") {
           updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-          emit7("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+          emit7("mg-result", tag({ media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit }, true));
         } else if (phase === "failed") {
           const msg = friendlyGenErr3(d.error || "task " + (d.status || "failed"));
           updateLine(id, { kind: "error", text: msg, moon: false });
-          emit7("mg-error", { error: msg });
+          emit7("mg-error", tag({ error: msg }, true));
         } else if (phase === "stalled") {
           updateLine(id, {
             kind: "plain",
             text: "Paused auto-checking after " + elapsedLabel2(CEILING_MS) + " with no result \u2014 check pixai.art, or reopen this shot to check again (task " + short() + ")"
           });
-          emit7("mg-paused", { task_id: taskId });
+          emit7("mg-paused", tag({ task_id: taskId }));
         } else if (phase === "slow" || phase === "stale") {
           tier = phase;
           updateLine(id, tierLine(phase, elapsed));
-          emit7("mg-slow", { tier: phase, elapsed, task_id: taskId });
+          emit7("mg-slow", tag({ tier: phase, elapsed, task_id: taskId }));
         } else {
           updateLine(id, tier === "normal" ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse\u2026 (task " + short() + ")" } : tierLine(tier, elapsed));
         }
       };
-      const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
+      const tid = await submitTask("/api/loom/generate", sent, {
+        label: "Rendered",
+        emit: emitLine,
+        onPhase,
+        ...loomIds ? { onAnswer: (a) => {
+          answer = a;
+        } } : {}
+      });
       unlock();
       if (!tid) {
-        emit7("mg-error", { error: lastErr || "submit failed" });
+        emit7("mg-error", tag({ error: lastErr || "submit failed", ...loomIds ? answerFlags(answer) : {} }));
         return;
       }
       taskId = tid;
-      emit7("mg-submit", { task_id: tid, payload: p });
+      emit7("mg-submit", tag({ task_id: tid, payload: p }));
       reprice({ force: true });
     };
     const renderError = (msg) => {
@@ -3933,6 +4539,12 @@ ${"=".repeat(48)}
       promptSet((cur2 ? cur2.replace(/,\s*$/, "") + ", " : "") + String(t || ""));
     };
     const setReuse = (info) => setReuseChip(info || null);
+    const setLoomTarget = (t) => {
+      st.current.loomTarget = t && t.board_id && t.card_id ? { board_id: String(t.board_id), card_id: String(t.card_id), draft: !!t.draft } : null;
+    };
+    const setHost = (h) => {
+      hostRef.current = h || null;
+    };
     useImperativeHandle(ref, () => {
       const node = rootRef.current;
       if (node && !node._mgWired) {
@@ -3945,6 +4557,8 @@ ${"=".repeat(48)}
         node.insertText = insertText;
         node.promptText = promptText2;
         node.setReuse = setReuse;
+        node.setLoomTarget = setLoomTarget;
+        node.setHost = setHost;
         Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
       }
       return node;
@@ -4653,7 +5267,7 @@ ${"=".repeat(48)}
   // ../gallery/src/notify/jobs.js
   var seen = {};
   var pending = {};
-  function clearPending(id) {
+  function clearPending2(id) {
     const p = pending[id];
     if (p && p.timer) clearTimeout(p.timer);
     delete pending[id];
@@ -4687,7 +5301,7 @@ ${"=".repeat(48)}
           error: "Stopped checking after 6h \u2014 the task may still be running. Reload to resume watching, or check it on pixai.art."
         });
         refresh();
-        clearPending(id);
+        clearPending2(id);
         return;
       }
       if (cb && c.tier !== from && (c.tier === "slow" || c.tier === "stale")) cb(c.tier, d || {});
@@ -4704,14 +5318,14 @@ ${"=".repeat(48)}
         } catch {
         }
         invalidate(["/api/achievements", "/api/health", "/api/panel/summary", "/api/your-art", "/api/next/library"]);
-        clearPending(id);
+        clearPending2(id);
         refresh();
       } else if (d.phase === "failed") {
         try {
           if (cb) cb("failed", d);
         } catch {
         }
-        clearPending(id);
+        clearPending2(id);
         refresh();
       } else {
         if (cb) cb("running", d);
@@ -10042,6 +10656,8 @@ ${"=".repeat(48)}
 .sb-ico:hover{color:var(--ink);background:var(--panel2)}
 .sb-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);cursor:pointer}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
+.sb-loadfail{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink2)}
+.sb-loadfail b{color:var(--peach);font-size:15px}
 @media (max-width:560px){.sb-conn-mid{align-self:flex-start;padding:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
@@ -10184,10 +10800,11 @@ ${"=".repeat(48)}
   async function sGetX(k) {
     try {
       const r = await window.storage.get(k);
-      return { value: r ? r.value : null, failed: false };
+      if (!r || r.value == null) return { value: null, missing: true, failed: false, rev: r ? r.rev : void 0 };
+      return { value: r.value, missing: false, failed: false, rev: r.rev };
     } catch (e) {
       storeFailed("read", k, e);
-      return { value: null, failed: true };
+      return { value: null, missing: false, failed: true, unreadable: !!(e && e.unreadable) };
     }
   }
   async function sGet(k) {
@@ -10202,15 +10819,17 @@ ${"=".repeat(48)}
       return false;
     }
   }
-  async function sList(p) {
+  async function sListX(p) {
     try {
       const r = await window.storage.list(p, false);
-      if (!r) return [];
-      return (r.keys || []).map((k) => typeof k === "string" ? k : k.key);
+      return { keys: (r && r.keys || []).map((k) => typeof k === "string" ? k : k.key), failed: false };
     } catch (e) {
       storeFailed("list", p, e);
-      return [];
+      return { keys: [], failed: true };
     }
+  }
+  async function sList(p) {
+    return (await sListX(p)).keys;
   }
   async function sDel(k) {
     try {
@@ -10221,6 +10840,11 @@ ${"=".repeat(48)}
       return false;
     }
   }
+  var writeBoard = (k, json, baseRev) => window.storage.set(k, json, false, baseRev !== void 0 ? { base_rev: baseRev } : void 0);
+  var LOOM_REV_MISSING = "missing";
+  var isBoard = (p) => !!(p && typeof p === "object" && Array.isArray(p.acts));
+  var newSubmitId2 = () => "s" + Date.now().toString(36) + uid() + uid();
+  var nowIso = () => (/* @__PURE__ */ new Date()).toISOString();
   function fileToThumb(file, maxDim = 480, q = 0.72) {
     return new Promise((res, rej) => {
       const img = new Image(), url = URL.createObjectURL(file);
@@ -10509,6 +11133,16 @@ ${"=".repeat(48)}
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
+/* Session P: a render that was refused, held or is unconfirmed reads PEACH (never red) -- the
+   app's colour for "nothing went wrong with your work; this needs your eye". */
+.lv-st.held{color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
+.lv-unclear{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:5px;padding:5px 6px;border-radius:6px;
+  font-size:9.5px;line-height:1.35;color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);cursor:default;}
+.lv-unclear span{flex:1 1 100%;}
+.lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
+  background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
+.lv-unclearbtn:hover{border-color:var(--peach);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
   display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
@@ -10976,6 +11610,12 @@ ${"=".repeat(48)}
     spend,
     refreshSpend,
     batchTally,
+    // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
+    // "attach to A·0n" (all useGenerationPipeline's).
+    beginDrawerRender,
+    recheckSubmit,
+    releaseSubmit,
+    attachDraftVideo,
     // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
     // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
     // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -11203,12 +11843,18 @@ ${"=".repeat(48)}
     thumbsRef.current = thumbs;
     const genDrawerRef = useRef2(null);
     const promptDirtyRef = useRef2(false);
-    const genTargetRef = useRef2(null);
+    const drawerHostRef = useRef2(beginDrawerRender);
+    drawerHostRef.current = beginDrawerRender;
+    const loomTargetRef = useRef2(null);
+    const drawerBusyRef = useRef2(false);
     const lastActiveIdRef = useRef2(null);
     const bindGenDrawer = useCallback2((el) => {
       genDrawerRef.current = el;
       if (el && !el._mgBound) {
         el._mgBound = true;
+        if (el.setHost) el.setHost({ beforeSend: (req) => drawerHostRef.current(req) });
+        if (el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+        if (el.setBusy) el.setBusy(drawerBusyRef.current);
         el.addEventListener("mg-dirty", () => {
           promptDirtyRef.current = true;
         });
@@ -11285,20 +11931,11 @@ ${"=".repeat(48)}
             openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
           }
         });
-        el.addEventListener("mg-submit", (e) => {
-          const a = activeRef.current;
-          genTargetRef.current = a.c.id;
-          const submitted = e.detail.payload && e.detail.payload.mode;
-          if (a && submitted && submitted !== a.c.mode) {
-            const apply = (c) => setShotMode(c, submitted);
-            a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-          }
-          onVideoSubmit(genTargetRef.current, e.detail);
-        });
-        el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
-        el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
-        el.addEventListener("mg-slow", (e) => onVideoSlow(genTargetRef.current || activeRef.current.c.id, e.detail));
-        el.addEventListener("mg-paused", (e) => onVideoPaused(genTargetRef.current || activeRef.current.c.id, e.detail));
+        el.addEventListener("mg-submit", (e) => onVideoSubmit(e.detail));
+        el.addEventListener("mg-result", (e) => onVideoResult(e.detail));
+        el.addEventListener("mg-error", (e) => onVideoError(e.detail));
+        el.addEventListener("mg-slow", (e) => onVideoSlow(e.detail));
+        el.addEventListener("mg-paused", (e) => onVideoPaused(e.detail));
         el.addEventListener("mg-prompt-commit", (e) => {
           const a = activeRef.current;
           if (!a) return;
@@ -11346,6 +11983,8 @@ ${"=".repeat(48)}
     const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
     const frameSrc = (f) => f && f.thumbId ? thumbs[f.thumbId] : f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null;
     activeRef.current = active;
+    loomTargetRef.current = projectApi.activeId ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
+    drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
     const [editSub, setEditSub] = useState2("edit");
     const [fixTag, setFixTag] = useState2("face");
     const [fixBoxes, setFixBoxes] = useState2([]);
@@ -11635,10 +12274,14 @@ ${"=".repeat(48)}
     ]);
     useEffect2(() => {
       const gs = genState[active.c.id];
-      const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
+      const stillBusy = goBlocked(active.c, !!(gs && gs.phase === "paused"));
       const el = genDrawerRef.current;
       if (el && el.setBusy) el.setBusy(stillBusy);
-    }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
+    }, [active.c.id, active.c.status, active.c.pendingSubmitId, active.c.pendingTaskId, genState[active.c.id] && genState[active.c.id].phase]);
+    useEffect2(() => {
+      const el = genDrawerRef.current;
+      if (el && el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+    }, [projectApi.activeId, active.c.id]);
     const board = /* @__PURE__ */ React.createElement("div", { className: "lv-board" }, project.acts.map((act2, ai) => {
       const items = entries.filter((e) => e.ai === ai);
       return /* @__PURE__ */ React.createElement("div", { key: act2.id, className: "lv-act" }, /* @__PURE__ */ React.createElement("div", { className: "lv-actrow" }, /* @__PURE__ */ React.createElement("input", { className: "lv-actname-in", value: act2.name, onChange: (ev) => setAct(act2.id, { name: ev.target.value }), "aria-label": "Act name" }), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, -1), title: "Move act up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico", onClick: () => moveAct(ai, 1), title: "Move act down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico danger", onClick: () => delAct(act2.id), title: "Delete act" }, "\u2715")), /* @__PURE__ */ React.createElement("div", { className: "lv-cards" }, items.map((e) => {
@@ -11664,7 +12307,8 @@ ${"=".repeat(48)}
           /* @__PURE__ */ React.createElement("div", { className: "lv-cmeta" }, /* @__PURE__ */ React.createElement("span", { className: "lv-mode" }, e.c.mode), /* @__PURE__ */ React.createElement("span", { className: "lv-dur" }, durOf2(e.c), "s"), (() => {
             const miss = castMissingImages(e, project, imgSrc);
             const over = castPastBudget(e, project, imgSrc);
-            return /* @__PURE__ */ React.createElement(React.Fragment, null, miss.length ? /* @__PURE__ */ React.createElement(
+            const unsendable = unsendableImages(shotPayload(e, project, imgSrc)).length > 0;
+            return /* @__PURE__ */ React.createElement(React.Fragment, null, unsendable ? /* @__PURE__ */ React.createElement("span", { className: "lv-st warn", title: "This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent." }, "imported picture \u2014 can't be sent yet") : null, miss.length ? /* @__PURE__ */ React.createElement(
               "span",
               {
                 className: "lv-st warn",
@@ -11691,16 +12335,17 @@ ${"=".repeat(48)}
           })(), linked && /* @__PURE__ */ React.createElement("span", { className: "lv-st linked", title: "Opening frame matches the previous shot's closing frame \u2014 continuous across the cut" }, "linked"), e.c.imported && /* @__PURE__ */ React.createElement("span", { className: "lv-st imported", title: "Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo" }, "imported"), /* @__PURE__ */ React.createElement(
             "span",
             {
-              className: "lv-st " + st,
+              className: "lv-st " + st + (gs && gs.held ? " held" : ""),
               onClick: paused ? (ev) => {
                 ev.stopPropagation();
-                pollShot(e.c.id, e.c.pendingTaskId);
+                pollShot(e.c.id, e.c.pendingTaskId, void 0, projectApi.activeId);
               } : void 0,
               style: paused ? { cursor: "pointer" } : void 0,
               title: paused ? "Click to check again" : void 0
             },
             gs && gs.msg ? gs.msg : st
           )),
+          sendUnclear(e.c) && !(gs && gs.phase === "checking") && /* @__PURE__ */ React.createElement("div", { className: "lv-unclear", role: "status", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => recheckSubmit(e.c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lv-unclearbtn", onClick: () => releaseSubmit(e.c.id) }, "I checked Activity \u2014 release this shot")),
           /* @__PURE__ */ React.createElement("div", { className: "lv-crow", onClick: (ev) => ev.stopPropagation(), onDoubleClick: (ev) => ev.stopPropagation() }, /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, -1), title: "Move up" }, "\u2191"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => moveCard(act2.id, e.ci, 1), title: "Move down" }, "\u2193"), /* @__PURE__ */ React.createElement("button", { className: "lv-ico xs", onClick: () => dupCard(act2.id, e.c), title: "Duplicate" }, "\u29C9"), /* @__PURE__ */ React.createElement(
             "button",
             {
@@ -11773,29 +12418,25 @@ ${"=".repeat(48)}
       const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
       const patchFrame = (key, fp) => patch2((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
       const inheritPrev = () => {
-        if (!prevEntry) return;
-        const rmid = prevEntry.c.resultMid;
+        if (!prevEntry || !sel) return;
+        const target = sel, src = prevEntry;
+        const rmid = src.c.resultMid;
         if (rmid) {
           setHandoff("wip");
           fetch("/api/loom/handoff", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ video_media_id: rmid, trim_out: prevEntry.c.trimOut })
+            body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut })
           }).then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) {
               setHandoff("err");
               return;
             }
             setHandoff("");
-            patchFrame("openFrame", {
-              mediaId: d.frame_media_id,
-              thumbId: "",
-              source: "",
-              desc: "handed off from " + (prevEntry.code || "prev shot")
-            });
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
           }).catch(() => setHandoff("err"));
         } else {
-          patchFrame("openFrame", { ...prevEntry.c.closeFrame });
+          patchFrame("openFrame", { ...src.c.closeFrame });
         }
       };
       let tabBody;
@@ -11824,8 +12465,8 @@ ${"=".repeat(48)}
         } }, "\u21BA re-sync from shot")), overrideClearedFlash && /* @__PURE__ */ React.createElement("div", { className: "lv-overrideflash" }, "override cleared \u2014 back to auto-compose"));
         videoTrailer = /* @__PURE__ */ React.createElement(React.Fragment, null, sel && /* @__PURE__ */ React.createElement("button", { className: "lv-usevid", disabled: busy, onClick: () => useExistingVideo(sel), title: "Skip generation -- use a video you already have in your gallery as this shot's clip" }, "\u{1F4BE} Use an existing video instead"), !sel && gs && gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-imgresult" }, /* @__PURE__ */ React.createElement("img", { src: "/thumbs/" + gs.mid + ".jpg", alt: "result" }), /* @__PURE__ */ React.createElement("div", { className: "lv-route" }, /* @__PURE__ */ React.createElement("span", { className: "lv-dim" }, "attach to shot \u2192"), /* @__PURE__ */ React.createElement("button", { className: "lv-routebtn", disabled: !routeTarget, onClick: () => {
           if (!routeTarget) return;
-          setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...gs.duration ? { actualDur: gs.duration } : {} }, (/* @__PURE__ */ new Date()).toISOString()));
-          setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
+          const out = attachDraftVideo(routeTarget.c.id, { mid: gs.mid, dur: gs.duration, settings: gs.settings || null });
+          if (out === "landed" || out === "selected") setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
         } }, routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above")), draftAttachedInfo && draftAttachedInfo.mid === gs.mid && /* @__PURE__ */ React.createElement("div", { className: "lv-ok2" }, "\u2713 attached to ", draftAttachedInfo.code, " \xB7 it's now that shot's result")));
       } else if (tab === "Image") {
         const gi = genImgState[active.c.id] || {};
@@ -12905,6 +13546,12 @@ ${"=".repeat(48)}
 .lm-genbtn:hover{filter:brightness(1.08);}
 .lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
 @media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
+.lm-held{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-unclear{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:8px 10px;border-radius:9px;font-size:11.5px;line-height:1.4;
+  color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);}
+.lm-unclear span{flex:1 1 100%;}
+.lm-unclearbtn{font:600 11px/1 system-ui;padding:7px 10px;border-radius:7px;cursor:pointer;color:var(--peach);
+  background:transparent;border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
   color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
   cursor:pointer;text-align:center;}
@@ -13193,6 +13840,9 @@ ${"=".repeat(48)}
     generateShot,
     priceShot,
     useExistingVideo,
+    // Session P (review F3/F8): the unclear-send way-out beside the Generate button.
+    recheckSubmit,
+    releaseSubmit,
     // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
     // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
     // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
@@ -13467,29 +14117,25 @@ ${"=".repeat(48)}
     const dfPatch = (fn) => dfLive && setCard(dfLive.a.id, dfLive.c.id, fn);
     const dfPatchFrame = (key, fp) => dfPatch((cc) => ({ ...cc, [key]: { ...cc[key], ...fp } }));
     const dfInheritPrev = () => {
-      if (!dfPrevEntry) return;
-      const rmid = dfPrevEntry.c.resultMid;
+      if (!dfPrevEntry || !dfLive) return;
+      const target = dfLive, src = dfPrevEntry;
+      const rmid = src.c.resultMid;
       if (rmid) {
         setDfHandoff("wip");
         fetch("/api/loom/handoff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid, trim_out: dfPrevEntry.c.trimOut })
+          body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut })
         }).then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) {
             setDfHandoff("err");
             return;
           }
           setDfHandoff("");
-          dfPatchFrame("openFrame", {
-            mediaId: d.frame_media_id,
-            thumbId: "",
-            source: "",
-            desc: "handed off from " + (dfPrevEntry.code || "prev shot")
-          });
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
         }).catch(() => setDfHandoff("err"));
       } else {
-        dfPatchFrame("openFrame", { ...dfPrevEntry.c.closeFrame });
+        dfPatchFrame("openFrame", { ...src.c.closeFrame });
       }
     };
     const dfPickFootage = (mid, code) => {
@@ -14136,7 +14782,7 @@ ${"=".repeat(48)}
       const costText = gp.noInput ? "attach a frame or cast image first" : gp.loading ? "checking\u2026" : tally ? formatCostEstimate(tally) : "\u2014";
       const costTitle = tally ? costTooltip(tally) : "";
       const gsSelf = genState[c.id];
-      const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+      const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused") || goBlocked(c, !!(gsSelf && gsSelf.phase === "paused"));
       const showClose = usesCloseFrame(c.mode);
       return /* @__PURE__ */ React.createElement("div", { className: "lm-gen" }, /* @__PURE__ */ React.createElement("div", { className: "lm-gen-top" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-gen-back", onClick: () => setGenOpen(false) }, "\u2039 ", dfLive.code), /* @__PURE__ */ React.createElement("span", { className: "lm-gen-title" }, c.title || "untitled"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-df-close", title: "Close", onClick: () => {
         setGenOpen(false);
@@ -14619,7 +15265,7 @@ ${"=".repeat(48)}
         /* @__PURE__ */ React.createElement("option", { value: "chinese" }, "Chinese"),
         /* @__PURE__ */ React.createElement("option", { value: "korean" }, "Korean"),
         /* @__PURE__ */ React.createElement("option", { value: "none" }, "SE only (no dialogue)")
-      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), /* @__PURE__ */ React.createElement(
+      ), /* @__PURE__ */ React.createElement("div", { className: "lm-gencost" }, /* @__PURE__ */ React.createElement("span", { className: "lm-gencosttext", title: costTitle }, costText), /* @__PURE__ */ React.createElement("span", { className: "lm-hint" }, "uploads are free \xB7 one job at a time")), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-genbtn", disabled: genBusy || genSubmitting || gp.noInput, onClick: genSubmit }, genBusy ? sendUnclear(c) ? "not confirmed yet \u2014 see below" : "already rendering\u2026" : genSubmitting ? "submitting\u2026" : "Generate video"), sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? /* @__PURE__ */ React.createElement("div", { className: "lm-unclear", role: "status" }, /* @__PURE__ */ React.createElement("span", null, "The server didn't confirm this render. Check Activity before rendering again."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => recheckSubmit(c.id) }, "\u21BB Check"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "lm-unclearbtn", onClick: () => releaseSubmit(c.id) }, "I checked Activity \u2014 release this shot")) : gsSelf && gsSelf.held && gsSelf.msg ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, gsSelf.msg) : unsendableImages(shotPayload(dfLive, project, imgSrc)).length ? /* @__PURE__ */ React.createElement("div", { className: "lm-held", role: "status" }, "Imported picture \u2014 it can't be sent to PixAI yet.") : null, /* @__PURE__ */ React.createElement(
         "button",
         {
           type: "button",
@@ -14928,14 +15574,129 @@ ${"=".repeat(48)}
     })());
   }
   function useProjectStore(setSelShot) {
-    const [project, setProject] = useState2(null);
+    const [project, setProjectState] = useState2(null);
     const [thumbs, setThumbs] = useState2({});
     const [busy, setBusy] = useState2(false);
-    const [activeId, setActiveId] = useState2(null);
+    const [activeId, setActiveIdState] = useState2(null);
     const [projList, setProjList] = useState2([]);
     const [projMenu, setProjMenu] = useState2(false);
+    const [loadError, setLoadError] = useState2("");
     const saveTimer = useRef2(null);
     const castImported = useRef2(false);
+    const projectRef = useRef2(null);
+    const setProject = useCallback2((next) => {
+      const v = typeof next === "function" ? next(projectRef.current) : next;
+      projectRef.current = v;
+      setProjectState(v);
+    }, []);
+    const activeIdRef = useRef2(null);
+    const setActiveId = useCallback2((id) => {
+      activeIdRef.current = id;
+      setActiveIdState(id);
+    }, []);
+    const lastSavedRef = useRef2({});
+    const pendingLocalRef = useRef2({});
+    const queueRef = useRef2(null);
+    if (!queueRef.current) {
+      queueRef.current = makeSaveQueue(async (k, json, baseRev) => {
+        const r = await writeBoard(k, json, baseRev);
+        if (r && r.ok) lastSavedRef.current[k] = json;
+        return r;
+      });
+    }
+    const resolvedRef = useRef2(/* @__PURE__ */ new Set());
+    const noteResolved = useCallback2((sid) => {
+      if (sid) resolvedRef.current.add(String(sid));
+    }, []);
+    const mergesRef = useRef2(/* @__PURE__ */ new WeakMap());
+    const namesOf = (p, ids) => {
+      const codes = {};
+      (p ? flat(p) : []).forEach((e) => {
+        codes[e.c.id] = e.code;
+      });
+      return ids.map((id) => codes[id]).filter(Boolean);
+    };
+    const mergeAfterConflict = async (id, res, depth2) => {
+      const key = PPRE + id;
+      if (res.value == null || res.rev === "unreadable") {
+        storeFailed("write", key, new Error("the storyboard changed elsewhere and could not be merged"));
+        return { failed: true, conflict: true };
+      }
+      let remote = null;
+      try {
+        remote = JSON.parse(res.value);
+      } catch (e) {
+        remote = null;
+      }
+      if (!isBoard(remote)) {
+        storeFailed("write", key, new Error("the other tab's storyboard did not parse"));
+        return { failed: true, conflict: true };
+      }
+      const open2 = activeIdRef.current === id;
+      const local = open2 ? projectRef.current : pendingLocalRef.current[key];
+      const { project: merged, changed } = mergeBoards(local, remote, { resolvedSubmits: Array.from(resolvedRef.current) });
+      if (open2) setProject(merged);
+      if (typeof window !== "undefined" && window.Toast) {
+        const codes = namesOf(merged, changed.map((x) => x.id));
+        window.Toast.show({
+          kind: "err",
+          title: "This storyboard changed in another tab",
+          msg: "Your takes were kept; other edits from this tab were replaced." + (codes.length ? " \u2605 or take numbers changed on " + codes.join(", ") + "." : "")
+        });
+      }
+      const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
+      if (again.ok) return { conflict: true, remote, merged, saved: true };
+      if (again.conflict && depth2 < 2) {
+        const next = await handleConflict(id, again, depth2 + 1);
+        return { ...next, conflict: true, remote: next.remote || remote };
+      }
+      if (again.failed) storeFailed("write", key, again.error);
+      return { conflict: true, remote, merged, failed: true };
+    };
+    const handleConflict = (id, res, depth2) => {
+      let pr = mergesRef.current.get(res);
+      if (!pr) {
+        pr = mergeAfterConflict(id, res, depth2 || 0);
+        mergesRef.current.set(res, pr);
+      }
+      return pr;
+    };
+    const persistBoard = useCallback2(async (id, p) => {
+      if (!hasStore || !id || !p) return { ok: true, skipped: true };
+      const key = PPRE + id;
+      const json = JSON.stringify(p);
+      if (!shouldSave(json, lastSavedRef.current[key])) return { ok: true, skipped: true };
+      pendingLocalRef.current[key] = p;
+      const res = await queueRef.current.save(key, json);
+      if (res.ok) return { ok: true };
+      if (res.conflict) return handleConflict(id, res, 0);
+      storeFailed("write", key, res.error);
+      return { failed: true };
+    }, []);
+    const saveBoardNow = useCallback2(async (id) => {
+      clearTimeout(saveTimer.current);
+      if (!id || activeIdRef.current !== id) return { ok: true, skipped: true };
+      return persistBoard(id, projectRef.current);
+    }, [persistBoard]);
+    const readBoard = async (id) => {
+      const got = await sGetX(PPRE + id);
+      if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+      if (got.missing) return { missing: true };
+      let p = null;
+      try {
+        p = JSON.parse(got.value);
+      } catch (e) {
+        p = null;
+      }
+      return isBoard(p) ? { p, rev: got.rev } : { failed: true, unreadable: true };
+    };
+    const showBoard = (id, p, rev) => {
+      const key = PPRE + id;
+      if (rev !== void 0) queueRef.current.setRev(key, rev);
+      lastSavedRef.current[key] = JSON.stringify(p);
+      setActiveId(id);
+      setProject(p);
+    };
     const readProjList = useCallback2(async () => {
       if (!hasStore) return [];
       const keys = await sList(PPRE);
@@ -14953,105 +15714,142 @@ ${"=".repeat(48)}
       setProjList(out);
       return out;
     }, []);
-    const flushSave = useCallback2(async (id, p) => {
-      if (hasStore && id && p) await sSet(PPRE + id, JSON.stringify(p));
-    }, []);
-    useEffect2(() => {
-      (async () => {
-        if (!hasStore) {
-          setProject(seedProject());
+    const flushSave = useCallback2(async (id) => saveBoardNow(id), [saveBoardNow]);
+    const loadBoards = async () => {
+      if (!hasStore) {
+        setProject(seedProject());
+        return;
+      }
+      const listed = await sListX(PPRE);
+      if (listed.failed) {
+        setLoadError("list");
+        return;
+      }
+      let keys = listed.keys;
+      if (!keys.length) {
+        const legacy = await sGetX(PKEY);
+        if (legacy.failed) {
+          setLoadError("legacy");
           return;
         }
-        let keys = await sList(PPRE);
-        if (!keys.length) {
-          const legacy = await sGet(PKEY);
-          const id = uid();
-          await sSet(PPRE + id, legacy || JSON.stringify(seedProject()));
-          await sSet(ACTIVE_KEY, id);
-          keys = [PPRE + id];
+        let first = null;
+        if (!legacy.missing) {
+          try {
+            first = JSON.parse(legacy.value);
+          } catch (e) {
+            first = null;
+          }
+          if (!isBoard(first)) {
+            setLoadError("legacy");
+            return;
+          }
         }
-        const wantedBoard = readBoardId(location.search);
-        let aid = wantedBoard && keys.includes(PPRE + wantedBoard) ? wantedBoard : null;
-        let boardMiss = "";
-        if (aid) {
-          await sSet(ACTIVE_KEY, aid);
-        } else {
-          if (wantedBoard) boardMiss = wantedBoard;
-          aid = await sGet(ACTIVE_KEY);
-          if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+        const id = uid();
+        queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+        pendingLocalRef.current[PPRE + id] = first || seedProject();
+        await queueRef.current.save(PPRE + id, JSON.stringify(pendingLocalRef.current[PPRE + id]));
+        await sSet(ACTIVE_KEY, id);
+        keys = [PPRE + id];
+      }
+      const wantedBoard = readBoardId(location.search);
+      let aid = wantedBoard && keys.includes(PPRE + wantedBoard) ? wantedBoard : null;
+      let boardMiss = "";
+      if (aid) {
+        await sSet(ACTIVE_KEY, aid);
+      } else {
+        if (wantedBoard) boardMiss = wantedBoard;
+        aid = await sGet(ACTIVE_KEY);
+        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+      }
+      const order = [aid].concat(keys.map((k) => k.slice(PPRE.length)).filter((x) => x !== aid));
+      let opened = null;
+      for (const id of order) {
+        const r = await readBoard(id);
+        if (r.p) {
+          opened = { id, p: r.p, rev: r.rev };
+          break;
         }
-        let p = null;
-        try {
-          const raw = await sGet(PPRE + aid);
-          if (raw) p = JSON.parse(raw);
-        } catch {
-        }
-        if (!p) {
-          p = seedProject();
-          await sSet(PPRE + aid, JSON.stringify(p));
-        }
-        setActiveId(aid);
-        setProject(p);
-        if (boardMiss && typeof window !== "undefined" && window.Toast) {
+      }
+      if (!opened) {
+        setLoadError("read");
+        return;
+      }
+      showBoard(opened.id, opened.p, opened.rev);
+      const p = opened.p;
+      if (typeof window !== "undefined" && window.Toast) {
+        if (opened.id !== aid) {
+          window.Toast.show({
+            kind: "err",
+            title: "A storyboard couldn't be read",
+            msg: "The storyboard you last had open didn't read, so nothing was written over it. Opened \u201C" + (p.name || "Untitled") + "\u201D instead. Check the server, then reload."
+          });
+        } else if (boardMiss) {
           window.Toast.show({
             kind: "err",
             title: "No storyboard at that address",
             msg: "The address asked for \u201C" + boardMiss + "\u201D, which this account has no storyboard for. Opened \u201C" + (p.name || "Untitled") + "\u201D instead."
           });
         }
-        const tkeys = await sList(TPRE);
-        const map = {};
-        for (const k of tkeys) {
-          const v = await sGet(k);
-          if (v) map[k.slice(TPRE.length)] = v;
-        }
-        setThumbs(map);
-        readProjList();
-      })();
+      }
+      const tkeys = await sList(TPRE);
+      const map = {};
+      for (const k of tkeys) {
+        const v = await sGet(k);
+        if (v) map[k.slice(TPRE.length)] = v;
+      }
+      setThumbs(map);
+      readProjList();
+    };
+    useEffect2(() => {
+      loadBoards();
     }, []);
     const openProject = useCallback2(async (id) => {
-      if (!id || id === activeId) {
+      if (!id || id === activeIdRef.current) {
         setProjMenu(false);
         return;
       }
-      await flushSave(activeId, project);
-      let p = null;
-      try {
-        const raw = await sGet(PPRE + id);
-        if (raw) p = JSON.parse(raw);
-      } catch {
+      await flushSave(activeIdRef.current);
+      await queueRef.current.idle(PPRE + id);
+      const r = await readBoard(id);
+      if (!r.p) {
+        setProjMenu(false);
+        if (window.Toast) window.Toast.show({
+          kind: "err",
+          title: "Couldn't open that storyboard",
+          msg: (r.missing ? "It is no longer there (deleted in another tab?)." : "It couldn't be read.") + " Your current storyboard stays open, unchanged."
+        });
+        return;
       }
-      if (!p) return;
       await sSet(ACTIVE_KEY, id);
-      setActiveId(id);
-      setProject(p);
+      showBoard(id, r.p, r.rev);
       setSelShot(null);
       setProjMenu(false);
-    }, [activeId, project, flushSave, setSelShot]);
-    const newProject = useCallback2(async () => {
-      await flushSave(activeId, project);
+    }, [flushSave, setSelShot]);
+    const createBoard = async (p) => {
       const id = uid();
+      queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+      await persistBoard(id, p);
+      await sSet(ACTIVE_KEY, id);
+      showBoard(id, p);
+      return id;
+    };
+    const newProject = useCallback2(async () => {
+      await flushSave(activeIdRef.current);
       const p = seedProject();
       p.name = "New storyboard";
-      await sSet(PPRE + id, JSON.stringify(p));
-      await sSet(ACTIVE_KEY, id);
-      setActiveId(id);
-      setProject(p);
+      await createBoard(p);
       setSelShot(null);
       setProjMenu(false);
       readProjList();
-    }, [activeId, project, flushSave, readProjList, setSelShot]);
+    }, [flushSave, readProjList, setSelShot]);
     const duplicateProject = useCallback2(async () => {
-      await flushSave(activeId, project);
-      const id = uid();
-      const p = { ...project, name: (project.name || "Untitled") + " copy" };
-      await sSet(PPRE + id, JSON.stringify(p));
-      await sSet(ACTIVE_KEY, id);
-      setActiveId(id);
-      setProject(p);
+      await flushSave(activeIdRef.current);
+      const cur2 = projectRef.current;
+      const p = stripInFlight({ ...cur2, name: (cur2.name || "Untitled") + " copy" });
+      await createBoard(p);
       setProjMenu(false);
       readProjList();
-    }, [activeId, project, flushSave, readProjList]);
+    }, [flushSave, readProjList]);
     const deleteProject = useCallback2(async (id) => {
       const list = await readProjList();
       if (list.length <= 1) {
@@ -15060,41 +15858,42 @@ ${"=".repeat(48)}
       }
       const tgt = list.find((x) => x.id === id);
       if (!window.confirm(`Delete "${tgt && tgt.name || "this storyboard"}"? This can't be undone.`)) return;
-      if (id === activeId) {
-        let next = null, p = null, anyReadFailed = false;
+      if (id === activeIdRef.current) {
+        let next = null, got = null, anyReadFailed = false;
         for (const cand of list) {
           if (cand.id === id) continue;
-          try {
-            const got = await sGetX(PPRE + cand.id);
-            if (got.failed) {
-              anyReadFailed = true;
-              continue;
-            }
-            if (got.value) {
-              p = JSON.parse(got.value);
-              next = cand;
-              break;
-            }
-          } catch {
+          const r = await readBoard(cand.id);
+          if (r.failed) {
             anyReadFailed = true;
+            continue;
+          }
+          if (r.p) {
+            got = r;
+            next = cand;
+            break;
           }
         }
-        if (!p) {
+        if (!got) {
           window.alert(anyReadFailed ? "Couldn't read your other storyboards, so nothing was deleted. Check the server and try again." : "Couldn't open another storyboard, so nothing was deleted. Try again.");
           return;
         }
         clearTimeout(saveTimer.current);
+        await queueRef.current.idle(PPRE + id);
         await sDel(PPRE + id);
+        queueRef.current.forget(PPRE + id);
+        delete lastSavedRef.current[PPRE + id];
         await sSet(ACTIVE_KEY, next.id);
-        setActiveId(next.id);
-        setProject(p);
+        showBoard(next.id, got.p, got.rev);
         setSelShot(null);
       } else {
+        await queueRef.current.idle(PPRE + id);
         await sDel(PPRE + id);
+        queueRef.current.forget(PPRE + id);
+        delete lastSavedRef.current[PPRE + id];
       }
       await readProjList();
       setProjMenu(false);
-    }, [activeId, readProjList, setSelShot]);
+    }, [readProjList, setSelShot]);
     const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
     useEffect2(() => {
       if (!activeId) return;
@@ -15128,11 +15927,16 @@ ${"=".repeat(48)}
       history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
     }, [project]);
     useEffect2(() => {
-      if (!project || !hasStore || !activeId) return;
+      if (!project || !hasStore || !activeId) return void 0;
+      if (!shouldSave(JSON.stringify(project), lastSavedRef.current[PPRE + activeId])) {
+        setBusy(false);
+        return void 0;
+      }
       setBusy(true);
       clearTimeout(saveTimer.current);
+      const id = activeId;
       saveTimer.current = setTimeout(async () => {
-        await sSet(PPRE + activeId, JSON.stringify(project));
+        await saveBoardNow(id);
         setBusy(false);
       }, 600);
       return () => clearTimeout(saveTimer.current);
@@ -15145,23 +15949,19 @@ ${"=".repeat(48)}
       return id;
     }, []);
     const _adoptBackup = async (d) => {
-      if (!d || !d.project) {
+      if (!d || !isBoard(d.project)) {
         window.alert("That file didn't parse as a storyboard backup.");
         return;
       }
       if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?
 
 Your currently-open board is left untouched.`)) return;
-      await flushSave(activeId, project);
-      const id = uid();
-      await sSet(PPRE + id, JSON.stringify(d.project));
-      await sSet(ACTIVE_KEY, id);
+      await flushSave(activeIdRef.current);
       if (d.thumbs) {
         setThumbs((t) => ({ ...t, ...d.thumbs }));
         if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v);
       }
-      setActiveId(id);
-      setProject(d.project);
+      await createBoard(stripInFlight(d.project));
       setSelShot(null);
       readProjList();
     };
@@ -15206,7 +16006,14 @@ Your currently-open board is left untouched.`)) return;
       projectApi,
       importJSON,
       importBackup,
-      activeId
+      activeId,
+      // Session P: what the render lifecycle needs from the store -- the synchronous board and
+      // board id, the lock flush, the merge's resolved-submit record, and the boot's failure.
+      projectRef,
+      activeIdRef,
+      saveBoardNow,
+      noteResolved,
+      loadError
     };
   }
   function useShotMutations(project, setProject) {
@@ -15215,7 +16022,6 @@ Your currently-open board is left untouched.`)) return;
     const setAct = useCallback2((aId, patch2) => setProject((p) => patchAct(p, aId, patch2)), [setProject]);
     const setAssets = useCallback2((fn) => setProject((p) => patchAssets(p, fn)), [setProject]);
     const setCardStatus = (cardId, patch2) => setProject((p) => patchCardById(p, cardId, patch2));
-    const setCardResult = (cardId, patch2) => setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch2, (/* @__PURE__ */ new Date()).toISOString())));
     const addCard = (aId) => {
       const c = newCard();
       setProject((p) => appendCardToAct(p, aId, c));
@@ -15257,7 +16063,16 @@ Your currently-open board is left untouched.`)) return;
     };
     const setRef = (aId, cId, rId, patch2) => setProject((p) => patchRef(p, aId, cId, rId, patch2));
     const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
-    const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+    const splitShot = (entry, t) => {
+      const cur2 = project && flat(project).find((e) => e.c.id === entry.c.id);
+      if (splitBlocked(cur2 ? cur2.c : entry.c)) {
+        const msg = "A render for this shot is still out. Split it after that take lands (or after you release it).";
+        if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "err", title: "Can't split this shot yet", msg });
+        else window.alert(msg);
+        return;
+      }
+      setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+    };
     return {
       open: open2,
       setOpen: setOpen2,
@@ -15265,7 +16080,6 @@ Your currently-open board is left untouched.`)) return;
       setAct,
       setAssets,
       setCardStatus,
-      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -15281,9 +16095,17 @@ Your currently-open board is left untouched.`)) return;
       splitShot
     };
   }
-  function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
+  function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
     const [genState, setGenState] = useState2({});
+    const genStateRef = useRef2(genState);
+    genStateRef.current = genState;
     const resumedRef = useRef2({});
+    const pollingRef = useRef2(/* @__PURE__ */ new Set());
+    const inflightRef = useRef2(/* @__PURE__ */ new Set());
+    const checkingRef = useRef2(/* @__PURE__ */ new Set());
+    const preLockRef = useRef2({});
+    const draftSubmitsRef = useRef2({});
+    const draftTasksRef = useRef2({});
     const [genImgState, setGenImgState] = useState2({});
     const [imgModel, setImgModel] = useState2(null);
     const [imgLoras, setImgLoras] = useState2([]);
@@ -15310,7 +16132,7 @@ Your currently-open board is left untouched.`)) return;
     const [batchTally, setBatchTally] = useState2(null);
     const setBatchOutcome = (cardId, outcome) => setBatchTally((prev) => prev && prev.ids.has(cardId) ? { ...prev, outcomes: { ...prev.outcomes, [cardId]: outcome } } : prev);
     const imgSrc = (thumbId, source) => thumbId ? thumbs[thumbId] : source && (source.startsWith("http") || source.startsWith("data:") || isCatalogMediaId(source)) ? source : null;
-    const shotPayload2 = (entry) => shotPayload(entry, project, imgSrc);
+    const shotPayload2 = (entry) => shotPayload(entry, projectRef && projectRef.current || project, imgSrc);
     const priceShot = (entry) => priceBody(shotPayload2(entry));
     const confirmSpend = async (quoteBody, label) => {
       const pr = await priceBody(quoteBody);
@@ -15329,70 +16151,243 @@ Couldn't verify the cost or free-card coverage \u2014 it may spend credits.
 
 Generate anyway?`);
     };
+    const cardOn = (id) => {
+      const p = projectRef.current;
+      return p ? flat(p).find((e) => e.c.id === id) || null : null;
+    };
+    const patchCardNow = (id, fn) => setProject((p) => p ? patchCardByIdWith(p, id, fn) : p);
+    const sayCard = (id, gs) => setGenState((s) => ({ ...s, [id]: gs }));
+    const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
+    const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
+    const CHECKING_MSG = "Checking whether the render was sent\u2026";
     const generateShot = async (entry, opts = {}) => {
-      const c = entry.c;
-      const p = shotPayload2(entry);
-      if (!p.hasInput) {
-        const msg = c.imported ? 'Imported footage \u2014 nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via "Use an existing video instead".' : "attach a frame or cast image first";
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
-        return { ok: false, reason: "no-input" };
-      }
-      if (!opts.skipConfirm) {
-        const pr = await priceShot(entry);
-        if (pr && !pr.free && pr.cost != null) {
-          const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
-          if (!window.confirm(`${line}
+      const cardId = entry.c.id;
+      const boardId = activeIdRef.current;
+      const pre = cardOn(cardId);
+      if (!pre) return { ok: false, reason: "missing" };
+      const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+      if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { ok: false, reason: "in-flight" };
+      if (opts.onlyIfNeeded && !needsRender(pre.c)) return { ok: false, reason: "not-needed" };
+      inflightRef.current.add(cardId);
+      try {
+        const proj = projectRef.current;
+        const fresh = cardOn(cardId);
+        const c = fresh.c;
+        const p = shotPayload(fresh, proj, imgSrc);
+        if (!p.hasInput) {
+          const msg = c.imported ? 'Imported footage \u2014 nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via "Use an existing video instead".' : "attach a frame or cast image first";
+          setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
+          return { ok: false, reason: "no-input" };
+        }
+        if (unsendableImages(p).length) {
+          holdCard(c.id, "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent.");
+          return { ok: false, reason: "imported-picture" };
+        }
+        if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
+        const settings = snapshotSettings(c, proj, p.prompt, p.quality);
+        let quote = opts.quote || null;
+        let expectFree = !!opts.expectFree;
+        if (!opts.skipConfirm) {
+          const pr = await priceBody(p);
+          if (pr && !pr.free && pr.cost != null) {
+            const line = priceIsShort(pr) ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`) : `No free card covers this shot \u2014 it will spend ~${pr.cost.toLocaleString()} credits.`;
+            if (!window.confirm(`${line}
 
 Generate anyway?`)) return { ok: false, reason: "cancelled" };
-        } else if (!pr || !pr.free) {
-          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
+          } else if (!pr || !pr.free) {
+            if (!window.confirm("Couldn't verify this shot's cost or free-card coverage \u2014 it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
+          }
+          quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
+          expectFree = !!(pr && pr.free);
         }
+        if (activeIdRef.current !== boardId || !cardOn(cardId)) return { ok: false, reason: "board-changed" };
+        const before = cardOn(cardId).c;
+        const submitId = newSubmitId2();
+        const startedAt = Date.now();
+        patchCardNow(cardId, (cc) => beginRender(cc, {
+          submitId,
+          settings,
+          anchor: c.anchor || null,
+          board: boardId,
+          quote,
+          startedAt
+        }, { pausedOk: pausedNow }) || cc);
+        const locked = cardOn(cardId);
+        if (!locked || locked.c.pendingSubmitId !== submitId) return { ok: false, reason: "in-flight" };
+        setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
+        const saved = await saveBoardNow(boardId);
+        if (!saved.ok) {
+          const here2 = activeIdRef.current === boardId;
+          if (saved.conflict) {
+            const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+            if (here2) {
+              patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || before));
+              await saveBoardNow(boardId);
+            }
+            holdCard(cardId, "This storyboard changed in another tab \u2014 check the shot, then press Render again.");
+            return { ok: false, reason: "conflict" };
+          }
+          if (here2) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+          holdCard(cardId, "Couldn't save the storyboard, so nothing was sent.");
+          return { ok: false, reason: "save-failed" };
+        }
+        let threw = false, status = 0, body = null;
+        try {
+          const r = await fetch("/api/loom/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: p.mode,
+              prompt: p.prompt,
+              images: p.images,
+              video_refs: p.video_refs,
+              duration: p.duration,
+              quality: p.quality,
+              generate_audio: p.generate_audio,
+              audio_language: p.audio_language,
+              origin: "loom-shot",
+              loom_target: { board_id: boardId, card_id: cardId },
+              submit_id: submitId,
+              ...expectFree ? { expect_free: true } : {}
+            })
+          });
+          status = r.status;
+          try {
+            body = await r.json();
+          } catch (_e) {
+            body = null;
+          }
+        } catch (_e) {
+          threw = true;
+        }
+        inflightRef.current.delete(cardId);
+        const here = () => activeIdRef.current === boardId;
+        const cls = classifySubmit({ threw, status, body });
+        if (cls.kind === "accepted") {
+          if (here()) {
+            patchCardNow(cardId, (cc) => adoptTask(cc, submitId, cls.taskId));
+            pollShot(cardId, cls.taskId, startedAt, boardId);
+          }
+          if (window.Jobs && window.Jobs.register) window.Jobs.register(cls.taskId, fresh.code + " \xB7 " + (c.title || "untitled"));
+          return { ok: true, taskId: cls.taskId };
+        }
+        if (cls.kind === "busy") {
+          if (here()) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+          holdCard(cardId, cls.error);
+          return { ok: false, reason: "busy" };
+        }
+        if (cls.kind === "refused") {
+          noteResolved(submitId);
+          const msg = friendlyGenErr(cls.error);
+          if (here()) patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+          holdCard(cardId, msg);
+          return { ok: false, reason: "refused" };
+        }
+        if (here()) patchCardNow(cardId, (cc) => markUnclear(cc, submitId, CHECKING_MSG, nowIso()));
+        const settled2 = await checkSubmit(cardId, submitId, boardId);
+        if (settled2.accepted) return { ok: true, taskId: settled2.taskId };
+        return { ok: false, reason: settled2.refused ? "refused" : "unclear" };
+      } finally {
+        inflightRef.current.delete(cardId);
       }
-      setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting\u2026" } }));
-      setCardStatus(c.id, { status: "wip" });
+    };
+    const checkSubmit = async (cardId, submitId, boardId) => {
+      const here = () => activeIdRef.current === boardId;
+      if (checkingRef.current.has(submitId)) return { unclear: true };
+      checkingRef.current.add(submitId);
       try {
-        const r = await fetch("/api/loom/generate", {
+        if (here()) holdCard(cardId, CHECKING_MSG, "checking");
+        let st = null;
+        try {
+          const r = await fetch("/api/loom/submit-status?submit_id=" + encodeURIComponent(submitId));
+          st = await r.json();
+        } catch (_e) {
+          st = null;
+        }
+        const cls = classifySubmitStatus(st);
+        if (!here()) return cls.kind === "accepted" ? { accepted: true, taskId: cls.taskId } : { [cls.kind]: true };
+        if (cls.kind === "accepted") {
+          adoptFromJournal(cardId, submitId, cls.taskId, boardId);
+          return { accepted: true, taskId: cls.taskId };
+        }
+        if (cls.kind === "refused") {
+          noteResolved(submitId);
+          const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
+          patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+          holdCard(cardId, msg);
+          return { refused: true };
+        }
+        patchCardNow(cardId, (cc) => markUnclear(cc, submitId, UNCLEAR_MSG, nowIso()));
+        holdCard(cardId, "unconfirmed", "unclear");
+        return { unclear: true };
+      } finally {
+        checkingRef.current.delete(submitId);
+      }
+    };
+    const adoptFromJournal = (cardId, submitId, taskId, boardId) => {
+      const e0 = cardOn(cardId);
+      if (!e0) return;
+      const startedAt = e0.c.genStartedAt || Date.now();
+      patchCardNow(cardId, (cc) => adoptTask(cc, submitId, taskId));
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(taskId, e0.code + " \xB7 " + (e0.c.title || "untitled"));
+      pollShot(cardId, taskId, startedAt, boardId);
+    };
+    const recheckSubmit = (cardId) => {
+      const e = cardOn(cardId);
+      if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+      checkSubmit(cardId, e.c.pendingSubmitId, activeIdRef.current);
+    };
+    const releaseSubmit = async (cardId) => {
+      const e = cardOn(cardId);
+      const boardId = activeIdRef.current;
+      if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+      const submitId = e.c.pendingSubmitId;
+      let d = null, status = 0;
+      try {
+        const csrf = await LOOM_RUN_DEPS.csrf();
+        const r = await fetch("/api/loom/submit-abandon", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: p.mode,
-            prompt: p.prompt,
-            images: p.images,
-            video_refs: p.video_refs,
-            duration: p.duration,
-            quality: p.quality,
-            generate_audio: p.generate_audio,
-            audio_language: p.audio_language,
-            origin: "loom-shot"
-          })
+          body: JSON.stringify({ csrf, submit_id: submitId })
         });
-        const d = await r.json();
-        if (d.error || !d.task_id) {
-          setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: d.error ? friendlyGenErr(d.error) : "submit failed" } }));
-          setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-          return { ok: false, reason: "submit-failed" };
-        }
-        const startedAt = Date.now();
-        setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
-        pollShot(c.id, d.task_id, startedAt);
-        if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " \xB7 " + (c.title || "untitled"));
-        return { ok: true, taskId: d.task_id };
-      } catch {
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
-        setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-        return { ok: false, reason: "network" };
+        status = r.status;
+        d = await r.json();
+      } catch (_e) {
+        d = null;
       }
+      if (activeIdRef.current !== boardId) return;
+      if (d && d.ok) {
+        noteResolved(submitId);
+        patchCardNow(cardId, (cc) => abandonSubmit(cc, submitId, nowIso()));
+        holdCard(cardId, "Released. If that render was sent after all, its clip is in your library.");
+        return;
+      }
+      if (status === 409 && d && d.task_id) {
+        adoptFromJournal(cardId, submitId, String(d.task_id), boardId);
+        return;
+      }
+      holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " \u2014 " + d.error : " \u2014 the server didn't answer.") + " Nothing was sent.", "unclear");
     };
     const POLL_SLOW_AT_MS = 20 * 60 * 1e3;
     const POLL_SLOW_MS = 20 * 1e3;
     const POLL_STALE_AT_MS = 90 * 60 * 1e3;
     const POLL_STALE_MS = 3 * 60 * 1e3;
     const POLL_CEILING_MS = 6 * 60 * 60 * 1e3;
-    const pollShot = (cardId, tid, existingStartedAt) => {
-      setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
+    const pollShot = (cardId, tid, existingStartedAt, boardId) => {
+      const key = String(tid);
+      if (pollingRef.current.has(key)) return;
+      pollingRef.current.add(key);
+      resumedRef.current[key] = true;
+      const onBoard = () => !boardId || activeIdRef.current === boardId;
+      const leave = () => {
+        pollingRef.current.delete(key);
+        delete resumedRef.current[key];
+      };
+      if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(tid).slice(-6) + ")" } }));
       const startedAt = existingStartedAt || Date.now();
       const pause = () => {
-        setGenState((s) => ({ ...s, [cardId]: {
+        pollingRef.current.delete(key);
+        if (onBoard()) setGenState((s) => ({ ...s, [cardId]: {
           phase: "paused",
           msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result \u2014 click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")"
         } }));
@@ -15402,25 +16397,53 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         const cls = classifyTaskStatus(d);
         const elapsed = Date.now() - startedAt;
         if (cls.phase === "done") {
-          setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-          setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...cls.duration ? { actualDur: cls.duration } : {} });
+          if (!onBoard()) {
+            leave();
+            return;
+          }
+          pollingRef.current.delete(key);
+          const cur2 = cardOn(cardId);
+          const rep = { mid: cls.mid, taskId: tid, dur: cls.duration, at: nowIso(), board: boardId };
+          const outcome = cur2 ? landTake(cur2.c, rep).outcome : "not-owned";
+          if (cur2) patchCardNow(cardId, (cc) => landTake(cc, rep).card);
+          if (outcome === "landed" || outcome === "repeat" && cur2 && String(cur2.c.pendingTaskId) === key) {
+            setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
+          } else if (outcome === "unselected") {
+            setGenState((s) => ({ ...s, [cardId]: {
+              phase: "done",
+              mid: cls.mid,
+              duration: cls.duration,
+              msg: "An earlier render finished; it was added as a take without taking \u2605."
+            } }));
+          } else {
+            setGenState((s) => ({ ...s, [cardId]: {
+              phase: "done",
+              mid: cls.mid,
+              msg: "That render finished; its clip is in your library."
+            } }));
+          }
           setBatchOutcome(cardId, "done");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (cls.phase === "failed") {
+          if (!onBoard()) {
+            leave();
+            return;
+          }
+          pollingRef.current.delete(key);
           setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-          setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
+          patchCardNow(cardId, (cc) => failRender(cc, { taskId: tid, state: "failed", msg: cls.msg, at: nowIso() }));
           setBatchOutcome(cardId, "failed");
           if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
         } else if (elapsed > POLL_CEILING_MS) {
           pause();
         } else if (elapsed > POLL_STALE_AT_MS) {
-          setGenState((s) => ({ ...s, [cardId]: {
+          if (onBoard()) setGenState((s) => ({ ...s, [cardId]: {
             phase: "stale",
             msg: "Still going after " + elapsedLabel(elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(tid).slice(-6) + ")"
           } }));
           setTimeout(tick, POLL_STALE_MS);
         } else if (elapsed > POLL_SLOW_AT_MS) {
-          setGenState((s) => ({ ...s, [cardId]: {
+          if (onBoard()) setGenState((s) => ({ ...s, [cardId]: {
             phase: "slow",
             msg: "Taking longer than expected (" + elapsedLabel(elapsed) + ", task " + String(tid).slice(-6) + ")"
           } }));
@@ -15436,16 +16459,224 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       });
       setTimeout(tick, 2500);
     };
+    const resumeInterrupted = () => {
+      const proj = projectRef.current;
+      if (!proj) return;
+      const boardId = activeIdRef.current;
+      cardsToResume(proj, resumedRef.current).forEach((c) => pollShot(c.id, c.taskId, c.startedAt, boardId));
+      submitsToCheck(proj, /* @__PURE__ */ Object.create(null)).forEach((c) => checkSubmit(c.id, c.submitId, boardId));
+    };
     useEffect2(() => {
-      if (!project) return;
-      cardsToResume(project, resumedRef.current).forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
+      resumeInterrupted();
     }, [activeId, mobileUI]);
     const useExistingVideo = (entry) => {
+      const cardId = entry.c.id, boardId = activeIdRef.current;
       openPick((mid, thumb, isVideo, duration) => {
-        setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-        setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
+        const cur2 = cardOn(cardId);
+        if (!cur2 || activeIdRef.current !== boardId) return;
+        const rep = { mid, dur: duration, imported: true, at: nowIso() };
+        const out = attachTake(cur2.c, rep);
+        if (out.outcome === "unclear") {
+          holdCard(cardId, "This shot's last render isn't confirmed yet \u2014 check it (or release it) before attaching a video.", "unclear");
+          return;
+        }
+        if (out.outcome === "invalid") return;
+        patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Attached from your gallery", mid } }));
       }, "video");
     };
+    const attachDraftVideo = (cardId, { mid, dur, settings }) => {
+      const cur2 = cardOn(cardId);
+      if (!cur2 || !mid) return "invalid";
+      const rep = { mid, dur, imported: false, settings: settings || null, at: nowIso() };
+      const out = attachTake(cur2.c, rep);
+      if (out.outcome === "unclear") {
+        holdCard(cardId, "This shot's last render isn't confirmed yet \u2014 check it (or release it) before attaching.", "unclear");
+        return "unclear";
+      }
+      if (out.outcome === "invalid") return "invalid";
+      patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+      return out.outcome;
+    };
+    const beginDrawerRender = async (req) => {
+      const q = req || {};
+      const cardId = String(q.card_id || ""), boardId = String(q.board_id || ""), submitId = String(q.submit_id || "");
+      const payload = q.payload || {};
+      if (!cardId || !boardId || !submitId) return { refused: "This render isn't tied to a shot, so nothing was sent." };
+      if (cardId === "__draft__") {
+        const dc = draftCardRef && draftCardRef.current || {};
+        draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
+          {
+            ...dc,
+            mode: payload.mode || dc.mode,
+            duration: payload.duration != null ? payload.duration : dc.duration,
+            audioGen: payload.audio != null ? !!payload.audio : dc.audioGen,
+            audioLanguage: payload.audio_language || dc.audioLanguage
+          },
+          projectRef.current,
+          payload.prompt,
+          payload.quality
+        ) };
+        return { ok: true };
+      }
+      if (activeIdRef.current !== boardId) return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+      const pre = cardOn(cardId);
+      if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
+      const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+      if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { refused: "This shot is already rendering. Nothing was sent." };
+      if (unsendableImages(payload).length) {
+        holdCard(cardId, "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent.");
+        return { refused: "Imported picture \u2014 it can't be sent to PixAI yet. Nothing was sent." };
+      }
+      inflightRef.current.add(cardId);
+      const c = pre.c;
+      const settings = snapshotSettings({
+        ...c,
+        mode: payload.mode || c.mode,
+        duration: payload.duration != null ? payload.duration : c.duration,
+        audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
+        audioLanguage: payload.audio_language || c.audioLanguage
+      }, projectRef.current, payload.prompt, payload.quality);
+      const quote = q.quote || null;
+      preLockRef.current[submitId] = c;
+      patchCardNow(cardId, (cc) => beginRender(cc, {
+        submitId,
+        settings,
+        anchor: c.anchor || null,
+        board: boardId,
+        quote,
+        startedAt: Date.now()
+      }, { pausedOk: pausedNow }) || cc);
+      const locked = cardOn(cardId);
+      if (!locked || locked.c.pendingSubmitId !== submitId) {
+        inflightRef.current.delete(cardId);
+        delete preLockRef.current[submitId];
+        return { refused: "This shot is already rendering. Nothing was sent." };
+      }
+      setGenState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting\u2026" } }));
+      const saved = await saveBoardNow(boardId);
+      if (saved.ok) return { ok: true };
+      inflightRef.current.delete(cardId);
+      delete preLockRef.current[submitId];
+      const here = activeIdRef.current === boardId;
+      if (saved.conflict) {
+        const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+        if (here) {
+          patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || c));
+          await saveBoardNow(boardId);
+        }
+        const msg2 = "This storyboard changed in another tab \u2014 check the shot, then press Render again.";
+        holdCard(cardId, msg2);
+        return { refused: msg2 };
+      }
+      if (here) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, c));
+      const msg = "Couldn't save the storyboard, so nothing was sent.";
+      holdCard(cardId, msg);
+      return { refused: msg };
+    };
+    const onVideoSubmit = useCallback2((detail) => {
+      const d = detail || {};
+      if (d.card_id) inflightRef.current.delete(String(d.card_id));
+      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Rendered");
+      const submitted = d.payload && d.payload.mode;
+      if (d.card_id === "__draft__") {
+        draftTasksRef.current[String(d.task_id)] = draftSubmitsRef.current[String(d.submit_id)] || {};
+        delete draftSubmitsRef.current[String(d.submit_id)];
+        setGenState((s) => ({ ...s, __draft__: { phase: "running", msg: "Rendering\u2026 (task " + String(d.task_id).slice(-6) + ")" } }));
+        if (submitted && setDraftCard) setDraftCard((c) => submitted !== c.mode ? setShotMode(c, submitted) : c);
+        return;
+      }
+      delete preLockRef.current[String(d.submit_id)];
+      if (d.board_id && d.board_id !== activeIdRef.current) return;
+      const card = cardForSubmit(projectRef.current, d.submit_id);
+      if (!card) return;
+      patchCardNow(card.id, (cc) => {
+        const a = adoptTask(cc, d.submit_id, d.task_id);
+        return submitted && submitted !== a.mode ? setShotMode(a, submitted) : a;
+      });
+      setGenState((s) => ({ ...s, [card.id]: { phase: "running", msg: "Rendering\u2026 (task " + String(d.task_id).slice(-6) + ")" } }));
+    }, []);
+    const onVideoResult = useCallback2((detail) => {
+      const d = detail || {};
+      const mid = (d.media_ids || [])[0];
+      if (d.card_id === "__draft__") {
+        const rec = draftTasksRef.current[String(d.task_id)] || {};
+        setGenState((s) => ({ ...s, __draft__: { phase: "done", msg: "Done", mid, duration: d.duration, settings: rec.settings || null } }));
+        return;
+      }
+      const tid = d.task_id;
+      if (!mid || !tid) return;
+      if (d.board_id && d.board_id !== activeIdRef.current) return;
+      const card = cardForTask(projectRef.current, tid);
+      if (!card) return;
+      const rep = { mid, taskId: tid, dur: d.duration, at: nowIso(), board: d.board_id || activeIdRef.current };
+      const outcome = landTake(card, rep).outcome;
+      patchCardNow(card.id, (cc) => landTake(cc, rep).card);
+      const landed = outcome === "landed" || outcome === "repeat" && String(card.pendingTaskId) === String(tid);
+      setGenState((s) => ({ ...s, [card.id]: landed ? { phase: "done", msg: "Done", mid, duration: d.duration } : { phase: "done", mid, msg: outcome === "unselected" ? "An earlier render finished; it was added as a take without taking \u2605." : "That render finished; its clip is in your library." } }));
+    }, []);
+    const onVideoError = useCallback2((detail) => {
+      const d = detail || {};
+      if (d.card_id === "__draft__") {
+        setGenState((s) => ({ ...s, __draft__: { phase: "error", msg: d.unclear ? UNCLEAR_MSG : d.error } }));
+        return;
+      }
+      if (d.task_id) {
+        if (d.board_id && d.board_id !== activeIdRef.current) return;
+        const card2 = cardForTask(projectRef.current, d.task_id);
+        if (!card2) return;
+        patchCardNow(card2.id, (cc) => failRender(cc, { taskId: d.task_id, state: "failed", msg: d.error, at: nowIso() }));
+        setGenState((s) => ({ ...s, [card2.id]: { phase: "error", msg: d.error } }));
+        return;
+      }
+      if (!d.submit_id) return;
+      if (d.card_id) inflightRef.current.delete(String(d.card_id));
+      const before = preLockRef.current[String(d.submit_id)];
+      delete preLockRef.current[String(d.submit_id)];
+      if (d.board_id && d.board_id !== activeIdRef.current) return;
+      const card = cardForSubmit(projectRef.current, d.submit_id);
+      if (!card) return;
+      const cls = d.answer ? classifySubmit(d.answer) : { kind: d.unclear ? "unclear" : "refused", error: d.error };
+      if (cls.kind === "unclear" || cls.kind === "accepted") {
+        patchCardNow(card.id, (cc) => markUnclear(cc, d.submit_id, CHECKING_MSG, nowIso()));
+        checkSubmit(card.id, d.submit_id, activeIdRef.current);
+        return;
+      }
+      if (cls.kind === "busy") {
+        if (before) patchCardNow(card.id, (cc) => cancelRender(cc, d.submit_id, before));
+        else patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg: cls.error || d.error, at: nowIso() }));
+        holdCard(card.id, cls.error || d.error);
+        return;
+      }
+      noteResolved(d.submit_id);
+      const msg = d.error || friendlyGenErr(cls.error);
+      patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg, at: nowIso() }));
+      holdCard(card.id, msg);
+    }, []);
+    const drawerCardFor = (d) => {
+      if (d.card_id === "__draft__") return "__draft__";
+      if (d.board_id && d.board_id !== activeIdRef.current) return null;
+      const card = cardForTask(projectRef.current, d.task_id);
+      return card ? card.id : null;
+    };
+    const onVideoSlow = useCallback2((detail) => {
+      const d = detail || {};
+      const id = drawerCardFor(d);
+      if (!id) return;
+      setGenState((s) => ({ ...s, [id]: {
+        phase: d.tier,
+        msg: d.tier === "stale" ? "Still going after " + elapsedLabel(d.elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(d.task_id).slice(-6) + ")" : "Taking longer than expected (" + elapsedLabel(d.elapsed) + ", task " + String(d.task_id).slice(-6) + ")"
+      } }));
+    }, []);
+    const onVideoPaused = useCallback2((detail) => {
+      const d = detail || {};
+      const id = drawerCardFor(d);
+      if (!id) return;
+      setGenState((s) => ({ ...s, [id]: {
+        phase: "paused",
+        msg: "Paused auto-checking with no result \u2014 click to check again, or check pixai.art (task " + String(d.task_id).slice(-6) + ")"
+      } }));
+    }, []);
     const pollTaskWithCeiling = (tid, setState, cardId) => {
       const startedAt = Date.now();
       const tick = () => fetch("/api/task-status?task_id=" + tid).then((r) => r.json()).then((d) => {
@@ -15645,9 +16876,11 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       );
     };
     const batchGenerate = async (entries) => {
-      const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
+      const board = projectRef.current ? flat(projectRef.current) : entries || [];
+      const todo = board.filter((e) => needsRender(e.c));
       if (!todo.length) return;
       setBatching(true);
+      const fps = todo.map((e) => priceFingerprint(shotPayload2(e)));
       const prices = await Promise.all(todo.map((e) => priceShot(e)));
       const { free, paid, credits, unknown, overflow, pools, overflowIndexes } = tallyPricesDetailed(prices);
       const shortPools = Object.values(pools).filter((pl) => pl.needed > pl.held);
@@ -15667,18 +16900,61 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       }
       const ids = new Set(todo.map((e) => e.c.id));
       setBatchTally({ total: todo.length, submitted: 0, ids, outcomes: {} });
-      for (const e of todo) {
+      const covered = prices.map((pr, i) => !!(pr && pr.free) && !(overflowIndexes || []).includes(i));
+      const dropFromTally = (id) => setBatchTally((prev) => {
+        if (!prev || !prev.ids.has(id)) return prev;
+        const next = new Set(prev.ids);
+        next.delete(id);
+        return { ...prev, ids: next, total: prev.total - 1 };
+      });
+      const changed = [], skipped = [];
+      let stopped = null;
+      for (const [i, e] of todo.entries()) {
         let r;
         try {
-          r = await generateShot(e, { skipConfirm: true });
+          r = await generateShot(e, {
+            skipConfirm: true,
+            onlyIfNeeded: true,
+            confirmedFp: fps[i],
+            expectFree: covered[i],
+            quote: prices[i] ? { cost: prices[i].cost == null ? null : prices[i].cost, free: covered[i] } : null
+          });
         } catch (_e) {
           r = { ok: false };
         }
         if (r.ok) setBatchTally((prev) => prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + 1 } : prev);
-        else setBatchOutcome(e.c.id, "failed");
-        await new Promise((res) => setTimeout(res, 2200));
+        else if (r.reason === "changed") {
+          changed.push(e.code);
+          dropFromTally(e.c.id);
+          continue;
+        } else if (r.reason === "not-needed" || r.reason === "in-flight" || r.reason === "missing") {
+          skipped.push(e.code);
+          dropFromTally(e.c.id);
+          continue;
+        } else setBatchOutcome(e.c.id, r.reason === "unclear" ? "stale" : "failed");
+        if (!r.ok && (r.reason === "conflict" || r.reason === "busy" || r.reason === "unclear" || r.reason === "save-failed" || r.reason === "board-changed")) {
+          stopped = { code: e.code, reason: r.reason };
+          todo.slice(i + 1).forEach((x) => dropFromTally(x.c.id));
+          break;
+        }
+        if (i < todo.length - 1) await new Promise((res) => setTimeout(res, 2200));
       }
       setBatching(false);
+      if (changed.length || skipped.length || stopped) {
+        const WHY = {
+          conflict: "the storyboard changed in another tab",
+          busy: "the server says that shot is already rendering",
+          unclear: "the server didn't confirm that render",
+          "save-failed": "the storyboard couldn't be saved",
+          "board-changed": "another storyboard was opened"
+        };
+        const lines = [];
+        if (changed.length) lines.push("Skipped " + changed.join(", ") + ": changed since you confirmed. Nothing was sent for them.");
+        if (skipped.length) lines.push("Skipped " + skipped.join(", ") + ": already rendering or rendered.");
+        if (stopped) lines.push("Stopped at " + stopped.code + " (" + (WHY[stopped.reason] || stopped.reason) + "). Nothing after it was sent.");
+        if (window.Toast) window.Toast.show({ kind: "err", sticky: !!stopped, title: "Generate all", msg: lines.join(" ") });
+        else window.alert(lines.join("\n"));
+      }
     };
     const PRICE_DEBOUNCE_MS2 = 600;
     const [priceCache, setPriceCache] = useState2({});
@@ -15704,7 +16980,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     }, [project, priceCache]);
     const { notDone, notDoneFp } = useMemo2(() => {
       const boardEntries = project ? flat(project) : [];
-      const nd = boardEntries.filter((e) => e.c.status !== "done");
+      const nd = boardEntries.filter((e) => needsRender(e.c));
       const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload2(e))).join("|");
       return { notDone: nd, notDoneFp: fp };
     }, [project]);
@@ -15810,7 +17086,18 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       refreshEstimate,
       priceShot,
       spend,
-      refreshSpend
+      refreshSpend,
+      // Session P: the unclear-send way-out, the draft's "attach to A·0n", and the Video
+      // drawer's host (its beforeSend and the handlers of its events).
+      recheckSubmit,
+      releaseSubmit,
+      attachDraftVideo,
+      beginDrawerRender,
+      onVideoSubmit,
+      onVideoResult,
+      onVideoError,
+      onVideoSlow,
+      onVideoPaused
     };
   }
   function useExportPipeline(project, thumbs) {
@@ -15957,8 +17244,15 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setProjMenu,
       projectApi,
       importBackup,
-      activeId
+      activeId,
+      projectRef,
+      activeIdRef,
+      saveBoardNow,
+      noteResolved,
+      loadError
     } = useProjectStore(setSelShot);
+    const draftCardRef = useRef2(draftCard);
+    draftCardRef.current = draftCard;
     const {
       open: open2,
       setOpen: setOpen2,
@@ -15966,7 +17260,6 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       setAct,
       setAssets,
       setCardStatus,
-      setCardResult,
       addCard,
       importFootage,
       dupCard,
@@ -16048,42 +17341,17 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       costEstimate,
       refreshEstimate,
       spend,
-      refreshSpend
-    } = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
-    const onVideoSubmit = useCallback2((cardId, detail) => {
-      setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering\u2026 (task " + String(detail.task_id).slice(-6) + ")" } }));
-      setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
-      if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
-    }, [setGenState, setCardStatus]);
-    const onVideoResult = useCallback2((cardId, detail) => {
-      const mid = (detail.media_ids || [])[0];
-      setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-      setCardResult(cardId, {
-        status: "done",
-        resultMid: mid,
-        trimIn: 0,
-        trimOut: null,
-        pendingTaskId: null,
-        genStartedAt: null,
-        ...detail.duration ? { actualDur: detail.duration } : {}
-      });
-    }, [setGenState, setCardResult]);
-    const onVideoError = useCallback2((cardId, detail) => {
-      setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
-      setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
-    }, [setGenState, setCardStatus]);
-    const onVideoSlow = useCallback2((cardId, detail) => {
-      setGenState((s) => ({ ...s, [cardId]: {
-        phase: detail.tier,
-        msg: detail.tier === "stale" ? "Still going after " + elapsedLabel(detail.elapsed) + " \u2014 unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")" : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")"
-      } }));
-    }, [setGenState]);
-    const onVideoPaused = useCallback2((cardId, detail) => {
-      setGenState((s) => ({ ...s, [cardId]: {
-        phase: "paused",
-        msg: "Paused auto-checking with no result \u2014 click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")"
-      } }));
-    }, [setGenState]);
+      refreshSpend,
+      recheckSubmit,
+      releaseSubmit,
+      attachDraftVideo,
+      beginDrawerRender,
+      onVideoSubmit,
+      onVideoResult,
+      onVideoError,
+      onVideoSlow,
+      onVideoPaused
+    } = useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
     useEffect2(() => {
       const clearDraft = (s) => {
         if (!("__draft__" in s)) return s;
@@ -16133,6 +17401,9 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
     const copyShot = (entry) => navigator.clipboard?.writeText(shotText(entry, project));
     const setLook = (v) => setProject((p) => ({ ...p, look: v }));
     const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
+    if (!project && loadError) {
+      return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement(NotifyRoot, null), /* @__PURE__ */ React.createElement("div", { className: "sb-empty sb-loadfail", role: "alert" }, /* @__PURE__ */ React.createElement("b", null, "Couldn't read your storyboards"), /* @__PURE__ */ React.createElement("span", null, loadError === "list" ? "The list of storyboards didn't load." : loadError === "legacy" ? "Your saved storyboard didn't read." : "None of your storyboards would read.", " Nothing was changed or written \u2014 check the server, then reload."), /* @__PURE__ */ React.createElement("button", { type: "button", className: "sb-btn", onClick: () => window.location.reload() }, "\u21BB Reload")));
+    }
     if (!project) return /* @__PURE__ */ React.createElement("div", { className: "sb-root" }, /* @__PURE__ */ React.createElement("style", null, STYLES), /* @__PURE__ */ React.createElement("div", { className: "sb-empty" }, "Loading the bay\u2026"));
     const entries = flat(project);
     const anyDone = entries.some((e) => e.c.resultMid);
@@ -16173,6 +17444,8 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         generateShot,
         priceShot,
         useExistingVideo,
+        recheckSubmit,
+        releaseSubmit,
         genImgState,
         imgModel,
         setImgModel,
@@ -16267,6 +17540,10 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
         onVideoSlow,
         onVideoPaused,
         pollShot,
+        beginDrawerRender,
+        recheckSubmit,
+        releaseSubmit,
+        attachDraftVideo,
         costEstimate,
         refreshEstimate,
         spend,
@@ -16321,7 +17598,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       const t = trackRef.current.getBoundingClientRect();
       return Math.max(0, Math.min(durRef.current, (clientX - t.left) / t.width * durRef.current));
     };
-    const scrub = (e) => {
+    const scrub2 = (e) => {
       if (playing) return;
       const v = vidRef.current;
       if (!v || !dur) return;
@@ -16427,7 +17704,7 @@ Generate anyway?`)) return { ok: false, reason: "cancelled" };
       "div",
       {
         className: "sb-shotprev",
-        onMouseMove: cropping ? void 0 : scrub,
+        onMouseMove: cropping ? void 0 : scrub2,
         onMouseLeave: () => {
           if (playing || cropping) return;
           const v = vidRef.current;

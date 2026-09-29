@@ -188,7 +188,10 @@ describe("registration belongs to the road, not to the shell that mounted the dr
     // The Loom reconciles a card's durable shot mode from this event's payload at the one moment
     // the submitted mode is known for certain -- that contract predates the road and outlives it.
     const drawer = fileNamed("components/VideoDrawer.jsx");
-    assert.match(drawer, /emit\("mg-submit", \{ task_id: tid, payload: p \}\);/,
+    // Session P (review F7): in the Loom, `tag` adds the render's submit id, shot and board so
+    // the Loom resolves the card by them rather than by the selected shot; outside the Loom it
+    // passes the detail through unchanged.
+    assert.match(drawer, /emit\("mg-submit", tag\(\{ task_id: tid, payload: p \}\)\);/,
       "mg-submit must still carry {task_id, payload}");
     for (const evt of ["mg-result", "mg-error", "mg-slow", "mg-paused"]) {
       assert.ok(drawer.includes('emit("' + evt + '"'), "the drawer must still emit " + evt);

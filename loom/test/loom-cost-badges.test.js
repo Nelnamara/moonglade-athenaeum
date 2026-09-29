@@ -126,7 +126,11 @@ test("batchGenerate tallies tickets against the held pool (tallyPricesDetailed) 
     "the confirm must map overflowIndexes to shot codes");
   assert.match(src, /Up to \$\{overflow\} of those priced free on their own may spend credits/,
     "overflow must be worded as an upper bound, not a certainty");
-  // No refusal was added: the confirm is still the only gate and submission order is unchanged.
+  // The confirm is still the only thing that lets the batch spend, and submission order is
+  // unchanged (todo order). Session P (review F12/F13) CHANGED ON PURPOSE what each shot is sent
+  // with: the fingerprint of the payload the confirm priced (a shot changed since is skipped,
+  // never sent unconfirmed) and whether the pool tally counted it covered (expect_free). Those
+  // only ever send LESS than the confirm allowed.
   assert.match(src, /if \(!window\.confirm\(msg\)\) \{ setBatching\(false\); return; \}/);
-  assert.match(src, /for \(const e of todo\) \{[\s\S]*?try \{ r = await generateShot\(e, \{ skipConfirm: true \}\); \}/);
+  assert.match(src, /for \(const \[i, e\] of todo\.entries\(\)\) \{[\s\S]*?r = await generateShot\(e, \{ skipConfirm: true, onlyIfNeeded: true, confirmedFp: fps\[i\], expectFree: covered\[i\],/);
 });

@@ -152,6 +152,19 @@ function RatioPopover({ value, onPick }) {
 
 let lineSeq = 0;
 
+// A Loom render's submit id ([a-z0-9], well inside the server's [A-Za-z0-9_-]{1,64}): one per
+// Go click, so the server's journal can tell a replay of THIS render from a new one.
+const newSubmitId = () => "d" + Date.now().toString(36)
+  + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+// The Loom's reading of a POST that returned no task: `unclear` when the road got no answer (a
+// throw, an unreadable body) or the server said the render may have started; `answer` is the
+// raw {threw, status, body} for the host's own classifier.
+const answerFlags = (a) => {
+  const b = a && a.body;
+  const unclear = !a || !!a.threw || !b || typeof b !== "object" || !!b.unclear;
+  return { unclear, answer: a || { threw: true } };
+};
+
 const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // `style`/`className` pass through to the root so a host can position/hide the node exactly as
   // it did the custom element (the Loom mounts it once and toggles style.display by tab).
@@ -178,6 +191,9 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
     modeNote: "",
     rendering: false,
     hostBusy: false,
+    // The Loom's target for a Go click (loomCtx only): {board_id, card_id, draft}, set by the
+    // host as its selection changes (node.setLoomTarget) and CAPTURED at the click.
+    loomTarget: null,
     // The price VERDICT no longer lives here: it is the shared probe's React state
     // (gen/usePriceProbe.js), which is also what repaints on every transition -- the
     // rerender() that used to sit beside each verdict write by hand.
@@ -209,6 +225,8 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   // mg-paused all leave through this same retained node.
   const liveNode = useRef(null);
   const setRoot = useCallback((n) => { rootRef.current = n; if (n) liveNode.current = n; }, []);
+  // The Loom's host hooks (loomCtx only), set through node.setHost: {beforeSend}.
+  const hostRef = useRef(null);
 
   const chipTimer = useRef(0);
   const previewTimer = useRef(0);
@@ -445,11 +463,52 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       if (!checkInFlight) reprice();
       return;
     }
+    /* THE LOOM'S RENDER (loomCtx only; Session P, BUILD-w5-p §3.3, review F7/F13). The render
+       belongs to the shot the host named when Go was clicked -- the target is CAPTURED HERE,
+       before any await, so selecting another shot while this one is being sent cannot move
+       it. Without a target there is nothing to lock, so nothing is sent. The submit id makes
+       the send one the server's journal can recognise if it is ever asked about again. */
+    const target = loomCtx ? st.current.loomTarget : null;
+    if (loomCtx && !(target && target.board_id && target.card_id)) {
+      pushLine({ kind: "error", text: "This render isn't tied to a shot, so nothing was sent." });
+      return;
+    }
+    const submitId = loomCtx ? newSubmitId() : null;
+    const loomIds = loomCtx ? { submit_id: submitId, card_id: target.card_id, board_id: target.board_id } : null;
+    // The settled verdict Go was allowed on (canSubmit above): was THIS payload quoted free?
+    const quoted = probe.response || null;
+    const expectFree = !!(quoted && quoted.free);
     const id = pushLine({ kind: "status", moon: true, text: "Submitting…" });
     setReuseChip(null);   // a new submission goes out -- the recipe is no longer "from" the old run
     st.current.rendering = true;
     rerender();
     const unlock = () => { st.current.rendering = false; rerender(); };
+    if (loomCtx) {
+      // The host's beforeSend runs the Loom's latch and saves the shot's lock BEFORE anything
+      // is sent; a refusal (or no host at all) ends the click here with its message, unsent.
+      const host = hostRef.current;
+      let verdict = null;
+      try {
+        verdict = (host && host.beforeSend) ? await host.beforeSend({ ...loomIds, payload: p,
+          quote: quoted ? { cost: quoted.cost == null ? null : quoted.cost, free: !!quoted.free } : null }) : null;
+      } catch (e) { verdict = null; }
+      if (!verdict || verdict.refused || !verdict.ok) {
+        updateLine(id, { kind: "error", moon: false,
+          text: (verdict && verdict.refused) || "The storyboard didn't take this render, so nothing was sent." });
+        unlock();
+        return;
+      }
+    }
+    // Every Loom event of this render names it: its submit id, its shot, its board (and its task
+    // once known). The gallery's own Video tab emits exactly what it always did.
+    const tag = (detail, withTask) => (loomIds ? { ...detail, ...loomIds, ...(withTask ? { task_id: taskId } : {}) } : detail);
+    // What is POSTed: the gallery's own Video tab sends the form's payload, byte for byte; the
+    // Loom adds its keys (a draft has no shot, so no loom_target), which the server pops before
+    // anything is priced or sent.
+    const sent = loomIds ? { ...p, submit_id: submitId,
+      ...(target.draft ? {} : { loom_target: { board_id: target.board_id, card_id: target.card_id } }),
+      ...(expectFree ? { expect_free: true } : {}) } : p;
+    let answer = null;       // loomCtx: what the POST itself answered, for the host's classification
 
     const startedAt = Date.now();
     let taskId = null;
@@ -485,24 +544,24 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       const elapsed = Date.now() - startedAt;
       if (phase === "done") {
         updateLine(id, { kind: "result", mediaIds: d.media_ids || [], cost: d.paid_credit });
-        emit("mg-result", { media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit });
+        emit("mg-result", tag({ media_ids: d.media_ids || [], is_video: !!d.is_video, duration: d.duration, paid_credit: d.paid_credit }, true));
       } else if (phase === "failed") {
         // The drawer's own friendlyGenErr, not the road's: this string is what the Loom prints on
         // the shot card, and it is pinned in parity with loom-mutations.js's copy so a PixAI
         // content-filter refusal reads identically on both surfaces (mg-generate-drawer-parity).
         const msg = friendlyGenErr(d.error || ("task " + (d.status || "failed")));
         updateLine(id, { kind: "error", text: msg, moon: false });
-        emit("mg-error", { error: msg });
+        emit("mg-error", tag({ error: msg }, true));
       } else if (phase === "stalled") {
         updateLine(id, {
           kind: "plain",
           text: "Paused auto-checking after " + elapsedLabel(CEILING_MS) + " with no result — check pixai.art, or reopen this shot to check again (task " + short() + ")",
         });
-        emit("mg-paused", { task_id: taskId });
+        emit("mg-paused", tag({ task_id: taskId }));
       } else if (phase === "slow" || phase === "stale") {
         tier = phase;
         updateLine(id, tierLine(phase, elapsed));
-        emit("mg-slow", { tier: phase, elapsed, task_id: taskId });
+        emit("mg-slow", tag({ tier: phase, elapsed, task_id: taskId }));
       } else {   // running -- every poll; the tier decides whether it is amber
         updateLine(id, tier === "normal"
           ? { kind: "status", moon: true, amber: false, text: "Rendering under the eclipse… (task " + short() + ")" }
@@ -510,17 +569,20 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       }
     };
 
-    const tid = await submitTask("/api/loom/generate", p, { label: "Rendered", emit: emitLine, onPhase });
+    const tid = await submitTask("/api/loom/generate", sent, { label: "Rendered", emit: emitLine, onPhase,
+      ...(loomIds ? { onAnswer: (a) => { answer = a; } } : {}) });
     unlock();   // the server answered (accepted or rejected) -- free the button for the NEXT submission
     // A submit-time failure (server rejection, no task_id, or no answer at all) must emit
     // mg-error, exactly as the vanilla's _renderErrorInto did -- otherwise the Loom's
     // onVideoError never runs and a rejected shot shows no error badge on the board when the
     // Video tab is collapsed. The road returns null for every one of those cases and has
     // already painted the line; this is the host half of the same event. (No credits are spent
-    // on a failed submit, so this is a status regression, not a spend one.)
-    if (!tid) { emit("mg-error", { error: lastErr || "submit failed" }); return; }
+    // on a failed submit, so this is a status regression, not a spend one.) In the Loom it also
+    // says whether the road got NO answer (unclear: the render may exist, so the Loom keeps the
+    // shot locked and asks the server's journal) and hands over the answer it did get.
+    if (!tid) { emit("mg-error", tag({ error: lastErr || "submit failed", ...(loomIds ? answerFlags(answer) : {}) })); return; }
     taskId = tid;
-    emit("mg-submit", { task_id: tid, payload: p });
+    emit("mg-submit", tag({ task_id: tid, payload: p }));
     // The submit just DEBITED tickets, so the settled verdict is stale even though the
     // payload is byte-identical -- identity-by-payload cannot see a balance change caused
     // by the drawer's own submit. Without this, a second click on the unchanged form passed
@@ -570,6 +632,14 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
   };
   // The video ↺-from chip's setter, exposed to the dock's prefillVideoFromRun. Null clears it.
   const setReuse = (info) => setReuseChip(info || null);
+  // The Loom's target (board + shot) for the next Go click; null = none. Stored only -- the
+  // click captures it (doGenerate). Never submits.
+  const setLoomTarget = (t) => {
+    st.current.loomTarget = (t && t.board_id && t.card_id)
+      ? { board_id: String(t.board_id), card_id: String(t.card_id), draft: !!t.draft } : null;
+  };
+  // The Loom's host hooks: {beforeSend}. Stored only. Never submits.
+  const setHost = (h) => { hostRef.current = h || null; };
 
   // The vanilla was a CUSTOM ELEMENT: hosts held the DOM node itself and called node.prefill(),
   // node.setRefs(), read node.mode, and node.addEventListener('mg-*'). To stay a drop-in, the ref
@@ -589,6 +659,10 @@ const VideoDrawer = forwardRef(function VideoDrawer(props, ref) {
       node.insertText = insertText;
       node.promptText = promptText;
       node.setReuse = setReuse;
+      // The Loom's two host hooks (Session P): which shot a Go click is for, and the beforeSend
+      // that locks that shot before anything is sent. Neither submits anything.
+      node.setLoomTarget = setLoomTarget;
+      node.setHost = setHost;
       Object.defineProperty(node, "mode", { configurable: true, get: () => st.current.mode });
     }
     return node;

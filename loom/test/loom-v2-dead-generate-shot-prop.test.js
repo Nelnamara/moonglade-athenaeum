@@ -56,7 +56,8 @@ describe("LoomV2 no longer threads the dead generateShot prop", () => {
     );
     assert.match(
       storyboardSrc,
-      /await generateShot\(e, \{ skipConfirm: true \}\)/,
+      // Session P: the batch also hands over what it confirmed (fingerprint, pool verdict).
+      /await generateShot\(e, \{ skipConfirm: true, onlyIfNeeded: true, confirmedFp: fps\[i\], expectFree: covered\[i\],/,
       "generateShot should still be called internally by the generation pipeline's own batch runner"
     );
   });

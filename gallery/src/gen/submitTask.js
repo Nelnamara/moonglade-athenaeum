@@ -34,23 +34,33 @@ import { adjustedText, friendlyGenErr } from "./genCore.js";
    surface says about a phase remains the surface's own business.
 
    `count` overrides payload.count for the Runs-reel placeholder; callers that keep it on the
-   payload (all of them today) need not pass it. */
-export async function submitTask(route, payload, { label, emit, count, onPhase }) {
-  let d;
+   payload (all of them today) need not pass it.
+
+   `onAnswer(answer)` (optional; only the Loom's video drawer passes it, Session P) is told what
+   the POST itself answered, before anything else happens: {threw: true} when there was no
+   answer or it could not be read, else {threw: false, status, body}. The Loom needs to tell
+   "no answer" (the render MAY exist: keep the shot locked, ask the server's journal) apart from
+   a refusal (nothing was sent), and the return value (a task id, or null for both) cannot say
+   which. It changes nothing about what this function does or returns. */
+export async function submitTask(route, payload, { label, emit, count, onPhase, onAnswer }) {
+  let d, status = 0;
   try {
     const r = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    status = r.status;
     d = await r.json();
   } catch {
+    if (onAnswer) onAnswer({ threw: true });
     emit({
       kind: "err",
       text: "No answer from the server — the task MAY still have been submitted. Check the Activity tray before trying again.",
     });
     return null;
   }
+  if (onAnswer) onAnswer({ threw: false, status, body: d });
   if (d.error || !d.task_id) {
     emit({ kind: "err", text: friendlyGenErr(d.error || "Submit failed.") });
     return null;

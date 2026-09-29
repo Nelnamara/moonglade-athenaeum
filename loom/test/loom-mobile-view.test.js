@@ -880,8 +880,13 @@ describe("Credit safety: the drawer's own component-local poll vs. this incremen
     // WHEN it fires is the dep array, and that is all that is left here to read: an
     // unmounted <mg-generate-drawer> fires no event, so the toggle itself has to be the
     // trigger. Sliced to the resume effect rather than matched anywhere in the file.
-    const effect = src.slice(src.indexOf("cardsToResume(project, resumedRef.current)"));
-    assert.match(effect.slice(0, 200), /\}, \[activeId, mobileUI\]\);/);
+    // Session P: the scan is the NAMED function resumeInterrupted (the never-auto-render test
+    // roots it by name); the effect just calls it -- on the same two triggers.
+    const at = src.indexOf("const resumeInterrupted = () => {");
+    assert.ok(at >= 0, "the resume scan is resumeInterrupted");
+    const scan = src.slice(at, src.indexOf("\n  };", at));
+    assert.match(scan, /cardsToResume\(proj, resumedRef\.current\)/);
+    assert.match(src.slice(at), /useEffect\(\(\) => \{ resumeInterrupted\(\); \}, \[activeId, mobileUI\]\);/);
   });
 
   test("App() passes its own mobileUI into useGenerationPipeline, not a stale/local copy", () => {

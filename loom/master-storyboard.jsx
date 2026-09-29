@@ -22,7 +22,7 @@ import {
 // (no React, no DOM, no fetch), consumed by the useProjectStore /
 // useShotMutations / useGenerationPipeline / useExportPipeline hooks below.
 import {
-  patchCard, patchCardById, patchCardByIdWith, withResult, patchAct, patchAssets,
+  patchCard, patchCardById, patchCardByIdWith, patchAct, patchAssets,
   appendCardToAct, buildDuplicateCard, insertCardAfter, removeCard, splitCardAt,
   moveCardInAct, moveCardToAct as mvCardToAct, nextActName, appendAct, removeAct, moveActInProject,
   buildNewRef, patchRef, removeRef, countShots, setShotMode, setShotConnect,
@@ -31,7 +31,7 @@ import {
   buildShotListText, buildPlaySequence, buildExportClips,
   setPromptOverride, clearPromptOverride,
   loraIncompat, resolveLoraPayload, anyLoraUnresolved, overLoraCap,
-  landInFirstAct, importedFootagePatch, importedFramesPatch, attachedVideoPatch,
+  landInFirstAct, importedFootagePatch, importedFramesPatch,
   // resolveGenDims was USED below (the Advanced panel's "→ W × H" readout) without ever
   // being imported. The in-browser Babel path inlines every module into one global scope,
   // so it happened to resolve there and the omission was invisible; esbuild builds a real
@@ -44,7 +44,20 @@ import {
   // The picked model's size grid for the two "→ W × H" readouts (SCOPE_2026-09-26 G1), the
   // same step buildImgGenBody sends.
   genStepFor,
+  // Session P (review F11): Split is refused while a render for the shot is out.
+  splitBlocked,
 } from "./src/loom-mutations.js";
+// Session P (Wave 5, BUILD-w5-p): TAKES and the render lifecycle as pure reducers and views,
+// and the per-key board save queue. Same discipline again -- no React, no DOM, no fetch. Every
+// landing goes through landTake/attachTake; nothing in this file writes takes, selectedTake or
+// takeSeq itself (loom/test/loom-render-lifecycle-wiring.test.js).
+import {
+  landTake, attachTake, snapshotSettings, needsRender, goBlocked, sendUnclear,
+  beginRender, cancelRender, adoptTask, failRender, markUnclear, abandonSubmit,
+  classifySubmit, classifySubmitStatus, submitsToCheck, stripInFlight, shouldSave, mergeBoards,
+  splicePatch, unsendableImages, cardForSubmit, cardForTask,
+} from "./src/loom-takes-core.js";
+import { makeSaveQueue } from "./src/loom-store-core.js";
 // The arena's OWN address (2026-09-06): /loom?board=<id>, one builder for every history
 // write here, plus the phone auto-open's stored-choice rule. Same discipline as the two
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
@@ -301,6 +314,8 @@ const STYLES = `
 .sb-ico:hover{color:var(--ink);background:var(--panel2)}
 .sb-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2);cursor:pointer}
 .sb-empty{text-align:center;color:var(--ink3);padding:30px;font-size:13px}
+.sb-loadfail{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink2)}
+.sb-loadfail b{color:var(--peach);font-size:15px}
 @media (max-width:560px){.sb-conn-mid{align-self:flex-start;padding:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
@@ -475,14 +490,51 @@ function storeFailed(op, k, e) {
       msg: "Your recent changes may not be saved. Check the server, then reload before editing further." });
   }
 }
+// Session P (BUILD-w5-p §1.2 / §3.5, review F15): sGetX tells four answers apart, because
+// only one of them may ever be followed by a write --
+//   {value, rev}                    the board, and the revision the compare-and-swap save sends
+//   {value:null, missing:true, rev} the server said there is no such key (rev = the sentinel)
+//   {failed:true, unreadable:true}  the file is there and will not read or parse
+//   {failed:true}                   the read itself failed (network, server)
+// Nothing seeds or writes a key that answered unreadable or failed: that is how a blank board
+// used to land over the owner's real one.
 async function sGetX(k) {
-  try { const r = await window.storage.get(k); return { value: r ? r.value : null, failed: false }; }
-  catch (e) { storeFailed("read", k, e); return { value: null, failed: true }; }
+  try {
+    const r = await window.storage.get(k);
+    if (!r || r.value == null) return { value: null, missing: true, failed: false, rev: r ? r.rev : undefined };
+    return { value: r.value, missing: false, failed: false, rev: r.rev };
+  } catch (e) {
+    storeFailed("read", k, e);
+    return { value: null, missing: false, failed: true, unreadable: !!(e && e.unreadable) };
+  }
 }
 async function sGet(k) { return (await sGetX(k)).value; }
 async function sSet(k, v) { try { await window.storage.set(k, v, false); return true; } catch (e) { storeFailed("write", k, e); return false; } }
-async function sList(p) { try { const r = await window.storage.list(p, false); if (!r) return []; return (r.keys || []).map((k) => (typeof k === "string" ? k : k.key)); } catch (e) { storeFailed("list", p, e); return []; } }
+// A failed listing is not an empty one (review F15a): the boot path migrates or seeds only
+// when the listing SUCCEEDED and came back empty.
+async function sListX(p) {
+  try {
+    const r = await window.storage.list(p, false);
+    return { keys: ((r && r.keys) || []).map((k) => (typeof k === "string" ? k : k.key)), failed: false };
+  } catch (e) { storeFailed("list", p, e); return { keys: [], failed: true }; }
+}
+async function sList(p) { return (await sListX(p)).keys; }
 async function sDel(k) { try { await window.storage.delete(k); return true; } catch (e) { storeFailed("delete", k, e); return false; } }
+// The ONE board writer, and only the board save queue calls it (loom-store-core.js): the
+// shim's compare-and-swap set. It resolves {ok, rev} or {conflict, value, rev} and THROWS on
+// any other answer, which the queue turns into {failed}. ACTIVE_KEY and thumbs keep sSet.
+const writeBoard = (k, json, baseRev) =>
+  window.storage.set(k, json, false, baseRev !== undefined ? { base_rev: baseRev } : undefined);
+// The server's revision for a key that does not exist yet (moonglade_gallery.py's
+// _LOOM_REV_MISSING): a brand-new board is written against it, so even its first save is a
+// compare-and-swap.
+const LOOM_REV_MISSING = "missing";
+// A parsed board the Loom can open. Anything else read from a key is treated as unreadable.
+const isBoard = (p) => !!(p && typeof p === "object" && Array.isArray(p.acts));
+// A submit id for one render: [A-Za-z0-9_-]{1,64}, unique per click (the server journal keys
+// every Loom render by it, so a replay can never send twice).
+const newSubmitId = () => "s" + Date.now().toString(36) + uid() + uid();
+const nowIso = () => new Date().toISOString();
 
 function fileToThumb(file, maxDim = 480, q = 0.72) {
   return new Promise((res, rej) => {
@@ -740,6 +792,16 @@ const V2_STYLES = `
    Neutral/informational, not a warning -- reuses .todo's own subtext-on-base treatment
    rather than inventing a new color. */
 .lv-st.imported{margin-left:0;color:var(--subtext);background:var(--base);}
+/* Session P: a render that was refused, held or is unconfirmed reads PEACH (never red) -- the
+   app's colour for "nothing went wrong with your work; this needs your eye". */
+.lv-st.held{color:var(--peach);background:color-mix(in srgb,var(--peach) 16%,transparent);}
+.lv-unclear{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:5px;padding:5px 6px;border-radius:6px;
+  font-size:9.5px;line-height:1.35;color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);cursor:default;}
+.lv-unclear span{flex:1 1 100%;}
+.lv-unclearbtn{font:600 9px/1 system-ui;padding:4px 7px;border-radius:5px;cursor:pointer;color:var(--peach);
+  background:var(--base);border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
+.lv-unclearbtn:hover{border-color:var(--peach);}
 .lv-reel{position:relative;flex:1;min-height:40px;display:flex;background:var(--base);border:1px solid var(--surface1);border-radius:7px;overflow:hidden;}
 .lv-seg{position:relative;min-width:3px;border-right:1px solid rgba(0,0,0,.35);cursor:pointer;
   display:flex;align-items:flex-end;padding:4px 6px;box-sizing:border-box;overflow:hidden;}
@@ -1131,6 +1193,9 @@ function ExportMenu({ exportAll, exportJSON, exportBundle, importBackup, bundlin
 }
 
 function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, setSelShot, useExistingVideo, genState, thumbs, openPick, storeThumb, setAct, addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct, genImgState, imgModel, setImgModel, imgLoras, setImgLoras, imgAdv, setImgAdv, modelDefaults, setModelDefaults, genImage, routeImg, genEditState, setGenEditState, genRefState, setGenRefState, genEdit, genRef, routeGen, genFixState, setGenFixState, genFix, projectApi, playSequence, exportCut, batching, batchGenerate, addRef, setRef, delRef, exportAll, exportJSON, exportBundle, bundling, importBackup, setImportOpen, copyShot, setLook, setDraft, splitShot, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused, pollShot, costEstimate, refreshEstimate, spend, refreshSpend, batchTally,
+  // Session P: the Video drawer's beforeSend host, the unclear-send way-out, and the draft's
+  // "attach to A·0n" (all useGenerationPipeline's).
+  beginDrawerRender, recheckSubmit, releaseSubmit, attachDraftVideo,
   // draftCard/draftTarget/draftAttachedInfo used to be LoomV2's own useState triple (a
   // Generate-drawer draft with no shot selected yet, keyed "__draft__" everywhere else in
   // this file already keys genState/genImgState/etc). LIFTED to App() (mobile-board-view
@@ -1427,17 +1492,20 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   thumbsRef.current = thumbs;
   const genDrawerRef = useRef(null);
   const promptDirtyRef = useRef(false);
-  // The drawer resolves its OWN completion target via activeRef at listener-registration
-  // time -- but activeRef always points at "whatever shot is currently selected," read at
-  // whatever moment mg-result/mg-error actually FIRE, which can be minutes after submit if
-  // the owner switches shots while the render is in flight. genTargetRef freezes "which shot
-  // this drawer generation belongs to" the moment mg-submit fires (the earliest point the
-  // host can observe), so a later result/error routes to the shot that was ACTUALLY
-  // generated, not whatever happens to be selected when the poll resolves. Found 2026-07-18
-  // live-testing: switching shots mid-render silently attributed the result to the wrong
-  // card. The drawer only ever has one poll in flight at a time (its own Go button disables
-  // during a render), so a single ref -- not a task_id-keyed map -- is sufficient.
-  const genTargetRef = useRef(null);
+  // WHICH SHOT A DRAWER RENDER BELONGS TO (Session P, review F7). It used to be "whatever was
+  // selected when mg-submit fired" (a single ref frozen then), which put a render on the wrong
+  // shot whenever the owner rendered A, selected B and rendered B before A answered. Now the
+  // drawer captures its target -- {board_id, card_id}, set below as the selection changes --
+  // AT THE CLICK, the Loom locks THAT card in beforeSend before anything is sent, and every
+  // drawer event names its own submit id / task id; useGenerationPipeline resolves the card
+  // from those. No listener here reads the selected shot for a render's outcome.
+  const drawerHostRef = useRef(beginDrawerRender);
+  drawerHostRef.current = beginDrawerRender;
+  // The target and Go gate as of this render (set below, beside activeRef): a drawer node that
+  // MOUNTS later -- collapsing the right panel unmounts it -- is given both when it binds, not
+  // only when the selection next changes.
+  const loomTargetRef = useRef(null);
+  const drawerBusyRef = useRef(false);
   // Tracks which shot the prefill effect below last ran for, so it can tell "the owner
   // switched shots" apart from "a field on the SAME shot changed" (both re-trigger the
   // effect, since active.c.* is in its dependency array). Only the former should clear
@@ -1450,6 +1518,11 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     genDrawerRef.current = el;
     if (el && !el._mgBound) {
       el._mgBound = true;
+      // The Loom is the drawer's host: its beforeSend runs the render latch and saves the
+      // shot's lock before the drawer may POST (a refusal ends the click with no POST).
+      if (el.setHost) el.setHost({ beforeSend: (req) => drawerHostRef.current(req) });
+      if (el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+      if (el.setBusy) el.setBusy(drawerBusyRef.current);
       el.addEventListener("mg-dirty", () => { promptDirtyRef.current = true; });
       // Fired ONLY from a direct user click on the drawer's own mode-segment buttons (see
       // mg-generate-drawer.js's _userSetMode) -- never from the drawer re-asserting/auto-
@@ -1577,26 +1650,13 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
           openPick((mid, thumb, isVideo, duration, isNsfw) => e.detail.respond(mid, thumb, isNsfw), e.detail.kind === "video" ? "video" : "image");
         }
       });
-      el.addEventListener("mg-submit", (e) => {
-        const a = activeRef.current;
-        genTargetRef.current = a.c.id;
-        // The drawer may have submitted a different mode than the card believes -- e.g. a
-        // model-gating auto-switch (_applyModelGating) that never wrote back on its own (that
-        // would let casual model-browsing silently corrupt a card's real mode). Reconcile the
-        // card's durable mode field to what ACTUALLY got submitted, at the one moment it's
-        // known for certain, so badges/shotText/telemetry never permanently disagree with the
-        // render that's about to attach to this card.
-        const submitted = e.detail.payload && e.detail.payload.mode;
-        if (a && submitted && submitted !== a.c.mode) {
-          const apply = (c) => setShotMode(c, submitted);
-          a.c.id === "__draft__" ? setDraftCard(apply) : setCard(a.a.id, a.c.id, apply);
-        }
-        onVideoSubmit(genTargetRef.current, e.detail);
-      });
-      el.addEventListener("mg-result", (e) => onVideoResult(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-error", (e) => onVideoError(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-slow", (e) => onVideoSlow(genTargetRef.current || activeRef.current.c.id, e.detail));
-      el.addEventListener("mg-paused", (e) => onVideoPaused(genTargetRef.current || activeRef.current.c.id, e.detail));
+      // A render's outcome, by the ids its event carries (the mode reconciliation to what was
+      // really sent happens there too, on the card that holds the submit id).
+      el.addEventListener("mg-submit", (e) => onVideoSubmit(e.detail));
+      el.addEventListener("mg-result", (e) => onVideoResult(e.detail));
+      el.addEventListener("mg-error", (e) => onVideoError(e.detail));
+      el.addEventListener("mg-slow", (e) => onVideoSlow(e.detail));
+      el.addEventListener("mg-paused", (e) => onVideoPaused(e.detail));
       // Durably persists a hand-edit made while typing normally (NOT switching shots or
       // batch-generating -- those paths call flushPromptEdit() directly, see below and the
       // toolbar button). A no-op if the committed text is identical to what auto-compose
@@ -1660,6 +1720,9 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   const routeTarget = sel || entries.find((e) => e.c.id === draftTarget) || null;
   const frameSrc = (f) => (f && f.thumbId ? thumbs[f.thumbId] : (f && f.mediaId ? "/thumbs/" + f.mediaId + ".jpg" : null));
   activeRef.current = active;
+  loomTargetRef.current = projectApi.activeId
+    ? { board_id: projectApi.activeId, card_id: active.c.id, draft: active.c.id === "__draft__" } : null;
+  drawerBusyRef.current = goBlocked(active.c, !!(genState[active.c.id] && genState[active.c.id].phase === "paused"));
 
   // ---- Fixer -- desktop port of LoomMobile's own seventh increment (2026-08-03), itself a
   // verbatim port of gallery/src/components/FixTab.jsx's real, already-shipped box-drawing
@@ -2037,12 +2100,22 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
   // this, reselecting a paused shot re-evaluates status==="wip" (still true by design) and
   // silently re-disables the Go button the drawer just freed, with no visible reason why
   // (found in review).
+  // Session P (BUILD-w5-p §3.3): the gate reads the shot's own render markers -- Go stays
+  // disabled while a send is out or unclear, and while a task is being polled (goBlocked in
+  // loom-takes-core.js), with the same paused carve-out.
   useEffect(() => {
     const gs = genState[active.c.id];
-    const stillBusy = active.c.status === "wip" && !(gs && gs.phase === "paused");
+    const stillBusy = goBlocked(active.c, !!(gs && gs.phase === "paused"));
     const el = genDrawerRef.current;
     if (el && el.setBusy) el.setBusy(stillBusy);
-  }, [active.c.id, active.c.status, genState[active.c.id] && genState[active.c.id].phase]);
+  }, [active.c.id, active.c.status, active.c.pendingSubmitId, active.c.pendingTaskId, genState[active.c.id] && genState[active.c.id].phase]);
+  // The drawer's TARGET: which board and shot a Go click is for. The drawer captures it at the
+  // click (review F7). A draft (no shot selected) is untargeted: it locks nothing on the board,
+  // and its result waits for the owner's "attach to A·0n".
+  useEffect(() => {
+    const el = genDrawerRef.current;
+    if (el && el.setLoomTarget) el.setLoomTarget(loomTargetRef.current);
+  }, [projectApi.activeId, active.c.id]);
   const board = (
     <div className="lv-board">
       {project.acts.map((act, ai) => {
@@ -2095,7 +2168,16 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       {(() => {
                         const miss = castMissingImages(e, project, imgSrc);
                         const over = castPastBudget(e, project, imgSrc);
+                        // Session P (open call 4, review F16): a picture the render route
+                        // cannot send yet (an imported local_ picture) is marked BEFORE anyone
+                        // presses Render -- the render itself refuses it before pricing.
+                        const unsendable = unsendableImages(buildShotPayload(e, project, imgSrc)).length > 0;
                         return <>
+                          {unsendable ? (
+                            <span className="lv-st warn" title="This shot uses a picture imported into your library (not a PixAI picture). It can't be sent to PixAI yet, so rendering it is refused before anything is priced or sent.">
+                              imported picture — can't be sent yet
+                            </span>
+                          ) : null}
                           {miss.length ? (
                             <span className="lv-st warn"
                               title={`No picture on this shot for ${miss.join(", ")} — they are cast here but cannot be referenced, so they are left out of the prompt. Add an image to use them.`}>
@@ -2123,11 +2205,21 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
                       })()}
                       {linked && <span className="lv-st linked" title="Opening frame matches the previous shot's closing frame — continuous across the cut">linked</span>}
                       {e.c.imported && <span className="lv-st imported" title="Imported from your gallery -- no PixAI task backs this clip, so re-roll has nothing to redo">imported</span>}
-                      <span className={"lv-st " + st}
-                        onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId); } : undefined}
+                      <span className={"lv-st " + st + (gs && gs.held ? " held" : "")}
+                        onClick={paused ? (ev) => { ev.stopPropagation(); pollShot(e.c.id, e.c.pendingTaskId, undefined, projectApi.activeId); } : undefined}
                         style={paused ? { cursor: "pointer" } : undefined}
                         title={paused ? "Click to check again" : undefined}>
                         {gs && gs.msg ? gs.msg : st}</span></div>
+                    {/* Session P (review F3/F8): a render whose send was never confirmed keeps the
+                        shot locked; this is the way out. ↻ Check reads the server's journal again
+                        (never a re-send); the release is the owner's own call, after Activity. */}
+                    {sendUnclear(e.c) && !(gs && gs.phase === "checking") && (
+                      <div className="lv-unclear" role="status" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
+                        <span>The server didn't confirm this render. Check Activity before rendering again.</span>
+                        <button type="button" className="lv-unclearbtn" onClick={() => recheckSubmit(e.c.id)}>&#8635; Check</button>
+                        <button type="button" className="lv-unclearbtn" onClick={() => releaseSubmit(e.c.id)}>I checked Activity — release this shot</button>
+                      </div>
+                    )}
                     <div className="lv-crow" onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, -1)} title="Move up">&#8593;</button>
                       <button className="lv-ico xs" onClick={() => moveCard(act.id, e.ci, 1)} title="Move down">&#8595;</button>
@@ -2237,21 +2329,26 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
     const selIdx = sel ? entries.findIndex((e) => e.c.id === sel.c.id) : -1;
     const prevEntry = selIdx > 0 ? entries[selIdx - 1] : null;
     const patchFrame = (key, fp) => patch((c) => ({ ...c, [key]: { ...c[key], ...fp } }));
+    // Session P (BUILD-w5-p §2.1): the splice records the ANCHOR -- the previous shot's id, its
+    // ★ take and the cut point the frame came from -- through splicePatch, so a later change of
+    // that take can flag this shot. The shot and its source are captured AT THE CLICK: the
+    // frame lands on the shot that asked for it, and the anchor names the take it came from.
+    // The frame is cut where the previous shot's ★ take is cut (trim_out; none -> its end).
     const inheritPrev = () => {
-      if (!prevEntry) return;
-      const rmid = prevEntry.c.resultMid;
+      if (!prevEntry || !sel) return;
+      const target = sel, src = prevEntry;
+      const rmid = src.c.resultMid;
       if (rmid) {
         setHandoff("wip");
         fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_media_id: rmid, trim_out: prevEntry.c.trimOut }) })
+          body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut }) })
           .then((r) => r.json()).then((d) => {
             if (d.error || !d.frame_media_id) { setHandoff("err"); return; }
             setHandoff("");
-            patchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
-              desc: "handed off from " + (prevEntry.code || "prev shot") });
+            setCard(target.a.id, target.c.id, (c) => splicePatch(c, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
           }).catch(() => setHandoff("err"));
       } else {
-        patchFrame("openFrame", { ...prevEntry.c.closeFrame });
+        patchFrame("openFrame", { ...src.c.closeFrame });
       }
     };
     let tabBody;
@@ -2339,8 +2436,10 @@ function LoomV2({ project, setCard, setAssets, entries, durOf, scale, selShot, s
             <div className="lv-route"><span className="lv-dim">attach to shot &#8594;</span>
               <button className="lv-routebtn" disabled={!routeTarget} onClick={() => {
                 if (!routeTarget) return;
-                setCard(routeTarget.a.id, routeTarget.c.id, (x) => withResult(x, { status: "done", resultMid: gs.mid, trimIn: 0, trimOut: null, ...(gs.duration ? { actualDur: gs.duration } : {}) }, new Date().toISOString()));
-                setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
+                // A real render made on this board: it lands as a billed take (attachTake),
+                // selected, with the draft's settings snapshot -- never over a render in flight.
+                const out = attachDraftVideo(routeTarget.c.id, { mid: gs.mid, dur: gs.duration, settings: gs.settings || null });
+                if (out === "landed" || out === "selected") setDraftAttachedInfo({ mid: gs.mid, code: routeTarget.code });
               }}>{routeTarget ? `attach to ${routeTarget.code}` : "choose a shot above"}</button>
             </div>
             {draftAttachedInfo && draftAttachedInfo.mid === gs.mid && <div className="lv-ok2">&#10003; attached to {draftAttachedInfo.code} &middot; it's now that shot's result</div>}
@@ -3709,6 +3808,12 @@ const LOOM_MOBILE_STYLES = `
 .lm-genbtn:hover{filter:brightness(1.08);}
 .lm-genbtn:disabled{opacity:.5;cursor:default;animation:none;}
 @media (prefers-reduced-motion:reduce){.lm-genbtn{animation:none;}}
+.lm-held{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--peach);}
+.lm-unclear{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:8px 10px;border-radius:9px;font-size:11.5px;line-height:1.4;
+  color:var(--peach);background:color-mix(in srgb,var(--peach) 10%,transparent);border:1px solid color-mix(in srgb,var(--peach) 45%,transparent);}
+.lm-unclear span{flex:1 1 100%;}
+.lm-unclearbtn{font:600 11px/1 system-ui;padding:7px 10px;border-radius:7px;cursor:pointer;color:var(--peach);
+  background:transparent;border:1px solid color-mix(in srgb,var(--peach) 55%,transparent);}
 .lm-genexisting{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:transparent;
   color:var(--subtext);border:1px solid var(--surface1);border-radius:8px;padding:9px;font:600 11px/1 system-ui;
   cursor:pointer;text-align:center;}
@@ -3972,6 +4077,8 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // wired to LoomV2's own board). No new submit call, no new pricing math, no forked spend
   // path: this screen is a new VIEW onto the exact same pipeline LoomV2 already drives.
   generateShot, priceShot, useExistingVideo,
+  // Session P (review F3/F8): the unclear-send way-out beside the Generate button.
+  recheckSubmit, releaseSubmit,
   // Fourth increment (2026-08-03): Image/Edit/Reference/Video, mirroring LoomV2's own
   // right-rail GEN_ICONS strip (its "Video" tab is what the third increment above already
   // built, using generateShot/priceShot rather than <mg-generate-drawer> -- see this
@@ -4339,21 +4446,23 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
   // splice-the-last-frame-off-a-rendered-clip endpoint, same closeFrame-copy fallback for a
   // previous shot that hasn't rendered yet), reimplemented here only because that function is
   // a private closure inside LoomV2's own component body, not something this file exports.
+  // Session P (BUILD-w5-p §2.1): records the anchor through splicePatch, exactly as desktop's
+  // inheritPrev does -- the shot and its source captured at the tap.
   const dfInheritPrev = () => {
-    if (!dfPrevEntry) return;
-    const rmid = dfPrevEntry.c.resultMid;
+    if (!dfPrevEntry || !dfLive) return;
+    const target = dfLive, src = dfPrevEntry;
+    const rmid = src.c.resultMid;
     if (rmid) {
       setDfHandoff("wip");
       fetch("/api/loom/handoff", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_media_id: rmid, trim_out: dfPrevEntry.c.trimOut }) })
+        body: JSON.stringify({ video_media_id: rmid, trim_out: src.c.trimOut }) })
         .then((r) => r.json()).then((d) => {
           if (d.error || !d.frame_media_id) { setDfHandoff("err"); return; }
           setDfHandoff("");
-          dfPatchFrame("openFrame", { mediaId: d.frame_media_id, thumbId: "", source: "",
-            desc: "handed off from " + (dfPrevEntry.code || "prev shot") });
+          setCard(target.a.id, target.c.id, (cc) => splicePatch(cc, { frameMid: d.frame_media_id, src: src.c, srcCode: src.code }));
         }).catch(() => setDfHandoff("err"));
     } else {
-      dfPatchFrame("openFrame", { ...dfPrevEntry.c.closeFrame });
+      dfPatchFrame("openFrame", { ...src.c.closeFrame });
     }
   };
   // "Finished shots" (Cast sheet's Footage tab): tapping a rendered shot from elsewhere in
@@ -5122,7 +5231,10 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
         // auto-poll has genuinely stopped, so a manual attach/re-submit isn't racing a live
         // network call).
         const gsSelf = genState[c.id];
-        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused");
+        // Session P: the shot's own render markers decide too (goBlocked, the same gate the
+        // desktop drawer uses) -- a send that is out or unclear keeps Generate off.
+        const genBusy = !!(gsSelf && gsSelf.phase && gsSelf.phase !== "done" && gsSelf.phase !== "error" && gsSelf.phase !== "paused")
+          || goBlocked(c, !!(gsSelf && gsSelf.phase === "paused"));
         // usesCloseFrame (loom-core.js): I2V consumes only the opening frame; FLF/R2V/V2V
         // all reserve a closing-frame slot when one resolves -- the SAME predicate
         // shotImageRefs()/the Cast sheet's own modeSendsRefs already gate on, not a second,
@@ -5674,8 +5786,19 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
                   submit in this file. No new endpoint, no new price math, no new confirm
                   dialog belongs to this screen. */}
               <button type="button" className="lm-genbtn" disabled={genBusy || genSubmitting || gp.noInput} onClick={genSubmit}>
-                {genBusy ? "already rendering…" : genSubmitting ? "submitting…" : "Generate video"}
+                {genBusy ? (sendUnclear(c) ? "not confirmed yet — see below" : "already rendering…") : genSubmitting ? "submitting…" : "Generate video"}
               </button>
+              {/* Session P: why a render did not go out, and the way out of an unclear send --
+                  peach, beside the button that would send it. */}
+              {sendUnclear(c) && !(gsSelf && gsSelf.phase === "checking") ? (
+                <div className="lm-unclear" role="status">
+                  <span>The server didn't confirm this render. Check Activity before rendering again.</span>
+                  <button type="button" className="lm-unclearbtn" onClick={() => recheckSubmit(c.id)}>&#8635; Check</button>
+                  <button type="button" className="lm-unclearbtn" onClick={() => releaseSubmit(c.id)}>I checked Activity — release this shot</button>
+                </div>
+              ) : (gsSelf && gsSelf.held && gsSelf.msg ? <div className="lm-held" role="status">{gsSelf.msg}</div>
+                : (unsendableImages(buildShotPayload(dfLive, project, imgSrc)).length
+                  ? <div className="lm-held" role="status">Imported picture — it can't be sent to PixAI yet.</div> : null))}
               {/* useExistingVideo -- the SAME real, already-shipped attach-without-generating
                   path LoomV2's own board already offers (no spend, no PixAI task). */}
               <button type="button" className="lm-genexisting" disabled={genBusy}
@@ -6064,14 +6187,146 @@ function LoomMobile({ project, entries, thumbs, genState, selShot, setSelShot, a
 
 // ---- 1. useProjectStore: multi-project CRUD + persistence ----
 function useProjectStore(setSelShot) {
-  const [project, setProject] = useState(null);
+  const [project, setProjectState] = useState(null);
   const [thumbs, setThumbs] = useState({});
   const [busy, setBusy] = useState(false);
-  const [activeId, setActiveId] = useState(null);   // id of the open storyboard (multi-project store)
+  const [activeId, setActiveIdState] = useState(null);   // id of the open storyboard (multi-project store)
   const [projList, setProjList] = useState([]);     // [{id,name,shots}] for the switcher
   const [projMenu, setProjMenu] = useState(false);  // switcher dropdown open?
+  // Session P (review F15): the boot read failed in a way that must not be papered over with a
+  // seed -- the list failed, or no listed board would read. App shows an honest "couldn't read
+  // your storyboards" state with a Reload button instead of the eternal "Loading the bay…".
+  const [loadError, setLoadError] = useState("");
   const saveTimer = useRef(null);
   const castImported = useRef(false);
+
+  /* THE CURRENT BOARD, READABLE SYNCHRONOUSLY (Session P, BUILD-w5-p §3.3). The render latch
+     reads the card it is about to lock from here, never from a render's closure, and the lock
+     flush saves exactly what this holds. So every write goes through setProject below, which
+     applies an updater to this ref at the moment it is dispatched (in dispatch order -- the
+     same order React would apply it) and hands React the resulting VALUE. A reducer passed to
+     setProject therefore runs exactly once, immediately, against the latest board: the ref
+     can never lag a queued update, and a value computed from the ref can never clobber one. */
+  const projectRef = useRef(null);
+  const setProject = useCallback((next) => {
+    const v = typeof next === "function" ? next(projectRef.current) : next;
+    projectRef.current = v;
+    setProjectState(v);
+  }, []);
+  // Which board a landing belongs to (review F4): pollShot and the drawer's events compare
+  // against this, and patch nothing when another board is open.
+  const activeIdRef = useRef(null);
+  const setActiveId = useCallback((id) => { activeIdRef.current = id; setActiveIdState(id); }, []);
+
+  /* THE BOARD SAVE QUEUE (Session P, BUILD-w5-p §3.5, review F5/F6). ONE per page: every board
+     write -- the 600 ms autosave, flushSave on a switch, the render lock's flush, the write of
+     a two-tab merge -- goes through it, so one tab never conflicts with itself and each write
+     carries the rev the one before it produced. `lastSaved` holds, per board key, the exact
+     text last read or written: the autosave writes only when the board differs from it, which
+     is what makes opening, switching and re-rendering write nothing (§1.2). */
+  const lastSavedRef = useRef({});         // PPRE+id -> the board text last read or written
+  const pendingLocalRef = useRef({});      // PPRE+id -> the newest board this tab asked to save
+  const queueRef = useRef(null);
+  if (!queueRef.current) {
+    queueRef.current = makeSaveQueue(async (k, json, baseRev) => {
+      const r = await writeBoard(k, json, baseRev);
+      if (r && r.ok) lastSavedRef.current[k] = json;   // what was really written (saves collapse)
+      return r;
+    });
+  }
+  // Submits this tab saw end (refused, released, failed, landed): a two-tab merge never
+  // brings their markers back (review F6a).
+  const resolvedRef = useRef(new Set());
+  const noteResolved = useCallback((sid) => { if (sid) resolvedRef.current.add(String(sid)); }, []);
+  // One merge per conflict answer: the queue answers every write that was built on the same
+  // stale board with the SAME conflict object, and only one of them may merge and re-save.
+  const mergesRef = useRef(new WeakMap());
+
+  const namesOf = (p, ids) => {
+    const codes = {};
+    (p ? flat(p) : []).forEach((e) => { codes[e.c.id] = e.code; });
+    return ids.map((id) => codes[id]).filter(Boolean);
+  };
+  // A save answered 409: another tab saved this board first. Merge (the other tab's board
+  // wins every field except takes and in-flight markers), show it, save it on the rev the
+  // conflict handed back, and say what moved (open call 14, review F6).
+  const mergeAfterConflict = async (id, res, depth) => {
+    const key = PPRE + id;
+    if (res.value == null || res.rev === "unreadable") {
+      // Deleted in another tab, or its file went unreadable: never write over either one.
+      storeFailed("write", key, new Error("the storyboard changed elsewhere and could not be merged"));
+      return { failed: true, conflict: true };
+    }
+    let remote = null;
+    try { remote = JSON.parse(res.value); } catch (e) { remote = null; }
+    if (!isBoard(remote)) {
+      storeFailed("write", key, new Error("the other tab's storyboard did not parse"));
+      return { failed: true, conflict: true };
+    }
+    const open = activeIdRef.current === id;
+    const local = open ? projectRef.current : pendingLocalRef.current[key];
+    const { project: merged, changed } = mergeBoards(local, remote, { resolvedSubmits: Array.from(resolvedRef.current) });
+    if (open) setProject(merged);
+    if (typeof window !== "undefined" && window.Toast) {
+      const codes = namesOf(merged, changed.map((x) => x.id));
+      window.Toast.show({ kind: "err", title: "This storyboard changed in another tab",
+        msg: "Your takes were kept; other edits from this tab were replaced."
+          + (codes.length ? " ★ or take numbers changed on " + codes.join(", ") + "." : "") });
+    }
+    const again = await queueRef.current.save(key, JSON.stringify(merged), { baseRev: res.rev });
+    if (again.ok) return { conflict: true, remote, merged, saved: true };
+    if (again.conflict && depth < 2) {
+      const next = await handleConflict(id, again, depth + 1);
+      return { ...next, conflict: true, remote: next.remote || remote };
+    }
+    if (again.failed) storeFailed("write", key, again.error);
+    return { conflict: true, remote, merged, failed: true };
+  };
+  const handleConflict = (id, res, depth) => {
+    let pr = mergesRef.current.get(res);
+    if (!pr) { pr = mergeAfterConflict(id, res, depth || 0); mergesRef.current.set(res, pr); }
+    return pr;
+  };
+  /** Save board `id` through the queue. Skips when the text is what was last read or written.
+   *  -> {ok} | {conflict, remote, merged, saved?|failed?} | {failed} */
+  const persistBoard = useCallback(async (id, p) => {
+    if (!hasStore || !id || !p) return { ok: true, skipped: true };
+    const key = PPRE + id;
+    const json = JSON.stringify(p);
+    if (!shouldSave(json, lastSavedRef.current[key])) return { ok: true, skipped: true };
+    pendingLocalRef.current[key] = p;
+    const res = await queueRef.current.save(key, json);
+    if (res.ok) return { ok: true };
+    if (res.conflict) return handleConflict(id, res, 0);
+    storeFailed("write", key, res.error);
+    return { failed: true };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /** Save the OPEN board now, from the ref (the render lock's flush, a switch's flush): the
+   *  pending autosave is cancelled first so it can never land an older board after this. */
+  const saveBoardNow = useCallback(async (id) => {
+    clearTimeout(saveTimer.current);
+    if (!id || activeIdRef.current !== id) return { ok: true, skipped: true };
+    return persistBoard(id, projectRef.current);
+  }, [persistBoard]);
+
+  /** Read one board: {p, rev} | {missing} | {failed, unreadable?}. Never writes. */
+  const readBoard = async (id) => {
+    const got = await sGetX(PPRE + id);
+    if (got.failed) return { failed: true, unreadable: !!got.unreadable };
+    if (got.missing) return { missing: true };
+    let p = null;
+    try { p = JSON.parse(got.value); } catch (e) { p = null; }
+    return isBoard(p) ? { p, rev: got.rev } : { failed: true, unreadable: true };
+  };
+  /** Show a board that was just read (or just created): record its rev and the text it was
+   *  read as, so the autosave sees nothing to write (nothing writes on open). */
+  const showBoard = (id, p, rev) => {
+    const key = PPRE + id;
+    if (rev !== undefined) queueRef.current.setRev(key, rev);
+    lastSavedRef.current[key] = JSON.stringify(p);
+    setActiveId(id); setProject(p);
+  };
 
   // ---- Multi-project store: each storyboard lives at PPRE+id; ACTIVE_KEY names the open one.
   //      The legacy single project (PKEY) is migrated in as the first storyboard on first load. ----
@@ -6086,88 +6341,142 @@ function useProjectStore(setSelShot) {
     out.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     setProjList(out); return out;
   }, []);
-  const flushSave = useCallback(async (id, p) => { if (hasStore && id && p) await sSet(PPRE + id, JSON.stringify(p)); }, []);
+  // Before switching away from a board: its pending edits are saved now, through the queue.
+  const flushSave = useCallback(async (id) => saveBoardNow(id), [saveBoardNow]);
 
-  useEffect(() => {
-    (async () => {
-      if (!hasStore) { setProject(seedProject()); return; }
-      let keys = await sList(PPRE);
-      if (!keys.length) {                                  // one-time migration of the legacy single project
-        const legacy = await sGet(PKEY);
-        const id = uid();
-        await sSet(PPRE + id, legacy || JSON.stringify(seedProject()));
-        await sSet(ACTIVE_KEY, id);
-        keys = [PPRE + id];
+  /* THE BOOT PATH, as a named function the mount effect calls (the never-auto-render test
+     roots it by name). Session P (BUILD-w5-p §1.2, review F15): it reads, and it writes only
+     in the one case that cannot lose anything -- a listing that SUCCEEDED and came back empty
+     gets today's one-time migration of the legacy single project (or a seed when there was
+     none). A failed listing, a failed legacy read, or a listed board that is missing,
+     unreadable or failed to read is NEVER written over: the next readable board opens
+     instead, and when none reads the owner is told so, with no board and no seed. */
+  const loadBoards = async () => {
+    if (!hasStore) { setProject(seedProject()); return; }
+    const listed = await sListX(PPRE);
+    if (listed.failed) { setLoadError("list"); return; }
+    let keys = listed.keys;
+    if (!keys.length) {                                  // one-time migration of the legacy single project
+      const legacy = await sGetX(PKEY);
+      if (legacy.failed) { setLoadError("legacy"); return; }
+      let first = null;
+      if (!legacy.missing) {
+        try { first = JSON.parse(legacy.value); } catch (e) { first = null; }
+        if (!isBoard(first)) { setLoadError("legacy"); return; }
       }
-      /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
-         (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
-         articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
-         back to; a bare /loom still opens the last one you had open, exactly as it always
-         has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
-         being the truth.
+      const id = uid();
+      queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+      pendingLocalRef.current[PPRE + id] = first || seedProject();
+      await queueRef.current.save(PPRE + id, JSON.stringify(pendingLocalRef.current[PPRE + id]));
+      await sSet(ACTIVE_KEY, id);
+      keys = [PPRE + id];
+    }
+    /* WHICH BOARD OPENS: the address first, the stored pointer as the fallback
+       (2026-09-06, owner call 1 -- "100% yes, its what I wanted originally but could not
+       articulate"). /loom?board=<id> makes a storyboard a place you can bookmark and come
+       back to; a bare /loom still opens the last one you had open, exactly as it always
+       has, because ACTIVE_KEY stays -- it stops being the ONLY truth, it does not stop
+       being the truth.
 
-         ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
-         exists, the pointer is rewritten FROM it immediately, so the two can never drift
-         into disagreeing -- the class of bug the library's own one-builder rule exists to
-         prevent.
+       ONE IDEA OF "WHICH BOARD IS OPEN", not two. When the address names a board that
+       exists, the pointer is rewritten FROM it immediately, so the two can never drift
+       into disagreeing -- the class of bug the library's own one-builder rule exists to
+       prevent.
 
-         AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
-         app's ordinary corner note saying so. No blank page, no invented screen -- and the
-         address self-corrects to the board actually open (the effect below), so the wrong id
-         does not sit in the bar pretending. */
-      const wantedBoard = readBoardId(location.search);
-      let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
-      let boardMiss = "";
-      if (aid) {
-        await sSet(ACTIVE_KEY, aid);
-      } else {
-        if (wantedBoard) boardMiss = wantedBoard;
-        aid = await sGet(ACTIVE_KEY);
-        if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
-      }
-      let p = null; try { const raw = await sGet(PPRE + aid); if (raw) p = JSON.parse(raw); } catch {}
-      if (!p) { p = seedProject(); await sSet(PPRE + aid, JSON.stringify(p)); }
-      setActiveId(aid); setProject(p);
-      if (boardMiss && typeof window !== "undefined" && window.Toast) {
+       AN UNKNOWN ID FAILS HONESTLY: you get the board you would have got anyway, plus the
+       app's ordinary corner note saying so. No blank page, no invented screen -- and the
+       address self-corrects to the board actually open (the effect below), so the wrong id
+       does not sit in the bar pretending. */
+    const wantedBoard = readBoardId(location.search);
+    let aid = (wantedBoard && keys.includes(PPRE + wantedBoard)) ? wantedBoard : null;
+    let boardMiss = "";
+    if (aid) {
+      await sSet(ACTIVE_KEY, aid);
+    } else {
+      if (wantedBoard) boardMiss = wantedBoard;
+      aid = await sGet(ACTIVE_KEY);
+      if (!aid || !keys.includes(PPRE + aid)) aid = keys[0].slice(PPRE.length);
+    }
+    // Read the chosen board; a listed key that will not read is skipped, NEVER seeded (F15c).
+    const order = [aid].concat(keys.map((k) => k.slice(PPRE.length)).filter((x) => x !== aid));
+    let opened = null;
+    for (const id of order) {
+      const r = await readBoard(id);
+      if (r.p) { opened = { id, p: r.p, rev: r.rev }; break; }
+    }
+    if (!opened) { setLoadError("read"); return; }
+    showBoard(opened.id, opened.p, opened.rev);
+    const p = opened.p;
+    if (typeof window !== "undefined" && window.Toast) {
+      if (opened.id !== aid) {
+        window.Toast.show({
+          kind: "err", title: "A storyboard couldn't be read",
+          msg: "The storyboard you last had open didn't read, so nothing was written over it. "
+             + "Opened “" + (p.name || "Untitled") + "” instead. Check the server, then reload.",
+        });
+      } else if (boardMiss) {
         window.Toast.show({
           kind: "err", title: "No storyboard at that address",
           msg: "The address asked for “" + boardMiss + "”, which this account has no "
              + "storyboard for. Opened “" + (p.name || "Untitled") + "” instead.",
         });
       }
-      const tkeys = await sList(TPRE); const map = {};
-      for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
-      setThumbs(map);
-      readProjList();
-    })();
-  }, []);
+    }
+    const tkeys = await sList(TPRE); const map = {};
+    for (const k of tkeys) { const v = await sGet(k); if (v) map[k.slice(TPRE.length)] = v; }
+    setThumbs(map);
+    readProjList();
+  };
+  useEffect(() => { loadBoards(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Opening a board READS it (sGetX) and writes nothing; a board that will not read leaves
+  // the current one open and says so.
   const openProject = useCallback(async (id) => {
-    if (!id || id === activeId) { setProjMenu(false); return; }
-    await flushSave(activeId, project);
-    let p = null; try { const raw = await sGet(PPRE + id); if (raw) p = JSON.parse(raw); } catch {}
-    if (!p) return;
+    if (!id || id === activeIdRef.current) { setProjMenu(false); return; }
+    await flushSave(activeIdRef.current);
+    await queueRef.current.idle(PPRE + id);
+    const r = await readBoard(id);
+    if (!r.p) {
+      setProjMenu(false);
+      if (window.Toast) window.Toast.show({ kind: "err", title: "Couldn't open that storyboard",
+        msg: (r.missing ? "It is no longer there (deleted in another tab?)." : "It couldn't be read.")
+           + " Your current storyboard stays open, unchanged." });
+      return;
+    }
     await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false);
-  }, [activeId, project, flushSave, setSelShot]);
+    showBoard(id, r.p, r.rev); setSelShot(null); setProjMenu(false);
+  }, [flushSave, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // A brand-new key is written against the "missing" revision, so even its first save is a
+  // compare-and-swap. showBoard then records the text; the queue already holds the new rev.
+  const createBoard = async (p) => {
+    const id = uid();
+    queueRef.current.setRev(PPRE + id, LOOM_REV_MISSING);
+    await persistBoard(id, p);
+    await sSet(ACTIVE_KEY, id);
+    showBoard(id, p);
+    return id;
+  };
   const newProject = useCallback(async () => {
-    await flushSave(activeId, project);
-    const id = uid(); const p = seedProject(); p.name = "New storyboard";
-    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setSelShot(null); setProjMenu(false); readProjList();
-  }, [activeId, project, flushSave, readProjList, setSelShot]);
+    await flushSave(activeIdRef.current);
+    const p = seedProject(); p.name = "New storyboard";
+    await createBoard(p);
+    setSelShot(null); setProjMenu(false); readProjList();
+  }, [flushSave, readProjList, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // The copy never carries a render in flight (review F4): its shots' renders belong to the
+  // original, so a landing can never turn into a phantom take here.
   const duplicateProject = useCallback(async () => {
-    await flushSave(activeId, project);
-    const id = uid(); const p = { ...project, name: (project.name || "Untitled") + " copy" };
-    await sSet(PPRE + id, JSON.stringify(p)); await sSet(ACTIVE_KEY, id);
-    setActiveId(id); setProject(p); setProjMenu(false); readProjList();
-  }, [activeId, project, flushSave, readProjList]);
+    await flushSave(activeIdRef.current);
+    const cur = projectRef.current;
+    const p = stripInFlight({ ...cur, name: (cur.name || "Untitled") + " copy" });
+    await createBoard(p);
+    setProjMenu(false); readProjList();
+  }, [flushSave, readProjList]);   // eslint-disable-line react-hooks/exhaustive-deps
   const deleteProject = useCallback(async (id) => {
     const list = await readProjList();
     if (list.length <= 1) { window.alert("This is your only storyboard — make another before deleting this one."); return; }
     const tgt = list.find((x) => x.id === id);
     if (!window.confirm(`Delete "${(tgt && tgt.name) || "this storyboard"}"? This can't be undone.`)) return;
-    if (id === activeId) {
+    if (id === activeIdRef.current) {
       // Switch to a survivor WITHOUT flushing the doomed project first — openProject()'s
       // flushSave(activeId) would re-create the very project we're deleting.
       // Walk the survivors rather than trusting the first one. readProjList() parsed every
@@ -6175,21 +6484,17 @@ function useProjectStore(setSelShot) {
       // candidate is almost certainly fine — refusing the whole delete because ONE key
       // blipped would be its own bug.
       // Giving up only when none of them read, and giving up WITHOUT deleting, is the
-      // point: sGet() swallows its own errors and returns null, so a failed read and an
-      // empty one look identical from here. Opening a seedProject() on that null (what
-      // this did before) hands the 600ms autosave a blank board to write over a survivor's
-      // own key — one dropped read costing TWO storyboards, the second of which nobody
-      // asked to delete.
-      let next = null, p = null, anyReadFailed = false;
+      // point: opening a seedProject() on a failed read (what this did before) hands the
+      // 600ms autosave a blank board to write over a survivor's own key — one dropped read
+      // costing TWO storyboards, the second of which nobody asked to delete.
+      let next = null, got = null, anyReadFailed = false;
       for (const cand of list) {
         if (cand.id === id) continue;
-        try {
-          const got = await sGetX(PPRE + cand.id);      // .failed distinguishes a broken read
-          if (got.failed) { anyReadFailed = true; continue; }
-          if (got.value) { p = JSON.parse(got.value); next = cand; break; }
-        } catch { anyReadFailed = true; }               // stored, but not parseable
+        const r = await readBoard(cand.id);
+        if (r.failed) { anyReadFailed = true; continue; }
+        if (r.p) { got = r; next = cand; break; }
       }
-      if (!p) {
+      if (!got) {
         window.alert(anyReadFailed
           ? "Couldn't read your other storyboards, so nothing was deleted. Check the server and try again."
           : "Couldn't open another storyboard, so nothing was deleted. Try again.");
@@ -6202,15 +6507,19 @@ function useProjectStore(setSelShot) {
       // the open board is the one being deleted — cancelling it while deleting some
       // other board would silently discard unsaved edits to the board still on screen.
       clearTimeout(saveTimer.current);
+      await queueRef.current.idle(PPRE + id);
       await sDel(PPRE + id);
+      queueRef.current.forget(PPRE + id); delete lastSavedRef.current[PPRE + id];
       await sSet(ACTIVE_KEY, next.id);
-      setActiveId(next.id); setProject(p); setSelShot(null);
+      showBoard(next.id, got.p, got.rev); setSelShot(null);
     } else {
+      await queueRef.current.idle(PPRE + id);
       await sDel(PPRE + id);
+      queueRef.current.forget(PPRE + id); delete lastSavedRef.current[PPRE + id];
     }
     await readProjList();
     setProjMenu(false);
-  }, [activeId, readProjList, setSelShot]);
+  }, [readProjList, setSelShot]);   // eslint-disable-line react-hooks/exhaustive-deps
   const projectApi = { activeId, projList, projMenu, setProjMenu, readProjList, openProject, newProject, duplicateProject, deleteProject };
 
   /* THE ADDRESS FOLLOWS THE OPEN BOARD (2026-09-06).
@@ -6260,12 +6569,20 @@ function useProjectStore(setSelShot) {
     history.replaceState(null, "", buildLoomUrl({ cast: null }, location.search, location.pathname));
   }, [project]);
 
+  /* The 600 ms autosave (Session P, BUILD-w5-p §1.2 / §3.5). It writes ONLY when the board
+     differs from the text last read or written for it, so opening, switching, duplicating,
+     importing and re-rendering write nothing; and it writes through the save queue, so the
+     save is a compare-and-swap and a conflict merges instead of silently losing a tab's work.
+     The timer saves the OPEN board as it is when the timer fires (saveBoardNow reads the ref
+     and refuses once another board is open), never an older closure's copy. */
   useEffect(() => {
-    if (!project || !hasStore || !activeId) return;
+    if (!project || !hasStore || !activeId) return undefined;
+    if (!shouldSave(JSON.stringify(project), lastSavedRef.current[PPRE + activeId])) { setBusy(false); return undefined; }
     setBusy(true); clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => { await sSet(PPRE + activeId, JSON.stringify(project)); setBusy(false); }, 600);
+    const id = activeId;
+    saveTimer.current = setTimeout(async () => { await saveBoardNow(id); setBusy(false); }, 600);
     return () => clearTimeout(saveTimer.current);
-  }, [project, activeId]);
+  }, [project, activeId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const storeThumb = useCallback(async (file) => {
     const data = await fileToThumb(file); const id = uid();
@@ -6278,15 +6595,17 @@ function useProjectStore(setSelShot) {
   // while a different board was open. Shared by both export tiers: a lightweight
   // {project, thumbs} parsed client-side, or the same shape handed back by the
   // server after a full-bundle zip's media has been reconciled into the catalog.
+  // Session P (review F4/F17): a restored board never carries a render in flight -- that
+  // render belongs to the board it was made on (or the machine it was made on), and its
+  // markers here would stay "rendering" forever or land a phantom take. The full bundle's
+  // server import strips them too; this lightweight JSON path must as well.
   const _adoptBackup = async (d) => {
-    if (!d || !d.project) { window.alert("That file didn't parse as a storyboard backup."); return; }
+    if (!d || !isBoard(d.project)) { window.alert("That file didn't parse as a storyboard backup."); return; }
     if (!window.confirm(`Import "${d.project.name || "this backup"}" as a NEW storyboard?\n\nYour currently-open board is left untouched.`)) return;
-    await flushSave(activeId, project);
-    const id = uid();
-    await sSet(PPRE + id, JSON.stringify(d.project));
-    await sSet(ACTIVE_KEY, id);
+    await flushSave(activeIdRef.current);
     if (d.thumbs) { setThumbs((t) => ({ ...t, ...d.thumbs })); if (hasStore) for (const [k, v] of Object.entries(d.thumbs)) await sSet(TPRE + k, v); }
-    setActiveId(id); setProject(d.project); setSelShot(null); readProjList();
+    await createBoard(stripInFlight(d.project));
+    setSelShot(null); readProjList();
   };
   const importJSON = async (file) => { if (!file) return;
     try { await _adoptBackup(JSON.parse(await file.text())); }
@@ -6310,7 +6629,10 @@ function useProjectStore(setSelShot) {
     return isZip ? importBundle(file) : importJSON(file); };
 
   return { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId };
+    projList, projMenu, setProjMenu, projectApi, importJSON, importBackup, activeId,
+    // Session P: what the render lifecycle needs from the store -- the synchronous board and
+    // board id, the lock flush, the merge's resolved-submit record, and the boot's failure.
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError };
 }
 
 // ---- 2. useShotMutations: act/card/ref CRUD on the open project ----
@@ -6324,15 +6646,9 @@ function useShotMutations(project, setProject) {
   // which needs the act id. generateShot/pollShot/useExistingVideo don't know (or care)
   // which act a shot lives in, so this stays a sibling of setCard rather than folding in.
   const setCardStatus = (cardId, patch) => setProject((p) => patchCardById(p, cardId, patch));
-  // setCardResult is setCardStatus for the ONE patch that carries a new resultMid. It exists
-  // so the card being overwritten gets a say: withResult reads the resultMid it is about to
-  // replace and files it under `attempts`, which is the only reason the spend ledger can
-  // count a re-rolled shot's first, paid-for try instead of forgetting it. Every landing
-  // result goes through here or through withResult directly (the routed-video path in
-  // LoomV2 uses setCard, which already takes a function) -- a fifth write site that used
-  // plain setCardStatus would silently reintroduce the amnesia.
-  const setCardResult = (cardId, patch) =>
-    setProject((p) => patchCardByIdWith(p, cardId, (c) => withResult(c, patch, new Date().toISOString())));
+  // (setCardResult / withResult retired, Session P: every landing -- pollShot, the drawer's
+  // mg-result, "attach to A·0n", "Use an existing video" -- goes through landTake/attachTake
+  // (loom/src/loom-takes-core.js), which append a take and move ★ and never lose a paid clip.)
 
   const addCard = (aId) => { const c = newCard();
     setProject((p) => appendCardToAct(p, aId, c));
@@ -6377,9 +6693,20 @@ function useShotMutations(project, setProject) {
     setCard(aId, card.id, (c) => ({ ...c, refs: [...c.refs, { ...buildNewRef(kind, uid()), tag }] })); };
   const setRef = (aId, cId, rId, patch) => setProject((p) => patchRef(p, aId, cId, rId, patch));
   const delRef = (aId, cId, ref) => setProject((p) => removeRef(p, aId, cId, ref.id));
-  const splitShot = (entry, t) => setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+  // Refused, with a plain message, while a render for the shot is out (review F11): the
+  // halves would split one render's lock, and its take would land on the left half only.
+  const splitShot = (entry, t) => {
+    const cur = project && flat(project).find((e) => e.c.id === entry.c.id);
+    if (splitBlocked(cur ? cur.c : entry.c)) {
+      const msg = "A render for this shot is still out. Split it after that take lands (or after you release it).";
+      if (typeof window !== "undefined" && window.Toast) window.Toast.show({ kind: "err", title: "Can't split this shot yet", msg });
+      else window.alert(msg);
+      return;
+    }
+    setProject((p) => splitCardAt(p, entry.a.id, entry.c.id, t, uid()));
+  };
 
-  return { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
+  return { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot };
 }
@@ -6388,9 +6715,23 @@ function useShotMutations(project, setProject) {
 // mobileUI (mobile-generate-rail pass, 2026-08-03): NOT used for its value, only as a second
 // dependency on the resume effect below -- see that effect's own comment for why the
 // Mobile-view toggle needs to trigger the identical resume it already runs on project load.
-function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI }) {
-  const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid} (video)
-  const resumedRef = useRef({});    // taskId -> true: shots whose interrupted poll we've re-attached this session
+function useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI }) {
+  const [genState, setGenState] = useState({});         // cardId -> {phase, msg, mid, held?} (video)
+  // genState read synchronously by the render latch (the paused carve-out): the click's own
+  // closure may be a render behind.
+  const genStateRef = useRef(genState);
+  genStateRef.current = genState;
+  const resumedRef = useRef({});    // taskId -> true: every task this tab has polled -- a later resume never starts a second poll of it
+  const pollingRef = useRef(new Set());   // taskIds with a live poll loop in this tab right now
+  // THE RENDER LATCH (BUILD-w5-p §3.3 step 1): card ids between a Render click and the moment
+  // their in-flight marker holds the lock. Checked and set synchronously, before any await, so
+  // a double click, an Enter repeat, a batch overlapping a single render, or the drawer's Go
+  // overlapping the card's own Render cannot both get through.
+  const inflightRef = useRef(new Set());
+  const checkingRef = useRef(new Set());  // submit ids whose submit-status check is out
+  const preLockRef = useRef({});          // submit id -> the card as it was before its lock (the drawer path's busy rollback)
+  const draftSubmitsRef = useRef({});     // submit id -> {settings} for a draft render from the drawer
+  const draftTasksRef = useRef({});       // task id -> {settings} for a draft render from the drawer
   const [genImgState, setGenImgState] = useState({});   // shotId -> {phase,msg,mid,routed} (in-Loom image ref-gen)
   const [imgModel, setImgModel] = useState(null);        // {model_id,title} for reference-image gen
   const [imgLoras, setImgLoras] = useState([]);           // D-11: [{model_id,title,version_id,weight,lora_base_type,trigger_words,failed}]
@@ -6448,7 +6789,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
      Wraps the pure, imported buildShotPayload with this hook's own `project` state
      + `imgSrc` (closes over `thumbs`), preserving the original single-argument
      call shape used below and in priceShot/generateShot. */
-  const shotPayload = (entry) => buildShotPayload(entry, project, imgSrc);
+  // The CURRENT board (review F12): a batch that runs for minutes, or a click after an edit
+  // the render has not caught up with, must price and send what the board says now.
+  const shotPayload = (entry) => buildShotPayload(entry, (projectRef && projectRef.current) || project, imgSrc);
   /* READ-ONLY cost + free-card check for a shot (spends nothing). The shot-shaped face of
      priceBody, the file's one price call site: -> {cost, free, cards, note}, or null when the
      check could not be verified at all. Every caller below fails CLOSED on that null. */
@@ -6480,6 +6823,21 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     }
     return window.confirm(`${label}\n\nCouldn't verify the cost or free-card coverage — it may spend credits.\n\nGenerate anyway?`);
   };
+  // ---- The render lifecycle's small helpers (Session P, BUILD-w5-p §3.3) ----
+  // The card as the board holds it NOW (the store's synchronous ref), never a render closure.
+  const cardOn = (id) => {
+    const p = projectRef.current;
+    return p ? (flat(p).find((e) => e.c.id === id) || null) : null;
+  };
+  // A reducer applied to one card of the OPEN board (setProject runs it against the ref at
+  // once). Callers check the board is still the open one first.
+  const patchCardNow = (id, fn) => setProject((p) => (p ? patchCardByIdWith(p, id, fn) : p));
+  const sayCard = (id, gs) => setGenState((s) => ({ ...s, [id]: gs }));
+  // Refused / held / unclear states are PEACH on the card (held:true), never red.
+  const holdCard = (id, msg, phase) => sayCard(id, { phase: phase || "error", held: true, msg });
+  const UNCLEAR_MSG = "The server didn't confirm this render. Check Activity before rendering again.";
+  const CHECKING_MSG = "Checking whether the render was sent…";
+
   // Returns an explicit outcome ({ok:true,taskId} | {ok:false,reason}) instead of only
   // writing state -- batchGenerate's own submit-time tally needs a value it can read
   // immediately after await, not genState (a React state variable batchGenerate's closure
@@ -6487,96 +6845,256 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // never retroactively change what that already-captured closure sees -- confirmed the
   // hard way tonight: two independent adversarial reviews both caught a first-draft tally
   // design that read genState right after this call and found it silently always stale).
+  //
+  // Session P (BUILD-w5-p §3.3, review F5/F12/F13/F16) -- the steps are ordered on purpose:
+  //   1. a SYNCHRONOUS latch before any await (inflightRef + the card's own markers, read from
+  //      the store's ref -- never the entry's closure); the paused carve-out may render again;
+  //   2. the entry is re-derived from the board ONCE, and ONE payload is built: it is priced,
+  //      it is what the confirm describes, it is what is POSTed, and the take's settings
+  //      snapshot is taken from the same moment;
+  //   3. the in-flight marker IS the lock (beginRender) and it is saved BEFORE anything is
+  //      sent -- through the save queue, after any save already in flight. A save conflict
+  //      (another tab saved first) merges and ABORTS; a failed save rolls the lock back and
+  //      ABORTS. Nothing is POSTed in either case;
+  //   4. ONE POST, with loom_target + submit_id (+ expect_free when the confirmed quote was
+  //      free); never retried;
+  //   5. the answer is classified: accepted -> adopt + poll; a definite refusal -> the card
+  //      says so; the one-render-per-shot 409 -> this click's lock comes off (nothing was
+  //      sent); NO answer -> UNCLEAR: the lock stays, and the only follow-up is ONE read of
+  //      /api/loom/submit-status (never a second POST).
   const generateShot = async (entry, opts = {}) => {
-    const c = entry.c;
-    const p = shotPayload(entry);
-    if (!p.hasInput) {
-      // Investigated, not assumed, what "re-roll on imported footage" actually does (an
-      // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
-      // so hasInput is false by construction): this branch is NOT the thing that protects
-      // it in practice. generateShot has exactly one caller, batchGenerate, whose own
-      // `todo` filter already excludes status:"done" -- importedFootagePatch always sets
-      // that -- so an imported card never reaches here via "Generate all" either. The real
-      // per-shot "Generate video" click lives entirely in <VideoDrawer>'s own
-      // doGenerate() (gallery/src/components/VideoDrawer.jsx), a SEPARATE, pre-existing guard
-      // (hasAnyRef) with its own message ("Pick a source image first."/"Pick at least one
-      // reference first.") -- live-verified: clicking it on an imported shot fires no
-      // fetch, spends nothing, and leaves the footage untouched. This message stays as a
-      // defensive fallback in case a future refactor ever re-routes per-shot generation
-      // through generateShot the way it once did (see the LoomV2-dead-generateShot-prop
-      // history) -- but do not mistake it for the operative guard today.
-      const msg = c.imported
-        ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
-        : "attach a frame or cast image first";
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
-      return { ok: false, reason: "no-input" };
-    }
-    // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
-    // Must fail CLOSED: priceShot swallows its own errors and returns null, and the server's
-    // own /api/price returns HTTP 200 with cost:null on any exception -- either one used to
-    // slip straight through the confirm below (every condition short-circuited on cost==null),
-    // submitting a paid generation with zero confirmation. A verify failure now still asks.
-    if (!opts.skipConfirm) {
-      const pr = await priceShot(entry);
-      if (pr && !pr.free && pr.cost != null) {
-        // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
-        // is worded as exactly what happens: no card attaches, the FULL price is charged.
-        // Not-matched keeps the original sentence. See confirmSpend's note above.
-        const line = priceIsShort(pr)
-          ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
-          : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
-        if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
-      } else if (!pr || !pr.free) {
-        if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
-      }
-    }
-    setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
-    setCardStatus(c.id, { status: "wip" });
+    const cardId = entry.c.id;
+    const boardId = activeIdRef.current;
+    // ---- 1. the latch: synchronous -- nothing is awaited before it ----
+    const pre = cardOn(cardId);
+    if (!pre) return { ok: false, reason: "missing" };
+    const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+    if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { ok: false, reason: "in-flight" };
+    if (opts.onlyIfNeeded && !needsRender(pre.c)) return { ok: false, reason: "not-needed" };
+    inflightRef.current.add(cardId);
     try {
-      const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
-          video_refs: p.video_refs, duration: p.duration, quality: p.quality,
-          generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot" }) });
-      const d = await r.json();
-      if (d.error || !d.task_id) {
-        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: (d.error ? friendlyGenErr(d.error) : "submit failed") } }));
-        // Roll the optimistic status:"wip" written above back to a real terminal "error" --
-        // the same write pollShot makes when the SERVER reports a failed render, so a
-        // rejection at SUBMIT time (content policy, no credits) lands in the same visible
-        // state as one that fails mid-render. Without it the card kept status:"wip" forever:
-        // indistinguishable from a live generation, and permanently skipped by
-        // batchGenerate's own todo filter (which excludes "wip" as well as "done"), so every
-        // later "Generate all" silently passed over the shot and the failure never surfaced.
-        setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-        return { ok: false, reason: "submit-failed" };
+      // ---- 2. the entry, re-derived once; ONE payload for the price, the POST and the snapshot ----
+      const proj = projectRef.current;
+      const fresh = cardOn(cardId);
+      const c = fresh.c;
+      const p = buildShotPayload(fresh, proj, imgSrc);
+      if (!p.hasInput) {
+        // Investigated, not assumed, what "re-roll on imported footage" actually does (an
+        // imported clip -- c.imported, see importedFootagePatch -- has no cast/frames/refs,
+        // so hasInput is false by construction): Generate all never reaches here for one
+        // (its todo is the shots that NEED a render, and an imported clip is a take), and the
+        // per-shot Video-tab button lives in <VideoDrawer>'s own doGenerate()
+        // (gallery/src/components/VideoDrawer.jsx), a SEPARATE guard (hasAnyRef) with its own
+        // message ("Pick a source image first."). The phone's Generate and the card's Render
+        // do reach here, and this is what they say.
+        const msg = c.imported
+          ? "Imported footage — nothing to re-roll. Attach a frame/cast image to render a NEW clip here, or swap the video via \"Use an existing video instead\"."
+          : "attach a frame or cast image first";
+        setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg } }));
+        return { ok: false, reason: "no-input" };
       }
-      // Persist the task id on the card so a mid-render tab close is recoverable: the
-      // in-memory pollShot loop dies with the page, but a resume effect re-attaches it
-      // from pendingTaskId on next load (otherwise the shot is stuck "wip" forever while
-      // its clip lands orphaned in the gallery). Cleared on done/fail.
-      // genStartedAt is ALSO persisted (not just held in pollShot's own closure) so the
-      // give-up-timer's tiers survive a reload -- without a durable timestamp, a resumed
-      // poll would compute elapsed from a fresh Date.now() every time, silently re-arming a
-      // full 6h ceiling on every reload regardless of true elapsed time (found in review).
+      // An imported (local_) picture cannot be sent yet (open call 4, review F16): refuse
+      // BEFORE a price is asked or a confirm shown. The server refuses it too.
+      if (unsendableImages(p).length) {
+        holdCard(c.id, "Imported picture — it can't be sent to PixAI yet. Nothing was sent.");
+        return { ok: false, reason: "imported-picture" };
+      }
+      // A batch confirmed THIS payload's price; content edited since then is not sent (F12).
+      if (opts.confirmedFp != null && priceFingerprint(p) !== opts.confirmedFp) return { ok: false, reason: "changed" };
+      const settings = snapshotSettings(c, proj, p.prompt, p.quality);
+      let quote = opts.quote || null;
+      let expectFree = !!opts.expectFree;
+      // GUARDRAIL: never spend credits silently. Check cost + free-card, confirm any credit spend.
+      // Must fail CLOSED: priceBody answers null for a check that could not be verified, and the
+      // server's own /api/price returns HTTP 200 with cost:null on any exception -- either one
+      // used to slip straight through the confirm below (every condition short-circuited on
+      // cost==null), submitting a paid generation with zero confirmation. A verify failure now
+      // still asks. The price is asked of THE payload that will be sent (review F12).
+      if (!opts.skipConfirm) {
+        const pr = await priceBody(p);
+        if (pr && !pr.free && pr.cost != null) {
+          // Short (a card matched, tickets held < tickets this duration costs -- issue #15)
+          // is worded as exactly what happens: no card attaches, the FULL price is charged.
+          // Not-matched keeps the original sentence. See confirmSpend's note above.
+          const line = priceIsShort(pr)
+            ? shortSpendLine(pr, `this ${p.duration ? `${p.duration}s ` : ""}shot`)
+            : `No free card covers this shot — it will spend ~${pr.cost.toLocaleString()} credits.`;
+          if (!window.confirm(`${line}\n\nGenerate anyway?`)) return { ok: false, reason: "cancelled" };
+        } else if (!pr || !pr.free) {
+          if (!window.confirm("Couldn't verify this shot's cost or free-card coverage — it may spend credits.\n\nGenerate anyway?")) return { ok: false, reason: "cancelled" };
+        }
+        quote = pr ? { cost: pr.cost == null ? null : pr.cost, free: !!pr.free } : null;
+        // Review F13: a render shown FREE (so no confirm) is sent as expect_free, and the
+        // server refuses it rather than charge credits if the card is gone by then.
+        expectFree = !!(pr && pr.free);
+      }
+      // ---- 3. the lock, saved before anything is sent ----
+      if (activeIdRef.current !== boardId || !cardOn(cardId)) return { ok: false, reason: "board-changed" };
+      const before = cardOn(cardId).c;
+      const submitId = newSubmitId();
       const startedAt = Date.now();
-      setCardStatus(c.id, { pendingTaskId: d.task_id, genStartedAt: startedAt });
-      pollShot(c.id, d.task_id, startedAt);
-      // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
-      // shows up in the activity card no matter which surface is watching -- register-ONLY (no
-      // poll loop of its own), since pollShot above already owns real completion handling;
-      // Jobs.track()'s own polling would be redundant for a submission this file already
-      // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
-      // own module scope), unlike a host-agnostic shared component that can't assume it.
-      if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, entry.code + " · " + (c.title || "untitled"));
-      return { ok: true, taskId: d.task_id };
-    } catch {
-      setGenState((s) => ({ ...s, [c.id]: { phase: "error", msg: "network error" } }));
-      // Same rollback as the submit-error branch above, for the same reason: a throw here
-      // (dropped connection, unparseable body) otherwise leaves the optimistic "wip" on the
-      // card forever, where it reads as a live render and is skipped by every later batch.
-      setCardStatus(c.id, { status: "error", pendingTaskId: null, genStartedAt: null });
-      return { ok: false, reason: "network" };
+      patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
+        board: boardId, quote, startedAt }, { pausedOk: pausedNow }) || cc);
+      const locked = cardOn(cardId);
+      if (!locked || locked.c.pendingSubmitId !== submitId) return { ok: false, reason: "in-flight" };
+      setGenState((s) => ({ ...s, [c.id]: { phase: "submitting", msg: "Submitting…" } }));
+      const saved = await saveBoardNow(boardId);
+      if (!saved.ok) {
+        const here = activeIdRef.current === boardId;
+        if (saved.conflict) {
+          // The merged board (the other tab's, plus this tab's takes and markers) is on
+          // screen now; this click's lock comes off it, measured against the OTHER tab's card
+          // so nothing stale from this tab (an old status, a paused task) comes back.
+          const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+          if (here) { patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || before)); await saveBoardNow(boardId); }
+          holdCard(cardId, "This storyboard changed in another tab — check the shot, then press Render again.");
+          return { ok: false, reason: "conflict" };
+        }
+        if (here) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+        holdCard(cardId, "Couldn't save the storyboard, so nothing was sent.");
+        return { ok: false, reason: "save-failed" };
+      }
+      // ---- 4. the one POST ----
+      let threw = false, status = 0, body = null;
+      try {
+        const r = await fetch("/api/loom/generate", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: p.mode, prompt: p.prompt, images: p.images,
+            video_refs: p.video_refs, duration: p.duration, quality: p.quality,
+            generate_audio: p.generate_audio, audio_language: p.audio_language, origin: "loom-shot",
+            loom_target: { board_id: boardId, card_id: cardId }, submit_id: submitId,
+            ...(expectFree ? { expect_free: true } : {}) }) });
+        status = r.status;
+        try { body = await r.json(); } catch (_e) { body = null; }
+      } catch (_e) { threw = true; }
+      // The POST answered: from here the card's own markers hold the lock.
+      inflightRef.current.delete(cardId);
+      // ---- 5. what the answer means ----
+      const here = () => activeIdRef.current === boardId;
+      const cls = classifySubmit({ threw, status, body });
+      if (cls.kind === "accepted") {
+        // Persist the task id on the card so a mid-render tab close is recoverable: the
+        // in-memory pollShot loop dies with the page, but the resume re-attaches it from
+        // pendingTaskId on next load (otherwise the shot is stuck "wip" forever while its clip
+        // lands orphaned in the gallery). genStartedAt was persisted by the lock, so the
+        // give-up-timer's tiers survive a reload too. Another board open now: that board's
+        // own resume adopts the task through /api/loom/submit-status when it is reopened.
+        if (here()) {
+          patchCardNow(cardId, (cc) => adoptTask(cc, submitId, cls.taskId));
+          pollShot(cardId, cls.taskId, startedAt, boardId);
+        }
+        // Registers this generation in the shared Job Tracker (gallery/src/notify/jobs.js) so it
+        // shows up in the activity card no matter which surface is watching -- register-ONLY (no
+        // poll loop of its own), since pollShot above already owns real completion handling;
+        // Jobs.track()'s own polling would be redundant for a submission this file already
+        // tracks. window.Jobs is guaranteed loaded here (installNotify() runs at this bundle's
+        // own module scope), unlike a host-agnostic shared component that can't assume it.
+        if (window.Jobs && window.Jobs.register) window.Jobs.register(cls.taskId, fresh.code + " · " + (c.title || "untitled"));
+        return { ok: true, taskId: cls.taskId };
+      }
+      if (cls.kind === "busy") {
+        // The server's one-render-per-shot rule: nothing was sent, so this click's lock comes off.
+        if (here()) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, before));
+        holdCard(cardId, cls.error);
+        return { ok: false, reason: "busy" };
+      }
+      if (cls.kind === "refused") {
+        noteResolved(submitId);
+        const msg = friendlyGenErr(cls.error);
+        if (here()) patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+        holdCard(cardId, msg);
+        return { ok: false, reason: "refused" };
+      }
+      // UNCLEAR (review F3): no answer, or an answer that says the render may have started.
+      // The lock stays; the way to learn more is the server's journal, read ONCE -- never a
+      // second POST of this render.
+      if (here()) patchCardNow(cardId, (cc) => markUnclear(cc, submitId, CHECKING_MSG, nowIso()));
+      const settled = await checkSubmit(cardId, submitId, boardId);
+      if (settled.accepted) return { ok: true, taskId: settled.taskId };
+      return { ok: false, reason: settled.refused ? "refused" : "unclear" };
+    } finally {
+      inflightRef.current.delete(cardId);
     }
+  };
+
+  // ONE read of the journal for a render whose POST answer never came (BUILD-w5-p §3.3 step 5):
+  // accepted -> the card adopts the task and polls it; refused / not sent / released -> the card
+  // says so; still unclear -> the peach way-out (↻ Check, or release after checking Activity).
+  // It reads GET /api/loom/submit-status and nothing else: it can never send a render.
+  const checkSubmit = async (cardId, submitId, boardId) => {
+    const here = () => activeIdRef.current === boardId;
+    if (checkingRef.current.has(submitId)) return { unclear: true };
+    checkingRef.current.add(submitId);
+    try {
+      if (here()) holdCard(cardId, CHECKING_MSG, "checking");
+      let st = null;
+      try {
+        const r = await fetch("/api/loom/submit-status?submit_id=" + encodeURIComponent(submitId));
+        st = await r.json();
+      } catch (_e) { st = null; }
+      const cls = classifySubmitStatus(st);
+      // Another board is open now: nothing is patched; that board's resume asks again.
+      if (!here()) return cls.kind === "accepted" ? { accepted: true, taskId: cls.taskId } : { [cls.kind]: true };
+      if (cls.kind === "accepted") {
+        adoptFromJournal(cardId, submitId, cls.taskId, boardId);
+        return { accepted: true, taskId: cls.taskId };
+      }
+      if (cls.kind === "refused") {
+        noteResolved(submitId);
+        const msg = cls.error ? friendlyGenErr(cls.error) : "That render was not sent. Nothing was spent on it.";
+        patchCardNow(cardId, (cc) => failRender(cc, { submitId, state: "refused", msg, at: nowIso() }));
+        holdCard(cardId, msg);
+        return { refused: true };
+      }
+      patchCardNow(cardId, (cc) => markUnclear(cc, submitId, UNCLEAR_MSG, nowIso()));
+      // The status pill stays short: the way-out beside it (sendUnclear) says the rest.
+      holdCard(cardId, "unconfirmed", "unclear");
+      return { unclear: true };
+    } finally {
+      checkingRef.current.delete(submitId);
+    }
+  };
+  // The journal says this render WAS sent (task id known): the card adopts it and it is polled
+  // like any other. This is a submit path for the Activity tray too -- a render whose POST
+  // answer was lost was never registered anywhere.
+  const adoptFromJournal = (cardId, submitId, taskId, boardId) => {
+    const e0 = cardOn(cardId);
+    if (!e0) return;
+    const startedAt = e0.c.genStartedAt || Date.now();
+    patchCardNow(cardId, (cc) => adoptTask(cc, submitId, taskId));
+    if (window.Jobs && window.Jobs.register) window.Jobs.register(taskId, e0.code + " · " + (e0.c.title || "untitled"));
+    pollShot(cardId, taskId, startedAt, boardId);
+  };
+  // "↻ Check": the same one read again, on the owner's click.
+  const recheckSubmit = (cardId) => {
+    const e = cardOn(cardId);
+    if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+    checkSubmit(cardId, e.c.pendingSubmitId, activeIdRef.current);
+  };
+  // "I checked Activity — release this shot" (review F8): records `abandoned` in the journal so
+  // the server stops holding the shot, and settles the card. It never re-sends anything; a
+  // render the journal knows WAS sent cannot be released -- the card adopts that task instead.
+  const releaseSubmit = async (cardId) => {
+    const e = cardOn(cardId);
+    const boardId = activeIdRef.current;
+    if (!e || !e.c.pendingSubmitId || e.c.pendingTaskId) return;
+    const submitId = e.c.pendingSubmitId;
+    let d = null, status = 0;
+    try {
+      const csrf = await LOOM_RUN_DEPS.csrf();
+      const r = await fetch("/api/loom/submit-abandon", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csrf, submit_id: submitId }) });
+      status = r.status;
+      d = await r.json();
+    } catch (_e) { d = null; }
+    if (activeIdRef.current !== boardId) return;
+    if (d && d.ok) {
+      noteResolved(submitId);
+      patchCardNow(cardId, (cc) => abandonSubmit(cc, submitId, nowIso()));
+      holdCard(cardId, "Released. If that render was sent after all, its clip is in your library.");
+      return;
+    }
+    if (status === 409 && d && d.task_id) { adoptFromJournal(cardId, submitId, String(d.task_id), boardId); return; }
+    holdCard(cardId, "Couldn't release this shot" + (d && d.error ? " — " + d.error : " — the server didn't answer.") + " Nothing was sent.", "unclear");
   };
   // classifyTaskStatus (loom-mutations.js) is the shared, tested response classifier;
   // the recursive setTimeout tick loop around it stays here since the polling/timing
@@ -6613,14 +7131,30 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // this, every reload would silently re-arm a full 6h budget regardless of true elapsed
   // time, reintroducing (on a per-reload cadence) the exact "dead generation indistinguishable
   // from a live one" symptom this whole softening exists to fix (found in review).
-  const pollShot = (cardId, tid, existingStartedAt) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
+  //
+  // Session P (BUILD-w5-p §1.3, review F1/F4/F14): `boardId` is the board the render was sent
+  // from. A result lands ONLY while that board is the open one, and only through landTake --
+  // which appends a take and moves ★ only for the task the card is waiting for. With another
+  // board open nothing is patched (a copy of the shot there is not its owner): the poll lets
+  // go of the task so that board's own resume lands it when it is reopened. A failure goes
+  // through failRender, so a shot that still has a ★ take stays done. The task is registered
+  // in resumedRef HERE, so no later resume can start a second poll of it.
+  const pollShot = (cardId, tid, existingStartedAt, boardId) => {
+    const key = String(tid);
+    if (pollingRef.current.has(key)) return;        // one live poll per task in this tab
+    pollingRef.current.add(key);
+    resumedRef.current[key] = true;
+    const onBoard = () => !boardId || activeIdRef.current === boardId;
+    // With another board open, let go of the task: that board's own resume polls it again.
+    const leave = () => { pollingRef.current.delete(key); delete resumedRef.current[key]; };
+    if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(tid).slice(-6) + ")" } }));
     const startedAt = existingStartedAt || Date.now();
     const pause = () => {
+      pollingRef.current.delete(key);
       // NOT a giveUp() -- status stays "wip", pendingTaskId stays set, and batchTally
       // records this card's outcome as "stale" (not "failed") so a batch banner never has to
       // lie about a shot this tab has genuinely stopped checking.
-      setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
+      if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
         msg: "Paused auto-checking after " + elapsedLabel(POLL_CEILING_MS) + " with no result — click to check again, or check the task on pixai.art (task " + String(tid).slice(-6) + ")" } }));
       setBatchOutcome(cardId, "stale");
     };
@@ -6628,15 +7162,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
       const cls = classifyTaskStatus(d);
       const elapsed = Date.now() - startedAt;
       if (cls.phase === "done") {
-        // duration is stashed here too (not just via setCardStatus below) so a draft
-        // generation -- with no real card for setCardStatus to find -- still has it
-        // on hand when the owner later attaches this result to a shot.
-        setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
-        // capture the clip's REAL length so the reel reflects what was rendered, not planned.
-        // Reset trims too -- a re-roll's new clip is a different length than whatever the
-        // PREVIOUS result was trimmed to, and a stale trimOut past the new clip's end can hang
-        // SequencePlayer on it forever (it never reaches the advance threshold).
-        setCardResult(cardId, { status: "done", resultMid: cls.mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null, ...(cls.duration ? { actualDur: cls.duration } : {}) });
+        if (!onBoard()) { leave(); return; }
+        pollingRef.current.delete(key);
+        const cur = cardOn(cardId);
+        const rep = { mid: cls.mid, taskId: tid, dur: cls.duration, at: nowIso(), board: boardId };
+        const outcome = cur ? landTake(cur.c, rep).outcome : "not-owned";
+        if (cur) patchCardNow(cardId, (cc) => landTake(cc, rep).card);
+        // duration is stashed here too so a draft generation -- with no real card -- still
+        // has it on hand when the owner later attaches this result to a shot. A take lands
+        // with the clip's REAL length and trims reset (landTake): a stale trimOut past the new
+        // clip's end can hang SequencePlayer on it forever.
+        if (outcome === "landed" || (outcome === "repeat" && cur && String(cur.c.pendingTaskId) === key)) {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid: cls.mid, duration: cls.duration } }));
+        } else if (outcome === "unselected") {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", mid: cls.mid, duration: cls.duration,
+            msg: "An earlier render finished; it was added as a take without taking ★." } }));
+        } else {
+          setGenState((s) => ({ ...s, [cardId]: { phase: "done", mid: cls.mid,
+            msg: "That render finished; its clip is in your library." } }));
+        }
         setBatchOutcome(cardId, "done");
         // Nudge the shared Activity tracker (the notify module's JobsCard) the INSTANT
         // this shot's own poll -- the live, real-time signal the per-shot badge above
@@ -6650,8 +7194,13 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
         // this bundle's module scope).
         if (window.JobsCard && window.JobsCard.refresh) window.JobsCard.refresh();
       } else if (cls.phase === "failed") {
+        if (!onBoard()) { leave(); return; }
+        pollingRef.current.delete(key);
         setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: cls.msg } }));
-        setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
+        // Status describes the ★ take (review F14): a failed retake on a rendered shot stays
+        // done, with the failure recorded; a report for a render the card is no longer waiting
+        // for changes nothing but that render's superseded record.
+        patchCardNow(cardId, (cc) => failRender(cc, { taskId: tid, state: "failed", msg: cls.msg, at: nowIso() }));
         setBatchOutcome(cardId, "failed");
         // Same nudge as the done branch above, mirroring the notify Jobs poller on its
         // own failed branch -- a failed shot must not leave the tray stuck on stale
@@ -6660,11 +7209,11 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
       } else if (elapsed > POLL_CEILING_MS) {
         pause();
       } else if (elapsed > POLL_STALE_AT_MS) {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "stale",
+        if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "stale",
           msg: "Still going after " + elapsedLabel(elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(tid).slice(-6) + ")" } }));
         setTimeout(tick, POLL_STALE_MS);
       } else if (elapsed > POLL_SLOW_AT_MS) {
-        setGenState((s) => ({ ...s, [cardId]: { phase: "slow",
+        if (onBoard()) setGenState((s) => ({ ...s, [cardId]: { phase: "slow",
           msg: "Taking longer than expected (" + elapsedLabel(elapsed) + ", task " + String(tid).slice(-6) + ")" } }));
         setTimeout(tick, POLL_SLOW_MS);
       } else setTimeout(tick, 4000);
@@ -6678,54 +7227,266 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // Resume any shot whose render was interrupted by a tab close: the card kept
   // status:"wip" + pendingTaskId, but its in-memory poll loop died with the page. On
   // project load (activeId change), re-attach a poll so the finished clip lands on the
-  // card. Deduped per task id so flipping projects back and forth mid-render doesn't
-  // stack loops; a resumed poll clears pendingTaskId itself on done/fail.
+  // card. Deduped per task id (pollShot registers every task it polls in resumedRef itself)
+  // so flipping projects back and forth mid-render doesn't stack loops.
   //
-  // mobileUI ALSO in the dependency array (mobile-generate-rail pass, 2026-08-03 --
-  // credit-safety finding): the desktop rail's Video tab submits through <mg-generate-
-  // drawer>, whose OWN poll is genuinely component-local (mg-generate-drawer.js's
-  // disconnectedCallback clears every _pollTimers entry -- confirmed by reading that
-  // file). LoomV2 -- and any <mg-generate-drawer> mounted inside it -- unmounts
-  // completely the instant the "📱 Mobile view" toggle flips (the same class of gap
-  // increment 3 built generateShot/pollShot specifically to route around for a shot's
-  // own clip). Unlike the drawer's documented 6h-ceiling pause, an unmount fires NO
-  // 'mg-paused' event -- genState silently freezes on "Rendering…" with nothing left
-  // polling, recoverable today only via a full page reload (which re-fires this same
-  // effect from a fresh activeId). Re-running the identical, already-idempotent scan on
-  // every mobileUI flip closes that gap immediately: any card left "wip"+pendingTaskId
-  // by a just-unmounted drawer gets a fresh, hook-level pollShot() the instant the
-  // toggle fires, regardless of whether LoomV2 or LoomMobile is the one now unmounting.
+  // mobileUI ALSO triggers it (mobile-generate-rail pass, 2026-08-03 -- credit-safety
+  // finding): LoomV2 -- and the <VideoDrawer> inside it -- unmounts completely the instant
+  // the "📱 Mobile view" toggle flips, and an unmount fires NO 'mg-paused' event, so a
+  // drawer-submitted render would sit on "Rendering…" with nothing left watching it here.
+  // Re-running the identical, already-idempotent scan on every flip closes that gap: any card
+  // left "wip"+pendingTaskId gets a hook-level pollShot() the instant the toggle fires.
   // resumedRef dedupes by taskId (not by trigger reason), so this is a genuine no-op for
-  // every task already resumed or still actively polling -- no double-poll risk, and
-  // none of Image/Edit/Reference's OWN generation needs this at all: genImage/genEdit/
-  // genRef's polls (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains
-  // living in this hook, never a DOM element's lifecycle, so they already survive the
-  // toggle with no fix required -- verified by reading their implementations, not
-  // assumed. See this increment's own report for the injected-state verification.
+  // every task already resumed or still actively polling. genImage/genEdit/genRef's polls
+  // (pollImg/pollTaskWithCeiling, below) are plain setTimeout chains living in this hook,
+  // never a DOM element's lifecycle, so they already survive the toggle with no fix.
   //
-  // WHICH cards need it is cardsToResume (loom-core.js) -- a pure walk over the board and
-  // the already-resumed record, so the dedup rule is provable without a mounted tree. WHEN
-  // to ask is this effect's dep array, and that is the whole of what lives here.
-  useEffect(() => {
-    if (!project) return;   // project is null until the store loads the first board
-    cardsToResume(project, resumedRef.current)
-      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt));
-  }, [activeId, mobileUI]);   // eslint-disable-line
+  // Session P (BUILD-w5-p §3.3, review F3/F8): a card whose SEND is unclear (a submit id, no
+  // task yet) is resumed by ONE read of /api/loom/submit-status -- never by a render.
+  //
+  // WHICH cards need it is cardsToResume (loom-core.js) and submitsToCheck
+  // (loom-takes-core.js) -- pure walks over the board, so the rules are provable without a
+  // mounted tree. It is a NAMED function so the never-auto-render test can root it.
+  const resumeInterrupted = () => {
+    const proj = projectRef.current;
+    if (!proj) return;   // null until the store loads the first board
+    const boardId = activeIdRef.current;
+    cardsToResume(proj, resumedRef.current)
+      .forEach((c) => pollShot(c.id, c.taskId, c.startedAt, boardId));
+    submitsToCheck(proj, Object.create(null))
+      .forEach((c) => checkSubmit(c.id, c.submitId, boardId));
+  };
+  useEffect(() => { resumeInterrupted(); }, [activeId, mobileUI]);   // eslint-disable-line
   // Attach an already-produced video straight onto a shot as its finished clip -- no
-  // generation involved. /api/loom/export already treats every resultMid as just "a video
-  // file to trim+concat," so this writes the exact same shape pollShot does on completion.
+  // generation involved. It lands as a take (attachTake, imported: the spend ledger never
+  // bills a borrowed clip), selected; a render still out for the shot is not cancelled by it
+  // (its late clip lands as a take without ★), and a shot whose send is unclear refuses.
   const useExistingVideo = (entry) => {
+    const cardId = entry.c.id, boardId = activeIdRef.current;
     openPick((mid, thumb, isVideo, duration) => {
-      setGenState((s) => ({ ...s, [entry.c.id]: { phase: "done", msg: "Attached from your gallery", mid } }));
-      // THE SAME PATCH THE FOOTAGE TAB'S IMPORT APPLIES (attachedVideoPatch, loom-mutations.js
-      // -- see its own note). Same picker, same borrowed clip, so the same `imported: true`
-      // provenance: this shot's video was rendered elsewhere at some other time, and the
-      // spend ledger must not bill it to this project. It was written out by hand here and
-      // missed that flag, which is the whole of the bug. pendingTaskId/genStartedAt clearing
-      // moved into the shared patch with it.
-      setCardResult(entry.c.id, attachedVideoPatch(mid, duration));
+      const cur = cardOn(cardId);
+      if (!cur || activeIdRef.current !== boardId) return;
+      const rep = { mid, dur: duration, imported: true, at: nowIso() };
+      const out = attachTake(cur.c, rep);
+      if (out.outcome === "unclear") {
+        holdCard(cardId, "This shot's last render isn't confirmed yet — check it (or release it) before attaching a video.", "unclear");
+        return;
+      }
+      if (out.outcome === "invalid") return;
+      patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+      setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Attached from your gallery", mid } }));
     }, "video");
   };
+  // The Video tab's draft result, "attach to A·0n": a real render made on this board, so a
+  // BILLED take, carrying the draft's settings snapshot when the draft recorded one. Returns
+  // attachTake's outcome for the button to report.
+  const attachDraftVideo = (cardId, { mid, dur, settings }) => {
+    const cur = cardOn(cardId);
+    if (!cur || !mid) return "invalid";
+    const rep = { mid, dur, imported: false, settings: settings || null, at: nowIso() };
+    const out = attachTake(cur.c, rep);
+    if (out.outcome === "unclear") {
+      holdCard(cardId, "This shot's last render isn't confirmed yet — check it (or release it) before attaching.", "unclear");
+      return "unclear";
+    }
+    if (out.outcome === "invalid") return "invalid";
+    patchCardNow(cardId, (cc) => attachTake(cc, rep).card);
+    return out.outcome;
+  };
+
+  /* ---- The Video drawer's host (BUILD-w5-p §3.3, review F7) ----
+     The drawer asks beforeSend({submit_id, card_id, board_id, payload}) before it POSTs, with
+     the target it captured AT THE CLICK. For a card this runs generateShot's steps 1 and 3:
+     the synchronous latch, then the lock (beginRender) saved through the queue. Any refusal
+     ends the click with the Loom's message and NO POST. Every drawer event is then resolved
+     by the ids it carries -- mg-submit by the card's pendingSubmitId, mg-result / mg-error /
+     mg-slow / mg-paused by the card's task id -- and never by whichever shot is selected. A
+     draft render (no card: "__draft__") locks nothing and is sent without a loom_target. */
+  const beginDrawerRender = async (req) => {
+    const q = req || {};
+    const cardId = String(q.card_id || ""), boardId = String(q.board_id || ""), submitId = String(q.submit_id || "");
+    const payload = q.payload || {};
+    if (!cardId || !boardId || !submitId) return { refused: "This render isn't tied to a shot, so nothing was sent." };
+    if (cardId === "__draft__") {
+      const dc = (draftCardRef && draftCardRef.current) || {};
+      draftSubmitsRef.current[submitId] = { settings: snapshotSettings(
+        { ...dc, mode: payload.mode || dc.mode, duration: payload.duration != null ? payload.duration : dc.duration,
+          audioGen: payload.audio != null ? !!payload.audio : dc.audioGen, audioLanguage: payload.audio_language || dc.audioLanguage },
+        projectRef.current, payload.prompt, payload.quality) };
+      return { ok: true };
+    }
+    if (activeIdRef.current !== boardId) return { refused: "The storyboard changed before this render went out. Nothing was sent." };
+    // ---- step 1: the latch, synchronous ----
+    const pre = cardOn(cardId);
+    if (!pre) return { refused: "That shot is no longer on this storyboard. Nothing was sent." };
+    const pausedNow = ((genStateRef.current || {})[cardId] || {}).phase === "paused";
+    if (inflightRef.current.has(cardId) || goBlocked(pre.c, pausedNow)) return { refused: "This shot is already rendering. Nothing was sent." };
+    if (unsendableImages(payload).length) {
+      holdCard(cardId, "Imported picture — it can't be sent to PixAI yet. Nothing was sent.");
+      return { refused: "Imported picture — it can't be sent to PixAI yet. Nothing was sent." };
+    }
+    inflightRef.current.add(cardId);
+    // ---- step 3: the lock, saved before anything is sent ----
+    const c = pre.c;
+    const settings = snapshotSettings({ ...c, mode: payload.mode || c.mode,
+      duration: payload.duration != null ? payload.duration : c.duration,
+      audioGen: payload.audio != null ? !!payload.audio : c.audioGen,
+      audioLanguage: payload.audio_language || c.audioLanguage }, projectRef.current, payload.prompt, payload.quality);
+    const quote = q.quote || null;
+    preLockRef.current[submitId] = c;
+    patchCardNow(cardId, (cc) => beginRender(cc, { submitId, settings, anchor: c.anchor || null,
+      board: boardId, quote, startedAt: Date.now() }, { pausedOk: pausedNow }) || cc);
+    const locked = cardOn(cardId);
+    if (!locked || locked.c.pendingSubmitId !== submitId) {
+      inflightRef.current.delete(cardId); delete preLockRef.current[submitId];
+      return { refused: "This shot is already rendering. Nothing was sent." };
+    }
+    setGenState((s) => ({ ...s, [cardId]: { phase: "submitting", msg: "Submitting…" } }));
+    const saved = await saveBoardNow(boardId);
+    if (saved.ok) return { ok: true };
+    inflightRef.current.delete(cardId); delete preLockRef.current[submitId];
+    const here = activeIdRef.current === boardId;
+    if (saved.conflict) {
+      const remoteCard = saved.remote ? (flat(saved.remote).find((e) => e.c.id === cardId) || {}).c : null;
+      if (here) { patchCardNow(cardId, (cc) => cancelRender(cc, submitId, remoteCard || c)); await saveBoardNow(boardId); }
+      const msg = "This storyboard changed in another tab — check the shot, then press Render again.";
+      holdCard(cardId, msg);
+      return { refused: msg };
+    }
+    if (here) patchCardNow(cardId, (cc) => cancelRender(cc, submitId, c));
+    const msg = "Couldn't save the storyboard, so nothing was sent.";
+    holdCard(cardId, msg);
+    return { refused: msg };
+  };
+  // mg-submit: the drawer's POST was accepted. The card that holds this submit id adopts the
+  // task (and its durable mode is reconciled to what was really sent) -- found by its
+  // pendingSubmitId, never by the selected shot.
+  const onVideoSubmit = useCallback((detail) => {
+    const d = detail || {};
+    if (d.card_id) inflightRef.current.delete(String(d.card_id));
+    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's own
+    // registration. The drawer's shared submit road registers on the way past too; register is
+    // idempotent by design, and this stays the Loom's own guarantee (every Loom submit path
+    // registers, pinned by loom-image-job-register.test.js).
+    if (window.Jobs && window.Jobs.register) window.Jobs.register(d.task_id, "Rendered");
+    const submitted = d.payload && d.payload.mode;
+    if (d.card_id === "__draft__") {
+      draftTasksRef.current[String(d.task_id)] = draftSubmitsRef.current[String(d.submit_id)] || {};
+      delete draftSubmitsRef.current[String(d.submit_id)];
+      setGenState((s) => ({ ...s, __draft__: { phase: "running", msg: "Rendering… (task " + String(d.task_id).slice(-6) + ")" } }));
+      if (submitted && setDraftCard) setDraftCard((c) => (submitted !== c.mode ? setShotMode(c, submitted) : c));
+      return;
+    }
+    delete preLockRef.current[String(d.submit_id)];
+    // Another board open: its own resume adopts the task through /api/loom/submit-status.
+    if (d.board_id && d.board_id !== activeIdRef.current) return;
+    const card = cardForSubmit(projectRef.current, d.submit_id);
+    if (!card) return;
+    // The drawer may have submitted a different mode than the card believes -- e.g. a
+    // model-gating auto-switch (_applyModelGating) that never wrote back on its own (that
+    // would let casual model-browsing silently corrupt a card's real mode). Reconcile the
+    // card's durable mode field to what ACTUALLY got submitted, at the one moment it's
+    // known for certain -- on THIS card.
+    patchCardNow(card.id, (cc) => {
+      const a = adoptTask(cc, d.submit_id, d.task_id);
+      return (submitted && submitted !== a.mode) ? setShotMode(a, submitted) : a;
+    });
+    setGenState((s) => ({ ...s, [card.id]: { phase: "running", msg: "Rendering… (task " + String(d.task_id).slice(-6) + ")" } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-result: lands on the card waiting for THIS task (or that superseded it), via landTake.
+  const onVideoResult = useCallback((detail) => {
+    const d = detail || {};
+    const mid = (d.media_ids || [])[0];
+    if (d.card_id === "__draft__") {
+      const rec = draftTasksRef.current[String(d.task_id)] || {};
+      setGenState((s) => ({ ...s, __draft__: { phase: "done", msg: "Done", mid, duration: d.duration, settings: rec.settings || null } }));
+      return;
+    }
+    const tid = d.task_id;                  // a result, never a submit: it takes no task id from one
+    if (!mid || !tid) return;
+    if (d.board_id && d.board_id !== activeIdRef.current) return;   // its board's resume lands it
+    const card = cardForTask(projectRef.current, tid);
+    if (!card) return;
+    const rep = { mid, taskId: tid, dur: d.duration, at: nowIso(), board: d.board_id || activeIdRef.current };
+    const outcome = landTake(card, rep).outcome;
+    patchCardNow(card.id, (cc) => landTake(cc, rep).card);
+    const landed = outcome === "landed" || (outcome === "repeat" && String(card.pendingTaskId) === String(tid));
+    setGenState((s) => ({ ...s, [card.id]: landed ? { phase: "done", msg: "Done", mid, duration: d.duration }
+      : { phase: "done", mid, msg: outcome === "unselected" ? "An earlier render finished; it was added as a take without taking ★."
+        : "That render finished; its clip is in your library." } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-error: a render that failed after it was sent (task id), or a submit that did not go
+  // through (submit id): refused -> the card says so; the one-render-per-shot 409 -> this
+  // click's lock comes off; NO answer -> unclear, and the one submit-status read.
+  const onVideoError = useCallback((detail) => {
+    const d = detail || {};
+    if (d.card_id === "__draft__") {
+      setGenState((s) => ({ ...s, __draft__: { phase: "error", msg: d.unclear ? UNCLEAR_MSG : d.error } }));
+      return;
+    }
+    if (d.task_id) {
+      if (d.board_id && d.board_id !== activeIdRef.current) return;
+      const card = cardForTask(projectRef.current, d.task_id);
+      if (!card) return;
+      patchCardNow(card.id, (cc) => failRender(cc, { taskId: d.task_id, state: "failed", msg: d.error, at: nowIso() }));
+      setGenState((s) => ({ ...s, [card.id]: { phase: "error", msg: d.error } }));
+      return;
+    }
+    if (!d.submit_id) return;               // not a render (an audio upload's error line, say)
+    if (d.card_id) inflightRef.current.delete(String(d.card_id));
+    const before = preLockRef.current[String(d.submit_id)];
+    delete preLockRef.current[String(d.submit_id)];
+    if (d.board_id && d.board_id !== activeIdRef.current) return;   // its board's resume checks it
+    const card = cardForSubmit(projectRef.current, d.submit_id);
+    if (!card) return;
+    const cls = d.answer ? classifySubmit(d.answer) : { kind: d.unclear ? "unclear" : "refused", error: d.error };
+    if (cls.kind === "unclear" || cls.kind === "accepted") {
+      patchCardNow(card.id, (cc) => markUnclear(cc, d.submit_id, CHECKING_MSG, nowIso()));
+      checkSubmit(card.id, d.submit_id, activeIdRef.current);
+      return;
+    }
+    if (cls.kind === "busy") {
+      // Nothing was sent: this click's lock comes off (back to the card as it was before it).
+      if (before) patchCardNow(card.id, (cc) => cancelRender(cc, d.submit_id, before));
+      else patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg: cls.error || d.error, at: nowIso() }));
+      holdCard(card.id, cls.error || d.error);
+      return;
+    }
+    noteResolved(d.submit_id);
+    const msg = d.error || friendlyGenErr(cls.error);
+    patchCardNow(card.id, (cc) => failRender(cc, { submitId: d.submit_id, state: "refused", msg, at: nowIso() }));
+    holdCard(card.id, msg);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-slow: the drawer's poll downshifted cadence without a real result. Board-grid cards
+  // read their badge text from genState, not the drawer's own inline line (only visible while
+  // this shot's Video tab is open) -- this is the mirror write that keeps them in sync. Never
+  // touches the card or batchTally: drawer-submitted shots are never part of a batch run.
+  const drawerCardFor = (d) => {
+    if (d.card_id === "__draft__") return "__draft__";
+    if (d.board_id && d.board_id !== activeIdRef.current) return null;
+    const card = cardForTask(projectRef.current, d.task_id);
+    return card ? card.id : null;
+  };
+  const onVideoSlow = useCallback((detail) => {
+    const d = detail || {};
+    const id = drawerCardFor(d);
+    if (!id) return;
+    setGenState((s) => ({ ...s, [id]: {
+      phase: d.tier,
+      msg: d.tier === "stale"
+        ? "Still going after " + elapsedLabel(d.elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(d.task_id).slice(-6) + ")"
+        : "Taking longer than expected (" + elapsedLabel(d.elapsed) + ", task " + String(d.task_id).slice(-6) + ")",
+    } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // mg-paused: the drawer's poll hit its 6h ceiling and stopped for this task. Same
+  // non-verdict as pollShot's own pause() -- the card's markers are untouched.
+  const onVideoPaused = useCallback((detail) => {
+    const d = detail || {};
+    const id = drawerCardFor(d);
+    if (!id) return;
+    setGenState((s) => ({ ...s, [id]: { phase: "paused",
+      msg: "Paused auto-checking with no result — click to check again, or check pixai.art (task " + String(d.task_id).slice(-6) + ")" } }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // ---- In-Loom reference-image gen: reuse /api/generate (image), poll, then route the result into the shot ----
   // Shared drawer poll. pollShot has had a POLL_CEILING_MS guard since the
   // give-up-timer pass; these drawer polls never did, so a task that never reached
@@ -6951,20 +7712,25 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     runGen(setGenFixState, c.id, "/api/fix", { source: src, boxes: scaledBoxes }, null, "",
       "Fix · " + entry.code + " · " + (c.title || "untitled"));
   };
-  // Batch-generate the whole board: fire every not-done shot in sequence, staggered so
-  // the submits don't collide. Each shot manages its own status/poll via generateShot.
-  // Takes `entries` as a call-site argument (computed by App() from the current
-  // project) rather than closing over it, since this hook has no `entries` of its own.
+  // Batch-generate the whole board: fire every shot that needs a render in sequence,
+  // staggered so the submits don't collide. Each shot manages its own status/poll via
+  // generateShot. `entries` is the caller's (the toolbar's) view; the todo list is taken from
+  // the CURRENT board (the store's ref), which already holds any hand-edit the click flushed.
   const batchGenerate = async (entries) => {
-    // Exclude "wip" alongside "done" -- a shot already mid-render (started individually via
-    // the drawer, or reattached by the resume-on-load effect) must not be resubmitted just
-    // because it isn't finished yet. Found in review: the batching flag only guards the
-    // TOOLBAR button, not this filter, so a batch launched while some other shot happens to
-    // already be rendering used to fire a second, duplicate /api/loom/generate for it.
-    const todo = entries.filter((e) => e.c.status !== "done" && e.c.status !== "wip");
+    // Session P (review F14, BUILD-w5-p §3.4): a shot needs a render when it has no ★ take and
+    // no render in flight (needsRender) -- NOT "status is not done". A rendered shot whose
+    // retake failed keeps its take and is never paid for again by Generate all; a shot already
+    // mid-render (started from the drawer or its own Render, or reattached by the resume) is
+    // never resubmitted.
+    const board = projectRef.current ? flat(projectRef.current) : (entries || []);
+    const todo = board.filter((e) => needsRender(e.c));
     if (!todo.length) return;
     // Price every shot FIRST so the confirm shows real cost + card coverage — no silent spend.
+    // The fingerprint each shot's confirmed price is held to (review F12) is taken from the
+    // same board in the same synchronous step as the payloads priced on the next line;
+    // generateShot later refuses to send a shot whose payload no longer matches it.
     setBatching(true);
+    const fps = todo.map((e) => priceFingerprint(shotPayload(e)));
     const prices = await Promise.all(todo.map((e) => priceShot(e)));
     // tallyPricesDetailed (loom-core.js) fails closed the same way this loop always did (a
     // failed price check buckets as "unknown", never a false "0 credits") -- the one shared
@@ -7008,22 +7774,60 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     // since nothing else would ever touch it again.
     const ids = new Set(todo.map((e) => e.c.id));
     setBatchTally({ total: todo.length, submitted: 0, ids, outcomes: {} });
-    for (const e of todo) {
+    // Which shots the pool-aware tally counted as COVERED by a card (review F13): only those are
+    // sent expect_free, so the server refuses one rather than charge it if the card is gone.
+    // An overflow shot was confirmed as a paid one and is sent as one.
+    const covered = prices.map((pr, i) => !!(pr && pr.free) && !(overflowIndexes || []).includes(i));
+    const dropFromTally = (id) => setBatchTally((prev) => {
+      if (!prev || !prev.ids.has(id)) return prev;
+      const next = new Set(prev.ids); next.delete(id);
+      return { ...prev, ids: next, total: prev.total - 1 };
+    });
+    const changed = [], skipped = [];
+    let stopped = null;
+    for (const [i, e] of todo.entries()) {
       // generateShot never throws (every failure path returns {ok:false,...}), so this
       // try/catch is defensive only -- the tally itself is driven by the return value, not
       // by whether an exception escaped (a first-draft design tried the latter and, since
       // generateShot swallows every failure internally, it never actually caught anything).
       let r;
-      try { r = await generateShot(e, { skipConfirm: true }); } catch (_e) { r = { ok: false }; }
+      try {
+        r = await generateShot(e, { skipConfirm: true, onlyIfNeeded: true, confirmedFp: fps[i], expectFree: covered[i],
+          quote: prices[i] ? { cost: prices[i].cost == null ? null : prices[i].cost, free: covered[i] } : null });
+      } catch (_e) { r = { ok: false }; }
       // A successful submit only bumps `submitted` -- its eventual done/failed/stale outcome
       // is recorded later by pollShot via setBatchOutcome. An immediate submit-time failure
       // (r.ok===false) never gets a pollShot at all, so it records its own "failed" outcome
       // right here, the one place that will ever happen for this card.
       if (r.ok) setBatchTally((prev) => (prev && prev.ids.has(e.c.id) ? { ...prev, submitted: prev.submitted + 1 } : prev));
-      else setBatchOutcome(e.c.id, "failed");
-      await new Promise((res) => setTimeout(res, 2200));
+      else if (r.reason === "changed") { changed.push(e.code); dropFromTally(e.c.id); continue; }
+      else if (r.reason === "not-needed" || r.reason === "in-flight" || r.reason === "missing") { skipped.push(e.code); dropFromTally(e.c.id); continue; }
+      // An unclear send MAY exist: the bar says "check manually" (its way-out is on the card),
+      // never "failed".
+      else setBatchOutcome(e.c.id, r.reason === "unclear" ? "stale" : "failed");
+      // The board changed in another tab, the server says the shot is already rendering, or
+      // its answers are getting lost: nothing more is sent (BUILD-w5-p §3.4). A definite
+      // refusal of one shot is recorded above and the batch goes on.
+      if (!r.ok && (r.reason === "conflict" || r.reason === "busy" || r.reason === "unclear"
+        || r.reason === "save-failed" || r.reason === "board-changed")) {
+        stopped = { code: e.code, reason: r.reason };
+        todo.slice(i + 1).forEach((x) => dropFromTally(x.c.id));
+        break;
+      }
+      if (i < todo.length - 1) await new Promise((res) => setTimeout(res, 2200));
     }
     setBatching(false);
+    if (changed.length || skipped.length || stopped) {
+      const WHY = { conflict: "the storyboard changed in another tab", busy: "the server says that shot is already rendering",
+        unclear: "the server didn't confirm that render", "save-failed": "the storyboard couldn't be saved",
+        "board-changed": "another storyboard was opened" };
+      const lines = [];
+      if (changed.length) lines.push("Skipped " + changed.join(", ") + ": changed since you confirmed. Nothing was sent for them.");
+      if (skipped.length) lines.push("Skipped " + skipped.join(", ") + ": already rendering or rendered.");
+      if (stopped) lines.push("Stopped at " + stopped.code + " (" + (WHY[stopped.reason] || stopped.reason) + "). Nothing after it was sent.");
+      if (window.Toast) window.Toast.show({ kind: "err", sticky: !!stopped, title: "Generate all", msg: lines.join(" ") });
+      else window.alert(lines.join("\n"));
+    }
   };
 
   // ---- Standing cost-to-finish estimate: a per-shot price CACHE, warm without gating on
@@ -7060,7 +7864,9 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
   // the board is busiest (found in review).
   const { notDone, notDoneFp } = useMemo(() => {
     const boardEntries = project ? flat(project) : [];
-    const nd = boardEntries.filter((e) => e.c.status !== "done");
+    // The same rule Generate all sends by (review F14): a shot with a ★ take is finished even
+    // when its last retake failed, and a shot in flight is not "to finish".
+    const nd = boardEntries.filter((e) => needsRender(e.c));
     const fp = nd.map((e) => e.c.id + ":" + priceFingerprint(shotPayload(e))).join("|");
     return { notDone: nd, notDoneFp: fp };
   }, [project]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -7143,6 +7949,10 @@ function useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCar
     generateShot, pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
     costEstimate, refreshEstimate, priceShot,
     spend, refreshSpend,
+    // Session P: the unclear-send way-out, the draft's "attach to A·0n", and the Video
+    // drawer's host (its beforeSend and the handlers of its events).
+    recheckSubmit, releaseSubmit, attachDraftVideo,
+    beginDrawerRender, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused,
   };
 }
 
@@ -7262,9 +8072,13 @@ export default function App() {
   const [draftTarget, setDraftTarget] = useState("");              // shot id chosen to route/attach a draft result into
   const [draftAttachedInfo, setDraftAttachedInfo] = useState(null); // {mid, code} once a draft video is attached to a shot
   const { project, setProject, thumbs, storeThumb, busy,
-    projList, projMenu, setProjMenu, projectApi, importBackup, activeId } = useProjectStore(setSelShot);
+    projList, projMenu, setProjMenu, projectApi, importBackup, activeId,
+    projectRef, activeIdRef, saveBoardNow, noteResolved, loadError } = useProjectStore(setSelShot);
+  // The draft card as it is now, for the drawer host's settings snapshot of a draft render.
+  const draftCardRef = useRef(draftCard);
+  draftCardRef.current = draftCard;
 
-  const { open, setOpen, setCard, setAct, setAssets, setCardStatus, setCardResult,
+  const { open, setOpen, setCard, setAct, setAssets, setCardStatus,
     addCard, importFootage, dupCard, delCard, moveCard, moveCardToAct, addAct, delAct, moveAct,
     addRef, setRef, delRef, splitShot } = useShotMutations(project, setProject);
 
@@ -7300,74 +8114,15 @@ export default function App() {
     // reference to them.
     generateShot, priceShot,
     pollShot, useExistingVideo, genImage, routeImg, genEdit, genRef, genFix, routeGen, batchGenerate,
-    costEstimate, refreshEstimate, spend, refreshSpend }
+    costEstimate, refreshEstimate, spend, refreshSpend,
+    recheckSubmit, releaseSubmit, attachDraftVideo,
+    beginDrawerRender, onVideoSubmit, onVideoResult, onVideoError, onVideoSlow, onVideoPaused }
     // mobileUI passed in (mobile-generate-rail pass, 2026-08-03) so the resume-on-reload
     // effect can also fire on the Mobile-view toggle -- see that effect's own comment.
-    = useGenerationPipeline({ project, thumbs, setCard, setCardStatus, setCardResult, setAssets, openPick, activeId, mobileUI });
-  // <mg-generate-drawer> owns its own submit/poll now (Loom-mount build, 2026-07-18); these
-  // mirror exactly what generateShot/pollShot already write for every OTHER path, so the
-  // board card's live status badge, tab-close resume (pendingTaskId), and the finished clip
-  // landing on the shot all keep working identically regardless of which UI submitted.
-  const onVideoSubmit = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "running", msg: "Rendering… (task " + String(detail.task_id).slice(-6) + ")" } }));
-    // genStartedAt persisted here too, not just in generateShot's own submit site -- the
-    // resume-on-reload effect (useGenerationPipeline) resumes ANY wip+pendingTaskId card via
-    // pollShot regardless of which path originally submitted it (the drawer's own in-memory
-    // poll dies with the page same as pollShot's would). Without this, reloading a page with a
-    // still-pending drawer-submitted shot would resume with no persisted start time, silently
-    // re-arming a full 6h give-up budget on every reload (found while implementing).
-    setCardStatus(cardId, { status: "wip", pendingTaskId: detail.task_id, genStartedAt: Date.now() });
-    // Registers with the shared Job Tracker (notify/jobs.js), mirroring generateShot's
-    // own registration -- deliberately done HERE (the Loom's own host code), not inside
-    // mg-generate-drawer.js itself, so the shared drawer component stays genuinely
-    // host-agnostic (its own documented contract) rather than assuming window.Jobs exists.
-    // "Rendered" matches the gallery's own existing label for this same /api/loom/generate
-    // endpoint (Gen.videoGenerate()'s runTask call).
-    // 2026-08-23: the drawer now submits through the gallery's shared submit road, which
-    // registers on the way past, so by the time this runs the id is usually already in the
-    // log and register() no-ops on its `seen` map. KEPT anyway, and not as an oversight:
-    // register is idempotent by design, this stays the Loom's own guarantee (every Loom
-    // submit path registers, pinned by loom-image-job-register.test.js) rather than a
-    // dependency on what another bundle's road happens to do, and it is still the only
-    // registration if a future host mounts this drawer without the gallery's Jobs engine.
-    if (window.Jobs && window.Jobs.register) window.Jobs.register(detail.task_id, "Rendered");
-  }, [setGenState, setCardStatus]);
-  const onVideoResult = useCallback((cardId, detail) => {
-    const mid = (detail.media_ids || [])[0];
-    setGenState((s) => ({ ...s, [cardId]: { phase: "done", msg: "Done", mid, duration: detail.duration } }));
-    setCardResult(cardId, { status: "done", resultMid: mid, trimIn: 0, trimOut: null, pendingTaskId: null, genStartedAt: null,
-      ...(detail.duration ? { actualDur: detail.duration } : {}) });
-  }, [setGenState, setCardResult]);
-  const onVideoError = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "error", msg: detail.error } }));
-    // Persist the failure onto the card itself, not just the ephemeral (reload-wiped)
-    // genState -- previously only pendingTaskId cleared here, leaving status:"wip" forever,
-    // indistinguishable from a shot that's still genuinely rendering. Found 2026-07-18.
-    // NOTE (2026-07-18(pm)): this now only ever fires on a REAL d.phase==='failed' from the
-    // drawer's own poll -- elapsed-time-alone timeouts route through onVideoSlow/onVideoPaused
-    // below instead, and never touch card.status at all.
-    setCardStatus(cardId, { status: "error", pendingTaskId: null, genStartedAt: null });
-  }, [setGenState, setCardStatus]);
-  // mg-slow: the drawer's poll downshifted cadence without a real result. Board-grid cards
-  // read their badge text from genState, not the drawer's own inline `res` div (only visible
-  // while this shot's Video tab is open) -- this is the mirror write that keeps them in sync.
-  // Never touches setCardStatus or batchTally: status stays "wip", and drawer-submitted shots
-  // are never part of a batch run (batchGenerate only ever calls generateShot/pollShot
-  // directly, never the drawer).
-  const onVideoSlow = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: {
-      phase: detail.tier,
-      msg: detail.tier === "stale"
-        ? "Still going after " + elapsedLabel(detail.elapsed) + " — unusual. Check pixai.art, or keep waiting (task " + String(detail.task_id).slice(-6) + ")"
-        : "Taking longer than expected (" + elapsedLabel(detail.elapsed) + ", task " + String(detail.task_id).slice(-6) + ")",
-    } }));
-  }, [setGenState]);
-  // mg-paused: the drawer's poll hit its 6h ceiling and stopped scheduling calls for this
-  // task. Same non-verdict as pollShot's own pause() -- status/pendingTaskId untouched.
-  const onVideoPaused = useCallback((cardId, detail) => {
-    setGenState((s) => ({ ...s, [cardId]: { phase: "paused",
-      msg: "Paused auto-checking with no result — click to check again, or check pixai.art (task " + String(detail.task_id).slice(-6) + ")" } }));
-  }, [setGenState]);
+    = useGenerationPipeline({ project, projectRef, activeIdRef, setProject, saveBoardNow, noteResolved, draftCardRef, setDraftCard, thumbs, setCard, setCardStatus, setAssets, openPick, activeId, mobileUI });
+  // The Video drawer's events (mg-submit / mg-result / mg-error / mg-slow / mg-paused) are
+  // handled by useGenerationPipeline itself since Session P (review F7): each resolves its card
+  // by the submit id or task id the event carries, never by the selected shot.
   // Draft-generation results (Image/Edit/Reference/Video) are keyed by the fixed "__draft__"
   // id, shared across every open project -- without this, a finished draft from project A
   // resurfaces in project B's drawer (still-live thumbnail + a working attach button that
@@ -7411,6 +8166,23 @@ export default function App() {
   const setLook = (v) => setProject((p) => ({ ...p, look: v }));
   const setDraft = (v) => setProject((p) => ({ ...p, draft: v }));
 
+  // Session P (review F15): a boot that could not read the storyboards says so, and writes and
+  // seeds nothing -- a Reload is the way on. Never the eternal "Loading the bay…".
+  if (!project && loadError) {
+    return (
+      <div className="sb-root"><style>{STYLES}</style><NotifyRoot />
+        <div className="sb-empty sb-loadfail" role="alert">
+          <b>Couldn't read your storyboards</b>
+          <span>{loadError === "list"
+            ? "The list of storyboards didn't load."
+            : loadError === "legacy"
+              ? "Your saved storyboard didn't read."
+              : "None of your storyboards would read."} Nothing was changed or written — check the server, then reload.</span>
+          <button type="button" className="sb-btn" onClick={() => window.location.reload()}>&#8635; Reload</button>
+        </div>
+      </div>
+    );
+  }
   if (!project) return <div className="sb-root"><style>{STYLES}</style><div className="sb-empty">Loading the bay…</div></div>;
 
   const entries = flat(project);
@@ -7437,6 +8209,7 @@ export default function App() {
           draftCard={draftCard} setDraftCard={setDraftCard} draftTarget={draftTarget} setDraftTarget={setDraftTarget}
           draftAttachedInfo={draftAttachedInfo} setDraftAttachedInfo={setDraftAttachedInfo}
           generateShot={generateShot} priceShot={priceShot} useExistingVideo={useExistingVideo}
+          recheckSubmit={recheckSubmit} releaseSubmit={releaseSubmit}
           genImgState={genImgState} imgModel={imgModel} setImgModel={setImgModel}
           imgLoras={imgLoras} setImgLoras={setImgLoras} imgAdv={imgAdv} setImgAdv={setImgAdv}
           modelDefaults={modelDefaults} setModelDefaults={setModelDefaults} genImage={genImage} routeImg={routeImg}
@@ -7463,6 +8236,8 @@ export default function App() {
           importBackup={importBackup} setImportOpen={setImportOpen} copyShot={copyShot} setLook={setLook} setDraft={setDraft} splitShot={splitShot}
           onVideoSubmit={onVideoSubmit} onVideoResult={onVideoResult} onVideoError={onVideoError}
           onVideoSlow={onVideoSlow} onVideoPaused={onVideoPaused} pollShot={pollShot}
+          beginDrawerRender={beginDrawerRender} recheckSubmit={recheckSubmit} releaseSubmit={releaseSubmit}
+          attachDraftVideo={attachDraftVideo}
           costEstimate={costEstimate} refreshEstimate={refreshEstimate}
           spend={spend} refreshSpend={refreshSpend}
           mobileUI={mobileUI} setMobileUI={setMobileUI}
