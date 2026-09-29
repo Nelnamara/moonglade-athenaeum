@@ -71,7 +71,10 @@
   font-family: inherit; font-size: 14px; font-weight: 800; padding: 0; background: none; border: 1.5px solid var(--surface1); color: var(--base); }
 .mgcm-box.on { background: var(--lavender); border-color: var(--lavender); }
 .mgcm-box.smart { border-style: dashed; cursor: not-allowed; }
-.mgcm-confirm { margin-top: 4px; }
+/* The delete question is pinned to the foot of the screen, like the merge bar: the row that asked
+   it can be anywhere in a long list, and a question below the fold is a question not asked. */
+.mgcm .mgcm-confirm { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 3; margin-top: 4px;
+  background: color-mix(in srgb, var(--red) 6%, var(--mantle)); box-shadow: 0 -12px 26px rgba(0, 0, 0, .55); }
 .mgcm-confirm .mgcu-btn { min-height: 44px; }
 .mgcm-mergebar { position: sticky; bottom: 0; z-index: 2; display: flex; margin: 4px -13px 0; padding: 10px 13px calc(12px + env(safe-area-inset-bottom));
   background: var(--base); border-top: 1px solid var(--surface1); }
