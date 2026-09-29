@@ -23,6 +23,67 @@ var LoomBundle = (() => {
     default: () => App
   });
 
+  // src/loom-takes-core.js
+  var str = (v) => v == null ? "" : String(v);
+  var num = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  var storedTakes = (card) => card && Array.isArray(card.takes) ? card.takes : null;
+  var maxN = (takes) => (takes || []).reduce((m, t) => Math.max(m, Number((t || {}).n) || 0), 0);
+  var mirrorTake = (card, n) => {
+    const t = {
+      id: "t" + n,
+      n,
+      mid: str(card.resultMid),
+      taskId: "",
+      at: "",
+      dur: num(card.actualDur),
+      trimIn: Number(card.trimIn) || 0,
+      trimOut: card.trimOut == null ? null : Number(card.trimOut),
+      settings: null,
+      anchor: null,
+      imported: !!card.imported,
+      source: "legacy"
+    };
+    if (card.crop) t.crop = card.crop;
+    return t;
+  };
+  var takesOf = (card) => {
+    if (!card) return [];
+    const stored = storedTakes(card);
+    const mid = str(card.resultMid);
+    if (!stored) return mid ? [mirrorTake(card, 1)] : [];
+    if (mid && !stored.some((t) => t && str(t.mid) === mid)) {
+      const n = Math.max(maxN(stored), Number(card.takeSeq) || 0) + 1;
+      return stored.concat([mirrorTake(card, n)]);
+    }
+    return stored;
+  };
+  var spendMidsOf = (card) => {
+    const out = [];
+    let imported = 0;
+    if (!card) return { mids: out, imported };
+    const seen2 = /* @__PURE__ */ new Set();
+    const add = (m) => {
+      const k = str(m);
+      if (k && !seen2.has(k)) {
+        seen2.add(k);
+        out.push(k);
+      }
+    };
+    takesOf(card).forEach((t) => {
+      if (t.imported) {
+        if (t.mid) imported += 1;
+      } else add(t.mid);
+    });
+    if (card.imported && !takesOf(card).some((t) => !t.imported)) return { mids: out, imported };
+    (card.attempts || []).forEach((a) => {
+      if (a && a.media_id) add(a.media_id);
+    });
+    return { mids: out, imported };
+  };
+
   // src/loom-core.js
   var CONNECT = {
     new: { label: "New scene", hint: "intentional break \u2014 fresh look/place" },
@@ -281,16 +342,9 @@ var LoomBundle = (() => {
       const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
       ((act || {}).cards || []).forEach((c) => {
         if (!c) return;
-        if (c.imported) {
-          if (c.resultMid) imported++;
-          return;
-        }
-        const own = [];
-        if (c.resultMid) own.push(String(c.resultMid));
-        (c.attempts || []).forEach((a) => {
-          if (a && a.media_id) own.push(String(a.media_id));
-        });
-        own.forEach((m) => {
+        const own = spendMidsOf(c);
+        imported += own.imported;
+        own.mids.forEach((m) => {
           if (!seen2[m]) {
             seen2[m] = true;
             bucket.mids.push(m);
@@ -422,6 +476,10 @@ var LoomBundle = (() => {
         const title = (c.title || "").trim();
         const code = `${actLetter(ai)}\xB7${String(ci + 1).padStart(2, "0")}${title ? ` ${title}` : ""}`;
         if (c.resultMid) note3(c.resultMid, `${code} (shot result)`);
+        (Array.isArray(c.takes) ? c.takes : []).forEach((t) => {
+          const m = t && t.mid ? String(t.mid) : "";
+          if (m && m !== String(c.resultMid || "")) note3(m, `${code} (take ${t.n})`);
+        });
         ["openFrame", "closeFrame"].forEach((slot) => {
           const f = c[slot] || {};
           if (f.mediaId) note3(f.mediaId, `${code} (${slot})`);
@@ -538,8 +596,29 @@ var LoomBundle = (() => {
     actualDur: null,
     trimIn: 0,
     trimOut: null,
-    attempts: []
+    attempts: [],
+    // Session P (BUILD-w5-p §1.5): no takes, no ★, no take numbering and no render in flight
+    // travel with a duplicate either -- the original's takes are the original's clips and its
+    // spend, and a copied pending marker would let the original's render land on the copy.
+    // The anchor and Keep DO travel (open call 13): they describe the copied open frame.
+    ...FRESH_CARD_RESET
   });
+  var FRESH_CARD_RESET = {
+    takes: void 0,
+    selectedTake: void 0,
+    takeSeq: void 0,
+    deletedTakes: void 0,
+    supersededTasks: void 0,
+    pendingTaskId: null,
+    pendingSubmitId: null,
+    pendingSettings: null,
+    pendingAnchor: null,
+    pendingBoard: null,
+    pendingQuote: null,
+    genStartedAt: null,
+    lastAttempt: null,
+    crop: void 0
+  };
   var insertCardAfter = (project, actId, origCardId, newCard2) => ({
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.flatMap((x) => x.id === origCardId ? [x, newCard2] : [x]) })
@@ -548,10 +627,12 @@ var LoomBundle = (() => {
     ...project,
     acts: project.acts.map((a) => a.id !== actId ? a : { ...a, cards: a.cards.filter((c) => c.id !== cardId) })
   });
+  var splitBlocked = (card) => !!(card && (card.pendingTaskId || card.pendingSubmitId));
   var splitCardAt = (project, actId, cardId, t, newCardId) => {
     const act = project.acts.find((a) => a.id === actId);
     const card = act && act.cards.find((c) => c.id === cardId);
     if (!card) return project;
+    if (splitBlocked(card)) return project;
     const ti = card.trimIn || 0, to = card.trimOut;
     if (!(t > ti + 0.1 && (to == null || t < to - 0.1))) return project;
     const right = {
@@ -559,10 +640,29 @@ var LoomBundle = (() => {
       id: newCardId,
       title: card.title ? card.title + " (cont.)" : "cont.",
       trimIn: t,
-      trimOut: to
+      trimOut: to,
+      anchor: null,
+      anchorKept: null
     };
+    [
+      "pendingTaskId",
+      "pendingSubmitId",
+      "pendingSettings",
+      "pendingAnchor",
+      "pendingBoard",
+      "pendingQuote",
+      "genStartedAt",
+      "supersededTasks"
+    ].forEach((k) => {
+      delete right[k];
+    });
+    if (right.status === "wip") right.status = "done";
     const withLeft = patchCard(project, actId, cardId, (c) => ({ ...c, trimOut: t }));
-    return insertCardAfter(withLeft, actId, cardId, right);
+    const inserted = insertCardAfter(withLeft, actId, cardId, right);
+    return {
+      ...inserted,
+      acts: inserted.acts.map((a) => ({ ...a, cards: a.cards.map((c) => c && c.id !== newCardId && c.anchor && String(c.anchor.shot) === String(cardId) ? { ...c, anchor: { ...c.anchor, shot: newCardId } } : c) }))
+    };
   };
   var moveCardInAct = (project, actId, idx, dir) => ({
     ...project,
@@ -1342,7 +1442,7 @@ ${"=".repeat(48)}
     function round4(n) {
       return Math.round(n * 1e4) / 1e4;
     }
-    function num(n) {
+    function num2(n) {
       return String(round4(n));
     }
     function get(id) {
@@ -1414,9 +1514,9 @@ ${"=".repeat(48)}
     function gradientCss(layer, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
       var parts = layer.stops.map(function(s) {
-        return s.color + " " + num(s.position * 100) + "%";
+        return s.color + " " + num2(s.position * 100) + "%";
       });
-      return "linear-gradient(" + num(a) + "deg, " + parts.join(", ") + ")";
+      return "linear-gradient(" + num2(a) + "deg, " + parts.join(", ") + ")";
     }
     function gradientEndpoints(w, h, angle) {
       var a = angle == null ? DEFAULT_ANGLE_DEG : angle;
@@ -1439,9 +1539,9 @@ ${"=".repeat(48)}
       var p = resolve(idOrRecipe).image_parameters;
       if (!p) return "";
       var out = [];
-      if (p.brightness) out.push("brightness(" + num(1 + p.brightness) + ")");
-      if (p.contrast) out.push("contrast(" + num(1 + p.contrast) + ")");
-      if (p.saturation) out.push("saturate(" + num(1 + p.saturation) + ")");
+      if (p.brightness) out.push("brightness(" + num2(1 + p.brightness) + ")");
+      if (p.contrast) out.push("contrast(" + num2(1 + p.contrast) + ")");
+      if (p.saturation) out.push("saturate(" + num2(1 + p.saturation) + ")");
       return out.join(" ");
     }
     function swatchLayers(idOrRecipe) {
