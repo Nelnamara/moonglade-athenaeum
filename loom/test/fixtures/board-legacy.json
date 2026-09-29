@@ -1,0 +1,316 @@
+{
+ "name": "Fixture board",
+ "target": 60,
+ "look": "synthetic look",
+ "draft": false,
+ "assets": [
+  {
+   "id": "as1",
+   "name": "Lead",
+   "kind": "image",
+   "tag": "@image1",
+   "thumbId": "",
+   "source": "",
+   "mediaId": "100000000000000001",
+   "lock": true
+  },
+  {
+   "id": "as2",
+   "name": "Set",
+   "kind": "image",
+   "tag": "@image2",
+   "thumbId": "th_set",
+   "source": "",
+   "lock": false
+  },
+  {
+   "id": "as3",
+   "name": "Tune",
+   "kind": "audio",
+   "tag": "@audio1",
+   "thumbId": "",
+   "source": "",
+   "lock": false
+  }
+ ],
+ "acts": [
+  {
+   "id": "act1",
+   "name": "Act 1",
+   "collapsed": false,
+   "cards": [
+    {
+     "id": "c1",
+     "title": "Rendered and re-rolled",
+     "status": "done",
+     "mode": "I2V",
+     "duration": 8,
+     "connect": "cut",
+     "prompt": "synthetic prompt one",
+     "openFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "synthetic open",
+      "tag": "",
+      "mediaId": "100000000000000010"
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "cast": [
+      "as1"
+     ],
+     "refs": [],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 0.4,
+     "trimOut": 4.6,
+     "promptOverride": false,
+     "promptOverrideText": "",
+     "resultMid": "200000000000000001",
+     "actualDur": 5.04,
+     "crop": {
+      "x": 0.1,
+      "y": 0.05,
+      "w": 0.8,
+      "h": 0.9
+     },
+     "attempts": [
+      {
+       "media_id": "200000000000000000",
+       "at": "2026-09-01T10:00:00Z"
+      }
+     ]
+    },
+    {
+     "id": "c2",
+     "title": "Imported footage",
+     "status": "done",
+     "mode": "I2V",
+     "duration": 8,
+     "connect": "cut",
+     "prompt": "",
+     "openFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "first frame of the imported clip",
+      "tag": "",
+      "mediaId": "300000000000000002"
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "last frame of the imported clip",
+      "tag": "",
+      "mediaId": "300000000000000003"
+     },
+     "cast": [],
+     "refs": [],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 0,
+     "trimOut": null,
+     "promptOverride": false,
+     "promptOverrideText": "",
+     "resultMid": "300000000000000001",
+     "imported": true,
+     "actualDur": 6.0
+    }
+   ]
+  },
+  {
+   "id": "act2",
+   "name": "Act 2",
+   "collapsed": false,
+   "cards": [
+    {
+     "id": "c3",
+     "title": "Split left",
+     "status": "done",
+     "mode": "FLF",
+     "duration": 8,
+     "connect": "cut",
+     "prompt": "",
+     "openFrame": {
+      "thumbId": "th_open",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": "",
+      "mediaId": "100000000000000011"
+     },
+     "cast": [],
+     "refs": [],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 0,
+     "trimOut": 3.5,
+     "promptOverride": false,
+     "promptOverrideText": "",
+     "resultMid": "200000000000000005",
+     "actualDur": 8.0
+    },
+    {
+     "id": "c3b",
+     "title": "Split left (cont.)",
+     "status": "done",
+     "mode": "FLF",
+     "duration": 8,
+     "connect": "cut",
+     "prompt": "",
+     "openFrame": {
+      "thumbId": "th_open",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": "",
+      "mediaId": "100000000000000011"
+     },
+     "cast": [],
+     "refs": [],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 3.5,
+     "trimOut": null,
+     "promptOverride": false,
+     "promptOverrideText": "",
+     "resultMid": "200000000000000005",
+     "actualDur": 8.0
+    }
+   ]
+  },
+  {
+   "id": "act3",
+   "name": "Act 3",
+   "collapsed": false,
+   "cards": [
+    {
+     "id": "c4",
+     "title": "Unrendered",
+     "status": "todo",
+     "mode": "R2V",
+     "duration": 5,
+     "connect": "cut",
+     "prompt": "synthetic prompt four",
+     "openFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "cast": [
+      "as1",
+      "as2"
+     ],
+     "refs": [
+      {
+       "id": "r1",
+       "kind": "image",
+       "tag": "@image3",
+       "role": "",
+       "source": "",
+       "thumbId": "th_ref"
+      }
+     ],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 0,
+     "trimOut": null,
+     "promptOverride": false,
+     "promptOverrideText": ""
+    },
+    {
+     "id": "c5",
+     "title": "Failed once",
+     "status": "error",
+     "mode": "I2V",
+     "duration": 8,
+     "connect": "cut",
+     "prompt": "",
+     "openFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": "",
+      "mediaId": "100000000000000012"
+     },
+     "closeFrame": {
+      "thumbId": "",
+      "source": "",
+      "desc": "",
+      "tag": ""
+     },
+     "cast": [],
+     "refs": [],
+     "camera": "",
+     "lighting": "",
+     "audioCue": "",
+     "audioGen": false,
+     "audioLanguage": "english",
+     "transIn": "",
+     "transOut": "",
+     "notes": "",
+     "discreet": false,
+     "trimIn": 0,
+     "trimOut": null,
+     "promptOverride": false,
+     "promptOverrideText": ""
+    }
+   ]
+  }
+ ]
+}

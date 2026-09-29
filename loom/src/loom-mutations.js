@@ -213,7 +213,18 @@ export const buildDuplicateCard = (card, newCardId, newRefIds) => ({
   // a duplicate that carried them would bill the project twice for money it
   // spent once, every time a shot was duplicated.
   resultMid: "", status: "todo", actualDur: null, trimIn: 0, trimOut: null, attempts: [],
+  // Session P (BUILD-w5-p §1.5): no takes, no ★, no take numbering and no render in flight
+  // travel with a duplicate either -- the original's takes are the original's clips and its
+  // spend, and a copied pending marker would let the original's render land on the copy.
+  // The anchor and Keep DO travel (open call 13): they describe the copied open frame.
+  ...FRESH_CARD_RESET,
 });
+const FRESH_CARD_RESET = {
+  takes: undefined, selectedTake: undefined, takeSeq: undefined, deletedTakes: undefined,
+  supersededTasks: undefined, pendingTaskId: null, pendingSubmitId: null, pendingSettings: null,
+  pendingAnchor: null, pendingBoard: null, pendingQuote: null, genStartedAt: null, lastAttempt: null,
+  crop: undefined,
+};
 
 // Insert `newCard` immediately after `origCardId` within one act.
 export const insertCardAfter = (project, actId, origCardId, newCard) => ({
@@ -232,16 +243,35 @@ export const removeCard = (project, actId, cardId) => ({
 // divide the kept trim range at `t`: the left becomes [trimIn..t], the right [t..trimOut].
 // Export then plays the two ranges of one clip back-to-back -- an actual cut. No-ops (returns
 // the project unchanged) if `t` isn't strictly inside the kept range, so neither half is empty.
+//
+// Session P (BUILD-w5-p §1.5, review F11): both halves keep the card's takes (same clips),
+// but a render in flight is refused outright -- a split mid-render would leave one half
+// waiting for a task only the other can land. The right half never inherits a pending
+// marker, and its own anchor is cleared (its picture starts mid-clip, not at the anchor).
+// A shot that was anchored to the split card is re-pointed at the RIGHT half, whose end is
+// the frame it was cut from.
+export const splitBlocked = (card) => !!(card && (card.pendingTaskId || card.pendingSubmitId));
 export const splitCardAt = (project, actId, cardId, t, newCardId) => {
   const act = project.acts.find((a) => a.id === actId);
   const card = act && act.cards.find((c) => c.id === cardId);
   if (!card) return project;
+  if (splitBlocked(card)) return project;
   const ti = card.trimIn || 0, to = card.trimOut;     // to == null means "to the clip's real end"
   if (!(t > ti + 0.1 && (to == null || t < to - 0.1))) return project;
   const right = { ...JSON.parse(JSON.stringify(card)), id: newCardId,
-    title: card.title ? card.title + " (cont.)" : "cont.", trimIn: t, trimOut: to };
+    title: card.title ? card.title + " (cont.)" : "cont.", trimIn: t, trimOut: to,
+    anchor: null, anchorKept: null };
+  ["pendingTaskId", "pendingSubmitId", "pendingSettings", "pendingAnchor", "pendingBoard",
+   "pendingQuote", "genStartedAt", "supersededTasks"].forEach((k) => { delete right[k]; });
+  if (right.status === "wip") right.status = "done";
   const withLeft = patchCard(project, actId, cardId, (c) => ({ ...c, trimOut: t }));
-  return insertCardAfter(withLeft, actId, cardId, right);
+  const inserted = insertCardAfter(withLeft, actId, cardId, right);
+  return {
+    ...inserted,
+    acts: inserted.acts.map((a) => ({ ...a, cards: a.cards.map((c) =>
+      (c && c.id !== newCardId && c.anchor && String(c.anchor.shot) === String(cardId))
+        ? { ...c, anchor: { ...c.anchor, shot: newCardId } } : c) })),
+  };
 };
 
 export const moveCardInAct = (project, actId, idx, dir) => ({

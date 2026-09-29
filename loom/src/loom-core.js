@@ -19,6 +19,11 @@
         import.meta, no imports of anything but this file itself.
    ========================================================================= */
 
+// The per-card take walk the spend ledger uses (Session P). The one import this file makes:
+// loom-takes-core.js imports nothing, so there is no cycle, and the Loom is bundle-only
+// (the in-browser Babel inline path this header describes was retired 2026-08-08).
+import { spendMidsOf } from "./loom-takes-core.js";
+
 // ---------- continuity / connection-method metadata ----------
 
 export const CONNECT = {
@@ -733,11 +738,12 @@ export const collectSpendMids = (project) => {
     const bucket = { name: (act || {}).name || `Act ${ai + 1}`, mids: [] };
     ((act || {}).cards || []).forEach((c) => {
       if (!c) return;
-      if (c.imported) { if (c.resultMid) imported++; return; }
-      const own = [];
-      if (c.resultMid) own.push(String(c.resultMid));
-      (c.attempts || []).forEach((a) => { if (a && a.media_id) own.push(String(a.media_id)); });
-      own.forEach((m) => { if (!seen[m]) { seen[m] = true; bucket.mids.push(m); } });
+      // Session P: every take is a paid render unless it is borrowed footage, so the walk is
+      // per TAKE now (spendMidsOf, loom-takes-core.js). An old board derives one take from
+      // resultMid, so it counts exactly as it always did.
+      const own = spendMidsOf(c);
+      imported += own.imported;
+      own.mids.forEach((m) => { if (!seen[m]) { seen[m] = true; bucket.mids.push(m); } });
     });
     byAct.push(bucket);
   });
