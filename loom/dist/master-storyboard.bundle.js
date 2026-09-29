@@ -2196,7 +2196,9 @@ ${"=".repeat(48)}
     onPick,
     onToggle,
     visible = true,
-    style
+    style,
+    favs = null,
+    onFav = null
   }) {
     const [q, setQ] = useState("");
     const [qDebounced, setQDebounced] = useState("");
@@ -2491,7 +2493,20 @@ ${"=".repeat(48)}
             onMouseEnter: (e) => schedulePreview(m, e.currentTarget),
             onMouseLeave: hidePreview
           },
-          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-cov" }, m.preview_url && /* @__PURE__ */ react_global_shim_default.createElement("img", { className: m.should_blur ? "blur" : void 0, loading: "lazy", src: m.preview_url, alt: "" }), m.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pill" }, "Official"), incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
+          /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-cov" }, m.preview_url && /* @__PURE__ */ react_global_shim_default.createElement("img", { className: m.should_blur ? "blur" : void 0, loading: "lazy", src: m.preview_url, alt: "" }), m.official && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-pill" }, "Official"), onFav ? /* @__PURE__ */ react_global_shim_default.createElement(
+            "button",
+            {
+              type: "button",
+              className: "mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : ""),
+              "aria-pressed": (favs || []).includes(String(m.model_id)),
+              title: (favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks",
+              onClick: (e) => {
+                e.stopPropagation();
+                onFav(m);
+              }
+            },
+            (favs || []).includes(String(m.model_id)) ? "\u2605" : "\u2606"
+          ) : null, incompat && arch && /* @__PURE__ */ react_global_shim_default.createElement("span", { className: "mg-ibadge" }, "\u26A0 ", arch)),
           /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-meta" }, /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-nm" }, m.title), /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-sub" }, arch && /* @__PURE__ */ react_global_shim_default.createElement("span", null, arch), /* @__PURE__ */ react_global_shim_default.createElement("span", null, fmtCompact(m.liked_count), " likes")), cost && /* @__PURE__ */ react_global_shim_default.createElement("div", { className: "mg-costline" }, cost))
         );
       })
