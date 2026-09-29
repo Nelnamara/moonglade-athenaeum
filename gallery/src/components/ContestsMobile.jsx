@@ -2,6 +2,10 @@ import React, { useEffect, useState } from "react";
 import Icon from "../icons/Icons.jsx";
 import useContests, { fmt, countdown, dayOf, tsOf } from "../hooks/useContests.js";
 import ContestDetailMobile from "./ContestDetailMobile.jsx";
+import ContestRecordWin from "./ContestRecordWin.jsx";
+import MobileSheet from "./MobileSheet.jsx";
+import useSheet from "../hooks/useSheet.js";
+import { bestWin, defaultContestId, rowStatus, tierLabel } from "../lib/contestWinCore.js";
 import "../styles/myart-contests.css";
 import "../styles/overlays.css";
 import "../styles/contest-mobile.css";
@@ -55,6 +59,9 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
           syncing, reloadMine } = ct;
   const [view, setView] = useState("board");     // "board" | "mine"
   const [detail, setDetail] = useState(null);
+  // E4 "Record a win" as a sheet (Small Calls Handoff L3: "the same link at the foot of My
+  // entries; E4 as a sheet"). The shared state machine, so the exit animation always finishes.
+  const recordSheet = useSheet(280);
 
   // An entry fired from anywhere (this screen, the lightbox, Image Details) bumps the
   // epoch; the count in the header and the My-entries view re-read on the next tick
@@ -80,22 +87,23 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
     prize_amount: 0, prize_distribution: [], cover_url: "", rules: [],
   };
 
-  /* The status line My entries adds to the same card. Derived, never stored: running →
-     awaiting results → results in (won / not placed), exactly the four ContestMyEntries.jsx
-     derives on desktop. There is no per-entry RANK on the row to show -- /api/contest/mine
-     answers entries and a `won` flag; rank lives behind the winners route, which this
-     surface does not call -- so the line states the standing it can actually know. */
+  /* The status line My entries adds to the same card. Derived, never stored
+     (lib/contestWinCore.js rowStatus, the same four states the desktop row derives): running
+     → awaiting results → results in (a VERIFIED win / checking / not placed). A win reads its
+     TIER ("🏆 TIER 2") -- PixAI's rank is the prize tier, never a numbered place -- with the
+     prize on the same line. `won` here means verified: the daily check, or the Check sheet,
+     found the entry on PixAI's own winners list with a tier. */
   const statusOf = (row) => {
-    const resultTs = tsOf(row.result_at);
-    const decided = resultTs !== null && resultTs <= Date.now();
+    const st = rowStatus(row);
     const ends = row.active ? countdown(row.end_at) : null;
     if (row.active) {
       return { cls: ends && ends.hot ? "hot" : "",
                text: "RUNNING" + (ends && !ends.over ? " · " + ends.text : "") };
     }
-    if (!decided) return { cls: "awaiting", text: "AWAITING RESULTS · " + (dayOf(row.result_at) || "—") };
-    if (row.won) return { cls: "won", text: "🏆 WON" };
-    return { cls: "", text: "NOT PLACED" };
+    if (st.text === "AWAITING RESULTS") {
+      return { cls: "awaiting", text: "AWAITING RESULTS · " + (dayOf(row.result_at) || "—") };
+    }
+    return st;
   };
 
   const card = (c, extra) => (
@@ -166,14 +174,24 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
                 }).map((row) => {
                   const c = liveOr(row);
                   const st = statusOf(row);
+                  const win = row.won ? bestWin(row) : null;
                   const n = (row.entry_artwork_ids || []).length;
                   return card(c, (
-                    <span className={"cmb-cardstatus " + st.cls}>
-                      {st.text} · {n} {n === 1 ? "piece" : "pieces"}
-                    </span>
+                    <>
+                      <span className={"cmb-cardstatus " + st.cls}>
+                        {st.text} · {n} {n === 1 ? "piece" : "pieces"}
+                      </span>
+                      {win ? (
+                        <span className="cmb-cardwin">{tierLabel(win.tier, win.prize_amount)}</span>
+                      ) : null}
+                    </>
                   ));
                 })}
               </div>
+              <button type="button" className="cmb-recordlink"
+                onClick={() => recordSheet.open("record")}>
+                It won but isn't shown…
+              </button>
             </>
           )}
         </>
@@ -227,6 +245,12 @@ export default function ContestsMobile({ onEnter, entriesEpoch = 0 }) {
           )}
         </>
       )}
+
+      <MobileSheet open={recordSheet.sheet === "record"} closing={recordSheet.closing}
+        onClose={recordSheet.close} title="RECORD A WIN">
+        <ContestRecordWin phone rows={mineRows} initialContestId={defaultContestId(mineRows)}
+          onClose={recordSheet.close} onDone={() => reloadMine()} />
+      </MobileSheet>
     </>
   );
 }
