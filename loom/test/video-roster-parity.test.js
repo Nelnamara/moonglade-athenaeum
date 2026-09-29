@@ -192,12 +192,20 @@ describe("Remix of a Tsubaki clip", () => {
     assert.equal(prefill.video_model, "tbkv1.0");
     assert.ok(!notes.includes("engine no longer in the roster"));
   });
-  test("a set ratio is named, not carried; adaptive or none says nothing", () => {
+  test("a set ratio rides the prefill where the picker shows it (Tsubaki, Multi-Reference)", () => {
     const { prefill, notes } = videoRemixFromRow(row({}), tp({ ratio: "3:2" }));
-    assert.ok(notes.includes("aspect ratio 3:2 not carried — PixAI will infer it"));
-    assert.equal(prefill.ratio, undefined, "the ratio never rides the prefill");
+    assert.equal(prefill.ratio, "3:2", "the picker's chip names it before any spend");
+    assert.ok(!notes.some((n) => /aspect ratio/.test(n)));
     assert.deepEqual(videoRemixFromRow(row({}), tp({ ratio: "adaptive" })).notes, []);
     assert.deepEqual(videoRemixFromRow(row({}), tp({})).notes, []);
+  });
+  test("a ratio that could only ride unseen is named, not carried", () => {
+    const ontoV4 = videoRemixFromRow(row({}), tp({ ratio: "3:2", video_model: "v4.0.1" }));
+    assert.equal(ontoV4.prefill.ratio, undefined);
+    assert.ok(ontoV4.notes.includes("aspect ratio 3:2 not carried — PixAI will infer it"));
+    const i2v = videoRemixFromRow(row({}), tp({ ratio: "16:9", kind: "i2v", start: { media_id: "1", in_lib: true } }));
+    assert.equal(i2v.prefill.ratio, undefined);
+    assert.ok(i2v.notes.includes("aspect ratio 16:9 not carried — PixAI will infer it"));
   });
   test("a recovered negative or camera on tbkv is disclosed; the same recipe on v4.0.1 is not", () => {
     const i2v = { kind: "i2v", negative: "blurry", camera: "zoom", start: { media_id: "1", in_lib: true } };

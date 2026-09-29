@@ -8682,7 +8682,7 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                             *, duration=5, generate_audio=False, model="",
                             audio_language="english", camera_movement="",
                             quality="professional", negative="", is_private=False,
-                            use_prompt_helper=False, input_video_durations=None):
+                            use_prompt_helper=False, input_video_durations=None, ratio=""):
     """PixAI video PROVIDER ADAPTER: map a Loom shot (mode + prompt + @-ordered ref
     media_ids) to createGenerationTask video params. This is the SEAM a future Seedance/
     other provider mirrors -- same shot spec in, provider-native params out. I2V/FLF ->
@@ -8700,7 +8700,12 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
     `model: "tbkv1.0.1"` with another model's id. `input_video_durations` (the caller's
     all-or-nothing list, see input_video_durations()) reaches only referenceVideo, and an
     engine that takes no video references refuses them here (build_reference_video_parameters)
-    rather than sending them."""
+    rather than sending them.
+
+    `ratio` (the Generate drawer's Tsubaki aspect-ratio picker, 2026-09-28) reaches only the
+    referenceVideo road, where build_reference_video_parameters sends it for a Tsubaki engine
+    and never as "adaptive"; an i2vPro shot has no such field and never carries it. The web
+    road writes the receipt when it cannot go out (build_request)."""
     m = (mode or "R2V").upper()
     # Both submit shapes cap the prompt, under different field names
     # (i2vPro.prompts / referenceVideo.prompt), so check once here where they converge.
@@ -8739,7 +8744,8 @@ def build_shot_video_params(mode, prompt, image_ids=(), video_ids=(), audio_ids=
                                                  generate_audio=generate_audio,
                                                  audio_language=audio_language,
                                                  model_id=mid_num,
-                                                 input_video_durations=input_video_durations)
+                                                 input_video_durations=input_video_durations,
+                                                 ratio=ratio)
     raise PixAIError("PixAI video needs a frame or a reference image/video for this shot "
                      "(mode {}) -- attach a cast image or an open frame.".format(m))
 
@@ -11496,6 +11502,16 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             if unknown:
                 adjusted.append({"field": "inputVideoDurations", "asked": "measured lengths",
                                  "used": [], "why": INPUT_VIDEO_UNKNOWN_WHY})
+        # The Tsubaki Multi-Reference aspect ratio (lane w2-small, 2026-09-28). It rides only the
+        # referenceVideo road of a Tsubaki engine (VIDEO_RATIO_MODELS) -- keyed on the ROAD, not
+        # the shot mode, since an FLF with one frame goes out as a reference video (spend review
+        # N6). Asked for anywhere else it is dropped with a receipt; the drawer never asks there.
+        # "adaptive" is PixAI's default and is never sent, so it needs no receipt.
+        ratio = str(p.get("ratio") or "").strip()
+        if ratio and ratio != "adaptive" and (i2v_road or vmodel not in VIDEO_RATIO_MODELS):
+            adjusted.append({"field": "ratio", "asked": ratio, "used": None,
+                             "why": "only Tsubaki Video's Multi-Reference takes an aspect ratio"})
+            ratio = ""
         if i2v_road:
             # V6: the builder drops both on an engine whose panel has neither; say so.
             if negative and vmodel in VIDEO_NO_NEGATIVE_MODELS:
@@ -11516,7 +11532,8 @@ def build_request(payload, *, mode=None, user=None, is_member=None, resolve=None
             negative=negative,
             is_private=bool(p.get("is_private")),
             use_prompt_helper=bool(p.get("prompt_helper")),
-            input_video_durations=durations)
+            input_video_durations=durations,
+            ratio=ratio)
         return GenerationRequest(mode="video", parameters=params, no_card=no_card,
                                  adjusted=adjusted)
 
