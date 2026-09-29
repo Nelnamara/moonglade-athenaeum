@@ -132,13 +132,16 @@ cards cover it. **Cancel · nothing is sent** is exactly that. There is no "don'
 A single picture sends as it always has, with no confirm.
 
 **Variables in the prompt.** `{silver|cobalt|ember}` is a variable: each option is one value.
-`__poses__` reads one of your **saved lists** (the **Lists ▾** button in the composer's header
-beside **Presets**: a name, one item per line, saved with your Moonglade account so the phone
-sees them too).
+Only braces with a `|` inside make a variable — ordinary braces like `{masterpiece}` or
+`{{best quality}}` are plain prompt text and are sent exactly as you typed them, and so is a
+backslash (a kaomoji's `\_` stays). `__poses__` reads one of your **saved lists** (the
+**Lists ▾** button in the composer's header beside **Presets**: a name, one item per line,
+saved with your Moonglade account so the phone sees them too).
 Variables work in the prompt only; the negative is sent as typed. They are tinted in the line
-under the prompt, and anything that can't be read — an unclosed or nested brace, a stray `}`,
-an empty `{}`, a list you don't have — is tinted peach and blocks Send until you fix it. To
-type a literal brace or underscore pair, put a backslash before it: `\{`, `\}`, `\_`.
+under the prompt, and anything that can't be read — a `{` with a `|` after it that never
+closes, a variable inside other braces, an empty `{ | }`, a list you don't have — is tinted
+peach and blocks Send until you fix it. To send a `{a|b}` or a `__name__` as plain text, put a
+backslash before it: `\{a|b}`, `\__name__`.
 
 - **Random** draws one value per picture, ×1–4, from the run seed (the Seed field when it holds
   a number, otherwise a draw of its own that **⚄ Reroll** changes), so the same prompt, settings
@@ -157,15 +160,17 @@ between the confirm and Go, nothing is sent and the confirm comes back with the 
 
 Reusing a run from the reel or History puts back its **template** (the variables, Random or
 Matrix, the count and the seed), not just one resolved prompt. An older picture's prompt comes
-back with its braces escaped, so sending it again sends exactly the same text.
+back with any `{a|b}` or `__name__` in it escaped, so sending it again sends exactly the same
+text.
 
 **Inspect `{ }`** (beside the snippets button, on each finished tile in the reel, and under **⋯**
 on a picture's record page) shows the
 exact request a picture was — or will be — sent with, after the variables were filled in, with
 the template and the drawn values beside it. The API key, cookies and session tokens are
 removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
-copies the matching `python moonglade_backup.py --generate …` command (quoted for the shell the
-server runs in — PowerShell on Windows). It never includes `--confirm`, so pasting it previews
+copies the matching `python moonglade_backup.py --generate …` command, quoted for the shell the
+server runs in — PowerShell on Windows, bash elsewhere, named beside the button (not the old
+Command Prompt, cmd.exe, where its quoting doesn't hold). It never includes `--confirm`, so pasting it previews
 first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
 copies as `--params-json`.
 
