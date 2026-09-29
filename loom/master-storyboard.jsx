@@ -80,9 +80,9 @@ import { shotsFromPictures, hasShotsAct, appendShotsAct, shotsActName, FROM_SELE
 // modules above -- no React, no DOM, no fetch -- so it is driven directly by the tests.
 import {
   readBoardId, buildLoomUrl,
-  LOOM_VIEW_KEY, readStoredView, resolveLoomView,
   // Session P, P5: the "as shots, in order" hand-off's meta and ruling 10's one cap.
   SHOTS_HANDOFF_CAP, readShotsMeta,
+  LOOM_VIEW_KEY, readStoredView, resolveLoomView,
 } from "./src/loom-url.js";
 // The crossing's memory, library side: where the library was when it handed over, so
 // "← Gallery" gives it back. Shared module, imported straight out of the library's own
