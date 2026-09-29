@@ -4,6 +4,7 @@ import YourLayer from "./YourLayer.jsx";
 import useImageDetails from "../hooks/useImageDetails.js";
 import useSimilar from "../hooks/useSimilar.js";
 import UpscalePanel from "./UpscalePanel.jsx";
+import RunInspector from "./RunInspector.jsx";
 import useScrollLock from "../hooks/useScrollLock.js";
 import { apiGet, rebuildPoster, fetchSeries } from "../api.js";
 import { localDay, localDayTime } from "../gen/dates.js";
@@ -213,6 +214,8 @@ export default function DetailsView({
     () => (typeof localStorage !== "undefined" && localStorage.getItem(MORE_KEY) === "1")
   );
   const [mediaOk, setMediaOk] = useState(true);
+  // Session M (NOTES 7): the Inspector the More row's { } Inspect chip opens
+  const [inspectOpen, setInspectOpen] = useState(false);
   const [posterBusy, setPosterBusy] = useState(false);
   const [posterSrc, setPosterSrc] = useState(null);   // set by Rebuild poster (cache-busted)
   // LINEAGE (Image Details.dc.html:108-123, 2026-08-06): where this image came from and
@@ -249,6 +252,7 @@ export default function DetailsView({
   useEffect(() => {
     setMediaOk(true);
     setPosterSrc(null);   // a rebuilt poster belongs to ONE row; don't carry it to the next
+    setInspectOpen(false);
   }, [mediaId]);
 
   useEffect(() => {
@@ -745,6 +749,13 @@ export default function DetailsView({
             </div>
           ) : null}
 
+          {/* Session M (NOTES 7, page M5): the exact request this picture's task was sent with, secrets
+              stripped, Copy JSON / Copy as CLI. Opened by the More row's { } Inspect chip; nothing is read
+              until then. Only for a picture PixAI made from a numeric task. */}
+          {inspectOpen && /^\d+$/.test(String(row.task_id || "")) && (
+            <RunInspector source={{ kind: "task", taskId: String(row.task_id) }} onClose={() => setInspectOpen(false)} />
+          )}
+
           {/* MORE -- the app's actions the DC never drew (it designs ten; the app
               carries more, each with real function). A quieter row, LAST, so the
               designed groups keep their shape; nothing here lost its handler.
@@ -769,6 +780,12 @@ export default function DetailsView({
               ? "Load this video's full recipe into the Video composer"
               : "Load this picture's full recipe into Generate"}
               onClick={() => { onClose(); onRemix && onRemix(row.media_id); }}>↺ Remix</button>
+            {/* Session M (NOTES 7): { } Inspect -- a chip in this row, not a sixth in the record group (the
+                record group is the locked design's five). */}
+            {/^\d+$/.test(String(row.task_id || "")) && row.is_video !== "1" ? (
+              <button className="btn" title="The exact request this picture's task was sent with"
+                onClick={() => setInspectOpen((v) => !v)}>{"{ } Inspect"}</button>
+            ) : null}
             {/* Rebuild poster (videos only): re-extract the thumbnail from the file. For a
                 clip whose cached poster is wrong -- a fade-in that was thumbnailed black --
                 without a full --rebuild-thumbs pass. (owner, 2026-08-22) */}

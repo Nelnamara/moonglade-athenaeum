@@ -21514,6 +21514,17 @@ def create_app(out_dir: Path):
         try:
             core, session = _gen_session()
             body = request.get_json(silent=True) or {}
+            # Session M (BUILD-w5-m review F2): this route is a SINGLE send. More than one
+            # generation goes through the confirm (/api/generate/plan -> /run), so a count
+            # other than 1 is refused here -- never clamped -- whoever sent it (a stale
+            # bundle, a hand-rolled POST). And a prompt in the template syntax is refused
+            # too: sent from here its braces would reach PixAI literally, a different prompt
+            # from the one the dock's expander sends for the same text. Both local, before
+            # any network call. The Upscale road is exempt from the template check only: it
+            # re-sends the source picture's own stored prompt, which is never a template.
+            refusal = _single_send_refusal(body)
+            if refusal:
+                return jsonify({"error": refusal}), 400
             # Unlimited Mode (SCOPE_2026-09-26_unlimited-mode §8.6/§8.9): READ_ONLY refuses
             # FIRST, before the entitlement read and the gate's reads below, as run_generate
             # does -- then one lane task at a time, off the app's own job log.
@@ -21564,6 +21575,11 @@ def create_app(out_dir: Path):
                 # client's own registration, so the one-at-a-time rule above can read it.
                 _log_job(task_id, status="running", type="generate", lane=core.UNLIMITED_LANE,
                          source="web")
+            # Session M (NOTES 3/7): the single send's request as built and card-attached (the
+            # card step writes kaisuukenId into req.parameters), so Inspect can show it. The
+            # submit itself is called exactly as before. Fail-soft -- a record that cannot be
+            # written never affects the spend.
+            _record_single_send(body, task_id, req.parameters, req)
             try:                       # LoRA telemetry (First Lora / Stacked Deck / Polyglot)
                 lvids = req.lora_version_ids
                 if lvids:
@@ -21595,6 +21611,613 @@ def create_app(out_dir: Path):
             if refusal:
                 return jsonify({"error": refusal["copy"], "recipe_error": refusal}), 200
             return jsonify({"error": msg}), 200
+
+    # ---- Session M: runs -- every send of more than one generation -----------------------
+    # The design, its guard order and the adversarial review it answers:
+    # moonglade-internal/design/notes/generate-power-tools/BUILD-w5-m.md. The dock expands a
+    # template only to draw it; the server re-parses, re-expands, re-counts, re-caps,
+    # re-builds and re-quotes everything here and checks the confirm's acknowledgement
+    # against that fresh plan. Sends go one at a time through core.send_run (the spend choke).
+    _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+    _run_lock = threading.Lock()
+    # ONE run in flight for the whole install (review F10): every gallery login spends the
+    # same PixAI wallet, free cards and Unlimited lane, so this is keyed on the install, not on
+    # session["user"]. {run_id, account, done, total} while a run is planned or sent.
+    _run_inflight = {}
+    _SINGLE_COUNT_WORDS = "Send more than one through the confirm — nothing was sent."
+    _TEMPLATE_WORDS = ("This prompt uses the template syntax ({a|b}, __list__ or \\{) — "
+                       "send it from the Generate dock, which expands it first. Nothing was "
+                       "sent.")
+    _RUN_PAYLOAD_DROP = ("csrf", "run_id", "ack", "var_mode", "run_seed")
+
+    def _single_send_refusal(body):
+        """Why /api/generate refuses this body (review F2), or None. Local, no network."""
+        import moonglade_runs as runs
+        raw = body.get("count")
+        if runs.strict_int(1 if raw is None else raw, 1, 1) is None:
+            return _SINGLE_COUNT_WORDS
+        upscale_road = bool(str(body.get("ref_media_id") or "").strip()) and any(
+            body.get(k) not in (None, "", 0) for k in ("enlarge", "upscale"))
+        if not upscale_road and runs.has_syntax(body.get("prompt") or ""):
+            return _TEMPLATE_WORDS
+        return None
+
+    def _strip_request(params):
+        import moonglade_runs as runs
+        if params is None:
+            return None
+        return runs.strip_secrets(params, redact=_redact_host_paths)
+
+    def _record_single_send(body, task_id, sent, req):
+        """A single send's record in the Runs store (NOTES 3/7): its exact request, for
+        Inspect. Fail-soft: nothing here can touch the spend that already happened."""
+        try:
+            import uuid
+            import moonglade_runs as runs
+            user = str(session.get("user") or "")
+            if not user or not task_id:
+                return
+            store = runs.RunsStore(out_dir)
+            rid = uuid.uuid4().hex
+            prompt = str(body.get("prompt") or "")
+            payload = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
+            if not store.reserve(rid, user, status="sent", mode="single", template=prompt,
+                                 count=1, jobs_n=1, payload=payload,
+                                 dock_seed=str(body.get("seed") or "")):
+                return
+            store.put_jobs(rid, [{
+                "cell": 0, "task_id": str(task_id), "prompt": prompt, "vars": [],
+                "seed": (sent or {}).get("seed"), "batch": 1,
+                "no_card": int(bool(req.no_card)),
+                "card": int(bool((sent or {}).get("kaisuukenId"))),
+                "state": "sent", "request": _strip_request(sent)}])
+        except Exception:                                    # noqa: BLE001
+            pass
+
+    class _RunRefused(Exception):
+        """A run refused before anything was sent; str() is the plain sentence."""
+
+        def __init__(self, msg, **extra):
+            super().__init__(msg)
+            self.extra = extra
+
+    def _prompt_limit(model_type):
+        """The prompt budget a model gives -- recipesCore.promptLimit's rule (the site's jr())."""
+        return 10000 if re.fullmatch(r"(USER_)?(MM)?DIT26[AB]_MODEL",
+                                     str(model_type or "")) else 4096
+
+    def _cell_label(plan, job):
+        if plan["mode"] not in ("random", "matrix"):
+            return ""
+        vals = " · ".join(v["value"] for v in job["vars"])
+        return "Cell {} ({}): ".format(job["cell"] + 1, vals) if vals else \
+            "Cell {}: ".format(job["cell"] + 1)
+
+    def _card_session(core, gsession):
+        """The identity the free-card check must read under: the one the create will use
+        (review F14, _apply_kaisuuken's rule). Under READ_ONLY nothing can be sent, so the
+        mirror session (whose read may refresh a token) is not reached for a quote."""
+        if core.READ_ONLY or core._read_only_now():
+            return gsession
+        return core._session_for_create(gsession)
+
+    def _recipe_budget_check(core, gsession, built, plan):
+        """Review F7: with recipes, a prompt a cell's value made too long would only be
+        refused by PixAI at SEND, partway through a run. Every resolved prompt is checked
+        against the recipes' own prompt length before anything goes out (the dock's rule,
+        recipesCore.recipeFit, on the longest prompt). One read-only recipe lookup."""
+        ids = (built[0]["req"].parameters or {}).get("recipeIds")
+        if not ids:
+            return
+        import moonglade_recipes as rec
+        try:
+            cards = rec.batch(gsession, ids)
+        except Exception:                                    # noqa: BLE001
+            raise _RunRefused("Couldn't read the recipes' prompt length from PixAI, so "
+                              "nothing was sent — try again in a moment.")
+        add = sum(int(c.get("prompt_len") or 0) for c in cards)
+        if not add:
+            return
+        try:
+            feats = core.features_resolver(gsession)(built[0]["req"].model_version_id)
+        except Exception:                                    # noqa: BLE001
+            feats = None
+        limit = _prompt_limit((feats or {}).get("model_type"))
+        for b in built:
+            n = len(str((b["req"].parameters or {}).get("prompts") or "")) + add
+            if n > limit:
+                raise _RunRefused(_cell_label(plan, b["job"]) + "a recipe would make the "
+                                  "prompt too long ({:,} / {:,}) — shorten the prompt."
+                                  .format(n, limit))
+
+    def _run_expand(body, user):
+        """Step 5, local and without a network call: var_mode, count, the run seed, and the
+        template expanded against the account's own lists (never lists from the request).
+        Returns (plan, run_seed, dock_seed); raises _RunRefused."""
+        import moonglade_runs as runs
+        vm = body.get("var_mode")
+        if vm not in ("random", "matrix"):
+            raise _RunRefused("Pick Random or Matrix for this run.")
+        raw = body.get("count")
+        count = runs.strict_int(1 if raw is None else raw, 1,
+                                1 if vm == "matrix" else runs.MAX_COUNT)
+        if count is None:
+            raise _RunRefused("A matrix sends one image per cell." if vm == "matrix"
+                              else "Pick 1 to 4 images.")
+        # The run seed (review F13f): the dock's seed field when it holds digits, else the
+        # dock's roll; a run seed that disagrees with a set seed field is refused.
+        seed_raw = str(body.get("seed") if body.get("seed") is not None else "").strip()
+        dock_seed = seed_raw if re.fullmatch(r"-?\d{1,12}", seed_raw) else ""
+        rs_raw = body.get("run_seed")
+        client_rs = None
+        if rs_raw not in (None, ""):
+            client_rs = runs.strict_int(rs_raw, 0, runs.RUN_SEED_MAX)
+            if client_rs is None:
+                raise _RunRefused("That run seed isn't one this app makes — reload the "
+                                  "page and try again.")
+        run_seed = None
+        if dock_seed:
+            n = int(dock_seed)
+            if 0 <= n <= runs.RUN_SEED_MAX:
+                run_seed = n
+            if client_rs is not None and client_rs != run_seed:
+                raise _RunRefused("The run seed doesn't match the seed field — nothing "
+                                  "was sent.")
+        else:
+            run_seed = client_rs
+        lists = runs.lists_from_prefs(account_prefs_get(out_dir, user))
+        plan = runs.plan_jobs(body.get("prompt") or "", lists, vm, count, run_seed)
+        if plan.get("error"):
+            raise _RunRefused(plan["error"])
+        if plan["mode"] == "random" and run_seed is None:
+            if dock_seed:
+                raise _RunRefused("A Random run's seed must be between 0 and "
+                                  "{:,} — or leave the seed blank.".format(
+                                      runs.RUN_SEED_MAX))
+            raise _RunRefused("This run has no seed to draw from — reload the page and "
+                              "try again.")
+        return plan, run_seed, dock_seed
+
+    def _run_plan(core, gsession, body, user, *, resolver, quote):
+        """Steps 5-10's work, shared by /plan and /run: the expansion (above), the mode
+        rules, entitlements, one build per job through THE ONE road, the per-route checks,
+        the recipes' prompt budget, and -- with `quote` -- the price and the free cards.
+        Raises _RunRefused; writes nothing."""
+        import moonglade_runs as runs
+        import moonglade_recipes as rec
+        plan, run_seed, dock_seed = _run_expand(body, user)
+        matrix = plan["mode"] == "matrix"
+        ent = _entitlements(core, gsession)
+        rs = resolver(core, gsession)
+        base = {k: v for k, v in body.items() if k not in _RUN_PAYLOAD_DROP}
+        built = []
+        for job in plan["jobs"]:
+            jp = dict(base, prompt=job["prompt"], count=job["batch"])
+            if job["seed"] is not None:
+                jp["seed"] = job["seed"]
+            if matrix:
+                jp["no_card"] = True          # Settled 2: never a card on a matrix cell
+            label = _cell_label(plan, job)
+            try:
+                req = core.build_request(jp, mode="image", is_member=ent["is_member"],
+                                         resolve=rs)
+            except core.PixAIError as e:
+                refusal = rec.refusal_from(e)
+                raise _RunRefused(label + (refusal["copy"] if refusal
+                                           else _redact_host_paths(str(e))[:200]),
+                                  **({"recipe_error": refusal} if refusal else {}))
+            if not req.model_version_id:
+                raise _RunRefused("pick a model first")
+            if req.parameters is None:
+                raise _RunRefused(label + (req.note or "nothing to send"))
+            cap = ent["lora_cap"]
+            if cap is not None and len(req.lora_version_ids) > cap:
+                raise _RunRefused("Your account allows {} LoRA{} per generation — "
+                                  "remove {} to continue.".format(
+                                      cap, "" if cap == 1 else "s",
+                                      len(req.lora_version_ids) - cap))
+            built.append({"cell": job["cell"], "job": job, "req": req,
+                          "no_card": True if matrix else None})
+        if any(b["req"].unlimited for b in built) and len(built) > 1:
+            raise _RunRefused("Unlimited Mode makes one picture at a time — switch it "
+                              "off to send a run.")
+        _recipe_budget_check(core, gsession, built, plan)
+        out = {"mode": plan["mode"], "count": plan["images"], "jobs": len(built),
+               "built": built, "plan": plan, "run_seed": run_seed, "dock_seed": dock_seed}
+        adjusted = list(built[0]["req"].adjusted or [])
+        if adjusted:
+            out["adjusted"] = adjusted
+        if not quote:
+            return out
+        # --- the quote (step 9): one price group, a read price, the free cards ---
+        queries = []
+        for b in built:
+            q = core._task_price_query(gsession, b["req"].parameters)
+            if not q:
+                raise _RunRefused(_cell_label(plan, b["job"]) + "this request can't be "
+                                  "priced, so nothing was sent.")
+            queries.append(runs.canonical(q))
+        if len(set(queries)) > 1:
+            raise _RunRefused("These cells don't all cost the same, so one confirm can't "
+                              "describe them — nothing was sent.")
+        first = built[0]["req"]
+        card, card_note = None, None
+        if first.unlimited:
+            each, covered = 0, len(built)
+            out["unlimited"] = True
+        else:
+            cost = core.price_task(gsession, first.parameters)
+            if cost is None:
+                if first.parameters.get("recipeIds"):
+                    v = rec.price_verdict(gsession, first.parameters, None) or {}
+                    raise _RunRefused(v.get("note") or "couldn't verify the price with "
+                                      "these recipes",
+                                      **({"recipe_error": v["recipe_error"]}
+                                         if v.get("recipe_error") else {}))
+                raise _RunRefused("Couldn't read the price from PixAI, so nothing was sent "
+                                  "— try again in a moment.")
+            each = int(cost)
+            covered = 0
+            if matrix:
+                card_note = "Free cards don’t cover queued matrix runs."
+            elif not first.no_card:
+                try:
+                    best = core.match_kaisuuken(_card_session(core, gsession),
+                                                first.parameters, enrich=True,
+                                                raise_on_error=True)
+                except Exception:                            # noqa: BLE001
+                    raise _RunRefused("The free-card check didn't answer, so nothing was "
+                                      "sent — try again in a moment.")
+                if best:
+                    need = max(1, int(best.get("consumeAmount") or 1))
+                    held = best.get("total")
+                    if core.card_covers(best):
+                        if len(built) == 1 or held is None:
+                            covered = 1
+                        else:
+                            covered = min(len(built), int(held) // need)
+                    card = {"name": best.get("name") or "", "held": held, "needed": need,
+                            "left_after": (int(held) - covered * need) if held is not None
+                            else None,
+                            "short": not core.card_covers(best)}
+                    if covered and first.parameters.get("recipeIds"):
+                        card_note = rec.CARD_NOTE
+        out.update(each=each, covered=covered, total=each * (len(built) - covered),
+                   card=card,
+                   digest=runs.run_digest([(b["req"].parameters, b["no_card"]) for b in built],
+                                          queries[0]))
+        if card_note:
+            out["card_note"] = card_note
+        return out
+
+    def _plan_public(core, planned, cells=False):
+        """The plan as the dock reads it (no GenerationRequest objects)."""
+        import moonglade_runs as runs
+        keys = ("mode", "count", "jobs", "each", "covered", "total", "card", "card_note",
+                "unlimited", "digest", "adjusted")
+        out = {k: planned[k] for k in keys if k in planned}
+        out["read_only"] = bool(core.READ_ONLY or core._read_only_now())
+        plan = planned["plan"]
+        if plan.get("axes"):
+            out["axes"] = plan["axes"]
+        if planned.get("run_seed") is not None:
+            out["run_seed"] = planned["run_seed"]
+        if cells:
+            out["cells"] = []
+            for b in planned["built"]:
+                req = _strip_request(b["req"].parameters)
+                out["cells"].append({
+                    "cell": b["cell"], "prompt": b["job"]["prompt"], "vars": b["job"]["vars"],
+                    "seed": b["req"].parameters.get("seed"), "count": b["job"]["batch"],
+                    "no_card": bool(b["no_card"]),
+                    "request": {"operation": "createGenerationTask",
+                                "variables": {"parameters": req}},
+                    "cli": runs.cli_command(core, req, no_card=bool(b["no_card"]))})
+        return out
+
+    @app.route("/api/generate/plan", methods=["POST"])
+    @tier(LOGIN)
+    def api_generate_plan():
+        """The confirm's numbers (BUILD-w5-m s3.1): count, total credits, the free cards that
+        cover it, each job's request and command line. READ-ONLY: it writes nothing -- no
+        Runs store row, no job event, no prefs -- and its only PixAI calls are the reads
+        /api/price already makes (plus a recipe lookup when recipes ride along). No READ_ONLY
+        refusal (a quote spends nothing); the answer says `read_only` so the confirm can."""
+        user = str(session.get("user") or "")
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        try:
+            core, gsession = _gen_session()
+            planned = _run_plan(core, gsession, body, user, resolver=_price_resolver,
+                                quote=True)
+            return jsonify(_plan_public(core, planned, cells=True))
+        except _RunRefused as e:
+            return jsonify(dict({"error": str(e)}, **e.extra)), 200
+        except Exception as e:                               # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+
+    def _run_refused(store, run_id, msg, **extra):
+        try:
+            store.update_run(run_id, status="refused", reason=str(msg)[:300])
+        except Exception:                                    # noqa: BLE001
+            pass
+        return jsonify(dict({"error": str(msg), "run_id": run_id, "status": "refused"},
+                            **extra)), 200
+
+    @app.route("/api/generate/run", methods=["POST"])
+    @tier(LOGIN)
+    def api_generate_run():
+        """Send a run (BUILD-w5-m s3.2-s4). The guard order, exactly: LOGIN -> CSRF ->
+        READ_ONLY (before ANY PixAI read) -> local refusals and the reservation of run_id
+        under one lock (a run_id already seen answers with that run, never a second send;
+        another run in flight anywhere on this install is refused) -> parse, expand, count,
+        cap -> the mode rules -> entitlements -> one build per job -> the quote -> the
+        acknowledgement against that fresh quote -> every job row written -> the sends, one
+        at a time, the first failure stopping the rest. A count of 1 needs no
+        acknowledgement: it is a single send (no quote, the card auto-applies, review F11)."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "Expected a JSON object."}), 400
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        import moonglade_backup as core
+        try:
+            core._check_read_only(core._SUBMIT_ACTION_DEFAULT)
+        except core.PixAIError as e:
+            return jsonify({"error": str(e), "read_only": True}), 200
+        run_id = str(body.get("run_id") or "")
+        if not _RUN_ID_RE.match(run_id):
+            return jsonify({"error": "This run has no id — reload the page and try "
+                                     "again. Nothing was sent."}), 400
+        store = runs.RunsStore(out_dir)
+        with _run_lock:
+            try:
+                existing = store.get(run_id)
+            except Exception:                                # noqa: BLE001
+                existing = None
+            if existing is not None:
+                if existing.get("account") != user:
+                    return jsonify({"error": "That run id is taken — nothing was "
+                                             "sent."}), 200
+                live = _run_inflight.get("run_id") == run_id
+                return jsonify(dict(runs.run_view(existing, live=live), replay=True)), 200
+            if _run_inflight:
+                return jsonify({"error": "A run is still being sent ({} of {}) — wait "
+                                         "for it to finish.".format(
+                                             _run_inflight.get("done", 0),
+                                             _run_inflight.get("total") or "?")}), 200
+            try:
+                ok = store.reserve(run_id, user, status="planning",
+                                   template=str(body.get("prompt") or ""),
+                                   var_mode=str(body.get("var_mode") or ""),
+                                   dock_seed=str(body.get("seed") or ""),
+                                   payload={k: v for k, v in body.items()
+                                            if k not in _RUN_PAYLOAD_DROP})
+            except Exception:                                # noqa: BLE001
+                ok = None
+            if ok is None:
+                return jsonify({"error": "Couldn't record the run, so nothing was sent."}), 200
+            if not ok:
+                return jsonify({"error": "That run id is taken — nothing was sent."}), 200
+            _run_inflight.update(run_id=run_id, account=user, done=0, total=0)
+        try:
+            return _run_send(core, store, run_id, body, user)
+        finally:
+            with _run_lock:
+                _run_inflight.clear()
+
+    def _run_send(core, store, run_id, body, user):
+        import moonglade_runs as runs
+        try:
+            # Step 5, local: expand and count before any network call.
+            plan, _rs, _ds = _run_expand(body, user)
+            multi = plan["images"] > 1
+            ack = body.get("ack")
+            if multi and not isinstance(ack, dict):
+                raise _RunRefused("Confirm the {} generations first — nothing was sent."
+                                  .format(plan["images"]))
+            # Step 6, the lane rule read off the app's own job log: one lane task at a time.
+            if core.asks_unlimited(body) and _lane_job_running(core):
+                raise _RunRefused(core.UNLIMITED_BUSY)
+            # Steps 7-9: entitlements, one build per job, the quote (a single send has none).
+            gcore, gsession = _gen_session()
+            planned = _run_plan(gcore, gsession, body, user, resolver=_submit_resolver,
+                                quote=multi)
+            if multi:
+                # Step 10: the acknowledgement against the FRESH plan, field by field.
+                bad = runs.ack_problem(ack, planned)
+                if bad:
+                    words = ("The price moved since you confirmed — nothing was sent."
+                             if bad in ("each", "covered", "total") else
+                             "What would be sent changed since you confirmed — nothing "
+                             "was sent.")
+                    raise _RunRefused(words, plan=_plan_public(core, planned),
+                                      changed=bad)
+        except _RunRefused as e:
+            return _run_refused(store, run_id, str(e), **e.extra)
+        except Exception as e:                               # noqa: BLE001
+            return _run_refused(store, run_id, _redact_host_paths(str(e))[:200])
+        built = planned["built"]
+        mode = planned["mode"]
+        each = planned.get("each")
+        covered = planned.get("covered") or 0
+        jobs_rows = []
+        for i, b in enumerate(built):
+            if not multi:
+                expected = None
+            elif b["no_card"]:
+                expected = each
+            else:
+                expected = 0 if i < covered else each
+            b["expected"] = expected
+            jobs_rows.append({"cell": b["cell"], "prompt": b["job"]["prompt"],
+                              "vars": b["job"]["vars"],
+                              "seed": b["req"].parameters.get("seed"),
+                              "batch": b["job"]["batch"], "no_card": int(bool(b["no_card"])),
+                              "expected": expected, "state": "pending"})
+        try:
+            store.put_jobs(run_id, jobs_rows)
+            store.update_run(run_id, status="sending", mode=mode, count=planned["count"],
+                             jobs_n=len(built), run_seed=planned.get("run_seed"),
+                             axes=planned["plan"].get("axes"), each_cost=each,
+                             covered=covered, ack_total=planned.get("total"))
+        except Exception:                                    # noqa: BLE001
+            return _run_refused(store, run_id, "Couldn't record the run's jobs, so nothing "
+                                               "was sent.")
+        with _run_lock:
+            _run_inflight["total"] = len(built)
+        by_cell = {b["cell"]: b for b in built}
+        label_kind = {"matrix": "Matrix", "random": "Random", "batch": "Batch",
+                      "single": "Run"}.get(mode, "Run")
+
+        class _Hooks(object):
+            def sending(self, cell):
+                store.set_job(run_id, cell, state="sending")
+
+            def sent(self, cell, task_id, request_, card):
+                b = by_cell[cell]
+                with _run_lock:
+                    _run_inflight["done"] = _run_inflight.get("done", 0) + 1
+                # The job event first: the Activity tray and the reel see every task even if
+                # the store write below fails or the tab closed (review F5).
+                _log_job(task_id, status="running", type="generate",
+                         label="{} {}/{}".format(label_kind, cell + 1, len(built))
+                         if len(built) > 1 else "Generated",
+                         count=b["job"]["batch"], run=run_id, cell=cell, run_mode=mode,
+                         lane=core.UNLIMITED_LANE if b["req"].unlimited else None,
+                         source="web")
+                store.set_job(run_id, cell, state="sent", task_id=task_id,
+                              request=_strip_request(request_), card=int(bool(card)))
+
+            def failed(self, cell, state, error, request_):
+                store.set_job(run_id, cell, state=state, error=error,
+                              request=_strip_request(request_))
+
+        budget = {"each": each, "total": planned["total"]} if multi else None
+        res = core.send_run(gsession, [{"cell": b["cell"], "req": b["req"],
+                                        "no_card": b["no_card"]} for b in built],
+                            hooks=_Hooks(), budget=budget)
+        for j in res["jobs"]:
+            if j["state"] == "not_sent":
+                try:
+                    store.set_job(run_id, j["cell"], state="not_sent")
+                except Exception:                            # noqa: BLE001
+                    pass
+        try:
+            store.update_run(run_id, status=res["status"], reason=res.get("reason"))
+        except Exception:                                    # noqa: BLE001
+            pass
+        try:                       # LoRA telemetry, per generation sent (as /api/generate)
+            for j in res["jobs"]:
+                if j["state"] == "sent":
+                    lvids = by_cell[j["cell"]]["req"].lora_version_ids
+                    if lvids:
+                        telem_bump("lora_used", out_dir=out_dir)
+                        telem_max("lora_stacked", len(lvids), out_dir=out_dir)
+                        for v in lvids:
+                            telem_set_add("loras", v, out_dir=out_dir)
+        except Exception:                                    # noqa: BLE001
+            pass
+        for j in res["jobs"]:
+            b = by_cell.get(j["cell"])
+            if b is not None:
+                j["prompt"] = b["job"]["prompt"]
+                j["vars"] = b["job"]["vars"]
+                if b.get("expected") is not None:
+                    j["expected"] = b["expected"]
+        out = {"run_id": run_id, "status": res["status"], "mode": mode,
+               "count": planned["count"], "jobs": res["jobs"],
+               "sent": sum(1 for j in res["jobs"] if j["state"] == "sent"),
+               "not_sent": sum(1 for j in res["jobs"] if j["state"] == "not_sent")}
+        if res.get("reason"):
+            out["reason"] = res["reason"]
+        if planned["plan"].get("axes"):
+            out["axes"] = planned["plan"]["axes"]
+        if planned.get("adjusted"):
+            out["adjusted"] = planned["adjusted"]
+        return jsonify(out), 200
+
+    @app.route("/api/generate/runs/<run_id>")
+    @tier(LOGIN)
+    def api_generate_run_get(run_id):
+        """A run's recorded state, for the dock whose POST answer was lost (review F4): 404
+        while this server has not received it (or it is another account's), else the run --
+        'planning' / 'sending' while it goes, then sent / stopped / refused."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        rid = str(run_id or "")
+        if not _RUN_ID_RE.match(rid):
+            return jsonify({"error": "not found"}), 404
+        run = runs.RunsStore(out_dir).get(rid)
+        if run is None or run.get("account") != user:
+            return jsonify({"error": "not found"}), 404
+        live = _run_inflight.get("run_id") == rid
+        return jsonify(runs.run_view(run, live=live))
+
+    @app.route("/api/generate/request/<task_id>")
+    @tier(LOGIN)
+    def api_generate_request(task_id):
+        """Inspect (NOTES 7): the exact request a task was sent with, secrets stripped, with
+        its template, its drawn values and its command line. The Runs store's record when the
+        caller's own account made it; for a task this library holds with no record anywhere,
+        PixAI's stored task (source "pixai"). Another account's record is never served, and
+        never falls back to PixAI either (review F9). Writes nothing."""
+        import moonglade_runs as runs
+        user = str(session.get("user") or "")
+        tid = str(task_id or "").strip()
+        if not tid.isdigit():
+            return jsonify({"error": "not found"}), 404
+        found = runs.RunsStore(out_dir).find_task(tid)
+        import moonglade_backup as core
+        if found is not None:
+            run, job = found
+            if run.get("account") != user:
+                return jsonify({"error": "not found"}), 404
+            params = job.get("request")
+            out = {"source": "local", "task_id": tid, "run_id": run.get("run_id"),
+                   "mode": run.get("mode"), "cell": job.get("cell"),
+                   "template": run.get("template") or "", "vars": job.get("vars") or [],
+                   "prompt": job.get("prompt") or "", "state": job.get("state")}
+            if isinstance(params, dict):
+                out["request"] = {"operation": "createGenerationTask",
+                                  "variables": {"parameters": params}}
+                out["cli"] = runs.cli_command(core, params, no_card=bool(job.get("no_card")))
+            return jsonify(out)
+        if not get_row_by_task(db_path, tid):
+            return jsonify({"error": "not found"}), 404
+        try:
+            core, gsession = _gen_session()
+            task = core.task_detail_gql(gsession, tid, retries=1)
+        except Exception as e:                               # noqa: BLE001
+            return jsonify({"error": _redact_host_paths(str(e))[:200]}), 200
+        if not task:
+            return jsonify({"error": "couldn't read the task from PixAI"}), 200
+        params = _strip_request(task.get("parameters") or {})
+        return jsonify({"source": "pixai", "task_id": tid,
+                        "request": {"operation": "createGenerationTask",
+                                    "variables": {"parameters": params}},
+                        "cli": runs.cli_command(core, params)})
+
+    def _run_note_paid(tid, paid):
+        """Review F14: a run job's charged credits beside what the confirm expected. Returns
+        the expected figure (None when it is not a run job with one). Fail-soft."""
+        try:
+            import moonglade_runs as runs
+            store = runs.RunsStore(out_dir)
+            found = store.find_task(tid)
+            if not found:
+                return None
+            run, job = found
+            if paid is not None:
+                store.set_job(run["run_id"], job["cell"], paid=int(paid))
+            return job.get("expected")
+        except Exception:                                    # noqa: BLE001
+            return None
 
     @app.route("/api/edit", methods=["POST"])
     @tier(LOGIN)
@@ -22432,7 +23055,7 @@ __DESIGN_TOKENS__
         prev_id = nav_ids[idx - 1] if idx > 0 else None
         next_id = nav_ids[idx + 1] if 0 <= idx < len(nav_ids) - 1 else None
         pl = personal_get(db_path, [media_id]).get(str(media_id)) or {}
-        return jsonify({
+        out = {
             "row": row,
             # The owner's own layer over this picture (N3): tags, keeper|reject, a note.
             "personal": {"tags": pl.get("tags", []), "mark": pl.get("mark", ""),
@@ -22443,7 +23066,31 @@ __DESIGN_TOKENS__
             # cloud account.
             "can_delete_cloud": _is_local_request(),
             "siblings": _batch_sibling_count(row.get("task_id")),
-        })
+        }
+        # Session M (NOTES 3): the run this picture came from, when the caller's own account
+        # sent it through the dock -- History reuse restores the TEMPLATE from it, not the
+        # resolved prompt. A read of the Runs store; absent for everything else.
+        run = _run_for_task(row.get("task_id"))
+        if run is not None:
+            out["run"] = run
+        return jsonify(out)
+
+    def _run_for_task(task_id):
+        try:
+            import moonglade_runs as runs
+            found = runs.RunsStore(out_dir).find_task(task_id)
+        except Exception:                                    # noqa: BLE001
+            return None
+        if not found:
+            return None
+        run, job = found
+        if run.get("account") != str(session.get("user") or ""):
+            return None
+        return {"run_id": run.get("run_id"), "mode": run.get("mode"),
+                "template": run.get("template") or "", "var_mode": run.get("var_mode") or "",
+                "count": run.get("count"), "run_seed": run.get("run_seed"),
+                "dock_seed": run.get("dock_seed") or "", "cell": job.get("cell"),
+                "vars": job.get("vars") or []}
 
     def _history_ts(created_at):
         """Epoch seconds for a stored created_at, or None. Tolerant of the three forms
@@ -23870,10 +24517,16 @@ __DESIGN_TOKENS__
                 # swallows its own errors so a post-charge telemetry blip can't fail this poll.
                 _fire_enhance_telemetry(tid)
                 _fire_scene_telemetry(tid)   # Doorwarden: same terminal-success gate as enhance
-                return jsonify({"phase": "done", "media_ids": got["media_ids"],
-                                "is_video": got.get("is_video", False),
-                                "duration": got.get("duration"),
-                                "paid_credit": st["paid_credit"]})
+                done = {"phase": "done", "media_ids": got["media_ids"],
+                        "is_video": got.get("is_video", False),
+                        "duration": got.get("duration"),
+                        "paid_credit": st["paid_credit"]}
+                # Session M (review F14): a run job's charge beside what its confirm expected,
+                # so the dock can mark a mismatch peach. Absent for everything else.
+                expected = _run_note_paid(tid, st.get("paid_credit"))
+                if expected is not None:
+                    done["expected_credit"] = expected
+                return jsonify(done)
             if st["phase"] == "failed":
                 _forget_gen_phase(tid)
                 _drop_enhance_pending(tid)   # a reaped/cancelled enhance must NOT count
@@ -24000,9 +24653,21 @@ __DESIGN_TOKENS__
                 _count = None
         except (TypeError, ValueError):
             _count = None
+        # Session M: the run a job belongs to and its cell (the reel's matrix grid), passed
+        # through only when well-formed. The server writes both itself when it sends a run;
+        # this keeps a client registration from ever carrying anything else.
+        _run = str(body.get("run") or "")
+        _run = _run if re.fullmatch(r"[0-9a-f]{1,36}", _run) else None
+        try:
+            _cell = int(body.get("cell")) if not isinstance(body.get("cell"), bool) else None
+            if _cell is not None and not (0 <= _cell <= 23):
+                _cell = None
+        except (TypeError, ValueError):
+            _cell = None
         _log_job(jid, status=(body.get("status") or "running"),
                  type=body.get("type"), label=body.get("label"),
                  done=body.get("done"), total=body.get("total"), count=_count,
+                 run=_run, cell=_cell if _run else None,
                  source=body.get("source") or "web")
         return jsonify({"ok": True})
 

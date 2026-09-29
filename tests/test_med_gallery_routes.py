@@ -64,15 +64,19 @@ def test_absurd_dimensions_steps_and_cfg_never_reach_a_paid_submit(tmp_path, mon
     """
     params = _generate_capture(tmp_path, monkeypatch, {
         "version_id": "V1", "prompt": "a night elf druid",
-        "width": 999999999, "height": 999999999, "steps": 999999, "cfg": 4242,
-        "count": 99})
+        "width": 999999999, "height": 999999999, "steps": 999999, "cfg": 4242})
     # Ceilings are the drawer's own controls: #gen-cw/#gen-ch max=4096, #gen-steps max=150,
-    # #gen-cfg max=30, #gen-count's four options.
+    # #gen-cfg max=30.
     assert params["width"] == 4096
     assert params["height"] == 4096
     assert params["samplingSteps"] == 150
     assert params["cfgScale"] == 30
-    assert params["batchSize"] == 4
+    # `count` never reaches this route's builder above 1 any more: since Session M a send of
+    # more than one generation goes through the confirm (/api/generate/run), and this route
+    # REFUSES any other count rather than clamping it (tests/test_generate_runs.py). The
+    # builder's own clamp still stands for every road that uses it:
+    assert core._gen_args_from_web_payload({"count": 99}).count == 4
+    assert core._gen_args_from_web_payload({"count": 0}).count == 1
 
 
 def test_below_range_values_are_raised_to_the_drawer_floor(tmp_path, monkeypatch):
@@ -80,7 +84,7 @@ def test_below_range_values_are_raised_to_the_drawer_floor(tmp_path, monkeypatch
     malformed submit as a nine-digit one, and _dim's 64px floor only ever covered w/h."""
     params = _generate_capture(tmp_path, monkeypatch, {
         "version_id": "V1", "prompt": "x",
-        "width": -50, "height": 0, "steps": 0, "cfg": -3, "count": 0})
+        "width": -50, "height": 0, "steps": 0, "cfg": -3})
     assert params["width"] == 64
     assert params["height"] == 64
     assert params["samplingSteps"] == 1
@@ -94,12 +98,12 @@ def test_ordinary_drawer_values_pass_through_untouched(tmp_path, monkeypatch):
     body = {}
     params = _generate_capture(tmp_path, monkeypatch, {
         "version_id": "V1", "prompt": "x",
-        "width": 1024, "height": 1536, "steps": 25, "cfg": 7.5, "count": 3}, out=body)
+        "width": 1024, "height": 1536, "steps": 25, "cfg": 7.5, "count": 1}, out=body)
     assert params["width"] == 1024
     assert params["height"] == 1536
     assert params["samplingSteps"] == 25
     assert params["cfgScale"] == 7.5
-    assert params["batchSize"] == 3
+    assert params["batchSize"] == 1       # more than one goes through the confirm (Session M)
     assert "adjusted" not in body, (
         "a submit that was NOT rewritten must carry no receipt -- a key on every response "
         "is a key the client learns to ignore")
@@ -135,8 +139,8 @@ def test_the_receipt_records_the_asked_for_value_not_the_defaulted_one(tmp_path,
     the caller really sent and the clamp really moved counts."""
     body = {}
     _generate_capture(tmp_path, monkeypatch, {
-        "version_id": "V1", "prompt": "x", "steps": "not a number", "count": 9}, out=body)
-    assert [a["field"] for a in body["adjusted"]] == ["count"], (
+        "version_id": "V1", "prompt": "x", "steps": "not a number", "width": 9000}, out=body)
+    assert [a["field"] for a in body["adjusted"]] == ["width"], (
         "an unparseable steps became the default 25, which is not a clamp firing")
 
 

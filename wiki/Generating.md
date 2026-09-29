@@ -123,6 +123,87 @@ generations in parallel, so you can queue up several in a row (Generate, Edit, E
 Fix, and the Video tab all work this way) and each one tracks and reports its own result
 independently.
 
+### Several at once: variables, Random and Matrix — and the one confirm
+
+**Anything that sends more than one generation asks first, once.** A batch of 2–4, a Random
+run and every Matrix run open one confirm card under the prompt: how many, the total credits
+(PixAI's own price for what will actually be sent, checked on the server) and how many free
+cards cover it. **Cancel · nothing is sent** is exactly that. There is no "don't ask again".
+A single picture sends as it always has, with no confirm.
+
+**Variables in the prompt.** `{silver|cobalt|ember}` is a variable: each option is one value.
+`__poses__` reads one of your **saved lists** (the **Lists ▾** button in the composer's header
+beside **Presets**: a name, one item per line, saved with your Moonglade account so the phone
+sees them too).
+Variables work in the prompt only; the negative is sent as typed. They are tinted in the line
+under the prompt, and anything that can't be read — an unclosed or nested brace, a stray `}`,
+an empty `{}`, a list you don't have — is tinted peach and blocks Send until you fix it. To
+type a literal brace or underscore pair, put a backslash before it: `\{`, `\}`, `\_`.
+
+- **Random** draws one value per picture, ×1–4, from the run seed (the Seed field when it holds
+  a number, otherwise a draw of its own that **⚄ Reroll** changes), so the same prompt, settings
+  and seed give the same run again. Each picture is its own task and its own run.
+- **Matrix** sends every combination, one picture each, queued one after another — at most 24;
+  over that, Send says *narrow an axis* and nothing goes. The reel shows a matrix as a grid:
+  the last variable across, the rest down. **Free cards never cover matrix cells** — a card
+  belongs to a model and a function.
+
+The dock previews what each picture will get before you send. After Go, the pictures go out
+one at a time; if PixAI refuses one (moderation, a recipe that doesn't fit that cell's
+prompt) the rest are **not** sent and the result line says which cell and why. A cell whose
+answer never came back reads *may have started — check the Activity tray*; nothing is ever
+re-sent on its own. If the price, your free cards or anything about the request changed
+between the confirm and Go, nothing is sent and the confirm comes back with the new numbers.
+
+Reusing a run from the reel or History puts back its **template** (the variables, Random or
+Matrix, the count and the seed), not just one resolved prompt. An older picture's prompt comes
+back with its braces escaped, so sending it again sends exactly the same text.
+
+**Inspect `{ }`** (beside the snippets button, on each finished tile in the reel, and under **⋯**
+on a picture's record page) shows the
+exact request a picture was — or will be — sent with, after the variables were filled in, with
+the template and the drawn values beside it. The API key, cookies and session tokens are
+removed from it on the server, never merely hidden. **Copy JSON** copies it; **Copy as CLI**
+copies the matching `python moonglade_backup.py --generate …` command (quoted for the shell the
+server runs in — PowerShell on Windows). It never includes `--confirm`, so pasting it previews
+first; a request the CLI's flags can't say (context images, recipes, a palette, creativity)
+copies as `--params-json`.
+
+### Your defaults, ↺ Last, Presets and quick picks
+
+These live with your Moonglade account, so the phone has the same ones. **Nothing is saved just
+by opening the dock** — each of them is written by a click of your own, or by a send that
+PixAI accepted.
+
+- **A default negative for each base family.** Type a negative, then press **☆ Set as default**
+  on the NEGATIVE row (the ▲ settings must be open); the button then reads **★ Default · DiT**
+  (or SDXL, Pony, Illustrious, Flux — whichever family the model belongs to), and pressing it
+  again clears that family's default. When you pick a model, the negative fills in with its
+  family's default **only if the box is empty or still holds the previous family's default** —
+  a negative you typed yourself is never replaced. A model whose author ships a preset still
+  applies it, and its note says the preset replaces your default. On the phone it is the same
+  row under Create → Advanced.
+- **↺ Last** refills the composer from your last **successful** send — model, LoRAs and their
+  weights, the prompt template, negative, frame, count, steps, CFG, toggles and the seed. It is
+  greyed until you have sent something, and it never sends.
+- **Presets ▾** saves the composer as a named preset: the same things as ↺ Last, **except the
+  seed**, up to thirty. Picking one fills everything in and says nothing was sent; if its model
+  is no longer available the rest is still filled and the note says so. ✕ deletes one. Presets
+  hold the Image tab only. On the phone, ↺ Last and Presets are two chips above the prompt and
+  presets open as a sheet.
+- **Quick picks** are the MODELS and LORAS rows above the prompt: your last three sends' models
+  and LoRAs plus the ones you ★ (the ☆ in the corner of a card in the model and LoRA pickers),
+  six to a row, then **+ more** into the picker. A model chip switches the model the same way
+  the picker does. A LoRA chip adds that LoRA at the weight you last used, and tapping it again
+  removes it; a LoRA for another model family is dimmed, with the reason in its tooltip. On the
+  phone they are one scrolling row of large chips, models then LoRAs.
+
+**On the phone** the prompt has a small toolbar: **{ }** puts a variable at the cursor for you
+to type over, and **Lists** opens your saved lists as a sheet. Variables are tinted the same
+way. Random works on the phone; **setting up a Matrix is done on a computer**, but a matrix's
+results open as a grid from **⋯ → View this matrix as a grid** on any of its pictures' records,
+and **⋯ → Inspect the request** shows the exact request with **Copy JSON**.
+
 ### Tsubaki.3 Unlimited Mode
 
 When your account holds PixAI's **Unlimited Mode** for Tsubaki.3 (a time-limited grant you
@@ -882,8 +963,11 @@ the button comes back — the app will tell you it doesn't know rather than leav
 drawer is login-tier, the sliders and number boxes in your browser are the only limit a
 well-behaved client honours — and anything POSTing to `/api/generate` by hand honours none,
 so a width of 999,999,999 or 999,999 steps used to go straight through to PixAI and be
-priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150,
-CFG to 1–30 and count to 1–4, the same bounds the drawer's own controls carry. When a clamp
+priced at whatever that produced. Width and height are now held to 64–4096, steps to 1–150
+and CFG to 1–30, the same bounds the drawer's own controls carry. The count is not clamped
+at all: `/api/generate` sends exactly one generation and refuses any other count, and a
+prompt written with variables, because more than one — and every template — goes through the
+confirm above, where the server itself expands, counts, caps and prices the run. When a clamp
 actually fires the response says so and the drawer raises it — "Settings were adjusted
 before submitting … steps 200 → 150 — this generation used the adjusted values." — because
 that submit is already made and already charged, and quietly billing you for a different

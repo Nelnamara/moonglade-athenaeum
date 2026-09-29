@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   SIZES, STEPS_FALLBACK, MODES as GEN_MODES, UNLIMITED_PRO,
@@ -29,6 +29,9 @@ import { ResultLines } from "./EditTab.jsx";
 import CostBadge from "./CostBadge.jsx";
 import { UnlimitedRow, UnlimitedStrip } from "./UnlimitedMode.jsx";
 import { PaletteRow } from "./ColorPalette.jsx";
+import { ListsSheet, RunConfirm, RunModeRow, RunPreview, TokenLine } from "./RunControls.jsx";
+import { NegDefaultButton, PowerNote } from "./PowerControls.jsx";
+import { PhoneChips, PhoneQuickRow, PresetsSheetBody, PromptTools } from "./PowerMobile.jsx";
 import "../styles/create-mobile.css";
 
 /* The Create tab, Image mode (design spec: Moonglade Mobile.dc.html isCreate
@@ -260,7 +263,7 @@ export default function CreateMobile({
   account, costRef, editCostRef, cmode, setCmode, edit,
   s, set, busy, results, applyModelRow, pickVersion, addLora, removeLora, setLora, generate, refreshPrice,
   addContext, removeContext, sizeContext,
-  canSubmit: priceOk, priceAnswer,
+  canSubmit: priceOk, priceAnswer, run, power,
 }) {
   const [flyOpen, setFlyOpen] = useState(false);
   // The model/LoRA sheet and its scrim are PORTALED out of the scrolling body (owner's 5059
@@ -294,9 +297,19 @@ export default function CreateMobile({
 
   // Session L 6, phone: "the same select as a sheet" -- the edit model's chooser.
   const modelSheet = useSheet();
+  // Session M, phone: the Presets sheet (M3) and the Lists sheet (M1), each a bottom sheet
+  const powerSheet = useSheet();
+  const promptRef = useRef(null);
 
   const loraCap = account && account.lora_cap != null ? account.lora_cap : null;
-  const gate = goGate(s, loraCap, priceAnswer);
+  // Session M: the dock's template gate on the phone too (a prompt typed with the syntax is
+  // expanded the same way; setting up a Matrix is desktop-only -- Stage B's phone work).
+  const gate = goGate(s, loraCap, priceAnswer, run ? run.longest : null)
+    || (run ? run.templateGate : null)
+    // Phone: setting up a Matrix is desktop-only (NOTES, Phone); a matrix left in the shared
+    // dock state is never sent from here.
+    || (s.varMode === "matrix" && run && run.parsed && run.parsed.syntax
+      ? "Setting up a Matrix is desktop-only — switch to Random, or use the dock on a computer" : null);
   const m = s.model;
 
   /* Prime the Image cost chip when Image mode is (re)entered. <CostBadge>'s ref
@@ -531,6 +544,11 @@ export default function CreateMobile({
 
         {cmode === "image" && (
           <>
+            {/* Session M (NOTES 5, 6; Phone): ↺ Last and Presets as two chips above the prompt,
+                the quick picks as one 36 px scrolling row, models then LoRAs. */}
+            {power && <PhoneChips power={power} onPresets={() => powerSheet.open("presets")} />}
+            {power && <PowerNote note={s.note} phone />}
+            {power && <PhoneQuickRow power={power} ctxOn={ctxOn} onMore={() => openModelSheet("base")} />}
             <div className="cm-lbl">Prompt</div>
             {/* Tsubaki.3 Unlimited Mode's band over the prompt (SCOPE_2026-09-26_unlimited-mode
                 C4), as on the desktop dock */}
@@ -541,10 +559,18 @@ export default function CreateMobile({
                 onAddImage={addContextPick} phone className="cm-ta cm-at"
                 placeholder="Use @ to reference your images, e.g. @image1 holding flowers" />
             ) : (
-              <textarea className="cm-ta" rows={4} value={s.prompt}
+              <textarea className="cm-ta" rows={4} value={s.prompt} ref={promptRef}
                 placeholder="Describe the image…"
-                onChange={(e) => set({ prompt: e.target.value })} />
+                onChange={(e) => set({ prompt: e.target.value, note: "" })} />
             )}
+            {/* Session M (M1, Phone): the { } key and Lists on the prompt toolbar, then the same
+                tint under it as the dock's (variables lavender, refusals peach) */}
+            {run && !ctxOn && (
+              <PromptTools taRef={promptRef} prompt={s.prompt} set={set} onLists={() => powerSheet.open("lists")} />
+            )}
+            {run && <TokenLine parsed={run.parsed} />}
+            {run && <RunModeRow s={s} set={set} parsed={run.parsed} plan={run.plan} phone />}
+            {run && <RunPreview s={{ ...s, varMode: "random" }} parsed={run.parsed} plan={run.plan} />}
 
             <div className="cm-lbl">Model &amp; {contextModel(m) ? "inputs" : "LoRAs"}</div>
             <button type="button" className={"cm-modelrow" + (m ? "" : " empty")}
@@ -683,7 +709,7 @@ export default function CreateMobile({
               <div className="gd-results cm-results">
                 {results.map((r) => (
                   <div key={r.id} className={"gd-res " + r.kind}>
-                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : "✕ "}{r.text}
+                    {r.kind === "run" ? "⏳ " : r.kind === "ok" ? "✔ " : r.kind === "warn" ? "⚠ " : "✕ "}{r.text}
                     {r.media && r.media.map((mid) => (
                       <a key={mid} href={"/full/" + mid} target="_blank" rel="noreferrer">
                         <img src={"/thumbs/" + mid + ".jpg"} alt="" />
@@ -694,15 +720,20 @@ export default function CreateMobile({
               </div>
             )}
 
+            {/* Session M (NOTES 2): THE ONE confirm for a send of more than one generation, the
+                same component as the dock's -- the server's own count, total and cards. */}
+            {run && <RunConfirm confirm={run.confirm} busy={run.busy} onGo={run.go} onCancel={run.cancel} />}
+
             {/* Gated on the price probe's verdict IN ADDITION to goGate/busy: the quote on the
                 badge must have been priced off the payload this click submits. generate()
                 refuses the same way (gen/priceProbeCore.js). */}
             <button type="button" className={"cm-generate" + (gate || busy || !priceOk ? " off" : "")}
               disabled={!!gate || busy || !priceOk}
               title={gate || (s.unlimited ? "Submit in Unlimited Mode"
-                : "Submit — this spends credits or a card")}
+                : run && run.images > 1 ? "Send " + run.images + " — a confirm shows the total first"
+                  : "Submit — this spends credits or a card")}
               onClick={() => generate(loraCap)}>
-              {busy ? "◌ Queued…" : "✦ Generate"}
+              {busy ? "◌ Queued…" : "✦ Generate" + (run && run.images > 1 ? " " + run.images : "")}
             </button>
           </>
         )}
@@ -716,7 +747,7 @@ export default function CreateMobile({
         title={(cmode === "edit" ? "Edit" : "Image") + " — Advanced"}>
         {cmode === "edit"
           ? <EditAdvanced edit={edit} />
-          : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} />}
+          : <ImageAdvanced s={s} set={set} setLora={setLora} m={m} power={power} />}
       </MobileScreen>
 
       {sheetHost && confirmOpen && createPortal(
@@ -727,6 +758,18 @@ export default function CreateMobile({
             onStay={closeConfirm} />
         </MobileSheet>,
         sheetHost)}
+      {sheetHost && power && powerSheet.sheet === "presets" && createPortal(
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="PRESETS"
+          className="cm-sheetover">
+          <PresetsSheetBody power={power} onDone={powerSheet.close} />
+        </MobileSheet>, sheetHost)}
+      {sheetHost && run && powerSheet.sheet === "lists" && createPortal(
+        <MobileSheet open closing={powerSheet.closing} onClose={powerSheet.close} title="LISTS"
+          className="cm-sheetover">
+          <div className="pm-sheetbody">
+            <ListsSheet bare lists={run.lists} onSave={run.saveLists} onClose={powerSheet.close} />
+          </div>
+        </MobileSheet>, sheetHost)}
       {sheetHost && createPortal(
         <>
           {flyOpen && <div className="glm-scrim" onClick={() => setFlyOpen(false)} />}
@@ -740,6 +783,8 @@ export default function CreateMobile({
               baseType={m ? m.model_type : ""}
               value={m} selected={s.loras}
               onBasePick={onBasePick} onLoraPick={onLoraPick}
+              favs={power ? { base: power.favModels, lora: power.favLoras } : null}
+              onFav={power ? power.toggleQuickFav : null}
               onClose={() => setFlyOpen(false)}
             />
           </div>
@@ -754,7 +799,7 @@ export default function CreateMobile({
    deviations from the design mock's literal Count/Priority numbers. Reads
    and writes the SAME `s`/`set`/`setLora` the Image composer above uses --
    no parallel state. ---- */
-function ImageAdvanced({ s, set, setLora, m }) {
+function ImageAdvanced({ s, set, setLora, m, power }) {
   const d = dims(s);
   const tiers = sizeTiers(m);
   const rows = profileRows(m);
@@ -926,6 +971,14 @@ function ImageAdvanced({ s, set, setLora, m }) {
         placeholder="lowres, bad hands, watermark"
         disabled={(m && m.compat_neg === false) || ctxOn}
         onChange={(e) => set({ negative: e.target.value })} />
+      {/* Session M (NOTES 4, Phone): the saved default negative for this base family, the same
+          row as the dock's, here in Create -> Advanced */}
+      {power && !ctxOn && (
+        <div className="pm-tools">
+          <NegDefaultButton power={power} negative={s.negative} />
+          <span className="cm-hint" style={{ margin: 0 }}>Default for {power.family || "the base family"} models</span>
+        </div>
+      )}
       {ctxOn ? <div className="cm-hint">Held · not sent with context images</div> : null}
     </>
   );

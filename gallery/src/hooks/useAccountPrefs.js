@@ -37,8 +37,9 @@ function _bootCsrf() {
 }
 
 /** The session's CSRF token, as this store knows it: the one its own GET handed out, else
-    the boot's. For another account-scoped POST that has no token of its own -- await
-    accountPrefs().ensureLoaded() first so the store's GET has answered. */
+    the boot's (MG_BOOT). For another account-scoped POST that has no token of its own -- await
+    accountPrefs().ensureLoaded() first so the store's GET has answered. Curation's bulk routes
+    and the Generate dock's run routes (Session M) both read it here. */
 export function accountCsrf() {
   return _csrf || _bootCsrf();
 }

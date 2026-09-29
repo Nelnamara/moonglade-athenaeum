@@ -87,6 +87,7 @@ const SORTS = [["trending", "Trending"], ["liked", "Most Liked"], ["used", "Most
 export default function ModelPicker({
   kind = "base", multi = false, market = false, baseType = "",
   value = null, selected = [], onPick, onToggle, visible = true, style,
+  favs = null, onFav = null,
 }) {
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
@@ -389,6 +390,14 @@ export default function ModelPicker({
               <div className="mg-cov">
                 {m.preview_url && <img className={m.should_blur ? "blur" : undefined} loading="lazy" src={m.preview_url} alt="" />}
                 {m.official && <span className="mg-pill">Official</span>}
+                {/* Session M (NOTES 6): the ☆ that puts this model / LoRA on the dock's quick-pick
+                    row. Only where the host handles it (the dock and the phone's Create tab). */}
+                {onFav ? (
+                  <button type="button" className={"mg-fav" + ((favs || []).includes(String(m.model_id)) ? " on" : "")}
+                    aria-pressed={(favs || []).includes(String(m.model_id))}
+                    title={(favs || []).includes(String(m.model_id)) ? "Remove from your quick picks" : "Add to your quick picks"}
+                    onClick={(e) => { e.stopPropagation(); onFav(m); }} />
+                ) : null}
                 {incompat && arch && <span className="mg-ibadge">&#9888; {arch}</span>}
               </div>
               <div className="mg-meta">

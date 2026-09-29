@@ -5810,3 +5810,491 @@ def test_the_loom_plays_the_moment_and_its_button_crosses_to_the_gallerys_brandi
     page.wait_for_selector('h3.mgcp-brandh:has-text("Icons, marks")', timeout=10_000)
     assert page.evaluate("() => sessionStorage.getItem('mg_panel_tab_request')") is None, (
         "the one-shot is consumed by the gallery that honoured it")
+
+
+# ---------------------------------------------------------------------------
+# Session M: THE ONE multi-send confirm (Generate Power Tools Handoff, "$" + frame A)
+# ---------------------------------------------------------------------------
+# The whole road is real -- the dock's pick, the template's tint and mode row, /api/generate/plan
+# pricing through core._rest_get's fake /task-price -- with PixAI faked at the seam, so nothing
+# leaves the machine and no mutation can happen (gql_mutate raises). Cancel is the only way out
+# taken: no POST /api/generate/run may leave the page.
+
+def _run_harness_guards(page, monkeypatch):
+    posts = []
+    page.on("request", lambda req: posts.append(req.url) if (
+        req.method == "POST" and "/api/generate" in req.url) else None)
+
+    def _no_mutation(*a, **k):
+        raise AssertionError("the confirm harness must never reach a mutation")
+    monkeypatch.setattr(core, "gql_mutate", _no_mutation)
+    return posts
+
+
+def _confirm_geometry(page, root):
+    return page.evaluate("""(root) => {
+        const c = document.querySelector(root + ' .mgrun-confirm');
+        if (!c) return null;
+        const b = c.getBoundingClientRect();
+        const go = c.querySelector('.mgrun-cgo');
+        const g = go.getBoundingClientRect();
+        const at = document.elementFromPoint(g.x + g.width / 2, g.y + g.height / 2);
+        return {top: b.top, bottom: b.bottom, left: b.left, right: b.right,
+                vw: innerWidth, vh: innerHeight, goHit: !!(at && (at === go || go.contains(at))),
+                title: c.querySelector('.mgrun-ctitle').textContent,
+                credits: c.querySelector('.mgrun-ccredits').textContent,
+                cards: c.querySelector('.mgrun-ccards').textContent,
+                go: go.textContent,
+                cancel: c.querySelector('.mgrun-ccancel').textContent,
+                creditsColor: getComputedStyle(c.querySelector('.mgrun-ccredits')).color};
+    }""", root)
+
+
+def test_the_dock_opens_one_confirm_for_a_run_and_cancel_sends_nothing(logged_in_page, monkeypatch):
+    """Desktop 1280x900: a template prompt tints its variables and shows the Random | Matrix row;
+    Generate on a Random x2 opens THE confirm with the server's own quote (5,100 each, no card),
+    inside the viewport, its Go button the topmost thing at its centre; Cancel closes it and
+    no /api/generate/run leaves the page."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**DESKTOP)
+    posts = _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _dismiss_any_achievement_toast(page)
+    _settle(page)
+    page.click(".mgx-gen")
+    page.wait_for_selector(".mgdock")
+    if not page.locator(".mgdock-modelrow").is_visible():
+        page.click(".mgdock-expand")
+    page.wait_for_selector(".mgdock-modelrow", state="visible")
+    page.click(".mgdock-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('.mgdock-gocol > .cost-badge').dataset.state === 'paid'")
+    page.click(".mgdock-expand")                      # settings closed: the composer alone
+    page.fill(".mgdock-prompt", "1girl, {silver|cobalt} hair, moonlit glade")
+    page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
+    assert page.locator(".mgrun-tok.var").first.inner_text() == "{silver|cobalt} ·2"
+    assert page.locator(".mgrun-seg button.on").first.inner_text() == "Random"
+    page.locator(".mgrun-seg button:has-text('×2')").click()
+    assert page.locator(".mgrun-prevrow").count() == 2
+    page.wait_for_function("() => !document.querySelector('.mgdock-gocol > .mgdock-gen').disabled")
+    assert "Generate 2" in page.locator(".mgdock-gocol > .mgdock-gen").inner_text()
+    page.click(".mgdock-gocol > .mgdock-gen")
+    page.wait_for_selector(".mgrun-confirm .mgrun-ctitle")
+    _settle(page)
+    geo = _confirm_geometry(page, ".mgdock")
+    assert geo["title"] == "Send 2 generations?"
+    assert geo["credits"] == "≈ 10,200 credits in total · 5,100 each × 2"
+    assert geo["cards"] == "No free card covers this."
+    assert geo["go"] == "Send 2" and geo["cancel"] == "Cancel · nothing is sent"
+    assert 0 <= geo["top"] and geo["bottom"] <= geo["vh"] and geo["right"] <= geo["vw"], geo
+    assert geo["goHit"], "the Go button must be the topmost thing at its own centre"
+    gold = page.evaluate("""() => { const p = document.createElement('span');
+        p.style.color = 'var(--gold)'; document.body.appendChild(p);
+        const c = getComputedStyle(p).color; p.remove(); return c; }""")
+    assert geo["creditsColor"] == gold, "the confirm's credits line is the gold spend colour"
+    page.click(".mgrun-ccancel")
+    page.wait_for_selector(".mgrun-confirm", state="detached")
+    assert [u for u in posts if u.endswith("/api/generate/run")] == [], posts
+    assert [u for u in posts if u.endswith("/api/generate/plan")], "the confirm is the server's quote"
+
+
+def test_the_phone_create_tab_confirms_a_batch_before_it_sends(logged_in_page, monkeypatch):
+    """Phone 390x844: a plain batch x2 on the Create tab opens the same confirm (one task of 2
+    images at the server's price), on screen and tappable; Cancel sends nothing."""
+    _fake_unlimited_pixai(monkeypatch)
+    page = logged_in_page(**PHONE)
+    posts = _run_harness_guards(page, monkeypatch)
+    _visit(page, "/")
+    _settle(page)
+    page.click("button:has-text('Create')")
+    page.wait_for_selector(".cm-modelrow")
+    page.click(".cm-modelrow")
+    page.wait_for_selector(".mfly.open .mg-card")
+    page.locator(".mfly.open .mg-card").first.click()
+    page.wait_for_function("() => !document.querySelector('.mfly.open')", timeout=5000)
+    page.fill("textarea.cm-ta", "1girl, moonlit glade")
+    page.click(".cm-advrow")
+    page.wait_for_selector(".glm-screen .cm-chip")
+    page.locator(".glm-screen .cm-chiprow").filter(has_text="4").locator("button:has-text('2')").last.click()
+    page.click(".glm-screen-back")
+    page.wait_for_selector(".glm-screen", state="detached")
+    page.wait_for_function("() => { const b = document.querySelector('.cm-generate'); return b && !b.disabled; }")
+    assert "Generate 2" in page.locator(".cm-generate").inner_text()
+    page.click(".cm-generate")
+    page.wait_for_selector(".mgrun-confirm .mgrun-ctitle")
+    page.locator(".mgrun-confirm").scroll_into_view_if_needed()
+    _settle(page)
+    geo = _confirm_geometry(page, "body")
+    assert geo["title"] == "Send 2 generations?"
+    assert geo["credits"] == "≈ 5,100 credits in total · one task of 2 images"
+    assert 0 <= geo["left"] and geo["right"] <= geo["vw"], geo
+    assert 0 <= geo["top"] and geo["bottom"] <= geo["vh"], geo
+    assert geo["goHit"], "the Go button must be tappable on the phone"
+    page.click(".mgrun-ccancel")
+    page.wait_for_selector(".mgrun-confirm", state="detached")
+    assert [u for u in posts if u.endswith("/api/generate/run")] == [], posts
+
+# ---------------------------------------------------------------------------
+# Session M, Stage B: the account-side power tools -- the default negative per family, ↺ Last,
+# Presets, the quick-pick chips (desktop) and their phone copies (Generate Power Tools Handoff,
+# rules M2-M4 and the Phone paragraph). Everything is seeded through the account store's own
+# writer and cleaned up after (the server is shared by the module), PixAI is the fake, and
+# nothing here may POST a generation or write one of the four keys by itself.
+# ---------------------------------------------------------------------------
+
+_POWER_KEYS = ("gen.quick", "gen.negatives", "gen.presets", "gen.last")
+_POWER_MODEL = {"model_id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "version_id": _UNL_T3,
+                "model_type": "MMDIT26B_MODEL", "base_hint": ""}
+
+
+def _seed_power_account(root, extra_models=0):
+    import moonglade_gallery as _gallery
+    models = [{"id": "unl-t3", "title": "Tsubaki.3", "thumb": "", "type": "MMDIT26B_MODEL", "hint": ""}]
+    favs = [{"id": "fav-%d" % i, "title": "Fav model %d" % i, "thumb": "", "type": "SDXL_MODEL", "hint": ""}
+            for i in range(extra_models)]
+    _gallery.account_prefs_update(root, _USERNAME, set_={
+        "gen.quick": {
+            "models": {"recent": models, "fav": favs},
+            "loras": {"recent": [{"id": "l-glade", "title": "Glade light", "thumb": "", "base": "SDXL_MODEL"},
+                                 {"id": "l-moon", "title": "Moonstalker", "thumb": "", "base": "MMDIT26B_MODEL"}],
+                      "fav": []},
+            "weights": {"l-glade": 0.6, "l-moon": 0.7}},
+        "gen.negatives": {"DiT": "lowres, bad hands, watermark"},
+        "gen.presets": [{"name": "Portraits", "model": _POWER_MODEL, "loras": [],
+                         "prompt": "1girl, {silver|cobalt} hair, portrait", "negative": "lowres",
+                         "count": 2, "varMode": "random", "steps": "", "cfg": ""},
+                        # a preset whose model PixAI no longer lists: it fills the rest and says so
+                        {"name": "Ghost", "model": dict(_POWER_MODEL, model_id="gone-model", title="Gone Mix"),
+                         "loras": [], "prompt": "ghost prompt", "negative": "", "count": 1,
+                         "varMode": "random", "steps": "", "cfg": ""}],
+        "gen.last": {"model": _POWER_MODEL, "loras": [], "prompt": "the last successful prompt",
+                     "negative": "lowres, text", "count": 1, "seed": "4242", "steps": "", "cfg": ""},
+    })
+
+
+def _clear_power_account(root):
+    import moonglade_gallery as _gallery
+    _gallery.account_prefs_update(root, _USERNAME, unset=list(_POWER_KEYS))
+
+
+def _power_writes(seen):
+    """Every account-store write in `seen` (POST bodies to /api/account/prefs) that names one of
+    the four power keys."""
+    return [b for b in seen if any('"' + k + '"' in b for k in _POWER_KEYS)]
+
+
+def test_the_dock_keeps_a_default_negative_last_presets_and_quick_picks_on_the_account(
+        logged_in_page, render_server, monkeypatch):
+    """Desktop 1280x900. Opening the dock writes none of the four keys. The MODELS row shows the
+    seeded recent model and the LORAS row a LoRA for another family, dimmed with its reason. A
+    model chip switches the model and, the negative being empty, fills the family's default
+    ("★ Default · DiT"); a negative typed by hand survives another switch. ↺ Last fills the prompt
+    and the seed; a preset fills its template and leaves the seed; the Presets popover is on
+    screen. Nothing writes an account key and nothing is POSTed to /api/generate*."""
+    _fake_unlimited_pixai(monkeypatch)
+    _seed_power_account(render_server.root)
+    try:
+        page = logged_in_page(**DESKTOP)
+        posts, prefs_posts = _run_harness_guards(page, monkeypatch), []
+        page.on("request", lambda req: prefs_posts.append(req.post_data or "") if (
+            req.method == "POST" and req.url.endswith("/api/account/prefs")) else None)
+        _visit(page, "/")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        page.click(".mgx-gen")
+        page.wait_for_selector(".mgdock")
+        page.wait_for_selector(".mgpow-rows .mgpow-chip")
+        _settle(page)
+        assert _power_writes(prefs_posts) == [], "opening the dock must write nothing"
+        assert page.locator(".mgpow-btn.last").is_enabled(), "a stored last send enables ↺ Last"
+        models = page.locator(".mgpow-row:has(.mgpow-rowlbl:has-text('MODELS')) .mgpow-chip").all_inner_texts()
+        assert models == ["Tsubaki.3", "+ more"], models
+        glade = page.locator(".mgpow-row:has(.mgpow-rowlbl:has-text('LORAS')) .mgpow-chip:has-text('Glade light')")
+        assert glade.inner_text() == "Glade light 0.6"
+
+        page.click(".mgpow-row:has(.mgpow-rowlbl:has-text('MODELS')) .mgpow-chip:has-text('Tsubaki.3')")
+        page.wait_for_function(
+            "() => document.querySelector('.mgdock-modelchip').innerText.includes('Tsubaki.3')")
+        page.click(".mgdock-expand")
+        page.wait_for_selector(".mgdock-neg")
+        neg = page.locator(".mgdock-neg").first
+        assert neg.input_value() == "lowres, bad hands, watermark", "the empty field takes the family default"
+        assert page.inner_text(".mgpow-default") == "★ Default · DiT"
+        assert "Started with your DiT default negative" in page.inner_text(".mgpow-note")
+        assert glade.get_attribute("aria-disabled") == "true", "a LoRA for another family is dimmed"
+        assert "dim" in glade.get_attribute("class")
+        assert glade.get_attribute("title") == "For SDXL models; Tsubaki.3 is DiT.3"
+        neg.fill("my own negative")
+        assert page.inner_text(".mgpow-default") == "☆ Set as default"
+        page.click(".mgdock-expand")
+
+        page.click(".mgpow-btn:has-text('Presets')")
+        page.wait_for_selector(".mgpow-pop")
+        _settle(page)
+        geo = page.evaluate("""() => { const r = document.querySelector('.mgpow-pop').getBoundingClientRect();
+            const d = document.querySelector('.mgdock').getBoundingClientRect();
+            return {l: r.left, t: r.top, r: r.right, b: r.bottom, vw: innerWidth, vh: innerHeight,
+                    dl: d.left, dt: d.top, dr: d.right, db: d.bottom}; }""")
+        assert 0 <= geo["l"] and geo["r"] <= geo["vw"] and 0 <= geo["t"] and geo["b"] <= geo["vh"], geo
+        assert geo["t"] >= geo["dt"] and geo["b"] <= geo["db"], "the popover is inside the dock, not clipped by it"
+        page.click(".mgpow-name:has-text('Portraits')")
+        page.wait_for_function("() => document.querySelector('.mgdock-prompt').value.includes('{silver|cobalt}')")
+        assert "Filled from preset “Portraits”" in page.inner_text(".mgpow-note")
+        assert page.locator(".mgrun-seg button.on").nth(1).inner_text() == "×2"
+        page.click(".mgpow-btn:has-text('Presets')")
+        page.click(".mgpow-name:has-text('Ghost')")
+        page.wait_for_function("() => document.querySelector('.mgdock-prompt').value === 'ghost prompt'")
+        assert "no longer available" in page.inner_text(".mgpow-note"), "a preset's missing model is said, not hidden"
+        assert "Tsubaki.3" in page.inner_text(".mgdock-modelchip"), "the model that was there stays"
+        page.click(".mgpow-btn.last")
+        page.wait_for_function("() => document.querySelector('.mgdock-prompt').value === 'the last successful prompt'")
+        page.click(".mgdock-expand")
+        page.wait_for_selector(".mgdock-seed")
+        assert page.input_value(".mgdock-seed") == "4242", "↺ Last brings the seed back; a preset never does"
+        assert "Filled from your last send" in page.inner_text(".mgpow-note")
+        assert [u for u in posts if "/api/generate" in u and not u.endswith("/plan")] == [], posts
+        assert _power_writes(prefs_posts) == [], "no click here saves anything"
+    finally:
+        _clear_power_account(render_server.root)
+
+
+def test_the_phone_create_tab_has_last_presets_quick_picks_and_no_matrix_setup(
+        logged_in_page, render_server, monkeypatch):
+    """Phone 390x844. ↺ Last and Presets are two chips above the prompt; the quick picks are ONE
+    scrolling row of 36 px chips; Presets opens a sheet on screen; the { } key inserts a variable
+    and Lists opens the lists sheet; a template prompt shows the tint and Random's row WITHOUT a
+    Matrix switch; Create -> Advanced carries the default negative row."""
+    _fake_unlimited_pixai(monkeypatch)
+    _seed_power_account(render_server.root, extra_models=5)
+    try:
+        page = logged_in_page(**PHONE)
+        posts, prefs_posts = _run_harness_guards(page, monkeypatch), []
+        page.on("request", lambda req: prefs_posts.append(req.post_data or "") if (
+            req.method == "POST" and req.url.endswith("/api/account/prefs")) else None)
+        _visit(page, "/")
+        _settle(page)
+        page.click("button:has-text('Create')")
+        page.wait_for_selector(".pm-chips")
+        page.wait_for_selector(".pm-quick .pm-chip")
+        _settle(page)
+        assert _power_writes(prefs_posts) == []
+        chips = page.evaluate("""() => {
+            const q = document.querySelector('.pm-quick');
+            const c = [...q.querySelectorAll('.pm-chip')];
+            const top = document.querySelector('.pm-chips').getBoundingClientRect().bottom;
+            const ta = document.querySelector('textarea.cm-ta').getBoundingClientRect().top;
+            return {h: c.map(x => Math.round(x.getBoundingClientRect().height)),
+                    ox: getComputedStyle(q).overflowX, sw: q.scrollWidth, cw: q.clientWidth,
+                    above: top <= ta, n: c.length,
+                    labels: [...document.querySelectorAll('.pm-chips .pm-chip')].map(x => x.innerText)};
+        }""")
+        assert set(chips["h"]) == {36}, chips
+        assert chips["ox"] == "auto" and chips["sw"] > chips["cw"], "one row that scrolls sideways: %r" % chips
+        assert chips["above"] and [x.replace("↺ ", "") for x in chips["labels"]] == ["Last", "Presets"], chips
+        page.click(".pm-chip:has-text('Presets')")
+        page.wait_for_selector(".glm-sheet .mgpow-panel")
+        _settle(page)
+        sheet = page.evaluate("""() => { const r = document.querySelector('.glm-sheet').getBoundingClientRect();
+            const b = document.querySelector('.glm-sheet .mgpow-savebtn').getBoundingClientRect();
+            const at = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            return {l: r.left, r: r.right, t: r.top, b: r.bottom, vw: innerWidth, vh: innerHeight,
+                    hit: !!(at && at.closest('.mgpow-savebtn')), names: [...document.querySelectorAll('.mgpow-name')].map(x => x.innerText)}; }""")
+        assert sheet["names"] == ["Portraits", "Ghost"] and sheet["l"] >= 0 and sheet["r"] <= sheet["vw"] and sheet["b"] <= sheet["vh"], sheet
+        page.click(".glm-scrim")
+        page.wait_for_selector(".glm-sheet", state="detached")
+
+        page.click(".pm-quick .pm-chip:has-text('Tsubaki.3')")
+        page.wait_for_function("() => document.querySelector('.cm-modelname') && document.querySelector('.cm-modelname').innerText.includes('Tsubaki.3')")
+        page.fill("textarea.cm-ta", "1girl")
+        page.click(".pm-key")
+        assert page.input_value("textarea.cm-ta") == "1girl{a|b}", "the { } key inserts a variable at the caret"
+        page.fill("textarea.cm-ta", "1girl, {silver|cobalt} hair")
+        page.wait_for_selector(".mgrun-toks .mgrun-tok.var")
+        row = page.locator(".mgrun-moderow.phone")
+        assert row.count() == 1
+        assert "Matrix" not in row.inner_text(), "setting up a Matrix is desktop-only"
+        assert page.locator(".mgrun-tok.var").first.inner_text() == "{silver|cobalt} ·2"
+        page.click(".pm-tools .pm-chip:has-text('Lists')")
+        page.wait_for_selector(".glm-sheet .mgrun-sheet")
+        page.click(".glm-scrim")
+        page.wait_for_selector(".glm-sheet", state="detached")
+
+        page.click(".cm-advrow")
+        page.wait_for_selector(".glm-screen .cm-subhead")
+        default = page.locator(".glm-screen .pm-tools .mgpow-default")
+        default.scroll_into_view_if_needed()
+        assert default.inner_text() == "★ Default · DiT"
+        assert page.locator(".glm-screen textarea.cm-ta").last.input_value() == "lowres, bad hands, watermark"
+        assert [u for u in posts if "/api/generate" in u and not u.endswith("/plan")] == [], posts
+        assert _power_writes(prefs_posts) == []
+    finally:
+        _clear_power_account(render_server.root)
+
+
+class _MatrixFixture:
+    """A stored 2 x 3 matrix run in the module's shared install: its Runs-store rows, its job
+    events (every finished cell shows catalog row 100's picture), and -- so a picture's record
+    knows the run -- task id 9100000000000001 on catalog row 100. `undo()` puts every file back."""
+
+    def __init__(self, root):
+        import sqlite3
+        import time
+        import moonglade_runs as runs
+        self.root = root
+        self.db = root / "catalog.db"
+        self.run_id = "b" * 32
+        self.tid = "9100000000000001"
+        self.jobs_path = root / "jobs.jsonl"
+        self.jobs_before = self.jobs_path.read_bytes() if self.jobs_path.exists() else None
+        con = sqlite3.connect(str(self.db))
+        try:
+            con.execute("UPDATE catalog SET task_id=? WHERE media_id='100'", (self.tid,))
+            con.commit()
+        finally:
+            con.close()
+        store = runs.RunsStore(root)
+        self.axes = [{"token": "{silver|cobalt}", "values": ["silver", "cobalt"]},
+                     {"token": "{kneeling|looking back|turning}", "values": ["kneeling", "looking back", "turning"]}]
+        store.reserve(self.run_id, _USERNAME, mode="matrix",
+                      template="1girl, {silver|cobalt} hair, {kneeling|looking back|turning}",
+                      var_mode="matrix", run_seed=1, dock_seed="", count=6, jobs_n=6, axes=self.axes, payload={},
+                      each_cost=1600, covered=0, ack_total=9600, status="sent")
+        self.cells = []
+        for i in range(6):
+            h, p = self.axes[0]["values"][i // 3], self.axes[1]["values"][i % 3]
+            refused = i == 4
+            cid = self.tid if i == 0 else str(9100000000000010 + i)
+            self.cells.append(dict(
+                cell=i, task_id=None if refused else cid, prompt="1girl, %s hair, %s" % (h, p),
+                vars=[{"token": self.axes[0]["token"], "value": h}, {"token": self.axes[1]["token"], "value": p}],
+                seed=None, batch=1, no_card=1, card=0, expected=1600,
+                state="refused" if refused else "sent", error="PixAI refused this one" if refused else None,
+                request=None if refused else {"modelId": _UNL_T3, "prompts": "1girl, %s hair, %s" % (h, p),
+                                              "batchSize": 1}))
+        store.put_jobs(self.run_id, self.cells)
+        for c in self.cells:
+            if c["task_id"]:
+                core.append_job_event(root, c["task_id"], status="done", type="generate", label="Matrix",
+                                      media_ids=["100"], count=1, run=self.run_id, cell=c["cell"],
+                                      run_mode="matrix", source="web", started_at=time.time() - 30)
+
+    def undo(self):
+        import sqlite3
+        con = sqlite3.connect(str(self.db))
+        try:
+            con.execute("UPDATE catalog SET task_id='' WHERE media_id='100'")
+            con.commit()
+        finally:
+            con.close()
+        c2 = sqlite3.connect(str(self.root / "runs.db"))
+        try:
+            c2.execute("DELETE FROM run_jobs WHERE run_id=?", (self.run_id,))
+            c2.execute("DELETE FROM runs WHERE run_id=?", (self.run_id,))
+            c2.commit()
+        finally:
+            c2.close()
+        if self.jobs_before is None:
+            if self.jobs_path.exists():
+                self.jobs_path.unlink()
+        else:
+            self.jobs_path.write_bytes(self.jobs_before)
+
+
+def test_the_phone_opens_a_matrix_as_a_grid_and_inspects_the_request_from_the_details_menu(
+        logged_in_page, render_server, monkeypatch):
+    """Phone 390x844, Image Details of a picture that is a cell of a stored matrix run: the ⋯ chip
+    opens a sheet with Inspect the request (Copy JSON only, no CLI tab, no secrets) and View this
+    matrix as a grid -- the last axis across, the rest down, a cell that was refused drawn as a
+    peach held tile, every cell on screen or reachable by scrolling. Nothing is written."""
+    fx = _MatrixFixture(render_server.root)
+    posts = []
+    try:
+        page = logged_in_page(**PHONE)
+        page.on("request", lambda req: posts.append(req.url) if req.method == "POST" else None)
+        _visit(page, "/")
+        page.wait_for_selector(".glm-tile", timeout=10_000)
+        _freeze_motion(page)
+        page.click('.glm-tile:has-text("harness prompt")')
+        page.wait_for_selector(".lbm-root", timeout=10_000)
+        page.click('.lbm-root button:has-text("Details"), .lbm-root a:has-text("Details")')
+        page.wait_for_selector(".idm-root .idm-chiprow", timeout=10_000)
+        page.wait_for_selector(".idm-chip[aria-label='More']")
+        page.click(".idm-chip[aria-label='More']")
+        page.wait_for_selector(".glm-sheet button:has-text('Inspect the request')")
+        page.click(".glm-sheet button:has-text('Inspect the request')")
+        page.wait_for_selector(".mgrun-insp .mgrun-inspbody")
+        page.wait_for_function("() => document.querySelector('.mgrun-inspbody').innerText.includes('createGenerationTask')")
+        assert page.locator(".mgrun-inspbtn").count() == 0, "the phone's Inspect is Copy JSON only: no CLI tab"
+        assert page.inner_text(".mgrun-copy") == "Copy JSON"
+        body = page.inner_text(".mgrun-inspbody")
+        assert "sk-render-harness-fake" not in body and "csrf" not in body.lower()
+        page.click(".glm-scrim")
+        page.wait_for_selector(".glm-sheet", state="detached")
+        page.click(".idm-chip[aria-label='More']")
+        page.click(".glm-sheet button:has-text('View this matrix as a grid')")
+        page.wait_for_selector(".pm-grid .pm-cell")
+        _settle(page)
+        grid = page.evaluate("""() => {
+            const g = document.querySelector('.pm-grid');
+            const cells = [...g.querySelectorAll('.pm-cell')];
+            const cols = getComputedStyle(g).gridTemplateColumns.split(' ').length - 1;
+            return {n: cells.length, cols, across: [...g.querySelectorAll('.pm-axis')].map(x => x.innerText),
+                    rows: [...g.querySelectorAll('.pm-rowlbl')].map(x => x.innerText),
+                    held: cells.filter(c => c.classList.contains('held')).length,
+                    done: cells.filter(c => c.classList.contains('done')).length,
+                    right: Math.max(...cells.map(c => c.getBoundingClientRect().right)), vw: innerWidth,
+                    sw: g.scrollWidth, cw: g.clientWidth};
+        }""")
+        assert grid["n"] == 6 and grid["cols"] == 3, grid
+        assert grid["across"] == ["kneeling", "looking back", "turning"], "the last axis runs across"
+        assert grid["rows"] == ["silver", "cobalt"], "the rest run down"
+        assert grid["done"] == 5 and grid["held"] == 1, "a refused cell is a held tile, a finished one opens"
+        assert grid["right"] <= grid["vw"] + 1 or grid["sw"] > grid["cw"], "every cell is on screen or scrolls into reach: %r" % grid
+        assert [u for u in posts if "/api/generate" in u] == [], posts
+    finally:
+        fx.undo()
+
+
+def test_the_dock_reel_draws_a_matrix_run_as_readable_aspect_true_tiles(
+        logged_in_page, render_server, monkeypatch):
+    """Desktop 1280x900, the reel of a stored 2 x 3 matrix run (Generate Power Tools Handoff M6, NOTES
+    8): the last axis across and the rest down, every tile at least 72 px tall and the picture's own
+    shape, the axis labels wrapped and whole (never clipped), the refused cell a peach held tile, the
+    { } on a tile only while it is hovered, and the whole grid inside the dock."""
+    _fake_unlimited_pixai(monkeypatch)
+    fx = _MatrixFixture(render_server.root)
+    try:
+        page = logged_in_page(**DESKTOP)
+        _run_harness_guards(page, monkeypatch)
+        _visit(page, "/")
+        _dismiss_any_achievement_toast(page)
+        page.click(".mgx-gen")
+        page.wait_for_selector(".mgdock .mgrun-grid .mgrun-cell")
+        _settle(page)
+        geo = page.evaluate("""() => {
+            const g = document.querySelector('.mgdock .mgrun-grid');
+            const d = document.querySelector('.mgdock').getBoundingClientRect();
+            const cells = [...g.querySelectorAll('.mgrun-cell')].map(c => c.getBoundingClientRect());
+            const axes = [...g.querySelectorAll('.mgrun-axis')].filter(a => a.innerText !== '…');
+            const insp = g.querySelector('.mgrun-cell .mgrun-cellinsp');
+            return {n: cells.length, minH: Math.min(...cells.map(c => c.height)),
+                    ratio: cells[0].width / cells[0].height,
+                    across: axes.map(a => a.innerText), rows: [...g.querySelectorAll('.mgrun-rowlbl')].map(x => x.innerText),
+                    clipped: axes.filter(a => a.scrollHeight > a.clientHeight + 1).length,
+                    held: g.querySelectorAll('.mgrun-cell.held').length, done: g.querySelectorAll('.mgrun-cell.done').length,
+                    inDock: cells.every(c => c.left >= d.left && c.right <= d.right && c.top >= d.top),
+                    inspOpacity: insp ? getComputedStyle(insp).opacity : null};
+        }""")
+        assert geo["n"] == 6 and geo["minH"] >= 72, geo
+        assert abs(geo["ratio"] - 832 / 1216) < 0.03, "tiles keep the picture's shape: %r" % geo
+        assert geo["across"] == ["kneeling", "looking back", "turning"] and geo["rows"] == ["silver", "cobalt"], geo
+        assert geo["clipped"] == 0, "axis labels wrap to two lines instead of clipping: %r" % geo
+        assert geo["held"] == 1 and geo["done"] == 5 and geo["inDock"], geo
+        assert geo["inspOpacity"] == "0", "a tile's { } shows on hover, not on every tile"
+        page.hover(".mgdock .mgrun-cell.done")
+        _settle(page)
+        assert page.evaluate("() => getComputedStyle(document.querySelector('.mgrun-cell.done .mgrun-cellinsp')).opacity") == "1"
+    finally:
+        fx.undo()
