@@ -1647,7 +1647,7 @@ def sibling_media(db_path, task_ids):
         return [dict(r) for r in rows]
 
 
-def recent_train_task_page(db_path, limit=18, before=None):
+def recent_train_task_page(db_path, limit=18, before=None, q=""):
     """Generations grouped by TASK, newest task first, for the Train dataset pickers (the
     phone's tiles are tasks; desktop's "Grouped" view) -- each entry is one generation and its
     real image count, never a fixed batch size (real batches are 1-4). Videos, task-less
@@ -1660,10 +1660,17 @@ def recent_train_task_page(db_path, limit=18, before=None):
     strictly older than it. Every image of a task on the page comes with it, whatever its own
     timestamp, so a task is never split across two pages.
 
+    `q` is the library's own search (_build_where: prompt words, field operators, a pasted
+    id); a task is on the page when any of its images matches, and then all of its images come.
+
     Returns (tasks, next_before): tasks = [{task_id, media_ids, count, newest}], newest image
     first within a task; next_before is None when there is nothing older."""
     limit = max(1, int(limit))
     where = ("task_id != '' AND COALESCE(is_video,'') != '1' AND filename != ''")
+    head_where, head_params = where, []
+    if (q or "").strip():
+        qw, qp = _build_where(q.strip(), "", "", "", media_type="image")
+        head_where, head_params = where + " AND " + qw, qp
     params = []
     having = ""
     if before and before.get("at") is not None:
@@ -1671,9 +1678,10 @@ def recent_train_task_page(db_path, limit=18, before=None):
         params = [before["at"], before["at"], str(before.get("task") or "")]
     with catalog(db_path) as con:
         heads = con.execute(
-            "SELECT task_id, MAX(created_at) AS newest FROM catalog WHERE " + where +
+            "SELECT task_id, MAX(created_at) AS newest FROM catalog WHERE " + head_where +
             " GROUP BY task_id" + having +
-            " ORDER BY newest DESC, task_id DESC LIMIT ?", params + [limit + 1]).fetchall()
+            " ORDER BY newest DESC, task_id DESC LIMIT ?",
+            head_params + params + [limit + 1]).fetchall()
         more = len(heads) > limit
         heads = heads[:limit]
         ids = [h["task_id"] for h in heads]
@@ -17301,7 +17309,8 @@ def create_app(out_dir: Path):
         at = (request.args.get("before_at") or "").strip()
         before = {"at": at, "task": (request.args.get("before_task") or "").strip()} \
             if at else None
-        page, nxt = recent_train_task_page(db_path, limit, before)
+        page, nxt = recent_train_task_page(db_path, limit, before,
+                                           (request.args.get("q") or "").strip())
         tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0]) for t in page]
         return jsonify({"tasks": tasks, "next_before": nxt})
 

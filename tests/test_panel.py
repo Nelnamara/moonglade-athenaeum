@@ -1429,6 +1429,39 @@ def test_train_recent_tasks_pages_by_task_to_the_oldest(tmp_path):
     assert pages == 6                                   # 7+7+7+7+7+5
 
 
+def test_train_recent_tasks_searches_and_brings_the_whole_task(tmp_path):
+    """The Train pool's search (Session J 2a, "From history": search, Grouped / All) rides the
+    grouped pages too. A task is on the page when ANY of its images matches the library's own
+    search, and then every one of its images comes with it; the cursor still walks the matches
+    to the end."""
+    rows = [
+        _row(media_id="k1", task_id="tKeep", filename="k1.png", prompt_full="a moonlit druid",
+             created_at="2026-07-03T00:00:00"),
+        _row(media_id="k2", task_id="tKeep", filename="k2.png", prompt_full="something else",
+             created_at="2026-07-03T00:00:00"),
+        _row(media_id="o1", task_id="tOther", filename="o1.png", prompt_full="a sunny beach",
+             created_at="2026-07-04T00:00:00"),
+    ]
+    for i in range(5):
+        rows.append(_row(media_id="d%d" % i, task_id="tD%d" % i, filename="d%d.png" % i,
+                         prompt_full="druid number %d" % i,
+                         created_at="2026-06-%02dT00:00:00" % (i + 1)))
+    save_catalog(tmp_path / "catalog.db", rows)
+    cli = login_test_client(create_app(tmp_path))
+    d = cli.get("/api/train/recent-tasks?q=druid&limit=3").get_json()
+    ids = [t["task_id"] for t in d["tasks"]]
+    assert ids[0] == "tKeep" and "tOther" not in ids
+    keep = d["tasks"][0]
+    assert set(keep["media_ids"]) == {"k1", "k2"} and keep["count"] == 2
+    seen = list(ids)
+    while d["next_before"]:
+        c = d["next_before"]
+        d = cli.get("/api/train/recent-tasks?q=druid&limit=3&before_at=%s&before_task=%s"
+                    % (c["at"], c["task"])).get_json()
+        seen += [t["task_id"] for t in d["tasks"]]
+    assert sorted(seen) == sorted(["tKeep"] + ["tD%d" % i for i in range(5)])
+
+
 def test_the_release_check_rides_the_schedulers_own_tick():
     """The hourly update check does NOT get a timer thread of its own. This process already
     has one periodic tick -- the automated-tasks scheduler -- so the check joins it, which is
