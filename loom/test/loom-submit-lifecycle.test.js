@@ -2,7 +2,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   classifySubmit, classifySubmitStatus, submitsToCheck, failRender, markUnclear, abandonSubmit,
-  adoptTask, beginRender, landTake, inFlight, needsRender,
+  adoptTask, beginRender, landTake, inFlight, needsRender, cancelRender,
+  goBlocked, sendUnclear, unsendableImages, cardForSubmit, cardForTask,
 } from "../src/loom-takes-core.js";
 import { cardsToResume } from "../src/loom-core.js";
 
@@ -97,5 +98,73 @@ describe("unclear, adopt, release (F3, F8)", () => {
     assert.equal(again.pendingSubmitId, "S2");
     assert.notEqual(again.pendingSubmitId, "S");
     assert.equal(abandonSubmit(again, "S", "t3"), again, "releasing the old id cannot touch the new render");
+  });
+});
+
+describe("the Go gate and the paused carve-out (BUILD-w5-p §3.3 step 1, §3.4)", () => {
+  const sent = adoptTask(beginRender({ id: "p", status: "todo" }, { submitId: "S1", board: "B" }), "S1", "T1");
+  test("a render this build sent keeps its submit id beside the task, and may still be superseded once PAUSED", () => {
+    assert.equal(sent.pendingSubmitId, "S1");
+    assert.equal(sent.pendingTaskId, "T1");
+    assert.equal(beginRender(sent, { submitId: "S2" }), null, "a task being polled refuses a new render");
+    const again = beginRender(sent, { submitId: "S2" }, { pausedOk: true });
+    assert.ok(again, "the paused carve-out works for an adopted render too");
+    assert.equal(again.pendingSubmitId, "S2");
+    assert.deepEqual(again.supersededTasks, ["T1"]);
+    assert.equal(landTake(again, { mid: "M1", taskId: "T1" }).outcome, "unselected",
+      "the paused render's late clip lands without taking ★");
+    const back = cancelRender(again, "S2", sent);
+    assert.equal(back.pendingTaskId, "T1", "a lock that could not be saved puts the paused task back");
+  });
+  test("goBlocked: an outstanding or unclear send always blocks; a polled task blocks unless paused", () => {
+    assert.equal(goBlocked({ id: "a" }, false), false);
+    assert.equal(goBlocked({ id: "a", status: "wip" }, false), false, "a marker-less wip is not in flight");
+    const out = beginRender({ id: "a" }, { submitId: "S" });
+    assert.equal(goBlocked(out, false), true);
+    assert.equal(goBlocked(out, true), true, "paused never frees a send whose answer is outstanding");
+    assert.equal(goBlocked(sent, false), true);
+    assert.equal(goBlocked(sent, true), false, "the paused carve-out");
+    assert.equal(goBlocked({ id: "old", status: "wip", pendingTaskId: "T" }, true), false, "a pre-P paused render");
+  });
+  test("sendUnclear: only a send with no task whose last attempt is unclear shows the way-out", () => {
+    const out = beginRender({ id: "a" }, { submitId: "S" });
+    assert.equal(sendUnclear(out), false, "still being answered");
+    const u = markUnclear(out, "S", "x", "t");
+    assert.equal(sendUnclear(u), true);
+    assert.equal(sendUnclear(adoptTask(u, "S", "T")), false, "a task id settles it");
+    assert.equal(sendUnclear(abandonSubmit(u, "S", "t")), false, "released");
+  });
+});
+
+describe("pictures the render route cannot send (open call 4, review F16)", () => {
+  test("mirrors the server: digits and data: thumbnails go, anything else is refused before pricing", () => {
+    assert.deepEqual(unsendableImages({ images: ["733917871331404290", "data:image/png;base64,AA", ""] }), []);
+    assert.deepEqual(unsendableImages({ images: ["733917871331404290", "local_0123456789ab"] }), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableImages({ images: [" local_0123456789ab "] }), ["local_0123456789ab"]);
+    assert.deepEqual(unsendableImages({ images: ["/thumbs/1.jpg"] }), ["/thumbs/1.jpg"]);
+    assert.deepEqual(unsendableImages({}), []);
+    assert.deepEqual(unsendableImages(null), []);
+  });
+});
+
+describe("the drawer's events find their card by id, never by selection (review F7)", () => {
+  const board = { acts: [{ cards: [
+    { id: "A", pendingSubmitId: "SA", pendingTaskId: "TA" },
+    { id: "B", pendingSubmitId: "SB" },
+    { id: "C", supersededTasks: ["Told"] },
+    { id: "D", pendingTaskId: "Told" },
+  ] }] };
+  test("by submit id", () => {
+    assert.equal(cardForSubmit(board, "SB").id, "B");
+    assert.equal(cardForSubmit(board, "nope"), null);
+    assert.equal(cardForSubmit(board, ""), null, "no id finds nothing (never 'the first card')");
+    assert.equal(cardForSubmit(null, "SB"), null);
+  });
+  test("by task id: the card polling it wins over one that superseded it", () => {
+    assert.equal(cardForTask(board, "TA").id, "A");
+    assert.equal(cardForTask(board, "Told").id, "D");
+    assert.equal(cardForTask({ acts: [{ cards: [{ id: "C", supersededTasks: ["Tx"] }] }] }, "Tx").id, "C");
+    assert.equal(cardForTask(board, ""), null);
+    assert.equal(cardForTask(board, "nope"), null);
   });
 });

@@ -113,6 +113,55 @@ export const takeView = (card, n) => {
  *  is known to be out, and the owner's next deliberate Render is the way out of it. */
 export const inFlight = (card) => !!(card && (card.pendingSubmitId || card.pendingTaskId));
 
+/** The Go gate (BUILD §3.3 step 1, the busy gate, the phone's Generate): may a NEW render of
+ *  this card start? No while a send's answer is outstanding or unclear; no while a task is
+ *  being polled -- unless that poll has PAUSED at its ceiling (`paused`, the tab's own view),
+ *  the one carve-out: beginRender then supersedes the paused task. */
+export const goBlocked = (card, paused) => {
+  if (!inFlight(card)) return false;
+  if (card.pendingSubmitId && !card.pendingTaskId) return true;
+  return !paused;
+};
+
+/** A send whose answer never came (or came back "may have started"): the card keeps its lock
+ *  and shows the peach way-out (↻ Check / release) until submit-status or the owner settles it. */
+export const sendUnclear = (card) => !!(card && card.pendingSubmitId && !card.pendingTaskId
+  && card.lastAttempt && card.lastAttempt.state === "unclear");
+
+/** The pictures of a shot payload the server's render route cannot send (open call 4, review
+ *  F16): anything that is neither a catalog id (digits) nor a data: thumbnail -- an imported
+ *  `local_` picture above all. Mirrors the server's own test, so the client refuses exactly
+ *  what the server would, BEFORE a price is asked or a confirm shown. */
+export const unsendableImages = (payload) => ((payload && payload.images) || [])
+  .map((x) => str(x).trim())
+  .filter((s) => s && !/^\d+$/.test(s) && !s.startsWith("data:"));
+
+/** The card on a board waiting for this submit id (the drawer's mg-submit / mg-error), or null. */
+export const cardForSubmit = (project, submitId) => {
+  const sid = str(submitId);
+  if (!sid) return null;
+  for (const a of ((project || {}).acts || [])) {
+    for (const c of ((a || {}).cards || [])) if (c && str(c.pendingSubmitId) === sid) return c;
+  }
+  return null;
+};
+
+/** The card on a board that owns this task: the one polling it, or one that superseded it
+ *  (so a paused render's late clip still lands there, without ★). Never "the selected shot". */
+export const cardForTask = (project, taskId) => {
+  const tid = str(taskId);
+  if (!tid) return null;
+  let sup = null;
+  for (const a of ((project || {}).acts || [])) {
+    for (const c of ((a || {}).cards || [])) {
+      if (!c) continue;
+      if (str(c.pendingTaskId) === tid) return c;
+      if (!sup && (c.supersededTasks || []).some((x) => str(x) === tid)) sup = c;
+    }
+  }
+  return sup;
+};
+
 /** Generate all / the cost-to-finish estimate: which shots still need a render (F14).
  *  A shot with a ★ take is finished even when its last retake failed. */
 export const needsRender = (card) => !!card && selectedTakeOf(card) == null && !inFlight(card)
@@ -394,8 +443,10 @@ export const beginRender = (card, m, opts) => {
   if (!card) return null;
   const o = opts || {};
   // A send whose answer is still outstanding (or unclear) always refuses: only the owner's
-  // "release" (F8) or the answer itself can clear it.
-  if (card.pendingSubmitId) return null;
+  // "release" (F8) or the answer itself can clear it. Once the answer named a task
+  // (adoptTask keeps the submit id beside it) the task rule below decides instead -- else a
+  // render this build sent could never use the paused carve-out.
+  if (card.pendingSubmitId && !card.pendingTaskId) return null;
   // A task still being polled refuses too, unless the poll has PAUSED at its ceiling.
   if (card.pendingTaskId && !o.pausedOk) return null;
   const x = m || {};
