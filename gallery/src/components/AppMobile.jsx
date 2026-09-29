@@ -980,6 +980,21 @@ export default function AppMobile({ boot }) {
   // that badge honest if the owner backs out to Details right after.
   const afterPublishOrTrain = async () => { lib.load(1, true); };
 
+  /* Train a LoRA (Session J, one step per screen): the screen's head ‹ steps back inside the
+     train flow first (TrainMobile sets trainBack), and closes the screen only from its chooser.
+     Its Runs "Use" puts a trained LoRA on the Create tab's composer -- the same useGenerate
+     addLora the model sheet's LoRA pick calls (trigger words and all); a pick, never a submit. */
+  const trainBack = useRef(null);
+  const screenBack = () => {
+    if (screen === "train" && trainBack.current && trainBack.current()) return;
+    closeScreen();
+  };
+  const takeTrainedLora = (lora) => {
+    gen.addLora(lora);
+    closeScreen();
+    setTab("create");
+  };
+
   // NavSpine.jsx's own logout(), ported verbatim (same /api/logout JSON POST +
   // cache-purge-then-navigate shape -- see that file's header comment for why).
   const logOut = () => {
@@ -1093,7 +1108,7 @@ export default function AppMobile({ boot }) {
             tab) because the hamburger is reachable from all three tabs --
             switching Gallery/Create/Control while a screen is pushed must
             not unmount it. */}
-        <MobileScreen open={!!screen} closing={screenClosing} onClose={closeScreen}
+        <MobileScreen open={!!screen} closing={screenClosing} onClose={screenBack}
           title={screen ? SCREEN_TITLES[screen] : ""}>
           {screen === "myart" && (
             <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => openScreenKey("train")} />
@@ -1117,7 +1132,7 @@ export default function AppMobile({ boot }) {
             <PublishMobile mediaId={publishFor} onClose={closeScreen} onPublished={afterPublishOrTrain} />
           )}
           {screen === "train" && (
-            <TrainMobile onClose={closeScreen} />
+            <TrainMobile onClose={closeScreen} onUseLora={takeTrainedLora} backRef={trainBack} />
           )}
         </MobileScreen>
       </div>

@@ -1,343 +1,123 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, apiPost } from "../api.js";
+import React, { useState } from "react";
 import "../styles/overlays.css";
-import "../styles/publish.css";
 import "../styles/train.css";
 import useScrollLock from "../hooks/useScrollLock.js";
-import { scrollParentOf } from "../picker/mergeRows.js";
-import { acceptCostField, normalizeTrigger } from "../gen/trainCore.js";
+import { loraForDock } from "../gen/trainCore.js";
+import {
+  useBasicTraining, useCsrf, usePublish, useRetry, useTrainRuns, useTrainSetup,
+} from "./train/useTraining.js";
+import TrainChooser from "./train/TrainChooser.jsx";
+import TrainBasic from "./train/TrainBasic.jsx";
+import TrainAdvanced from "./train/TrainAdvanced.jsx";
+import TrainStrip from "./train/TrainStrip.jsx";
+import RunsList, { RetryConfirm } from "./train/RunsList.jsx";
+import PublishSheet from "./train/PublishSheet.jsx";
 
-/* Train a LoRA — Frontend Gallery.dc.html's ovTrain (markup L392-500+), on the real
-   createTrainingTask pipeline.
+/* ⚗ Train a LoRA, desktop -- Session J (Training Handoff.dc.html, committed 2026-09-28; picks
+   1a · 2a · 3c · 4a · 5c · 6a, with the owner's 2026-09-28 corrections in
+   moonglade-internal/design/notes/training/BUILD-w3-train.md section 5). It replaces the old
+   one-page ovTrain body; the mount (App.jsx, overlay === "train"), the way it opens (the nav's
+   Train) and the z-order (the shared .mgv-scrim / .mgv-host, 410/411 in the 300-500 overlay
+   band) are unchanged.
 
-   Left column is the dataset (the design's "Dataset images N/100", min-10 gate, and its
-   tile grid of recent generations to toggle on/off). Right column is the design's form:
-   Name of LoRA, Trigger words with a live counter, Category, Model Type, Model Theme
-   cards — ending in the submit.
+   Screens: the CHOOSER it opens on (Basic / Advanced cards, the Runs row, the pinned strip
+   while something trains) -> BASIC (three steps) or ADVANCED (set up, descriptions,
+   parameters -> start: train/TrainAdvanced.jsx; Runs' Continue opens a draft there) -> RUNS
+   (filters, one row per run, one action each), with the PUBLISH sheet and the RETRY confirm
+   laid over it.
 
-   Where the DC carries demo data the same control is wired to the real equivalent:
-   - the dataset tiles are your real recent library images (the DC's own tile grid,
-     with actual art in it), toggled by clicking, exactly as drawn;
-   - Model Theme cards are real base models from /api/model-search?kind=base — the same
-     route the Generate drawer's own model picker already uses;
-   - Model Type is the architecture FILTER over those cards. It is a real filter, not a
-     separate submitted field: PixAI's own form uses modelType for validation/pricing and
-     derives the actual model from the chosen base, which is what baseModelId carries.
+   NOTHING WRITES ON OPEN (DECISIONS 2026-09-28). Opening reads the training config, the free
+   trainings and the runs list; every write is a press, and every paid or irreversible press
+   shows the QUOTED amount it will send and asks once (useTraining.js carries the calls; the
+   server re-checks everything, BUILD sections 3 and 7).
 
-   COST. This is a spend path, so it leads with the truth rather than a button. A run is
-   free two ways, as on PixAI's own trainer (owner ruling 4, 2026-09-26): the membership's
-   free-training QUOTA (currency `free::user_lora_training`, counted only for a member),
-   shown here as "N free trainings left"; or a training free card for the chosen base, which
-   the server checks when you press Train it and the quota does not cover the run (PixAI's own
-   page checks it either way -- a deliberate difference, see api_train_submit) and names in the
-   confirm. Otherwise the run costs credits, and the price IS quoted -- it comes from PixAI's
-   own training price list (SCOPE_2026-09-26 E7; the old "this app cannot quote the amount"
-   stopped being true). The server still refuses a paid submit unless the accept-cost
-   acknowledgment is sent -- the AMOUNT the box named, refused if the run no longer costs that
-   -- and this panel makes you tick it deliberately. */
-
-// PixAI's real LoRA categories + their display labels, probed live off the train-lora
-// page 2026-08-06 (the design's character/style/concept was placeholder). "detail"
-// shows as "Detail Enhancement", matching the site.
-const CATEGORIES = [
-  ["character", "Character"], ["animal", "Animal"], ["style", "Style"],
-  ["realistic", "Realistic"], ["pose", "Pose"], ["clothing", "Clothing"],
-  ["background", "Background"], ["detail", "Detail Enhancement"], ["other", "Other"],
-];
-const MIN_IMAGES = 10;
-const MAX_IMAGES = 100;
-
-/* The base the panel pre-selects: the server's `default_version_id` -- PixAI's own default,
-   the first SDXL row of its training list (SCOPE_2026-09-26 E7) -- and the Model Type group
-   that holds it. Never "the first group's first model": DiT.3 (Tsubaki.3, 100,000 credits)
-   sorts first now, so that rule would pre-select the most expensive base on the list. */
-function defaultBase(groups, versionId) {
-  const gi = groups.findIndex((g) => g.models.some((m) => m.version_id === versionId));
-  if (gi >= 0) return { archIdx: gi, baseModel: versionId };
-  return { archIdx: 0, baseModel: "" };
-}
-
-export default function TrainOverlay({ onClose }) {
+   The runs list polls every 15 s only while something is queued, training or being described,
+   and only while a screen that shows it -- the chooser or Runs -- is open (useTrainRuns). */
+export default function TrainOverlay({ onClose, onUseLora }) {
   useScrollLock();
-  const [csrf, setCsrf] = useState("");
-  const [quota, setQuota] = useState(null);
-  const [pool, setPool] = useState([]);       // recent library images to choose from
-  // The pool pages on scroll (owner, 2026-09-26: "capped like old image picker bugs" -- it read
-  // one page of 60 and stopped). Same mechanism as ModelPicker's load-more: a 1px sentinel after
-  // the tiles, observed from the scrolling pane (.mgtr-left) with a page of head start.
-  const poolPage = useRef(0);
-  const poolPages = useRef(1);
-  const poolBusy = useRef(false);
-  const poolEnd = useRef(null);
-  const loadMorePool = useCallback(() => {
-    if (poolBusy.current || poolPage.current >= poolPages.current) return;
-    poolBusy.current = true;
-    const next = poolPage.current + 1;
-    apiGet("/api/next/library?page=" + next + "&page_size=60&media=image&sort=newest")
-      .then((d) => {
-        poolBusy.current = false;
-        if (!d || d.error) return;              // transient: the next scroll retries
-        poolPage.current = next;
-        poolPages.current = Number(d.pages) || next;
-        const incoming = d.items || [];
-        setPool((old) => {
-          const seen = new Set(old.map((x) => x.media_id));
-          const fresh = incoming.filter((x) => x && x.media_id && !seen.has(x.media_id)
-            && seen.add(x.media_id));
-          return fresh.length ? old.concat(fresh) : old;
-        });
-      })
-      .catch(() => { poolBusy.current = false; });
-  }, []);
-  const [picked, setPicked] = useState([]);   // media_ids in the dataset
-  // Trainable base models grouped by architecture -- the real Model Type -> Model Theme
-  // structure (each group is one architecture: DiT.2, DiT.1, SDXL, SD 1.5).
-  const [groups, setGroups] = useState([]);
-  const [archIdx, setArchIdx] = useState(0);       // selected Model Type
-  const [baseModel, setBaseModel] = useState("");  // selected theme's VERSION id
+  const csrf = useCsrf();
+  const setup = useTrainSetup();
+  const [view, setView] = useState("chooser");       // chooser | basic | advanced | runs
+  const [basicStep, setBasicStep] = useState(1);
+  const [draftId, setDraftId] = useState("");
+  const [advRun, setAdvRun] = useState(0);            // a fresh Advanced set-up per entry
+  const [filter, setFilter] = useState("all");
+  const runs = useTrainRuns({ enabled: view === "chooser" || view === "runs" });
+  const basic = useBasicTraining(setup, csrf);
+  const retry = useRetry(csrf, () => runs.refresh());
+  const pub = usePublish(csrf, () => runs.refresh());
 
-  const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState("");
-  const [category, setCategory] = useState("");
-
-  const [ask, setAsk] = useState(null);
-  const [acceptCost, setAcceptCost] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [done, setDone] = useState(null);
-
-  useEffect(() => {
-    apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
-    apiGet("/api/train/quota")
-      .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0));
-    loadMorePool();
-    apiGet("/api/train/models")
-      .then((d) => {
-        const gs = d.groups || [];
-        setGroups(gs);
-        const def = defaultBase(gs, d.default_version_id || "");
-        setArchIdx(def.archIdx);
-        setBaseModel(def.baseModel);
-      });
-  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const el = poolEnd.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMorePool();
-    }, { root: scrollParentOf(el), rootMargin: "720px 0px", threshold: 0 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [loadMorePool, pool.length]);
-
-  /* A quote is for ONE form. The base chips, the dataset and the fields stay live while the
-     confirm panel is open, so any change takes the panel down with its ticked acknowledgement:
-     otherwise "Spend 25,000 credits" could stay ticked over a base picked afterwards that costs
-     100,000. (The server refuses that too -- the confirm sends the amount, see acceptCostField.) */
-  useEffect(() => { setAsk(null); setAcceptCost(false); },
-    [baseModel, archIdx, picked, trigger, name, category]);
-
-  // Selecting a Model Type shows that architecture's models and defaults to its first.
-  const pickArch = (i) => {
-    setArchIdx(i);
-    const g = groups[i];
-    setBaseModel(g && g.models.length ? g.models[0].version_id : "");
-  };
-  const themes = (groups[archIdx] || {}).models || [];
-  const selectedPrice = (groups[archIdx] || {}).price ?? null;   // credits for this arch
-
-  const toggle = (mid) => {
-    setPicked((cur) => (cur.includes(mid)
-      ? cur.filter((x) => x !== mid)
-      : (cur.length >= MAX_IMAGES ? cur : cur.concat([mid]))));
+  const toRuns = () => { setView("runs"); };
+  const onAction = (kind, row) => {
+    if (kind === "continue") { setDraftId(row.id); setView("advanced"); }
+    else if (kind === "publish") pub.open("publish", row);
+    else if (kind === "make-public") pub.open("make-public", row);
+    else if (kind === "retry") retry.preview(row);
+    else if (kind === "use") {
+      const lora = loraForDock(row, setup.archOf);
+      if (lora && onUseLora) onUseLora(lora);
+    }
   };
 
-  const body = () => ({
-    base_model_id: baseModel, media_ids: picked, title: name,
-    trigger_words: trigger, category, csrf,
-  });
-
-  const preview = async () => {
-    setBusy(true); setErr("");
-    try {
-      const p = await apiPost("/api/train/submit", body());
-      if (p.error) { setErr(p.error); return; }
-      setAsk(p); setAcceptCost(false);
-    } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
-  };
-
-  const confirm = async () => {
-    setBusy(true); setErr("");
-    try {
-      const res = await apiPost("/api/train/submit",
-        { ...body(), confirm: true, ...acceptCostField(ask, acceptCost) });
-      if (res.error) { setErr(res.error); return; }
-      setDone(res); setAsk(null);
-      if (typeof res.free_trainings_left === "number") setQuota(res.free_trainings_left);
-    } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
-  };
-
-  const enough = picked.length >= MIN_IMAGES;
+  const head = view === "runs" ? (
+    <div className="mgtr-head runs">
+      <button type="button" className="mgtr-back" onClick={() => setView("chooser")}>‹ Train a LoRA</button>
+      <div className="mgtr-head-title">Runs</div>
+      <button type="button" className="mgtr-newbtn" onClick={() => setView("chooser")}>+ New training</button>
+      <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
+    </div>
+  ) : (
+    <div className="mgtr-head">
+      <div className="mgtr-head-title">⚗ Train a LoRA</div>
+      <div className="mgtr-sub">runs on PixAI; the library keeps the receipts</div>
+      <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
+    </div>
+  );
 
   return (
     <>
       <div className="mgv-scrim" onClick={onClose} />
       <div className="mgv-host">
-        <div className="mgtr-slab" role="dialog" aria-label="Train a LoRA">
-          <div className="mgpub-head">
-            <div>
-              <div className="mgpub-title">⚗ Train a LoRA</div>
-              <div className="mgtr-sub">runs on PixAI — the library keeps the receipts</div>
-            </div>
-            <button type="button" className="mgv-x" onClick={onClose} aria-label="Close">×</button>
+        <div className={"mgtr-slab" + (view === "basic" || view === "advanced" ? " wiz" : "")}
+          role="dialog" aria-label="Train a LoRA" data-view={view}>
+          {head}
+          <div className="mgtr-scroll">
+            {view === "chooser" && (
+              <TrainChooser runs={runs} paused={setup.paused} resumesAt={setup.resumesAt}
+                onRuns={toRuns}
+                onPick={(k) => { if (k === "advanced") { setDraftId(""); setAdvRun((n) => n + 1); } setView(k); }} />
+            )}
+            {view === "basic" && (
+              <TrainBasic b={basic} setup={setup} step={basicStep} setStep={setBasicStep}
+                onBack={() => setView("chooser")} onRuns={toRuns}
+                onAdvanced={() => { setDraftId(""); setAdvRun((n) => n + 1); setView("advanced"); }} />
+            )}
+            {view === "advanced" && (
+              <TrainAdvanced key={draftId || "new-" + advRun} setup={setup} csrf={csrf} draftId={draftId}
+                onBack={() => setView(draftId ? "runs" : "chooser")} onRuns={toRuns}
+                onBasic={() => setView("basic")} onStarted={() => runs.refresh()} />
+            )}
+            {view === "runs" && (
+              <div className="mgtr-runsview">
+                <TrainStrip running={runs.running} withCover />
+                {retry.err && !retry.ask && <div className="mgtr-err">⚠ {retry.err}</div>}
+                {runs.errors && runs.errors.length > 0 && (
+                  <div className="mgtr-warnnote">Some runs couldn't be read just now: {runs.errors.join(" · ")}</div>
+                )}
+                {!runs.loaded ? <div className="mgtr-dim mgtr-runs-empty">Reading your runs…</div>
+                  : <RunsList runs={runs.runs} filter={filter} setFilter={setFilter} onAction={onAction} />}
+              </div>
+            )}
           </div>
-
-          {/* The cost position, stated before anything else. With free quota it's free;
-              without, we now quote the REAL price of the selected base (captured matrix). */}
-          <div className={"mgtr-cost" + (quota === 0 ? " paid" : "")}>
-            {quota === null ? "checking your free trainings…"
-              : quota > 0
-                ? "✓ " + quota + " free training" + (quota === 1 ? "" : "s") + " left — this one costs nothing."
-                  + (selectedPrice != null ? " (Normally " + selectedPrice.toLocaleString() + " credits.)" : "")
-                : (selectedPrice != null
-                    ? "⚠ No free trainings left — this base costs " + selectedPrice.toLocaleString() + " credits to train, unless a training free card covers it."
-                    : "⚠ No free trainings left, and PixAI's price list has no price for this base.")}
-          </div>
-
-          <div className="mgtr-body">
-            {/* LEFT: the dataset */}
-            <div className="mgtr-left">
-              <div className="mgtr-dshead">
-                <span>Dataset images <b>{picked.length}/{MAX_IMAGES}</b></span>
-                <span className={enough ? "ok" : "need"}>
-                  {enough ? "ready" : "Min " + MIN_IMAGES + " required"}
-                </span>
+          {retry.ask && (
+            <div className="mgtr-layer">
+              <div className="mgtr-layer-scrim" onClick={() => { if (!retry.busy) retry.setAsk(null); }} />
+              <div className="mgtr-sheet" role="dialog" aria-label="Retry">
+                <RetryConfirm retry={retry} />
               </div>
-              <div className="mgtr-bar">
-                <div className="mgtr-barfill"
-                  style={{ width: Math.min(100, (picked.length / MAX_IMAGES) * 100) + "%" }} />
-              </div>
-              <div className="mgtr-tilehead">Recent generations — click to add or remove</div>
-              <div className="mgtr-tiles">
-                {pool.map((p) => {
-                  const on = picked.includes(p.media_id);
-                  return (
-                    <button type="button" key={p.media_id}
-                      className={"mgtr-tile" + (on ? " on" : "")}
-                      onClick={() => toggle(p.media_id)} title={on ? "Remove" : "Add"}>
-                      <img src={p.thumb} alt="" loading="lazy" />
-                      {on && <span className="mgtr-check">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <div ref={poolEnd} className="mgtr-poolend" aria-hidden="true" />
             </div>
-
-            {/* RIGHT: the form */}
-            <div className="mgtr-right">
-              <label className="mgpub-lab">Name of LoRA</label>
-              <input className="mgpub-in" value={name} placeholder="eg: my LoRA"
-                onChange={(e) => setName(e.target.value)} />
-
-              <label className="mgpub-lab">Trigger words</label>
-              <div className="mgtr-trigwrap">
-                <textarea className="mgpub-in" rows={2} value={trigger}
-                  placeholder="eg: hatsune miku, aqua hair, twin tails"
-                  onChange={(e) => setTrigger(e.target.value)} />
-                {/* The length the server checks: the normalized string, counted as PixAI counts it. */}
-                <span className="mgtr-trigcount">{normalizeTrigger(trigger).length}</span>
-              </div>
-              <div className="mgpub-hint">
-                Stick to letters, numbers and common symbols. Line breaks become commas,
-                extra spaces and repeated commas are tidied, and it's lowercased before
-                submitting. Up to 256 characters; a DiT.2 or DiT.3 base needs at least 30.
-              </div>
-
-              <label className="mgpub-lab">Category</label>
-              <select className="mgpub-in" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option value="">Select a category</option>
-                {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-
-              {groups.length > 1 && (
-                <>
-                  <label className="mgpub-lab">Model Type</label>
-                  <div className="mgtr-types">
-                    {groups.map((g, i) => (
-                      <button type="button" key={g.arch}
-                        className={"mgtr-type" + (archIdx === i ? " on" : "")}
-                        onClick={() => pickArch(i)}>{g.label}</button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              <label className="mgpub-lab">Model Theme</label>
-              {themes.length === 0 ? (
-                <div className="mgpub-hint">loading base models…</div>
-              ) : (
-                <div className="mgtr-themes">
-                  {themes.map((m) => (
-                    <button type="button" key={m.version_id} title={m.title}
-                      className={"mgtr-theme" + (baseModel === m.version_id ? " on" : "")}
-                      onClick={() => setBaseModel(m.version_id)}>
-                      {/* Covers are PixAI CDN URLs the browser can't hotlink cross-origin
-                          from localhost -- proxied through the (host-guarded) backend. The
-                          selected card's img load can get aborted by the selection
-                          re-render; onError retries it once (cache-buster) so the browser
-                          doesn't leave it blank. */}
-                      {/* NOT loading="lazy": the theme grid sits below the panel's fold,
-                          so lazy covers never entered the viewport and never loaded. Only
-                          ~15 small thumbnails, so eager is fine. */}
-                      {m.cover ? <img src={"/api/train/cover?u=" + encodeURIComponent(m.cover)} alt=""
-                        onError={(e) => { const el = e.currentTarget; if (!el.dataset.retried) { el.dataset.retried = "1"; el.src = el.src + "&r=1"; } }} /> : null}
-                      <span className="n">{m.title}</span>
-                      {baseModel === m.version_id && <span className="mgtr-check">✓</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {err && <div className="mgpub-note err">⚠ {err}</div>}
-
-              {done ? (
-                <div className="mgpub-note ok">
-                  ✓ Training submitted{done.used_card ? " — it used your training free card"
-                    : done.was_free ? " — it used one of your free trainings" : ""}.
-                  {done.task && done.task.refId ? " PixAI is building it now; it'll appear on your models page." : ""}
-                </div>
-              ) : ask ? (
-                <div className="mgpub-confirm">
-                  <div className="t">Start this training on PixAI?</div>
-                  <div className="b">
-                    <b>{ask.title}</b> · {ask.image_count} images · {ask.category}
-                    <div className="n">{ask.cost_note}{ask.image_note ? " " + ask.image_note : ""}</div>
-                    {!ask.is_free && (
-                      <label className="mgtr-accept">
-                        <input type="checkbox" checked={acceptCost}
-                          onChange={(e) => setAcceptCost(e.target.checked)} />
-                        <span>{ask.price != null
-                          ? "Spend " + ask.price.toLocaleString() + " credits on this training."
-                          : "Spend credits on this training — the amount could not be quoted."}</span>
-                      </label>
-                    )}
-                  </div>
-                  <div className="a">
-                    <button type="button" className="mgpub-ghost" onClick={() => setAsk(null)} disabled={busy}>Back</button>
-                    <button type="button" className="mgpub-go" disabled={busy || (!ask.is_free && !acceptCost)}
-                      onClick={confirm}>{busy ? "submitting…" : "Start training"}</button>
-                  </div>
-                </div>
-              ) : (
-                <button type="button" className="mgpub-go big" disabled={busy || !enough || !baseModel}
-                  onClick={preview}>
-                  {busy ? "checking…" : enough ? "⚗ Train it" : "Add " + (MIN_IMAGES - picked.length) + " more image" + (MIN_IMAGES - picked.length === 1 ? "" : "s")}
-                </button>
-              )}
-            </div>
-          </div>
+          )}
+          <PublishSheet pub={pub} />
         </div>
       </div>
     </>

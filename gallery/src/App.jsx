@@ -15,6 +15,7 @@ import DuplicateReviewOverlay from "./components/DuplicateReviewOverlay.jsx";
 import MyArtOverlay from "./components/MyArtOverlay.jsx";
 import PublishOverlay from "./components/PublishOverlay.jsx";
 import TrainOverlay from "./components/TrainOverlay.jsx";
+import { trainOwnsEscape } from "./components/train/useTraining.js";
 import ContestsOverlay from "./components/ContestsOverlay.jsx";
 import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
@@ -287,6 +288,7 @@ export default function App({ boot }) {
       if (isPickerOpen()) return;                   // picker dismisses itself
       if (isRecipesOpen()) return;                  // the recipes overlay runs its own ladder
       if (paletteUpRef.current) return;             // the palette/cheat-sheet close FIRST
+      if (overlayRef.current === "train" && trainOwnsEscape()) return;   // focus view -> grid
       e.stopPropagation();
       setOverlay(null);
     };
@@ -890,6 +892,14 @@ export default function App({ boot }) {
     setOverlay(null);
     openDock();
     setGenRequest({ tab: "scene", scene, nonce: Math.random() });
+  };
+  /* Train a LoRA's "Use" (Training Handoff 5c): a trained LoRA into the dock -- close the
+     overlay, open the dock on the Image tab and add the LoRA there, the same one-shot genRequest
+     shape. Adding a LoRA is a pick, never a submit. */
+  const requestLora = (lora) => {
+    setOverlay(null);
+    openDock();
+    setGenRequest({ tab: "lora", lora, nonce: Math.random() });
   };
 
   // Grid right-click context menu (the 5 classic actions; owner picked all five).
@@ -1622,7 +1632,7 @@ export default function App({ boot }) {
           onOpenPublish={() => { setPublishFor(""); setOverlay("publish"); }} />
       )}
       {overlay === "train" && (
-        <TrainOverlay onClose={() => setOverlay(null)} />
+        <TrainOverlay onClose={() => setOverlay(null)} onUseLora={requestLora} />
       )}
       {overlay === "publish" && (
         <PublishOverlay

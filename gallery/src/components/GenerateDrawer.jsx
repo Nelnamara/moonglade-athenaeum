@@ -395,6 +395,11 @@ function GenerateDrawer({ open, onClose, account, request }) {
       // 2026-08-31: Again SENDS TO REMIX, it never submits) -- the identical recipe road,
       // with the seed re-rolled on the way through so the next Generate is a fresh draw.
       if (request.mid) prefillRun("", request.mid, { newSeed: !!request.newSeed });
+    } else if (request.tab === "lora") {
+      // Train a LoRA's "Use" (Training Handoff 5c): the trained LoRA onto the Image tab, the
+      // picker's own addLora road (trigger words and all). A pick; nothing is generated.
+      setTab("image");
+      if (request.lora && request.lora.model_id) g.addLora(request.lora);
     }
   }, [request]);
 
