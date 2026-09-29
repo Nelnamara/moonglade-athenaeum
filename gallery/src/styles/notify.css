@@ -351,7 +351,12 @@ html.mg-updbanner-on .wz-stage,html.mg-updbanner-on .wzm-stage{padding-top:var(-
      .ach-m2     -- z-index 519, ABOVE the strip on purpose: an earned achievement owns the
                     whole screen for its few seconds, strip included.
    loom/test/mg-updbanner-layers.test.js re-derives this list from the stylesheets and fails on
-   any new fixed inset:0 root that is neither offset here nor named in its exemption list. */
+   any new fixed inset:0 root that is neither offset here nor named in its exemption list.
+   It reads gallery/src/styles.css too since 2026-09-28: the desktop details page (.detail-wrap)
+   and the delete dialog's scrim (.lb) live there, the test never looked, and the strip sat
+   over the details page's Back bar the whole time. .detail-wrap states its own height, which
+   beats bottom:0, so the rule after this block takes the strip off that height too. */
+html.mg-updbanner-on .detail-wrap, html.mg-updbanner-on .lb,
 html.mg-updbanner-on .lbx,
 html.mg-updbanner-on .mgv-scrim, html.mg-updbanner-on .mgv-host,
 html.mg-updbanner-on .mgai-scrim,
@@ -379,3 +384,9 @@ html.mg-updbanner-on .lv-df-veil, html.mg-updbanner-on .lv-mpick-veil,
 html.mg-updbanner-on .lv-fc-veil, html.mg-updbanner-on .lv-fc-host,
 html.mg-updbanner-on .sb-projveil,
 html.mg-updbanner-on .sb-seq, html.mg-updbanner-on .sb-pick-ov{top:var(--mg-updbanner-h,0px);}
+/* The details page is the one layer above with an explicit height (styles.css, 100dvh for
+   drift 122); pushed down without this it would run off the bottom by exactly the strip,
+   taking its last action row with it. No 100vh twin: a browser without dvh finds this
+   invalid at computed-value time (it holds a var()), height falls back to auto, and the
+   top/bottom pair fills the rest -- the same reasoning as gallery-mobile.css's shells. */
+html.mg-updbanner-on .detail-wrap{height:calc(100dvh - var(--mg-updbanner-h,0px));}

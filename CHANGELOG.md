@@ -18,7 +18,8 @@ git tags. Full prose notes for tagged versions live on
 
 - **On a phone or tablet, the bottom row of buttons is always within reach.** In the Lightbox with a long prompt open, on the image details screen, and in the sheets that slide up from the bottom, the last row of buttons could sit just past the end of the scroll — under the browser's own toolbar — where no amount of scrolling reached it. Every full-screen phone view now sizes itself to the part of the screen you can actually see, the Lightbox's lower panel scrolls with its action row pinned to the bottom, sheets are capped to the visible height with their buttons pinned to their foot, and everything leaves room for the home bar. (2026-09-28)
 - Panels, menus, sheets and celebrations now stack in three fixed layers — page, overlays, celebrations — so a menu or dialog can no longer end up behind something it should sit in front of. Nothing moves on screen. (2026-09-28)
-- An installed phone app is no longer locked to portrait by the browser; the app states it can turn. (2026-09-28)
+- On desktop, the update notice no longer covers the top of an image's details page, where it sat over the Back to Gallery button. The details page now starts below the notice and still ends at the bottom of the window. (2026-09-28)
+- Under the hood: the installed app's manifest now says it can turn to landscape, instead of leaving that unsaid for a later edit to lock. (2026-09-28)
 - Under the hood: a per-account settings store (one file per sign-in account, read and written through `/api/account/prefs`) for the features coming next that remember things per account. Nothing uses it yet. (2026-09-28)
 
 ## [3.14.0] - 2026-09-26 — Moving Pictures

@@ -25,6 +25,11 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STYLES_DIR = path.join(__dirname, "../../gallery/src/styles");
+/* The main sheet sits one level up, beside the styles/ folder, and holds two fixed full-screen
+   roots of its own: the desktop details page (.detail-wrap) and the delete dialog's scrim
+   (.lb). This test read only styles/ until 2026-09-28, so the strip covered the details
+   page's Back bar with every check here green. */
+const MAIN_SHEET = path.join(__dirname, "../../gallery/src/styles.css");
 const LOOM_JSX = path.join(__dirname, "../master-storyboard.jsx");
 const read = (p) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 
@@ -81,7 +86,7 @@ function allSheets() {
     .filter((f) => f.endsWith(".css"))
     .sort()
     .map((f) => ({ name: `styles/${f}`, css: read(path.join(STYLES_DIR, f)) }));
-  return sheets.concat(loomStylesets());
+  return [{ name: "styles.css", css: read(MAIN_SHEET) }, ...sheets, ...loomStylesets()];
 }
 
 /* Every fixed full-screen layer root in the app, as {selector -> {sheet, z}}. */
@@ -174,6 +179,22 @@ describe("the update strip and the app's fixed full-screen layers", () => {
         `${sel} must start at the strip's bottom edge -- it is the shell's own top bar ` +
         "(the phone Loom's only '< Gallery' link is inside .lm-root) and the strip takes clicks");
     }
+  });
+
+  /* The desktop details page: the one pushed layer that states its own height (100dvh, drift
+     122), and a stated height beats bottom:0 -- so the offset alone slides it off the bottom
+     by exactly the strip, its last action row with it. Named, like the three above, so the
+     sweep cannot be satisfied by the offset alone. */
+  test("the desktop details page starts under the strip and gives the strip's height back", () => {
+    const offset = offsetSelectors();
+    assert.ok(offset.has(".detail-wrap"), ".detail-wrap must start at the strip's bottom edge");
+    assert.ok(offset.has(".lb"), "the delete dialog's scrim is pushed like every other scrim");
+    const css = stripComments(read(path.join(STYLES_DIR, "notify.css")));
+    const decls = [...rules(css)]
+      .filter(({ sel }) => sel.split(",").some((s) => s.trim() === "html.mg-updbanner-on .detail-wrap"))
+      .map(({ decl }) => flat(decl)).join(";");
+    assert.match(decls, /height:calc\(100dvh-var\(--mg-updbanner-h,0px\)\)/,
+      "the pushed details page must be 100dvh minus the strip, or its foot runs off the screen");
   });
 
   /* The rule that made .sb-root's padding useless, stated once so it cannot be re-learned the
