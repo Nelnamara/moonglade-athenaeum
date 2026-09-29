@@ -167,7 +167,7 @@ html.mg-noblur .mgpal-scrim, html.mg-noblur .mgks-scrim {
   align-items: flex-start; padding-top: 10vh; pointer-events: none; }
 
 .mgks { pointer-events: auto; box-sizing: border-box;
-  width: 880px; max-width: calc(100vw - 48px); max-height: 84vh; overflow-y: auto;
+  width: 880px; max-width: calc(100vw - 48px); max-height: 84vh; max-height: 84dvh; overflow-y: auto;
   border-radius: 16px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18, 14, 42, .99) 0%, rgba(10, 8, 24, .99) 100%);
   box-shadow: 0 24px 70px rgba(0, 0, 0, .72); padding: 20px 24px 0;

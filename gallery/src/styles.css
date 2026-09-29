@@ -148,7 +148,7 @@ button:disabled { cursor: default; }
    (.am-wrap/.am-menu/.am-item/.am-div, the classic Actions dropdown, went in the
    2026-09-04 dead-code sweep: ActionsMenu.jsx renders the shared .mgl-item menu.) */
 .card.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); }
-.cd-inner { max-width: min(760px, 92vw); max-height: 90vh; overflow-y: auto;
+.cd-inner { max-width: min(760px, 92vw); max-height: 90vh; max-height: 90dvh; overflow-y: auto;
   background: var(--mantle); border: 1px solid color-mix(in srgb, var(--red) 50%, transparent);
   border-radius: 12px; padding: 14px 15px 12px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .8); }
@@ -342,11 +342,16 @@ button:disabled { cursor: default; }
    playReveal() (the reveal locked 2026-07-30, docs/DECISIONS.md "Direction C"); this
    sheet holds the rest state each animated piece starts from (opacity:0) and the look. */
 @keyframes dvFrame { from { opacity: 0; transform: scale(.94) translateY(10px); } to { opacity: 1; transform: none; } }
-/* THE SHELL (DC:36): a fixed full-window takeover, 100vh, overflow hidden, a flex column
+/* THE SHELL (DC:36): a fixed full-window takeover, overflow hidden, a flex column
    -- the DOCUMENT NEVER SCROLLS. z 40: above the page chrome, below the app's overlay
    band (300+) so the Lightbox and the Upscale float still paint over it. Background is
-   the DC's literal radial -- the page behind is covered, so the takeover carries its own. */
-.detail-wrap { position: fixed; inset: 0; z-index: 40; height: 100vh; overflow: hidden;
+   the DC's literal radial -- the page behind is covered, so the takeover carries its own.
+   Its height is the VISIBLE viewport (100dvh), with 100vh only for a browser without dvh
+   (drift 122, owner device pass 2026-09-28): this is the details page a TABLET gets, and on
+   an iPad with Safari's toolbars up 100vh is taller than the screen they leave, so the
+   bottom of the record -- its last action row -- sat under the toolbar, past the end of
+   the scroll. */
+.detail-wrap { position: fixed; inset: 0; z-index: 40; height: 100vh; height: 100dvh; overflow: hidden;
   display: flex; flex-direction: column; padding: 0;
   background: radial-gradient(120% 80% at 22% -10%, #17123a 0%, #0a0818 52%, #05040d 100%);
   animation: dvFrame .34s cubic-bezier(.2, .9, .24, 1) both; }

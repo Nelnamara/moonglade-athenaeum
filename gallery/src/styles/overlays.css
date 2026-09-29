@@ -78,7 +78,7 @@ html.mg-noblur .mgv-scrim {
 .mgv-host { position: fixed; inset: 0; z-index: 411; display: grid; place-items: center;
   pointer-events: none; }
 .mgv-slab { pointer-events: auto; box-sizing: border-box;
-  width: min(980px, calc(100vw - 48px)); max-height: 90vh; overflow-y: auto;
+  width: min(980px, calc(100vw - 48px)); max-height: 90vh; max-height: 90dvh; overflow-y: auto;
   border-radius: 18px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;

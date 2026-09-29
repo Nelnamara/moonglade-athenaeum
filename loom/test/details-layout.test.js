@@ -90,9 +90,10 @@ describe("(c) the frame: the DC's formula (DC:357-358 frameStyle)", () => {
 });
 
 describe("(d) one scroller: the record; the shell never scrolls (DC:36, :347)", () => {
-  test(".detail-wrap is fixed inset-0, 100vh, overflow hidden, a flex column", () => {
+  test(".detail-wrap is fixed inset-0, the visible viewport (100dvh, 100vh fallback), overflow hidden, a flex column", () => {
     const r = rule(".detail-wrap");
-    assert.match(r, /position: fixed; inset: 0; z-index: 40; height: 100vh; overflow: hidden;/);
+    // drift 122: 100vh alone is taller than an iPad's visible screen with Safari's toolbars up
+    assert.match(r, /position: fixed; inset: 0; z-index: 40; height: 100vh; height: 100dvh; overflow: hidden;/);
     assert.match(r, /display: flex; flex-direction: column;/);
   });
   test(".detail-nav is flex: none; .placard-record is the flex column with overflow-y: auto / overflow-x: hidden", () => {

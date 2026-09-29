@@ -16,7 +16,7 @@
 /* min-height + scroll, not a fixed 100vh (2026-08-02, account-creation spec):
    the create form has more fields than sign-in and can exceed a short
    viewport's height. */
-.lgn-stage { position: relative; min-height: 100vh; overflow-y: auto; overflow-x: hidden;
+.lgn-stage { position: relative; min-height: 100vh; min-height: 100svh; overflow-y: auto; overflow-x: hidden;
   box-sizing: border-box; display: grid; place-items: center; padding: 32px 0;
   background: #05040d; }
 .lgn-wash { position: absolute; filter: blur(30px); }

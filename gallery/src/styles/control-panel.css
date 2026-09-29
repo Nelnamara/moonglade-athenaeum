@@ -22,7 +22,7 @@
 @keyframes cpRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes cpMetal { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 
-.mgcp-slab { width: min(1360px, 96vw); height: min(880px, 92vh); display: flex; flex-direction: column;
+.mgcp-slab { width: min(1360px, 96vw); height: min(880px, 92vh); height: min(880px, 92dvh); display: flex; flex-direction: column;
   padding: 0; overflow: hidden; }
 
 .mgcp-head { flex: none; height: 64px; display: flex; align-items: center; gap: 14px; padding: 0 22px;
@@ -478,7 +478,7 @@ button.mgcp-slotcard-thumb.on { border-color: var(--gold); }
    covered: that surface is frozen for its own design session, which owns it.) */
 html.mg-noblur .mgcp-sub-scrim { backdrop-filter: none !important; }
 .mgcp-sub-host { position: fixed; inset: 0; z-index: 423; /* above its own scrim (422) */ display: grid; place-items: center; padding: 20px; }
-.mgcp-sub-slab { width: min(560px, calc(100vw - 40px)); max-height: 84vh; overflow-y: auto; border-radius: 16px;
+.mgcp-sub-slab { width: min(560px, calc(100vw - 40px)); max-height: 84vh; max-height: 84dvh; overflow-y: auto; border-radius: 16px;
   border: 1px solid var(--surface1); background: linear-gradient(180deg, rgba(18,14,42,.99) 0%, rgba(10,8,24,.99) 100%);
   box-shadow: 0 30px 90px rgba(0,0,0,.75); padding: 20px 24px; animation: cpModalIn .28s cubic-bezier(.2,.9,.24,1) both; }
 .mgcp-sub-slab.wide { width: min(940px, calc(100vw - 40px)); }

@@ -22,7 +22,7 @@
    the glass face on the host, its card div a plain passthrough. */
 .upscale-panel:not(.inline) .mgu-card {
   position: relative; z-index: 1; box-sizing: border-box;
-  width: min(430px, calc(100vw - 40px)); max-height: 92vh; overflow-y: auto;
+  width: min(430px, calc(100vw - 40px)); max-height: 92vh; max-height: 92dvh; overflow-y: auto;
   border-radius: 16px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18, 14, 42, .99) 0%, rgba(10, 8, 24, .99) 100%);
   box-shadow: 0 34px 100px rgba(0, 0, 0, .78);

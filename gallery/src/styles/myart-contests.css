@@ -18,7 +18,7 @@
    .mgma-footnote did NOT come back with it, and was dropped 2026-09-07: the 2026-09-06
    revival above restored the bar only, and nothing in gallery/src ever referenced the
    footnote. ---- */
-.mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; display: flex;
+.mgma2-slab { width: min(980px, calc(100vw - 40px)); max-height: 90vh; max-height: 90dvh; display: flex;
   flex-direction: column; padding: 0; }
 .mgma2-head { flex: none; padding: 22px 26px 0; }
 .mgma2-titlerow { display: flex; align-items: flex-start; gap: 12px; }
@@ -519,7 +519,7 @@ html.mg-noblur .mgct-subscrim {
 
 .mgct-subhost { position: fixed; inset: 0; z-index: 425; display: grid; place-items: center;
   pointer-events: none; }
-.mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; overflow-y: auto;
+.mgct-sub { pointer-events: auto; box-sizing: border-box; max-height: 88vh; max-height: 88dvh; overflow-y: auto;
   border-radius: 18px; border: 1px solid var(--surface1);
   background: linear-gradient(180deg, rgba(18,14,42,.99), rgba(10,8,24,.99));
   box-shadow: 0 34px 100px rgba(0,0,0,.78); padding: 22px 26px;

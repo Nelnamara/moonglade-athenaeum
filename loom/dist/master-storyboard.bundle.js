@@ -9476,7 +9476,12 @@ ${"=".repeat(48)}
     })());
   }
   var LOOM_MOBILE_STYLES = `
-.lm-root{position:fixed;inset:0;z-index:400;background:var(--mantle);color:var(--text);
+/* Drift 122 (design handoff 2026-09-04, owner device pass 2026-09-28): the phone Loom is sized
+   by the VISIBLE viewport (dvh), like the gallery's phone shells (gallery-mobile.css). inset:0 is
+   the fallback for a browser without dvh; the update strip's height comes off the top because
+   notify.css moves this shell down by it. Its three scroll bodies and two sheets pad their foot
+   by the home indicator, so the last control in each clears it. */
+.lm-root{position:fixed;inset:0;height:calc(100dvh - var(--mg-updbanner-h, 0px));z-index:400;background:var(--mantle);color:var(--text);
   display:flex;flex-direction:column;font-family:system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 .lm-top{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
   padding:max(10px,env(safe-area-inset-top)) 16px 8px;}
@@ -9522,7 +9527,7 @@ ${"=".repeat(48)}
 .lm-prevcode{font-family:ui-monospace,monospace;font-size:9px;color:var(--overlay0);}
 .lm-prevtitle{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lm-prevmeta{font-size:9px;color:var(--subtext);}
-.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-body{flex:1 1 auto;overflow-y:auto;padding:0 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-acthead{display:flex;align-items:baseline;gap:8px;padding:14px 0 8px;}
 .lm-actname{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--text);}
 .lm-actcount{font-size:10px;color:var(--overlay0);}
@@ -9580,7 +9585,7 @@ ${"=".repeat(48)}
 .lm-df-close{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
   border-radius:8px;border:1px solid var(--surface1);color:var(--subtext);cursor:pointer;background:none;
   font-size:13px;padding:0;}
-.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-df-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-microlab{display:block;font:700 9px/1 system-ui;text-transform:uppercase;color:var(--subtext);
   margin:10px 0 5px;}
 .lm-hint{font-size:9.5px;color:var(--overlay0);padding:5px 2px 0;}
@@ -9630,7 +9635,7 @@ ${"=".repeat(48)}
 .lm-scrim.closing{animation:lmFadeOut .28s ease both;}
 .lm-sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 18px max(20px,env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
+  padding:12px 18px calc(16px + env(safe-area-inset-bottom));max-height:75%;overflow-y:auto;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-sheethandle{width:36px;height:4px;border-radius:3px;background:rgba(255,255,255,.18);margin:0 auto 10px;}
@@ -9678,7 +9683,7 @@ ${"=".repeat(48)}
 .lm-gen-back:hover{color:var(--text);}
 .lm-gen-title{flex:1 1 auto;min-width:0;font:600 13px/1.2 system-ui;color:var(--text);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 30px;-webkit-overflow-scrolling:touch;}
+.lm-gen-body{flex:1 1 auto;overflow-y:auto;padding:4px 16px max(30px, calc(16px + env(safe-area-inset-bottom)));-webkit-overflow-scrolling:touch;}
 .lm-genbtn{display:block;width:100%;box-sizing:border-box;margin-top:12px;
   border:1px solid rgba(255,255,255,.3);
   color:color-mix(in oklab,var(--accent) 26%,#08040f);
@@ -9806,7 +9811,7 @@ ${"=".repeat(48)}
    custom element LoomV2's floating .lv-mpick-veil overlay uses. */
 .lm-pick-sheet{position:absolute;left:0;right:0;bottom:0;top:6%;z-index:32;background:var(--mantle);
   border-radius:18px 18px 0 0;border:1px solid var(--surface1);border-bottom:none;
-  padding:12px 16px max(14px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
+  padding:12px 16px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;
   animation:lmSheetUp .26s cubic-bezier(.2,.9,.24,1);}
 .lm-pick-sheet.closing{animation:lmSheetDown .28s cubic-bezier(.4,0,.2,1) both;}
 .lm-pick-head{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;}

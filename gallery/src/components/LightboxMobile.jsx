@@ -334,6 +334,10 @@ export default function LightboxMobile({
           })}
         </div>
 
+        {/* The foot -- action row + hint -- is pinned to the bottom of the scrolling
+            lower panel (drift 122; lightbox-mobile.css .lbm-bottom/.lbm-foot), so an open
+            prompt slab can never push these off the screen again. */}
+        <div className="lbm-foot">
         <div className="lbm-actsrow">
           <button type="button" className="lbm-chip"
             onClick={() => toast("Edit", "Its own mobile wiring — coming later.")}>✎ Edit</button>
@@ -360,6 +364,7 @@ export default function LightboxMobile({
           </button>
         </div>
         <div className="lbm-hint">‹ › to browse · swipe the photo · ▶ for slideshow</div>
+        </div>
       </div>
 
       <div className={"lbm-sheet-scrim" + (sheetOpen ? " open" : "")} onClick={toggleUpscale} aria-hidden={!sheetOpen} />

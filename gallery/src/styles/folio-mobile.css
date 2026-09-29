@@ -49,8 +49,10 @@
    tab scroller still sitting underneath it. The same hardening .glm-screen-body and the
    contest detail took on 2026-09-05; this surface and the picture screen were the two the
    sweep missed. */
+/* Drift 122: the Folio's scroller ends at the bottom of the screen, so it carries the
+   drift's bottom pad -- 16px plus the home indicator -- and its last row clears the bar. */
 .fm-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain; }
+  overscroll-behavior: contain; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 .fm-loading { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
 
 /* ---- hero header ---- */

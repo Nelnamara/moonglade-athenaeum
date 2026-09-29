@@ -18,8 +18,8 @@
    regions instead of one big scrolling slab. ---- */
 .mgfo-slab {
   width: min(1460px, calc(100vw - 48px));
-  height: min(94vh, 940px);
-  max-height: 94vh;
+  height: min(94vh, 940px); height: min(94dvh, 940px);
+  max-height: 94vh; max-height: 94dvh;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -611,7 +611,7 @@
 
 /* ---- Mobile stacking, matching the DC's own <860px collapse ---- */
 @media (max-width: 860px) {
-  .mgfo-slab { width: 100vw; height: 100vh; max-height: none; border-radius: 0; }
+  .mgfo-slab { width: 100vw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }
   .mgfo-body { flex-direction: column; }
   .mgfo-rail { width: auto; border-left: none; border-top: 1px solid rgba(255, 255, 255, .06); }
   .mgfo-grid2, .mgfo-grid2.even { grid-template-columns: 1fr; }

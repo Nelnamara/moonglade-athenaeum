@@ -59,8 +59,20 @@
   background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(0,0,0,.14)), color-mix(in srgb, var(--lavender) 32%, var(--surface0));
   border: 1px solid color-mix(in srgb, var(--lavender) 62%, transparent); }
 
-/* ---- stage (image area) ---- */
-.lbm-stage { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center;
+/* ---- stage (image area) ----
+   The 30% floor is drift 122's other half (see .lbm-bottom below). Before it, an open prompt
+   slab on a long prompt out-grew the viewer: the stage collapsed to its padding -- the
+   picture gone, the ‹ › buttons stranded over the prompt -- and the action row was pushed
+   off the bottom of a layer that does not scroll, measured at y=933 on an 844-tall phone.
+   Now the lower panel scrolls instead, and the picture keeps at least this share of the
+   viewer while it does. Only an open slab ever reaches the floor: a closed one leaves the
+   stage far more than 30%. The zero basis is what keeps the panel whole the rest of the
+   time: the stage takes only the space the panel leaves (exactly what it got when the panel
+   was `flex: none`), so the shrink the flex algorithm hands out never comes out of the
+   panel until the stage is sitting on its floor. With a content-sized basis the stage's
+   own picture height competed for that shrink and the pinned foot slid up over the
+   filmstrip. */
+.lbm-stage { position: relative; flex: 1 1 0; min-height: 30%; display: grid; place-items: center;
   padding: 8px; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .lbm-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 52px;
   display: grid; place-items: center; border-radius: 10px; font-size: 18px; cursor: pointer; z-index: 3;
@@ -68,7 +80,7 @@
 .lbm-prev { left: 4px; }
 .lbm-next { right: 4px; }
 .lbm-herowrap { position: relative; height: 100%; width: 100%; display: grid; place-items: center; min-width: 0; }
-.lbm-hero { position: relative; height: min(100%, 66vh); max-width: 100%; border-radius: 14px; overflow: hidden;
+.lbm-hero { position: relative; height: min(100%, 66vh); height: min(100%, 66dvh); max-width: 100%; border-radius: 14px; overflow: hidden;
   border: 1px solid rgba(255,255,255,.12); box-shadow: 0 30px 80px rgba(0,0,0,.7); background: var(--surface0); }
 .lbm-hero img, .lbm-hero video { position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: contain; -webkit-user-drag: none; }
@@ -81,9 +93,32 @@
 .lbm-slidefill { height: 100%; width: 100%; transform-origin: 0 50%; background: var(--accent);
   animation: lbmSlide 4.2s linear both; }
 
-/* ---- bottom: meta / prompt slab / filmstrip / action pills ---- */
-.lbm-bottom { flex: none; display: flex; flex-direction: column; gap: 8px;
-  padding: 8px 0 max(14px, env(safe-area-inset-bottom)); }
+/* ---- bottom: meta / prompt slab / filmstrip / action pills ----
+   DRIFT 122: THE LOWER PANEL IS THE LIGHTBOX'S SHEET. It was `flex: none` under a layer that
+   does not scroll, so whatever the panel held beyond the viewport was simply gone -- with
+   the prompt slab open on a long prompt that was the whole action row. Now it is the
+   height-capped scroller the drift asks for: it takes what the stage's floor leaves, scrolls
+   its own content (contained, so a flick never reaches the gallery behind), and pins its
+   foot -- the action row and its hint, .lbm-foot -- to the bottom, so Edit / To Video /
+   Upscale / Details are always on screen. Its children keep their own heights (the meta row
+   and the filmstrip are overflow boxes, which a shrinking flex column would otherwise be
+   free to crush to nothing). The bottom pad is the drift's formula. */
+.lbm-bottom { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  padding: 8px 0 calc(16px + env(safe-area-inset-bottom)); }
+.lbm-bottom > * { flex: none; }
+/* The pinned foot, on the viewer's own void so it is invisible at rest and simply masks the
+   prompt scrolling under it. Same arithmetic as the phone's sheets (gallery-mobile.css,
+   .glm-sheet-actions): it takes over the panel's bottom pad, so resting and stuck are one
+   position; its own pad keeps the pills off the home indicator; and its sticky offset is
+   minus that pad, because a sticky box is held inside its scroller's content edge -- at
+   `bottom: 0` it sat a pad too high and slid 16px up over the filmstrip. The 6px it
+   borrows from the gap above is breathing room between the pills and whatever scrolls up
+   to them. */
+.lbm-foot { position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 1;
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: -6px; padding: 6px 0 calc(16px + env(safe-area-inset-bottom)); background: #05040d; }
+.lbm-foot:last-child { margin-bottom: calc(-16px - env(safe-area-inset-bottom)); }
 .lbm-metarow { display: flex; align-items: baseline; gap: 10px; padding: 0 12px; font-size: 10.5px;
   color: var(--overlay0); overflow: hidden; white-space: nowrap; }
 .lbm-model { color: var(--lavender); font-size: 11.5px; }
@@ -153,12 +188,17 @@
 .lbm-sheet-scrim { position: fixed; inset: 0; z-index: 65; background: rgba(4,3,10,.66);
   opacity: 0; pointer-events: none; transition: opacity .24s ease; }
 .lbm-sheet-scrim.open { opacity: 1; pointer-events: auto; }
-.lbm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 66; max-height: 84vh;
+/* Drift 122's sheet contract -- see .idm-sheet-slab (image-details-mobile.css), which this
+   mirrors line for line. */
+.lbm-sheet-slab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 66;
+  max-height: 84vh; max-height: min(84dvh, calc(100dvh - 24px));
   overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--mantle);
   border-radius: 16px 16px 0 0; border-top: 1px solid var(--lavender);
-  padding: 12px 15px max(22px, env(safe-area-inset-bottom));
+  padding: 12px 15px calc(16px + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
   transform: translateY(100%); pointer-events: none;
   transition: transform .28s cubic-bezier(.4,0,.2,1); }
+.lbm-sheet-slab .mgu-go { position: sticky; bottom: 0; z-index: 1; }
 .lbm-sheet-slab.open { transform: translateY(0); pointer-events: auto;
   transition: transform .28s cubic-bezier(.2,.9,.24,1); }
 .lbm-sheet-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }

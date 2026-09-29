@@ -231,7 +231,7 @@
   border-radius: 16px 16px 0 0; border: 1px solid var(--surface1);
   border-left: none; border-right: none; border-bottom: none;
   background: var(--mantle); box-shadow: 0 -20px 60px rgba(0, 0, 0, .55);
-  padding: 12px 13px max(14px, env(safe-area-inset-bottom));
+  padding: 12px 13px calc(16px + env(safe-area-inset-bottom));   /* drift 122's sheet pad */
   animation: glmSheetUp .28s cubic-bezier(.2, .9, .24, 1) both; }
 
 @media (prefers-reduced-motion: reduce) {

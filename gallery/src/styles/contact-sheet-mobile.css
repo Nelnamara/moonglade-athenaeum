@@ -44,7 +44,10 @@
 .csm-meta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--subtext); }
 
 /* ---- scrollable body ---- */
-.csm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+/* Drift 122: the list ends at the bottom of the screen, so its bottom pad is the drift's
+   formula (16px plus the home indicator) and the last card clears the bar. */
+.csm-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
 .csm-loading, .csm-empty { padding: 40px 16px; text-align: center; color: var(--subtext); font-style: italic; }
 
 /* ---- single-column card list (NOT desktop's grid -- design's own layout) ---- */
