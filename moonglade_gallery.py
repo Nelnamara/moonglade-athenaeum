@@ -1647,32 +1647,52 @@ def sibling_media(db_path, task_ids):
         return [dict(r) for r in rows]
 
 
-def recent_train_tasks(db_path, limit=18, pool=400):
-    """Recent generations grouped by TASK, newest task first, for the mobile Train
-    dataset picker -- each entry is one generation and its real image count, never a
-    fixed batch size (real batches are 1-4). Videos, task-less imports and rows with
-    no file are excluded: a training set is made of images that exist on disk.
+def recent_train_task_page(db_path, limit=18, before=None):
+    """Generations grouped by TASK, newest task first, for the Train dataset pickers (the
+    phone's tiles are tasks; desktop's "Grouped" view) -- each entry is one generation and its
+    real image count, never a fixed batch size (real batches are 1-4). Videos, task-less
+    imports and rows with no file are excluded: a training set is made of images that exist on
+    disk.
 
-    `pool` is how many recent rows are read before grouping -- the tasks come out of
-    the newest `pool` media rows, which is what makes this one indexed query instead of
-    a GROUP BY over the whole catalog. Returns [{task_id, media_ids, count}]."""
+    PAGED BY TASK (issue #56: the phone stopped at the 18 newest). A task is ordered by its
+    newest image; `before` is the previous page's `next_before` cursor -- that newest
+    created_at and the task id, the tie-breaker -- and the page holds the next `limit` tasks
+    strictly older than it. Every image of a task on the page comes with it, whatever its own
+    timestamp, so a task is never split across two pages.
+
+    Returns (tasks, next_before): tasks = [{task_id, media_ids, count, newest}], newest image
+    first within a task; next_before is None when there is nothing older."""
+    limit = max(1, int(limit))
+    where = ("task_id != '' AND COALESCE(is_video,'') != '1' AND filename != ''")
+    params = []
+    having = ""
+    if before and before.get("at") is not None:
+        having = " HAVING (newest < ? OR (newest = ? AND task_id < ?))"
+        params = [before["at"], before["at"], str(before.get("task") or "")]
     with catalog(db_path) as con:
+        heads = con.execute(
+            "SELECT task_id, MAX(created_at) AS newest FROM catalog WHERE " + where +
+            " GROUP BY task_id" + having +
+            " ORDER BY newest DESC, task_id DESC LIMIT ?", params + [limit + 1]).fetchall()
+        more = len(heads) > limit
+        heads = heads[:limit]
+        ids = [h["task_id"] for h in heads]
         rows = con.execute(
-            "SELECT media_id, task_id, is_video, created_at FROM catalog"
-            " WHERE task_id != '' AND is_video != '1' AND filename != ''"
-            " ORDER BY created_at DESC LIMIT ?", (int(pool),)).fetchall()
-    groups, order = {}, []
+            "SELECT media_id, task_id FROM catalog WHERE " + where +
+            " AND task_id IN (%s) ORDER BY created_at DESC, media_id" % ",".join("?" * len(ids)),
+            ids).fetchall() if ids else []
+    groups = {tid: [] for tid in ids}
     for r in rows:
-        tid = r["task_id"]
-        if tid not in groups:
-            if len(order) >= limit:
-                continue
-            groups[tid] = []
-            order.append(tid)
-        if tid in groups:
-            groups[tid].append(r["media_id"])
-    return [{"task_id": tid, "media_ids": groups[tid], "count": len(groups[tid])}
-            for tid in order]
+        groups[r["task_id"]].append(r["media_id"])
+    tasks = [{"task_id": h["task_id"], "media_ids": groups[h["task_id"]],
+              "count": len(groups[h["task_id"]]), "newest": h["newest"]} for h in heads]
+    nxt = ({"at": heads[-1]["newest"], "task": heads[-1]["task_id"]} if more and heads else None)
+    return tasks, nxt
+
+
+def recent_train_tasks(db_path, limit=18):
+    """The first page of recent_train_task_page: the newest `limit` tasks."""
+    return recent_train_task_page(db_path, limit)[0]
 
 
 def history_page(db_path, since_utc, until_utc, media="", source=""):
@@ -17130,14 +17150,21 @@ def create_app(out_dir: Path):
         exactly 4 images (a fixed demo constant); real batches are 1-4, so this returns
         each task's REAL image count and media_id list rather than a hardcoded number --
         the mobile picker's running total is a sum of real counts, not tiles*4.
+
+        PAGES BY TASK (issue #56): `next_before` is the cursor for the page below this one
+        (null when there is nothing older); the picker sends it back as `before_at` +
+        `before_task` when its sentinel scrolls into view, the desktop pool's mechanism.
         Pure catalog read, no network."""
         try:
             limit = max(1, min(int(request.args.get("limit") or 18), 60))
         except ValueError:
             limit = 18
-        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0])
-                 for t in recent_train_tasks(db_path, limit)]
-        return jsonify({"tasks": tasks})
+        at = (request.args.get("before_at") or "").strip()
+        before = {"at": at, "task": (request.args.get("before_task") or "").strip()} \
+            if at else None
+        page, nxt = recent_train_task_page(db_path, limit, before)
+        tasks = [dict(t, thumb="/thumbs/%s.jpg" % t["media_ids"][0]) for t in page]
+        return jsonify({"tasks": tasks, "next_before": nxt})
 
     @app.route("/api/train/quota")
     @tier(LOGIN)

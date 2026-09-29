@@ -1395,6 +1395,39 @@ def test_train_recent_tasks_respects_limit(tmp_path):
     assert len(d["tasks"]) == 5
 
 
+def test_train_recent_tasks_pages_by_task_to_the_oldest(tmp_path):
+    """Issue #56: the phone's picture grid stopped at the 18 newest generations. The route now
+    hands back a cursor for the page below, and following it walks every task exactly once --
+    including tasks whose images carry different timestamps and ties on the newest one --
+    with every image of a task on the page that shows the task."""
+    rows = []
+    for i in range(40):
+        rows.append(_row(media_id="a%d" % i, task_id="t%02d" % i, filename="a%d.png" % i,
+                         created_at="2026-07-%02dT10:00:00" % (i % 20 + 1)))
+        if i % 3 == 0:     # a second image, older than the task's newest
+            rows.append(_row(media_id="b%d" % i, task_id="t%02d" % i, filename="b%d.png" % i,
+                             created_at="2026-06-01T00:00:00"))
+    save_catalog(tmp_path / "catalog.db", rows)
+    cli = login_test_client(create_app(tmp_path))
+    seen, images, url, pages = [], 0, "/api/train/recent-tasks?limit=7", 0
+    while True:
+        d = cli.get(url).get_json()
+        pages += 1
+        for t in d["tasks"]:
+            seen.append(t["task_id"])
+            images += t["count"]
+            assert t["count"] == (2 if int(t["task_id"][1:]) % 3 == 0 else 1), t
+        if not d["next_before"]:
+            break
+        c = d["next_before"]
+        url = ("/api/train/recent-tasks?limit=7&before_at=%s&before_task=%s"
+               % (c["at"], c["task"]))
+        assert pages < 20, "the cursor never ran out"
+    assert len(seen) == 40 and len(set(seen)) == 40, "every task once: %r" % seen
+    assert images == len(rows)
+    assert pages == 6                                   # 7+7+7+7+7+5
+
+
 def test_the_release_check_rides_the_schedulers_own_tick():
     """The hourly update check does NOT get a timer thread of its own. This process already
     has one periodic tick -- the automated-tasks scheduler -- so the check joins it, which is

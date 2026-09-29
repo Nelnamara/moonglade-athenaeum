@@ -4830,6 +4830,46 @@ def test_the_train_dataset_pool_pages_past_its_first_60(
         ctx.close()
 
 
+def test_the_phone_train_grid_pages_by_task_past_the_first_18(
+        paged_library_server, render_browser, monkeypatch):
+    """Issue #56: on the phone, Train a LoRA offered only the 18 most recent generations -- it
+    read /api/train/recent-tasks?limit=18 once and never asked for more. The grid now pages BY
+    TASK (a tile adds all of a generation's images) through the desktop pool's sentinel,
+    observed from the pushed screen's own scroller. The 120-row library is given one task per
+    picture here, so all 120 tasks must arrive, each once, across seven pages."""
+    import sqlite3
+    with sqlite3.connect(str(paged_library_server.root / "catalog.db")) as con:
+        con.execute("UPDATE catalog SET task_id = 'T' || media_id")
+    monkeypatch.setattr(core, "_config_path", lambda: paged_library_server.config_path)
+    ctx = render_browser.new_context(
+        viewport={"width": PHONE["width"], "height": PHONE["height"]},
+        device_scale_factor=1, base_url=paged_library_server.base_url)
+    ctx.set_default_timeout(10_000)
+    try:
+        page = ctx.new_page()
+        _login(page)
+        _visit(page, "/")
+        _dismiss_any_achievement_toast(page)
+        _settle(page)
+        page.click('button[title="More"]')
+        page.click('.glm-menu-item:has-text("Train a LoRA")')
+        page.wait_for_selector(".trm-tile")
+        assert page.locator(".trm-tile").count() == 18, "the first page is the 18 newest tasks"
+        for _ in range(12):
+            page.evaluate("() => { const b = document.querySelector('.glm-screen-body'); "
+                          "b.scrollTop = b.scrollHeight; }")
+            page.wait_for_timeout(150)
+            if page.locator(".trm-tile").count() >= 120:
+                break
+        srcs = page.evaluate(
+            "() => [...document.querySelectorAll('.trm-tile img')].map(i => i.getAttribute('src'))")
+        assert len(srcs) == 120 and len(set(srcs)) == 120, (
+            "the grid must page through every task, each once: {} tiles, {} distinct".format(
+                len(srcs), len(set(srcs))))
+    finally:
+        ctx.close()
+
+
 # ---------------------------------------------------------------------------
 # Tsubaki.3 Unlimited Mode on the desktop dock (SCOPE_2026-09-26_unlimited-mode §5)
 # ---------------------------------------------------------------------------

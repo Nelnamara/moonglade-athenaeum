@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.js";
 import useSheet from "../hooks/useSheet.js";
 import MobileSheet from "./MobileSheet.jsx";
+import { scrollParentOf } from "../picker/mergeRows.js";
 import { acceptCostField } from "../gen/trainCore.js";
 import "../styles/train.css";
 import "../styles/train-mobile.css";
@@ -53,6 +54,34 @@ export default function TrainMobile({ onClose }) {
   const [quota, setQuota] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [pickedTasks, setPickedTasks] = useState(() => new Set());
+  // The picture grid pages on scroll, BY TASK (issue #56: it read the 18 newest generations
+  // once and stopped). The desktop pool's mechanism (TrainOverlay, commit adaf033c): a 1px
+  // sentinel after the tiles, observed from the screen's own scroller with a page of head
+  // start; the route's `next_before` cursor names the page below, null at the end.
+  const cursor = useRef(null);
+  const exhausted = useRef(false);
+  const busyPage = useRef(false);
+  const gridEnd = useRef(null);
+  const loadMoreTasks = useCallback(() => {
+    if (busyPage.current || exhausted.current) return;
+    busyPage.current = true;
+    const c = cursor.current;
+    const q = "/api/train/recent-tasks?limit=18"
+      + (c ? "&before_at=" + encodeURIComponent(c.at) + "&before_task=" + encodeURIComponent(c.task) : "");
+    apiGet(q).then((d) => {
+      busyPage.current = false;
+      if (!d || d.error) return;                  // transient: the next scroll retries
+      cursor.current = d.next_before || null;
+      if (!d.next_before) exhausted.current = true;
+      const incoming = d.tasks || [];
+      setTasks((old) => {
+        const seen = new Set(old.map((t) => t.task_id));
+        const fresh = incoming.filter((t) => t && t.task_id && !seen.has(t.task_id)
+          && seen.add(t.task_id));
+        return fresh.length ? old.concat(fresh) : old;
+      });
+    }).catch(() => { busyPage.current = false; });
+  }, []);
   const [groups, setGroups] = useState([]);
   const [archIdx, setArchIdx] = useState(0);
   const [baseModel, setBaseModel] = useState("");
@@ -74,7 +103,7 @@ export default function TrainMobile({ onClose }) {
     apiGet("/api/myart/items").then((d) => setCsrf(d.csrf || ""));
     apiGet("/api/train/quota")
       .then((d) => setQuota(typeof d.free_trainings === "number" ? d.free_trainings : 0));
-    apiGet("/api/train/recent-tasks?limit=18").then((d) => setTasks(d.tasks || []));
+    loadMoreTasks();
     apiGet("/api/train/models")
       .then((d) => {
         const gs = d.groups || [];
@@ -84,6 +113,16 @@ export default function TrainMobile({ onClose }) {
         setBaseModel(def.baseModel);
       });
   }, []);
+
+  useEffect(() => {
+    const el = gridEnd.current;
+    if (!el || typeof IntersectionObserver === "undefined") return undefined;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreTasks();
+    }, { root: scrollParentOf(el), rootMargin: "600px 0px", threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMoreTasks, tasks.length]);
 
   const pickArch = (i) => {
     setArchIdx(i);
@@ -164,6 +203,7 @@ export default function TrainMobile({ onClose }) {
               );
             })}
           </div>
+          <div ref={gridEnd} className="trm-gridend" aria-hidden="true" />
 
           <div className="pubm-lab" style={{ marginTop: 16 }}>Name of LoRA</div>
           <input className="pubm-in" value={name} placeholder="eg: my LoRA" onChange={(e) => setName(e.target.value)} />

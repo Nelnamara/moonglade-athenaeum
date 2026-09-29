@@ -38,4 +38,6 @@
   max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trm-themechip.on { color: var(--text); background: color-mix(in srgb, var(--lavender) 22%, var(--surface0));
   border-color: color-mix(in srgb, var(--lavender) 55%, transparent); }
+/* The grid's load-more sentinel (issue #56): observed, never seen. */
+.trm-gridend { height: 1px; flex: none; }
 .trm-donebox { padding: 30px 0; text-align: center; font-size: 12.5px; color: var(--emerald); }
