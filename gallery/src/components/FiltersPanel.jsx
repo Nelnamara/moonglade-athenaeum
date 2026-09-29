@@ -39,6 +39,7 @@ const SORT_CYCLE = ["newest", "oldest", "rating_desc", "aes_desc", "likes"];
 const SORT_LABELS = {
   newest: "newest", oldest: "oldest", rating_desc: "highest rated",
   aes_desc: "aesthetic ↓", likes: "most liked",
+  manual: "manual order",     // Session P (P6): a hand-picked collection's own order
 };
 const PER_CYCLE = [50, 100, 200];
 
@@ -68,7 +69,12 @@ function cycleNext(list, cur) {
    every chip reuses the exact mechanism the Advanced flyout already commits
    through (media/shelf/perPage keys included). */
 export function FilterTray({ closing, media, shelf, perPage, adv, models, commit, group, setGroup,
-    collectionNames, onManageCollections, query }) {
+    collectionNames, onManageCollections, onEditOrder, query }) {
+  /* Session P (P6): a hand-picked collection's view offers a "Manual" sort -- the order the
+     owner set in the order editor (then pictures added since, oldest first). Smart collections
+     do not offer it: their membership is live. While it is on, "⇅ Order" opens the editor. */
+  const handShelf = !!shelf && (collectionNames || []).some((c) => c.name === shelf && c.kind === "hand");
+  const sortCycle = handShelf ? SORT_CYCLE.concat("manual") : SORT_CYCLE;
   const srcLabel = (SOURCE_CYCLE.find((s) => s[0] === (adv.source || "")) || SOURCE_CYCLE[0])[1];
   const mediaLabel = (MEDIA_CYCLE.find((m) => m[0] === (media || "")) || MEDIA_CYCLE[0])[1];
   const stars = adv.ratingMin || 0;
@@ -145,8 +151,13 @@ export function FilterTray({ closing, media, shelf, perPage, adv, models, commit
         title="Where each file came from"
         onClick={() => commit({ source: cycleNext(SOURCE_CYCLE.map((s) => s[0]), adv.source || "") })} />
       <Chip label={"Sort · " + (SORT_LABELS[adv.sort] || adv.sort)} active={adv.sort !== "newest"}
-        title="Everyday sorts — the full list lives in Advanced (▾ on the search field)"
-        onClick={() => commit({ sort: cycleNext(SORT_CYCLE, adv.sort) })} />
+        title={handShelf ? "Everyday sorts, and this collection's own manual order — the full list lives in Advanced"
+          : "Everyday sorts — the full list lives in Advanced (▾ on the search field)"}
+        onClick={() => commit({ sort: cycleNext(sortCycle, adv.sort) })} />
+      {handShelf && adv.sort === "manual" && onEditOrder ? (
+        <Chip label="⇅ Order" active title={"Put “" + shelf + "” in your own order"}
+          onClick={() => onEditOrder(shelf)} />
+      ) : null}
       <Chip label={"★ " + (stars >= 5 ? "5" : stars + "+")} active={stars > 0}
         title="Minimum rating"
         onClick={() => commit({ ratingMin: (stars + 1) % 6 })} />
@@ -298,6 +309,7 @@ export function LibraryBar({
           media={media} shelf={shelf} perPage={perPage} adv={adv}
           collectionNames={curation ? curation.names : undefined}
           onManageCollections={curation ? curation.onManage : undefined}
+          onEditOrder={curation ? curation.onEditOrder : undefined}
           query={query}
           models={boot.models || []}
           commit={applyAdvanced}
@@ -372,6 +384,7 @@ export function LibraryBar({
               onSaveView={actions && actions.saveView}
               onDeleteView={actions && actions.deleteView}
               buildViewQuery={actions && actions.buildViewQuery}
+              manualSort={!!shelf && !!curation && curation.names.some((c) => c.name === shelf && c.kind === "hand")}
             />
           )}
         </div>

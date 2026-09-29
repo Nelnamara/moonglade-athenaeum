@@ -1,5 +1,5 @@
-"""Session P, Stage B1: the Loom's new LOCAL routes -- the music bed (P3) and the editor handoff
-export (P4).
+"""Session P, Stage B1: the Loom's new LOCAL routes -- the music bed (P3), the editor handoff
+export (P4) and the read-only prompt lookup "as shots, in order" titles from (P5).
 
 What these pin (BUILD-w5-p §4 and §5.1/§5.5; rulings 6-8, 15; review F17, F18, F19, N2):
 
@@ -324,13 +324,13 @@ def test_every_new_route_is_login_tier(tmp_path):
     anon = create_app(tmp_path).test_client()
     for method, path in (("POST", "/api/loom/bed"), ("GET", "/api/loom/bed?file=x"),
                          ("GET", "/api/loom/beds/unused"), ("POST", "/api/loom/beds/sweep"),
-                         ("POST", "/api/loom/export-edl")):
+                         ("POST", "/api/loom/export-edl"), ("GET", "/api/loom/prompts?ids=1")):
         r = anon.open(path, method=method, json={} if method == "POST" else None)
         assert r.status_code == 401, (method, path, r.status_code)
 
 
 _NEW_FUNCS = ("api_loom_bed_upload", "api_loom_bed_get", "api_loom_beds_unused", "api_loom_beds_sweep",
-              "api_loom_export_edl", "_loom_bed_path", "_loom_store_bed",
+              "api_loom_export_edl", "api_loom_prompts", "_loom_bed_path", "_loom_store_bed",
               "_loom_account_projects", "_loom_unused_beds", "_loom_complete_clip", "_loom_beds_dir")
 _SPEND = {"submit", "submit_generation", "build_request", "gql_mutate", "gql_adhoc", "_gen_session",
           "_make_session", "upload_media", "submit_fixer"}
@@ -637,6 +637,23 @@ def test_render_without_the_bed_file_says_so_and_renders_the_cut(rig, monkeypatc
     fc = started[0][0][started[0][0].index("-filter_complex") + 1]
     assert "amix" not in fc and fc.endswith("[vout][aout]")
     assert "music bed" in cli.get("/api/loom/export-status").get_json()["warning"]
+
+
+# ---- the read-only prompt lookup (P5) ------------------------------------------------------------
+
+def test_prompts_answers_in_order_and_leaves_unknown_ids_out(rig):
+    save_catalog(rig["tmp"] / "catalog.db", [
+        _row(media_id="11", filename="a.png", prompt_full="first line\nsecond", created_at="2026-01-02"),
+        _row(media_id="local_0123456789ab", filename="b.png", prompt_preview="imported", created_at="2026-01-01"),
+        _row(media_id="13", filename="c.mp4", is_video="1", created_at="2026-01-03"),
+    ])
+    d = rig["cli"].get("/api/loom/prompts?ids=13,99,local_0123456789ab,11,../x").get_json()
+    assert [p["media_id"] for p in d["pictures"]] == ["13", "local_0123456789ab", "11"]
+    assert d["pictures"][2] == {"media_id": "11", "prompt": "first line\nsecond", "created_at": "2026-01-02",
+                                "is_video": False}
+    assert d["pictures"][0]["is_video"] is True
+    assert rig["cli"].get("/api/loom/prompts?ids=" + ",".join(str(i) for i in range(201))).status_code == 400
+    assert rig["traps"] == []
 
 
 # ---- the sniffer, directly -------------------------------------------------------------------------

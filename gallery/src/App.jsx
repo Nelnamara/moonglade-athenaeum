@@ -21,6 +21,7 @@ import ImportOverlay from "./components/ImportOverlay.jsx";
 import ControlPanelOverlay from "./components/ControlPanelOverlay.jsx";
 import ContactSheetOverlay from "./components/ContactSheetOverlay.jsx";
 import CollectionsManager from "./components/CollectionsManager.jsx";
+import CollectionOrderEditor from "./components/CollectionOrderEditor.jsx";
 import CurationBar from "./components/CurationBar.jsx";
 import CurateToast from "./components/CurateToast.jsx";
 import SmartStrip from "./components/SmartStrip.jsx";
@@ -900,6 +901,20 @@ export default function App({ boot }) {
   const curate = useCurate({ csrf: boot.csrf || "", setItems });
 
   const openCollectionsManager = useCallback(() => setOverlay("collections"), []);
+  /* Session P (P6): the manual-order editor for one hand-picked collection -- opened from the
+     manager's row slot ("Order") and from the collection view's Manual sort. It rides the
+     manager's layer, drawn after it. Saving a new order reloads the view when it is showing
+     that collection in its manual order. */
+  const [orderFor, setOrderFor] = useState("");
+  const closeOrder = useCallback(() => {
+    setOrderFor("");
+    invalidate(["/api/next/library"]);
+    if (shelf && lib.adv && lib.adv.sort === "manual") load(1, true);
+  }, [shelf, lib.adv, load]);
+  const orderSlot = useCallback((c) => (
+    <button type="button" className="mgco-slotbtn" title={"Put “" + c.name + "” in your own order"}
+      onClick={() => setOrderFor(c.name)}>{"⇅ Order"}</button>
+  ), []);
   /* The manager tells the shell what moved. The open collection follows its own rename, falls
      back to the target when it was merged away, and goes back to the whole library when it was
      deleted; a merge INTO the open collection reloads it so the newcomers show. */
@@ -1712,6 +1727,8 @@ export default function App({ boot }) {
                 smartShelf: isSmartShelf,
                 onManage: openCollectionsManager,
                 onClear: () => setEditingSmart(""),
+                // Session P (P6): the Manual sort's editor (hand-picked collections only)
+                onEditOrder: (name) => setOrderFor(name),
               }}
               group={group} setGroup={setGroup}
               layout={layout} setLayout={setLayout}
@@ -1949,8 +1966,11 @@ export default function App({ boot }) {
       )}
       {overlay === "collections" && (
         <CollectionsManager csrf={boot.csrf || ""} onClose={() => setOverlay(null)}
-          onChanged={onCollectionsChanged} />
+          onChanged={onCollectionsChanged} renderRowSlot={orderSlot} />
       )}
+      {orderFor ? (
+        <CollectionOrderEditor key={orderFor} name={orderFor} csrf={boot.csrf || ""} onClose={closeOrder} />
+      ) : null}
       {overlay === "aitools" && (
         <AiToolsModal open onClose={() => setOverlay(null)} onPick={requestScene} />
       )}

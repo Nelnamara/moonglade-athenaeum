@@ -148,6 +148,9 @@ TIER_SNAPSHOT = [
     "/api/collections [GET] LOGIN",
     "/api/collections/detail [GET] LOGIN",
     "/api/collections/manage [POST] LOGIN",
+    # wave 5, Session P (P6): a hand-picked collection's manual order
+    "/api/collections/order [GET] LOGIN",
+    "/api/collections/order [POST] LOGIN",
     "/api/contact-sheet [GET] LOGIN",
     "/api/contest/<slug>/artworks [GET] LOGIN",
     "/api/contest/<slug>/winners [GET] LOGIN",
@@ -211,6 +214,7 @@ TIER_SNAPSHOT = [
     "/api/loom/import-bundle [POST] LOGIN",
     "/api/loom/import-frames [POST] LOGIN",
     "/api/loom/list [GET] LOGIN",
+    "/api/loom/prompts [GET] LOGIN",         # Session P (P5): a read-only catalog lookup
     "/api/loom/set [POST] LOGIN",
     "/api/loom/spend [POST] LOGIN",
     "/api/loom/submit-abandon [POST] LOGIN",
@@ -995,8 +999,8 @@ _CSRF_PREFIXES = ("/api/recipes", "/api/train", "/api/help", "/api/account/prefs
                   "/api/curate", "/api/collections/manage",
                   # wave 5, Session P: the Loom's new local routes
                   "/api/loom/submit-abandon",
-                  # Session P, Stage B1: the music bed and the EDL export
-                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl")
+                  # Session P, Stage B1: the music bed, the EDL export, the manual order
+                  "/api/loom/bed", "/api/loom/beds", "/api/loom/export-edl", "/api/collections/order")
 _CSRF_HELPERS = ("_check_csrf(", "_train_csrf_body(", "_recipe_write_body(")
 
 
@@ -1015,4 +1019,5 @@ def test_every_lane_post_checks_csrf(app):
     assert "/api/account/prefs" in checked, checked
     assert "/api/narrator/poke" in checked, checked
     assert {"/api/curate", "/api/curate/restore", "/api/collections/manage"} <= set(checked), checked
-    assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl"} <= set(checked), checked
+    assert {"/api/loom/bed", "/api/loom/beds/sweep", "/api/loom/export-edl",
+            "/api/collections/order"} <= set(checked), checked

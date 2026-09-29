@@ -35,6 +35,7 @@ import RecipesHost from "../recipes/RecipesHost.jsx";
 import MyArtMobile from "./MyArtMobile.jsx";
 import HealthMobile from "./HealthMobile.jsx";
 import CollectionsMobile from "./CollectionsMobile.jsx";
+import CollectionOrderMobile from "./CollectionOrderMobile.jsx";
 import CurateToast from "./CurateToast.jsx";
 import SmartStrip from "./SmartStrip.jsx";
 import ImportMobile from "./ImportMobile.jsx";
@@ -1154,6 +1155,16 @@ export default function AppMobile({ boot }) {
   const closeScreen = () => {
     closeScreenRaw();
     setPublishFor("");
+    setOrderFor("");
+  };
+  /* Session P (P6): the Collections screen's manual-order sub-view for one hand-picked
+     collection -- reached from its row slot ("⇅ Order") and from the gallery's Manual sort.
+     Closing it returns to the list (and reloads the grid when it is showing that order). */
+  const [orderFor, setOrderFor] = useState("");
+  const openOrder = (name) => { setOrderFor(name); openScreenKey("collections"); };
+  const backFromOrder = () => {
+    setOrderFor("");
+    if (lib.shelf && lib.adv && lib.adv.sort === "manual") lib.load(1, true);
   };
 
   /* EVERY LAYER THIS SHELL PUSHES, ON THE ONE BACK LEDGER (2026-09-06) -- registered
@@ -1310,6 +1321,8 @@ export default function AppMobile({ boot }) {
             marker={marker} frontPage={frontPage} onPullRefresh={refreshFromPull}
             curation={{
               smart, curate, saveSmart, composeView,
+              // Session P (P6): the Manual sort's editor, on the Collections screen
+              onEditOrder: openOrder,
               strip: (smartOpen || editingSmart) ? (
                 <SmartStrip
                   name={smartOpen ? smartOpen.name : ""} query={smartOpen ? smartOpen.query : ""}
@@ -1365,10 +1378,16 @@ export default function AppMobile({ boot }) {
           {screen === "myart" && (
             <MyArtMobile onOpenPost={openDetails} onOpenTrain={() => openScreenKey("train")} />
           )}
-          {screen === "collections" && (
+          {screen === "collections" && (orderFor ? (
+            <CollectionOrderMobile key={orderFor} name={orderFor} csrf={boot.csrf || ""} onBack={backFromOrder} />
+          ) : (
             <CollectionsMobile csrf={boot.csrf || ""} onOpenCollection={openCollection}
-              onChanged={onCollectionsChanged} />
-          )}
+              onChanged={onCollectionsChanged}
+              renderRowSlot={(c) => (
+                <button type="button" className="mgco-slotbtn" aria-label={"Put " + c.name + " in your own order"}
+                  onClick={(e) => { e.stopPropagation(); setOrderFor(c.name); }}>{"⇅ Order"}</button>
+              )} />
+          ))}
           {screen === "health" && (
             <HealthMobile
               onModelFilter={(m) => filterFromHealth({ model: m })}

@@ -62,7 +62,7 @@ function MonthPicker({ value, onChange, years, label }) {
 }
 
 export default function Flyout({ boot, current, queryText = "", onApply, onClose, onPrintCollection,
-    onSaveView, onDeleteView, buildViewQuery }) {
+    onSaveView, onDeleteView, buildViewQuery, manualSort }) {
   const [d, setD] = useState(current);          // draft
   /* The Aspect field (Session N7) is not a filter of its own: it is the search text's `ar:`
      token, read out of the field when the flyout opens and written back on Apply, so what the
@@ -133,6 +133,9 @@ export default function Flyout({ boot, current, queryText = "", onApply, onClose
         <div className="flyrow"><label>Sort</label>
           <select value={d.sort} onChange={set("sort")}>
             {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            {/* Session P (P6): a hand-picked collection's own order -- offered only while the
+                gallery is showing a hand-picked collection (a smart one's membership is live). */}
+            {manualSort || d.sort === "manual" ? <option value="manual">Manual order</option> : null}
           </select>
         </div>
         <div className="flyrow"><label>Min rating</label>

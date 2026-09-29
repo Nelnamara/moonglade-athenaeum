@@ -336,6 +336,27 @@ export function manageCollections(csrf, body) {
   return apiPost("/api/collections/manage", { ...body, csrf });
 }
 
+/* MANUAL ORDER (Session P, P6). A collection's members in its order -- {name, kind, media_ids,
+   manual} -- and the order's one write (hand-picked only; local catalog, never PixAI). */
+export function fetchCollectionOrder(name) {
+  return apiGet("/api/collections/order", { name });
+}
+export function saveCollectionOrder(csrf, name, mediaIds) {
+  return apiPost("/api/collections/order", { csrf, name, media_ids: mediaIds });
+}
+/* Some pictures' facts from the local catalog -- {id: {prompt, created_at, is_video}}, 200 at a
+   time (GET /api/loom/prompts): the order editor's row names, and what the Loom's "as shots"
+   hand-off needs to know. */
+export async function fetchPictureFacts(ids) {
+  const out = {};
+  const list = Array.from(ids || []).map(String);
+  for (let i = 0; i < list.length; i += 200) {
+    const d = await apiGet("/api/loom/prompts", { ids: list.slice(i, i + 200).join(",") });
+    ((d && d.pictures) || []).forEach((p) => { out[String(p.media_id)] = p; });
+  }
+  return out;
+}
+
 /* Saved views are server-side and account-scoped; each stores the CLASSIC
    gallery's query string, which the flyout parses back into pilot state --
    one store, both surfaces. */

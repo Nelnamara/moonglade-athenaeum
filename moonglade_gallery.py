@@ -446,6 +446,16 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS smart_collections ("
     "name TEXT PRIMARY KEY, query TEXT NOT NULL DEFAULT '', "
     "created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
+    # MANUAL ORDER (Session P, P6, 2026-09-29) -- a NEW table, no catalog column and no rewrite
+    # of any row, so an existing library gains an empty table and keeps every row byte for
+    # byte. Membership stays the comma-joined `collections` label (add_to_collection writes
+    # nothing here); `position` lives "on the membership" as one row per (collection,
+    # picture). ordered_members() reads it; a row whose picture has left the collection is
+    # ignored until the next order write prunes it. Hand-picked collections only: a smart
+    # collection's membership is live, so it has no order to keep. Local; never PixAI.
+    "CREATE TABLE IF NOT EXISTS collection_order ("
+    "name TEXT NOT NULL, media_id TEXT NOT NULL, position INTEGER NOT NULL, "
+    "PRIMARY KEY (name, media_id))",
 ]
 
 # ---------------------------------------------------------------------------
@@ -664,6 +674,23 @@ _SORT_SQL = {
     "likes":       "CAST(COALESCE(NULLIF(liked_count,''),'0') AS INTEGER) DESC, created_at DESC",
 }
 _DEFAULT_SORT_SQL = "created_at DESC"
+
+# "manual" (Session P, P6): a hand-picked collection's own order -- its saved positions, then
+# the pictures added since, OLDEST first (ruling 9), the same order ordered_members() gives.
+# Offered only on a hand-picked collection's view; anywhere else (no collection, or a smart one,
+# which _expand_smart has already turned into a search) it falls back to the default sort.
+_MANUAL_SORT_SQL = ("(SELECT o.position FROM collection_order o WHERE o.name = ? AND o.media_id = catalog.media_id) IS NULL, "
+                    "(SELECT o.position FROM collection_order o WHERE o.name = ? AND o.media_id = catalog.media_id), "
+                    "created_at ASC, media_id ASC")
+
+
+def _order_sql(sort, collection=""):
+    """(ORDER BY text, its parameters) for a sort key. Only "manual" takes parameters."""
+    if sort == "manual":
+        if collection:
+            return _MANUAL_SORT_SQL, [collection, collection]
+        return _DEFAULT_SORT_SQL, []
+    return _SORT_SQL.get(sort, _DEFAULT_SORT_SQL), []
 
 
 def _like_pattern(term):
@@ -1586,6 +1613,10 @@ def rename_collection(db_path, old, new):
                 con.commit()
                 return {"name": new, "kind": "smart", "changed": 1}
             changed = 0
+            # P6: the manual order follows the rename (any stale rows under the new name go
+            # first, so the move cannot collide on the primary key).
+            con.execute("DELETE FROM collection_order WHERE name=?", (new,))
+            con.execute("UPDATE collection_order SET name=? WHERE name=?", (new, old))
             for r in _rows_with_label(con, old):
                 cols = [new if c == old else c for c in _split_collections(r["collections"])]
                 seen, out = set(), []
@@ -1623,6 +1654,9 @@ def merge_collections(db_path, names):
                     raise CurationError("There is no hand-picked collection called “{}”.".format(n))
             target, others = order[0], set(order[1:])
             changed = 0
+            # P6: the target keeps its manual order; the merged-in pictures have no position
+            # there, so they follow it, oldest first. The merged collections' orders go.
+            con.executemany("DELETE FROM collection_order WHERE name=?", [(n,) for n in sorted(others)])
             for r in con.execute("SELECT media_id, collections FROM catalog "
                                  "WHERE COALESCE(collections,'') != ''").fetchall():
                 cols = _split_collections(r["collections"])
@@ -1667,6 +1701,7 @@ def delete_collection(db_path, name):
     with catalog(db_path) as con:
         with _CURATION_LOCK, _COLLECTIONS_LOCK:
             kept = 0
+            con.execute("DELETE FROM collection_order WHERE name=?", (name,))   # P6: its order goes too
             for r in _rows_with_label(con, name):
                 con.execute("UPDATE catalog SET collections=? WHERE media_id=?",
                             (",".join(c for c in _split_collections(r["collections"]) if c != name),
@@ -1674,6 +1709,81 @@ def delete_collection(db_path, name):
                 kept += 1
             con.commit()
     return {"name": name, "kind": "hand", "kept": kept}
+
+
+# ---- manual order (Session P, P6) --------------------------------------------
+
+def _collection_kind(con, name):
+    """"smart" | "hand" | None for a collection name, from one open connection."""
+    hand, smart = _all_collection_names(con)
+    if name in smart:
+        return "smart"
+    if name in hand:
+        return "hand"
+    return None
+
+
+def ordered_members(db_path, name):
+    """The members of collection `name`, in its order: {name, kind, media_ids, manual}.
+
+    Hand-picked: the labelled pictures (those the collection's own view shows, a file on
+    disk) -- the ones with a position first, by position; then the ones without (added since
+    the order was saved) OLDEST first (ruling 9). A position whose picture has left the
+    collection is ignored. `manual` says whether any position is in force.
+    Smart: its query's current matches, oldest first; never manual (membership is live).
+    Unknown name: kind None, no ids. Read-only."""
+    name = str(name or "").strip()
+    if not name:
+        return {"name": "", "kind": None, "media_ids": [], "manual": False}
+    with catalog(db_path) as con:
+        kind = _collection_kind(con, name)
+        if kind == "hand":
+            rows = con.execute(
+                "SELECT c.media_id, o.position FROM catalog c LEFT JOIN collection_order o "
+                "ON o.name = ? AND o.media_id = c.media_id "
+                "WHERE c.filename != '' AND (',' || COALESCE(c.collections,'') || ',') LIKE ? ESCAPE '\\' "
+                "ORDER BY (o.position IS NULL), o.position, c.created_at ASC, c.media_id ASC",
+                (name, "%," + _like_escape(name) + ",%")).fetchall()
+            return {"name": name, "kind": "hand", "media_ids": [str(r[0]) for r in rows],
+                    "manual": any(r[1] is not None for r in rows)}
+    if kind == "smart":
+        rows, _ = query_catalog(db_path, collection=name, sort="oldest", page_size=None)
+        return {"name": name, "kind": "smart", "media_ids": [str(r["media_id"]) for r in rows],
+                "manual": False}
+    return {"name": name, "kind": None, "media_ids": [], "manual": False}
+
+
+def set_collection_order(db_path, name, media_ids):
+    """Save a hand-picked collection's manual order: positions 0..n-1 for `media_ids`, in ONE
+    transaction, replacing the collection's old positions (which also prunes the rows of
+    pictures no longer in it). Refuses a smart collection (its membership is live), an unknown
+    one, a repeated id and any id that is not a member. Returns ordered_members() after."""
+    name = str(name or "").strip()
+    ids = [str(m).strip() for m in (media_ids or [])]
+    if not name:
+        raise CurationError("Say which collection to order.")
+    if len(ids) > CURATE_MAX_IDS:
+        raise CurationError("A collection order holds at most {} pictures.".format(CURATE_MAX_IDS))
+    if len(set(ids)) != len(ids) or any(not m for m in ids):
+        raise CurationError("Each picture appears once in an order.")
+    with catalog(db_path) as con:
+        with _CURATION_LOCK, _COLLECTIONS_LOCK:
+            kind = _collection_kind(con, name)
+            if kind == "smart":
+                raise CurationError("“{}” is a smart collection. Its pictures are the search's "
+                                    "matches, so it can’t be ordered by hand.".format(name))
+            if kind != "hand":
+                raise CurationError("There is no hand-picked collection called “{}”.".format(name))
+            members = {str(r["media_id"]) for r in _rows_with_label(con, name)}
+            stray = [m for m in ids if m not in members]
+            if stray:
+                raise CurationError("{} of those {} not in “{}”.".format(
+                    len(stray), "is" if len(stray) == 1 else "are", name))
+            con.execute("DELETE FROM collection_order WHERE name=?", (name,))
+            con.executemany("INSERT INTO collection_order (name, media_id, position) VALUES (?,?,?)",
+                            [(name, m, i) for i, m in enumerate(ids)])
+            con.commit()
+    return ordered_members(db_path, name)
 
 
 def collection_summaries(db_path):
@@ -1935,12 +2045,12 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
             params = list(params) + member_ids
         else:
             where += " AND 1=0"   # unknown sid -> empty result, not an error
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         if page_size is None:
             rows = con.execute(
                 "SELECT * FROM catalog WHERE {} ORDER BY {}".format(where, order),
-                params,
+                list(params) + order_params,
             ).fetchall()
             # No second COUNT on purpose -- taking one here would reintroduce exactly the
             # two-snapshot disagreement this branch exists to avoid, and a total that can
@@ -1951,7 +2061,7 @@ def query_catalog(db_path, q="", model="", date_from="", date_to="",
         ).fetchone()[0]
         rows = con.execute(
             "SELECT * FROM catalog WHERE {} ORDER BY {} LIMIT ? OFFSET ?".format(where, order),
-            params + [page_size, (max(1, page) - 1) * page_size],
+            list(params) + order_params + [page_size, (max(1, page) - 1) * page_size],
         ).fetchall()
         return [dict(r) for r in rows], total
 
@@ -8199,10 +8309,11 @@ def list_media_ids(db_path, q="", model="", date_from="", date_to="", sort="newe
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
-            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order), params
+            "SELECT media_id FROM catalog WHERE {} ORDER BY {}".format(where, order),
+            list(params) + order_params
         ).fetchall()
         return [r[0] for r in rows]
 
@@ -8227,11 +8338,11 @@ def list_group_rows(db_path, q="", model="", date_from="", date_to="", sort="new
     where, params = _build_where(q, model, date_from, date_to, batch, rating_min,
                                  published_only, art_tag, lora, media_type, source,
                                  collection)
-    order = _SORT_SQL.get(sort, _DEFAULT_SORT_SQL)
+    order, order_params = _order_sql(sort, collection)
     with catalog(db_path) as con:
         rows = con.execute(
             "SELECT media_id, task_id, created_at, is_video FROM catalog "
-            "WHERE {} ORDER BY {}".format(where, order), params
+            "WHERE {} ORDER BY {}".format(where, order), list(params) + order_params
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -16390,6 +16501,36 @@ def create_app(out_dir: Path):
             return jsonify({"error": str(e)}), 400
         return jsonify(dict(res, ok=True))
 
+    # ---- MANUAL ORDER (Session P, P6) -------------------------------------------------------
+    # A hand-picked collection's order: read by the order editor, the collection view's
+    # "Manual" sort, the Contact sheet and "as shots, in order". Local catalog only, never
+    # PixAI; the write is one transaction and needs the session's CSRF token.
+    @app.route("/api/collections/order", methods=["GET"])
+    @tier(LOGIN)
+    def api_collections_order_get():
+        """{name, kind, media_ids, manual} -- the collection's members in its order
+        (ordered_members). Read-only: opening the editor writes nothing."""
+        name = (request.args.get("name") or "").strip()
+        res = ordered_members(db_path, name)
+        if res["kind"] is None:
+            return jsonify(dict(res, error="There is no collection called “{}”.".format(name))), 404
+        return jsonify(res)
+
+    @app.route("/api/collections/order", methods=["POST"])
+    @tier(LOGIN)
+    def api_collections_order_set():
+        """{csrf, name, media_ids} -> the saved order (ordered_members after). A smart
+        collection, an unknown one and any id that is not a member are refused (400)."""
+        body = request.get_json(silent=True) or {}
+        if not _check_csrf(body):
+            return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+        ids = body.get("media_ids")
+        try:
+            res = set_collection_order(db_path, body.get("name"), ids if isinstance(ids, list) else [])
+        except CurationError as e:
+            return jsonify({"error": str(e)}), 400
+        return jsonify(dict(res, ok=True))
+
     @app.route("/api/curate", methods=["POST"])
     @tier(LOGIN)
     def api_curate():
@@ -17722,8 +17863,9 @@ def create_app(out_dir: Path):
             rows = rows_for_media_ids(db_path, ids)
             title = "{} selected".format(len(rows))
         elif collection:
-            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
-                                    page=1, page_size=400)
+            # P6: a collection prints in its own order (a hand-picked one's manual order, then
+            # pictures added since, oldest first; a smart one's matches, oldest first).
+            rows = rows_for_media_ids(db_path, ordered_members(db_path, collection)["media_ids"][:400])
             title = "Collection: {}".format(escape(collection))
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
@@ -17825,8 +17967,8 @@ def create_app(out_dir: Path):
             rows = rows_for_media_ids(db_path, ids)
             collection_name = "{} selected".format(len(rows))
         elif collection:
-            rows, _ = query_catalog(db_path, collection=collection, sort="newest",
-                                    page=1, page_size=400)
+            # P6: the collection's own order, the same as the print view above.
+            rows = rows_for_media_ids(db_path, ordered_members(db_path, collection)["media_ids"][:400])
             collection_name = collection
         else:
             rows, _ = query_catalog(db_path, sort="newest", page=1, page_size=60)
@@ -25117,6 +25259,26 @@ __DESIGN_TOKENS__
         resp.headers["X-Edl-Missing-Count"] = str(len(missing))
         resp.call_on_close(lambda: _unlink_quiet(zpath))
         return resp
+
+    # ==== "AS SHOTS, IN ORDER" (Session P, P5) ===================================================
+    @app.route("/api/loom/prompts")
+    @tier(LOGIN)
+    def api_loom_prompts():
+        """?ids=a,b,c -> {pictures: [{media_id, prompt, created_at, is_video}]} in the order
+        asked, unknown ids left out. A READ-ONLY lookup of those ids' local catalog rows: the
+        Loom titles a collection's shots from it, the gallery orders a plain selection by it.
+        Never PixAI."""
+        raw = [x.strip() for x in (request.args.get("ids") or "").split(",") if x.strip()]
+        if len(raw) > 200:
+            return jsonify({"error": "at most 200 ids at once"}), 400
+        ids = [x for x in raw if LOOM_MEDIA_ID_RE.match(x)]
+        pics = []
+        for r in rows_for_media_ids(db_path, ids):
+            pics.append({"media_id": str(r.get("media_id") or ""),
+                         "prompt": str(r.get("prompt_full") or r.get("prompt_preview") or "")[:2000],
+                         "created_at": str(r.get("created_at") or ""),
+                         "is_video": str(r.get("is_video") or "") == "1"})
+        return jsonify({"pictures": pics})
 
     @app.route("/api/loom/export", methods=["POST"])
     @tier(LOGIN)

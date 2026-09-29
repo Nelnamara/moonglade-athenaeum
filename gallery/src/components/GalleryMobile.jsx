@@ -108,6 +108,10 @@ export default function GalleryMobile({
   curation,
 }) {
   const { sheet, closing, open: openSheet, close: closeSheet } = useSheet();
+  /* Session P (P6): a hand-picked collection's view offers its manual order as a sort (a smart
+     collection's membership is live, so it does not). */
+  const handShelf = !!shelf && (collections || []).indexOf(shelf) >= 0;
+  const sortOpts = handShelf || adv.sort === "manual" ? SORT_OPTS.concat([["manual", "Manual order"]]) : SORT_OPTS;
   const hasCuration = !!curation;
   const [layout, setLayout] = useFeedLayout();
   const saver = useDataSaver().active;
@@ -375,7 +379,7 @@ export default function GalleryMobile({
           <label className="glm-field">
             <span>Sort</span>
             <select value={draft.sort} onChange={(e) => setDraft((d) => ({ ...d, sort: e.target.value }))}>
-              {SORT_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {sortOpts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <label className="glm-field">
@@ -447,12 +451,18 @@ export default function GalleryMobile({
 
       <MobileSheet open={sheet === "sort"} closing={closing} onClose={closeSheet} title="SORT">
         <div className="glm-sheet-list">
-          {SORT_OPTS.map(([v, label]) => (
+          {sortOpts.map(([v, label]) => (
             <button key={v} type="button" className={"glm-metal glm-sheetopt" + (adv.sort === v ? " on" : "")}
               onClick={() => { applyAdvanced({ sort: v }); closeSheet(); }}>
               {label}
             </button>
           ))}
+          {/* Session P (P6): while a hand-picked collection shows in its manual order, the way
+              to change that order -- the Collections screen's order view. */}
+          {handShelf && adv.sort === "manual" && curation && curation.onEditOrder ? (
+            <button type="button" className="glm-metal glm-sheetopt"
+              onClick={() => { closeSheet(); curation.onEditOrder(shelf); }}>{"⇅ Edit the order…"}</button>
+          ) : null}
         </div>
       </MobileSheet>
 
