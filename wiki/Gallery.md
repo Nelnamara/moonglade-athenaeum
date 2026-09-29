@@ -321,6 +321,32 @@ the recorded prompt (or, for a picture made by a Generate run with variables, th
 Send to Video puts the picture in as the start frame — and **nothing is sent** until you press
 Generate.
 
+### The phone turned sideways
+
+Hold the phone in **landscape** and it is still the phone app (it no longer falls over to the desktop
+one), laid out for a wide, short screen:
+
+- **The tab bar becomes a slim rail on the left** — Gallery, Create, Control as icons, the current one
+  tinted. The banner at the top folds to a single bar (name, your counts, the **◐ Saver** chip when Data
+  saver is on, credits and the icon buttons), and the search bar scrolls away with the list so the
+  pictures get the height.
+- **The gallery shows 4 columns** (3 on a screen under 700 px wide), each row lined up. **Feed** stays one
+  picture per row, but no picture is drawn taller than the screen. The **N new since** line, **↑ Newest**
+  and pull to refresh work exactly as upright.
+- **In the viewer the picture fits the height** and the actions — Edit, To Video, Similar, Upscale, Enter
+  contest, Details, Slideshow — are a column down the right edge, ahead of the placard, the prompt and the
+  film strip, which scroll beneath them.
+- **Sheets open from the right edge as side panels**, no wider than 380 px: Sort, Advanced, Actions, the
+  model picker, Upscale and the rest. On a picture's record, the picture sits on the left and the record
+  is a panel on the right with **Remix** and **Send to Video** pinned at its foot.
+- **Turning the phone keeps your place**: the picture at the top of the list is still at the top after the
+  columns re-flow, and a picture you have open stays open. A notch or the home bar on either side is left
+  clear.
+
+A tablet turned sideways is not a phone here and keeps the desktop layout. **The Loom** still opens its
+wide board when the phone is already in landscape and its board-and-reel view when upright; nothing asks
+you to turn the phone.
+
 ## Editing & curating
 
 - **Star ratings** (0–5) per image, inline, stored in `catalog.db`. **A rating that doesn't
